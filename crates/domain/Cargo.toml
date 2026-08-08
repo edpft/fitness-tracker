@@ -1,0 +1,12 @@
+[package]
+name = "domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The core depends on nothing. Keep it that way.
+[dependencies]
+
+[lints]
+workspace = true

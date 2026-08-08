@@ -1,0 +1,8 @@
+/target
+/result
+
+# direnv
+/.direnv/
+
+# Local, untracked environment
+/.env

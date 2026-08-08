@@ -1,0 +1,12 @@
+name: Security audit
+
+# The `audit-deps` flake check runs on every pull request via CI. This is the
+# nightly run, which refreshes the advisory database before checking.
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    uses: edpft/rust-workflows/.github/workflows/nix-audit.yml@main

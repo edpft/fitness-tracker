@@ -1,0 +1,39 @@
+# Configuration for `cargo deny`, run by the `audit-licenses` flake check.
+#
+# This holds only the settings that differ from cargo-deny's defaults. For the
+# full annotated set of options, see:
+# https://embarkstudios.github.io/cargo-deny/checks/cfg.html
+
+[licenses]
+# Every dependency must be under one of these. Add to the list deliberately —
+# this is the check that stops a licence you cannot ship sneaking in via a
+# transitive dependency.
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  # Match this to the license in the workspace Cargo.toml.
+  "GPL-3.0-or-later",
+]
+
+[bans]
+# Duplicate versions of a crate are a warning, not an error: they are usually
+# someone else's transitive dependency and not yours to fix.
+multiple-versions = "warn"
+# A wildcard version requirement on a crates.io dependency is a bug waiting to
+# happen. Path dependencies on our own unpublished crates are exempt.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[advisories]
+# Advisories to ignore, with a reason. Prefer upgrading; reach for this only
+# when an advisory does not apply to how you use the crate.
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

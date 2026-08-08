@@ -1,0 +1,15 @@
+name: Update flake lock
+
+# Dependabot handles Cargo.toml and the actions, but not flake.lock.
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  # Runs `nix flake check` against the new inputs before opening anything, so
+  # a broken update never becomes a pull request. That pull request will show
+  # no checks of its own — GitHub raises no workflow events for the default
+  # token — which is why the update is verified up front instead.
+  update:
+    uses: edpft/rust-workflows/.github/workflows/nix-flake-update.yml@main

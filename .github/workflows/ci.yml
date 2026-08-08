@@ -1,0 +1,17 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The flake owns what runs: add an entry to `checks` in flake.nix and it
+  # appears here as a new job, with no change to this workflow.
+  checks:
+    uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@main
