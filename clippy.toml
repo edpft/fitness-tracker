@@ -1,0 +1,10 @@
+# Configuration for the lints denied in `[workspace.lints.clippy]`.
+#
+# Constitution § 26 forbids panics and unhandled errors in the domain. It does
+# not forbid a test from asserting that a value is present: `unwrap` in a test
+# *is* the assertion, and its failure is the test failing, not a production
+# panic. These exemptions apply to `#[cfg(test)]` code and `tests/` only.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

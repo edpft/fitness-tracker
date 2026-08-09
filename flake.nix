@@ -97,7 +97,7 @@
             (craneLib.fileset.commonCargoSources ./crates/infrastructure)
             (craneLib.fileset.commonCargoSources ./crates/web)
             # Tool config files — add as you create them:
-            # ./clippy.toml
+            ./clippy.toml
             # ./rustfmt.toml
             ./deny.toml
             # ./taplo.toml

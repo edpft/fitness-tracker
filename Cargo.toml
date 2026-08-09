@@ -23,6 +23,28 @@ infrastructure = { path = "crates/infrastructure" }
 pedantic = { level = "warn", priority = -1 }
 must_use_candidate = "allow"
 
+# Constitution § 26: no panics and no unhandled errors.
+#
+# `forbid`, not `deny`: an `#[allow]` on a forbidden lint is a compile error
+# (E0453), so this is not a rule an agent can grant itself an exception to.
+# Relaxing it means editing this file, which is visible in review.
+#
+# Tests keep `unwrap` — the exemptions in `clippy.toml` are configuration, not
+# attributes, so they survive `forbid`. A test asserting a value is present is
+# not an unhandled error.
+unwrap_used = "forbid"
+expect_used = "forbid"
+panic = "forbid"
+unreachable = "forbid"
+panic_in_result_fn = "forbid"
+exit = "forbid"
+# Unfinished code is not a standard to commit against (§ 33).
+todo = "forbid"
+unimplemented = "forbid"
+# Left at `warn`: the noisiest of the set, and the one most likely to have a
+# legitimate exception in parsing code.
+indexing_slicing = "warn"
+
 # Crane reads this to name the vendored-dependency derivation.
 [workspace.metadata.crane]
 name = "workspace"
