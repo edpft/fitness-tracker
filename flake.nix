@@ -219,6 +219,7 @@
 
         packages.default = web;
 
+        # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
         formatter = pkgs.nixfmt;
 
         devShells.default = craneLib.devShell {

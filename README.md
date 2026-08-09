@@ -46,7 +46,7 @@ The example `Item` type exists only to demonstrate the shape. Delete it.
 | `nix flake check` | Run everything CI runs: per-crate builds, rustfmt, clippy, tests, doctests, `cargo audit`, `cargo deny`, and a nix formatting check. |
 | `nix build` | Build the `web` binary into `./result`. |
 | `nix run` | Build and run it. |
-| `nix fmt` | Format the nix files. |
+| `nix fmt .` | Format the nix files. The path is required — a bare `nix fmt` passes no files and nixfmt then waits on stdin. |
 | `cargo nextest run` | The fast inner loop, inside the dev shell. |
 
 CI enumerates `checks` from the flake, so adding a check there adds a CI job
