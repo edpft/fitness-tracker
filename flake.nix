@@ -358,6 +358,8 @@
             taplo
             # For spec-kit
             uv
+            # agent
+            claude-code
           ];
         };
       }
