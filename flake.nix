@@ -104,6 +104,33 @@
           ];
         };
 
+        # Everything under version control, for the checks that scan the
+        # repository rather than build it.
+        repoSrc = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.difference ./. (
+            lib.fileset.unions (
+              map lib.fileset.maybeMissing [
+                ./target
+                ./result
+                ./.direnv
+              ]
+            )
+          );
+        };
+
+        # Constitution § 16 and § 18: which ring each crate sits in. A crate may
+        # only depend on a lower number. Adding a crate means deciding its ring,
+        # which is the question worth being asked; what a crate takes from
+        # crates.io is not this check's business — § 16 tags the vendor rule
+        # `[review]`, and chrono or uuid in the domain is nobody's emergency.
+        crateRings = {
+          domain = 0;
+          application = 1;
+          infrastructure = 2;
+          web = 3;
+        };
+
         # Add one of these per workspace member you want to build.
         domain = craneLib.buildPackage (
           individualCrateArgs
@@ -208,6 +235,100 @@
                 touch "$out"
               '';
 
+          # Constitution § 16, § 18. See `crateRings` above.
+          architecture =
+            pkgs.runCommand "architecture"
+              {
+                nativeBuildInputs = [
+                  rustToolchain
+                  pkgs.jq
+                ];
+              }
+              ''
+                export CARGO_HOME="$TMPDIR/cargo"
+
+                # The whole repository, not the curated build source: a crate
+                # missing from `workspaceSrc` must still be seen here, or it
+                # would evade the check entirely.
+                cargo metadata --no-deps --offline --format-version 1 \
+                  --manifest-path ${repoSrc}/Cargo.toml \
+                  | jq -r '.packages[] | .name as $crate
+                      | .dependencies[] | select(.path != null) | "\($crate) \(.name)"' \
+                  | sort -u > edges
+
+                printf '%s\n' ${
+                  lib.escapeShellArgs (lib.mapAttrsToList (crate: ring: "${crate} ${toString ring}") crateRings)
+                } > rings
+
+                awk '
+                  NR == FNR { ring[$1] = $2; next }
+                  !($1 in ring) { print "  " $1 " is in no ring"; bad = 1; next }
+                  !($2 in ring) { print "  " $2 " is in no ring"; bad = 1; next }
+                  ring[$2] >= ring[$1] {
+                    printf "  %s (ring %d) depends on %s (ring %d)\n", $1, ring[$1], $2, ring[$2]
+                    bad = 1
+                  }
+                  END { exit bad }
+                ' rings edges && exit_code=0 || exit_code=1
+
+                if [ "$exit_code" -ne 0 ]; then
+                  echo
+                  echo "Constitution § 16: dependencies point inward only —"
+                  echo "web -> infrastructure -> application -> domain. A crate"
+                  echo "in no ring is a new one: give it a ring in flake.nix,"
+                  echo "which is the decision worth making deliberately."
+                  exit 1
+                fi
+
+                touch "$out"
+              '';
+
+          # Not constitutional — build hygiene. `workspaceSrc` lists its members
+          # by hand, so a new crate can be perfectly valid to cargo while nix
+          # silently ignores its sources, and every per-crate build keeps
+          # passing without ever compiling it.
+          workspace-members =
+            pkgs.runCommand "workspace-members"
+              {
+                nativeBuildInputs = [
+                  rustToolchain
+                  pkgs.jq
+                ];
+              }
+              ''
+                export CARGO_HOME="$TMPDIR/cargo"
+
+                members() {
+                  cargo metadata --no-deps --offline --format-version 1 \
+                    --manifest-path "$1/Cargo.toml" \
+                    | jq -r '.packages[].name' | sort
+                }
+
+                if ! diff -u <(members ${repoSrc}) <(members ${workspaceSrc}); then
+                  echo
+                  echo "A workspace member is missing from \`workspaceSrc\` in"
+                  echo "flake.nix, so nix is not building it. Add it there, and"
+                  echo "give it a \`buildPackage\` block if it should build alone."
+                  exit 1
+                fi
+
+                touch "$out"
+              '';
+
+          # Constitution § 35: credentials never enter version control. This
+          # scans what is tracked; the structural defence is that credentials
+          # come from the environment or an untracked local file, and the
+          # scanner is the backstop for when that is forgotten.
+          secrets =
+            pkgs.runCommand "secrets"
+              {
+                nativeBuildInputs = [ pkgs.gitleaks ];
+              }
+              ''
+                gitleaks dir --no-banner --redact --exit-code 1 ${repoSrc}
+                touch "$out"
+              '';
+
           audit-deps = craneLib.cargoAudit {
             inherit src advisory-db;
           };
@@ -229,6 +350,7 @@
             cargo-audit
             cargo-deny
             cargo-nextest
+            gitleaks
             nixfmt
             # Conveniences.
             actionlint
