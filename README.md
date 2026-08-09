@@ -1,6 +1,11 @@
-# PROJECT_NAME
+# Fitness Tracker
 
-<!-- Replace this file's contents once the template has served its purpose. -->
+A single system for ingesting, storing and analysing personal health and
+fitness data across every platform in use. Single user, single operator.
+
+The rules governing it — the observation data model above all — are in
+[`.specify/memory/constitution.md`](.specify/memory/constitution.md), and are
+binding rather than aspirational. Read it before changing anything here.
 
 A Rust workspace laid out for hexagonal architecture, built with
 [crane](https://github.com/ipetkov/crane) over a

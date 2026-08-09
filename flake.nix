@@ -1,5 +1,5 @@
 {
-  description = "A rust workspace flake";
+  description = "Fitness tracker: personal health and fitness data, ingested and analysed";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
