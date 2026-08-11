@@ -25,15 +25,15 @@ Rust workspace, hexagonal, dependencies inward only:
 
 **Purpose**: Bring the workspace to the shape the plan describes, and settle the documentation conflicts planning surfaced.
 
-- [ ] T001 Create `crates/cli/Cargo.toml` (name `cli`, binary `fitness`, workspace lints, depends on `application`, `infrastructure`, `domain`) and a placeholder `crates/cli/src/main.rs` returning `std::process::ExitCode`
-- [ ] T002 Add `cli` to `workspaceSrc` in `flake.nix` via `craneLib.fileset.commonCargoSources ./crates/cli` — omit this and cargo is happy while nix silently ignores the sources
-- [ ] T003 Add `cli = 3;` to `crateRings` in `flake.nix`, and add a `buildPackage` block for `cli` with `meta.mainProgram = "fitness"`, plus a `checks` entry
-- [ ] T004 Verify `nix flake check` passes the `workspace-members` and `architecture` checks with the new crate. `members = ["crates/*"]` globs it into cargo automatically; the two flake edits above are what nix needs
-- [ ] T005 [P] Add workspace dependencies to the root `Cargo.toml`: `tokio`, `reqwest` (no default features, `rustls-tls`), `serde`, `serde_json` (`raw_value`), `sqlx` (`sqlite`, `runtime-tokio`, `migrate`), `jiff`, `sha2`, `clap` (`derive`, `env`), `thiserror`, `fs4`, and dev-dependencies `proptest`, `wiremock`, `tempfile`
-- [ ] T006 [P] Run `nix flake check` and resolve the `audit-licenses` outcome for the TLS backend. If `ring` or `aws-lc-sys` fails the allowlist, add a `[licenses.exceptions]` or `[licenses.clarify]` entry to `deny.toml` with a recorded reason — never widen `allow`
-- [ ] T007 [P] Amend **SC-001** in `specs/001-hevy-workout-extraction/spec.md` to read "the number of distinct workouts landed whose most recent landing record is an update rather than a deletion equals the count the source independently reports". As written it fails a correct run — see research.md
-- [ ] T008 [P] Update `CLAUDE.md` and `README.md`: `web` is no longer the sole composition root, and the layout table gains `cli` as a second driving adapter
-- [ ] T009 [P] Reword the comment in `crates/domain/Cargo.toml` from "The core depends on nothing" to state the actual rule: no workspace crates, frameworks, transports or stores; data-type dependencies (`jiff`, `sha2`, `uuid`, `url`) are allowed
+- [X] T001 Create `crates/cli/Cargo.toml` (name `cli`, binary `fitness`, workspace lints, depends on `application`, `infrastructure`, `domain`) and a placeholder `crates/cli/src/main.rs` returning `std::process::ExitCode`
+- [X] T002 Add `cli` to `workspaceSrc` in `flake.nix` via `craneLib.fileset.commonCargoSources ./crates/cli` — omit this and cargo is happy while nix silently ignores the sources
+- [X] T003 Add `cli = 3;` to `crateRings` in `flake.nix`, and add a `buildPackage` block for `cli` with `meta.mainProgram = "fitness"`, plus a `checks` entry
+- [X] T004 Verify `nix flake check` passes the `workspace-members` and `architecture` checks with the new crate. `members = ["crates/*"]` globs it into cargo automatically; the two flake edits above are what nix needs
+- [X] T005 [P] Add workspace dependencies to the root `Cargo.toml`: `tokio`, `reqwest` (no default features, `rustls-tls`), `serde`, `serde_json` (`raw_value`), `sqlx` (`sqlite`, `runtime-tokio`, `migrate`), `jiff`, `sha2`, `clap` (`derive`, `env`), `thiserror`, `fs4`, and dev-dependencies `proptest`, `wiremock`, `tempfile`
+- [X] T006 [P] Run `nix flake check` and resolve the `audit-licenses` outcome for the TLS backend. If `ring` or `aws-lc-sys` fails the allowlist, add a `[licenses.exceptions]` or `[licenses.clarify]` entry to `deny.toml` with a recorded reason — never widen `allow`
+- [X] T007 [P] Amend **SC-001** in `specs/001-hevy-workout-extraction/spec.md` to read "the number of distinct workouts landed whose most recent landing record is an update rather than a deletion equals the count the source independently reports". As written it fails a correct run — see research.md
+- [X] T008 [P] Update `CLAUDE.md` and `README.md`: `web` is no longer the sole composition root, and the layout table gains `cli` as a second driving adapter
+- [X] T009 [P] Reword the comment in `crates/domain/Cargo.toml` from "The core depends on nothing" to state the actual rule: no workspace crates, frameworks, transports or stores; data-type dependencies (`jiff`, `sha2`, `uuid`, `url`) are allowed
 
 ---
 
@@ -43,8 +43,8 @@ Rust workspace, hexagonal, dependencies inward only:
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T010 Delete the `Item` example end to end: `crates/domain/src/lib.rs` (`Item`, `ItemId`, `InvalidItem` and their tests), `crates/application/src/lib.rs` (`ItemRepository`, `CreateItem`, `ItemService`, `RepositoryError`, `CreateItemError` and their tests), `crates/infrastructure/src/lib.rs` (`InMemoryItemRepository` and its test). It is scaffolding to be deleted, not extended
-- [ ] T011 Replace `crates/web/src/main.rs` with a stub returning `ExitCode` and reporting that no HTTP surface exists yet, so the crate compiles without the `Item` wiring
+- [X] T010 Delete the `Item` example end to end: `crates/domain/src/lib.rs` (`Item`, `ItemId`, `InvalidItem` and their tests), `crates/application/src/lib.rs` (`ItemRepository`, `CreateItem`, `ItemService`, `RepositoryError`, `CreateItemError` and their tests), `crates/infrastructure/src/lib.rs` (`InMemoryItemRepository` and its test). It is scaffolding to be deleted, not extended
+- [X] T011 Replace `crates/web/src/main.rs` with a stub returning `ExitCode` and reporting that no HTTP surface exists yet, so the crate compiles without the `Item` wiring
 - [ ] T012 Create `migrations/` and wire `sqlx::migrate!` into a pool constructor in `crates/infrastructure/src/store/pool.rs`, reading the database path from a parameter — no hardcoded path (§ 34)
 - [ ] T013 Add a `sqlx-prepare` check to `flake.nix` running `cargo sqlx prepare --check --workspace`, so stale `.sqlx/` offline metadata is a CI failure rather than a mystery
 - [ ] T014 [P] Create the test-double module `crates/application/tests/support/mod.rs` with in-memory fakes for every driven port, plus a fixed `Clock`. Fakes go here, not in `infrastructure` — a use-case test that needs a database has a dependency pointing the wrong way
@@ -61,15 +61,15 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### Domain vocabulary — types first (§ 27)
 
-- [ ] T015 [P] [US1] Create `crates/domain/src/raw/ids.rs`: `SourceName`, `Endpoint`, `SourceRecordId`, `EntityKind`, `LandingStream` newtypes, each validating at construction. `SourceRecordId` is **not** parsed as a UUID — validating a source's id format is interpretation (FR-002) and would fail extraction to defend a constraint we do not own
-- [ ] T016 [P] [US1] Create `crates/domain/src/raw/payload.rs`: `RawPayload` (non-empty bytes) and `PayloadDigest` ([u8; 32]), where the only constructor for a digest digests a `RawPayload`, so a digest not corresponding to a payload is unrepresentable
-- [ ] T017 [P] [US1] Create `crates/domain/src/raw/event.rs`: `EventKind` sum type (`Updated` | `Deleted` | `Unrecognised(RawEventKind)`) and `RawEventKind`. The `Unrecognised` variant is deliberate — a kind Hevy adds later is unknown, not illegal, and § II.1 forbids discarding it
-- [ ] T018 [P] [US1] Create `crates/domain/src/raw/time.rs`: `FetchedAt`, `EventTime`, `Watermark` over `jiff::Timestamp`
-- [ ] T019 [US1] Create `crates/domain/src/raw/record.rs`: `LandingRecord` with complete provenance, no setters and no `&mut` accessors. Construction fails without a source record id (FR-003). Depends on T015–T018
-- [ ] T020 [US1] Create `crates/domain/src/raw/run.rs`: `RunId`, `ExtractionRun`, `RunOutcome` sum type (`InFlight` | `Succeeded { finished_at, events_seen, records_landed }` | `Failed { finished_at, reason }`) and `FailureReason`. Counts live inside `Succeeded`, not as optional fields beside it, so a run cannot report landed records without having finished
-- [ ] T021 [US1] Declare the module tree in `crates/domain/src/raw/mod.rs` and re-export from `crates/domain/src/lib.rs`
-- [ ] T022 [P] [US1] Property tests in `crates/domain/tests/value_types.rs`: a generated instance of every newtype is valid, and construction rejects every invalid input (§ 28). If an arbitrary instance can violate an invariant, fix the type, not the generator
-- [ ] T023 [P] [US1] Property test in `crates/domain/tests/digest.rs`: digesting identical bytes yields identical digests and differing bytes differ — the property FR-005 rests on
+- [X] T015 [P] [US1] Create `crates/domain/src/landing/ids.rs`: `SourceName`, `Endpoint`, `SourceRecordId`, `EntityKind`, `LandingStream` newtypes, each validating at construction. `SourceRecordId` is **not** parsed as a UUID — validating a source's id format is interpretation (FR-002) and would fail extraction to defend a constraint we do not own
+- [X] T016 [P] [US1] Create `crates/domain/src/landing/payload.rs`: `RawPayload` (non-empty bytes) and `PayloadDigest` ([u8; 32]). The ordinary constructor digests a `RawPayload`; a separate `from_storage` exists for the persistence boundary alone, since the store must rehydrate a digest it previously wrote. What the type guarantees everywhere is width
+- [X] T017 [P] [US1] Create `crates/domain/src/landing/event.rs`: `EventKind` sum type (`Updated` | `Deleted` | `Unrecognised(RawEventKind)`) and `RawEventKind`. The `Unrecognised` variant is deliberate — a kind Hevy adds later is unknown, not illegal, and § II.1 forbids discarding it
+- [X] T018 [P] [US1] Create `crates/domain/src/landing/time.rs`: `FetchedAt`, `EventTime`, `Watermark` over `jiff::Timestamp`
+- [X] T019 [US1] Create `crates/domain/src/landing/record.rs`: `LandingRecord` with complete provenance, no setters and no `&mut` accessors. Construction fails without a source record id (FR-003). Depends on T015–T018
+- [X] T020 [US1] Create `crates/domain/src/landing/run.rs`: `RunId`, `ExtractionRun`, `RunOutcome` sum type (`InFlight` | `Succeeded { finished_at, events_seen, records_landed }` | `Failed { finished_at, reason }`) and `FailureReason`. Counts live inside `Succeeded`, not as optional fields beside it, so a run cannot report landed records without having finished
+- [X] T021 [US1] Declare the module tree in `crates/domain/src/landing/mod.rs` and re-export from `crates/domain/src/lib.rs`
+- [X] T022 [P] [US1] Property tests in `crates/domain/tests/value_types.rs`: a generated instance of every newtype is valid, and construction rejects every invalid input (§ 28). If an arbitrary instance can violate an invariant, fix the type, not the generator
+- [X] T023 [P] [US1] Property test in `crates/domain/tests/digest.rs`: digesting identical bytes yields identical digests and differing bytes differ — the property FR-005 rests on
 
 ### Ports (§ 16) — declared before anything implements them
 
@@ -191,10 +191,10 @@ The use case depends on the port *declarations*, not on the adapters — that in
 
 ```bash
 # Launch the four value-type modules together:
-Task: "Create identifier newtypes in crates/domain/src/raw/ids.rs"
-Task: "Create RawPayload and PayloadDigest in crates/domain/src/raw/payload.rs"
-Task: "Create EventKind sum type in crates/domain/src/raw/event.rs"
-Task: "Create timestamp newtypes in crates/domain/src/raw/time.rs"
+Task: "Create identifier newtypes in crates/domain/src/landing/ids.rs"
+Task: "Create RawPayload and PayloadDigest in crates/domain/src/landing/payload.rs"
+Task: "Create EventKind sum type in crates/domain/src/landing/event.rs"
+Task: "Create timestamp newtypes in crates/domain/src/landing/time.rs"
 
 # Then the scenario tests, all against ports rather than implementations:
 Task: "Scenario 1 first-run test in crates/application/tests/extraction.rs"

@@ -53,7 +53,7 @@ opaque. FR-003 fixes the provenance set.
 | `FetchedAt` | `jiff::Timestamp` | — |
 | `EventTime` | `jiff::Timestamp` | — |
 | `RawPayload` | `Vec<u8>` | Non-empty |
-| `PayloadDigest` | `[u8; 32]` | Fixed width; only constructible by digesting a `RawPayload` |
+| `PayloadDigest` | `[u8; 32]` | Fixed width. Ordinarily obtained by digesting a `RawPayload`; see below |
 | `EventKind` | sum type | `Updated` \| `Deleted` \| `Unrecognised(RawEventKind)` |
 | `RawEventKind` | `String` | Non-empty. Verbatim, never normalised (D12) |
 
@@ -70,9 +70,12 @@ are retained, never discarded" hold without the type lying about what it has
 seen. `Updated` and `Deleted` are still distinguishable in the type system, so
 no caller can confuse them.
 
-**`PayloadDigest` cannot be constructed from arbitrary bytes.** Its only
-constructor digests a `RawPayload`, so a digest that does not correspond to a
-payload is unrepresentable, and D3's comparison cannot be fed a hand-made value.
+**`PayloadDigest` guarantees width, and almost guarantees provenance.** The
+ordinary constructor digests a `RawPayload`, so D3's comparison cannot be fed a
+hand-made value. One escape hatch exists and is named for what it is:
+`from_storage`, for the persistence boundary, because the store must rehydrate
+a digest it wrote earlier without reading back the payload merely to re-derive
+it. The type still makes a digest unconfusable with arbitrary data everywhere.
 
 ### Immutability
 
