@@ -69,7 +69,7 @@ It models domain entities — a strength workout of ordered exercises and sets; 
 
 - **Provenance is mandatory:** the source that produced the observation, whatever version or algorithm identifier the source exposes, and the identifier by which the source names this record — which is what makes same-source supersession mechanically detectable at § 4. Provenance records what a source actually tells us; it is not inferred or invented.
 - **Units canonicalised** (kg, metres, seconds, bpm, watts).
-- **Timestamps are local wall-clock time plus IANA timezone identifier.** 8pm stays 8pm. The UTC instant is derivable and is never the stored primary; an offset is not a substitute for a zone. Where a source supplies only a UTC instant, the zone is taken from declared operator configuration — a versioned input to deterministic translation (§ 9), not an inference about the source. Exceptions (e.g. travel) are corrected through the edit overlay.
+- **Timestamps carry an IANA timezone identifier and are never naive.** 8pm stays 8pm: wall-clock time is what is entered and what is displayed. Which physical encoding carries it — wall clock plus zone, or instant plus zone — is an implementation choice, because given the zone the two are losslessly interconvertible. An offset is not a substitute: it records the rule that applied at one instant, not the rule that applies across an interval. Arithmetic and calendar bucketing therefore resolve through the zone, and a system that assumes every local day is 24 hours long is wrong twice a year. Where a source supplies only a UTC instant, the zone is taken from declared operator configuration — a versioned input to deterministic translation (§ 9), not an inference about the source. Exceptions (e.g. travel) are corrected through the edit overlay.
 
 **4. Canonical layer.** A function of the normalised layer, deterministic matching, and the match overlay. Cross-source: one entry per real-world event, whatever number of sources recorded it, and whatever number of times each recorded it. This is the clean layer the analytical layer reads.
 
@@ -196,7 +196,9 @@ No rule above records which of the two applies to it. Enforceability changes as 
 
 **39.** Review covers design, naming, invariant modelling and architectural fit. Agent review surfaces candidates for attention; it does not gate, because it shares blind spots with the agent that wrote the code.
 
-**40.** Human sign-off before merge is a real gate and is not delegated.
+**40.** Human sign-off before merge is a real gate and is not delegated. It covers authored changes — code written by a person or an agent — where what is being signed off is a judgement about design that no suite can stand in for.
+
+Dependency updates are not authored changes. A bump whose checks pass may merge automatically: what is trusted there is the test suite and the advisory database, both of which say more about a version bump than a human skimming a lockfile diff.
 
 ## Governance
 
