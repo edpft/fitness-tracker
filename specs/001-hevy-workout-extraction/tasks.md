@@ -73,10 +73,10 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### Ports (§ 16) — declared before anything implements them
 
-- [ ] T024 [US1] Create `crates/application/src/ports.rs` with the driven ports from [contracts/ports.md](./contracts/ports.md): `WorkoutEventSource`, `LandingStore`, `ResumptionPointStore`, `ExtractionRunLog`, `RunLock`, `Clock`, plus `EventPage` and `SourceEvent`. Use `fn … -> impl Future<Output = …> + Send`, not bare `async fn` — a future with no `Send` bound cannot be held across an `await` in an axum handler later
-- [ ] T025 [US1] Add the driving ports `ExtractWorkouts`, `ReportExtractionStatus`, `ResetResumptionPoint` to `crates/application/src/ports.rs`
-- [ ] T026 [US1] Create `crates/application/src/error.rs`: `ExtractionError`, `SourceError`, `StoreError`, `RunLockError`, `StatusError` via `thiserror`. No vendor type appears — no HTTP status, no SQL code (§ 26)
-- [ ] T027 [US1] `LandingStore` takes no stream parameter: each instance is bound to one landing table at construction, so a store for `hevy.workouts` cannot read another stream. Reflect this in `crates/application/src/ports.rs`
+- [X] T024 [US1] Create `crates/application/src/ports.rs` with the driven ports from [contracts/ports.md](./contracts/ports.md): `WorkoutEventSource`, `LandingStore`, `ResumptionPointStore`, `ExtractionRunLog`, `RunLock`, `Clock`, plus `EventPage` and `SourceEvent`. Use `fn … -> impl Future<Output = …> + Send`, not bare `async fn` — a future with no `Send` bound cannot be held across an `await` in an axum handler later
+- [X] T025 [US1] Add the driving ports `ExtractWorkouts`, `ReportExtractionStatus`, `ResetResumptionPoint` to `crates/application/src/ports.rs`
+- [X] T026 [US1] Create `crates/application/src/error.rs`: `ExtractionError`, `SourceError`, `StoreError`, `RunLockError`, `StatusError` via `thiserror`. No vendor type appears — no HTTP status, no SQL code (§ 26)
+- [X] T027 [US1] `LandingStore` takes no stream parameter: each instance is bound to one landing table at construction, so a store for `hevy.workouts` cannot read another stream. Reflect this in `crates/application/src/ports.rs`
 
 ### Integration tests at the port boundary — write these first, watch them fail (§ 29, § 31)
 
