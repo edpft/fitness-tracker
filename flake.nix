@@ -96,6 +96,7 @@
             (craneLib.fileset.commonCargoSources ./crates/application)
             (craneLib.fileset.commonCargoSources ./crates/infrastructure)
             (craneLib.fileset.commonCargoSources ./crates/web)
+            (craneLib.fileset.commonCargoSources ./crates/cli)
             # Tool config files — add as you create them:
             ./clippy.toml
             # ./rustfmt.toml
@@ -124,11 +125,16 @@
         # which is the question worth being asked; what a crate takes from
         # crates.io is not this check's business — § 16 tags the vendor rule
         # `[review]`, and chrono or uuid in the domain is nobody's emergency.
+        # `cli` and `web` are peers: two driving adapters, two composition
+        # roots, neither depending on the other. Equal ring numbers make that
+        # structural — the check requires a strict decrease across every edge,
+        # so a dependency either way fails.
         crateRings = {
           domain = 0;
           application = 1;
           infrastructure = 2;
           web = 3;
+          cli = 3;
         };
 
         # Add one of these per workspace member you want to build.
@@ -166,6 +172,16 @@
           }
         );
 
+        cli = craneLib.buildPackage (
+          individualCrateArgs
+          // {
+            cargoExtraArgs = "-p cli";
+            src = workspaceSrc;
+            # The crate is `cli`; the binary operators type is `fitness`.
+            meta.mainProgram = "fitness";
+          }
+        );
+
       in
       {
         checks = {
@@ -174,6 +190,7 @@
             application
             infrastructure
             web
+            cli
             ;
 
           format = craneLib.cargoFmt {

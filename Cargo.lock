@@ -10,6 +10,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "application",
+ "domain",
+ "infrastructure",
+]
+
+[[package]]
 name = "domain"
 version = "0.1.0"
 
