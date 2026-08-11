@@ -28,8 +28,14 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
 ## Layout
 
-`web → infrastructure → application → domain`, inward only. Ports are declared
-in `application`; `web` is the composition root.
+`{cli, web} → infrastructure → application → domain`, inward only. Ports are
+declared in `application`.
+
+Two driving adapters, both composition roots, both at ring 3 and neither
+depending on the other. `cli` is the operator's entry point — extraction is
+invoked from a terminal or an external scheduler, never over HTTP. `web` is the
+HTTP surface. A capability belongs to whichever transport invokes it; a batch
+job behind a web binary is a name that misleads.
 
 Adding a crate takes three edits, and the third is easy to forget:
 

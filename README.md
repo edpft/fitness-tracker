@@ -17,15 +17,21 @@ Dependencies point inward only. Nothing in an inner ring may name anything in
 an outer one:
 
 ```
-web ──▶ infrastructure ──▶ application ──▶ domain
+cli ──┐
+      ├──▶ infrastructure ──▶ application ──▶ domain
+web ──┘
 ```
 
 | Crate | Role | What belongs here |
 | --- | --- | --- |
-| `domain` | The core | Entities, value objects, and the rules that govern them. Depends on nothing — not on `application`, and never on a framework, database, or transport. |
+| `domain` | The core | Entities, value objects, and the rules that govern them. Depends on no workspace crate, and never on a framework, database, or transport. Data-type dependencies — a timestamp, a hash — are fine. |
 | `application` | Use cases and ports | The things your software *does*, and the traits it needs the outside world to satisfy. Ports are declared here, in the application's own vocabulary, and implemented further out. |
 | `infrastructure` | Driven adapters | Implementations of the driven ports: a database, an HTTP client, a filesystem. The one place a technology choice is allowed to show. |
-| `web` | Driving adapter, composition root | Translates requests into use-case calls, and is the only crate that names a concrete adapter. |
+| `cli` | Driving adapter, composition root | The operator's entry point: `fitness extract`, `status`, `reset`. Extraction is invoked from a terminal or an external scheduler, never over HTTP. |
+| `web` | Driving adapter, composition root | The HTTP surface. Translates requests into use-case calls. |
+
+`cli` and `web` are peers at the same ring. Neither depends on the other, and a
+capability belongs to whichever transport invokes it.
 
 Two consequences worth keeping in mind:
 

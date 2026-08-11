@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,18 +31,20 @@
 
 ## Notes
 
-### Outstanding
+### Cleared during planning
 
-**`No [NEEDS CLARIFICATION] markers remain` — fails deliberately, and does not block planning.**
+**`No [NEEDS CLARIFICATION] markers remain` — now passes.**
 
-Two markers remain under Open Questions. Neither is a decision the author can make by choosing between options; both are empirical facts about an external system, answerable only by observing it:
+Two markers stood at specification time. Neither was a decision the author could make by choosing between options; both were empirical facts about an external system, answerable only by observing it. They were left standing rather than guessed at, on the grounds that the spec already guarded them, and both were resolved during `/speckit-plan` against the live account:
 
-1. **Completeness of the events feed** — whether requesting from the epoch reconstructs full history.
-2. **Rate limits** — whether the source throttles and how it signals it.
+1. **Completeness of the events feed** — CONFIRMED. Requesting from the epoch reconstructs full history; the count matches the source's own exactly.
+2. **Rate limits** — NONE OBSERVED, and none documented. Extraction backs off regardless, which costs nothing if the source never throttles.
 
-Answering these by picking a plausible option would record a guess as a decision. They are left standing because the spec already guards them: SC-001 fails loudly if (1) is wrong, and (2) affects how extraction paces requests, not what it guarantees. Both resolve during `/speckit-plan`, against the live account or the source's documentation.
+Both are now recorded under Resolved Questions in the spec, with evidence in `research.md`. Neither was answered by picking a plausible option, which was the reason for deferring them in the first place.
 
-The third Open Question (exercise type metadata) carries no marker — it is a stated dependency for the future normalisation feature, not an unknown in this one.
+**SC-001 was revised as a consequence.** Observing the account showed it failing on a correct run: one workout exists only as a deletion, so a first extraction lands 164 distinct identifiers against a reported 163. It now counts workouts whose most recent landing record is an update.
+
+Two Open Questions remain, neither carrying a marker: exercise type metadata is a stated dependency for the future normalisation feature rather than an unknown in this one, and the deletion behaviour is a prediction with a deferred live check.
 
 ### Resolved during validation
 

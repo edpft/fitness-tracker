@@ -69,7 +69,7 @@ Expected behaviour below is a reasoned default, not a source-confirmed fact; eac
 
 ### Measurable Outcomes
 
-- **SC-001**: After a first full extraction, the number of distinct workouts landed equals the count the source independently reports for the account.
+- **SC-001**: After a first full extraction, the number of distinct workouts landed whose most recent landing record is an update rather than a deletion equals the count the source independently reports for the account. The qualifier is load-bearing: a workout that exists only as a deletion is correctly landed here and correctly absent from the source's count, so an unqualified comparison fails a correct run.
 - **SC-002**: Running extraction twice in succession with no intervening change in Hevy produces the same number of landing records as running it once.
 - **SC-003**: Every workout ever landed remains retrievable in its original form after any number of subsequent extractions.
 - **SC-004**: A run interrupted at any point, followed by a successful run, lands the same set of workouts as a single uninterrupted run.
@@ -77,7 +77,7 @@ Expected behaviour below is a reasoned default, not a source-confirmed fact; eac
 
 ## Assumptions
 
-- **The source serves a workout events feed that reconstructs full history.** Requested from the epoch, it is assumed to surface a workout's creation as an update carrying its full body. Inferred from the feed's default `since` value and its stated purpose, not from documentation. See Open Questions.
+- **The source serves a workout events feed that reconstructs full history.** Requested from the epoch, it surfaces a workout's creation as an update carrying its full body. No longer an assumption — confirmed against the live account during planning. See Resolved Questions.
 - **A workout has a stable source identifier across edits.** FR-005 and acceptance scenario 3 both depend on it: without it, an edit is indistinguishable from a new workout and supersession cannot be detected downstream (§ 10).
 - **Change detection compares payloads, not timestamps.** Scenario 6 requires deciding whether a re-fetched workout differs from what was last landed; the comparison is against the stored payload, so a source that re-serves an identical body after a reset adds nothing.
 - **The account is a single operator's own account** (§ I). No multi-account or delegated-access handling.
@@ -88,8 +88,16 @@ Expected behaviour below is a reasoned default, not a source-confirmed fact; eac
 
 Normalisation, canonicalisation and analysis. Exercise templates, routines, routine folders and exercise history. Webhook subscriptions. Write-back to Hevy. Scheduling and freshness policy — extraction is invoked, not self-triggering. Any other source.
 
+## Resolved Questions
+
+Both were settled during planning by observing the live account, not by choosing between plausible options. Evidence and method are in [research.md](./research.md).
+
+- **Completeness of the events feed — CONFIRMED.** Requested from the epoch, the feed reconstructs the entire history: 163 distinct `updated` identifiers against a count of 163 independently reported by the source, with 160 of those workouts never edited and still surfacing as `updated`. The feed has no separate creation event; creation surfaces as an update carrying the full body. SC-001 remains the standing guard against regression.
+- **Rate limits — NONE OBSERVED.** No throttling is documented, advertised or reachable: 30 rapid requests all succeeded, no response carries a rate-limit header, and no throttling status appears anywhere in the source's published interface. Absence of evidence is not a guarantee, so extraction still backs off on throttling and server errors — which costs nothing if the source never throttles.
+
+A third finding, not previously recorded as a question: the feed carries **one entry per workout reflecting its current state**, rather than an append-only log. A deletion replaces a workout's entry instead of adding one. This is what the edge case about collapsed repeat edits anticipated, and it is why SC-001 is phrased against the most recent landing record.
+
 ## Open Questions
 
-- **Completeness of the events feed.** The design assumes the workout events feed, requested from the epoch, reconstructs the entire history — that a workout's creation surfaces as an update carrying its full body. This is inferred from the feed's default `since` value and its stated purpose, not from documentation. SC-001 is the guard: if the assumption is wrong, acceptance fails rather than data being silently lost. [NEEDS CLARIFICATION: confirm against the live account before implementation]
-- **Rate limits.** Page size is capped low enough that a full history is a few dozen requests. Whether the source throttles, and how it signals throttling, is unknown. [NEEDS CLARIFICATION: confirm against the live account or documentation before implementation]
 - **Exercise type metadata.** Whether an exercise is weight-and-reps, bodyweight, duration or distance is carried by the exercise template, not the workout. Translation will likely need it. It is refetchable and out of scope here, but it is a dependency the normalisation feature inherits.
+- **Deletion of a landed workout.** Predicted from the feed's observed shape but not yet exercised: deleting a workout should replace its update entry with a deletion, leaving the total entry count unchanged. Confirmed by a deferred live check in [quickstart.md](./quickstart.md); it needs a deletion, which the source's interface does not expose.
