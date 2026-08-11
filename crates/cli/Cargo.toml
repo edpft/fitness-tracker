@@ -17,5 +17,13 @@ application.workspace = true
 domain.workspace = true
 infrastructure.workspace = true
 
+clap.workspace = true
+jiff.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

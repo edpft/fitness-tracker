@@ -13,6 +13,12 @@ publish.workspace = true
 # ends up passing strings across its own boundaries. The `architecture` check
 # in flake.nix enforces the rule that matters: which ring may depend on which.
 [dependencies]
+jiff.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
