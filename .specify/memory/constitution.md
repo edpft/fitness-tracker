@@ -1,8 +1,8 @@
 <!--
 Sync Impact Report
-- Version: 1.0.0 (draft, unratified). Pre-push revision is drafting, not amendment, so this
-  stays at 1.0.0 until the first push to the remote regardless of how much it changes. The
-  version line does not move again until feature implementation has begun.
+- Version: 1.0.0, ratified 2026-08-11 on completion of the repository's preparation. It stays
+  at 1.0.0 until feature implementation begins; from the first feature onward, every change
+  to this document bumps it.
 - Content: operator-authored constitution, sections I-X plus Governance. Supersedes the
   repository-derived draft written earlier in the same session, which was auto-generated
   from repo context and carried no lineage worth preserving.
@@ -16,9 +16,7 @@ Sync Impact Report
   individually, which turned it into forty claims to keep current and invited bespoke checks
   written to make an unimplemented tag look satisfied. The preference now appears once, in
   § X, where it belongs.
-- Deferred items:
-  - TODO(RATIFICATION_DATE): ratified once preparation is complete and feature
-    implementation can begin.
+- Deferred items: none.
 -->
 
 # Constitution
@@ -203,9 +201,9 @@ Dependency updates are not authored changes. A bump whose checks pass may merge 
 ## Governance
 
 - **Conflicts are surfaced, not silently resolved.** Where this document conflicts with a spec, a plan, or a current instruction, the conflict is raised and settled explicitly. Three outcomes are legitimate: amend this document, revise the artifact, or withdraw the artifact. A written artifact never outranks current intent by virtue of being written down, and precedence is never applied as an automatic tiebreak.
-- **This document is a draft until preparation is complete.** It is ratified at the point feature implementation can genuinely begin, not before. A draft still governs; it is simply expected to move.
-- **The version stays at 1.0.0 until the first push to the remote**, however many times this document is edited before then. Revision before that point is drafting, not amendment, and does not bump. Once feature implementation has begun, every change bumps the version: MAJOR for a rule removed or redefined incompatibly, MINOR for a rule added or materially widened, PATCH for clarification.
+- **This document is ratified.** It was drafted through the preparation of the repository and adopted at the point feature implementation could genuinely begin. Changes to it are amendments now, not drafting.
+- **The version stays at 1.0.0 until feature implementation begins.** Revision before that point is preparation, and does not bump. From the first feature onward every change bumps the version: MAJOR for a rule removed or redefined incompatibly, MINOR for a rule added or materially widened, PATCH for clarification.
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 1.0.0 (draft, unratified) | **Ratified**: TODO(RATIFICATION_DATE): on completion of preparation, when feature implementation can begin | **Last Amended**: 2026-08-08
+**Version**: 1.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-08-11
