@@ -10,9 +10,15 @@ use std::{env::VarError, path::PathBuf};
 /// output for every other user on the machine.
 pub const API_KEY_VARIABLE: &str = "HEVY_API_KEY";
 
-/// Hevy's public API. A default rather than a constant, because the contract
+/// Hevy's API root. A default rather than a constant, because the contract
 /// tests point this at a local stub.
-pub const DEFAULT_BASE_URL: &str = "https://api.hevyapp.com/v1";
+///
+/// The **root**, with no version segment: the endpoint constant carries the
+/// full path (`/v1/workouts/events`), which is also what each landing record
+/// records as its provenance. Putting `/v1` in both composed
+/// `/v1/v1/workouts/events`, which no test caught because the stub's URI has
+/// no version segment to double up — only a live run did.
+pub const DEFAULT_BASE_URL: &str = "https://api.hevyapp.com";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {

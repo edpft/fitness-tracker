@@ -280,7 +280,7 @@ async fn extract(config: &Config, source: Source) -> Result<(), Failure> {
         },
     );
 
-    output::run_started(&stream, "…");
+    output::run_started(&stream);
     let summary = extraction.extract(&stream).await?;
     output::run_succeeded(&summary);
     Ok(())

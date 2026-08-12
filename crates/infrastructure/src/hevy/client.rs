@@ -11,7 +11,11 @@ use super::{
     retry::{RetryPolicy, is_retryable},
 };
 
-/// The feed's path. Also what every landing record records as its endpoint.
+/// The feed's path, from the API root. Also what every landing record records
+/// as its endpoint, so the two cannot drift apart.
+///
+/// The base URL is therefore the root and carries no version segment; see the
+/// test at the foot of this file.
 pub const EVENTS_ENDPOINT: &str = "/v1/workouts/events";
 
 /// The source caps this at 10 and rejects anything larger with a 400, so it is
@@ -64,7 +68,7 @@ impl HevyWorkoutEvents {
         })
     }
 
-    fn url(&self) -> String {
+    pub(crate) fn url(&self) -> String {
         format!("{}{EVENTS_ENDPOINT}", self.base_url)
     }
 }
@@ -169,5 +173,29 @@ impl WorkoutEventSource for HevyWorkoutEvents {
             let _ = retryable_detail;
             attempt += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EVENTS_ENDPOINT, HevyWorkoutEvents};
+
+    /// The composed URL, pinned.
+    ///
+    /// A live run once produced `/v1/v1/workouts/events` because the default
+    /// base URL also ended in `/v1`. The stub-based contract tests could not
+    /// catch it: their base URI has no version segment to double up.
+    #[test]
+    fn the_base_url_and_the_endpoint_compose_to_the_real_url() {
+        let source = HevyWorkoutEvents::new("https://api.hevyapp.com", "k").expect("a source");
+        assert_eq!(source.url(), "https://api.hevyapp.com/v1/workouts/events");
+        assert_eq!(EVENTS_ENDPOINT, "/v1/workouts/events");
+    }
+
+    /// A trailing slash on the configured base must not double the separator.
+    #[test]
+    fn a_trailing_slash_on_the_base_url_is_tolerated() {
+        let source = HevyWorkoutEvents::new("https://api.hevyapp.com/", "k").expect("a source");
+        assert_eq!(source.url(), "https://api.hevyapp.com/v1/workouts/events");
     }
 }

@@ -7,8 +7,22 @@
 use application::{RunSummary, StreamStatus};
 use domain::landing::{LandingStream, RunOutcome, Watermark};
 
-pub fn run_started(stream: &LandingStream, run: &str) {
-    println!("run {run} started for {stream}");
+pub fn run_started(stream: &LandingStream) {
+    // No run number here: the store assigns it, and this line is printed
+    // before the run begins. The completion line carries it.
+    println!("extracting {stream} …");
+}
+
+/// Timestamps to the second for display.
+///
+/// The stored value keeps its full precision — the resumption point depends on
+/// sub-second times, and the source serves them — but nine decimal places in a
+/// status table is noise, and it breaks the column alignment.
+fn to_the_second(value: &str) -> String {
+    match value.split_once('.') {
+        Some((whole, _)) => format!("{whole}Z"),
+        None => value.to_owned(),
+    }
 }
 
 pub fn run_succeeded(summary: &RunSummary) {
@@ -27,7 +41,7 @@ pub fn run_succeeded(summary: &RunSummary) {
 /// Never having run is a fact to report, not an error to raise.
 pub fn status(standing: &StreamStatus) {
     println!(
-        "{:<16} {:<26} {:>11} {:>15} {:>16}",
+        "{:<16} {:<22} {:>11} {:>15} {:>13}",
         "stream", "last succeeded", "events seen", "records landed", "records held"
     );
 
@@ -37,12 +51,15 @@ pub fn status(standing: &StreamStatus) {
     };
 
     println!(
-        "{:<16} {:<26} {:>11} {:>15} {:>16}",
+        "{:<16} {:<22} {:>11} {:>15} {:>13}",
         standing.stream.to_string(),
         when,
         seen,
         landed,
-        standing.records_held
+        // `.to_string()` first: a Display impl that forwards through
+        // `write!(f, "{}", ..)` discards the width and fill flags, so passing
+        // the value directly would ignore the column width.
+        standing.records_held.to_string()
     );
 
     match standing.resumption_point {
@@ -65,7 +82,7 @@ impl ExtractionRunView {
                 events_seen,
                 records_landed,
             } => Self {
-                finished_at: finished_at.to_string(),
+                finished_at: to_the_second(&finished_at.to_string()),
                 events_seen: events_seen.to_string(),
                 records_landed: records_landed.to_string(),
             },
