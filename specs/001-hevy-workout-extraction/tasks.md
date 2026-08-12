@@ -134,7 +134,7 @@ Rust workspace, hexagonal, dependencies inward only:
 ## Phase 4: Polish & Cross-Cutting Concerns
 
 - [X] T062 Run `cargo sqlx prepare --workspace` and commit `.sqlx/`, then confirm the `sqlx-prepare` flake check from T013 passes
-- [ ] T063 Run the full `nix flake check` and resolve every finding across the `checks` enumerated in `flake.nix` — per-crate builds, rustfmt, clippy with warnings denied, nextest, doctests, `audit-deps`, `audit-licenses`, `architecture`, `workspace-members` and `secrets`. This is the merge gate, and CI derives its jobs from it
+- [X] T063 Run the full `nix flake check` and resolve every finding across the `checks` enumerated in `flake.nix` — per-crate builds, rustfmt, clippy with warnings denied, nextest, doctests, `audit-deps`, `audit-licenses`, `architecture`, `workspace-members` and `secrets`. This is the merge gate, and CI derives its jobs from it
 - [X] T064 Live validation passed: 164 records landed in 3.3s; 163 workouts whose most recent record is an update against a reported `workout_count` of 163; a second run landed nothing; `UPDATE` and `DELETE` refused by the store; 1,135 exercises and `superset_id` preserved verbatim. It also caught a defect no stub test could: the default base URL and the endpoint constant both carried `/v1`
 - [ ] T065 [P] Run the deferred live check in [quickstart.md](./quickstart.md) with a disposable workout: land it, delete it **in the Hevy app** (the API has no `DELETE` endpoint), re-run, and confirm it lands as `deleted` while the earlier `updated` record stays intact
 - [X] T066 [P] Update `README.md` with the `fitness` commands and the configuration table

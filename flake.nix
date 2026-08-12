@@ -219,6 +219,21 @@
             commonArgs
             // {
               inherit cargoArtifacts;
+
+              # reqwest's TLS backend reads the platform trust store when a
+              # client is *built*, and the sandbox has none — so constructing a
+              # client fails even for a plain-HTTP request to a local stub, and
+              # every contract test fails with "builder error".
+              #
+              # This grants no network access: the sandbox still has none, and
+              # the tests still only talk to a stub on loopback. It only lets
+              # the TLS backend initialise.
+              #
+              # Set here rather than in `commonArgs` on purpose. `commonArgs`
+              # feeds `cargoArtifacts`, so putting it there would change the
+              # hash of the vendored-dependency derivation and rebuild all ~300
+              # crates. Only the tests run code that needs this.
+              SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
             }
           );
 
