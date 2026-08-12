@@ -7,6 +7,17 @@
 # Local, untracked environment
 /.env
 
-# sqlx compile-time query verification builds against this; regenerate with
-# `cargo sqlx prepare`. The committed `.sqlx/` metadata is what nix uses.
-/.sqlx-build.db*
+# Local stores, their SQLite sidecar files, and the run locks that sit beside
+# them. This is a privacy guard as much as a hygiene one: a landing database
+# holds real training history.
+#
+# `.sqlx-build.db` is the throwaway schema sqlx verifies queries against;
+# regenerate the committed `.sqlx/` metadata with `cargo sqlx prepare`.
+*.db
+*.db-shm
+*.db-wal
+
+# Extraction run locks, named `.<source>.<entity>.lock`.
+#
+# `.*.lock` rather than `*.lock`, which would swallow Cargo.lock.
+.*.lock
