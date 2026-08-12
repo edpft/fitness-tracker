@@ -121,11 +121,11 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### CLI
 
-- [ ] T057 [US1] Implement the command surface in `crates/cli/src/cli.rs` per [contracts/cli.md](./contracts/cli.md): `extract <source>`, `status`, `reset <source>`, using `clap` derive
-- [ ] T058 [US1] Implement configuration in `crates/cli/src/config.rs`: `HEVY_API_KEY` from env with **no flag** — a credential on the command line lands in shell history and `ps` output (§ 35) — plus `HEVY_API_BASE_URL` and `FITNESS_TRACKER_DATABASE` with flags
-- [ ] T059 [US1] Wire the composition root in `crates/cli/src/main.rs`: construct the adapters, inject them into the use cases, and map outcomes to exit codes `0`/`1`/`2`/`3`/`4`. Return `ExitCode` — `clippy::exit` is `forbid` and no `#[allow]` can rescue it (E0453)
-- [ ] T060 [P] [US1] Implement human-readable output in `crates/cli/src/output.rs` reporting events seen and records landed on every run, and whether the resumption point moved
-- [ ] T061 [P] [US1] `crates/cli/tests/cli.rs`: assert exit code `2` on concurrent invocation (FR-010), exit `1` on an unreachable source with raw unchanged, exit `0` for a run that found nothing, and that `status` exits `0` before any run has happened
+- [X] T057 [US1] Implement the command surface in `crates/cli/src/main.rs` per [contracts/cli.md](./contracts/cli.md): `extract <source>`, `status`, `reset <source>`. Built with clap's **builder** API, not derive: the derive macros expand with `#[allow(clippy::restriction)]`, and an allow for a forbidden lint is a compile error (E0453)
+- [X] T058 [US1] Implement configuration in `crates/cli/src/config.rs`: `HEVY_API_KEY` from env with **no flag** — a credential on the command line lands in shell history and `ps` output (§ 35) — plus `HEVY_API_BASE_URL` and `FITNESS_TRACKER_DATABASE` with flags
+- [X] T059 [US1] Wire the composition root in `crates/cli/src/main.rs`: construct the adapters, inject them into the use cases, and map outcomes to exit codes `0`/`1`/`2`/`3`/`4`. Return `ExitCode` — `clippy::exit` is `forbid` and no `#[allow]` can rescue it (E0453)
+- [X] T060 [P] [US1] Implement human-readable output in `crates/cli/src/output.rs` reporting events seen and records landed on every run, and whether the resumption point moved
+- [X] T061 [P] [US1] `crates/cli/tests/cli.rs`: assert exit code `2` on concurrent invocation (FR-010), exit `1` on an unreachable source with raw unchanged, exit `0` for a run that found nothing, and that `status` exits `0` before any run has happened
 
 **Checkpoint**: User Story 1 fully functional. Extraction lands the full history, repeat runs land nothing, and the store refuses mutation.
 
