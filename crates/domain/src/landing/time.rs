@@ -30,6 +30,9 @@ fn parse(value: &str) -> Result<Timestamp, InvalidTimestamp> {
 pub struct FetchedAt(Timestamp);
 
 impl FetchedAt {
+    /// The Unix epoch. Where a stream that has never run begins.
+    pub const EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
+
     pub fn new(at: Timestamp) -> Self {
         Self(at)
     }
@@ -93,6 +96,9 @@ impl fmt::Display for EventTime {
 pub struct Watermark(Timestamp);
 
 impl Watermark {
+    /// The Unix epoch, which is also the source's own default for `since`.
+    pub const EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
+
     pub fn new(at: Timestamp) -> Self {
         Self(at)
     }

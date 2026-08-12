@@ -89,10 +89,10 @@ fn a_page_with_neither_key_is_empty_rather_than_broken() {
     runtime().expect("a tokio runtime").block_on(async {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{"page":1,"page_count":1}"#,
-                "application/json",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"page":1,"page_count":1}"#, "application/json"),
+            )
             .mount(&server)
             .await;
 

@@ -47,7 +47,7 @@ Rust workspace, hexagonal, dependencies inward only:
 - [X] T011 Replace `crates/web/src/main.rs` with a stub returning `ExitCode` and reporting that no HTTP surface exists yet, so the crate compiles without the `Item` wiring
 - [X] T012 Create `migrations/` and wire `sqlx::migrate!` into a pool constructor in `crates/infrastructure/src/store/pool.rs`, reading the database path from a parameter — no hardcoded path (§ 34)
 - [X] T013 Set `SQLX_OFFLINE` in `flake.nix` and carry `migrations/` and `.sqlx/` in the build's fileset. No separate check is needed after all: an offline build *is* the check, because a query changed without regenerating its metadata fails to compile. A dedicated `prepare --check` job would have needed a live database inside the sandbox to tell us the same thing
-- [ ] T014 [P] Create the test-double module `crates/application/tests/support/mod.rs` with in-memory fakes for every driven port, plus a fixed `Clock`. Fakes go here, not in `infrastructure` — a use-case test that needs a database has a dependency pointing the wrong way
+- [X] T014 [P] Create the test-double module `crates/application/tests/support/mod.rs` with in-memory fakes for every driven port, plus a fixed `Clock`. Fakes go here, not in `infrastructure` — a use-case test that needs a database has a dependency pointing the wrong way
 
 **Checkpoint**: workspace builds green with no example code; store plumbing and fakes ready.
 
@@ -80,15 +80,15 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### Integration tests at the port boundary — write these first, watch them fail (§ 29, § 31)
 
-- [ ] T028 [P] [US1] `crates/application/tests/extraction.rs` scenario 1: stub serves 17 pages / 164 events; assert every workout landed, `records_landed == 164`, watermark equals the newest event time
-- [ ] T029 [P] [US1] `crates/application/tests/extraction.rs` scenario 2 (**SC-002**): run twice against an unchanged stub; assert the second run lands zero records and the total is unchanged
-- [ ] T030 [P] [US1] `crates/application/tests/extraction.rs` scenario 3: stub re-serves one workout with a changed body; assert a second record for that id and that the first is byte-identical and still retrievable
-- [ ] T031 [P] [US1] `crates/application/tests/extraction.rs` scenario 4: stub serves a `deleted` event for a landed workout; assert a record with kind `deleted` and that the earlier record is present and unaltered
-- [ ] T032 [P] [US1] `crates/application/tests/extraction.rs` scenario 5 (**SC-004**): stub fails on page 9 of 17; assert the run fails, pages 1–8 are durable and the watermark is unmoved; then rerun against a healthy stub and assert the same end state as one clean run
-- [ ] T033 [P] [US1] `crates/application/tests/extraction.rs` scenario 6: land fully, reset, run again; assert zero new records for identical payloads, and exactly one new record when a payload differs
-- [ ] T034 [P] [US1] `crates/application/tests/extraction.rs` scenario 7: stub returns connection errors; assert zero landing records, watermark unmoved, and that status still answers (§ 36)
-- [ ] T035 [P] [US1] `crates/application/tests/edge_cases.rs`: delete for a workout never landed is landed anyway; multiple edits between runs land every payload served in the order served; empty account succeeds having landed nothing; an unrecognised event kind is landed with its kind verbatim; an event with no timestamp lands with a null event time and does not move the watermark
-- [ ] T036 [P] [US1] `crates/application/tests/watermark.rs`: the invariant the whole feature rests on — a workout edited mid-run and promoted past an already-read page is collected by the *next* run, because the watermark never advances beyond an event the run actually saw. Assert the watermark is never set from the clock
+- [X] T028 [P] [US1] `crates/application/tests/extraction.rs` scenario 1: stub serves 17 pages / 164 events; assert every workout landed, `records_landed == 164`, watermark equals the newest event time
+- [X] T029 [P] [US1] `crates/application/tests/extraction.rs` scenario 2 (**SC-002**): run twice against an unchanged stub; assert the second run lands zero records and the total is unchanged
+- [X] T030 [P] [US1] `crates/application/tests/extraction.rs` scenario 3: stub re-serves one workout with a changed body; assert a second record for that id and that the first is byte-identical and still retrievable
+- [X] T031 [P] [US1] `crates/application/tests/extraction.rs` scenario 4: stub serves a `deleted` event for a landed workout; assert a record with kind `deleted` and that the earlier record is present and unaltered
+- [X] T032 [P] [US1] `crates/application/tests/extraction.rs` scenario 5 (**SC-004**): stub fails on page 9 of 17; assert the run fails, pages 1–8 are durable and the watermark is unmoved; then rerun against a healthy stub and assert the same end state as one clean run
+- [X] T033 [P] [US1] `crates/application/tests/extraction.rs` scenario 6: land fully, reset, run again; assert zero new records for identical payloads, and exactly one new record when a payload differs
+- [X] T034 [P] [US1] `crates/application/tests/extraction.rs` scenario 7: stub returns connection errors; assert zero landing records, watermark unmoved, and that status still answers (§ 36)
+- [X] T035 [P] [US1] `crates/application/tests/edge_cases.rs`: delete for a workout never landed is landed anyway; multiple edits between runs land every payload served in the order served; empty account succeeds having landed nothing; an unrecognised event kind is landed with its kind verbatim; an event with no timestamp lands with a null event time and does not move the watermark
+- [X] T036 [P] [US1] `crates/application/tests/watermark.rs`: the invariant the whole feature rests on — a workout edited mid-run and promoted past an already-read page is collected by the *next* run, because the watermark never advances beyond an event the run actually saw. Assert the watermark is never set from the clock
 
 ### Store adapters
 
@@ -114,10 +114,10 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### The use case
 
-- [ ] T053 [US1] Implement `ExtractWorkouts` in `crates/application/src/extract.rs`, generic over its ports: acquire the lock, begin the run, read the watermark, walk pages `1..=page_count`, deduplicate by digest against the most recent record, commit per page, then advance the watermark and record success in a final transaction
-- [ ] T054 [US1] Implement watermark advancement in `crates/application/src/extract.rs`: the maximum event time across events the run **saw** (landed or deduplicated), never the clock, and unchanged when the run saw no events. Pass the stored watermark to `since` unmodified — it is inclusive at the source, so the boundary event is re-served and deduplicated for free
-- [ ] T055 [US1] Implement failure handling in `crates/application/src/extract.rs`: roll back nothing already committed (§ II.1 — landed records persist), record the failed run in its own transaction so FR-011 stays answerable, and leave the watermark unmoved (FR-006)
-- [ ] T056 [P] [US1] Implement `ReportExtractionStatus` and `ResetResumptionPoint` in `crates/application/src/status.rs`, reporting `events_seen` and `records_landed` separately and rendering "never run" as a fact rather than an error
+- [X] T053 [US1] Implement `ExtractWorkouts` in `crates/application/src/extract.rs`, generic over its ports: acquire the lock, begin the run, read the watermark, walk pages `1..=page_count`, deduplicate by digest against the most recent record, commit per page, then advance the watermark and record success in a final transaction
+- [X] T054 [US1] Implement watermark advancement in `crates/application/src/extract.rs`: the maximum event time across events the run **saw** (landed or deduplicated), never the clock, and unchanged when the run saw no events. Pass the stored watermark to `since` unmodified — it is inclusive at the source, so the boundary event is re-served and deduplicated for free
+- [X] T055 [US1] Implement failure handling in `crates/application/src/extract.rs`: roll back nothing already committed (§ II.1 — landed records persist), record the failed run in its own transaction so FR-011 stays answerable, and leave the watermark unmoved (FR-006)
+- [X] T056 [P] [US1] Implement `ReportExtractionStatus` and `ResetResumptionPoint` in `crates/application/src/status.rs`, reporting `events_seen` and `records_landed` separately and rendering "never run" as a fact rather than an error
 
 ### CLI
 

@@ -175,7 +175,10 @@ pub trait ExtractionRunLog {
 /// survive the crash and need a manual repair — a worse failure for a single
 /// operator than a lock that simply lets go.
 pub trait RunLock {
-    type Guard;
+    /// `Send` because a run holds the guard across every await it makes: the
+    /// lock covers the whole run, not just its opening. Requiring it here says
+    /// so once, rather than at every use site.
+    type Guard: Send;
 
     /// # Errors
     ///

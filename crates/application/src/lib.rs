@@ -6,8 +6,13 @@
 //! lets a use case be tested against fakes with no I/O anywhere near it.
 
 pub mod error;
+pub mod extract;
 pub mod paging;
 pub mod ports;
+pub mod status;
+
+pub use extract::{Extraction, ExtractionPorts};
+pub use status::ExtractionStatus;
 
 pub use error::{ExtractionError, RunLockError, SourceError, StatusError, StoreError};
 pub use paging::{PageCount, PageNumber};

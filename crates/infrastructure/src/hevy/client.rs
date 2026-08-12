@@ -34,7 +34,10 @@ impl HevyWorkoutEvents {
     /// # Errors
     ///
     /// Returns [`SourceError::Unavailable`] if an HTTP client cannot be built.
-    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Result<Self, SourceError> {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Result<Self, SourceError> {
         Self::with_retry(base_url, api_key, RetryPolicy::default())
     }
 
@@ -109,60 +112,59 @@ impl WorkoutEventSource for HevyWorkoutEvents {
                 .send()
                 .await;
 
-            let retryable_detail = match outcome {
-                Ok(response) => {
-                    let status = response.status();
-                    if status.is_success() {
-                        let body =
-                            response
-                                .bytes()
-                                .await
-                                .map_err(|error| SourceError::Unavailable {
+            let retryable_detail =
+                match outcome {
+                    Ok(response) => {
+                        let status = response.status();
+                        if status.is_success() {
+                            let body = response.bytes().await.map_err(|error| {
+                                SourceError::Unavailable {
                                     detail: error.to_string(),
-                                })?;
-                        return parse_page(&body);
-                    }
+                                }
+                            })?;
+                            return parse_page(&body);
+                        }
 
-                    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-                        // Terminal. The body here is the bare string
-                        // `InvalidApiKey` rather than JSON, which is why
-                        // nothing tries to parse it.
-                        return Err(SourceError::Unauthorised);
-                    }
+                        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+                            // Terminal. The body here is the bare string
+                            // `InvalidApiKey` rather than JSON, which is why
+                            // nothing tries to parse it.
+                            return Err(SourceError::Unauthorised);
+                        }
 
-                    if !is_retryable(status.as_u16()) {
-                        // A 400 or a 404 is a fault in our request, not a
-                        // passing condition at the source. Asking again would
-                        // get the same answer.
-                        let detail = response.text().await.unwrap_or_default();
-                        return Err(SourceError::Malformed {
-                            detail: format!("{status}: {}", detail.trim()),
-                        });
-                    }
+                        if !is_retryable(status.as_u16()) {
+                            // A 400 or a 404 is a fault in our request, not a
+                            // passing condition at the source. Asking again would
+                            // get the same answer.
+                            let detail = response.text().await.unwrap_or_default();
+                            return Err(SourceError::Malformed {
+                                detail: format!("{status}: {}", detail.trim()),
+                            });
+                        }
 
-                    let wait = retry_after(&response);
-                    let detail = format!("{status}");
-                    if attempt + 1 >= self.retry.attempts() {
-                        return Err(SourceError::Unavailable {
-                            detail: format!("{detail} after {} attempts", attempt + 1),
-                        });
+                        let wait = retry_after(&response);
+                        let detail = format!("{status}");
+                        if attempt + 1 >= self.retry.attempts() {
+                            return Err(SourceError::Unavailable {
+                                detail: format!("{detail} after {} attempts", attempt + 1),
+                            });
+                        }
+                        tokio::time::sleep(self.retry.backoff(attempt, wait)).await;
+                        detail
                     }
-                    tokio::time::sleep(self.retry.backoff(attempt, wait)).await;
-                    detail
-                }
-                Err(error) => {
-                    // Transport failures — refused, reset, timed out — are the
-                    // ordinary shape of a source being unreachable.
-                    let detail = error.to_string();
-                    if attempt + 1 >= self.retry.attempts() {
-                        return Err(SourceError::Unavailable {
-                            detail: format!("{detail} after {} attempts", attempt + 1),
-                        });
+                    Err(error) => {
+                        // Transport failures — refused, reset, timed out — are the
+                        // ordinary shape of a source being unreachable.
+                        let detail = error.to_string();
+                        if attempt + 1 >= self.retry.attempts() {
+                            return Err(SourceError::Unavailable {
+                                detail: format!("{detail} after {} attempts", attempt + 1),
+                            });
+                        }
+                        tokio::time::sleep(self.retry.backoff(attempt, None)).await;
+                        detail
                     }
-                    tokio::time::sleep(self.retry.backoff(attempt, None)).await;
-                    detail
-                }
-            };
+                };
 
             let _ = retryable_detail;
             attempt += 1;
