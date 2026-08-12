@@ -8,3 +8,8 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+
+# Product and protocol names `doc_markdown` mistakes for code items. Backticking
+# them in prose would be wrong: they are things, not identifiers. `..` extends
+# clippy's default list rather than replacing it.
+doc-valid-idents = ["SQLite", "SQLx", "PostgreSQL", "HTTPie", ".."]

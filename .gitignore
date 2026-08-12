@@ -6,3 +6,7 @@
 
 # Local, untracked environment
 /.env
+
+# sqlx compile-time query verification builds against this; regenerate with
+# `cargo sqlx prepare`. The committed `.sqlx/` metadata is what nix uses.
+/.sqlx-build.db*

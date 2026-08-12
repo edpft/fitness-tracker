@@ -50,7 +50,37 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        src = craneLib.cleanCargoSource ./.;
+        # Every crate builds from the same file set: cargo needs the whole
+        # workspace manifest graph even when building a single member, and sqlx
+        # needs the migrations and the offline query metadata at *compile*
+        # time. `cleanCargoSource` would drop both — it keeps only files cargo
+        # itself recognises — so the fileset is spelled out here and used
+        # everywhere rather than only for the per-crate builds.
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            # One entry per workspace member:
+            (craneLib.fileset.commonCargoSources ./crates/domain)
+            (craneLib.fileset.commonCargoSources ./crates/application)
+            (craneLib.fileset.commonCargoSources ./crates/infrastructure)
+            (craneLib.fileset.commonCargoSources ./crates/web)
+            (craneLib.fileset.commonCargoSources ./crates/cli)
+            # `sqlx::migrate!` embeds these, and `query!` is verified against
+            # the schema they produce.
+            ./migrations
+            # Offline query metadata. Regenerate with `cargo sqlx prepare`
+            # after changing a query; a stale directory fails the build here
+            # rather than surprising someone later.
+            ./.sqlx
+            # Tool config files — add as you create them:
+            ./clippy.toml
+            # ./rustfmt.toml
+            ./deny.toml
+            # ./taplo.toml
+          ];
+        };
 
         buildDeps = (
           with pkgs;
@@ -64,6 +94,12 @@
         commonArgs = {
           inherit src;
           strictDeps = true;
+
+          # sqlx verifies every `query!` against the schema at compile time.
+          # Offline means it reads the committed `.sqlx` metadata rather than
+          # reaching for a database, which keeps the build hermetic — and makes
+          # a query changed without regenerating that metadata a build failure.
+          SQLX_OFFLINE = "true";
 
           nativeBuildInputs = buildDeps;
 
@@ -82,27 +118,6 @@
           inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
           # NB: we disable tests since we'll run them all via cargo-nextest
           doCheck = false;
-        };
-
-        # Every crate builds from the same file set: cargo needs the whole
-        # workspace manifest graph even when building a single member.
-        workspaceSrc = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            # One entry per workspace member:
-            (craneLib.fileset.commonCargoSources ./crates/domain)
-            (craneLib.fileset.commonCargoSources ./crates/application)
-            (craneLib.fileset.commonCargoSources ./crates/infrastructure)
-            (craneLib.fileset.commonCargoSources ./crates/web)
-            (craneLib.fileset.commonCargoSources ./crates/cli)
-            # Tool config files — add as you create them:
-            ./clippy.toml
-            # ./rustfmt.toml
-            ./deny.toml
-            # ./taplo.toml
-          ];
         };
 
         # Everything under version control, for the checks that scan the
@@ -142,7 +157,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p domain";
-            src = workspaceSrc;
           }
         );
 
@@ -150,7 +164,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p application";
-            src = workspaceSrc;
           }
         );
 
@@ -158,7 +171,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p infrastructure";
-            src = workspaceSrc;
           }
         );
 
@@ -166,7 +178,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p web";
-            src = workspaceSrc;
             # Lets `nix run` find the binary without a hand-written app.
             meta.mainProgram = "web";
           }
@@ -176,7 +187,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p cli";
-            src = workspaceSrc;
             # The crate is `cli`; the binary operators type is `fitness`.
             meta.mainProgram = "fitness";
           }
@@ -265,7 +275,7 @@
                 export CARGO_HOME="$TMPDIR/cargo"
 
                 # The whole repository, not the curated build source: a crate
-                # missing from `workspaceSrc` must still be seen here, or it
+                # missing from `src` must still be seen here, or it
                 # would evade the check entirely.
                 cargo metadata --no-deps --offline --format-version 1 \
                   --manifest-path ${repoSrc}/Cargo.toml \
@@ -300,7 +310,7 @@
                 touch "$out"
               '';
 
-          # Not constitutional — build hygiene. `workspaceSrc` lists its members
+          # Not constitutional — build hygiene. `src` lists its members
           # by hand, so a new crate can be perfectly valid to cargo while nix
           # silently ignores its sources, and every per-crate build keeps
           # passing without ever compiling it.
@@ -321,9 +331,9 @@
                     | jq -r '.packages[].name' | sort
                 }
 
-                if ! diff -u <(members ${repoSrc}) <(members ${workspaceSrc}); then
+                if ! diff -u <(members ${repoSrc}) <(members ${src}); then
                   echo
-                  echo "A workspace member is missing from \`workspaceSrc\` in"
+                  echo "A workspace member is missing from \`src\` in"
                   echo "flake.nix, so nix is not building it. Add it there, and"
                   echo "give it a \`buildPackage\` block if it should build alone."
                   exit 1
@@ -369,6 +379,10 @@
             cargo-nextest
             gitleaks
             nixfmt
+            # Regenerating `.sqlx` after a query changes, and reading the store
+            # by hand during validation.
+            sqlx-cli
+            sqlite
             # Conveniences.
             actionlint
             cargo-watch

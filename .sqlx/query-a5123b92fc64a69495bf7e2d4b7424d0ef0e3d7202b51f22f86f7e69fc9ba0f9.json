@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT payload_digest AS \"payload_digest!: Vec<u8>\"\n            FROM hevy_workout_landing\n            WHERE source_record_id = ?\n            ORDER BY id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "payload_digest!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "payload_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a5123b92fc64a69495bf7e2d4b7424d0ef0e3d7202b51f22f86f7e69fc9ba0f9"
+}

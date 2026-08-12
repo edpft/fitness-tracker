@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO hevy_workout_landing (\n                    endpoint, fetched_at, source_record_id, event_kind,\n                    event_time, payload, payload_digest, run_id, serve_ordinal\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "61b8c0a586a9ed18e44b93efc3cd9a4b6bbd3a435404f0b86faaf9e127a2e88d"
+}

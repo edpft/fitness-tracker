@@ -90,6 +90,12 @@ name = "workspace"
 [profile.dev]
 opt-level = 1
 
-# Enable a large amount of optimization in the dev profile for dependencies.
+# Some optimization for dependencies, not full optimization.
+#
+# This was `3`, which optimises all ~300 dependencies at every clean build. That
+# trade buys faster dependency *runtime*, and this workload has none worth
+# buying: a few dozen HTTP requests and a few thousand records. What it costs is
+# peak build memory, which is the binding constraint — a full-tree build at four
+# parallel jobs is enough to stall the machine on memory.
 [profile.dev.package."*"]
-opt-level = 3
+opt-level = 1
