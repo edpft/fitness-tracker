@@ -51,9 +51,32 @@ The `workspace-members` and `architecture` checks catch 2 and 3.
 - **Panics are `forbid`, not `deny`.** `#[allow(clippy::unwrap_used)]` is a
   compile error (E0453). Fix the error handling; do not reach for the
   attribute, and do not edit `Cargo.toml` to get around it.
+
+  Two macros generate that attribute for you, so they cannot be used at all:
+
+  - **`#[tokio::test]`** on a test returning `Result`. Build the runtime by
+    hand — `tokio::runtime::Builder::new_current_thread()` — from a `#[test]`
+    function returning `()`.
+  - **clap's derive macros.** Use the builder API, which is plain function
+    calls.
+
+  Tests therefore return `()` and assert by panicking, which is also what
+  `clippy.toml` is configured for: `allow-panic-in-tests` and its siblings
+  exist precisely so a test can assert that way. `panic_in_result_fn` is
+  forbidden too, so an `assert!` inside a function returning `Result` fails.
+- **The test exemptions do not reach free functions.** `expect` is allowed in a
+  `#[test]` function and in an `async` block inside one, but not in a helper
+  defined alongside them in the same file. Fixture builders return `Result` and
+  the test unwraps at the call site.
 - **§ II is a data model, not a suggestion.** The common mistakes are storing
   something the analytical layer should derive, resampling component
   observations to a convenient resolution, and treating a match between two
   sources as permission to combine their series.
-- **The example `Item` type is scaffolding.** It demonstrates the shape and is
-  to be deleted, not extended.
+- **A stub cannot catch a wrong default.** The contract tests point the source
+  at a mock server, so anything wrong with the *default* configuration is
+  invisible to them — a base URL that already ended in `/v1` produced
+  `/v1/v1/workouts/events` and only a live run found it. Pin composed defaults
+  in their own unit test.
+- **Regenerate `.sqlx` after changing a query**: `cargo sqlx prepare
+  --workspace`. Builds read it offline, so a stale directory is a compile
+  error rather than a silent fallback.
