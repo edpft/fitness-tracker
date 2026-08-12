@@ -380,7 +380,13 @@
           };
         };
 
-        packages.default = web;
+        packages = {
+          # `cli` is the default because it is the one that does something:
+          # `nix run` should hand you the working tool, not the dormant HTTP
+          # stub. Both are exposed by name.
+          default = cli;
+          inherit cli web;
+        };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
         formatter = pkgs.nixfmt;
