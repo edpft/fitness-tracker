@@ -6,8 +6,12 @@
 //! Nothing here leaks upward: every vendor error is translated at the boundary
 //! into the application's own view of failure.
 
+pub mod hevy;
+pub mod lock;
 pub mod store;
 
+pub use hevy::{EVENTS_ENDPOINT, HevyWorkoutEvents, RetryPolicy};
+pub use lock::FileRunLock;
 pub use store::{
     HevyWorkoutLandingStore, SqliteExtractionRunLog, SqliteResumptionPointStore, connect,
 };

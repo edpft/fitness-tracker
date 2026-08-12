@@ -45,8 +45,8 @@ Rust workspace, hexagonal, dependencies inward only:
 
 - [X] T010 Delete the `Item` example end to end: `crates/domain/src/lib.rs` (`Item`, `ItemId`, `InvalidItem` and their tests), `crates/application/src/lib.rs` (`ItemRepository`, `CreateItem`, `ItemService`, `RepositoryError`, `CreateItemError` and their tests), `crates/infrastructure/src/lib.rs` (`InMemoryItemRepository` and its test). It is scaffolding to be deleted, not extended
 - [X] T011 Replace `crates/web/src/main.rs` with a stub returning `ExitCode` and reporting that no HTTP surface exists yet, so the crate compiles without the `Item` wiring
-- [ ] T012 Create `migrations/` and wire `sqlx::migrate!` into a pool constructor in `crates/infrastructure/src/store/pool.rs`, reading the database path from a parameter — no hardcoded path (§ 34)
-- [ ] T013 Add a `sqlx-prepare` check to `flake.nix` running `cargo sqlx prepare --check --workspace`, so stale `.sqlx/` offline metadata is a CI failure rather than a mystery
+- [X] T012 Create `migrations/` and wire `sqlx::migrate!` into a pool constructor in `crates/infrastructure/src/store/pool.rs`, reading the database path from a parameter — no hardcoded path (§ 34)
+- [X] T013 Set `SQLX_OFFLINE` in `flake.nix` and carry `migrations/` and `.sqlx/` in the build's fileset. No separate check is needed after all: an offline build *is* the check, because a query changed without regenerating its metadata fails to compile. A dedicated `prepare --check` job would have needed a live database inside the sandbox to tell us the same thing
 - [ ] T014 [P] Create the test-double module `crates/application/tests/support/mod.rs` with in-memory fakes for every driven port, plus a fixed `Clock`. Fakes go here, not in `infrastructure` — a use-case test that needs a database has a dependency pointing the wrong way
 
 **Checkpoint**: workspace builds green with no example code; store plumbing and fakes ready.
@@ -92,14 +92,14 @@ Rust workspace, hexagonal, dependencies inward only:
 
 ### Store adapters
 
-- [ ] T037 [US1] Write `migrations/0001_extraction.sql` per [data-model.md](./data-model.md): `extraction_run` (keyed by `stream`, with the `CHECK` constraints mirroring `RunOutcome`), `resumption_point`, and `hevy_workout_landing` with no `source` column — the table name carries it
-- [ ] T038 [US1] Add the append-only triggers to `migrations/0001_extraction.sql`: `BEFORE UPDATE` and `BEFORE DELETE` on `hevy_workout_landing` raising `'raw landing is append-only (constitution II.1)'`. Every future landing table needs its own pair — this is the cost of the per-stream split
-- [ ] T039 [US1] Add the indexes to `migrations/0001_extraction.sql`: `hevy_workout_landing_latest` on `(source_record_id, id DESC)` for the D3 lookup, and the partial `extraction_run_succeeded` index for FR-008
-- [ ] T040 [P] [US1] `crates/infrastructure/tests/store.rs`: assert `UPDATE` and `DELETE` against `hevy_workout_landing` are refused by the database (**SC-003**), that the `RunOutcome` `CHECK` constraints reject invalid combinations, and that `latest_digest` returns the most recent record rather than any record
-- [ ] T041 [US1] Implement `LandingStore` in `crates/infrastructure/src/store/landing.rs`, bound to one table at construction. Timestamps convert to RFC 3339 UTC `TEXT` here; `payload` is `BLOB`
-- [ ] T042 [P] [US1] Implement `ResumptionPointStore` in `crates/infrastructure/src/store/resumption.rs`, where `clear` deletes the row (FR-007)
-- [ ] T043 [P] [US1] Implement `ExtractionRunLog` in `crates/infrastructure/src/store/run_log.rs`, including `latest_success` for FR-008
-- [ ] T044 [US1] Translate `sqlx::Error` into `StoreError` at the adapter boundary in `crates/infrastructure/src/store/mod.rs` — no SQL code crosses inward (§ 26)
+- [X] T037 [US1] Write `migrations/0001_extraction.sql` per [data-model.md](./data-model.md): `extraction_run` (keyed by `stream`, with the `CHECK` constraints mirroring `RunOutcome`), `resumption_point`, and `hevy_workout_landing` with no `source` column — the table name carries it
+- [X] T038 [US1] Add the append-only triggers to `migrations/0001_extraction.sql`: `BEFORE UPDATE` and `BEFORE DELETE` on `hevy_workout_landing` raising `'raw landing is append-only (constitution II.1)'`. Every future landing table needs its own pair — this is the cost of the per-stream split
+- [X] T039 [US1] Add the indexes to `migrations/0001_extraction.sql`: `hevy_workout_landing_latest` on `(source_record_id, id DESC)` for the D3 lookup, and the partial `extraction_run_succeeded` index for FR-008
+- [X] T040 [P] [US1] `crates/infrastructure/tests/store.rs`: assert `UPDATE` and `DELETE` against `hevy_workout_landing` are refused by the database (**SC-003**), that the `RunOutcome` `CHECK` constraints reject invalid combinations, and that `latest_digest` returns the most recent record rather than any record
+- [X] T041 [US1] Implement `LandingStore` in `crates/infrastructure/src/store/landing.rs`, bound to one table at construction. Timestamps convert to RFC 3339 UTC `TEXT` here; `payload` is `BLOB`
+- [X] T042 [P] [US1] Implement `ResumptionPointStore` in `crates/infrastructure/src/store/resumption.rs`, where `clear` deletes the row (FR-007)
+- [X] T043 [P] [US1] Implement `ExtractionRunLog` in `crates/infrastructure/src/store/run_log.rs`, including `latest_success` for FR-008
+- [X] T044 [US1] Translate `sqlx::Error` into `StoreError` at the adapter boundary in `crates/infrastructure/src/store/mod.rs` — no SQL code crosses inward (§ 26)
 
 ### Hevy adapter
 
