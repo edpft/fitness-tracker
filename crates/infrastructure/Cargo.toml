@@ -9,7 +9,6 @@ publish.workspace = true
 application.workspace = true
 domain.workspace = true
 
-fs4.workspace = true
 jiff.workspace = true
 reqwest.workspace = true
 serde.workspace = true

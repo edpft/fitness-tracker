@@ -36,6 +36,8 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 # The feature is `rustls` — 0.13 renamed it from `rustls-tls`.
 reqwest = { version = "0.13.4", default-features = false, features = [
   "rustls",
+  # Query-string building is feature-gated in 0.13.
+  "query",
 ] }
 serde = { version = "1.0.229", features = ["derive"] }
 # `raw_value` is load-bearing, not a convenience: RawValue borrows the exact
@@ -48,7 +50,6 @@ sqlx = { version = "0.9.0", default-features = false, features = [
   "migrate",
   "macros",
 ] }
-fs4 = { version = "1.1.0", features = ["sync"] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
 
 # Test-only.
