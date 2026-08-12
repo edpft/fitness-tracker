@@ -1,6 +1,6 @@
 //! The HTTP adapter for Hevy's workout events feed.
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use application::{EventPage, SourceError, WorkoutEventSource, paging::PageNumber};
 use domain::landing::Watermark;
@@ -26,45 +26,59 @@ const PAGE_SIZE: u32 = 10;
 const EPOCH: &str = "1970-01-01T00:00:00Z";
 
 /// Hevy's workout events feed.
-#[derive(Debug, Clone)]
+///
+/// The HTTP client is built on first use rather than at construction, and the
+/// distinction is not academic: building it initialises the TLS backend, which
+/// reads the platform trust store and can fail. Doing that in a constructor
+/// made a failure surface while the composition root was still assembling
+/// ports — before the run lock had been taken — so a second concurrent run
+/// reported the source as unreachable instead of reporting that another run
+/// held the lock.
+///
+/// Constructing a port does no I/O. Whatever the adapter needs, it acquires
+/// when it is actually asked to do something.
+#[derive(Debug)]
 pub struct HevyWorkoutEvents {
-    client: Client,
+    client: OnceLock<Result<Client, String>>,
     base_url: String,
     api_key: String,
     retry: RetryPolicy,
 }
 
 impl HevyWorkoutEvents {
-    /// # Errors
-    ///
-    /// Returns [`SourceError::Unavailable`] if an HTTP client cannot be built.
-    pub fn new(
-        base_url: impl Into<String>,
-        api_key: impl Into<String>,
-    ) -> Result<Self, SourceError> {
+    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self::with_retry(base_url, api_key, RetryPolicy::default())
     }
 
-    /// # Errors
-    ///
-    /// Returns [`SourceError::Unavailable`] if an HTTP client cannot be built.
     pub fn with_retry(
         base_url: impl Into<String>,
         api_key: impl Into<String>,
         retry: RetryPolicy,
-    ) -> Result<Self, SourceError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-
-        Ok(Self {
-            client,
+    ) -> Self {
+        Self {
+            client: OnceLock::new(),
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             api_key: api_key.into(),
             retry,
+        }
+    }
+
+    /// The client, built once on first use.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Unavailable`] if it cannot be built — most likely
+    /// because the TLS backend found no usable trust store.
+    fn client(&self) -> Result<&Client, SourceError> {
+        let built = self.client.get_or_init(|| {
+            Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .map_err(|error| error.to_string())
+        });
+
+        built.as_ref().map_err(|detail| SourceError::Unavailable {
+            detail: detail.clone(),
         })
     }
 
@@ -105,7 +119,7 @@ impl WorkoutEventSource for HevyWorkoutEvents {
         let mut attempt = 0;
         loop {
             let outcome = self
-                .client
+                .client()?
                 .get(self.url())
                 .header("api-key", &self.api_key)
                 .query(&[
@@ -187,7 +201,7 @@ mod tests {
     /// catch it: their base URI has no version segment to double up.
     #[test]
     fn the_base_url_and_the_endpoint_compose_to_the_real_url() {
-        let source = HevyWorkoutEvents::new("https://api.hevyapp.com", "k").expect("a source");
+        let source = HevyWorkoutEvents::new("https://api.hevyapp.com", "k");
         assert_eq!(source.url(), "https://api.hevyapp.com/v1/workouts/events");
         assert_eq!(EVENTS_ENDPOINT, "/v1/workouts/events");
     }
@@ -195,7 +209,7 @@ mod tests {
     /// A trailing slash on the configured base must not double the separator.
     #[test]
     fn a_trailing_slash_on_the_base_url_is_tolerated() {
-        let source = HevyWorkoutEvents::new("https://api.hevyapp.com/", "k").expect("a source");
+        let source = HevyWorkoutEvents::new("https://api.hevyapp.com/", "k");
         assert_eq!(source.url(), "https://api.hevyapp.com/v1/workouts/events");
     }
 }

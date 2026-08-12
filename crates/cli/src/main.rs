@@ -271,7 +271,7 @@ async fn extract(config: &Config, source: Source) -> Result<(), Failure> {
         stream.clone(),
         Endpoint::new(EVENTS_ENDPOINT).map_err(|error| Failure::usage(&error))?,
         ExtractionPorts {
-            source: HevyWorkoutEvents::new(&config.base_url, &config.api_key)?,
+            source: HevyWorkoutEvents::new(&config.base_url, &config.api_key),
             landing: HevyWorkoutLandingStore::new(pool.clone()),
             resumption: SqliteResumptionPointStore::new(pool.clone()),
             runs: SqliteExtractionRunLog::new(pool),

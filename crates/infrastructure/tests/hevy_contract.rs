@@ -8,8 +8,6 @@
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
-use std::error::Error;
-
 use application::{
     SourceError, WorkoutEventSource,
     paging::{PageCount, PageNumber},
@@ -21,22 +19,20 @@ use wiremock::{
     matchers::{header, method, path, query_param},
 };
 
-type Fallible<T> = Result<T, Box<dyn Error>>;
-
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
 }
 
-fn source(base: &str) -> Fallible<HevyWorkoutEvents> {
+fn source(base: &str) -> HevyWorkoutEvents {
     // No sleeping in tests: the retry *count* is the behaviour worth pinning,
     // and waiting to prove a delay exists only makes the suite slow.
-    Ok(HevyWorkoutEvents::with_retry(
+    HevyWorkoutEvents::with_retry(
         base,
         "00000000-0000-0000-0000-000000000000",
         RetryPolicy::immediate(3),
-    )?)
+    )
 }
 
 /// One update and one deletion, in the shape the live API serves them.
@@ -73,7 +69,6 @@ fn an_empty_page_uses_the_workouts_key_and_is_not_an_error() {
             .await;
 
         let page = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("an empty page is a success, not a parse error");
@@ -97,7 +92,6 @@ fn a_page_with_neither_key_is_empty_rather_than_broken() {
             .await;
 
         let page = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("a missing array is an empty page");
@@ -118,7 +112,6 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
             .await;
 
         let page = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("a populated page");
@@ -170,7 +163,6 @@ fn an_unrecognised_event_kind_survives() {
             .await;
 
         let page = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("an unknown kind is still an event");
@@ -196,7 +188,6 @@ fn an_event_without_an_identifier_fails_the_run() {
             .await;
 
         let failure = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("an event with no identifier must fail");
@@ -228,7 +219,6 @@ fn the_watermark_is_sent_unmodified_and_the_epoch_stands_in_for_none() {
 
         let mark = Watermark::parse("2026-08-10T19:29:47.199Z").expect("valid");
         source(&server.uri())
-            .expect("a source")
             .fetch_page(Some(mark), PageNumber::first())
             .await
             .expect("the watermark must be sent verbatim");
@@ -246,7 +236,6 @@ fn the_watermark_is_sent_unmodified_and_the_epoch_stands_in_for_none() {
             .await;
 
         source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("no watermark means the epoch");
@@ -269,7 +258,6 @@ fn a_rejected_credential_is_terminal_and_its_body_is_not_json() {
             .await;
 
         let failure = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("401 must fail");
@@ -290,7 +278,6 @@ fn throttling_is_retried_then_reported_as_unavailable() {
             .await;
 
         let failure = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("exhausted retries must fail");
@@ -315,7 +302,6 @@ fn a_server_fault_is_retried_and_then_succeeds() {
             .await;
 
         let page = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect("a transient fault must be ridden out");
@@ -339,7 +325,6 @@ fn a_bad_request_is_terminal_and_not_retried() {
             .await;
 
         let failure = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("400 must fail");
@@ -358,7 +343,6 @@ fn an_unreadable_body_is_reported_rather_than_panicking() {
             .await;
 
         let failure = source(&server.uri())
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("a non-JSON body must fail");
@@ -373,7 +357,6 @@ fn an_unreachable_source_is_unavailable() {
     runtime().expect("a tokio runtime").block_on(async {
         // A port nothing is listening on: the connection is refused at once.
         let failure = source("http://127.0.0.1:1")
-            .expect("a source")
             .fetch_page(None, PageNumber::first())
             .await
             .expect_err("an unreachable source must fail");
