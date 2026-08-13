@@ -14,11 +14,14 @@
 
 mod support;
 
-use application::{ExtractWorkouts, Extraction, ExtractionPorts};
+use application::{
+    WorkoutExtractor,
+    extract::{Extraction, ExtractionPorts},
+};
 use domain::landing::Watermark;
 use support::{
     FakeLock, FakeSource, Fallible, FixedClock, InMemoryLanding, InMemoryResumption, InMemoryRuns,
-    events_endpoint, hevy_workouts, untimed, updated,
+    hevy_workouts, untimed, updated,
 };
 
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
@@ -37,22 +40,18 @@ const FROZEN_CLOCK: &str = "2030-01-01T00:00:00Z";
 fn harness(
     source: FakeSource,
 ) -> Fallible<(Subject, InMemoryLanding, InMemoryResumption, InMemoryRuns)> {
-    let landing = InMemoryLanding::default();
+    let landing = InMemoryLanding::holding(hevy_workouts()?);
     let resumption = InMemoryResumption::default();
     let runs = InMemoryRuns::default();
 
-    let extraction = Extraction::new(
-        hevy_workouts()?,
-        events_endpoint()?,
-        ExtractionPorts {
-            source,
-            landing: landing.clone(),
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock: FakeLock::free(),
-            clock: FixedClock::at(FROZEN_CLOCK)?,
-        },
-    );
+    let extraction = Extraction::new(ExtractionPorts {
+        source,
+        landing: landing.clone(),
+        resumption: resumption.clone(),
+        runs: runs.clone(),
+        lock: FakeLock::free(),
+        clock: FixedClock::at(FROZEN_CLOCK)?,
+    });
 
     Ok((extraction, landing, resumption, runs))
 }
@@ -91,9 +90,8 @@ fn an_edit_promoted_past_a_read_page_is_collected_by_the_next_run() {
         let source = FakeSource::serving(before);
         source.swap_after_page(1, after);
         let (extraction, landing, resumption, _runs) = harness(source).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
 
         // The edit was missed, exactly as expected — this is a real race, not
         // something the design pretends away.
@@ -104,19 +102,19 @@ fn an_edit_promoted_past_a_read_page_is_collected_by_the_next_run() {
         let mark = resumption.get().expect("a resumption point");
         assert_eq!(
             mark,
-            Watermark::parse("2026-08-04T00:00:00Z").expect("valid"),
+            Watermark::try_from("2026-08-04T00:00:00Z").expect("valid"),
             "the point is the newest event seen, not the newest that exists"
         );
         assert!(
             mark.as_timestamp()
-                < Watermark::parse("2026-08-09T00:00:00Z")
+                < Watermark::try_from("2026-08-09T00:00:00Z")
                     .expect("valid")
                     .as_timestamp(),
             "the point must not have passed the edit"
         );
 
         // So the next run collects it.
-        extraction.extract(&stream).await.expect("the second run");
+        extraction.extract().await.expect("the second run");
         assert_eq!(landing.for_id("c").len(), 1, "the next run collects it");
     });
 }
@@ -133,19 +131,16 @@ fn the_resumption_point_never_comes_from_the_clock() {
         ]]);
         let (extraction, _landing, resumption, _runs) = harness(source).expect("a harness");
 
-        extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
-            .await
-            .expect("a run");
+        extraction.extract().await.expect("a run");
 
         let mark = resumption.get().expect("a resumption point");
         assert_eq!(
             mark,
-            Watermark::parse("2026-08-04T00:00:00Z").expect("valid")
+            Watermark::try_from("2026-08-04T00:00:00Z").expect("valid")
         );
         assert!(
             mark.as_timestamp()
-                < Watermark::parse(FROZEN_CLOCK)
+                < Watermark::try_from(FROZEN_CLOCK)
                     .expect("valid")
                     .as_timestamp(),
             "the clock is not a resumption point"
@@ -163,7 +158,7 @@ fn a_run_that_sees_nothing_leaves_the_point_alone() {
             harness(FakeSource::empty()).expect("a harness");
 
         let summary = extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
+            .extract()
             .await
             .expect("an empty account is not a failure");
 
@@ -185,10 +180,7 @@ fn an_event_without_a_timestamp_does_not_move_the_point() {
         ]]);
         let (extraction, landing, resumption, _runs) = harness(source).expect("a harness");
 
-        let summary = extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
-            .await
-            .expect("a run");
+        let summary = extraction.extract().await.expect("a run");
 
         // It is landed — § 37 records partial data as partial rather than
         // discarding it.
@@ -197,7 +189,7 @@ fn an_event_without_a_timestamp_does_not_move_the_point() {
             landing
                 .for_id("a")
                 .first()
-                .and_then(domain::landing::LandingRecord::event_time),
+                .and_then(|record| record.provenance().occurred_at()),
             None
         );
         // But it moves nothing.
@@ -215,9 +207,8 @@ fn the_point_never_retreats() {
             updated("a", r#"{"id":"a"}"#, "2026-08-09T00:00:00Z").expect("a fixture"),
         ]]);
         let (extraction, _landing, resumption, _runs) = harness(source.clone()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
         let advanced = resumption.get().expect("a resumption point");
 
         // The source now serves only something older. `since` is inclusive, so
@@ -226,7 +217,7 @@ fn the_point_never_retreats() {
         source.now_serving(vec![vec![
             updated("b", r#"{"id":"b"}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
         ]]);
-        extraction.extract(&stream).await.expect("the second run");
+        extraction.extract().await.expect("the second run");
 
         assert_eq!(
             resumption.get(),

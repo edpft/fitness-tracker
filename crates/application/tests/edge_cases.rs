@@ -7,12 +7,22 @@
 
 mod support;
 
-use application::{ExtractWorkouts, Extraction, ExtractionPorts};
-use domain::landing::{EventKind, RecordCount};
+use application::{
+    WorkoutExtractor,
+    extract::{Extraction, ExtractionPorts},
+};
+use domain::landing::{EventKind, EventProvenance, LandingRecord, Provenance, RecordCount};
 use support::{
     FakeLock, FakeSource, Fallible, FixedClock, InMemoryLanding, InMemoryResumption, InMemoryRuns,
-    deleted, events_endpoint, hevy_workouts, updated,
+    deleted, event_at, events_endpoint, hevy_workouts, updated,
 };
+
+/// What the source said happened, which lives in the record's provenance
+/// because it is true of an events feed rather than of every source.
+fn kind_of(record: &LandingRecord) -> EventKind {
+    let Provenance::Event(event) = record.provenance();
+    event.kind().clone()
+}
 
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_current_thread()
@@ -24,21 +34,17 @@ type Subject =
     Extraction<FakeSource, InMemoryLanding, InMemoryResumption, InMemoryRuns, FakeLock, FixedClock>;
 
 fn harness(source: FakeSource) -> Fallible<(Subject, InMemoryLanding, InMemoryRuns)> {
-    let landing = InMemoryLanding::default();
+    let landing = InMemoryLanding::holding(hevy_workouts()?);
     let runs = InMemoryRuns::default();
 
-    let extraction = Extraction::new(
-        hevy_workouts()?,
-        events_endpoint()?,
-        ExtractionPorts {
-            source,
-            landing: landing.clone(),
-            resumption: InMemoryResumption::default(),
-            runs: runs.clone(),
-            lock: FakeLock::free(),
-            clock: FixedClock::at("2026-08-11T18:19:59Z")?,
-        },
-    );
+    let extraction = Extraction::new(ExtractionPorts {
+        source,
+        landing: landing.clone(),
+        resumption: InMemoryResumption::default(),
+        runs: runs.clone(),
+        lock: FakeLock::free(),
+        clock: FixedClock::at("2026-08-11T18:19:59Z")?,
+    });
 
     Ok((extraction, landing, runs))
 }
@@ -54,18 +60,12 @@ fn a_deletion_for_a_workout_never_landed_is_landed_anyway() {
         ]]);
         let (extraction, landing, _runs) = harness(source).expect("a harness");
 
-        let summary = extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
-            .await
-            .expect("a run");
+        let summary = extraction.extract().await.expect("a run");
 
-        assert_eq!(summary.records_landed, RecordCount::new(1));
+        assert_eq!(summary.records_landed, RecordCount::from(1));
         let held = landing.for_id("never-seen");
         assert_eq!(held.len(), 1);
-        assert_eq!(
-            held.first().map(|record| record.event_kind().clone()),
-            Some(EventKind::Deleted)
-        );
+        assert_eq!(held.first().map(kind_of), Some(EventKind::Deleted));
     });
 }
 
@@ -80,15 +80,14 @@ fn repeated_edits_between_runs_land_each_payload_the_source_actually_served() {
             updated("w1", r#"{"id":"w1","v":1}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
         ]]);
         let (extraction, landing, _runs) = harness(source.clone()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
 
         // Two edits happen between runs; the source serves only the latest.
         source.now_serving(vec![vec![
             updated("w1", r#"{"id":"w1","v":3}"#, "2026-08-03T00:00:00Z").expect("a fixture"),
         ]]);
-        extraction.extract(&stream).await.expect("the second run");
+        extraction.extract().await.expect("the second run");
 
         let held = landing.for_id("w1");
         assert_eq!(held.len(), 2, "one record per payload actually served");
@@ -109,19 +108,18 @@ fn a_payload_reverted_to_an_earlier_state_lands_again() {
             updated("w1", r#"{"id":"w1","v":"x"}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
         ]]);
         let (extraction, landing, _runs) = harness(source.clone()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("run one");
+        extraction.extract().await.expect("run one");
 
         source.now_serving(vec![vec![
             updated("w1", r#"{"id":"w1","v":"y"}"#, "2026-08-02T00:00:00Z").expect("a fixture"),
         ]]);
-        extraction.extract(&stream).await.expect("run two");
+        extraction.extract().await.expect("run two");
 
         source.now_serving(vec![vec![
             updated("w1", r#"{"id":"w1","v":"x"}"#, "2026-08-03T00:00:00Z").expect("a fixture"),
         ]]);
-        extraction.extract(&stream).await.expect("run three");
+        extraction.extract().await.expect("run three");
 
         assert_eq!(landing.for_id("w1").len(), 3);
     });
@@ -135,12 +133,12 @@ fn an_empty_account_is_a_success_rather_than_a_failure() {
         let (extraction, landing, runs) = harness(FakeSource::empty()).expect("a harness");
 
         let summary = extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
+            .extract()
             .await
             .expect("an empty account is not a failure");
 
         assert_eq!(summary.events_seen.as_u64(), 0);
-        assert_eq!(summary.records_landed, RecordCount::new(0));
+        assert_eq!(summary.records_landed, RecordCount::from(0));
         assert!(landing.records().is_empty());
         assert!(
             runs.last_outcome()
@@ -162,22 +160,26 @@ fn an_unrecognised_event_kind_is_landed_with_its_kind_verbatim() {
             "2026-08-01T00:00:00Z",
         )
         .expect("a fixture");
-        event.kind = EventKind::from_source("archived").expect("a readable kind");
+        event.provenance = EventProvenance::new(
+            events_endpoint().expect("a fixture"),
+            EventKind::try_from("archived").expect("a readable kind"),
+            Some(event_at("2026-08-01T00:00:00Z").expect("a fixture")),
+        )
+        .into();
 
         let (extraction, landing, _runs) =
             harness(FakeSource::serving(vec![vec![event]])).expect("a harness");
 
         extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
+            .extract()
             .await
             .expect("an unknown kind is still an event");
 
         let held = landing.for_id("w1");
         assert_eq!(held.len(), 1);
         assert_eq!(
-            held.first()
-                .map(|record| record.event_kind().as_source_str()),
-            Some("archived")
+            held.first().map(|record| kind_of(record).to_string()),
+            Some("archived".to_owned())
         );
     });
 }
@@ -193,14 +195,12 @@ fn every_landed_record_carries_its_provenance() {
         ]]);
         let (extraction, landing, _runs) = harness(source).expect("a harness");
 
-        extraction
-            .extract(&hevy_workouts().expect("a valid stream"))
-            .await
-            .expect("a run");
+        extraction.extract().await.expect("a run");
 
         let record = landing.records().first().cloned().expect("a record");
-        assert_eq!(record.source().as_str(), "hevy");
-        assert_eq!(record.endpoint().as_str(), "/v1/workouts/events");
+        let Provenance::Event(event) = record.provenance();
+        assert_eq!(record.stream().to_string(), "hevy.workouts");
+        assert_eq!(event.endpoint().as_str(), "/v1/workouts/events");
         assert_eq!(record.source_record_id().as_str(), "w1");
         assert_eq!(record.fetched_at().to_string(), "2026-08-11T18:19:59Z");
         assert_eq!(record.digest(), record.payload().digest());

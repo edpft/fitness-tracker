@@ -5,17 +5,41 @@ use std::fmt;
 
 use super::{ids::LandingStream, time::FetchedAt};
 
+/// A stored run id that could not be one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a run id cannot be negative, found {value}")]
+pub struct NegativeRunId {
+    pub value: i64,
+}
+
 /// The store's identifier for a run.
+///
+/// Unsigned, because a position in the store's own sequence has no negative
+/// values. SQLite counts in `i64`, so the narrowing happens once at the store
+/// adapter — where a negative id means the file holds something this program
+/// did not write, and says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RunId(i64);
+pub struct RunId(u64);
 
 impl RunId {
-    pub fn new(id: i64) -> Self {
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for RunId {
+    fn from(id: u64) -> Self {
         Self(id)
     }
+}
 
-    pub fn as_i64(self) -> i64 {
-        self.0
+impl TryFrom<i64> for RunId {
+    type Error = NegativeRunId;
+
+    fn try_from(id: i64) -> Result<Self, Self::Error> {
+        u64::try_from(id)
+            .map(Self)
+            .map_err(|_| NegativeRunId { value: id })
     }
 }
 
@@ -30,17 +54,14 @@ impl fmt::Display for RunId {
 pub struct EventCount(u64);
 
 impl EventCount {
-    pub fn new(count: u64) -> Self {
-        Self(count)
-    }
-
     pub fn as_u64(self) -> u64 {
         self.0
     }
+}
 
-    #[must_use]
-    pub fn increment(self) -> Self {
-        Self(self.0.saturating_add(1))
+impl From<u64> for EventCount {
+    fn from(count: u64) -> Self {
+        Self(count)
     }
 }
 
@@ -55,17 +76,14 @@ impl fmt::Display for EventCount {
 pub struct RecordCount(u64);
 
 impl RecordCount {
-    pub fn new(count: u64) -> Self {
-        Self(count)
-    }
-
     pub fn as_u64(self) -> u64 {
         self.0
     }
+}
 
-    #[must_use]
-    pub fn increased_by(self, other: Self) -> Self {
-        Self(self.0.saturating_add(other.0))
+impl From<u64> for RecordCount {
+    fn from(count: u64) -> Self {
+        Self(count)
     }
 }
 
@@ -73,6 +91,13 @@ impl fmt::Display for RecordCount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// A stored reason this version of the program does not know.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{value:?} is not a failure reason this version knows")]
+pub struct UnknownFailureReason {
+    pub value: String,
 }
 
 /// Why a run did not finish.
@@ -93,7 +118,9 @@ pub enum FailureReason {
 }
 
 impl FailureReason {
-    /// The stored form. Round-trips through [`FailureReason::parse`].
+    /// The stored form. Round-trips through `TryFrom<&str>`.
+    ///
+    /// Not `Display`, which is the sentence an operator reads.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SourceUnavailable => "source_unavailable",
@@ -104,22 +131,38 @@ impl FailureReason {
             Self::MalformedResponse => "malformed_response",
         }
     }
+}
 
-    /// Read a reason back from the store.
-    ///
-    /// An unknown value is not an error: it is a reason recorded by a version
-    /// of this program that knew something this one does not, and losing the
-    /// fact that the run failed would be worse than losing why.
-    pub fn parse(value: &str) -> Option<Self> {
+/// Read a reason back from the store.
+///
+/// A value we do not know is a reason recorded by a version of this program
+/// that knew something this one does not. It is an error here so that the
+/// caller decides — and the store's caller keeps the run's failure while
+/// discarding only the why, because losing the fact that it failed would be
+/// worse.
+impl TryFrom<&str> for FailureReason {
+    type Error = UnknownFailureReason;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "source_unavailable" => Some(Self::SourceUnavailable),
-            "unauthorised" => Some(Self::Unauthorised),
-            "already_running" => Some(Self::AlreadyRunning),
-            "missing_provenance" => Some(Self::MissingProvenance),
-            "store_failure" => Some(Self::StoreFailure),
-            "malformed_response" => Some(Self::MalformedResponse),
-            _ => None,
+            "source_unavailable" => Ok(Self::SourceUnavailable),
+            "unauthorised" => Ok(Self::Unauthorised),
+            "already_running" => Ok(Self::AlreadyRunning),
+            "missing_provenance" => Ok(Self::MissingProvenance),
+            "store_failure" => Ok(Self::StoreFailure),
+            "malformed_response" => Ok(Self::MalformedResponse),
+            other => Err(UnknownFailureReason {
+                value: other.to_owned(),
+            }),
         }
+    }
+}
+
+impl std::str::FromStr for FailureReason {
+    type Err = UnknownFailureReason;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value)
     }
 }
 

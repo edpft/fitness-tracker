@@ -6,12 +6,11 @@
 
 use application::{ExtractionRunLog, StoreError};
 use domain::landing::{
-    EventCount, ExtractionRun, FailureReason, FetchedAt, LandingStream, RecordCount, RunId,
-    RunOutcome,
+    EventCount, ExtractionRun, FetchedAt, LandingStream, RecordCount, RunId, RunOutcome,
 };
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{run_id_for_storage, run_id_from_row, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqliteExtractionRunLog {
@@ -48,11 +47,11 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
         .await
         .map_err(|error| store_error(&error))?;
 
-        Ok(RunId::new(row.id))
+        run_id_from_row(row.id)
     }
 
     async fn finish(&self, run: RunId, outcome: RunOutcome) -> Result<(), StoreError> {
-        let id = run.as_i64();
+        let id = run_id_for_storage(run)?;
 
         let (finished_at, label, events_seen, records_landed, reason) = match &outcome {
             // Nothing to write: the row is already in flight, which is exactly
@@ -128,27 +127,20 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
 
         let Some(row) = row else { return Ok(None) };
 
-        let started_at =
-            FetchedAt::parse(&row.started_at).map_err(|error| corrupt(error.to_string()))?;
-        let finished_at =
-            FetchedAt::parse(&row.finished_at).map_err(|error| corrupt(error.to_string()))?;
+        let started_at = FetchedAt::try_from(row.started_at.as_str())
+            .map_err(|error| corrupt(error.to_string()))?;
+        let finished_at = FetchedAt::try_from(row.finished_at.as_str())
+            .map_err(|error| corrupt(error.to_string()))?;
 
         Ok(Some(ExtractionRun::new(
-            RunId::new(row.id),
+            run_id_from_row(row.id)?,
             stream.clone(),
             started_at,
             RunOutcome::Succeeded {
                 finished_at,
-                events_seen: EventCount::new(row.events_seen.unsigned_abs()),
-                records_landed: RecordCount::new(row.records_landed.unsigned_abs()),
+                events_seen: EventCount::from(row.events_seen.unsigned_abs()),
+                records_landed: RecordCount::from(row.records_landed.unsigned_abs()),
             },
         )))
     }
-}
-
-/// Kept close to the table it reads: a stored reason this program does not
-/// recognise was written by a version that knew something this one does not,
-/// and losing the fact that a run failed would be worse than losing why.
-pub fn parse_failure_reason(stored: &str) -> Option<FailureReason> {
-    FailureReason::parse(stored)
 }

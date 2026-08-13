@@ -10,7 +10,7 @@ Land every workout Hevy holds into an append-only raw store, permanently
 re-derivable and never contacting Hevy again to rebuild what comes after it.
 Extract and Load only — no normalisation, no domain entities, no analysis.
 
-The approach: a `fitness extract hevy` command walks
+The approach: a `fitness extract hevy.workouts` command walks
 `GET /v1/workouts/events` from a stored resumption point, splits each page into
 one record per workout with its bytes untouched, and lands only payloads whose
 digest differs from the most recent record for that workout. The resumption

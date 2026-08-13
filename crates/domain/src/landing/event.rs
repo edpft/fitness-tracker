@@ -1,8 +1,8 @@
-//! What kind of event produced a landing record.
+//! What a source said happened to a record it serves.
 
 use std::fmt;
 
-use super::ids::InvalidIdentifier;
+use super::{ids::InvalidIdentifier, newtype::string_name};
 
 /// A kind the source used that we do not recognise.
 ///
@@ -11,12 +11,10 @@ use super::ids::InvalidIdentifier;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RawEventKind(String);
 
-impl RawEventKind {
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the kind is empty.
-    pub fn new(kind: impl Into<String>) -> Result<Self, InvalidIdentifier> {
-        let kind = kind.into();
+impl TryFrom<String> for RawEventKind {
+    type Error = InvalidIdentifier;
+
+    fn try_from(kind: String) -> Result<Self, Self::Error> {
         if kind.is_empty() {
             return Err(InvalidIdentifier::Empty {
                 field: "an event kind",
@@ -24,17 +22,9 @@ impl RawEventKind {
         }
         Ok(Self(kind))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for RawEventKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+string_name!(RawEventKind, InvalidIdentifier);
 
 /// What the source said happened.
 ///
@@ -52,36 +42,48 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    /// Read a kind as the source expressed it.
+    /// The kind as the source expressed it, which is also what gets stored.
     ///
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the source supplied an empty kind.
-    pub fn from_source(kind: &str) -> Result<Self, InvalidIdentifier> {
-        match kind {
-            "updated" => Ok(Self::Updated),
-            "deleted" => Ok(Self::Deleted),
-            other => Ok(Self::Unrecognised(RawEventKind::new(other)?)),
-        }
-    }
-
-    /// The kind as the source expressed it, which is what gets stored.
-    pub fn as_source_str(&self) -> &str {
+    /// Round-trips through `TryFrom<&str>`.
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Updated => "updated",
             Self::Deleted => "deleted",
             Self::Unrecognised(kind) => kind.as_str(),
         }
     }
+}
 
-    /// Whether this event asserts the record no longer exists at the source.
-    pub fn is_deletion(&self) -> bool {
-        matches!(self, Self::Deleted)
+impl TryFrom<String> for EventKind {
+    type Error = InvalidIdentifier;
+
+    fn try_from(kind: String) -> Result<Self, Self::Error> {
+        match kind.as_str() {
+            "updated" => Ok(Self::Updated),
+            "deleted" => Ok(Self::Deleted),
+            _ => RawEventKind::try_from(kind).map(Self::Unrecognised),
+        }
+    }
+}
+
+impl TryFrom<&str> for EventKind {
+    type Error = InvalidIdentifier;
+
+    fn try_from(kind: &str) -> Result<Self, Self::Error> {
+        Self::try_from(kind.to_owned())
+    }
+}
+
+impl std::str::FromStr for EventKind {
+    type Err = InvalidIdentifier;
+
+    fn from_str(kind: &str) -> Result<Self, Self::Err> {
+        Self::try_from(kind.to_owned())
     }
 }
 
 impl fmt::Display for EventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_source_str())
+        f.write_str(self.as_str())
     }
 }

@@ -1,30 +1,24 @@
 //! The operator's entry point, and a composition root.
 //!
-//! This is the only place besides `web` that names a concrete adapter: it
-//! picks the implementations, injects them into the use cases, and translates
-//! between the terminal and the driving ports.
+//! Translates between the terminal and the driving ports: it reads an
+//! invocation, resolves configuration, hands the work to [`wiring`] — which
+//! picks the adapters — and turns whatever comes back into output and an exit
+//! code.
 
+mod catalogue;
 mod config;
 mod output;
+mod wiring;
 
-use std::{
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{path::PathBuf, process::ExitCode};
 
-use application::{
-    ExtractWorkouts, Extraction, ExtractionError, ExtractionPorts, ExtractionStatus,
-    ReportExtractionStatus, ResetResumptionPoint, ResumptionPointStore, SourceError, StatusError,
-    StoreError,
-};
+use application::{ExtractionError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgMatches, Command as ClapCommand, value_parser};
-use domain::landing::{Endpoint, EntityKind, FetchedAt, LandingStream, SourceName};
-use infrastructure::{
-    EVENTS_ENDPOINT, FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingStore,
-    SqliteExtractionRunLog, SqliteResumptionPointStore, connect,
-};
+use domain::landing::LandingStream;
 
-use config::{API_KEY_VARIABLE, Config, ConfigError, DEFAULT_BASE_URL};
+use catalogue::KnownStream;
+use config::{ConfigError, SourceAccess};
+use wiring::{Command, Outcome, WiringError};
 
 /// Exit codes are part of the contract: an external scheduler distinguishes
 /// outcomes by them, so they are named rather than assorted numbers.
@@ -62,23 +56,24 @@ fn command() -> ClapCommand {
                 .value_parser(value_parser!(PathBuf))
                 .help("Where the store lives. No path is compiled in"),
         )
-        .arg(
-            Arg::new("base-url")
-                .long("base-url")
-                .env("HEVY_API_BASE_URL")
-                .global(true)
-                .default_value(DEFAULT_BASE_URL)
-                .help("The source's base URL"),
-        )
         .subcommand(
             ClapCommand::new("extract")
                 .about("Collect everything the source has served since the resumption point")
-                .arg(source_argument().required(true)),
+                .arg(stream_argument())
+                // Not global, and not on the other two: only extraction
+                // contacts a source, and which source it contacts is decided
+                // by the stream this invocation names. The environment
+                // variable it overrides is named after that source, so it
+                // cannot be declared here — see `catalogue`.
+                .arg(Arg::new("base-url").long("base-url").help(
+                    "Override the source's API root for this run. \
+                             Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
+                )),
         )
         .subcommand(
             ClapCommand::new("status")
                 .about("Report the most recent successful extraction")
-                .arg(source_argument().default_value("hevy")),
+                .arg(stream_argument()),
         )
         .subcommand(
             ClapCommand::new("reset")
@@ -86,41 +81,19 @@ fn command() -> ClapCommand {
                     "Discard the resumption point so the next run collects the full history. \
                      Lands nothing and removes nothing",
                 )
-                .arg(source_argument().required(true)),
+                .arg(stream_argument()),
         )
 }
 
-fn source_argument() -> Arg {
-    Arg::new("source")
-        .value_parser(["hevy"])
-        .help("Which source to work with")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Source {
-    Hevy,
-}
-
-impl Source {
-    fn parse(value: Option<&String>) -> Result<Self, Failure> {
-        match value.map(String::as_str) {
-            Some("hevy") | None => Ok(Self::Hevy),
-            Some(other) => Err(Failure {
-                message: format!("unknown source {other:?}; the only source is \"hevy\""),
-                code: exit::USAGE,
-            }),
-        }
-    }
-
-    fn stream(self) -> Result<LandingStream, Failure> {
-        let (source, entity) = match self {
-            Self::Hevy => ("hevy", "workouts"),
-        };
-        Ok(LandingStream::new(
-            SourceName::new(source).map_err(|error| Failure::usage(&error))?,
-            EntityKind::new(entity).map_err(|error| Failure::usage(&error))?,
-        ))
-    }
+/// The stream, named the way it is printed back: `source.entity`.
+///
+/// Source and entity are one argument because they are one name. A flag per
+/// half would let `--source hevy --entity routines` be typed for a stream that
+/// does not exist, and would still need checking against the catalogue.
+fn stream_argument() -> Arg {
+    Arg::new("stream")
+        .required(true)
+        .help("Which stream to work with, as source.entity — for example hevy.workouts")
 }
 
 /// A message for the operator and a code for whatever invoked us.
@@ -136,32 +109,30 @@ impl Failure {
             code: exit::USAGE,
         }
     }
+
+    fn message(message: impl Into<String>, code: u8) -> Self {
+        Self {
+            message: message.into(),
+            code,
+        }
+    }
 }
 
 impl From<ConfigError> for Failure {
     fn from(error: ConfigError) -> Self {
-        Self {
-            message: error.to_string(),
-            code: exit::USAGE,
-        }
+        Self::usage(&error)
     }
 }
 
 impl From<StoreError> for Failure {
     fn from(error: StoreError) -> Self {
-        Self {
-            message: error.to_string(),
-            code: exit::STORE,
-        }
+        Self::message(error.to_string(), exit::STORE)
     }
 }
 
 impl From<SourceError> for Failure {
     fn from(error: SourceError) -> Self {
-        Self {
-            message: error.to_string(),
-            code: exit::SOURCE,
-        }
+        Self::message(error.to_string(), exit::SOURCE)
     }
 }
 
@@ -181,9 +152,23 @@ impl From<ExtractionError> for Failure {
             ExtractionError::AlreadyRunning => exit::ALREADY_RUNNING,
             ExtractionError::Store(_) => exit::STORE,
         };
-        Self {
-            message: error.to_string(),
-            code,
+        Self::message(error.to_string(), code)
+    }
+}
+
+impl From<WiringError> for Failure {
+    fn from(error: WiringError) -> Self {
+        match error {
+            WiringError::Extraction(error) => Self::from(error),
+            WiringError::Status(error) => Self::from(error),
+            WiringError::Store(error) => Self::from(error),
+            // Both of these are mistakes in this build rather than in the
+            // invocation — a stream named but not wired, or an adapter
+            // declaring a stream name that is not one — so neither reads as a
+            // usage error the operator could act on.
+            WiringError::Unwired { .. } | WiringError::Stream(_) => {
+                Self::message(error.to_string(), exit::STORE)
+            }
         }
     }
 }
@@ -225,105 +210,79 @@ fn run(matches: &ArgMatches) -> Result<(), Failure> {
 }
 
 async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
-    let database = matches.get_one::<PathBuf>("database").cloned();
-    let base_url = matches
-        .get_one::<String>("base-url")
-        .cloned()
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_owned());
-
     let Some((name, sub)) = matches.subcommand() else {
-        return Err(Failure {
-            message: "no command given".to_owned(),
-            code: exit::USAGE,
-        });
+        return Err(Failure::message("no command given", exit::USAGE));
     };
-    let source = Source::parse(sub.get_one::<String>("source"))?;
 
-    match name {
+    let known = named_stream(sub)?;
+    let stream = known
+        .landing_stream()
+        .map_err(|error| Failure::usage(&error))?;
+    let database = config::database(matches.get_one::<PathBuf>("database").cloned())?;
+
+    let command = match name {
         "extract" => {
-            let config = configure(database, base_url)?;
-            extract(&config, source).await
+            // Printed before the run begins, so a long first collection says
+            // what it is doing. The completion line carries the run number,
+            // which only the store can assign.
+            output::run_started(&stream);
+            Command::Extract(source_access(known, sub)?)
         }
-        // Status and reset must work without a credential: a staleness report
-        // that needs the source to be reachable reports nothing worth having.
-        "status" => status(&database.ok_or(ConfigError::MissingDatabase)?, source).await,
-        "reset" => reset(&database.ok_or(ConfigError::MissingDatabase)?, source).await,
-        other => Err(Failure {
-            message: format!("unknown command {other:?}"),
-            code: exit::USAGE,
-        }),
-    }
+        "status" => Command::Status,
+        "reset" => Command::Reset,
+        other => {
+            return Err(Failure::message(
+                format!("unknown command {other:?}"),
+                exit::USAGE,
+            ));
+        }
+    };
+
+    report(&stream, wiring::run(command, known, &database).await?);
+    Ok(())
 }
 
-fn configure(database: Option<PathBuf>, base_url: String) -> Result<Config, Failure> {
-    Ok(Config::resolve(
-        database,
+/// The catalogue entry this invocation names.
+///
+/// Checked against the catalogue rather than against a list clap holds, so the
+/// message says what this build can actually do — the two cannot drift apart
+/// because there is only one list.
+fn named_stream(sub: &ArgMatches) -> Result<&'static KnownStream, Failure> {
+    let name = sub
+        .get_one::<String>("stream")
+        .ok_or_else(|| Failure::message("no stream given", exit::USAGE))?;
+
+    catalogue::lookup(name).ok_or_else(|| {
+        Failure::message(
+            format!(
+                "unknown stream {name:?}; this build collects {}",
+                catalogue::known_names()
+            ),
+            exit::USAGE,
+        )
+    })
+}
+
+/// The base URL comes from the flag, then the source's own variable, then the
+/// built-in root; the credential comes from the environment and nowhere else.
+fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, Failure> {
+    let base_url = sub
+        .get_one::<String>("base-url")
+        .cloned()
+        .or_else(|| std::env::var(known.base_url_variable()).ok())
+        .unwrap_or_else(|| known.default_base_url().to_owned());
+
+    Ok(SourceAccess::resolve(
+        known,
         base_url,
-        std::env::var(API_KEY_VARIABLE),
+        std::env::var(known.api_key_variable()),
     )?)
 }
 
-async fn extract(config: &Config, source: Source) -> Result<(), Failure> {
-    let stream = source.stream()?;
-    let pool = connect(&config.database).await?;
-
-    let extraction = Extraction::new(
-        stream.clone(),
-        Endpoint::new(EVENTS_ENDPOINT).map_err(|error| Failure::usage(&error))?,
-        ExtractionPorts {
-            source: HevyWorkoutEvents::new(&config.base_url, &config.api_key),
-            landing: HevyWorkoutLandingStore::new(pool.clone()),
-            resumption: SqliteResumptionPointStore::new(pool.clone()),
-            runs: SqliteExtractionRunLog::new(pool),
-            lock: FileRunLock::beside(&config.database),
-            clock: SystemClock,
-        },
-    );
-
-    output::run_started(&stream);
-    let summary = extraction.extract(&stream).await?;
-    output::run_succeeded(&summary);
-    Ok(())
-}
-
-async fn status(database: &Path, source: Source) -> Result<(), Failure> {
-    let stream = source.stream()?;
-    let pool = connect(database).await?;
-
-    let reader = ExtractionStatus::new(
-        HevyWorkoutLandingStore::new(pool.clone()),
-        SqliteResumptionPointStore::new(pool.clone()),
-        SqliteExtractionRunLog::new(pool),
-    );
-
-    output::status(&reader.status(&stream).await?);
-    Ok(())
-}
-
-async fn reset(database: &Path, source: Source) -> Result<(), Failure> {
-    let stream = source.stream()?;
-    let pool = connect(database).await?;
-
-    let points = SqliteResumptionPointStore::new(pool.clone());
-    let previous = points.read(&stream).await?;
-
-    let reader = ExtractionStatus::new(
-        HevyWorkoutLandingStore::new(pool.clone()),
-        points,
-        SqliteExtractionRunLog::new(pool),
-    );
-    reader.reset(&stream).await?;
-
-    output::reset(&stream, previous);
-    Ok(())
-}
-
-/// The wall clock, which is the only thing a real run should take its timings
-/// from — and emphatically not where the resumption point comes from.
-struct SystemClock;
-
-impl application::Clock for SystemClock {
-    fn now(&self) -> FetchedAt {
-        FetchedAt::new(jiff::Timestamp::now())
+fn report(stream: &LandingStream, outcome: Outcome) {
+    match outcome {
+        Outcome::Extracted(summary) => output::run_succeeded(&summary),
+        Outcome::Reported(status) => output::status(&status),
+        Outcome::Reset { previous } => output::reset(stream, previous),
     }
 }

@@ -31,37 +31,83 @@ One workout payload as the source served it, plus its provenance. Immutable.
 FR-001 makes the unit one workout, not one page. FR-002 makes the payload
 opaque. FR-003 fixes the provenance set.
 
+The record carries what is true of every record whatever served it. What is
+true only of the transport that carried it is in its `Provenance`, so that a
+source arriving as a CSV export is a new variant rather than three columns left
+blank.
+
 | Field | Type | Notes |
 | --- | --- | --- |
-| `source` | `SourceName` | Which system served it. `hevy` here. Carried by the type; *not* a column — the table name encodes it (see Store schema) |
-| `endpoint` | `Endpoint` | What was called. `/v1/workouts/events` |
+| `stream` | `LandingStream` | Which stream it belongs to. `hevy.workouts`. Carried by the type; *not* a column — the table name encodes it (see Store schema) |
 | `fetched_at` | `FetchedAt` | When the fetch that produced it ran (FR-003) |
 | `source_record_id` | `SourceRecordId` | The source's own identifier (FR-003, § 8) |
-| `event_kind` | `EventKind` | What kind of event produced it (FR-003) |
-| `event_time` | `Option<EventTime>` | `updated_at` / `deleted_at`. Optional — § 37, D13 |
+| `provenance` | `Provenance` | How it reached us (FR-003) — see below |
 | `payload` | `RawPayload` | Exact bytes as received (FR-002) |
 | `digest` | `PayloadDigest` | SHA-256 of `payload`, for change detection (D3) |
+
+### Provenance
+
+```rust
+pub enum Provenance {
+    /// Served by an HTTP feed of change events.
+    Event(EventProvenance),
+}
+```
+
+| Field of `EventProvenance` | Type | Notes |
+| --- | --- | --- |
+| `endpoint` | `Endpoint` | What was called. `/v1/workouts/events` |
+| `kind` | `EventKind` | What the source said happened (FR-003) |
+| `occurred_at` | `Option<EventTime>` | `updated_at` / `deleted_at`. Optional — § 37, D13 |
+
+One variant, because one transport has been built. It is an enum rather than
+more fields on the record so that the second transport is an addition instead
+of a rewrite — a CSV export has no endpoint, no event kind and no event time,
+and giving it empty ones would be recording facts we do not have. What a new
+variant may not do is add to what *every* record carries.
+
+`Provenance::occurred_at` is the one question askable without knowing what
+carried the payload, because it is where a resumption point comes from. Every
+other question requires matching the variant, which is how the store's HTTP
+columns stay honest: a second variant fails to compile there.
 
 ### Value types
 
 | Type | Wraps | Invariant enforced at construction (§ 24) |
 | --- | --- | --- |
-| `SourceName` | `String` | Non-empty, lowercase, no whitespace |
-| `LandingStream` | `SourceName` + `EntityKind` | One source's one entity type — `hevy.workouts`. The unit that resumes, runs and locks independently |
-| `Endpoint` | `String` | Non-empty, begins `/` |
-| `SourceRecordId` | `String` | Non-empty, no whitespace. Not parsed as a UUID — see below |
+Every one of these is built by `TryFrom`, and gets `TryFrom<&str>`, `FromStr`,
+`Display` and `AsRef` from that — no bespoke `new`, `parse` or `from_source`.
+`RunId` is unsigned, and the store narrows SQLite's `i64` at the boundary.
+
+| Type | Wraps | Invariant enforced at construction (§ 24) |
+| --- | --- | --- |
+| `SourceName` | `String` | Non-empty, lowercase, no whitespace, no `.` |
+| `EntityKind` | `String` | The same rules, for the same reason |
+| `LandingStream` | `SourceName` + `EntityKind` | One source's one entity type — `hevy.workouts`. The unit that resumes, runs and locks independently, and the name an operator types |
+| `Endpoint` | `String` | Non-empty, no whitespace, begins `/` |
+| `SourceRecordId` | `String` | Non-empty. Nothing else — see below |
 | `FetchedAt` | `jiff::Timestamp` | — |
 | `EventTime` | `jiff::Timestamp` | — |
 | `RawPayload` | `Vec<u8>` | Non-empty |
 | `PayloadDigest` | `[u8; 32]` | Fixed width. Ordinarily obtained by digesting a `RawPayload`; see below |
 | `EventKind` | sum type | `Updated` \| `Deleted` \| `Unrecognised(RawEventKind)` |
 | `RawEventKind` | `String` | Non-empty. Verbatim, never normalised (D12) |
+| `RunId` | `u64` | A position in the store's sequence; negative is corruption |
 
-**`SourceRecordId` is not a UUID.** Hevy serves UUIDs today and the OpenAPI
-document says so, but validating that shape would be interpreting a source
-field, which FR-002 forbids, and would make extraction fail on a source that
-changed its id format — losing data to defend a constraint we do not own. Being
-non-empty is ours to require: FR-003 has no meaning without it.
+**The name rules are ours, and they exist for one reason.** A stream is written
+`hevy.workouts` on the command line, in a resumption point's key and in every
+message an operator reads, so that text form has to round-trip. A `.` inside a
+half would make the split ambiguous, whitespace would make the argument need
+quoting, and mixed case would let one stream be spelled two ways and resume
+from two different places. None of it is imposed on a value a source owns.
+
+**`SourceRecordId` is not a UUID, and is barely constrained at all.** Hevy
+serves UUIDs today and the OpenAPI document says so, but validating that shape
+would be interpreting a source field, which FR-002 forbids, and would make
+extraction fail on a source that changed its id format — losing data to defend
+a constraint we do not own. The same argument rules out rejecting whitespace in
+it. Being non-empty is the one requirement, and it is ours rather than the
+source's: FR-003 has no meaning without an identifier.
 
 **`EventKind::Unrecognised` is deliberate.** § 24 asks that illegal states be
 unrepresentable; an event type Hevy adds next year is not illegal, it is
@@ -71,11 +117,20 @@ seen. `Updated` and `Deleted` are still distinguishable in the type system, so
 no caller can confuse them.
 
 **`PayloadDigest` guarantees width, and almost guarantees provenance.** The
-ordinary constructor digests a `RawPayload`, so D3's comparison cannot be fed a
-hand-made value. One escape hatch exists and is named for what it is:
-`from_storage`, for the persistence boundary, because the store must rehydrate
+ordinary way to obtain one is `RawPayload::digest`, so D3's comparison cannot be
+fed a hand-made value. Two escape hatches exist for the persistence boundary
+alone — `From<[u8; 32]>` and `TryFrom<&[u8]>` — because the store must rehydrate
 a digest it wrote earlier without reading back the payload merely to re-derive
-it. The type still makes a digest unconfusable with arbitrary data everywhere.
+it, and a row of any other width means the file holds something this program did
+not write. The type still makes a digest unconfusable with arbitrary data
+everywhere.
+
+**The digest is not `Hash`.** `Hash` hands its bytes to the caller's `Hasher`
+and so cannot choose an algorithm, produces 64 bits, and guarantees nothing
+across builds or platforms. This value is written to the store and compared
+against rows written by earlier versions of this program, so all three matter.
+`RawPayload` derives `Hash` as well, for putting a payload in a map — a
+different job with different requirements.
 
 ### Immutability
 

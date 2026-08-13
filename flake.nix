@@ -325,6 +325,31 @@
                 touch "$out"
               '';
 
+          # Constitution § 15, § 16. The ring check above proves the
+          # dependency points the right way; it cannot prove what is done with
+          # it. `infrastructure` depends on `application` because that is where
+          # the ports it implements are declared — and nothing in cargo stops a
+          # driven adapter from reaching past those ports and calling a use
+          # case, which would make the adapter drive the application it is
+          # supposed to be driven by.
+          #
+          # `application` keeps its use cases behind `extract` and `status`
+          # rather than re-exporting them at the crate root, so naming one
+          # requires naming its module. That makes this greppable, which is the
+          # only reason the module boundary is worth keeping.
+          use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
+            if grep -rn 'application::\(extract\|status\)' \
+                 ${repoSrc}/crates/infrastructure; then
+              echo
+              echo "Constitution § 16: a driven adapter implements ports, it"
+              echo "does not call the use cases. What infrastructure may name"
+              echo "from application is its ports and its errors."
+              exit 1
+            fi
+
+            touch "$out"
+          '';
+
           # Not constitutional — build hygiene. `src` lists its members
           # by hand, so a new crate can be perfectly valid to cargo while nix
           # silently ignores its sources, and every per-crate build keeps

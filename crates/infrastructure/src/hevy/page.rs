@@ -6,13 +6,14 @@
 //! which would reorder keys, renumber floats, and silently drop any field we
 //! did not know to keep.
 
-use application::{
-    EventPage, SourceError, SourceEvent,
-    paging::{PageCount, PageNumber},
+use application::{EventBatch, SourceError, SourceEvent};
+use domain::landing::{
+    Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId,
 };
-use domain::landing::{EventKind, EventTime, RawPayload, SourceRecordId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
+
+use super::paging::{PageCount, PageNumber};
 
 /// The page envelope.
 ///
@@ -45,7 +46,7 @@ struct Envelope<'a> {
 /// error rather than serde's, and so that reading provenance never depends on
 /// having recognised the event kind.
 #[derive(Debug, Deserialize)]
-struct Provenance<'a> {
+struct EventFields<'a> {
     #[serde(rename = "type")]
     kind: Option<&'a str>,
     id: Option<&'a str>,
@@ -67,12 +68,16 @@ fn malformed(detail: impl Into<String>) -> SourceError {
 
 /// Split a page into one event per record, bytes intact.
 ///
+/// The batch's `resume` is the next page, and is `None` on the last one:
+/// asking beyond the last page is an error at the source rather than an empty
+/// page, so a walk has to stop exactly here.
+///
 /// # Errors
 ///
 /// [`SourceError::Malformed`] if the envelope will not parse, or if an event
 /// carries no identifier — a landing record that cannot say what it is about
 /// is worse than a visible failure.
-pub fn parse_page(body: &[u8]) -> Result<EventPage, SourceError> {
+pub fn parse_page(body: &[u8], endpoint: &Endpoint) -> Result<EventBatch<PageNumber>, SourceError> {
     let envelope: Envelope<'_> =
         serde_json::from_slice(body).map_err(|error| malformed(error.to_string()))?;
 
@@ -82,63 +87,57 @@ pub fn parse_page(body: &[u8]) -> Result<EventPage, SourceError> {
 
     let mut events = Vec::with_capacity(raw_events.len());
     for raw in raw_events {
-        events.push(parse_event(raw)?);
+        events.push(parse_event(raw, endpoint)?);
     }
 
-    Ok(EventPage {
-        page: page_number(envelope.page),
-        page_count: PageCount::new(envelope.page_count),
-        events,
-    })
+    let next = PageNumber::from(envelope.page).next();
+    let resume = PageCount::from(envelope.page_count)
+        .contains(next)
+        .then_some(next);
+
+    Ok(EventBatch { events, resume })
 }
 
-/// Pages are one-based at the source. A zero would be the source contradicting
-/// its own contract; treating it as the first page is harmless, since the
-/// number is only ever echoed back for reporting.
-fn page_number(page: u32) -> PageNumber {
-    (1..page).fold(PageNumber::first(), |number, _| number.next())
-}
-
-fn parse_event(raw: &RawValue) -> Result<SourceEvent, SourceError> {
-    let provenance: Provenance<'_> =
+fn parse_event(raw: &RawValue, endpoint: &Endpoint) -> Result<SourceEvent, SourceError> {
+    let fields: EventFields<'_> =
         serde_json::from_str(raw.get()).map_err(|error| malformed(error.to_string()))?;
 
-    let kind = provenance
+    let kind = fields
         .kind
         .ok_or_else(|| malformed("an event carried no `type`"))?;
-    let kind = EventKind::from_source(kind).map_err(|error| malformed(error.to_string()))?;
+    let kind = EventKind::try_from(kind).map_err(|error| malformed(error.to_string()))?;
 
     // An update names its workout inside the body; a deletion names it at the
     // top level. A kind we do not recognise could do either, so both are tried
     // rather than assuming which.
-    let id = provenance
+    let id = fields
         .workout
         .as_ref()
         .and_then(|workout| workout.id)
-        .or(provenance.id)
+        .or(fields.id)
         .ok_or_else(|| malformed("an event carried no identifier"))?;
-    let source_record_id = SourceRecordId::new(id).map_err(|error| malformed(error.to_string()))?;
+    let source_record_id =
+        SourceRecordId::try_from(id).map_err(|error| malformed(error.to_string()))?;
 
     // `updated_at` for an update, `deleted_at` for a deletion. Absent is a
     // legitimate answer and is recorded as absent: substituting the fetch time
     // would invent a fact, and would risk a resumption point stepping over
     // events this run never saw.
-    let event_time = provenance
+    let occurred_at = fields
         .workout
         .as_ref()
         .and_then(|workout| workout.updated_at)
-        .or(provenance.deleted_at)
-        .map(EventTime::parse)
+        .or(fields.deleted_at)
+        .map(EventTime::try_from)
         .transpose()
         .map_err(|error| malformed(error.to_string()))?;
 
-    let payload = RawPayload::new(raw.get().as_bytes().to_vec())
-        .map_err(|error| malformed(error.to_string()))?;
+    let payload =
+        RawPayload::try_from(raw.get().as_bytes()).map_err(|error| malformed(error.to_string()))?;
 
     Ok(SourceEvent {
-        kind,
         source_record_id,
-        event_time,
+        provenance: EventProvenance::new(endpoint.clone(), kind, occurred_at).into(),
         payload,
     })
 }

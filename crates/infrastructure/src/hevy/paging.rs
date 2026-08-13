@@ -1,13 +1,17 @@
-//! Pagination, which is an artefact of the request rather than of the data.
+//! Pagination, which is an artefact of how this source answers.
 //!
-//! These types exist so a run can walk a source's pages without a stray `+ 1`
-//! or an off-by-one at the last page. They are deliberately not in `domain`: a
-//! landing record corresponds to one workout as served, and page boundaries
-//! are not preserved anywhere.
+//! It lives here, in the adapter, and goes no further: a landing record
+//! corresponds to one workout as served, page boundaries are preserved
+//! nowhere, and a run has no use for a page number it cannot land. What
+//! crosses the port is "there is more" and whatever this adapter needs to ask
+//! for it — see [`application::WorkoutEventSource::Resume`].
+//!
+//! These types exist so a walk cannot acquire a stray `+ 1` or an off-by-one
+//! at the last page.
 
 use std::{fmt, num::NonZeroU32};
 
-/// A page to ask for. One-based, because sources are.
+/// A page to ask for. One-based, because the source is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageNumber(NonZeroU32);
 
@@ -26,6 +30,15 @@ impl PageNumber {
     }
 }
 
+/// Pages are one-based at the source. A zero would be the source contradicting
+/// its own contract; treating it as the first page is harmless, since the
+/// number is only ever echoed back.
+impl From<u32> for PageNumber {
+    fn from(page: u32) -> Self {
+        NonZeroU32::new(page).map_or_else(Self::first, Self)
+    }
+}
+
 impl fmt::Display for PageNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -40,17 +53,15 @@ impl fmt::Display for PageNumber {
 pub struct PageCount(u32);
 
 impl PageCount {
-    pub const fn new(count: u32) -> Self {
-        Self(count)
-    }
-
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-
     /// Whether this page is one the source will serve.
     pub const fn contains(self, page: PageNumber) -> bool {
         page.get() <= self.0
+    }
+}
+
+impl From<u32> for PageCount {
+    fn from(count: u32) -> Self {
+        Self(count)
     }
 }
 

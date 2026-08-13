@@ -5,9 +5,11 @@
 //! wall-clock time starts to matter; the distinction is why the library was
 //! chosen, and why there is no naive local type in reach.
 
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use jiff::Timestamp;
+
+use super::newtype::instant;
 
 /// Why an instant could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -32,59 +34,15 @@ pub struct FetchedAt(Timestamp);
 impl FetchedAt {
     /// The Unix epoch. Where a stream that has never run begins.
     pub const EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
-
-    pub fn new(at: Timestamp) -> Self {
-        Self(at)
-    }
-
-    /// # Errors
-    ///
-    /// Returns [`InvalidTimestamp`] if the value is not RFC 3339.
-    pub fn parse(value: &str) -> Result<Self, InvalidTimestamp> {
-        parse(value).map(Self)
-    }
-
-    pub fn as_timestamp(&self) -> Timestamp {
-        self.0
-    }
 }
 
-impl fmt::Display for FetchedAt {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+instant!(FetchedAt);
 
 /// When the source says the event happened.
-///
-/// Optional on a landing record: a source is free to serve an event without
-/// one, and substituting the fetch time would be inventing a fact — as well as
-/// risking a resumption point that steps over events never seen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EventTime(Timestamp);
 
-impl EventTime {
-    pub fn new(at: Timestamp) -> Self {
-        Self(at)
-    }
-
-    /// # Errors
-    ///
-    /// Returns [`InvalidTimestamp`] if the value is not RFC 3339.
-    pub fn parse(value: &str) -> Result<Self, InvalidTimestamp> {
-        parse(value).map(Self)
-    }
-
-    pub fn as_timestamp(&self) -> Timestamp {
-        self.0
-    }
-}
-
-impl fmt::Display for EventTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+instant!(EventTime);
 
 /// Where extraction resumes from.
 ///
@@ -98,21 +56,6 @@ pub struct Watermark(Timestamp);
 impl Watermark {
     /// The Unix epoch, which is also the source's own default for `since`.
     pub const EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
-
-    pub fn new(at: Timestamp) -> Self {
-        Self(at)
-    }
-
-    /// # Errors
-    ///
-    /// Returns [`InvalidTimestamp`] if the value is not RFC 3339.
-    pub fn parse(value: &str) -> Result<Self, InvalidTimestamp> {
-        parse(value).map(Self)
-    }
-
-    pub fn as_timestamp(&self) -> Timestamp {
-        self.0
-    }
 
     /// The later of two positions.
     ///
@@ -128,14 +71,10 @@ impl Watermark {
     }
 }
 
+instant!(Watermark);
+
 impl From<EventTime> for Watermark {
     fn from(event: EventTime) -> Self {
         Self(event.as_timestamp())
-    }
-}
-
-impl fmt::Display for Watermark {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }

@@ -55,7 +55,7 @@ fn stderr(output: &Output) -> String {
 
 #[test]
 fn a_missing_database_path_is_a_usage_error() {
-    let output = fitness(&["status"], None, None).expect("the binary runs");
+    let output = fitness(&["status", "hevy.workouts"], None, None).expect("the binary runs");
     assert_eq!(code(&output), 4);
     assert!(
         stderr(&output).contains("--database"),
@@ -71,7 +71,7 @@ fn a_missing_database_path_is_a_usage_error() {
 fn a_missing_credential_is_a_usage_error_that_says_where_to_get_one() {
     let directory = TempDir::new().expect("a temporary directory");
     let output = fitness(
-        &["extract", "hevy"],
+        &["extract", "hevy.workouts"],
         Some(&directory.path().join("fitness.db")),
         None,
     )
@@ -89,7 +89,7 @@ fn there_is_no_flag_for_the_credential() {
     let directory = TempDir::new().expect("a temporary directory");
     let output = Command::new(BINARY)
         .env_remove("HEVY_API_KEY")
-        .args(["extract", "hevy", "--api-key", "secret"])
+        .args(["extract", "hevy.workouts", "--api-key", "secret"])
         .arg("--database")
         .arg(directory.path().join("fitness.db"))
         .output()
@@ -99,14 +99,54 @@ fn there_is_no_flag_for_the_credential() {
 }
 
 #[test]
-fn an_unknown_source_is_refused() {
+fn an_unknown_stream_is_refused_and_says_what_this_build_collects() {
     let directory = TempDir::new().expect("a temporary directory");
     let output = fitness(
-        &["extract", "strava"],
+        &["extract", "strava.rides"],
         Some(&directory.path().join("fitness.db")),
         Some("a-key"),
     )
     .expect("the binary runs");
+
+    assert_eq!(code(&output), 4);
+    let message = stderr(&output);
+    assert!(message.contains("strava.rides"), "{message}");
+    assert!(message.contains("hevy.workouts"), "{message}");
+}
+
+/// A source is not a stream. Naming one without an entity is refused rather
+/// than guessed at, because a source that serves two kinds of thing has two
+/// resumption points and neither is the default.
+#[test]
+fn a_source_without_an_entity_is_refused() {
+    let directory = TempDir::new().expect("a temporary directory");
+    let output = fitness(
+        &["status", "hevy"],
+        Some(&directory.path().join("fitness.db")),
+        None,
+    )
+    .expect("the binary runs");
+
+    assert_eq!(code(&output), 4);
+    assert!(
+        stderr(&output).contains("hevy.workouts"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// The stream is required. Defaulting it would make `status` report on
+/// whichever stream happened to be first in the catalogue.
+#[test]
+fn a_command_without_a_stream_is_a_usage_error() {
+    let directory = TempDir::new().expect("a temporary directory");
+    let output = fitness(
+        &["status"],
+        Some(&directory.path().join("fitness.db")),
+        None,
+    )
+    .expect("the binary runs");
+
     assert_eq!(code(&output), 4);
 }
 
@@ -119,7 +159,7 @@ fn an_unknown_source_is_refused() {
 fn status_before_any_run_succeeds_and_says_never() {
     let directory = TempDir::new().expect("a temporary directory");
     let output = fitness(
-        &["status"],
+        &["status", "hevy.workouts"],
         Some(&directory.path().join("fitness.db")),
         None,
     )
@@ -149,7 +189,7 @@ fn an_unreachable_source_exits_one_and_leaves_the_store_usable() {
         .env("HEVY_API_KEY", "00000000-0000-0000-0000-000000000000")
         // Nothing is listening here, so the connection is refused at once.
         .env("HEVY_API_BASE_URL", "http://127.0.0.1:1")
-        .args(["extract", "hevy"])
+        .args(["extract", "hevy.workouts"])
         .arg("--database")
         .arg(&database)
         .output()
@@ -158,7 +198,8 @@ fn an_unreachable_source_exits_one_and_leaves_the_store_usable() {
     assert_eq!(code(&output), 1, "stderr: {}", stderr(&output));
 
     // The capability that does not depend on the source still answers.
-    let after = fitness(&["status"], Some(&database), None).expect("the binary runs");
+    let after =
+        fitness(&["status", "hevy.workouts"], Some(&database), None).expect("the binary runs");
     assert_eq!(code(&after), 0);
     assert!(stdout(&after).contains("never"));
 }
@@ -173,7 +214,9 @@ fn a_second_run_exits_two_while_the_lock_is_held() {
     // Create the store first, so the run under test fails on the lock rather
     // than on anything else.
     assert_eq!(
-        code(&fitness(&["status"], Some(&database), None).expect("the binary runs")),
+        code(
+            &fitness(&["status", "hevy.workouts"], Some(&database), None).expect("the binary runs")
+        ),
         0
     );
 
@@ -191,7 +234,7 @@ fn a_second_run_exits_two_while_the_lock_is_held() {
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env("HEVY_API_KEY", "00000000-0000-0000-0000-000000000000")
         .env("HEVY_API_BASE_URL", "http://127.0.0.1:1")
-        .args(["extract", "hevy"])
+        .args(["extract", "hevy.workouts"])
         .arg("--database")
         .arg(&database)
         .output()
@@ -214,7 +257,7 @@ fn a_second_run_exits_two_while_the_lock_is_held() {
 fn reset_is_safe_to_run_when_there_is_nothing_to_reset() {
     let directory = TempDir::new().expect("a temporary directory");
     let output = fitness(
-        &["reset", "hevy"],
+        &["reset", "hevy.workouts"],
         Some(&directory.path().join("fitness.db")),
         None,
     )

@@ -85,9 +85,9 @@ SC-005; the offline suite cannot.
 ```bash
 export $(grep -v '^#' .env | xargs)
 
-fitness status                      # never run
-fitness extract hevy                # ~17 requests, ~10s
-fitness status                      # last succeeded: now
+fitness status hevy.workouts    # never run
+fitness extract hevy.workouts   # ~17 requests, ~10s
+fitness status hevy.workouts    # last succeeded: now
 ```
 
 ### SC-001 — completeness
@@ -137,10 +137,10 @@ still 164 events, with `workout_count` falling to 162.
 Run it on a disposable workout, never a real training record:
 
 1. `POST /v1/workouts` a throwaway workout, or log one in the app.
-2. `fitness extract hevy` — it lands as `updated`.
+2. `fitness extract hevy.workouts` — it lands as `updated`.
 3. Delete it **in the Hevy app**. The API has no `DELETE` endpoint — `GET`,
    `POST` and `PUT` only — so this step cannot be scripted.
-4. `fitness extract hevy` again.
+4. `fitness extract hevy.workouts` again.
 
 Expected: one new landing record, kind `deleted`, for that id. The earlier
 `updated` record is untouched and still retrievable (acceptance scenario 4,
@@ -150,7 +150,7 @@ the assertion that the recency form buys and the kind filter would fail.
 ### SC-002 — idempotence
 
 ```bash
-fitness extract hevy
+fitness extract hevy.workouts
 sqlite3 local.db "SELECT COUNT(*) FROM hevy_workout_landing;"   # unchanged
 ```
 
@@ -187,7 +187,7 @@ in the application interprets a payload at this layer (FR-002).
 ## Verifying FR-010 by hand
 
 ```bash
-fitness extract hevy & fitness extract hevy; wait
+fitness extract hevy.workouts & fitness extract hevy.workouts; wait
 ```
 
 One run proceeds; the other exits `2` immediately having landed nothing. Kill a
@@ -204,6 +204,6 @@ clear.
       delete-only id.
 - [ ] A second live run lands nothing.
 - [ ] `UPDATE` and `DELETE` against `hevy_workout_landing` are refused by the store.
-- [ ] `fitness status` reports the last success, and reports `never` cleanly
+- [ ] `fitness status hevy.workouts` reports the last success, and reports `never` cleanly
       before any run.
 - [ ] No credential is committed; `gitleaks` passes.

@@ -8,12 +8,9 @@
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
-use application::{
-    SourceError, WorkoutEventSource,
-    paging::{PageCount, PageNumber},
-};
-use domain::landing::{EventKind, EventTime, Watermark};
-use infrastructure::{HevyWorkoutEvents, RetryPolicy};
+use application::{SourceError, SourceEvent, WorkoutEventSource};
+use domain::landing::{EventKind, EventTime, Provenance, Watermark};
+use infrastructure::{HevyWorkoutEvents, PageNumber, RetryPolicy};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{header, method, path, query_param},
@@ -23,6 +20,18 @@ fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
+}
+
+/// What the source said happened. In the provenance rather than beside it,
+/// because an event kind is true of a feed of events and not of every source.
+fn kind_of(event: &SourceEvent) -> &EventKind {
+    let Provenance::Event(served) = &event.provenance;
+    served.kind()
+}
+
+fn endpoint_of(event: &SourceEvent) -> &str {
+    let Provenance::Event(served) = &event.provenance;
+    served.endpoint().as_str()
 }
 
 fn source(base: &str) -> HevyWorkoutEvents {
@@ -68,13 +77,15 @@ fn an_empty_page_uses_the_workouts_key_and_is_not_an_error() {
             .mount(&server)
             .await;
 
-        let page = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+        let batch = source(&server.uri())
+            .fetch(None, None)
             .await
             .expect("an empty page is a success, not a parse error");
 
-        assert!(page.events.is_empty());
-        assert_eq!(page.page_count, PageCount::new(1));
+        assert!(batch.events.is_empty());
+        // One page of one: there is nowhere to resume, and asking for a page
+        // beyond the last is a 400 at the live source.
+        assert_eq!(batch.resume, None);
     });
 }
 
@@ -91,11 +102,11 @@ fn a_page_with_neither_key_is_empty_rather_than_broken() {
             .mount(&server)
             .await;
 
-        let page = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+        let batch = source(&server.uri())
+            .fetch(None, None)
             .await
             .expect("a missing array is an empty page");
-        assert!(page.events.is_empty());
+        assert!(batch.events.is_empty());
     });
 }
 
@@ -111,21 +122,26 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
             .mount(&server)
             .await;
 
-        let page = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+        let batch = source(&server.uri())
+            .fetch(None, None)
             .await
             .expect("a populated page");
 
-        assert_eq!(page.events.len(), 2);
-        assert_eq!(page.page_count, PageCount::new(17));
+        assert_eq!(batch.events.len(), 2);
+        // Sixteen pages left, so the walk carries on — the number is the
+        // adapter's business and never crosses the port.
+        assert_eq!(batch.resume, Some(PageNumber::from(2)));
 
-        let update = page.events.first().expect("an update");
-        assert_eq!(update.kind, EventKind::Updated);
+        let update = batch.events.first().expect("an update");
+        assert_eq!(kind_of(update), &EventKind::Updated);
         assert_eq!(update.source_record_id.as_str(), "b459cba5");
         assert_eq!(
-            update.event_time,
-            Some(EventTime::parse("2026-08-10T19:29:47.199Z").expect("valid"))
+            update.provenance.occurred_at(),
+            Some(EventTime::try_from("2026-08-10T19:29:47.199Z").expect("valid"))
         );
+        // The adapter stamps the endpoint it called, so provenance is real
+        // rather than a constant the application supplied.
+        assert_eq!(endpoint_of(update), "/v1/workouts/events");
 
         // The payload is the event object as served. `superset_id` is the
         // singular spelling the API actually uses, against the documented
@@ -138,12 +154,12 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
 
         // A deletion names its workout at the top level rather than inside a
         // body, and carries `deleted_at` as its event time.
-        let deletion = page.events.get(1).expect("a deletion");
-        assert_eq!(deletion.kind, EventKind::Deleted);
+        let deletion = batch.events.get(1).expect("a deletion");
+        assert_eq!(kind_of(deletion), &EventKind::Deleted);
         assert_eq!(deletion.source_record_id.as_str(), "93d50b8d");
         assert_eq!(
-            deletion.event_time,
-            Some(EventTime::parse("2025-11-05T20:02:27.905Z").expect("valid"))
+            deletion.provenance.occurred_at(),
+            Some(EventTime::try_from("2025-11-05T20:02:27.905Z").expect("valid"))
         );
     });
 }
@@ -162,13 +178,13 @@ fn an_unrecognised_event_kind_survives() {
             .mount(&server)
             .await;
 
-        let page = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+        let batch = source(&server.uri())
+            .fetch(None, None)
             .await
             .expect("an unknown kind is still an event");
 
-        let event = page.events.first().expect("one event");
-        assert_eq!(event.kind.as_source_str(), "archived");
+        let event = batch.events.first().expect("one event");
+        assert_eq!(kind_of(event).as_str(), "archived");
         assert_eq!(event.source_record_id.as_str(), "w9");
     });
 }
@@ -188,7 +204,7 @@ fn an_event_without_an_identifier_fails_the_run() {
             .await;
 
         let failure = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("an event with no identifier must fail");
         assert!(matches!(failure, SourceError::Malformed { .. }));
@@ -217,9 +233,9 @@ fn the_watermark_is_sent_unmodified_and_the_epoch_stands_in_for_none() {
             .mount(&server)
             .await;
 
-        let mark = Watermark::parse("2026-08-10T19:29:47.199Z").expect("valid");
+        let mark = Watermark::try_from("2026-08-10T19:29:47.199Z").expect("valid");
         source(&server.uri())
-            .fetch_page(Some(mark), PageNumber::first())
+            .fetch(Some(mark), None)
             .await
             .expect("the watermark must be sent verbatim");
     });
@@ -236,7 +252,7 @@ fn the_watermark_is_sent_unmodified_and_the_epoch_stands_in_for_none() {
             .await;
 
         source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect("no watermark means the epoch");
     });
@@ -258,7 +274,7 @@ fn a_rejected_credential_is_terminal_and_its_body_is_not_json() {
             .await;
 
         let failure = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("401 must fail");
         assert_eq!(failure, SourceError::Unauthorised);
@@ -278,7 +294,7 @@ fn throttling_is_retried_then_reported_as_unavailable() {
             .await;
 
         let failure = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("exhausted retries must fail");
         assert!(matches!(failure, SourceError::Unavailable { .. }));
@@ -301,11 +317,11 @@ fn a_server_fault_is_retried_and_then_succeeds() {
             .mount(&server)
             .await;
 
-        let page = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+        let batch = source(&server.uri())
+            .fetch(None, None)
             .await
             .expect("a transient fault must be ridden out");
-        assert_eq!(page.events.len(), 2);
+        assert_eq!(batch.events.len(), 2);
     });
 }
 
@@ -325,7 +341,7 @@ fn a_bad_request_is_terminal_and_not_retried() {
             .await;
 
         let failure = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("400 must fail");
         assert!(matches!(failure, SourceError::Malformed { .. }));
@@ -343,7 +359,7 @@ fn an_unreadable_body_is_reported_rather_than_panicking() {
             .await;
 
         let failure = source(&server.uri())
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("a non-JSON body must fail");
         assert!(matches!(failure, SourceError::Malformed { .. }));
@@ -357,7 +373,7 @@ fn an_unreachable_source_is_unavailable() {
     runtime().expect("a tokio runtime").block_on(async {
         // A port nothing is listening on: the connection is refused at once.
         let failure = source("http://127.0.0.1:1")
-            .fetch_page(None, PageNumber::first())
+            .fetch(None, None)
             .await
             .expect_err("an unreachable source must fail");
         assert!(matches!(failure, SourceError::Unavailable { .. }));

@@ -2,20 +2,23 @@
 
 use std::{sync::OnceLock, time::Duration};
 
-use application::{EventPage, SourceError, WorkoutEventSource, paging::PageNumber};
-use domain::landing::Watermark;
+use application::{EventBatch, SourceError, WorkoutEventSource};
+use domain::landing::{Endpoint, Watermark};
 use reqwest::{Client, StatusCode, header::RETRY_AFTER};
 
 use super::{
     page::parse_page,
+    paging::PageNumber,
     retry::{RetryPolicy, is_retryable},
 };
 
-/// The feed's path, from the API root. Also what every landing record records
-/// as its endpoint, so the two cannot drift apart.
+/// The feed's path, from the API root. Also what this adapter stamps on every
+/// record's provenance, so the two cannot drift apart.
 ///
-/// The base URL is therefore the root and carries no version segment; see the
-/// test at the foot of this file.
+/// Not re-exported from the crate root: what was called is the adapter's
+/// business, and nothing above the port needs to name it. The base URL is
+/// therefore the root and carries no version segment; see the test at the foot
+/// of this file.
 pub const EVENTS_ENDPOINT: &str = "/v1/workouts/events";
 
 /// The source caps this at 10 and rejects anything larger with a 400, so it is
@@ -85,6 +88,18 @@ impl HevyWorkoutEvents {
     pub(crate) fn url(&self) -> String {
         format!("{}{EVENTS_ENDPOINT}", self.base_url)
     }
+
+    /// The endpoint as a landing record records it.
+    ///
+    /// Built per call rather than held, so that constructing a port stays
+    /// infallible — the constant is pinned by the tests at the foot of this
+    /// file, which is what makes the failure arm unreachable in practice
+    /// rather than merely unlikely.
+    fn endpoint() -> Result<Endpoint, SourceError> {
+        Endpoint::try_from(EVENTS_ENDPOINT).map_err(|error| SourceError::Malformed {
+            detail: error.to_string(),
+        })
+    }
 }
 
 /// `Retry-After` in its delay-seconds form. The HTTP-date form is not parsed:
@@ -103,11 +118,18 @@ fn retry_after(response: &reqwest::Response) -> Option<Duration> {
 }
 
 impl WorkoutEventSource for HevyWorkoutEvents {
-    async fn fetch_page(
+    /// This source paginates, so what it needs to carry on is the next page.
+    type Resume = PageNumber;
+
+    async fn fetch(
         &self,
         since: Option<Watermark>,
-        page: PageNumber,
-    ) -> Result<EventPage, SourceError> {
+        resume: Option<PageNumber>,
+    ) -> Result<EventBatch<PageNumber>, SourceError> {
+        let endpoint = Self::endpoint()?;
+        // No resume token means this is the opening request of a walk.
+        let page = resume.unwrap_or_else(PageNumber::first);
+
         // The stored watermark is passed through unmodified. `since` is
         // inclusive at the source, so the boundary event is served again and
         // deduplicated — which costs nothing, and cannot skip a sibling that
@@ -140,7 +162,7 @@ impl WorkoutEventSource for HevyWorkoutEvents {
                                     detail: error.to_string(),
                                 }
                             })?;
-                            return parse_page(&body);
+                            return parse_page(&body, &endpoint);
                         }
 
                         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {

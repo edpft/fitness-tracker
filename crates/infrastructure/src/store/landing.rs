@@ -1,10 +1,13 @@
 //! Raw landing for `hevy.workouts`.
 
 use application::{LandingStore, StoreError};
-use domain::landing::{LandingRecord, PayloadDigest, RecordCount, RunId, SourceRecordId};
+use domain::landing::{
+    InvalidStream, LandingRecord, LandingStream, PayloadDigest, Provenance, RecordCount, RunId,
+    SourceRecordId,
+};
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{run_id_for_storage, store_error};
 
 /// The landing table for Hevy workouts.
 ///
@@ -14,26 +17,45 @@ use super::store_error;
 #[derive(Debug, Clone)]
 pub struct HevyWorkoutLandingStore {
     pool: SqlitePool,
+    stream: LandingStream,
 }
 
 impl HevyWorkoutLandingStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    /// Which stream this table holds.
+    ///
+    /// Declared here, beside the queries that name `hevy_workout_landing`,
+    /// because this is the one link in the chain no type can check: the table
+    /// is a string inside `sqlx::query!`. Everything downstream — what a run
+    /// locks, what it logs, which resumption point it advances, how each
+    /// record is tagged — derives from this constant rather than being passed
+    /// in beside it, so this is the only place the pairing can be got wrong.
+    pub const STREAM: &'static str = "hevy.workouts";
+
+    /// # Errors
+    ///
+    /// [`InvalidStream`] if [`Self::STREAM`] is not a stream name. Pinned by a
+    /// test below, so it is a mistake in this file rather than in a call.
+    pub fn new(pool: SqlitePool) -> Result<Self, InvalidStream> {
+        Ok(Self {
+            pool,
+            stream: LandingStream::try_from(Self::STREAM)?,
+        })
     }
 }
 
 /// A stored digest is 32 bytes. Anything else means the file holds something
 /// this program did not write.
-fn digest_from_row(bytes: Vec<u8>) -> Result<PayloadDigest, StoreError> {
-    let width = bytes.len();
-    <[u8; 32]>::try_from(bytes)
-        .map(PayloadDigest::from_storage)
-        .map_err(|_| StoreError::Corrupt {
-            detail: format!("a payload digest should be 32 bytes, found {width}"),
-        })
+fn digest_from_row(bytes: &[u8]) -> Result<PayloadDigest, StoreError> {
+    PayloadDigest::try_from(bytes).map_err(|error| StoreError::Corrupt {
+        detail: error.to_string(),
+    })
 }
 
 impl LandingStore for HevyWorkoutLandingStore {
+    fn stream(&self) -> &LandingStream {
+        &self.stream
+    }
+
     async fn latest_digest(
         &self,
         id: &SourceRecordId,
@@ -56,7 +78,7 @@ impl LandingStore for HevyWorkoutLandingStore {
         .await
         .map_err(|error| store_error(&error))?;
 
-        row.map(|row| digest_from_row(row.payload_digest))
+        row.map(|row| digest_from_row(&row.payload_digest))
             .transpose()
     }
 
@@ -66,7 +88,7 @@ impl LandingStore for HevyWorkoutLandingStore {
         records: Vec<LandingRecord>,
     ) -> Result<RecordCount, StoreError> {
         if records.is_empty() {
-            return Ok(RecordCount::new(0));
+            return Ok(RecordCount::default());
         }
 
         let mut transaction = self
@@ -75,7 +97,7 @@ impl LandingStore for HevyWorkoutLandingStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        let run_id = run.as_i64();
+        let run_id = run_id_for_storage(run)?;
         // The serve ordinal continues across pages within a run, so the order
         // the source served events in survives a walk that commits per page.
         let next = sqlx::query!(
@@ -96,11 +118,18 @@ impl LandingStore for HevyWorkoutLandingStore {
         for record in &records {
             ordinal = ordinal.saturating_add(1);
 
-            let endpoint = record.endpoint().as_str();
+            // This table is the landing table for an HTTP events feed, and its
+            // columns say so. A record that reached us some other way belongs
+            // in a table shaped for that, not in this one with three columns
+            // left blank — so the destructuring is deliberately exhaustive,
+            // and a second variant will fail to compile here.
+            let Provenance::Event(event) = record.provenance();
+
+            let endpoint = event.endpoint().as_str();
             let fetched_at = record.fetched_at().to_string();
             let source_record_id = record.source_record_id().as_str();
-            let event_kind = record.event_kind().as_source_str();
-            let event_time = record.event_time().map(|at| at.to_string());
+            let event_kind = event.kind().as_str();
+            let event_time = event.occurred_at().map(|at| at.to_string());
             let payload = record.payload().as_bytes();
             let digest = record.digest();
             let digest = digest.as_bytes().as_slice();
@@ -135,7 +164,7 @@ impl LandingStore for HevyWorkoutLandingStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        Ok(RecordCount::new(landed))
+        Ok(RecordCount::from(landed))
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
@@ -144,6 +173,19 @@ impl LandingStore for HevyWorkoutLandingStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        Ok(RecordCount::new(row.total.unsigned_abs()))
+        Ok(RecordCount::from(row.total.unsigned_abs()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HevyWorkoutLandingStore, LandingStream};
+
+    /// The constant every run's identity is derived from must name a stream.
+    #[test]
+    fn the_declared_stream_is_a_stream() {
+        let stream =
+            LandingStream::try_from(HevyWorkoutLandingStore::STREAM).expect("a stream name");
+        assert_eq!(stream.to_string(), "hevy.workouts");
     }
 }

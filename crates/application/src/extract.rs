@@ -1,16 +1,14 @@
 //! Collecting everything the source has served since the resumption point.
 
 use domain::landing::{
-    Endpoint, EventCount, EventTime, LandingRecord, LandingStream, RecordCount, RunId, RunOutcome,
-    SourceName, Watermark,
+    EventCount, EventTime, LandingRecord, LandingStream, RecordCount, RunId, RunOutcome, Watermark,
 };
 
 use crate::{
     error::ExtractionError,
-    paging::PageNumber,
     ports::{
-        Clock, EventPage, ExtractWorkouts, ExtractionRunLog, LandingStore, ResumptionPointStore,
-        RunLock, RunSummary, SourceEvent, WorkoutEventSource,
+        Clock, EventBatch, ExtractionRunLog, LandingStore, ResumptionPointStore, RunLock,
+        RunSummary, SourceEvent, WorkoutEventSource, WorkoutExtractor,
     },
 };
 
@@ -20,7 +18,6 @@ use crate::{
 /// talks to and a test can drive the whole of it with fakes and no I/O.
 pub struct Extraction<S, L, R, G, K, C> {
     stream: LandingStream,
-    endpoint: Endpoint,
     source: S,
     landing: L,
     resumption: R,
@@ -43,15 +40,16 @@ pub struct ExtractionPorts<S, L, R, G, K, C> {
     pub clock: C,
 }
 
-impl<S, L, R, G, K, C> Extraction<S, L, R, G, K, C> {
-    pub fn new(
-        stream: LandingStream,
-        endpoint: Endpoint,
-        ports: ExtractionPorts<S, L, R, G, K, C>,
-    ) -> Self {
+impl<S, L, R, G, K, C> Extraction<S, L, R, G, K, C>
+where
+    L: LandingStore,
+{
+    /// No stream argument: the landing store is bound to one table and is
+    /// asked which, so the run cannot be built holding a stream its ports
+    /// disagree with. See [`LandingStore::stream`].
+    pub fn new(ports: ExtractionPorts<S, L, R, G, K, C>) -> Self {
         Self {
-            stream,
-            endpoint,
+            stream: ports.landing.stream().clone(),
             source: ports.source,
             landing: ports.landing,
             resumption: ports.resumption,
@@ -59,10 +57,6 @@ impl<S, L, R, G, K, C> Extraction<S, L, R, G, K, C> {
             lock: ports.lock,
             clock: ports.clock,
         }
-    }
-
-    pub fn stream(&self) -> &LandingStream {
-        &self.stream
     }
 }
 
@@ -88,7 +82,7 @@ where
 {
     /// Walk the feed from `since`, landing what has changed.
     ///
-    /// Pages commit as they are read, so a run that fails on the last page
+    /// Batches commit as they are read, so a run that fails on the last one
     /// keeps everything before it. Those records are durable and stay durable:
     /// deleting them on failure would be a mutation of raw, and the retry
     /// deduplicates them anyway.
@@ -97,25 +91,26 @@ where
         run: RunId,
         since: Option<Watermark>,
     ) -> Result<Collected, ExtractionError> {
-        let mut page = PageNumber::first();
-        let mut events_seen = EventCount::default();
-        let mut records_landed = RecordCount::default();
+        let mut resume = None;
+        let mut events_seen = 0_u64;
+        let mut records_landed = 0_u64;
         let mut newest_event: Option<EventTime> = None;
 
         loop {
-            let EventPage {
-                page_count, events, ..
-            } = self.source.fetch_page(since, page).await?;
+            let EventBatch {
+                events,
+                resume: next,
+            } = self.source.fetch(since, resume).await?;
             let fetched_at = self.clock.now();
 
             let mut to_land = Vec::with_capacity(events.len());
             for event in events {
-                events_seen = events_seen.increment();
+                events_seen = events_seen.saturating_add(1);
 
                 // The watermark is built only from event times this run was
-                // actually served. An event with no time contributes nothing
-                // rather than borrowing the clock.
-                if let Some(at) = event.event_time {
+                // actually served. An event the source gave no time for
+                // contributes nothing rather than borrowing the clock.
+                if let Some(at) = event.provenance.occurred_at() {
                     newest_event = Some(newest_event.map_or(at, |seen| seen.max(at)));
                 }
 
@@ -124,20 +119,20 @@ where
                 }
             }
 
-            records_landed = records_landed.increased_by(self.landing.append(run, to_land).await?);
+            let landed = self.landing.append(run, to_land).await?;
+            records_landed = records_landed.saturating_add(landed.as_u64());
 
-            // Stop exactly at the last page: asking beyond it is an error at
-            // the source rather than an empty page.
-            let next = page.next();
-            if !page_count.contains(next) {
-                break;
+            // The source says when it has finished. Asking it again after that
+            // is a question it has already answered.
+            match next {
+                Some(next) => resume = Some(next),
+                None => break,
             }
-            page = next;
         }
 
         Ok(Collected {
-            events_seen,
-            records_landed,
+            events_seen: EventCount::from(events_seen),
+            records_landed: RecordCount::from(records_landed),
             newest_event,
         })
     }
@@ -160,12 +155,10 @@ where
         }
 
         Ok(Some(LandingRecord::land(
-            self.stream.source().clone(),
-            self.endpoint.clone(),
+            self.stream.clone(),
             fetched_at,
             event.source_record_id.clone(),
-            event.kind.clone(),
-            event.event_time,
+            event.provenance.clone(),
             event.payload.clone(),
         )))
     }
@@ -187,7 +180,7 @@ where
     }
 }
 
-impl<S, L, R, G, K, C> ExtractWorkouts for Extraction<S, L, R, G, K, C>
+impl<S, L, R, G, K, C> WorkoutExtractor for Extraction<S, L, R, G, K, C>
 where
     S: WorkoutEventSource + Sync,
     L: LandingStore + Sync,
@@ -196,7 +189,12 @@ where
     K: RunLock + Sync,
     C: Clock + Sync,
 {
-    async fn extract(&self, stream: &LandingStream) -> Result<RunSummary, ExtractionError> {
+    async fn extract(&self) -> Result<RunSummary, ExtractionError> {
+        // One stream throughout, read from the store that holds it. The lock,
+        // the run log, the resumption point and every record landed name the
+        // same one because there is only one to name.
+        let stream = &self.stream;
+
         // Single-flight first, and before anything is written. A second run
         // must land nothing and move nothing, so it fails here or not at all.
         let _guard = self.lock.try_acquire(stream)?;
@@ -220,7 +218,7 @@ where
 
         // The resumption point advances to the newest event this run *saw*,
         // and never to the clock. The feed serves newest first, so a workout
-        // edited mid-run is promoted above pages already read and can be
+        // edited mid-run is promoted above batches already read and can be
         // missed by this run; because the point never passes an event we
         // observed, and that edit is by definition newer, the next run
         // collects it. Setting it from the clock would step over it for good.
@@ -257,9 +255,4 @@ where
             resumption_point_moved: moved,
         })
     }
-}
-
-/// The source a landing stream names, for adapters that need it spelled out.
-pub fn source_of(stream: &LandingStream) -> &SourceName {
-    stream.source()
 }

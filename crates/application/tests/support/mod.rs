@@ -34,52 +34,52 @@ type Pages = Vec<Vec<SourceEvent>>;
 type StagedEdit = Option<(u32, Pages)>;
 
 use application::{
-    Clock, EventPage, ExtractionRunLog, LandingStore, ResumptionPointStore, RunLock, SourceError,
+    Clock, EventBatch, ExtractionRunLog, LandingStore, ResumptionPointStore, RunLock, SourceError,
     SourceEvent, StoreError, WorkoutEventSource,
-    paging::{PageCount, PageNumber},
 };
 use domain::landing::{
-    Endpoint, EntityKind, EventKind, EventTime, ExtractionRun, FetchedAt, LandingRecord,
-    LandingStream, PayloadDigest, RawPayload, RecordCount, RunId, RunOutcome, SourceName,
+    Endpoint, EventKind, EventProvenance, EventTime, ExtractionRun, FetchedAt, LandingRecord,
+    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
 };
 
 pub fn hevy_workouts() -> Fallible<LandingStream> {
-    Ok(LandingStream::new(
-        SourceName::new("hevy")?,
-        EntityKind::new("workouts")?,
-    ))
+    Ok(LandingStream::try_from("hevy.workouts")?)
 }
 
 pub fn events_endpoint() -> Fallible<Endpoint> {
-    Ok(Endpoint::new("/v1/workouts/events")?)
+    Ok(Endpoint::try_from("/v1/workouts/events")?)
 }
 
 pub fn at(value: &str) -> Fallible<FetchedAt> {
-    Ok(FetchedAt::parse(value)?)
+    Ok(FetchedAt::try_from(value)?)
 }
 
 pub fn event_at(value: &str) -> Fallible<EventTime> {
-    Ok(EventTime::parse(value)?)
+    Ok(EventTime::try_from(value)?)
+}
+
+/// How the events feed describes what it served. Every fixture below builds
+/// one, because provenance is the adapter's to supply.
+fn served(kind: EventKind, when: Option<EventTime>) -> Fallible<Provenance> {
+    Ok(EventProvenance::new(events_endpoint()?, kind, when).into())
 }
 
 /// An update event carrying a body, in the shape the source serves.
 pub fn updated(id: &str, body: &str, when: &str) -> Fallible<SourceEvent> {
     Ok(SourceEvent {
-        kind: EventKind::Updated,
-        source_record_id: SourceRecordId::new(id)?,
-        event_time: Some(event_at(when)?),
-        payload: RawPayload::new(body.as_bytes().to_vec())?,
+        source_record_id: SourceRecordId::try_from(id)?,
+        provenance: served(EventKind::Updated, Some(event_at(when)?))?,
+        payload: RawPayload::try_from(body.as_bytes())?,
     })
 }
 
 /// A deletion, which names its workout at the top level and carries no body.
 pub fn deleted(id: &str, when: &str) -> Fallible<SourceEvent> {
     Ok(SourceEvent {
-        kind: EventKind::Deleted,
-        source_record_id: SourceRecordId::new(id)?,
-        event_time: Some(event_at(when)?),
-        payload: RawPayload::new(
+        source_record_id: SourceRecordId::try_from(id)?,
+        provenance: served(EventKind::Deleted, Some(event_at(when)?))?,
+        payload: RawPayload::try_from(
             format!(r#"{{"type":"deleted","id":"{id}","deleted_at":"{when}"}}"#).into_bytes(),
         )?,
     })
@@ -88,10 +88,9 @@ pub fn deleted(id: &str, when: &str) -> Fallible<SourceEvent> {
 /// An event the source served without a timestamp.
 pub fn untimed(id: &str, body: &str) -> Fallible<SourceEvent> {
     Ok(SourceEvent {
-        kind: EventKind::Updated,
-        source_record_id: SourceRecordId::new(id)?,
-        event_time: None,
-        payload: RawPayload::new(body.as_bytes().to_vec())?,
+        source_record_id: SourceRecordId::try_from(id)?,
+        provenance: served(EventKind::Updated, None)?,
+        payload: RawPayload::try_from(body.as_bytes())?,
     })
 }
 
@@ -169,19 +168,25 @@ impl FakeSource {
 }
 
 impl WorkoutEventSource for FakeSource {
-    async fn fetch_page(
+    /// A page number, which is this stub's way of saying "not finished". The
+    /// application never looks inside it — that is the point of the type.
+    type Resume = u32;
+
+    async fn fetch(
         &self,
         since: Option<Watermark>,
-        page: PageNumber,
-    ) -> Result<EventPage, SourceError> {
-        guard(&self.requests).push((since, page.get()));
+        resume: Option<u32>,
+    ) -> Result<EventBatch<u32>, SourceError> {
+        // No resume token means the opening request of a walk.
+        let page = resume.unwrap_or(1);
+        guard(&self.requests).push((since, page));
 
         if *guard(&self.unreachable) {
             return Err(SourceError::Unavailable {
                 detail: "stub is unreachable".to_owned(),
             });
         }
-        if *guard(&self.fail_on_page) == Some(page.get()) {
+        if *guard(&self.fail_on_page) == Some(page) {
             return Err(SourceError::Unavailable {
                 detail: format!("stub fails on page {page}"),
             });
@@ -194,7 +199,7 @@ impl WorkoutEventSource for FakeSource {
             .map(|events| {
                 events
                     .iter()
-                    .filter(|event| match (since, event.event_time) {
+                    .filter(|event| match (since, event.provenance.occurred_at()) {
                         (Some(mark), Some(time)) => time.as_timestamp() >= mark.as_timestamp(),
                         _ => true,
                     })
@@ -208,7 +213,7 @@ impl WorkoutEventSource for FakeSource {
         // `{"page":1,"page_count":1,"workouts":[]}`.
         let page_count = u32::try_from(filtered.len()).unwrap_or(u32::MAX).max(1);
         let events = filtered
-            .get((page.get() as usize).saturating_sub(1))
+            .get((page as usize).saturating_sub(1))
             .cloned()
             .unwrap_or_default();
 
@@ -218,30 +223,44 @@ impl WorkoutEventSource for FakeSource {
         // so the run sees the feed as it was when it asked.
         let staged = guard(&self.swap_after).take();
         if let Some((after, replacement)) = staged {
-            if page.get() == after {
+            if page == after {
                 *guard(&self.pages) = replacement;
             } else {
                 *guard(&self.swap_after) = Some((after, replacement));
             }
         }
 
-        Ok(EventPage {
-            page,
-            page_count: PageCount::new(page_count),
+        // The last page says so by resuming nowhere. Asking beyond it is an
+        // error at the live source, so a walk has to stop exactly here.
+        let next = page.saturating_add(1);
+        Ok(EventBatch {
             events,
+            resume: (next <= page_count).then_some(next),
         })
     }
 }
 
 // --- The store --------------------------------------------------------------
 
-#[derive(Clone, Default)]
+/// Bound to one stream, like every real landing store: it is the table, and
+/// the table is one stream's. There is no `Default`, because a store that does
+/// not know which stream it holds is the thing the port exists to rule out.
+#[derive(Clone)]
 pub struct InMemoryLanding {
+    stream: LandingStream,
     records: Arc<Mutex<Vec<(RunId, LandingRecord)>>>,
     failing: Arc<Mutex<bool>>,
 }
 
 impl InMemoryLanding {
+    pub fn holding(stream: LandingStream) -> Self {
+        Self {
+            stream,
+            records: Arc::new(Mutex::new(Vec::new())),
+            failing: Arc::new(Mutex::new(false)),
+        }
+    }
+
     pub fn records(&self) -> Vec<LandingRecord> {
         guard(&self.records)
             .iter()
@@ -273,6 +292,10 @@ impl InMemoryLanding {
 }
 
 impl LandingStore for InMemoryLanding {
+    fn stream(&self) -> &LandingStream {
+        &self.stream
+    }
+
     async fn latest_digest(
         &self,
         id: &SourceRecordId,
@@ -304,11 +327,11 @@ impl LandingStore for InMemoryLanding {
         for record in records {
             held.push((run, record));
         }
-        Ok(RecordCount::new(landed))
+        Ok(RecordCount::from(landed))
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
-        Ok(RecordCount::new(
+        Ok(RecordCount::from(
             u64::try_from(guard(&self.records).len()).unwrap_or(u64::MAX),
         ))
     }
@@ -374,7 +397,11 @@ impl InMemoryRuns {
 impl ExtractionRunLog for InMemoryRuns {
     async fn begin(&self, _stream: &LandingStream, at: FetchedAt) -> Result<RunId, StoreError> {
         let mut runs = guard(&self.runs);
-        let id = RunId::new(i64::try_from(runs.len()).unwrap_or(i64::MAX) + 1);
+        let id = RunId::from(
+            u64::try_from(runs.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(1),
+        );
         runs.push((id, RunOutcome::InFlight));
         guard(&self.started).push(at);
         Ok(id)
@@ -399,7 +426,7 @@ impl ExtractionRunLog for InMemoryRuns {
             .rev()
             .find(|(_, outcome)| outcome.is_success())
             .map(|(id, outcome)| {
-                let index = usize::try_from(id.as_i64()).unwrap_or(1).saturating_sub(1);
+                let index = usize::try_from(id.as_u64()).unwrap_or(1).saturating_sub(1);
                 ExtractionRun::new(
                     *id,
                     stream.clone(),

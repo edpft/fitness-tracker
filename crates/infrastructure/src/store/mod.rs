@@ -12,6 +12,7 @@ pub mod resumption;
 pub mod run_log;
 
 use application::StoreError;
+use domain::landing::RunId;
 
 pub use landing::HevyWorkoutLandingStore;
 pub use pool::connect;
@@ -35,4 +36,19 @@ fn store_error(error: &sqlx::Error) -> StoreError {
             detail: error.to_string(),
         },
     }
+}
+
+/// SQLite counts rows in `i64` and a run id does not go negative, so the two
+/// representations meet here and nowhere else.
+fn run_id_for_storage(run: RunId) -> Result<i64, StoreError> {
+    i64::try_from(run.as_u64()).map_err(|_| StoreError::Corrupt {
+        detail: format!("run id {run} is larger than the store can hold"),
+    })
+}
+
+/// A negative id is not a run this program started.
+fn run_id_from_row(id: i64) -> Result<RunId, StoreError> {
+    RunId::try_from(id).map_err(|error| StoreError::Corrupt {
+        detail: error.to_string(),
+    })
 }

@@ -16,13 +16,30 @@
 mod support;
 
 use application::{
-    ExtractWorkouts, Extraction, ExtractionError, ExtractionPorts, ExtractionStatus,
-    ReportExtractionStatus, ResetResumptionPoint, SourceEvent,
+    ExtractionError, ExtractionStatusReporter, ResumptionPointResetter, SourceEvent,
+    WorkoutExtractor,
+    extract::{Extraction, ExtractionPorts},
+    status::ExtractionStatus,
 };
-use domain::landing::{EventKind, RecordCount, RunOutcome, Watermark};
+use domain::landing::{EventKind, LandingRecord, Provenance, RecordCount, RunOutcome, Watermark};
+
+/// Whether the source's last word on a record was that it is gone.
+///
+/// A plain match rather than a method on the kind: the two variants that carry
+/// meaning are distinguishable precisely so a caller can ask this itself.
+fn is_deletion(record: &LandingRecord) -> bool {
+    kind_of(record) == EventKind::Deleted
+}
+
+/// What the source said happened, which lives in the record's provenance
+/// because it is true of an events feed rather than of every source.
+fn kind_of(record: &LandingRecord) -> EventKind {
+    let Provenance::Event(event) = record.provenance();
+    event.kind().clone()
+}
 use support::{
     FakeLock, FakeSource, Fallible, FixedClock, InMemoryLanding, InMemoryResumption, InMemoryRuns,
-    deleted, events_endpoint, hevy_workouts, updated,
+    deleted, hevy_workouts, updated,
 };
 
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
@@ -46,25 +63,21 @@ type Subject =
 type Reader = ExtractionStatus<InMemoryLanding, InMemoryResumption, InMemoryRuns>;
 
 fn harness(source: FakeSource, lock: FakeLock) -> Fallible<(Subject, Harness)> {
-    let landing = InMemoryLanding::default();
+    let landing = InMemoryLanding::holding(hevy_workouts()?);
     let runs = InMemoryRuns::default();
     let resumption = InMemoryResumption::default();
 
-    let extraction = Extraction::new(
-        hevy_workouts()?,
-        events_endpoint()?,
-        ExtractionPorts {
-            source: source.clone(),
-            landing: landing.clone(),
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock,
-            // Frozen on purpose. Extraction must never take its resumption
-            // point from the clock, so a clock that does not move is the
-            // assertion rather than a simplification.
-            clock: FixedClock::at("2026-08-11T18:19:59Z")?,
-        },
-    );
+    let extraction = Extraction::new(ExtractionPorts {
+        source: source.clone(),
+        landing: landing.clone(),
+        resumption: resumption.clone(),
+        runs: runs.clone(),
+        lock,
+        // Frozen on purpose. Extraction must never take its resumption
+        // point from the clock, so a clock that does not move is the
+        // assertion rather than a simplification.
+        clock: FixedClock::at("2026-08-11T18:19:59Z")?,
+    });
 
     Ok((
         extraction,
@@ -129,7 +142,7 @@ fn live_workouts(landing: &InMemoryLanding) -> usize {
             landing
                 .for_id(id)
                 .last()
-                .is_some_and(|record| !record.event_kind().is_deletion())
+                .is_some_and(|record| !is_deletion(record))
         })
         .count()
 }
@@ -144,12 +157,11 @@ fn a_first_run_lands_every_workout_the_source_holds() {
             FakeLock::free(),
         )
         .expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        let summary = extraction.extract(&stream).await.expect("a first run");
+        let summary = extraction.extract().await.expect("a first run");
 
         assert_eq!(summary.events_seen.as_u64(), 164);
-        assert_eq!(summary.records_landed, RecordCount::new(164));
+        assert_eq!(summary.records_landed, RecordCount::from(164));
         assert_eq!(seen.landing.records().len(), 164);
 
         // SC-001: the source independently reports 163, and the extra landed
@@ -165,14 +177,14 @@ fn a_first_run_lands_every_workout_the_source_holds() {
             .expect("fixtures")
             .into_iter()
             .flatten()
-            .filter_map(|event| event.event_time)
+            .filter_map(|event| event.provenance.occurred_at())
             .max()
             .expect("the fixture carries event times");
         assert!(summary.resumption_point_moved);
         assert_eq!(summary.resumption_point, Some(Watermark::from(newest)));
         assert!(
             newest.as_timestamp()
-                > Watermark::parse("2026-08-11T18:19:59Z")
+                > Watermark::try_from("2026-08-11T18:19:59Z")
                     .expect("valid")
                     .as_timestamp(),
             "the fixture must reach past the frozen clock, or this proves nothing"
@@ -190,15 +202,14 @@ fn a_repeat_run_over_unchanged_data_lands_nothing() {
             FakeLock::free(),
         )
         .expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
         let after_first = seen.landing.records().len();
 
-        let second = extraction.extract(&stream).await.expect("the second run");
+        let second = extraction.extract().await.expect("the second run");
 
         assert_eq!(seen.landing.records().len(), after_first, "SC-002");
-        assert_eq!(second.records_landed, RecordCount::new(0));
+        assert_eq!(second.records_landed, RecordCount::from(0));
         // Finding nothing new is a success, not silence.
         assert!(
             seen.runs
@@ -223,9 +234,8 @@ fn an_edited_workout_lands_again_and_the_earlier_record_survives() {
         ]];
         let (extraction, seen) =
             harness(FakeSource::serving(before_edit), FakeLock::free()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
         let first = seen
             .landing
             .for_id("w1")
@@ -242,7 +252,7 @@ fn an_edited_workout_lands_again_and_the_earlier_record_survives() {
             .expect("a fixture"),
         ]]);
 
-        extraction.extract(&stream).await.expect("the second run");
+        extraction.extract().await.expect("the second run");
 
         let held = seen.landing.for_id("w1");
         assert_eq!(held.len(), 2, "an edit lands a second record");
@@ -270,9 +280,8 @@ fn a_deletion_lands_a_record_and_alters_nothing() {
         ]];
         let (extraction, seen) =
             harness(FakeSource::serving(before), FakeLock::free()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
         let landed = seen
             .landing
             .for_id("w1")
@@ -285,15 +294,12 @@ fn a_deletion_lands_a_record_and_alters_nothing() {
         seen.source.now_serving(vec![vec![
             deleted("w1", "2026-08-03T00:00:00Z").expect("a fixture"),
         ]]);
-        extraction.extract(&stream).await.expect("the second run");
+        extraction.extract().await.expect("the second run");
 
         let held = seen.landing.for_id("w1");
         assert_eq!(held.len(), 2);
         assert_eq!(held.first(), Some(&landed), "nothing is altered");
-        assert_eq!(
-            held.last().map(|record| record.event_kind().clone()),
-            Some(EventKind::Deleted)
-        );
+        assert_eq!(held.last().map(kind_of), Some(EventKind::Deleted));
         // And the workout is no longer live, by the SC-001 reading.
         assert_eq!(live_workouts(&seen.landing), 0);
     });
@@ -309,11 +315,10 @@ fn an_interrupted_run_leaves_the_resumption_point_and_is_made_good_by_the_next()
             FakeLock::free(),
         )
         .expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
         seen.source.fail_on_page(9);
         let failure = extraction
-            .extract(&stream)
+            .extract()
             .await
             .expect_err("a failing page fails the run");
         assert!(matches!(failure, ExtractionError::Source(_)));
@@ -328,7 +333,7 @@ fn an_interrupted_run_leaves_the_resumption_point_and_is_made_good_by_the_next()
         ));
 
         seen.source.heal();
-        extraction.extract(&stream).await.expect("the retry");
+        extraction.extract().await.expect("the retry");
 
         // SC-004: the same end state as one uninterrupted run, with what was
         // already landed deduplicated rather than doubled.
@@ -348,23 +353,22 @@ fn a_reset_and_rerun_lands_nothing_when_payloads_are_identical() {
             FakeLock::free(),
         )
         .expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
+        extraction.extract().await.expect("the first run");
         let after_first = seen.landing.records().len();
 
         status_reader(&seen)
-            .reset(&stream)
+            .reset()
             .await
             .expect("a reset succeeds");
         assert_eq!(seen.resumption.get(), None);
 
-        let rerun = extraction.extract(&stream).await.expect("the rerun");
+        let rerun = extraction.extract().await.expect("the rerun");
 
         assert_eq!(rerun.events_seen.as_u64(), 164, "everything is re-served");
         assert_eq!(
             rerun.records_landed,
-            RecordCount::new(0),
+            RecordCount::from(0),
             "identical payloads land nothing"
         );
         assert_eq!(seen.landing.records().len(), after_first);
@@ -380,18 +384,17 @@ fn a_reset_and_rerun_lands_only_what_actually_differs() {
         ]];
         let (extraction, seen) =
             harness(FakeSource::serving(original), FakeLock::free()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
-        extraction.extract(&stream).await.expect("the first run");
-        status_reader(&seen).reset(&stream).await.expect("a reset");
+        extraction.extract().await.expect("the first run");
+        status_reader(&seen).reset().await.expect("a reset");
 
         seen.source.now_serving(vec![vec![
             updated("w1", r#"{"id":"w1","v":1}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
             updated("w2", r#"{"id":"w2","v":2}"#, "2026-08-02T00:00:00Z").expect("a fixture"),
         ]]);
 
-        let rerun = extraction.extract(&stream).await.expect("the rerun");
-        assert_eq!(rerun.records_landed, RecordCount::new(1), "exactly one");
+        let rerun = extraction.extract().await.expect("the rerun");
+        assert_eq!(rerun.records_landed, RecordCount::from(1), "exactly one");
         assert_eq!(seen.landing.for_id("w1").len(), 1);
         assert_eq!(seen.landing.for_id("w2").len(), 2);
     });
@@ -405,10 +408,9 @@ fn an_unreachable_source_leaves_raw_untouched_and_fails_visibly() {
         let source = FakeSource::serving(full_history().expect("fixtures"));
         source.go_unreachable();
         let (extraction, seen) = harness(source, FakeLock::free()).expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
         let failure = extraction
-            .extract(&stream)
+            .extract()
             .await
             .expect_err("an unreachable source fails the run");
 
@@ -423,10 +425,10 @@ fn an_unreachable_source_leaves_raw_untouched_and_fails_visibly() {
 
         // § 36: capabilities that do not depend on the source keep working.
         let standing = status_reader(&seen)
-            .status(&stream)
+            .status()
             .await
             .expect("status answers even when the source does not");
-        assert_eq!(standing.records_held, RecordCount::new(0));
+        assert_eq!(standing.records_held, RecordCount::from(0));
         assert!(standing.last_success.is_none());
     });
 }
@@ -441,10 +443,9 @@ fn a_concurrent_run_is_refused_and_changes_nothing() {
             FakeLock::already_held(),
         )
         .expect("a harness");
-        let stream = hevy_workouts().expect("a valid stream");
 
         let refused = extraction
-            .extract(&stream)
+            .extract()
             .await
             .expect_err("a second run is refused");
 

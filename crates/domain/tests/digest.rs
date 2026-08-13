@@ -10,8 +10,8 @@
 //! free helper in an integration test file is not one.
 
 use domain::landing::{
-    Endpoint, EventKind, FetchedAt, LandingRecord, PayloadDigest, RawPayload, SourceName,
-    SourceRecordId,
+    Endpoint, EventKind, EventProvenance, FetchedAt, LandingRecord, LandingStream, PayloadDigest,
+    Provenance, RawPayload, SourceRecordId,
 };
 use proptest::prelude::*;
 
@@ -20,8 +20,8 @@ proptest! {
     /// would duplicate the entire history.
     #[test]
     fn identical_bytes_digest_identically(bytes in prop::collection::vec(any::<u8>(), 1..1024)) {
-        let left = RawPayload::new(bytes.clone()).expect("non-empty bytes");
-        let right = RawPayload::new(bytes).expect("non-empty bytes");
+        let left = RawPayload::try_from(bytes.clone()).expect("non-empty bytes");
+        let right = RawPayload::try_from(bytes).expect("non-empty bytes");
         prop_assert_eq!(left.digest(), right.digest());
     }
 
@@ -33,8 +33,8 @@ proptest! {
         right in prop::collection::vec(any::<u8>(), 1..1024),
     ) {
         prop_assume!(left != right);
-        let left = RawPayload::new(left).expect("non-empty bytes");
-        let right = RawPayload::new(right).expect("non-empty bytes");
+        let left = RawPayload::try_from(left).expect("non-empty bytes");
+        let right = RawPayload::try_from(right).expect("non-empty bytes");
         prop_assert_ne!(left.digest(), right.digest());
     }
 
@@ -45,8 +45,8 @@ proptest! {
         let mut reversed = bytes.clone();
         reversed.reverse();
         prop_assume!(reversed != bytes);
-        let forwards = RawPayload::new(bytes).expect("non-empty bytes");
-        let backwards = RawPayload::new(reversed).expect("non-empty bytes");
+        let forwards = RawPayload::try_from(bytes).expect("non-empty bytes");
+        let backwards = RawPayload::try_from(reversed).expect("non-empty bytes");
         prop_assert_ne!(forwards.digest(), backwards.digest());
     }
 
@@ -57,22 +57,25 @@ proptest! {
     fn a_digest_survives_the_persistence_boundary(
         bytes in prop::collection::vec(any::<u8>(), 1..256),
     ) {
-        let digest = RawPayload::new(bytes).expect("non-empty bytes").digest();
-        prop_assert_eq!(PayloadDigest::from_storage(*digest.as_bytes()), digest);
+        let digest = RawPayload::try_from(bytes).expect("non-empty bytes").digest();
+        prop_assert_eq!(PayloadDigest::from(*digest.as_bytes()), digest);
     }
 
     /// A record's digest is computed from its own payload, never supplied
     /// alongside it, so the two cannot disagree.
     #[test]
     fn a_record_digests_its_own_payload(bytes in prop::collection::vec(any::<u8>(), 1..256)) {
-        let body = RawPayload::new(bytes).expect("non-empty bytes");
-        let record = LandingRecord::land(
-            SourceName::new("hevy").expect("valid"),
-            Endpoint::new("/v1/workouts/events").expect("valid"),
-            FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid"),
-            SourceRecordId::new("b459cba5-cd6d-463c-abd6-54f8eafcadcb").expect("valid"),
+        let body = RawPayload::try_from(bytes).expect("non-empty bytes");
+        let provenance = Provenance::Event(EventProvenance::new(
+            Endpoint::try_from("/v1/workouts/events").expect("valid"),
             EventKind::Updated,
             None,
+        ));
+        let record = LandingRecord::land(
+            LandingStream::try_from("hevy.workouts").expect("valid"),
+            FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid"),
+            SourceRecordId::try_from("b459cba5-cd6d-463c-abd6-54f8eafcadcb").expect("valid"),
+            provenance,
             body.clone(),
         );
         prop_assert_eq!(record.digest(), body.digest());
@@ -82,7 +85,7 @@ proptest! {
 
 #[test]
 fn a_digest_renders_as_hex() {
-    let digest = RawPayload::new(b"hevy".to_vec())
+    let digest = RawPayload::try_from(b"hevy".to_vec())
         .expect("non-empty bytes")
         .digest();
     let rendered = digest.to_string();
@@ -95,19 +98,23 @@ fn a_digest_renders_as_hex() {
 /// rather than a removal.
 #[test]
 fn a_deletion_is_a_record_like_any_other() {
-    let body = RawPayload::new(
+    let body = RawPayload::try_from(
         br#"{"type":"deleted","id":"93d5","deleted_at":"2025-11-05T20:02:27.905Z"}"#.to_vec(),
     )
     .expect("non-empty bytes");
     let record = LandingRecord::land(
-        SourceName::new("hevy").expect("valid"),
-        Endpoint::new("/v1/workouts/events").expect("valid"),
-        FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid"),
-        SourceRecordId::new("93d5").expect("valid"),
-        EventKind::Deleted,
-        None,
+        LandingStream::try_from("hevy.workouts").expect("valid"),
+        FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid"),
+        SourceRecordId::try_from("93d5").expect("valid"),
+        Provenance::Event(EventProvenance::new(
+            Endpoint::try_from("/v1/workouts/events").expect("valid"),
+            EventKind::Deleted,
+            None,
+        )),
         body,
     );
-    assert!(record.event_kind().is_deletion());
-    assert_eq!(record.event_time(), None);
+
+    let Provenance::Event(event) = record.provenance();
+    assert_eq!(event.kind(), &EventKind::Deleted);
+    assert_eq!(event.occurred_at(), None);
 }

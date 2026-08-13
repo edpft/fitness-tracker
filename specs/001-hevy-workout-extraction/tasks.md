@@ -6,6 +6,13 @@
 
 **Tests**: Mandatory, not optional. The template treats tests as opt-in; the constitution does not. § 29 makes integration tests at port boundaries "the primary suite and the agent's steering signal", § 31 requires red-green-refactor at that boundary, § 28 requires property tests asserting that a generated instance of a type is valid, and § 30 requires the public API to be fully tested. Test tasks are ordered before the implementation they steer.
 
+**Status**: Every task below is complete, and the list is kept as the record of
+how the feature was built rather than as a description of what now exists. PR
+review changed several of the shapes it names — the driving ports, the source
+port's pagination, the landing record's provenance, and the CLI's arguments.
+[data-model.md](./data-model.md) and [contracts/](./contracts/) were revised
+with them and are the current description.
+
 **Organization**: One user story. The spec says why it does not decompose: a partial history in raw satisfies no downstream need, so slicing it would produce fragments that deliver value only once all are present.
 
 ## Format: `[ID] [P?] [Story] Description`

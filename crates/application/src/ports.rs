@@ -13,56 +13,66 @@
 use std::future::Future;
 
 use domain::landing::{
-    EventKind, EventTime, ExtractionRun, FetchedAt, LandingRecord, LandingStream, PayloadDigest,
+    EventCount, ExtractionRun, FetchedAt, LandingRecord, LandingStream, PayloadDigest, Provenance,
     RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
 };
 
-use crate::{
-    error::{ExtractionError, RunLockError, SourceError, StatusError, StoreError},
-    paging::{PageCount, PageNumber},
-};
+use crate::error::{ExtractionError, RunLockError, SourceError, StatusError, StoreError};
 
 // --- Driven ports -----------------------------------------------------------
 
-/// One event, already split out of its page and carrying its bytes intact.
+/// One record as the source served it, carrying its bytes intact.
 ///
-/// The split happens in the adapter because only the adapter knows the page's
-/// shape; what crosses the port is one record as served, which is the unit a
-/// landing record corresponds to.
+/// The three things a landing record needs that only the source can supply.
+/// How the source was asked, and what it called the shape it answered in, is
+/// in the [`Provenance`] — which the adapter builds, because the adapter is
+/// the only thing that knows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceEvent {
-    pub kind: EventKind,
     pub source_record_id: SourceRecordId,
-    pub event_time: Option<EventTime>,
+    pub provenance: Provenance,
     pub payload: RawPayload,
 }
 
-/// One page of events, in the order the source served them.
+/// One instalment of a source's answer, in the order the source served it.
+///
+/// A source hands back what it is willing to hand back in one go; `resume`
+/// says whether there is more and, if so, carries whatever the adapter needs
+/// to pick up where it stopped. `None` means that was everything.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EventPage {
-    pub page: PageNumber,
-    pub page_count: PageCount,
+pub struct EventBatch<R> {
     pub events: Vec<SourceEvent>,
+    pub resume: Option<R>,
 }
 
 /// Where observations come from.
 pub trait WorkoutEventSource {
-    /// One page of events, newest first.
+    /// Whatever the adapter needs to continue a walk it has already started.
+    ///
+    /// Opaque here on purpose. A page number, a cursor, an offset into a file
+    /// and a continuation token are all the same thing to a run — the source's
+    /// own way of saying "not finished" — and pagination is a fact about how a
+    /// particular source answers, not about the data. The application counts
+    /// records and stops when told to stop.
+    type Resume: Send;
+
+    /// The next instalment of everything served since `since`.
     ///
     /// `since` is inclusive at the source, so a caller passes its stored
     /// watermark unmodified: the boundary event is served again and
     /// deduplicated, which costs nothing and cannot skip a sibling sharing
-    /// that timestamp.
+    /// that timestamp. It is passed on every call rather than remembered, so
+    /// the adapter holds no state between them.
     ///
     /// # Errors
     ///
     /// [`SourceError`] if the source is unreachable, rejects our credential,
     /// or serves something unreadable.
-    fn fetch_page(
+    fn fetch(
         &self,
         since: Option<Watermark>,
-        page: PageNumber,
-    ) -> impl Future<Output = Result<EventPage, SourceError>> + Send;
+        resume: Option<Self::Resume>,
+    ) -> impl Future<Output = Result<EventBatch<Self::Resume>, SourceError>> + Send;
 }
 
 /// Raw landing for **one** stream.
@@ -71,6 +81,16 @@ pub trait WorkoutEventSource {
 /// no stream argument to pass wrongly and a store for `hevy.workouts` cannot
 /// read another stream's records.
 pub trait LandingStore {
+    /// Which stream this store holds.
+    ///
+    /// Asked rather than told, and this is the whole of how a run knows what
+    /// it is extracting. Being bound to one table makes this store the only
+    /// thing that can answer without being informed — so it is the single
+    /// source of truth, and every other use of the stream in a run derives
+    /// from it. A stream supplied alongside the ports could disagree with
+    /// them; one read out of them cannot.
+    fn stream(&self) -> &LandingStream;
+
     /// The digest of the most recent record for this source record, if there
     /// is one.
     ///
@@ -198,6 +218,10 @@ pub trait Clock {
 }
 
 // --- Driving ports ----------------------------------------------------------
+//
+// Named for the thing that does the work rather than the work itself: a trait
+// describes what an implementer *is*, and every implementer of these is a
+// noun. The act is the method.
 
 /// What a completed run is worth reporting.
 ///
@@ -207,7 +231,7 @@ pub trait Clock {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunSummary {
     pub run_id: RunId,
-    pub events_seen: domain::landing::EventCount,
+    pub events_seen: EventCount,
     pub records_landed: RecordCount,
     pub resumption_point: Option<Watermark>,
     pub resumption_point_moved: bool,
@@ -222,38 +246,34 @@ pub struct StreamStatus {
     pub resumption_point: Option<Watermark>,
 }
 
-/// Collect everything the source has served since the resumption point.
-pub trait ExtractWorkouts {
+// None of the three takes a stream. Each is built from ports that are already
+// bound to one, and asks them which — see [`LandingStore::stream`]. A stream
+// passed in here would be a second answer to a question that already has one,
+// and two answers can disagree: a run whose lock, run log and resumption point
+// name one stream while its records are tagged with another advances a
+// watermark past events it never collected.
+
+/// Collects everything the source has served since the resumption point.
+pub trait WorkoutExtractor {
     /// # Errors
     ///
-    /// [`ExtractionError::AlreadyRunning`] when another run holds the lock, in
-    /// which case nothing is landed and the resumption point does not move.
-    /// Otherwise the underlying source or store failure.
-    fn extract(
-        &self,
-        stream: &LandingStream,
-    ) -> impl Future<Output = Result<RunSummary, ExtractionError>> + Send;
+    /// [`ExtractionError`] if another run holds the lock, the source will not
+    /// serve us, or the store will not take what it served.
+    fn extract(&self) -> impl Future<Output = Result<RunSummary, ExtractionError>> + Send;
 }
 
-/// Report the most recent successful extraction, so a broken one is visible.
-pub trait ReportExtractionStatus {
-    /// # Errors
-    ///
-    /// [`StatusError`] if the store is unavailable. Never having run is not an
-    /// error — it is a fact to report.
-    fn status(
-        &self,
-        stream: &LandingStream,
-    ) -> impl Future<Output = Result<StreamStatus, StatusError>> + Send;
-}
-
-/// Discard a stream's resumption point so the next run collects everything.
-pub trait ResetResumptionPoint {
-    /// Lands nothing and removes nothing.
-    ///
+/// Reports where a stream stands.
+pub trait ExtractionStatusReporter {
     /// # Errors
     ///
     /// [`StatusError`] if the store is unavailable.
-    fn reset(&self, stream: &LandingStream)
-    -> impl Future<Output = Result<(), StatusError>> + Send;
+    fn status(&self) -> impl Future<Output = Result<StreamStatus, StatusError>> + Send;
+}
+
+/// Discards a stream's resumption point.
+pub trait ResumptionPointResetter {
+    /// # Errors
+    ///
+    /// [`StatusError`] if the store is unavailable.
+    fn reset(&self) -> impl Future<Output = Result<(), StatusError>> + Send;
 }

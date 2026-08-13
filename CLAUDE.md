@@ -29,13 +29,20 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 ## Layout
 
 `{cli, web} → infrastructure → application → domain`, inward only. Ports are
-declared in `application`.
+declared in `application` — the standard hexagonal position, because a port is
+defined by what the core needs rather than by what an adapter offers.
 
-Two driving adapters, both composition roots, both at ring 3 and neither
-depending on the other. `cli` is the operator's entry point — extraction is
-invoked from a terminal or an external scheduler, never over HTTP. `web` is the
-HTTP surface. A capability belongs to whichever transport invokes it; a batch
-job behind a web binary is a name that misleads.
+Two driving adapters, both operator entry points, both composition roots, both
+at ring 3 and neither depending on the other. `cli` is being built first; the
+two are meant to reach feature parity, which is both a convenience and the
+demonstration that the hexagonal split is real. A capability that only one of
+them can invoke is a sign the capability has been built into a transport.
+
+`application` re-exports its ports and errors at the crate root but keeps its
+use cases behind `extract` and `status`. That is not tidiness: it makes
+`application::extract::…` greppable, and the `use-case-isolation` check uses it
+to stop a driven adapter calling the application that is supposed to be driving
+it.
 
 Adding a crate takes three edits, and the third is easy to forget:
 
@@ -45,6 +52,38 @@ Adding a crate takes three edits, and the third is easy to forget:
 3. a ring in `crateRings` in `flake.nix`
 
 The `workspace-members` and `architecture` checks catch 2 and 3.
+
+## Conventions
+
+- **Standard traits over bespoke methods.** A validated newtype implements
+  `TryFrom<String>` and gets the rest — `as_str`, `AsRef`, `Display`,
+  `TryFrom<&str>`, `FromStr` — from the macros in `domain::landing::newtype`.
+  `FromStr` is not optional alongside `TryFrom<&str>`: `str::parse`, clap's
+  value parsers and serde's string forms all go through it. See
+  <https://rust-lang.github.io/api-guidelines/checklist.html>.
+
+  The exception is `RawPayload::digest`, which is SHA-256 and deliberately not
+  `Hash`: `Hash` hands its bytes to the caller's `Hasher`, produces 64 bits and
+  guarantees nothing across builds, and this digest is persisted and compared
+  against rows written by earlier versions.
+- **A trait names a thing, not an act.** `WorkoutExtractor`, not
+  `ExtractWorkouts`. The act is the method.
+- **One source's shape is never the only shape.** `LandingRecord` carries what
+  every record has whatever served it; anything true only of the transport is a
+  `Provenance` variant. Pagination is the same rule applied to the port: the
+  source hands back a batch and an opaque resume token, and `PageNumber` lives
+  in the Hevy adapter where it means something.
+- **A run's identity is derived, never passed.** No use case or driving port
+  takes a `LandingStream`: the landing store is bound to a table, declares its
+  stream (`HevyWorkoutLandingStore::STREAM`, beside the SQL naming the table),
+  and everything else — lock, run log, resumption point, record tags — reads it
+  from there. Two streams that must agree are one stream or a silent data loss;
+  see `contracts/ports.md`.
+- **What this build can collect lives in `cli::catalogue`.** One entry per
+  stream — `hevy.workouts`, not `hevy` — and everything a source needs from the
+  environment is derived from its name (`HEVY_API_KEY`, `HEVY_API_BASE_URL`), so
+  a second source adds an entry and an arm in `cli::wiring` rather than a
+  constant and a flag.
 
 ## Easy to get wrong
 

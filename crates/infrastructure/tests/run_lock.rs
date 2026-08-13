@@ -15,8 +15,8 @@ type Fallible<T> = Result<T, Box<dyn Error>>;
 
 fn stream(entity: &str) -> Fallible<LandingStream> {
     Ok(LandingStream::new(
-        SourceName::new("hevy")?,
-        EntityKind::new(entity)?,
+        SourceName::try_from("hevy")?,
+        EntityKind::try_from(entity)?,
     ))
 }
 

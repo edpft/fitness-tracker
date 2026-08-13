@@ -33,7 +33,7 @@ impl ResumptionPointStore for SqliteResumptionPointStore {
         .map_err(|error| store_error(&error))?;
 
         row.map(|row| {
-            Watermark::parse(&row.watermark).map_err(|error| StoreError::Corrupt {
+            Watermark::try_from(row.watermark.as_str()).map_err(|error| StoreError::Corrupt {
                 detail: error.to_string(),
             })
         })

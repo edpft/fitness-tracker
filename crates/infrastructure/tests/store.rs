@@ -22,8 +22,8 @@ use std::error::Error;
 
 use application::{ExtractionRunLog, LandingStore, ResumptionPointStore};
 use domain::landing::{
-    Endpoint, EntityKind, EventKind, EventTime, FetchedAt, LandingRecord, LandingStream,
-    RawPayload, RecordCount, RunId, RunOutcome, SourceName, SourceRecordId, Watermark,
+    Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, LandingRecord, LandingStream,
+    RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
 };
 use infrastructure::{
     HevyWorkoutLandingStore, SqliteExtractionRunLog, SqliteResumptionPointStore, connect,
@@ -52,28 +52,31 @@ async fn store() -> Fallible<(TempDir, SqlitePool)> {
 }
 
 fn hevy_workouts() -> Fallible<LandingStream> {
-    Ok(LandingStream::new(
-        SourceName::new("hevy")?,
-        EntityKind::new("workouts")?,
-    ))
+    Ok(LandingStream::try_from("hevy.workouts")?)
 }
 
 fn record(id: &str, kind: EventKind, body: &[u8], at: &str) -> Fallible<LandingRecord> {
     Ok(LandingRecord::land(
-        SourceName::new("hevy")?,
-        Endpoint::new("/v1/workouts/events")?,
-        FetchedAt::parse("2026-08-11T18:19:59Z")?,
-        SourceRecordId::new(id)?,
-        kind,
-        Some(EventTime::parse(at)?),
-        RawPayload::new(body.to_vec())?,
+        hevy_workouts()?,
+        FetchedAt::try_from("2026-08-11T18:19:59Z")?,
+        SourceRecordId::try_from(id)?,
+        EventProvenance::new(
+            Endpoint::try_from("/v1/workouts/events")?,
+            kind,
+            Some(EventTime::try_from(at)?),
+        )
+        .into(),
+        RawPayload::try_from(body)?,
     ))
 }
 
 async fn a_run(pool: &SqlitePool) -> Fallible<RunId> {
     let log = SqliteExtractionRunLog::new(pool.clone());
     Ok(log
-        .begin(&hevy_workouts()?, FetchedAt::parse("2026-08-11T18:19:59Z")?)
+        .begin(
+            &hevy_workouts()?,
+            FetchedAt::try_from("2026-08-11T18:19:59Z")?,
+        )
         .await?)
 }
 
@@ -87,7 +90,7 @@ fn the_store_refuses_to_update_a_landing_record() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
         landing
             .append(
                 run,
@@ -116,7 +119,7 @@ fn the_store_refuses_to_delete_a_landing_record() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
         landing
             .append(
                 run,
@@ -151,8 +154,8 @@ fn the_latest_digest_is_the_most_recent_not_any() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
-        let id = SourceRecordId::new("w1").expect("valid test fixture");
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
+        let id = SourceRecordId::try_from("w1").expect("valid test fixture");
 
         let first = record(
             "w1",
@@ -204,9 +207,9 @@ fn the_latest_digest_is_the_most_recent_not_any() {
 fn an_unseen_record_has_no_digest() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool);
+        let landing = HevyWorkoutLandingStore::new(pool).expect("a wired stream");
         let digest = landing
-            .latest_digest(&SourceRecordId::new("never-seen").expect("valid test fixture"))
+            .latest_digest(&SourceRecordId::try_from("never-seen").expect("valid test fixture"))
             .await
             .expect("store operation");
         assert_eq!(digest, None);
@@ -220,7 +223,7 @@ fn a_payload_round_trips_byte_for_byte() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
         let body = br#"{"type":"updated","workout":{"id":"w1","surprise_field":[1,2,3]}}"#;
 
         landing
@@ -250,7 +253,7 @@ fn serve_ordinals_continue_across_pages_of_one_run() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
 
         landing
             .append(
@@ -306,16 +309,19 @@ fn a_deletion_lands_and_a_missing_event_time_stays_missing() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
 
         let deletion = LandingRecord::land(
-            SourceName::new("hevy").expect("valid test fixture"),
-            Endpoint::new("/v1/workouts/events").expect("valid test fixture"),
-            FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture"),
-            SourceRecordId::new("gone").expect("valid test fixture"),
-            EventKind::Deleted,
-            None,
-            RawPayload::new(br#"{"type":"deleted","id":"gone"}"#.to_vec())
+            hevy_workouts().expect("valid test fixture"),
+            FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture"),
+            SourceRecordId::try_from("gone").expect("valid test fixture"),
+            EventProvenance::new(
+                Endpoint::try_from("/v1/workouts/events").expect("valid test fixture"),
+                EventKind::Deleted,
+                None,
+            )
+            .into(),
+            RawPayload::try_from(br#"{"type":"deleted","id":"gone"}"#.as_slice())
                 .expect("valid test fixture"),
         );
         landing
@@ -340,7 +346,7 @@ fn an_unrecognised_event_kind_is_stored_verbatim() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool.clone());
+        let landing = HevyWorkoutLandingStore::new(pool.clone()).expect("a wired stream");
 
         landing
             .append(
@@ -348,7 +354,7 @@ fn an_unrecognised_event_kind_is_stored_verbatim() {
                 vec![
                     record(
                         "w1",
-                        EventKind::from_source("archived").expect("valid test fixture"),
+                        EventKind::try_from("archived").expect("valid test fixture"),
                         br#"{"type":"archived"}"#,
                         "2026-08-01T00:00:00Z",
                     )
@@ -372,17 +378,17 @@ fn appending_nothing_lands_nothing() {
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let run = a_run(&pool).await.expect("store operation");
-        let landing = HevyWorkoutLandingStore::new(pool);
+        let landing = HevyWorkoutLandingStore::new(pool).expect("a wired stream");
         assert_eq!(
             landing
                 .append(run, Vec::new())
                 .await
                 .expect("store operation"),
-            RecordCount::new(0)
+            RecordCount::from(0)
         );
         assert_eq!(
             landing.count().await.expect("store operation"),
-            RecordCount::new(0)
+            RecordCount::from(0)
         );
     });
 }
@@ -412,9 +418,9 @@ fn a_resumption_point_advances_and_clears() {
         let (_dir, pool) = store().await.expect("store operation");
         let points = SqliteResumptionPointStore::new(pool);
         let stream = hevy_workouts().expect("valid test fixture");
-        let at = FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture");
+        let at = FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture");
 
-        let first = Watermark::parse("2026-08-01T00:00:00Z").expect("valid test fixture");
+        let first = Watermark::try_from("2026-08-01T00:00:00Z").expect("valid test fixture");
         points
             .advance(&stream, first, at)
             .await
@@ -424,7 +430,7 @@ fn a_resumption_point_advances_and_clears() {
             Some(first)
         );
 
-        let later = Watermark::parse("2026-08-10T19:29:47.199Z").expect("valid test fixture");
+        let later = Watermark::try_from("2026-08-10T19:29:47.199Z").expect("valid test fixture");
         points
             .advance(&stream, later, at)
             .await
@@ -447,13 +453,13 @@ fn a_resumption_point_keeps_sub_second_precision() {
         let (_dir, pool) = store().await.expect("store operation");
         let points = SqliteResumptionPointStore::new(pool);
         let stream = hevy_workouts().expect("valid test fixture");
-        let precise = Watermark::parse("2026-08-10T19:29:47.199Z").expect("valid test fixture");
+        let precise = Watermark::try_from("2026-08-10T19:29:47.199Z").expect("valid test fixture");
 
         points
             .advance(
                 &stream,
                 precise,
-                FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture"),
+                FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture"),
             )
             .await
             .expect("store operation");
@@ -472,16 +478,14 @@ fn streams_of_one_source_resume_independently() {
         let (_dir, pool) = store().await.expect("store operation");
         let points = SqliteResumptionPointStore::new(pool);
         let workouts = hevy_workouts().expect("valid test fixture");
-        let measurements = LandingStream::new(
-            SourceName::new("hevy").expect("valid test fixture"),
-            EntityKind::new("measurements").expect("valid test fixture"),
-        );
-        let at = FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture");
+        let measurements =
+            LandingStream::try_from("hevy.measurements").expect("valid test fixture");
+        let at = FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture");
 
         points
             .advance(
                 &workouts,
-                Watermark::parse("2026-08-01T00:00:00Z").expect("valid test fixture"),
+                Watermark::try_from("2026-08-01T00:00:00Z").expect("valid test fixture"),
                 at,
             )
             .await
@@ -511,7 +515,7 @@ fn a_successful_run_that_found_nothing_is_still_a_success() {
         let (_dir, pool) = store().await.expect("store operation");
         let log = SqliteExtractionRunLog::new(pool);
         let stream = hevy_workouts().expect("valid test fixture");
-        let at = FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture");
+        let at = FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture");
 
         assert_eq!(
             log.latest_success(&stream).await.expect("store operation"),
@@ -529,8 +533,8 @@ fn a_successful_run_that_found_nothing_is_still_a_success() {
             run,
             RunOutcome::Succeeded {
                 finished_at: at,
-                events_seen: domain::landing::EventCount::new(0),
-                records_landed: RecordCount::new(0),
+                events_seen: domain::landing::EventCount::from(0),
+                records_landed: RecordCount::from(0),
             },
         )
         .await
@@ -554,7 +558,7 @@ fn a_failed_run_is_not_a_success() {
         let (_dir, pool) = store().await.expect("store operation");
         let log = SqliteExtractionRunLog::new(pool);
         let stream = hevy_workouts().expect("valid test fixture");
-        let at = FetchedAt::parse("2026-08-11T18:19:59Z").expect("valid test fixture");
+        let at = FetchedAt::try_from("2026-08-11T18:19:59Z").expect("valid test fixture");
 
         let run = log.begin(&stream, at).await.expect("store operation");
         log.finish(
@@ -586,14 +590,14 @@ fn the_latest_success_is_the_most_recent_one() {
             "2026-08-11T00:00:00Z",
             "2026-08-10T00:00:00Z",
         ] {
-            let at = FetchedAt::parse(finished).expect("valid test fixture");
+            let at = FetchedAt::try_from(finished).expect("valid test fixture");
             let run = log.begin(&stream, at).await.expect("store operation");
             log.finish(
                 run,
                 RunOutcome::Succeeded {
                     finished_at: at,
-                    events_seen: domain::landing::EventCount::new(1),
-                    records_landed: RecordCount::new(1),
+                    events_seen: domain::landing::EventCount::from(1),
+                    records_landed: RecordCount::from(1),
                 },
             )
             .await
@@ -607,7 +611,7 @@ fn the_latest_success_is_the_most_recent_one() {
             .expect("a success");
         assert_eq!(
             latest.outcome().finished_at(),
-            Some(FetchedAt::parse("2026-08-11T00:00:00Z").expect("valid test fixture"))
+            Some(FetchedAt::try_from("2026-08-11T00:00:00Z").expect("valid test fixture"))
         );
     });
 }

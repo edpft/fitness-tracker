@@ -1,12 +1,19 @@
-//! The names a landing record carries: what served it, what was called, and
-//! what the source called the thing.
+//! What a landing record is about: which stream it belongs to, and what the
+//! source calls the thing it describes.
 
 use std::fmt;
 
-/// Why an identifier could not be constructed.
+use super::newtype::string_name;
+
+/// What separates a stream's two halves in its text form.
+pub const STREAM_SEPARATOR: char = '.';
+
+/// Why a name we assign could not be constructed.
 ///
-/// One enum rather than one per type: the failure modes are shared, and the
-/// field name is what makes a message useful.
+/// One enum rather than one per type: these three types answer to the same
+/// rules for the same reason, and the field name is what makes a message
+/// useful. A name a *source* assigns is [`SourceRecordId`], which answers to
+/// almost none of them.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidIdentifier {
     #[error("{field} must not be empty")]
@@ -15,27 +22,32 @@ pub enum InvalidIdentifier {
     ContainsWhitespace { field: &'static str },
     #[error("{field} must be lowercase")]
     NotLowercase { field: &'static str },
-    #[error("{field} must begin with '/'")]
-    NotAbsolutePath { field: &'static str },
+    #[error("{field} must not contain '.'")]
+    ContainsSeparator { field: &'static str },
 }
 
-fn reject_empty(field: &'static str, value: &str) -> Result<(), InvalidIdentifier> {
+/// The rules a name we assign must satisfy, and where they come from.
+///
+/// They are not a guess at what is generally reasonable. A [`LandingStream`]
+/// is written `hevy.workouts` — on the command line, in a resumption point's
+/// key, and in every message an operator reads — and that text form has to
+/// round-trip. A separator inside a half would make the split ambiguous;
+/// whitespace would make the argument need quoting; mixed case would let one
+/// stream be spelled two ways and resume from two different places.
+///
+/// Nothing here is imposed on a value a source owns.
+fn reject_unusable_name(field: &'static str, value: &str) -> Result<(), InvalidIdentifier> {
     if value.is_empty() {
         return Err(InvalidIdentifier::Empty { field });
     }
-    Ok(())
-}
-
-fn reject_whitespace(field: &'static str, value: &str) -> Result<(), InvalidIdentifier> {
     if value.chars().any(char::is_whitespace) {
         return Err(InvalidIdentifier::ContainsWhitespace { field });
     }
-    Ok(())
-}
-
-fn reject_uppercase(field: &'static str, value: &str) -> Result<(), InvalidIdentifier> {
     if value.chars().any(char::is_uppercase) {
         return Err(InvalidIdentifier::NotLowercase { field });
+    }
+    if value.contains(STREAM_SEPARATOR) {
+        return Err(InvalidIdentifier::ContainsSeparator { field });
     }
     Ok(())
 }
@@ -44,29 +56,16 @@ fn reject_uppercase(field: &'static str, value: &str) -> Result<(), InvalidIdent
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceName(String);
 
-impl SourceName {
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the name is empty, contains
-    /// whitespace, or is not lowercase.
-    pub fn new(name: impl Into<String>) -> Result<Self, InvalidIdentifier> {
-        let name = name.into();
-        reject_empty("a source name", &name)?;
-        reject_whitespace("a source name", &name)?;
-        reject_uppercase("a source name", &name)?;
+impl TryFrom<String> for SourceName {
+    type Error = InvalidIdentifier;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        reject_unusable_name("a source name", &name)?;
         Ok(Self(name))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for SourceName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+string_name!(SourceName, InvalidIdentifier);
 
 /// The kind of thing a source serves us. `workouts`.
 ///
@@ -75,28 +74,24 @@ impl fmt::Display for SourceName {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntityKind(String);
 
-impl EntityKind {
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the kind is empty, contains
-    /// whitespace, or is not lowercase.
-    pub fn new(kind: impl Into<String>) -> Result<Self, InvalidIdentifier> {
-        let kind = kind.into();
-        reject_empty("an entity kind", &kind)?;
-        reject_whitespace("an entity kind", &kind)?;
-        reject_uppercase("an entity kind", &kind)?;
-        Ok(Self(kind))
-    }
+impl TryFrom<String> for EntityKind {
+    type Error = InvalidIdentifier;
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    fn try_from(kind: String) -> Result<Self, Self::Error> {
+        reject_unusable_name("an entity kind", &kind)?;
+        Ok(Self(kind))
     }
 }
 
-impl fmt::Display for EntityKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
+string_name!(EntityKind, InvalidIdentifier);
+
+/// Why a stream could not be read from its text form.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidStream {
+    #[error("a stream is named source.entity, and {value:?} is not")]
+    Malformed { value: String },
+    #[error(transparent)]
+    Half(#[from] InvalidIdentifier),
 }
 
 /// One source's one entity type: `hevy.workouts`.
@@ -124,44 +119,37 @@ impl LandingStream {
     }
 }
 
+/// The inverse of [`LandingStream`]'s `Display`, which is what makes the name
+/// an operator types the same name the system prints back.
+impl TryFrom<&str> for LandingStream {
+    type Error = InvalidStream;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let (source, entity) =
+            value
+                .split_once(STREAM_SEPARATOR)
+                .ok_or_else(|| InvalidStream::Malformed {
+                    value: value.to_owned(),
+                })?;
+
+        Ok(Self::new(
+            SourceName::try_from(source)?,
+            EntityKind::try_from(entity)?,
+        ))
+    }
+}
+
+impl std::str::FromStr for LandingStream {
+    type Err = InvalidStream;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value)
+    }
+}
+
 impl fmt::Display for LandingStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.source, self.entity)
-    }
-}
-
-/// What was called to obtain a payload. `/v1/workouts/events`.
-///
-/// Real provenance rather than a constant: the same entity can arrive from
-/// more than one endpoint of the same source.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Endpoint(String);
-
-impl Endpoint {
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the endpoint is empty, contains
-    /// whitespace, or does not begin with `/`.
-    pub fn new(endpoint: impl Into<String>) -> Result<Self, InvalidIdentifier> {
-        let endpoint = endpoint.into();
-        reject_empty("an endpoint", &endpoint)?;
-        reject_whitespace("an endpoint", &endpoint)?;
-        if !endpoint.starts_with('/') {
-            return Err(InvalidIdentifier::NotAbsolutePath {
-                field: "an endpoint",
-            });
-        }
-        Ok(Self(endpoint))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for Endpoint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        write!(f, "{}{STREAM_SEPARATOR}{}", self.source, self.entity)
     }
 }
 
@@ -171,29 +159,22 @@ impl fmt::Display for Endpoint {
 /// says so in its published interface. Validating a source's identifier format
 /// is interpreting a source field, which raw landing does not do — and it
 /// would fail extraction to defend a constraint we do not own. Non-empty is
-/// ours to require: provenance has no meaning without it.
+/// the one thing we do require, and it is required of us rather than of the
+/// source: provenance has no meaning without it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceRecordId(String);
 
-impl SourceRecordId {
-    /// # Errors
-    ///
-    /// Returns [`InvalidIdentifier`] if the identifier is empty or contains
-    /// whitespace.
-    pub fn new(id: impl Into<String>) -> Result<Self, InvalidIdentifier> {
-        let id = id.into();
-        reject_empty("a source record id", &id)?;
-        reject_whitespace("a source record id", &id)?;
+impl TryFrom<String> for SourceRecordId {
+    type Error = InvalidIdentifier;
+
+    fn try_from(id: String) -> Result<Self, Self::Error> {
+        if id.is_empty() {
+            return Err(InvalidIdentifier::Empty {
+                field: "a source record id",
+            });
+        }
         Ok(Self(id))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for SourceRecordId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+string_name!(SourceRecordId, InvalidIdentifier);

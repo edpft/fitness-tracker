@@ -7,8 +7,10 @@
 
 pub mod client;
 pub mod page;
+pub mod paging;
 pub mod retry;
 
 pub use client::{EVENTS_ENDPOINT, HevyWorkoutEvents};
 pub use page::parse_page;
+pub use paging::{PageCount, PageNumber};
 pub use retry::RetryPolicy;
