@@ -396,6 +396,40 @@
                 touch "$out"
               '';
 
+          typos =
+            pkgs.runCommand "typos"
+              {
+                nativeBuildInputs = [ pkgs.typos ];
+              }
+              ''
+                typos ${
+                  lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./.;
+                  }
+                }
+                touch "$out"
+              '';
+
+          unused-deps =
+            pkgs.runCommand "unused-deps"
+              {
+                nativeBuildInputs = [ pkgs.cargo-machete ];
+              }
+              ''
+                cargo-machete ${
+                  lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./.;
+                  }
+                }
+                touch "$out"
+              '';
+
+          toml-fmt = craneLib.taploFmt {
+            src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
+          };
+
           audit-deps = craneLib.cargoAudit {
             inherit src advisory-db;
           };
@@ -433,6 +467,8 @@
             actionlint
             cargo-watch
             taplo
+            typos
+            cargo-machete
             # For spec-kit
             uv
             # agent

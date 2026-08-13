@@ -52,27 +52,27 @@ impl LandingRecord {
         }
     }
 
-    pub fn stream(&self) -> &LandingStream {
+    pub const fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    pub fn fetched_at(&self) -> FetchedAt {
+    pub const fn fetched_at(&self) -> FetchedAt {
         self.fetched_at
     }
 
-    pub fn source_record_id(&self) -> &SourceRecordId {
+    pub const fn source_record_id(&self) -> &SourceRecordId {
         &self.source_record_id
     }
 
-    pub fn provenance(&self) -> &Provenance {
+    pub const fn provenance(&self) -> &Provenance {
         &self.provenance
     }
 
-    pub fn payload(&self) -> &RawPayload {
+    pub const fn payload(&self) -> &RawPayload {
         &self.payload
     }
 
-    pub fn digest(&self) -> PayloadDigest {
+    pub const fn digest(&self) -> PayloadDigest {
         self.digest
     }
 }

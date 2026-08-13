@@ -61,7 +61,7 @@ macro_rules! string_name {
 macro_rules! instant {
     ($name:ident) => {
         impl $name {
-            pub fn as_timestamp(self) -> Timestamp {
+            pub const fn as_timestamp(self) -> Timestamp {
                 self.0
             }
         }

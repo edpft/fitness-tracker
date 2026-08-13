@@ -32,11 +32,11 @@ impl KnownStream {
         format!("{}.{}", self.source, self.entity)
     }
 
-    pub fn default_base_url(&self) -> &'static str {
+    pub const fn default_base_url(&self) -> &'static str {
         self.default_base_url
     }
 
-    pub fn credential_url(&self) -> &'static str {
+    pub const fn credential_url(&self) -> &'static str {
         self.credential_url
     }
 

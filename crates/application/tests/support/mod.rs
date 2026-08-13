@@ -323,10 +323,7 @@ impl LandingStore for InMemoryLanding {
             });
         }
         let landed = u64::try_from(records.len()).unwrap_or(u64::MAX);
-        let mut held = guard(&self.records);
-        for record in records {
-            held.push((run, record));
-        }
+        guard(&self.records).extend(records.into_iter().map(|record| (run, record)));
         Ok(RecordCount::from(landed))
     }
 
@@ -396,20 +393,25 @@ impl InMemoryRuns {
 
 impl ExtractionRunLog for InMemoryRuns {
     async fn begin(&self, _stream: &LandingStream, at: FetchedAt) -> Result<RunId, StoreError> {
-        let mut runs = guard(&self.runs);
-        let id = RunId::from(
-            u64::try_from(runs.len())
-                .unwrap_or(u64::MAX)
-                .saturating_add(1),
-        );
-        runs.push((id, RunOutcome::InFlight));
+        // Scoped so the `runs` lock is released before `started` is taken:
+        // holding two of this fake's locks at once is a deadlock waiting for a
+        // test that touches it from more than one task.
+        let id = {
+            let mut runs = guard(&self.runs);
+            let id = RunId::from(
+                u64::try_from(runs.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(1),
+            );
+            runs.push((id, RunOutcome::InFlight));
+            id
+        };
         guard(&self.started).push(at);
         Ok(id)
     }
 
     async fn finish(&self, run: RunId, outcome: RunOutcome) -> Result<(), StoreError> {
-        let mut runs = guard(&self.runs);
-        if let Some(entry) = runs.iter_mut().find(|(id, _)| *id == run) {
+        if let Some(entry) = guard(&self.runs).iter_mut().find(|(id, _)| *id == run) {
             entry.1 = outcome;
         }
         Ok(())

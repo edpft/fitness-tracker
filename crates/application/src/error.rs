@@ -72,7 +72,7 @@ pub enum ExtractionError {
 impl ExtractionError {
     /// How this failure is recorded against the run, so that a later reader
     /// can tell what went wrong without the original error being in scope.
-    pub fn as_failure_reason(&self) -> FailureReason {
+    pub const fn as_failure_reason(&self) -> FailureReason {
         match self {
             Self::AlreadyRunning => FailureReason::AlreadyRunning,
             Self::Source(SourceError::Unavailable { .. }) => FailureReason::SourceUnavailable,

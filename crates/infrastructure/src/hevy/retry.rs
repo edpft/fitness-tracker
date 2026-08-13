@@ -31,7 +31,7 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
-    pub fn new(attempts: u32, base: Duration, ceiling: Duration) -> Self {
+    pub const fn new(attempts: u32, base: Duration, ceiling: Duration) -> Self {
         Self {
             attempts,
             base,
@@ -42,7 +42,7 @@ impl RetryPolicy {
     /// A policy that never waits, for tests that assert retry *counts* rather
     /// than timing. Sleeping to prove backoff exists makes a suite slow and
     /// tells you nothing the count does not.
-    pub fn immediate(attempts: u32) -> Self {
+    pub const fn immediate(attempts: u32) -> Self {
         Self {
             attempts,
             base: Duration::ZERO,
@@ -50,7 +50,7 @@ impl RetryPolicy {
         }
     }
 
-    pub fn attempts(self) -> u32 {
+    pub const fn attempts(self) -> u32 {
         self.attempts
     }
 

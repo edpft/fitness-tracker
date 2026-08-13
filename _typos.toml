@@ -1,0 +1,6 @@
+[files]
+extend-exclude = ["Cargo.lock", "flake.lock", "**/*.pinned.json"]
+
+[default.extend-words]
+# Don't correct the app name "Hevy"
+Hevy = "Hevy"

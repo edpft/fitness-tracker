@@ -18,7 +18,7 @@ pub struct SqliteExtractionRunLog {
 }
 
 impl SqliteExtractionRunLog {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 }

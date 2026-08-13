@@ -22,7 +22,7 @@ pub struct NegativeRunId {
 pub struct RunId(u64);
 
 impl RunId {
-    pub fn as_u64(self) -> u64 {
+    pub const fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -54,7 +54,7 @@ impl fmt::Display for RunId {
 pub struct EventCount(u64);
 
 impl EventCount {
-    pub fn as_u64(self) -> u64 {
+    pub const fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -76,7 +76,7 @@ impl fmt::Display for EventCount {
 pub struct RecordCount(u64);
 
 impl RecordCount {
-    pub fn as_u64(self) -> u64 {
+    pub const fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -121,7 +121,7 @@ impl FailureReason {
     /// The stored form. Round-trips through `TryFrom<&str>`.
     ///
     /// Not `Display`, which is the sentence an operator reads.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SourceUnavailable => "source_unavailable",
             Self::Unauthorised => "unauthorised",
@@ -191,11 +191,11 @@ pub enum RunOutcome {
 }
 
 impl RunOutcome {
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         matches!(self, Self::Succeeded { .. })
     }
 
-    pub fn finished_at(&self) -> Option<FetchedAt> {
+    pub const fn finished_at(&self) -> Option<FetchedAt> {
         match self {
             Self::InFlight => None,
             Self::Succeeded { finished_at, .. } | Self::Failed { finished_at, .. } => {
@@ -215,7 +215,7 @@ pub struct ExtractionRun {
 }
 
 impl ExtractionRun {
-    pub fn new(
+    pub const fn new(
         id: RunId,
         stream: LandingStream,
         started_at: FetchedAt,
@@ -229,19 +229,19 @@ impl ExtractionRun {
         }
     }
 
-    pub fn id(&self) -> RunId {
+    pub const fn id(&self) -> RunId {
         self.id
     }
 
-    pub fn stream(&self) -> &LandingStream {
+    pub const fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    pub fn started_at(&self) -> FetchedAt {
+    pub const fn started_at(&self) -> FetchedAt {
         self.started_at
     }
 
-    pub fn outcome(&self) -> &RunOutcome {
+    pub const fn outcome(&self) -> &RunOutcome {
         &self.outcome
     }
 }

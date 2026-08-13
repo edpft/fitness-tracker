@@ -72,12 +72,12 @@ fn record(id: &str, kind: EventKind, body: &[u8], at: &str) -> Fallible<LandingR
 
 async fn a_run(pool: &SqlitePool) -> Fallible<RunId> {
     let log = SqliteExtractionRunLog::new(pool.clone());
-    Ok(log
-        .begin(
-            &hevy_workouts()?,
-            FetchedAt::try_from("2026-08-11T18:19:59Z")?,
-        )
-        .await?)
+    // Resolved before the await rather than inline: `?` on a `Fallible` leaves
+    // a `Box<dyn Error>` temporary alive across the await point, which makes
+    // the whole future `!Send`.
+    let stream = hevy_workouts()?;
+    let at = FetchedAt::try_from("2026-08-11T18:19:59Z")?;
+    Ok(log.begin(&stream, at).await?)
 }
 
 // --- Raw is append-only -----------------------------------------------------

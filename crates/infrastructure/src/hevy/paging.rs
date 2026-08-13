@@ -21,7 +21,7 @@ impl PageNumber {
     }
 
     #[must_use]
-    pub fn next(self) -> Self {
+    pub const fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
 

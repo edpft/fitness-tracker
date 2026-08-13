@@ -63,7 +63,7 @@ pub struct EventProvenance {
 }
 
 impl EventProvenance {
-    pub fn new(endpoint: Endpoint, kind: EventKind, occurred_at: Option<EventTime>) -> Self {
+    pub const fn new(endpoint: Endpoint, kind: EventKind, occurred_at: Option<EventTime>) -> Self {
         Self {
             endpoint,
             kind,
@@ -71,15 +71,15 @@ impl EventProvenance {
         }
     }
 
-    pub fn endpoint(&self) -> &Endpoint {
+    pub const fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
 
-    pub fn kind(&self) -> &EventKind {
+    pub const fn kind(&self) -> &EventKind {
         &self.kind
     }
 
-    pub fn occurred_at(&self) -> Option<EventTime> {
+    pub const fn occurred_at(&self) -> Option<EventTime> {
         self.occurred_at
     }
 }
@@ -107,7 +107,7 @@ impl Provenance {
     /// what carried the payload: it is where a resumption point comes from,
     /// and every transport has some answer to it — including "none", which is
     /// why it is optional rather than absent.
-    pub fn occurred_at(&self) -> Option<EventTime> {
+    pub const fn occurred_at(&self) -> Option<EventTime> {
         let Self::Event(event) = self;
         event.occurred_at()
     }
