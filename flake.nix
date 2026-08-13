@@ -411,6 +411,21 @@
                 touch "$out"
               '';
 
+          unused-deps =
+            pkgs.runCommand "unused-deps"
+              {
+                nativeBuildInputs = [ pkgs.cargo-machete ];
+              }
+              ''
+                cargo-machete ${
+                  lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./.;
+                  }
+                }
+                touch "$out"
+              '';
+
           audit-deps = craneLib.cargoAudit {
             inherit src advisory-db;
           };
