@@ -426,6 +426,10 @@
                 touch "$out"
               '';
 
+          toml-fmt = craneLib.taploFmt {
+            src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
+          };
+
           audit-deps = craneLib.cargoAudit {
             inherit src advisory-db;
           };
@@ -463,6 +467,8 @@
             actionlint
             cargo-watch
             taplo
+            typos
+            cargo-machete
             # For spec-kit
             uv
             # agent
