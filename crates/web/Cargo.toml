@@ -11,5 +11,12 @@ application.workspace = true
 domain.workspace = true
 infrastructure.workspace = true
 
+# Dormant by design (see `main.rs`), so none of the above is used yet. They are
+# not speculative: these three path edges are what the `architecture` check
+# reads to assert this crate's ring, and dropping them to quiet the scan would
+# quietly stop that check watching web at all.
+[package.metadata.cargo-machete]
+ignored = ["application", "domain", "infrastructure"]
+
 [lints]
 workspace = true
