@@ -12,3 +12,6 @@ permissions:
 jobs:
   release-please:
     uses: edpft/rust-workflows/.github/workflows/release-please.yml@main
+    with:
+      config-file: release-please-config.json
+      manifest-file: .release-please-manifest.json

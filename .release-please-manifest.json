@@ -1,0 +1,7 @@
+{
+    "crates/domain": "0.1.0",
+    "crates/application": "0.1.0",
+    "crates/infrastructure": "0.1.0",
+    "crates/web": "0.1.0",
+    "crates/cli": "0.1.0"
+}
