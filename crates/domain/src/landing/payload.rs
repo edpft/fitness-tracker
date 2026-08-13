@@ -92,7 +92,7 @@ pub struct WrongDigestWidth {
 pub struct PayloadDigest([u8; 32]);
 
 impl PayloadDigest {
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 }

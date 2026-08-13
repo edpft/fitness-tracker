@@ -106,15 +106,15 @@ pub struct LandingStream {
 }
 
 impl LandingStream {
-    pub fn new(source: SourceName, entity: EntityKind) -> Self {
+    pub const fn new(source: SourceName, entity: EntityKind) -> Self {
         Self { source, entity }
     }
 
-    pub fn source(&self) -> &SourceName {
+    pub const fn source(&self) -> &SourceName {
         &self.source
     }
 
-    pub fn entity(&self) -> &EntityKind {
+    pub const fn entity(&self) -> &EntityKind {
         &self.entity
     }
 }

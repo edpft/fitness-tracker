@@ -24,7 +24,7 @@ fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 
 /// What the source said happened. In the provenance rather than beside it,
 /// because an event kind is true of a feed of events and not of every source.
-fn kind_of(event: &SourceEvent) -> &EventKind {
+const fn kind_of(event: &SourceEvent) -> &EventKind {
     let Provenance::Event(served) = &event.provenance;
     served.kind()
 }

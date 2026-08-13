@@ -62,6 +62,15 @@ pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 must_use_candidate = "allow"
+# Duplicate transitive versions are cargo-deny's business, not clippy's.
+# `deny.toml` already rules on them (`bans.multiple-versions = "warn"`) and
+# gives the reason: they arrive through someone else's dependency tree and are
+# not ours to fix. This lint restates that judgement as a build failure, and
+# restates it per crate — nine duplicate pairs became forty-nine warnings —
+# with no way to accept one pair and keep watching the rest. Two checks
+# disagreeing about the same fact is the thing to remove; the one that can
+# express the nuance stays.
+multiple_crate_versions = "allow"
 
 # Constitution § 26: no panics and no unhandled errors.
 #
