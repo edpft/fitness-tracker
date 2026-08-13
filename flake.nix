@@ -396,6 +396,21 @@
                 touch "$out"
               '';
 
+          typos =
+            pkgs.runCommand "typos"
+              {
+                nativeBuildInputs = [ pkgs.typos ];
+              }
+              ''
+                typos ${
+                  lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./.;
+                  }
+                }
+                touch "$out"
+              '';
+
           audit-deps = craneLib.cargoAudit {
             inherit src advisory-db;
           };
