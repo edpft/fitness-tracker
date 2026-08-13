@@ -19,6 +19,44 @@ domain = { path = "crates/domain" }
 application = { path = "crates/application" }
 infrastructure = { path = "crates/infrastructure" }
 
+# Data types. These are allowed in `domain`: they describe values rather than
+# machinery, and a core that cannot name a timestamp ends up passing strings
+# across its own boundaries.
+#
+# `jiff` rather than chrono: § II requires an IANA zone identifier and says an
+# offset is not a substitute. jiff's Timestamp/Zoned split is exactly that
+# distinction, and it has no naive local type to reach for by accident.
+jiff = "0.2.35"
+sha2 = "0.11.0"
+thiserror = "2.0.20"
+
+# Adapters. Nothing below this line may appear in `domain` or `application`.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+# rustls, not native-tls: no OpenSSL, so the nix build needs no buildInputs.
+# The feature is `rustls` — 0.13 renamed it from `rustls-tls`.
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "rustls",
+  # Query-string building is feature-gated in 0.13.
+  "query",
+] }
+serde = { version = "1.0.229", features = ["derive"] }
+# `raw_value` is load-bearing, not a convenience: RawValue borrows the exact
+# source bytes of a sub-value, which is how a payload is stored as received
+# (FR-002) without re-serialising a parsed Value and reordering its keys.
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+sqlx = { version = "0.9.0", default-features = false, features = [
+  "sqlite",
+  "runtime-tokio",
+  "migrate",
+  "macros",
+] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
+
+# Test-only.
+proptest = "1.11.0"
+wiremock = "0.6.5"
+tempfile = "3.27.0"
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 must_use_candidate = "allow"
@@ -53,6 +91,12 @@ name = "workspace"
 [profile.dev]
 opt-level = 1
 
-# Enable a large amount of optimization in the dev profile for dependencies.
+# Some optimization for dependencies, not full optimization.
+#
+# This was `3`, which optimises all ~300 dependencies at every clean build. That
+# trade buys faster dependency *runtime*, and this workload has none worth
+# buying: a few dozen HTTP requests and a few thousand records. What it costs is
+# peak build memory, which is the binding constraint — a full-tree build at four
+# parallel jobs is enough to stall the machine on memory.
 [profile.dev.package."*"]
-opt-level = 3
+opt-level = 1

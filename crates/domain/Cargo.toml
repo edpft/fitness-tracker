@@ -5,8 +5,20 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# The core depends on nothing. Keep it that way.
+# The core depends on no workspace crate, no framework, no transport and no
+# store. Keep it that way.
+#
+# Data-type dependencies are fine — jiff, sha2, uuid, url and their kind. They
+# describe values, not machinery, and a domain that cannot name a timestamp
+# ends up passing strings across its own boundaries. The `architecture` check
+# in flake.nix enforces the rule that matters: which ring may depend on which.
 [dependencies]
+jiff.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true

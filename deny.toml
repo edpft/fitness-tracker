@@ -15,9 +15,26 @@ allow = [
   "ISC",
   "MIT",
   "Unicode-3.0",
+  # Permissive, OSI-approved and GPL-compatible. Arrived via foldhash under
+  # hashbrown under sqlx, but it goes here rather than in an exception because
+  # we would accept it from any crate — the list is for licence classes we are
+  # happy with, and a carve-out would imply we are not.
+  "Zlib",
   # Match this to the license in the workspace Cargo.toml.
   "GPL-3.0-or-later",
 ]
+
+# Scoped acceptances: a specific crate whose licence we accept because of what
+# that crate *is*. Unlike `allow` above, nothing here generalises.
+#
+# webpki-root-certs is Mozilla's CA root store — data, not code, which is why
+# it carries a data licence. CDLA-Permissive-2.0 imposes no conditions on
+# software that merely reads the set. We would not accept it on a code
+# dependency, so it is pinned to this one crate rather than allowed outright.
+# Reached via rustls-platform-verifier under reqwest.
+[[licenses.exceptions]]
+name = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
 
 [bans]
 # Duplicate versions of a crate are a warning, not an error: they are usually

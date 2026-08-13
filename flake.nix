@@ -50,7 +50,37 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        src = craneLib.cleanCargoSource ./.;
+        # Every crate builds from the same file set: cargo needs the whole
+        # workspace manifest graph even when building a single member, and sqlx
+        # needs the migrations and the offline query metadata at *compile*
+        # time. `cleanCargoSource` would drop both — it keeps only files cargo
+        # itself recognises — so the fileset is spelled out here and used
+        # everywhere rather than only for the per-crate builds.
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            # One entry per workspace member:
+            (craneLib.fileset.commonCargoSources ./crates/domain)
+            (craneLib.fileset.commonCargoSources ./crates/application)
+            (craneLib.fileset.commonCargoSources ./crates/infrastructure)
+            (craneLib.fileset.commonCargoSources ./crates/web)
+            (craneLib.fileset.commonCargoSources ./crates/cli)
+            # `sqlx::migrate!` embeds these, and `query!` is verified against
+            # the schema they produce.
+            ./migrations
+            # Offline query metadata. Regenerate with `cargo sqlx prepare`
+            # after changing a query; a stale directory fails the build here
+            # rather than surprising someone later.
+            ./.sqlx
+            # Tool config files — add as you create them:
+            ./clippy.toml
+            # ./rustfmt.toml
+            ./deny.toml
+            # ./taplo.toml
+          ];
+        };
 
         buildDeps = (
           with pkgs;
@@ -64,6 +94,12 @@
         commonArgs = {
           inherit src;
           strictDeps = true;
+
+          # sqlx verifies every `query!` against the schema at compile time.
+          # Offline means it reads the committed `.sqlx` metadata rather than
+          # reaching for a database, which keeps the build hermetic — and makes
+          # a query changed without regenerating that metadata a build failure.
+          SQLX_OFFLINE = "true";
 
           nativeBuildInputs = buildDeps;
 
@@ -82,26 +118,6 @@
           inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
           # NB: we disable tests since we'll run them all via cargo-nextest
           doCheck = false;
-        };
-
-        # Every crate builds from the same file set: cargo needs the whole
-        # workspace manifest graph even when building a single member.
-        workspaceSrc = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            # One entry per workspace member:
-            (craneLib.fileset.commonCargoSources ./crates/domain)
-            (craneLib.fileset.commonCargoSources ./crates/application)
-            (craneLib.fileset.commonCargoSources ./crates/infrastructure)
-            (craneLib.fileset.commonCargoSources ./crates/web)
-            # Tool config files — add as you create them:
-            ./clippy.toml
-            # ./rustfmt.toml
-            ./deny.toml
-            # ./taplo.toml
-          ];
         };
 
         # Everything under version control, for the checks that scan the
@@ -124,11 +140,16 @@
         # which is the question worth being asked; what a crate takes from
         # crates.io is not this check's business — § 16 tags the vendor rule
         # `[review]`, and chrono or uuid in the domain is nobody's emergency.
+        # `cli` and `web` are peers: two driving adapters, two composition
+        # roots, neither depending on the other. Equal ring numbers make that
+        # structural — the check requires a strict decrease across every edge,
+        # so a dependency either way fails.
         crateRings = {
           domain = 0;
           application = 1;
           infrastructure = 2;
           web = 3;
+          cli = 3;
         };
 
         # Add one of these per workspace member you want to build.
@@ -136,7 +157,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p domain";
-            src = workspaceSrc;
           }
         );
 
@@ -144,7 +164,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p application";
-            src = workspaceSrc;
           }
         );
 
@@ -152,7 +171,6 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p infrastructure";
-            src = workspaceSrc;
           }
         );
 
@@ -160,9 +178,17 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p web";
-            src = workspaceSrc;
             # Lets `nix run` find the binary without a hand-written app.
             meta.mainProgram = "web";
+          }
+        );
+
+        cli = craneLib.buildPackage (
+          individualCrateArgs
+          // {
+            cargoExtraArgs = "-p cli";
+            # The crate is `cli`; the binary operators type is `fitness`.
+            meta.mainProgram = "fitness";
           }
         );
 
@@ -174,6 +200,7 @@
             application
             infrastructure
             web
+            cli
             ;
 
           format = craneLib.cargoFmt {
@@ -192,6 +219,21 @@
             commonArgs
             // {
               inherit cargoArtifacts;
+
+              # reqwest's TLS backend reads the platform trust store when a
+              # client is *built*, and the sandbox has none — so constructing a
+              # client fails even for a plain-HTTP request to a local stub, and
+              # every contract test fails with "builder error".
+              #
+              # This grants no network access: the sandbox still has none, and
+              # the tests still only talk to a stub on loopback. It only lets
+              # the TLS backend initialise.
+              #
+              # Set here rather than in `commonArgs` on purpose. `commonArgs`
+              # feeds `cargoArtifacts`, so putting it there would change the
+              # hash of the vendored-dependency derivation and rebuild all ~300
+              # crates. Only the tests run code that needs this.
+              SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
             }
           );
 
@@ -248,7 +290,7 @@
                 export CARGO_HOME="$TMPDIR/cargo"
 
                 # The whole repository, not the curated build source: a crate
-                # missing from `workspaceSrc` must still be seen here, or it
+                # missing from `src` must still be seen here, or it
                 # would evade the check entirely.
                 cargo metadata --no-deps --offline --format-version 1 \
                   --manifest-path ${repoSrc}/Cargo.toml \
@@ -283,7 +325,32 @@
                 touch "$out"
               '';
 
-          # Not constitutional — build hygiene. `workspaceSrc` lists its members
+          # Constitution § 15, § 16. The ring check above proves the
+          # dependency points the right way; it cannot prove what is done with
+          # it. `infrastructure` depends on `application` because that is where
+          # the ports it implements are declared — and nothing in cargo stops a
+          # driven adapter from reaching past those ports and calling a use
+          # case, which would make the adapter drive the application it is
+          # supposed to be driven by.
+          #
+          # `application` keeps its use cases behind `extract` and `status`
+          # rather than re-exporting them at the crate root, so naming one
+          # requires naming its module. That makes this greppable, which is the
+          # only reason the module boundary is worth keeping.
+          use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
+            if grep -rn 'application::\(extract\|status\)' \
+                 ${repoSrc}/crates/infrastructure; then
+              echo
+              echo "Constitution § 16: a driven adapter implements ports, it"
+              echo "does not call the use cases. What infrastructure may name"
+              echo "from application is its ports and its errors."
+              exit 1
+            fi
+
+            touch "$out"
+          '';
+
+          # Not constitutional — build hygiene. `src` lists its members
           # by hand, so a new crate can be perfectly valid to cargo while nix
           # silently ignores its sources, and every per-crate build keeps
           # passing without ever compiling it.
@@ -304,9 +371,9 @@
                     | jq -r '.packages[].name' | sort
                 }
 
-                if ! diff -u <(members ${repoSrc}) <(members ${workspaceSrc}); then
+                if ! diff -u <(members ${repoSrc}) <(members ${src}); then
                   echo
-                  echo "A workspace member is missing from \`workspaceSrc\` in"
+                  echo "A workspace member is missing from \`src\` in"
                   echo "flake.nix, so nix is not building it. Add it there, and"
                   echo "give it a \`buildPackage\` block if it should build alone."
                   exit 1
@@ -338,7 +405,13 @@
           };
         };
 
-        packages.default = web;
+        packages = {
+          # `cli` is the default because it is the one that does something:
+          # `nix run` should hand you the working tool, not the dormant HTTP
+          # stub. Both are exposed by name.
+          default = cli;
+          inherit cli web;
+        };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
         formatter = pkgs.nixfmt;
@@ -352,6 +425,10 @@
             cargo-nextest
             gitleaks
             nixfmt
+            # Regenerating `.sqlx` after a query changes, and reading the store
+            # by hand during validation.
+            sqlx-cli
+            sqlite
             # Conveniences.
             actionlint
             cargo-watch

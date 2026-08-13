@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE extraction_run\n            SET finished_at = ?, outcome = ?, events_seen = ?,\n                records_landed = ?, failure_reason = ?\n            WHERE id = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "c192c02736f97c75f863cbd68efcf852a5deafaadd64e4081480df0a00c58ffb"
+}

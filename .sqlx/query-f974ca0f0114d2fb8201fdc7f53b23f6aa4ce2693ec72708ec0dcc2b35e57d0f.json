@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT watermark AS \"watermark!: String\" FROM resumption_point WHERE stream = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "watermark!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "resumption_point",
+            "name": "watermark"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f974ca0f0114d2fb8201fdc7f53b23f6aa4ce2693ec72708ec0dcc2b35e57d0f"
+}

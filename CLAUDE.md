@@ -28,8 +28,21 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
 ## Layout
 
-`web → infrastructure → application → domain`, inward only. Ports are declared
-in `application`; `web` is the composition root.
+`{cli, web} → infrastructure → application → domain`, inward only. Ports are
+declared in `application` — the standard hexagonal position, because a port is
+defined by what the core needs rather than by what an adapter offers.
+
+Two driving adapters, both operator entry points, both composition roots, both
+at ring 3 and neither depending on the other. `cli` is being built first; the
+two are meant to reach feature parity, which is both a convenience and the
+demonstration that the hexagonal split is real. A capability that only one of
+them can invoke is a sign the capability has been built into a transport.
+
+`application` re-exports its ports and errors at the crate root but keeps its
+use cases behind `extract` and `status`. That is not tidiness: it makes
+`application::extract::…` greppable, and the `use-case-isolation` check uses it
+to stop a driven adapter calling the application that is supposed to be driving
+it.
 
 Adding a crate takes three edits, and the third is easy to forget:
 
@@ -40,14 +53,69 @@ Adding a crate takes three edits, and the third is easy to forget:
 
 The `workspace-members` and `architecture` checks catch 2 and 3.
 
+## Conventions
+
+- **Standard traits over bespoke methods.** A validated newtype implements
+  `TryFrom<String>` and gets the rest — `as_str`, `AsRef`, `Display`,
+  `TryFrom<&str>`, `FromStr` — from the macros in `domain::landing::newtype`.
+  `FromStr` is not optional alongside `TryFrom<&str>`: `str::parse`, clap's
+  value parsers and serde's string forms all go through it. See
+  <https://rust-lang.github.io/api-guidelines/checklist.html>.
+
+  The exception is `RawPayload::digest`, which is SHA-256 and deliberately not
+  `Hash`: `Hash` hands its bytes to the caller's `Hasher`, produces 64 bits and
+  guarantees nothing across builds, and this digest is persisted and compared
+  against rows written by earlier versions.
+- **A trait names a thing, not an act.** `WorkoutExtractor`, not
+  `ExtractWorkouts`. The act is the method.
+- **One source's shape is never the only shape.** `LandingRecord` carries what
+  every record has whatever served it; anything true only of the transport is a
+  `Provenance` variant. Pagination is the same rule applied to the port: the
+  source hands back a batch and an opaque resume token, and `PageNumber` lives
+  in the Hevy adapter where it means something.
+- **A run's identity is derived, never passed.** No use case or driving port
+  takes a `LandingStream`: the landing store is bound to a table, declares its
+  stream (`HevyWorkoutLandingStore::STREAM`, beside the SQL naming the table),
+  and everything else — lock, run log, resumption point, record tags — reads it
+  from there. Two streams that must agree are one stream or a silent data loss;
+  see `contracts/ports.md`.
+- **What this build can collect lives in `cli::catalogue`.** One entry per
+  stream — `hevy.workouts`, not `hevy` — and everything a source needs from the
+  environment is derived from its name (`HEVY_API_KEY`, `HEVY_API_BASE_URL`), so
+  a second source adds an entry and an arm in `cli::wiring` rather than a
+  constant and a flag.
+
 ## Easy to get wrong
 
 - **Panics are `forbid`, not `deny`.** `#[allow(clippy::unwrap_used)]` is a
   compile error (E0453). Fix the error handling; do not reach for the
   attribute, and do not edit `Cargo.toml` to get around it.
+
+  Two macros generate that attribute for you, so they cannot be used at all:
+
+  - **`#[tokio::test]`** on a test returning `Result`. Build the runtime by
+    hand — `tokio::runtime::Builder::new_current_thread()` — from a `#[test]`
+    function returning `()`.
+  - **clap's derive macros.** Use the builder API, which is plain function
+    calls.
+
+  Tests therefore return `()` and assert by panicking, which is also what
+  `clippy.toml` is configured for: `allow-panic-in-tests` and its siblings
+  exist precisely so a test can assert that way. `panic_in_result_fn` is
+  forbidden too, so an `assert!` inside a function returning `Result` fails.
+- **The test exemptions do not reach free functions.** `expect` is allowed in a
+  `#[test]` function and in an `async` block inside one, but not in a helper
+  defined alongside them in the same file. Fixture builders return `Result` and
+  the test unwraps at the call site.
 - **§ II is a data model, not a suggestion.** The common mistakes are storing
   something the analytical layer should derive, resampling component
   observations to a convenient resolution, and treating a match between two
   sources as permission to combine their series.
-- **The example `Item` type is scaffolding.** It demonstrates the shape and is
-  to be deleted, not extended.
+- **A stub cannot catch a wrong default.** The contract tests point the source
+  at a mock server, so anything wrong with the *default* configuration is
+  invisible to them — a base URL that already ended in `/v1` produced
+  `/v1/v1/workouts/events` and only a live run found it. Pin composed defaults
+  in their own unit test.
+- **Regenerate `.sqlx` after changing a query**: `cargo sqlx prepare
+  --workspace`. Builds read it offline, so a stale directory is a compile
+  error rather than a silent fallback.

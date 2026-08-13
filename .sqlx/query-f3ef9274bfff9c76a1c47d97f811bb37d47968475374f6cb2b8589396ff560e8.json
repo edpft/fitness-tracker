@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id            AS \"id!: i64\",\n                   started_at    AS \"started_at!: String\",\n                   finished_at   AS \"finished_at!: String\",\n                   events_seen   AS \"events_seen!: i64\",\n                   records_landed AS \"records_landed!: i64\"\n            FROM extraction_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "name": "finished_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "finished_at"
+          }
+        }
+      },
+      {
+        "name": "events_seen!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "events_seen"
+          }
+        }
+      },
+      {
+        "name": "records_landed!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "records_landed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f3ef9274bfff9c76a1c47d97f811bb37d47968475374f6cb2b8589396ff560e8"
+}

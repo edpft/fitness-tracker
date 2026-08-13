@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM resumption_point WHERE stream = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fd22afeb41b2aea6d0be04b9eea713139ea2751cab5cbd080116398be6a8916a"
+}

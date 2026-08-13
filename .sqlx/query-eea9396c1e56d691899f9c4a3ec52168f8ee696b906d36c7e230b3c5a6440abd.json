@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO extraction_run (stream, started_at)\n            VALUES (?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "extraction_run",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eea9396c1e56d691899f9c4a3ec52168f8ee696b906d36c7e230b3c5a6440abd"
+}
