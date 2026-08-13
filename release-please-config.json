@@ -1,0 +1,37 @@
+{
+    "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+    "release-type": "rust",
+    "include-component-in-tag": false,
+    "separate-pull-requests": false,
+    "packages": {
+        "crates/domain": {
+            "component": "domain"
+        },
+        "crates/application": {
+            "component": "application"
+        },
+        "crates/infrastructure": {
+            "component": "infrastructure"
+        },
+        "crates/web": {
+            "component": "web"
+        },
+        "crates/cli": {
+            "component": "cli"
+        }
+    },
+    "plugins": [
+        "cargo-workspace",
+        {
+            "type": "linked-versions",
+            "groupName": "fitness-tracker",
+            "components": [
+                "domain",
+                "application",
+                "infrastructure",
+                "web",
+                "cli"
+            ]
+        }
+    ]
+}
