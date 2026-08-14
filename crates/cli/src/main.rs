@@ -12,7 +12,7 @@ mod wiring;
 
 use std::{path::PathBuf, process::ExitCode};
 
-use application::{ExtractionError, SourceError, StatusError, StoreError};
+use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
@@ -33,6 +33,10 @@ mod exit {
     pub const STORE: u8 = 3;
     /// Missing configuration, or an unusable invocation.
     pub const USAGE: u8 = 4;
+    /// The exercise vocabulary has a gap. A defect in this build rather than in
+    /// the data, and its own code because it is the one thing an operator
+    /// cannot fix by correcting a record.
+    pub const UNMAPPED: u8 = 5;
 }
 
 /// The command surface, built rather than derived.
@@ -69,6 +73,19 @@ fn command() -> ClapCommand {
                     "Override the source's API root for this run. \
                              Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
                 )),
+        )
+        .subcommand(
+            ClapCommand::new("normalise")
+                .about(
+                    "Derive the normalised layer from what raw already holds. \
+                     Contacts no source",
+                )
+                .arg(stream_argument()),
+        )
+        .subcommand(
+            ClapCommand::new("refusals")
+                .about("List what the last derivation would not accept, grouped by what to do about it")
+                .arg(stream_argument()),
         )
         .subcommand(
             ClapCommand::new("status")
@@ -156,10 +173,24 @@ impl From<ExtractionError> for Failure {
     }
 }
 
+impl From<NormalisationError> for Failure {
+    fn from(error: NormalisationError) -> Self {
+        let code = match &error {
+            NormalisationError::Store(_) => exit::STORE,
+            // Not a data problem, and not something a retry helps with: the
+            // mapping is code, so this is a gap to go and fill.
+            NormalisationError::UnmappedExercise { .. } => exit::UNMAPPED,
+            NormalisationError::MissingZone => exit::USAGE,
+        };
+        Self::message(error.to_string(), code)
+    }
+}
+
 impl From<WiringError> for Failure {
     fn from(error: WiringError) -> Self {
         match error {
             WiringError::Extraction(error) => Self::from(error),
+            WiringError::Normalisation(error) => Self::from(error),
             WiringError::Status(error) => Self::from(error),
             WiringError::Store(error) => Self::from(error),
             // Both of these are mistakes in this build rather than in the
@@ -228,6 +259,13 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             output::run_started(&stream);
             Command::Extract(source_access(known, sub)?)
         }
+        "normalise" => {
+            // Printed before the run begins, so a long first derivation says
+            // what it is doing.
+            output::derivation_started(&stream);
+            Command::Normalise(config::timezone(std::env::var("FITNESS_TRACKER_TIMEZONE"))?)
+        }
+        "refusals" => Command::Refusals,
         "status" => Command::Status,
         "reset" => Command::Reset,
         other => {
@@ -282,6 +320,8 @@ fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, 
 fn report(stream: &LandingStream, outcome: Outcome) {
     match outcome {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
+        Outcome::Derived(summary) => output::derivation_succeeded(&summary),
+        Outcome::Refused(report) => output::refusals(&report),
         Outcome::Reported(status) => output::status(&status),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }

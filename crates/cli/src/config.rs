@@ -8,6 +8,8 @@
 
 use std::{env::VarError, path::PathBuf};
 
+use domain::gym::OperatorZone;
+
 use crate::catalogue::KnownStream;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,6 +28,39 @@ pub enum ConfigError {
 
     #[error("no database path: pass --database or set FITNESS_TRACKER_DATABASE")]
     MissingDatabase,
+
+    #[error(
+        "no time zone: set FITNESS_TRACKER_TIMEZONE to an IANA identifier such as Europe/London. \
+         Nothing is compiled in, because a default would be an assumption about where you train \
+         — silently right here and silently wrong elsewhere"
+    )]
+    MissingTimeZone,
+
+    #[error("FITNESS_TRACKER_TIMEZONE is set to {value:?}, which is not an IANA identifier")]
+    UnknownTimeZone { value: String },
+}
+
+/// The zone the operator declares they train in.
+///
+/// § II.3 takes it from configuration, and § 34 forbids an environment
+/// assumption — so there is no default. A compiled-in `Europe/London` would be
+/// correct for this account and wrong for the next, and because it would be
+/// correct here no test would ever catch it.
+///
+/// It is deliberately not a flag. A zone is a declared interpretive parameter,
+/// not a per-invocation choice, and an operator who can pass it per run can
+/// produce two derivations that disagree.
+///
+/// # Errors
+///
+/// [`ConfigError`] if it is unset or is not an identifier the database knows.
+pub fn timezone(declared: Result<String, VarError>) -> Result<OperatorZone, ConfigError> {
+    let value = match declared {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return Err(ConfigError::MissingTimeZone),
+    };
+
+    OperatorZone::try_from(value.as_str()).map_err(|_| ConfigError::UnknownTimeZone { value })
 }
 
 /// What it takes to reach a source.
@@ -84,6 +119,7 @@ mod tests {
     use super::{ConfigError, SourceAccess, database};
     use crate::catalogue::{KnownStream, lookup};
     use std::{env::VarError, path::PathBuf};
+
 
     fn hevy() -> Option<&'static KnownStream> {
         lookup("hevy.workouts")

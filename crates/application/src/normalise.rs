@@ -229,17 +229,43 @@ where
     }
 }
 
-impl<R, T, W, F, G, C> RefusalReporter for Normalisation<R, T, W, F, G, C>
+/// Reporting what the domain would not accept.
+///
+/// Its own use case rather than a second trait on [`Normalisation`]. Reading
+/// refusals needs the refusal store and the run log and nothing else — no
+/// translator, no raw, and above all no declared zone. Hanging it off the
+/// derivation would have made `fitness refusals` demand a time zone in order to
+/// print a list it never consults one to produce.
+pub struct Refusals<F, G> {
+    stream: LandingStream,
+    store: F,
+    runs: G,
+}
+
+impl<F, G> Refusals<F, G>
 where
-    R: LandingRecordReader + Sync,
-    T: WorkoutTranslator + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    F: RefusalStore,
+{
+    /// No stream argument: the refusal store is bound to one and is asked
+    /// which.
+    pub fn new(store: F, runs: G) -> Self {
+        Self {
+            stream: store.stream().clone(),
+            store,
+            runs,
+        }
+    }
+}
+
+impl<F, G> RefusalReporter for Refusals<F, G>
+where
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
-    C: Clock + Sync,
 {
     async fn refusals(&self) -> Result<RefusalReport, NormalisationError> {
-        let refusals = self.refusals.all().await?;
+        let refusals = self.store.all().await?;
+        // When the derivation ran, so a stale list reads as stale rather than
+        // as current (§ 38).
         let derived_at = self
             .runs
             .latest_success(&self.stream)

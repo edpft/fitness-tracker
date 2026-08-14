@@ -13,14 +13,22 @@
 use std::path::Path;
 
 use application::{
-    ExtractionError, ExtractionStatusReporter, LandingStore, ResumptionPointResetter,
+    ExtractionError, ExtractionStatusReporter, LandingStore, NormalisationError,
+    NormalisationSummary, RefusalReport, RefusalReporter, ResumptionPointResetter,
     ResumptionPointStore, RunSummary, StatusError, StreamStatus, WorkoutExtractor,
+    WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
+    normalise::{Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
-use domain::landing::{FetchedAt, Watermark};
+use domain::{
+    gym::OperatorZone,
+    landing::{FetchedAt, Watermark},
+};
 use infrastructure::{
-    FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingStore, SqliteExtractionRunLog,
+    FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
+    HevyWorkoutTranslator,
+    SqliteExtractionRunLog, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
     SqliteResumptionPointStore, connect,
 };
 
@@ -33,6 +41,12 @@ use crate::{catalogue::KnownStream, config::SourceAccess};
 /// runs left behind and must keep working with no credential and no network.
 pub enum Command {
     Extract(SourceAccess),
+    /// Derive the normalised layer from what raw already holds. Contacts no
+    /// source, which is why it carries a zone rather than a credential.
+    Normalise(OperatorZone),
+    /// Read back what the last derivation would not accept. Takes no zone: it
+    /// consults none to produce the list.
+    Refusals,
     Status,
     Reset,
 }
@@ -40,6 +54,8 @@ pub enum Command {
 /// What happened, in terms the output module can print.
 pub enum Outcome {
     Extracted(Box<RunSummary>),
+    Derived(Box<NormalisationSummary>),
+    Refused(Box<RefusalReport>),
     Reported(Box<StreamStatus>),
     Reset { previous: Option<Watermark> },
 }
@@ -59,6 +75,8 @@ impl application::Clock for SystemClock {
 pub enum WiringError {
     #[error(transparent)]
     Extraction(#[from] ExtractionError),
+    #[error(transparent)]
+    Normalisation(#[from] NormalisationError),
     #[error(transparent)]
     Status(#[from] StatusError),
     #[error(transparent)]
@@ -99,7 +117,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
     let pool = connect(database).await?;
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::Extract(access) => {
@@ -114,6 +132,32 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
             let summary = extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(zone) => {
+            // No lock. A derivation reads raw and writes only its own tables,
+            // so it neither takes the extraction lock nor advances the
+            // resumption point — the two commands can run at once.
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: HevyWorkoutLandingReader::new(pool.clone())?,
+                    translator: HevyWorkoutTranslator,
+                    workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(pool.clone())?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+
+            let summary = normalisation.normalise().await?;
+            Ok(Outcome::Derived(Box::new(summary)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone())?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
         }
         Command::Status => {
             let reader = ExtractionStatus::new(landing, resumption, runs);

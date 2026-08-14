@@ -5,7 +5,7 @@
 //! `dead_code` is allowed here for that reason and no other; it is not a
 //! forbidden lint, and the alternative is a fixture split per suite with the
 //! corpus loaded four times.
-#![allow(dead_code)]
+#![allow(dead_code, unused_macros, unused_imports)]
 
 pub mod corpus;
 

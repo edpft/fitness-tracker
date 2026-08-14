@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT landing_record_id AS \"id!: i64\", source_record_id AS \"source!: String\",\n               started_at_utc AS \"started!: String\", zone AS \"zone!: String\"\n        FROM gym_workout ORDER BY landing_record_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "source!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "started!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e12a2f450e107933fc1fe628de3c22ede5ec5b0b6351adc391650ac8c453f9e9"
+}

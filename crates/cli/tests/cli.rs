@@ -26,6 +26,7 @@ fn fitness(
     command
         .env_remove("HEVY_API_KEY")
         .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("HEVY_API_BASE_URL")
         .args(arguments);
 
@@ -293,4 +294,130 @@ fn help_and_version_exit_zero() {
 fn no_arguments_is_a_usage_error() {
     let output = Command::new(BINARY).output().expect("the binary runs");
     assert_eq!(code(&output), 4);
+}
+
+// --- Normalisation ----------------------------------------------------------
+
+/// The same clean environment, plus a declared zone.
+fn fitness_in(
+    arguments: &[&str],
+    database: Option<&Path>,
+    zone: &str,
+) -> std::io::Result<Output> {
+    let mut command = Command::new(BINARY);
+    command
+        .env_remove("HEVY_API_KEY")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("HEVY_API_BASE_URL")
+        .env("FITNESS_TRACKER_TIMEZONE", zone)
+        .args(arguments);
+
+    if let Some(path) = database {
+        command.arg("--database").arg(path);
+    }
+
+    command.output()
+}
+
+/// § 34 and D4: nothing is compiled in, so a derivation with no declared zone
+/// refuses rather than guessing.
+///
+/// A default of `Europe/London` would be right for this account and wrong for
+/// the next, and because it would be right here no test would catch it.
+#[test]
+fn normalising_without_a_declared_zone_is_a_usage_error() {
+    let Ok(directory) = TempDir::new() else {
+        panic!("a temporary directory is available")
+    };
+    let database = directory.path().join("test.db");
+
+    let Ok(output) = fitness(&["normalise", "hevy.workouts"], Some(&database), None) else {
+        panic!("the binary runs")
+    };
+
+    assert_eq!(code(&output), 4, "usage: {}", stderr(&output));
+    let message = stderr(&output);
+    assert!(
+        message.contains("FITNESS_TRACKER_TIMEZONE"),
+        "the message names the variable: {message}"
+    );
+    assert!(
+        message.contains("Europe/London"),
+        "and gives an example: {message}"
+    );
+}
+
+/// A zone that is not an IANA identifier is refused, and the message says so.
+/// An offset would be accepted by a laxer parser and is exactly what § II.3
+/// rules out.
+#[test]
+fn a_zone_that_is_not_an_iana_identifier_is_refused() {
+    let Ok(directory) = TempDir::new() else {
+        panic!("a temporary directory is available")
+    };
+    let database = directory.path().join("test.db");
+
+    let Ok(output) = fitness_in(&["normalise", "hevy.workouts"], Some(&database), "+01:00") else {
+        panic!("the binary runs")
+    };
+
+    assert_eq!(code(&output), 4, "usage: {}", stderr(&output));
+    assert!(
+        stderr(&output).contains("IANA"),
+        "the message says what a zone is: {}",
+        stderr(&output)
+    );
+}
+
+/// Deriving over an empty store is not a failure. It is a system with nothing
+/// landed yet, which reads differently from one that broke (§ 38).
+#[test]
+fn normalising_an_empty_store_succeeds_with_nothing_to_do() {
+    let Ok(directory) = TempDir::new() else {
+        panic!("a temporary directory is available")
+    };
+    let database = directory.path().join("test.db");
+
+    let Ok(output) = fitness_in(
+        &["normalise", "hevy.workouts"],
+        Some(&database),
+        "Europe/London",
+    ) else {
+        panic!("the binary runs")
+    };
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let printed = stdout(&output);
+    assert!(printed.contains("records read"), "{printed}");
+    assert!(printed.contains("workouts written"), "{printed}");
+}
+
+/// Refusals need no zone: nothing is consulted to produce the list, so
+/// demanding one would be asking for configuration to print a table.
+#[test]
+fn reading_refusals_needs_no_declared_zone() {
+    let Ok(directory) = TempDir::new() else {
+        panic!("a temporary directory is available")
+    };
+    let database = directory.path().join("test.db");
+
+    let Ok(derived) = fitness_in(
+        &["normalise", "hevy.workouts"],
+        Some(&database),
+        "Europe/London",
+    ) else {
+        panic!("the binary runs")
+    };
+    assert_eq!(code(&derived), 0, "{}", stderr(&derived));
+
+    let Ok(output) = fitness(&["refusals", "hevy.workouts"], Some(&database), None) else {
+        panic!("the binary runs")
+    };
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("nothing refused"),
+        "an empty store refuses nothing: {}",
+        stdout(&output)
+    );
 }

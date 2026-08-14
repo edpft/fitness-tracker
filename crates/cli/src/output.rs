@@ -4,8 +4,11 @@
 //! difference between them is the difference between finding nothing new and
 //! finding nothing at all — and neither is a failure.
 
-use application::{RunSummary, StreamStatus};
-use domain::landing::{LandingStream, RunOutcome, Watermark};
+use application::{NormalisationSummary, RefusalReport, RunSummary, StreamStatus};
+use domain::{
+    gym::{Refusal, RefusalKind},
+    landing::{LandingStream, RunOutcome, Watermark},
+};
 
 pub fn run_started(stream: &LandingStream) {
     // No run number here: the store assigns it, and this line is printed
@@ -107,4 +110,97 @@ pub fn reset(stream: &LandingStream, previous: Option<Watermark>) {
         None => println!("resumption point for {stream} was already unset"),
     }
     println!("nothing was landed and nothing was removed");
+}
+
+pub fn derivation_started(stream: &LandingStream) {
+    println!("deriving {stream} …");
+}
+
+/// The four numbers that must add up.
+///
+/// `records read` equals workouts plus withdrawals plus retractions plus
+/// records refused, which is FR-005 visible at the terminal: a record that went
+/// missing shows up as arithmetic that does not reconcile, without anyone
+/// having to query a table.
+///
+/// Refusals are reported and do not affect the exit code. A run that recorded
+/// 26 of them succeeded — it found 26 things wrong with the data and said so,
+/// which is the feature working.
+pub fn derivation_succeeded(summary: &NormalisationSummary) {
+    println!("derivation {} succeeded", summary.run_id);
+    println!("  records read       {:>5}", summary.records_read);
+    println!("  workouts written   {:>5}", summary.workouts_written);
+    if summary.workouts_withdrawn.as_u64() > 0 {
+        println!("  workouts withdrawn {:>5}", summary.workouts_withdrawn);
+    }
+    println!("  retractions        {:>5}", summary.retractions_applied);
+    if summary.records_refused.as_u64() > 0 {
+        println!("  records refused    {:>5}", summary.records_refused);
+    }
+    println!("  refusals           {:>5}", summary.refusals_recorded);
+
+    if !summary.reconciles() {
+        // Not a failure to exit on — the derivation happened and its output is
+        // real. It is a loud note that this program's accounting is wrong,
+        // which is a defect worth seeing rather than swallowing.
+        println!("  ! these do not add up: a record is unaccounted for");
+    }
+}
+
+/// Grouped by what an operator should *do*, not by record.
+///
+/// Three different actions — fix it at source, live with it, or note it as
+/// evidence for a later feature — and the model of record says telling them
+/// apart is the point of recording them at all.
+pub fn refusals(report: &RefusalReport) {
+    let when = report
+        .derived_at
+        .map_or_else(|| "never".to_owned(), |at| to_the_second(&at.to_string()));
+
+    if report.refusals.is_empty() {
+        println!(
+            "{} — nothing refused in the derivation of {when}",
+            report.stream
+        );
+        return;
+    }
+
+    println!(
+        "{} — {} refusals from the derivation of {when}",
+        report.stream,
+        report.refusals.len()
+    );
+
+    for kind in [
+        RefusalKind::WrongData,
+        RefusalKind::DeclaredLimitation,
+        RefusalKind::Unmodelled,
+    ] {
+        let of_kind: Vec<&Refusal> = report
+            .refusals
+            .iter()
+            .filter(|refusal| refusal.kind() == kind)
+            .collect();
+        if of_kind.is_empty() {
+            continue;
+        }
+
+        println!("\n{kind} ({})", of_kind.len());
+        for refusal in of_kind {
+            let exercise = refusal
+                .exercise
+                .map_or_else(String::new, |exercise| format!("  {exercise}"));
+            println!(
+                "  {}  {:<22}{exercise}",
+                short(refusal.source_record_id.as_str()),
+                refusal.locus.to_string(),
+            );
+            println!("      {}", refusal.reason);
+        }
+    }
+}
+
+/// Enough of an identifier to find the record, without a full UUID per line.
+fn short(id: &str) -> String {
+    id.chars().take(8).collect()
 }
