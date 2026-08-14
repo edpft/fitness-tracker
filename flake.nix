@@ -469,6 +469,10 @@
             taplo
             typos
             cargo-machete
+            # Branch, then pull request: the workflow needs a GitHub client, and
+            # an agent that cannot open the PR leaves the work on a pushed
+            # branch nobody has been asked to review.
+            gh
             # For spec-kit
             uv
             # agent
