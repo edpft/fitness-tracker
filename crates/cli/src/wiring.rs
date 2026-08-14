@@ -13,12 +13,13 @@
 use std::path::Path;
 
 use application::{
-    ExtractionError, ExtractionStatusReporter, LandingStore, NormalisationError,
+    DerivationStatus, DerivationStatusReporter, ExtractionError, ExtractionStatusReporter,
+    LandingStore, NormalisationError,
     NormalisationSummary, RefusalReport, RefusalReporter, ResumptionPointResetter,
     ResumptionPointStore, RunSummary, StatusError, StreamStatus, WorkoutExtractor,
     WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
-    normalise::{Normalisation, NormalisationPorts, Refusals},
+    normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
 use domain::{
@@ -56,7 +57,10 @@ pub enum Outcome {
     Extracted(Box<RunSummary>),
     Derived(Box<NormalisationSummary>),
     Refused(Box<RefusalReport>),
-    Reported(Box<StreamStatus>),
+    Reported {
+        extraction: Box<StreamStatus>,
+        derivation: Box<DerivationStatus>,
+    },
     Reset { previous: Option<Watermark> },
 }
 
@@ -160,8 +164,23 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
         }
         Command::Status => {
+            // Both halves, because § 38 is about the whole chain: an
+            // extraction that is up to date and a derivation that is eight
+            // records behind is a system with a silent problem.
+            let derivation = DerivationStanding::new(
+                HevyWorkoutLandingStore::new(pool.clone())?,
+                SqliteGymWorkoutStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone())?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
-            Ok(Outcome::Reported(Box::new(reader.status().await?)))
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: Box::new(derivation),
+            })
         }
         Command::Reset => {
             // Read first, so the operator is told what was discarded rather

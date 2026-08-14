@@ -489,6 +489,31 @@ pub trait WorkoutNormaliser {
     ) -> impl Future<Output = Result<NormalisationSummary, NormalisationError>> + Send;
 }
 
+/// Where a stream's derivation stands.
+///
+/// `records_behind` is what makes a forgotten `normalise` visible rather than
+/// silent: raw's record count minus what the last successful derivation read.
+/// Non-zero means raw has moved since and the normalised layer is stale, which
+/// is § 38 applied to a derivation rather than only to an extraction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivationStatus {
+    pub stream: LandingStream,
+    pub last_success: Option<NormalisationRun>,
+    pub workouts_held: WorkoutCount,
+    pub refusals_held: RefusalCount,
+    pub records_behind: RecordCount,
+}
+
+/// Reports where a stream's derivation stands.
+pub trait DerivationStatusReporter {
+    /// # Errors
+    ///
+    /// [`NormalisationError`] if the store is unavailable.
+    fn derivation_status(
+        &self,
+    ) -> impl Future<Output = Result<DerivationStatus, NormalisationError>> + Send;
+}
+
 /// Reports what the domain would not accept.
 pub trait RefusalReporter {
     /// # Errors

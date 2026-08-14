@@ -16,7 +16,7 @@
 use domain::{
     gym::{
         GymWorkout, NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone,
-        Refusal, WorkoutCount,
+        Refusal, RefusalCount, WorkoutCount,
     },
     landing::{LandingStream, RecordCount, SourceRecordId},
 };
@@ -24,9 +24,9 @@ use domain::{
 use crate::{
     error::NormalisationError,
     ports::{
-        Clock, LandingRecordReader, NormalisationRunLog, NormalisationSummary,
-        NormalisedWorkoutStore, RefusalReport, RefusalReporter, RefusalStore, Translation,
-        WorkoutNormaliser, WorkoutTranslator,
+        Clock, DerivationStatus, DerivationStatusReporter, LandingRecordReader, LandingStore,
+        NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore, RefusalReport,
+        RefusalReporter, RefusalStore, Translation, WorkoutNormaliser, WorkoutTranslator,
     },
 };
 
@@ -276,6 +276,65 @@ where
             stream: self.stream.clone(),
             derived_at,
             refusals,
+        })
+    }
+}
+
+/// Where the derivation stands.
+///
+/// Built from the same two ports as [`Refusals`] plus a count of raw, because
+/// "how far behind is the normalised layer" is a question about both sides and
+/// neither store can answer it alone.
+pub struct DerivationStanding<L, W, F, G> {
+    stream: LandingStream,
+    raw: L,
+    workouts: W,
+    refusals: F,
+    runs: G,
+}
+
+impl<L, W, F, G> DerivationStanding<L, W, F, G>
+where
+    W: NormalisedWorkoutStore,
+{
+    pub fn new(raw: L, workouts: W, refusals: F, runs: G) -> Self {
+        Self {
+            stream: workouts.stream().clone(),
+            raw,
+            workouts,
+            refusals,
+            runs,
+        }
+    }
+}
+
+impl<L, W, F, G> DerivationStatusReporter for DerivationStanding<L, W, F, G>
+where
+    L: LandingStore + Sync,
+    W: NormalisedWorkoutStore + Sync,
+    F: RefusalStore + Sync,
+    G: NormalisationRunLog + Sync,
+{
+    async fn derivation_status(&self) -> Result<DerivationStatus, NormalisationError> {
+        // Never having derived is a fact to report, not an error to raise.
+        let last_success = self.runs.latest_success(&self.stream).await?;
+        let workouts_held = self.workouts.count().await?;
+        let refusals_held = RefusalCount::from(
+            u64::try_from(self.refusals.all().await?.len()).unwrap_or(u64::MAX),
+        );
+
+        let held = self.raw.count().await?.as_u64();
+        let read = last_success.as_ref().map_or(0, |run| match run.outcome() {
+            NormalisationOutcome::Succeeded { records_read, .. } => records_read.as_u64(),
+            NormalisationOutcome::InFlight | NormalisationOutcome::Failed { .. } => 0,
+        });
+
+        Ok(DerivationStatus {
+            stream: self.stream.clone(),
+            last_success,
+            workouts_held,
+            refusals_held,
+            records_behind: RecordCount::from(held.saturating_sub(read)),
         })
     }
 }

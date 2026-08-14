@@ -4,7 +4,7 @@
 //! difference between them is the difference between finding nothing new and
 //! finding nothing at all — and neither is a failure.
 
-use application::{NormalisationSummary, RefusalReport, RunSummary, StreamStatus};
+use application::{DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus};
 use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
@@ -42,7 +42,7 @@ pub fn run_succeeded(summary: &RunSummary) {
 }
 
 /// Never having run is a fact to report, not an error to raise.
-pub fn status(standing: &StreamStatus) {
+pub fn status(standing: &StreamStatus, derivation: &DerivationStatus) {
     println!(
         "{:<16} {:<22} {:>11} {:>15} {:>13}",
         "stream", "last succeeded", "events seen", "records landed", "records held"
@@ -68,6 +68,35 @@ pub fn status(standing: &StreamStatus) {
     match standing.resumption_point {
         Some(mark) => println!("\nresumption point: {mark}"),
         None => println!("\nresumption point: unset — the next run collects the full history"),
+    }
+
+    derivation_status(derivation);
+}
+
+/// The derivation's half of § 38.
+///
+/// An extraction that is up to date and a derivation eight records behind is a
+/// system with a silent problem, and `records behind` is the one number that
+/// makes it visible.
+fn derivation_status(standing: &DerivationStatus) {
+    let derived = standing
+        .last_success
+        .as_ref()
+        .and_then(|run| run.outcome().finished_at())
+        .map_or_else(|| "never".to_owned(), |at| to_the_second(&at.to_string()));
+
+    println!("\nnormalisation");
+    println!("  last succeeded     {derived}");
+    println!("  workouts           {}", standing.workouts_held);
+    println!("  refusals           {}", standing.refusals_held);
+
+    let behind = standing.records_behind.as_u64();
+    if behind == 0 {
+        println!("  records behind     0");
+    } else {
+        println!(
+            "  records behind     {behind} — raw has moved since; run `fitness normalise`"
+        );
     }
 }
 

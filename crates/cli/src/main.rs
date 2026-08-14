@@ -322,7 +322,10 @@ fn report(stream: &LandingStream, outcome: Outcome) {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         Outcome::Refused(report) => output::refusals(&report),
-        Outcome::Reported(status) => output::status(&status),
+        Outcome::Reported {
+            extraction,
+            derivation,
+        } => output::status(&extraction, &derivation),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }
 }

@@ -23,7 +23,8 @@ pub use error::{
     ExtractionError, NormalisationError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    Clock, EventBatch, ExtractionRunLog, ExtractionStatusReporter, LandingRecordReader,
+    Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExtractionRunLog,
+    ExtractionStatusReporter, LandingRecordReader,
     LandingStore, NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore,
     RefusalReport, RefusalReporter, RefusalStore, ResumptionPointResetter, ResumptionPointStore,
     RunLock, RunSummary, SourceEvent, StreamStatus, Translation, WorkoutEventSource,
