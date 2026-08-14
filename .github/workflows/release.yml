@@ -13,5 +13,11 @@ jobs:
   release-please:
     uses: edpft/rust-workflows/.github/workflows/release-please.yml@main
     with:
+      # Empty on purpose. release-please-action treats `release-type` as a mode
+      # switch: when it is set the action builds a single-package manifest at
+      # `path` and never opens `config-file`. The shared workflow defaults it to
+      # `rust`, so leaving it unset here would silently discard the config below
+      # and try to release the virtual workspace manifest as a package.
+      release-type: ""
       config-file: release-please-config.json
       manifest-file: .release-please-manifest.json
