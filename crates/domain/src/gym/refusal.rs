@@ -18,6 +18,7 @@
 
 use std::fmt;
 
+use super::exercise::Exercise;
 use crate::landing::{LandingRecordId, SourceRecordId};
 
 /// Where in a record the refused thing sat.
@@ -192,6 +193,14 @@ pub struct Refusal {
     pub landed_as: LandingRecordId,
     pub source_record_id: SourceRecordId,
     pub locus: RefusalLocus,
+    /// Which of our exercises the refused thing belonged to, where that was
+    /// known by the time it was refused.
+    ///
+    /// A position alone is not enough to act on. "Exercise 4, set 2" sends the
+    /// operator back to the payload to find out what exercise 4 was, which is
+    /// exactly what FR-022 says a refusal must save them. `None` only where the
+    /// record failed before any exercise was resolved.
+    pub exercise: Option<Exercise>,
     pub reason: RefusalReason,
 }
 
@@ -203,10 +212,10 @@ impl Refusal {
 
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} — {}: {}",
-            self.source_record_id, self.locus, self.reason
-        )
+        write!(f, "{} — {}", self.source_record_id, self.locus)?;
+        if let Some(exercise) = self.exercise {
+            write!(f, " ({exercise})")?;
+        }
+        write!(f, ": {}", self.reason)
     }
 }

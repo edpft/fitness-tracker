@@ -504,3 +504,121 @@ pub fn workout_starting<'a>(produced: &'a Produced, source_record_id: &str) -> O
         .iter()
         .find(|workout| workout.source_record_id().as_str() == source_record_id)
 }
+
+/// The corpus plus an `updated` record for `source_record_id`.
+///
+/// Built from a real workout's body so the record is genuine in every respect
+/// except which workout it claims to be. What it exists for is to give the
+/// landed tombstone something to withdraw — the corpus offers no such pair, and
+/// a retraction that removes nothing exercises only half the rule.
+///
+/// # Errors
+///
+/// [`FixtureError`] if the corpus is empty or the identifier is not a valid one.
+pub fn with_synthetic_update_for(
+    fixture: &Derivation,
+    source_record_id: &str,
+) -> Result<Derivation, FixtureError> {
+    let donor = fixture
+        .records
+        .iter()
+        .find(|record| {
+            matches!(
+                record.provenance(),
+                domain::landing::Provenance::Event(event)
+                    if *event.kind() == EventKind::Updated
+            )
+        })
+        .ok_or_else(|| FixtureError::Invalid("the corpus holds no update".to_owned()))?;
+
+    let id = next_landing_id(fixture);
+    let record = LandingRecord::land(
+        fixture.stream.clone(),
+        donor.record().fetched_at(),
+        SourceRecordId::try_from(source_record_id).map_err(invalid)?,
+        donor.provenance().clone(),
+        donor.payload().clone(),
+    );
+
+    let mut records = fixture.records.clone();
+    records.push(LandedRecord::new(id, record));
+    Ok(Derivation {
+        records,
+        stream: fixture.stream.clone(),
+        zone: fixture.zone.clone(),
+    })
+}
+
+/// The corpus plus a second landing record for the first workout's identifier.
+///
+/// § 10's supersession, which the corpus cannot exercise: 164 records carry 164
+/// distinct identifiers and not one re-serve.
+///
+/// # Errors
+///
+/// [`FixtureError`] if the corpus is empty.
+pub fn with_reserved_first_workout(fixture: &Derivation) -> Result<Derivation, FixtureError> {
+    let first = fixture
+        .records
+        .first()
+        .ok_or_else(|| FixtureError::Invalid("the corpus is empty".to_owned()))?;
+
+    let id = next_landing_id(fixture);
+    let mut records = fixture.records.clone();
+    records.push(LandedRecord::new(id, first.record().clone()));
+    Ok(Derivation {
+        records,
+        stream: fixture.stream.clone(),
+        zone: fixture.zone.clone(),
+    })
+}
+
+/// The corpus plus a record naming a template the mapping does not cover.
+///
+/// # Errors
+///
+/// [`FixtureError`] if the corpus is empty or the synthetic payload is invalid.
+pub fn with_unmapped_template(
+    fixture: &Derivation,
+    template_id: &str,
+) -> Result<Derivation, FixtureError> {
+    let donor = fixture
+        .records
+        .first()
+        .ok_or_else(|| FixtureError::Invalid("the corpus is empty".to_owned()))?;
+
+    let payload = format!(
+        r#"{{"type":"updated","workout":{{"id":"synthetic","start_time":"2026-01-01T18:00:00+00:00","exercises":[{{"index":0,"title":"Something New","exercise_template_id":"{template_id}","superset_id":null,"sets":[{{"index":0,"type":"normal","weight_kg":60,"reps":5,"distance_meters":null,"duration_seconds":null,"rpe":null}}]}}]}}}}"#
+    );
+
+    let id = next_landing_id(fixture);
+    let record = LandingRecord::land(
+        fixture.stream.clone(),
+        donor.record().fetched_at(),
+        SourceRecordId::try_from("synthetic-unmapped").map_err(invalid)?,
+        donor.provenance().clone(),
+        RawPayload::try_from(payload.into_bytes()).map_err(invalid)?,
+    );
+
+    let mut records = fixture.records.clone();
+    records.push(LandedRecord::new(id, record));
+    Ok(Derivation {
+        records,
+        stream: fixture.stream.clone(),
+        zone: fixture.zone.clone(),
+    })
+}
+
+/// One past the highest landing record id the fixture holds.
+///
+/// Raw is append-only, so a synthetic record joins at the end exactly as a real
+/// one would.
+fn next_landing_id(fixture: &Derivation) -> LandingRecordId {
+    let highest = fixture
+        .records
+        .iter()
+        .map(|record| record.id().as_i64())
+        .max()
+        .unwrap_or(0);
+    LandingRecordId::try_from(highest.saturating_add(1)).unwrap_or(LandingRecordId::FIRST)
+}

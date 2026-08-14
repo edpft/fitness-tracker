@@ -179,8 +179,9 @@ impl HevyWorkoutTranslator {
         };
 
         if entry.sets.is_empty() {
-            scribe.note(
+            scribe.note_for(
                 RefusalLocus::Entry { entry: entry.index },
+                Some(mapped.exercise),
                 RefusalReason::NoSetsInEntry,
             );
             return Ok(None);
@@ -249,7 +250,7 @@ impl HevyWorkoutTranslator {
             };
             match Self::one_set(set, mapped, measure_of) {
                 Ok(set) => translated.push(set),
-                Err(reason) => scribe.note(locus, reason),
+                Err(reason) => scribe.note_for(locus, Some(mapped.exercise), reason),
             }
         }
         translated
@@ -500,10 +501,21 @@ impl Scribe {
     }
 
     fn note(&mut self, locus: RefusalLocus, reason: RefusalReason) {
+        self.note_for(locus, None, reason);
+    }
+
+    /// A refusal that knows which exercise it belonged to.
+    fn note_for(
+        &mut self,
+        locus: RefusalLocus,
+        exercise: Option<Exercise>,
+        reason: RefusalReason,
+    ) {
         self.refusals.push(Refusal {
             landed_as: self.landed_as,
             source_record_id: self.source_record_id.clone(),
             locus,
+            exercise,
             reason,
         });
     }
@@ -528,6 +540,7 @@ impl Scribe {
                         landed_as: self.landed_as,
                         source_record_id: self.source_record_id.clone(),
                         locus: RefusalLocus::Record,
+                        exercise: None,
                         reason: RefusalReason::NothingTranslatable,
                     },
                     Vec::new(),

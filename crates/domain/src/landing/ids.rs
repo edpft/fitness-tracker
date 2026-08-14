@@ -170,6 +170,9 @@ pub struct NegativeLandingRecordId;
 pub struct LandingRecordId(i64);
 
 impl LandingRecordId {
+    /// The first id a store assigns. `AUTOINCREMENT` starts at one.
+    pub const FIRST: Self = Self(1);
+
     pub const fn as_i64(self) -> i64 {
         self.0
     }
