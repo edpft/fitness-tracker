@@ -3,11 +3,12 @@
 *The gym-workout entity, and the reasoning behind it. Companion to the
 constitution, which it does not override.*
 
-*Modelled from what is true about training, then checked against the landed Hevy
-corpus: 164 records — 163 `updated`, 1 `deleted` — covering November 2024 to
+*Modelled from what is true about training, then run against every landed Hevy
+record: 164 records — 163 `updated`, 1 `deleted` — covering November 2024 to
 August 2026, 1,135 exercise entries, 3,779 sets, 134 distinct exercise
-templates. Counts quoted throughout are from that corpus. Hevy's shape decides
-nothing here; where it appears, it appears as evidence about one adapter.*
+templates. Counts quoted throughout are from that corpus, and what the run found
+is in "Checked against the data" below. No source's shape decides anything here;
+where Hevy appears, it appears as evidence about one adapter.*
 
 ---
 
@@ -51,9 +52,8 @@ stays part of that session whichever of them recorded it.
 
 ```rust
 enum Load {
-    Absolute(Kg),         // barbell, dumbbell, machine stack — the load is the whole load
+    Absolute(Kg),         // the implement has mass; zero is impossible
     Relative(SignedKg),   // delta against bodyweight; 0 = plain bodyweight
-    Unrecorded,           // a load applied and the source did not say what it was
 }
 
 struct Distance { metres: Metres, duration: Option<Duration> }
@@ -76,7 +76,7 @@ struct Set<M> {
 
 /// The exercise vocabulary, partitioned by what its members are measured in.
 enum RepsExercise     { FrontSquat, Deadlift, PullUp, ChestDip, BoxJump, /* … */ }
-enum DurationExercise { DeadHang, HandstandHold, AirBike, SledPush, /* … */ }
+enum DurationExercise { DeadHang, HandstandHold, Stretching, /* … */ }
 enum DistanceExercise { Running, FarmersWalk, WalkingLunge, /* … */ }
 
 enum PerformedExercise {
@@ -110,11 +110,17 @@ real regularity — and a fact about Hevy's storage, not about training. A
 categorisation that only tracks which columns a source fills is that source's
 schema wearing domain vocabulary.
 
-**Absolute vs Relative, not external vs added.** A 100kg squat and a bodyweight
-dip +10kg are not the same fact: one number is the total, the other a delta
-against a bodyweight the set doesn't record. Splitting on "is this the whole
-load or a delta" keeps a consumer from needing to know which exercise it is to
-read the number.
+**Absolute vs Relative is decided by whether zero is performable.** A load is
+`Relative` where an unloaded version of the movement exists — a pull-up, a
+bodyweight Bulgarian split squat, a plain crunch — so zero is a real
+observation and the number is a delta against a bodyweight the set does not
+record. It is `Absolute` where the implement itself has mass, so zero is
+impossible and the number is the whole load.
+
+The rule earns its place by self-checking: on an absolute-load exercise a zero
+is a data error *by construction*, with no judgement required. It is also what
+keeps a 100kg squat and a bodyweight dip +10kg from being read as the same kind
+of number.
 
 **Assistance is negative, not a separate case.** Assisted −20 and weighted +10
 sit on one axis, and the crossover through zero is a genuine progression that
@@ -125,23 +131,22 @@ series. The corpus is full of it — `Pull Up` (97 sets), `Pull Up (Assisted)`
 `PullUp` is one exercise carrying a load, with a plain pull-up translating to
 `Relative(0)` rather than to an absence.
 
-**`Unrecorded` exists so `Relative(0)` stays honest.** `Relative(0)` means plain
-bodyweight, which is a measurement. An Air Bike's fan resistance and a sled's
-load are neither bodyweight nor recorded, and 35 sets in the corpus carry a zero
-against a barbell movement where zero is a data-entry hole rather than a lift —
-`Romanian Deadlift (Barbell)` at 0 kg, with the bar's own mass unknowable since
-10, 15 and 20 kg bars are all in use. Without a third case those all become
-`Relative(0)` and silently join a bodyweight series (§ 37).
+**There is no "unrecorded" load.** It was tried and removed. It merged three
+unrelated things: data that is simply wrong, a load that does not apply, and a
+load that applies and was never captured. Worse, it could not catch the case it
+was added for — deterministic translation cannot tell a zero that means
+"unrecorded" from one that means "no added load", which is why that judgement
+belongs to the mapping. A variant for absence would have absorbed the empty-bar
+warm-ups below and hidden the pattern that makes them diagnosable.
 
 **Bands are not modelled.** Band tension varies through the range of motion, so
 no scalar is honest. Nothing available records one anyway: assistance arrives as
 a bare number with no mechanism attached, and the account's assisted loads run
 `0, 7, 14, 21, 28, 35, 42` — stacked bands rather than a machine stack, which
-deterministic translation (§ 9) cannot distinguish. The nine band-named sets
-(`Pull Up (Band)` at 14 kg, `Front Raise (Band)` and `Lateral Raise (Band)` at
-5 kg) carry operator estimates, not measurements. Band and machine assistance
-are therefore not comparable, and that is a limitation to declare rather than
-one the value can express.
+deterministic translation (§ 9) cannot distinguish. Band-named sets carry
+operator estimates, not measurements. Band and machine assistance are therefore
+not comparable, and that is a limitation to declare rather than one the value
+can express.
 
 **Three measures, because there are three things you can count.** Repetitions,
 elapsed time, and ground covered. Everything else a source offers is one of
@@ -153,10 +158,10 @@ measure, one of them partial (§ 37). Whether that is right is open question 2 �
 the case against is that a carry is time under load and a run is pace, and those
 may not want to sit on one axis.
 
-The partition is by measure alone, which is what makes `MeasurementType`
-unnecessary as a stored field: an exercise's measure is fixed by which
-vocabulary it belongs to, so a set and its exercise cannot disagree and nothing
-needs validating (§ 24, § 28).
+The partition is by measure alone, which is what makes a stored measurement type
+unnecessary: an exercise's measure is fixed by which vocabulary it belongs to,
+so a set and its exercise cannot disagree and nothing needs validating (§ 24),
+and an arbitrary instance is valid by construction (§ 28).
 
 Where a source's category and ours differ, ours wins. Hevy calls `Sled Push`
 distance-and-duration; what it actually holds is thirty seconds and a zero
@@ -193,15 +198,12 @@ sets at RPE 10 of which only 67 carry the flag. An unrecognised kind fails
 translation rather than defaulting.
 
 **A superset is exercises performed back to back.** That is the definition, so
-its members are contiguous, and a container in the ordered sequence is the type
-that says so. One record in the corpus has a group whose members sit either side
-of a non-member; that record is wrong, not evidence that supersets can
-interleave, and 121 of the 122 workouts using supersets are contiguous.
+its members are contiguous and there are at least two of them, and a container
+in the ordered sequence is the type that says so.
 
-Translation cannot repair it, because both repairs are guesses — move the
-intruder in, or drop the grouping. The workout translates, the ungrammatical
-grouping does not, and the omission is recorded (§ 37). It is the first concrete
-case for the edit overlay.
+Translation cannot repair a record that breaks this, because every repair is a
+guess. The workout translates, the ungrammatical grouping does not, and the
+omission is recorded (§ 37). It is the first concrete case for the edit overlay.
 
 Grouping *sets* rather than exercises was considered and is arguably more
 faithful to what happens, but it would require exercise identity to move onto
@@ -209,10 +211,9 @@ the set. Rejected on that basis.
 
 **A session sits above the workout.** The source's workout boundary is not the
 session boundary. 2025-10-06 and 2025-10-10 each landed four back-to-back
-records 7–20 minutes apart — one training session, fragmented by an attempt to
-make workout parts reusable — and 21 days carry more than one record. Without
-the container, every session count, frequency figure and streak over those days
-is inflated (§ 10).
+records — one training session, fragmented by an attempt to make workout parts
+reusable — and 21 days carry more than one record. Without the container, every
+session count, frequency figure and streak over those days is inflated (§ 10).
 
 § 4 licenses it: a canonical entity "names the normalised entities it stands
 for", plural. Composition is structure at the canonical layer, not a
@@ -220,8 +221,8 @@ correspondence, so § 10's supersession and co-observation cases are silent on i
 rather than contradicted — the first governs records *sharing a source
 identity*, which four distinct workouts do not.
 
-**Identity is one level: the exercise.** A set belongs to an exercise, and
-that is the whole of it.
+**Identity is one level: the exercise.** A set belongs to an exercise, and that
+is the whole of it.
 
 The alternative was two levels — a movement with variants, so `Front Squat` is
 the `Front` variant of `Squat`. It fails because variants are not independent of
@@ -245,8 +246,8 @@ So the mapping is a version-controlled table keyed on template id, many-to-one
 onto our exercises, with titles informing it and never keying it — § 8's
 "deterministic translation merges where a source over-separates", which is the
 same mechanism that collapses assisted and unassisted pull-ups. Per id it
-resolves the exercise, the load interpretation, and whether a zero load is
-meaningful. It is code, not data (§ 9), and an unmapped id fails loudly.
+resolves the exercise and its load interpretation. It is code, not data (§ 9),
+and an unmapped id fails loudly.
 
 A source's declared type informs that mapping without determining it. `Pull Up`
 is `reps_only` in Hevy and `Pull Up (Assisted)` is `bodyweight_assisted_reps`,
@@ -279,6 +280,60 @@ against rows written by earlier versions (§ 7).
 
 ---
 
+## Checked against the data
+
+The model was written out as rules and every landed record run through it.
+**3,755 of 3,779 sets translate completely**, along with 334 of 336 supersets.
+What did not fit falls into three kinds, and telling them apart is the point of
+the exercise: a model that cannot hold a genuine case needs refining, whereas a
+model that rejects a wrong record is working.
+
+| | Sets | Verdict |
+|---|---:|---|
+| Zero load on an absolute-load exercise | 7 | Wrong data |
+| Band resistance | 16 | Known limitation, accepted |
+| A set of zero reps | 1 | Genuine case, not modelled |
+| Non-contiguous superset | — | Wrong data |
+| Single-member superset | — | Wrong data |
+
+**The seven zeros are all the bottom of a warm-up ramp** — `0, 5, 10` on a good
+morning; `0, 15, 20` on an overhead squat; `0, 0` then `105, 105, 105` on a
+Romanian deadlift, the zeros tagged `warmup`. They mean "empty bar" or "PVC
+pipe", which is real technique work recorded lossily, since the bar's own mass
+went unwritten and 10, 15 and 20 kg bars are all in use. The event is genuine
+and the recording is wrong; it is fixed at source or in the edit overlay, not by
+weakening the type.
+
+**The two malformed supersets are malformed.** One has members either side of a
+non-member; one has a single member, the last exercise in the workout, where the
+partner was never added. Both fail the definition rather than testing it.
+
+**The one genuine gap is the zero-rep set**: 95 kg × 0 reps at `Rir::Zero`, an
+attempt that failed. It is a real event and it is not a set, so no refinement of
+`RepCount` captures it honestly — it needs an *attempt*, which belongs with
+prescribed-versus-performed (open question 3).
+
+Two things the run settled that argument had not:
+
+**Load applicability is nearly a non-question.** Bodyweight movements are
+`Relative(0)`, which covers running, skipping, stretching and mobility work.
+That leaves two exercises where resistance applies, is not bodyweight, and was
+never captured — the air bike's fan and the sled's load, 41 sets between them.
+Small enough to defer, and named in open question 5 rather than paid for with a
+variant on `Load`.
+
+**The session rule is not an arbitrary threshold.** Of 27 consecutive same-day
+workout pairs, the largest gap between one ending and the next starting is
+**8.3 minutes**, and twelve of them are under ten seconds. Nothing sits between
+that and the following day, so any threshold from ten minutes to several hours
+gives the same answer. The corpus resolves to **136 sessions** from 163 workout
+records.
+
+Nothing in the run exercises supersession, deletion or timezone handling: the
+corpus holds no re-serve to test against.
+
+---
+
 ## Prescribed vs performed
 
 § 8 requires the split; it is load-bearing rather than tidy.
@@ -291,8 +346,7 @@ against rows written by earlier versions (§ 7).
 The corpus shows what happens without the split. Hevy has no prescribed side, so
 intent leaks into observation records wherever it finds a field: the `failure`
 set kind, exercise notes carrying "do lengthened partials when you can't do full
-reps", and one set recording 95 kg × **0 reps** at RPE 10 — a single attempted
-and missed, with nowhere else to say so.
+reps", and the missed single above, which had nowhere else to go.
 
 Hevy's own prescribed side is not a substitute. `routine_id` is populated on 8
 of 163 workouts, and the routines it names have since been deleted. We will own
@@ -318,10 +372,11 @@ shapes the model above; it is what one adapter must translate into it.
   the correct treatment, and travel is invisible in the payload — an edit-overlay
   correction, as § II.3 anticipates.
 - **No identity below the workout.** Sets and exercises carry only a positional
-  index, which moves under insertion or reordering. See open question 5.
-- **Zero is overloaded.** 93 sets carry a zero load: 58 legitimately, on
-  assisted and weighted templates where zero means unassisted or no added load;
-  35 not. Nine `Sled Push` sets record a zero distance the same way.
+  index, which moves under insertion or reordering. See open question 6.
+- **Zero is overloaded.** 93 sets carry a zero load. 58 are legitimate under the
+  performable-zero rule; 28 more resolve once bodyweight movements are read as
+  `Relative`; 7 are wrong. Nine `Sled Push` sets record a zero distance the same
+  way.
 - **The feed is current-state, not an event log.** A deletion replaces a
   workout's row rather than adding one, so a workout created and deleted between
   two runs arrives as a body-less tombstone — one is already landed. Detail in
@@ -375,34 +430,40 @@ row.
    different measures?** Optional duration says a 20 m farmer's walk and a 200 m
    run are one measure recorded to different depths. Separate measures say one
    is time under load and the other is pace, and they do not belong on one axis.
-3. **Block-level results** for AMRAP/EMOM — a score attributable to no set.
-   Three workouts repeat an exercise entry, most likely rounds encoded without
-   supersets, which is evidence but not an answer. Blocked on a BTWB export.
+3. **Attempts.** A rep attempted and missed is a real event and not a set. One
+   occurrence so far. Belongs with prescribed-versus-performed, since a source
+   with no prescribed side leaves nowhere to record intent that went unmet.
 4. **The grouping layer** — "all squatting volume", "all pull-up variants". A
    relation over exercises, many-to-many, added without unpicking identity. Not
    designed.
-5. **Overlay anchors below the workout.** § II.2 requires overlays anchor to
+5. **Resistance that is neither bodyweight nor recorded** — the air bike's fan,
+   the sled's load. 41 sets across two exercises. Either those exercises leave
+   the entity, or the vocabulary distinguishes load-applicable from not.
+6. **Overlay anchors below the workout.** § II.2 requires overlays anchor to
    source identity, and Hevy publishes none below the workout, so the obligation
    is unsatisfiable as written. An anchor derived from content — exercise,
    ordinal, recorded values — survives a rebuild, which is the rule's stated
    purpose, and lapses when the set changes at source, which is § II.2's own
    "overrides do not propagate" one level down. Reads as a violation until that
    is noticed; settled when the overlay is built.
-6. **Composition in the match overlay.** The overlay's vocabulary is "the same
+7. **Composition in the match overlay.** The overlay's vocabulary is "the same
    real-world event", which does not obviously express "is part of". To be
    settled against a concrete case.
-7. **Machine identity.** A weight stack is not comparable across machines — the
+8. **Machine identity.** A weight stack is not comparable across machines — the
    corpus carries a note reading "TechnoGym single purpose leg extension
    (settings: 2-2-max)" for that reason — but the notes are inconsistent and
    nothing else records it. Not a § 6 gap: method-dependence there concerns
    sensors and algorithms, and a stack is neither. An § 8 identity question,
    standing as a declared limitation.
-8. **Per-limb load** — whether two 15kg dumbbells records 15 or 30. Resolved by
+9. **Per-limb load** — whether two 15kg dumbbells records 15 or 30. Resolved by
    naming, but historical recording is expected to be inconsistent. An
    edit-overlay problem, not a modelling one.
-9. **Cluster sets** — intra-set rest. Probably separate sets with a short
-   `rest_after`, per the rest-defined set boundary, but nothing confirms it.
-10. **Logging as a first-class capability** — "build my own Hevy". Would make
+10. **Block-level results** for AMRAP/EMOM — a score attributable to no set.
+    Three workouts repeat an exercise entry, most likely rounds encoded without
+    supersets, which is evidence but not an answer. Blocked on a BTWB export.
+11. **Cluster sets** — intra-set rest. Probably separate sets with a short
+    `rest_after`, per the rest-defined set boundary, but nothing confirms it.
+12. **Logging as a first-class capability** — "build my own Hevy". Would make
     the platform a system of record for data no source produces, which § II.2
     does not currently accommodate. Architectural change, not a feature.
     Motivated by the rest-recording hole.
