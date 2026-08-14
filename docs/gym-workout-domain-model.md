@@ -56,7 +56,8 @@ enum Load {
     Relative(SignedKg),   // delta against bodyweight; 0 = plain bodyweight
 }
 
-struct Distance { metres: Metres, duration: Option<Duration> }
+struct Distance { metres: Metres }
+struct TimedDistance { metres: Metres, duration: Duration }
 
 /// Reps in reserve. An ordinal scale: positions order and compare, they do not
 /// average or subtract.
@@ -75,14 +76,16 @@ struct Set<M> {
 }
 
 /// The exercise vocabulary, partitioned by what its members are measured in.
-enum RepsExercise     { FrontSquat, Deadlift, PullUp, ChestDip, BoxJump, /* … */ }
-enum DurationExercise { DeadHang, HandstandHold, Stretching, /* … */ }
-enum DistanceExercise { Running, FarmersWalk, WalkingLunge, /* … */ }
+enum RepsExercise          { FrontSquat, Deadlift, PullUp, ChestDip, BoxJump, /* … */ }
+enum DurationExercise      { DeadHang, HandstandHold, Stretching, SledPush, /* … */ }
+enum DistanceExercise      { FarmersWalk, WalkingLunge, /* … */ }
+enum TimedDistanceExercise { Running, /* … */ }
 
 enum PerformedExercise {
-    ForReps     { exercise: RepsExercise,     sets: NonEmpty<Set<RepCount>> },
-    ForDuration { exercise: DurationExercise, sets: NonEmpty<Set<Duration>> },
-    ForDistance { exercise: DistanceExercise, sets: NonEmpty<Set<Distance>> },
+    ForReps          { exercise: RepsExercise,          sets: NonEmpty<Set<RepCount>> },
+    ForDuration      { exercise: DurationExercise,      sets: NonEmpty<Set<Duration>> },
+    ForDistance      { exercise: DistanceExercise,      sets: NonEmpty<Set<Distance>> },
+    ForTimedDistance { exercise: TimedDistanceExercise, sets: NonEmpty<Set<TimedDistance>> },
 }
 
 struct Superset { members: NonEmpty<PerformedExercise> }   // two or more, back to back
@@ -148,15 +151,19 @@ operator estimates, not measurements. Band and machine assistance are therefore
 not comparable, and that is a limitation to declare rather than one the value
 can express.
 
-**Three measures, because there are three things you can count.** Repetitions,
-elapsed time, and ground covered. Everything else a source offers is one of
-those recorded more or less fully.
+**Four measures, because there are four things you can count.** Repetitions,
+elapsed time, ground covered, and ground covered in a time. Everything else a
+source offers is one of those recorded more or less fully.
 
-Distance carries an optional duration rather than splitting into distance-and-
-distance-over-time: a 20 m farmer's walk and a 200 m run in 60 s are the same
-measure, one of them partial (§ 37). Whether that is right is open question 2 —
-the case against is that a carry is time under load and a run is pace, and those
-may not want to sit on one axis.
+The last two were one measure with an optional duration until the data was run
+against them, and the split is [decision
+0002](decisions/0002-distance-and-distance-over-time-are-different-measures.md).
+A carry is time under load and a run is pace, and the corpus never once leaves
+it ambiguous which of the two an exercise is: all 19 `Running` sets carry a
+duration and none of the 41 carry sets does. An optional duration would have
+meant "not captured" for a run and "does not apply" for a carry with nothing to
+tell them apart — the same merge that got the `Unrecorded` load removed, one
+field over.
 
 The partition is by measure alone, which is what makes a stored measurement type
 unnecessary: an exercise's measure is fixed by which vocabulary it belongs to,
@@ -379,7 +386,11 @@ shapes the model above; it is what one adapter must translate into it.
   way.
 - **The feed is current-state, not an event log.** A deletion replaces a
   workout's row rather than adding one, so a workout created and deleted between
-  two runs arrives as a body-less tombstone — one is already landed. Detail in
+  two runs arrives as a body-less tombstone — one is already landed, carrying an
+  id and a `deleted_at` and nothing else. It is a retraction, and it leaves the
+  workout it names with no normalised entity: [decision
+  0001](decisions/0001-retraction-at-the-normalised-layer.md), which amended the
+  constitution to say so. Detail on the feed in
   [`specs/001-hevy-workout-extraction/research.md`](../specs/001-hevy-workout-extraction/research.md).
 - **Supersession has no ground truth.** 164 records, 164 distinct workout ids,
   not one re-serve. § 10's "the later supersedes" needs a synthetic test.
@@ -426,19 +437,22 @@ row.
    series to declare its method including that choice. A container picks one
    silently, and leaves a day without a measurement wanting a value it does not
    have (§ 37).
-2. **Does `Distance` carry an optional duration, or are carries and runs
-   different measures?** Optional duration says a 20 m farmer's walk and a 200 m
-   run are one measure recorded to different depths. Separate measures say one
-   is time under load and the other is pace, and they do not belong on one axis.
+2. ~~**Does `Distance` carry an optional duration, or are carries and runs
+   different measures?**~~ **Settled**: different measures. [Decision
+   0002](decisions/0002-distance-and-distance-over-time-are-different-measures.md).
 3. **Attempts.** A rep attempted and missed is a real event and not a set. One
    occurrence so far. Belongs with prescribed-versus-performed, since a source
    with no prescribed side leaves nowhere to record intent that went unmet.
 4. **The grouping layer** — "all squatting volume", "all pull-up variants". A
    relation over exercises, many-to-many, added without unpicking identity. Not
    designed.
-5. **Resistance that is neither bodyweight nor recorded** — the air bike's fan,
-   the sled's load. 41 sets across two exercises. Either those exercises leave
-   the entity, or the vocabulary distinguishes load-applicable from not.
+5. ~~**Resistance that is neither bodyweight nor recorded**~~ — the air bike's
+   fan, the sled's load, 41 sets across two exercises. **Settled**: they
+   translate as `Relative(0)`, and that the load is not a measurement of what
+   was moved is a declared limitation rather than something the value says.
+   [Decision
+   0003](decisions/0003-unrecorded-resistance-translates-as-relative-zero.md),
+   which also says when to revisit it.
 6. **Overlay anchors below the workout.** § II.2 requires overlays anchor to
    source identity, and Hevy publishes none below the workout, so the obligation
    is unsatisfiable as written. An anchor derived from content — exercise,

@@ -1,8 +1,16 @@
 <!--
 Sync Impact Report
-- Version: 1.0.0, ratified 2026-08-11 on completion of the repository's preparation. It stays
-  at 1.0.0 until feature implementation begins; from the first feature onward, every change
-  to this document bumps it.
+- Version: 1.0.1, amended 2026-08-14. Ratified at 1.0.0 on 2026-08-11, on completion of the
+  repository's preparation.
+- 1.0.1 — retraction. § II.3 gains two paragraphs and § 10's first bullet a sentence, all
+  saying that a source withdrawing a record it previously served leaves that record with no
+  normalised entity. PATCH, not MAJOR: the per-record rule is about composition — one entity
+  is never built out of several records, because reconciling accounts is the canonical
+  layer's work — and a retraction composes nothing. A source's successive records about one
+  workout are versions of one entity rather than entities in their own right, so acting on a
+  withdrawal changes the letter of the rule and not its spirit. Raised while specifying
+  002-hevy-workout-normalisation, against a landed Hevy deletion. Recorded in
+  docs/decisions/0001-retraction-at-the-normalised-layer.md.
 - Content: operator-authored constitution, sections I-X plus Governance. Supersedes the
   repository-derived draft written earlier in the same session, which was auto-generated
   from repo context and carried no lineage worth preserving.
@@ -61,7 +69,13 @@ Obligations, common to both:
 
 ### Derivations
 
-**3. Normalised layer.** A function of raw, deterministic translation, and the edit overlay. Per-source and derived per-record: each normalised entity is a function of exactly one raw landing record, never of two, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
+**3. Normalised layer.** A function of raw, deterministic translation, and the edit overlay. Per-source and derived per-record: each normalised entity's content is a function of exactly one raw landing record, never of two, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
+
+**A retraction leaves the record it names with no normalised entity.** Where a source serves an event withdrawing a record it previously served, nothing here stands for that record: a withdrawn record is not something the source is still saying, and an entity for it would be this layer asserting what no source does.
+
+The per-record rule above is not in tension with that, because it is about composition. What it forbids is building one entity out of several records — the work of reconciling accounts, which belongs to the layer that can see every source. A retraction composes nothing: it carries no content, contributes no value, and can only remove, so what an entity says is still exactly what one landing record said. A source's successive records about one thing are versions of one entity rather than entities in their own right, and this layer may act on that where doing so needs nothing it cannot see.
+
+What the source once said stays in raw (§ II.1), the retraction is itself a landing record like any other, and re-deriving from raw reproduces exactly this result (§ 7). A retraction naming a record never landed removes nothing and is not an error.
 
 It models domain entities — a strength workout of ordered exercises and sets; a cycling workout of summary and samples; a body measurement — whose definitions are declared, version-controlled and owned here, extending § 8 from identity to structure. Sources are translated into these entities, never the reverse: no source's format shapes the domain, and a new or historical source is an adapter question, not a modelling one. A standalone reading is the degenerate entity. Component observations keep the source's native temporal resolution — never resampled, aggregated or interpolated — and belong to their parent entity. Two sources recording one real-world event produce two entities here, and that is correct.
 
@@ -101,7 +115,7 @@ Both are re-runnable at any time. Neither consults an overlay.
 
 **10.** **Correspondence is ordered within a source and unordered across sources.**
 
-- Two records sharing a source identity are the same source contradicting itself. The later supersedes; the earlier remains in raw and normalised but is not current.
+- Two records sharing a source identity are the same source contradicting itself. The later supersedes; the earlier remains in raw and normalised but is not current. Retraction is not supersession and does not reach here: it names no replacement, so there are not two accounts to prefer between, and § II.3 has already settled it.
 - Records from different sources are co-observations. Neither supersedes the other, both stand, and disagreement between them is evidence rather than error. Choosing which to read is an analytical-layer decision (§ 5), never resolved by discarding one.
 
 Consequences:
@@ -206,4 +220,4 @@ Dependency updates are not authored changes. A bump whose checks pass may merge 
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-08-11
+**Version**: 1.0.1 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-08-14
