@@ -10,7 +10,6 @@
 
 pub mod event;
 pub mod ids;
-mod newtype;
 pub mod payload;
 pub mod provenance;
 pub mod record;
@@ -19,12 +18,12 @@ pub mod time;
 
 pub use event::{EventKind, RawEventKind};
 pub use ids::{
-    EntityKind, InvalidIdentifier, InvalidStream, LandingStream, STREAM_SEPARATOR, SourceName,
-    SourceRecordId,
+    EntityKind, InvalidIdentifier, InvalidStream, LandingRecordId, LandingStream,
+    NegativeLandingRecordId, STREAM_SEPARATOR, SourceName, SourceRecordId,
 };
 pub use payload::{InvalidPayload, PayloadDigest, RawPayload, WrongDigestWidth};
 pub use provenance::{Endpoint, EventProvenance, InvalidEndpoint, Provenance};
-pub use record::LandingRecord;
+pub use record::{LandedRecord, LandingRecord};
 pub use run::{
     EventCount, ExtractionRun, FailureReason, NegativeRunId, RecordCount, RunId, RunOutcome,
     UnknownFailureReason,

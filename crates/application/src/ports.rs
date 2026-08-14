@@ -12,12 +12,18 @@
 
 use std::future::Future;
 
+use domain::gym::{
+    GymWorkout, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone,
+    Refusal, RefusalCount, WorkoutCount,
+};
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandingRecord, LandingStream, PayloadDigest, Provenance,
-    RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream, PayloadDigest,
+    Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
 };
 
-use crate::error::{ExtractionError, RunLockError, SourceError, StatusError, StoreError};
+use crate::error::{
+    ExtractionError, NormalisationError, RunLockError, SourceError, StatusError, StoreError,
+};
 
 // --- Driven ports -----------------------------------------------------------
 
@@ -276,4 +282,217 @@ pub trait ResumptionPointResetter {
     ///
     /// [`StatusError`] if the store is unavailable.
     fn reset(&self) -> impl Future<Output = Result<(), StatusError>> + Send;
+}
+
+// --- Normalisation ----------------------------------------------------------
+//
+// The second derivation's ports. They follow the same rules as the ones above:
+// each store is bound to one stream and asked which, no vendor type appears in
+// a signature, and nothing takes an overlay — § 9 forbids consulting one, and
+// the strongest form of that is a port that could not be handed one.
+
+/// What one landing record became.
+///
+/// The three outcomes of FR-005, as a sum. A record that produced no workout
+/// and no reason does not compile, and a retraction cannot carry refusals —
+/// the two mistakes most worth making impossible, since either would let a
+/// record go silently missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Translation {
+    /// A workout, with whatever it would not accept listed beside it. A
+    /// refusal inside a record does not stop the rest of it translating
+    /// (FR-024), so both travel together.
+    Workout {
+        workout: Box<GymWorkout>,
+        refusals: Vec<Refusal>,
+    },
+    /// The source withdrew a record it previously served. Carries no refusals,
+    /// because nothing was rejected.
+    Retraction { of: SourceRecordId },
+    /// Nothing translated, and here is why. Non-empty, so "no workout and no
+    /// reason" is not a state that exists.
+    Refused(NonEmpty<Refusal>),
+}
+
+/// Raw, read-only, for one stream.
+///
+/// A separate trait from [`LandingStore`] rather than a widening of it. That is
+/// what makes "a derivation never writes to raw" a fact about the type rather
+/// than a promise about the code: this reader has no `append`, so a derivation
+/// holding one could not mutate an input if it tried.
+pub trait LandingRecordReader {
+    fn stream(&self) -> &LandingStream;
+
+    /// Every record for this stream, oldest first, in the order the source
+    /// served them.
+    ///
+    /// The order is defined so that a derivation is reproducible, not because
+    /// the use case depends on it — retraction is absorbing and
+    /// order-independent — and defining it is what lets that independence be
+    /// tested by reversing the sequence.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn records(&self) -> impl Future<Output = Result<Vec<LandedRecord>, StoreError>> + Send;
+}
+
+/// Turns one source's payload into our entity.
+///
+/// The one port that knows a source's format, and the only place a vendor's
+/// shape is allowed to be understood. Synchronous and total: it makes no
+/// request, reads no clock and consults no overlay, which is what
+/// "deterministic translation" means and is visible here as a signature with
+/// nothing to be non-deterministic with.
+pub trait WorkoutTranslator {
+    /// # Errors
+    ///
+    /// [`NormalisationError::UnmappedExercise`] and nothing else. A gap in our
+    /// vocabulary is a defect in our code, so it stops the run — where every
+    /// problem with the *data* becomes a `Refusal` inside a successful
+    /// translation.
+    fn translate(
+        &self,
+        record: &LandedRecord,
+        zone: &OperatorZone,
+    ) -> Result<Translation, NormalisationError>;
+}
+
+/// The normalised layer for one stream.
+pub trait NormalisedWorkoutStore {
+    fn stream(&self) -> &LandingStream;
+
+    /// Replace this stream's normalised layer entirely.
+    ///
+    /// One transaction, and a replacement rather than an update: § II says a
+    /// derivation is never mutated in place, and doing the full re-derivation
+    /// every time is the cheapest way to be sure of it. There is no
+    /// append-only trigger here as there is on raw — those guard an *input*,
+    /// and applying them to a derivation would prevent the rebuild the
+    /// constitution requires.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn replace(
+        &self,
+        run: NormalisationRunId,
+        workouts: Vec<GymWorkout>,
+    ) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn count(&self) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
+}
+
+/// What the domain would not accept, for one stream.
+pub trait RefusalStore {
+    fn stream(&self) -> &LandingStream;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn replace(
+        &self,
+        run: NormalisationRunId,
+        refusals: Vec<Refusal>,
+    ) -> impl Future<Output = Result<RefusalCount, StoreError>> + Send;
+
+    /// Read back after a derivation, so what the domain will not accept is
+    /// visible rather than surfacing only in a log.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<Refusal>, StoreError>> + Send;
+}
+
+/// What happened on each derivation.
+///
+/// Mirrors [`ExtractionRunLog`] exactly, for the same reason: § 38 wants a
+/// broken derivation visible rather than merely absent, and a derivation that
+/// found nothing must be distinguishable from one that failed.
+pub trait NormalisationRunLog {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn begin(
+        &self,
+        stream: &LandingStream,
+        at: FetchedAt,
+    ) -> impl Future<Output = Result<NormalisationRunId, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn finish(
+        &self,
+        run: NormalisationRunId,
+        outcome: NormalisationOutcome,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn latest_success(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<Option<NormalisationRun>, StoreError>> + Send;
+}
+
+/// What a completed derivation is worth reporting.
+///
+/// Numbers that must add up: `records_read` equals `workouts_written` plus
+/// `workouts_withdrawn` plus `retractions_applied` plus `records_refused`.
+/// That is FR-005 asserted without reading a row, and it is printed at the
+/// terminal for the same reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NormalisationSummary {
+    pub run_id: NormalisationRunId,
+    pub records_read: RecordCount,
+    pub workouts_written: WorkoutCount,
+    /// Workouts a retraction removed. Distinct from `retractions_applied`: a
+    /// retraction naming a record never landed withdraws nothing.
+    pub workouts_withdrawn: WorkoutCount,
+    pub retractions_applied: RecordCount,
+    pub records_refused: RecordCount,
+    pub refusals_recorded: RefusalCount,
+}
+
+/// What the last derivation would not accept, grouped for reading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusalReport {
+    pub stream: LandingStream,
+    pub derived_at: Option<FetchedAt>,
+    /// In the order they were produced: record order, then position within a
+    /// record. Grouping by kind is the reader's job, not the store's.
+    pub refusals: Vec<Refusal>,
+}
+
+// --- Driving ports ----------------------------------------------------------
+
+/// Derives the normalised layer for a stream.
+///
+/// This trait existing at all is what satisfies FR-029: `cli` implements
+/// nothing, it constructs the use case and calls this, and a future `web`
+/// handler does the same against the same signature.
+pub trait WorkoutNormaliser {
+    /// # Errors
+    ///
+    /// [`NormalisationError`] if the store is unavailable or the vocabulary
+    /// has a gap. Never for a record the domain refused.
+    fn normalise(
+        &self,
+    ) -> impl Future<Output = Result<NormalisationSummary, NormalisationError>> + Send;
+}
+
+/// Reports what the domain would not accept.
+pub trait RefusalReporter {
+    /// # Errors
+    ///
+    /// [`NormalisationError`] if the store is unavailable.
+    fn refusals(&self) -> impl Future<Output = Result<RefusalReport, NormalisationError>> + Send;
 }

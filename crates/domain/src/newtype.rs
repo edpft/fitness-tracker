@@ -4,6 +4,10 @@
 //! — borrowing it, printing it, reading it back from text — is identical
 //! across a family and is generated here rather than written out five times
 //! with five chances to differ.
+//!
+//! At the crate root rather than inside `landing` because `gym` needs the same
+//! surface for the same reason. A second copy would be a second place for the
+//! `FromStr` that clap and serde both reach for to go missing from.
 
 /// Implement the shared surface of a string-backed name.
 ///
@@ -102,4 +106,32 @@ macro_rules! instant {
     };
 }
 
-pub(crate) use {instant, string_name};
+/// Implement the borrowed and `FromStr` forms of a value type that is not
+/// string-backed.
+///
+/// `string_name!` cannot serve these: it also generates `as_str` and `AsRef`,
+/// which a quantity has no business answering to. What every value type does
+/// share is that `TryFrom<String>` carries the validation and the other two
+/// text conversions delegate to it — `FromStr` above all, because `str::parse`,
+/// clap's value parsers and serde's string forms all reach for it.
+macro_rules! from_str_via_string {
+    ($name:ident, $error:ty) => {
+        impl TryFrom<&str> for $name {
+            type Error = $error;
+
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
+                Self::try_from(value.to_owned())
+            }
+        }
+
+        impl ::std::str::FromStr for $name {
+            type Err = $error;
+
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                Self::try_from(value.to_owned())
+            }
+        }
+    };
+}
+
+pub(crate) use {from_str_via_string, instant, string_name};

@@ -1,7 +1,7 @@
 //! One payload as the source served it, plus its provenance.
 
 use super::{
-    ids::{LandingStream, SourceRecordId},
+    ids::{LandingRecordId, LandingStream, SourceRecordId},
     payload::{PayloadDigest, RawPayload},
     provenance::Provenance,
     time::FetchedAt,
@@ -74,5 +74,46 @@ impl LandingRecord {
 
     pub const fn digest(&self) -> PayloadDigest {
         self.digest
+    }
+}
+
+/// A landing record that is already in the store, and so has an identity.
+///
+/// Distinct from [`LandingRecord`] rather than an optional field on it. A
+/// record being appended has no id yet and a record being read back always
+/// has one, and those are two different things a caller can hold — so an
+/// `Option` here would put a question at every use site whose answer is
+/// already known from which direction the record is travelling.
+///
+/// The derivation reads these. Extraction writes the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandedRecord {
+    id: LandingRecordId,
+    record: LandingRecord,
+}
+
+impl LandedRecord {
+    pub const fn new(id: LandingRecordId, record: LandingRecord) -> Self {
+        Self { id, record }
+    }
+
+    pub const fn id(&self) -> LandingRecordId {
+        self.id
+    }
+
+    pub const fn record(&self) -> &LandingRecord {
+        &self.record
+    }
+
+    pub const fn source_record_id(&self) -> &SourceRecordId {
+        self.record.source_record_id()
+    }
+
+    pub const fn provenance(&self) -> &Provenance {
+        self.record.provenance()
+    }
+
+    pub const fn payload(&self) -> &RawPayload {
+        self.record.payload()
     }
 }

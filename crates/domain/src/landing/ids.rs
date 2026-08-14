@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::newtype::string_name;
+use crate::newtype::string_name;
 
 /// What separates a stream's two halves in its text form.
 pub const STREAM_SEPARATOR: char = '.';
@@ -150,6 +150,45 @@ impl std::str::FromStr for LandingStream {
 impl fmt::Display for LandingStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{STREAM_SEPARATOR}{}", self.source, self.entity)
+    }
+}
+
+/// Why a landing record id could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a landing record id is assigned by the store and is never negative")]
+pub struct NegativeLandingRecordId;
+
+/// Which landing record. Assigned by the store when the record is appended.
+///
+/// Ours rather than the source's, and the two are not interchangeable: a source
+/// record id names the workout, while this names one *serving* of it. Raw is
+/// append-only, so a source that re-serves a workout produces two records
+/// sharing a [`SourceRecordId`] and differing here — which is what lets the
+/// normalised layer hold both, as § 10 requires, instead of silently keeping
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LandingRecordId(i64);
+
+impl LandingRecordId {
+    pub const fn as_i64(self) -> i64 {
+        self.0
+    }
+}
+
+impl TryFrom<i64> for LandingRecordId {
+    type Error = NegativeLandingRecordId;
+
+    fn try_from(id: i64) -> Result<Self, Self::Error> {
+        if id < 0 {
+            return Err(NegativeLandingRecordId);
+        }
+        Ok(Self(id))
+    }
+}
+
+impl fmt::Display for LandingRecordId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

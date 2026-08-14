@@ -1,0 +1,275 @@
+//! Deriving the normalised layer from raw.
+//!
+//! Reads every landing record for one stream, translates each, and replaces the
+//! stream's normalised layer with the result. It contacts nothing: a derivation
+//! works with every source down, which is § 36 satisfied by construction rather
+//! than by degrading gracefully.
+//!
+//! Two passes over the records, and the reason for the first is the whole of
+//! how retraction works here. A withdrawal is **absorbing**, not latest-wins:
+//! every retracted source record id is collected before any workout is emitted,
+//! so the result does not depend on the order the records are read in (FR-028).
+//! Latest-wins would depend on it, and would also answer a question the corpus
+//! cannot — whether a source that deletes a workout and later serves it again
+//! has re-created it — which § 10 reserves for the canonical layer.
+
+use domain::{
+    gym::{
+        GymWorkout, NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone,
+        Refusal, WorkoutCount,
+    },
+    landing::{LandingStream, RecordCount, SourceRecordId},
+};
+
+use crate::{
+    error::NormalisationError,
+    ports::{
+        Clock, LandingRecordReader, NormalisationRunLog, NormalisationSummary,
+        NormalisedWorkoutStore, RefusalReport, RefusalReporter, RefusalStore, Translation,
+        WorkoutNormaliser, WorkoutTranslator,
+    },
+};
+
+/// The derivation use case.
+///
+/// Generic over every port it uses, so the composition root decides what it
+/// talks to and a test can drive the whole of it with fakes and no I/O.
+pub struct Normalisation<R, T, W, F, G, C> {
+    stream: LandingStream,
+    zone: OperatorZone,
+    raw: R,
+    translator: T,
+    workouts: W,
+    refusals: F,
+    runs: G,
+    clock: C,
+}
+
+/// The adapters a derivation needs.
+///
+/// A struct rather than six positional arguments: at the composition root the
+/// names are what make the wiring readable, and two ports of the same shape
+/// cannot be swapped by accident.
+pub struct NormalisationPorts<R, T, W, F, G, C> {
+    pub raw: R,
+    pub translator: T,
+    pub workouts: W,
+    pub refusals: F,
+    pub runs: G,
+    pub clock: C,
+}
+
+impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
+where
+    R: LandingRecordReader,
+{
+    /// No stream argument: the reader is bound to one table and is asked which,
+    /// so a derivation cannot be built holding a stream its ports disagree
+    /// with. The rule extraction established, unchanged.
+    ///
+    /// The zone *is* an argument, because it is not a fact about any port — it
+    /// is a declared interpretive parameter, and § II.3 says translation takes
+    /// it from configuration.
+    pub fn new(ports: NormalisationPorts<R, T, W, F, G, C>, zone: OperatorZone) -> Self {
+        Self {
+            stream: ports.raw.stream().clone(),
+            zone,
+            raw: ports.raw,
+            translator: ports.translator,
+            workouts: ports.workouts,
+            refusals: ports.refusals,
+            runs: ports.runs,
+            clock: ports.clock,
+        }
+    }
+}
+
+/// What translating the whole corpus produced, before it is written.
+#[derive(Debug, Default)]
+struct Derived {
+    workouts: Vec<GymWorkout>,
+    refusals: Vec<Refusal>,
+    retracted: Vec<SourceRecordId>,
+    records_read: u64,
+    records_refused: u64,
+}
+
+impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
+where
+    R: LandingRecordReader + Sync,
+    T: WorkoutTranslator + Sync,
+    W: NormalisedWorkoutStore + Sync,
+    F: RefusalStore + Sync,
+    G: NormalisationRunLog + Sync,
+    C: Clock + Sync,
+{
+    /// Record why a derivation stopped, then hand the failure back.
+    ///
+    /// Its own call rather than inline, for extraction's reason: the difference
+    /// between a derivation that broke and one that quietly found nothing is
+    /// the whole of § 38.
+    async fn record_failure(
+        &self,
+        run: NormalisationRunId,
+        error: NormalisationError,
+    ) -> NormalisationError {
+        let reason = match error {
+            NormalisationError::Store(_) => NormalisationFailure::StoreFailure,
+            NormalisationError::UnmappedExercise { .. } => NormalisationFailure::UnmappedExercise,
+            NormalisationError::MissingZone => NormalisationFailure::MissingZone,
+        };
+        let outcome = NormalisationOutcome::Failed {
+            finished_at: self.clock.now(),
+            reason,
+        };
+        // If recording the failure also fails, the original failure is the one
+        // worth reporting — the store being unreachable is why we are here.
+        let _ = self.runs.finish(run, outcome).await;
+        error
+    }
+}
+
+impl<R, T, W, F, G, C> WorkoutNormaliser for Normalisation<R, T, W, F, G, C>
+where
+    R: LandingRecordReader + Sync,
+    T: WorkoutTranslator + Sync,
+    W: NormalisedWorkoutStore + Sync,
+    F: RefusalStore + Sync,
+    G: NormalisationRunLog + Sync,
+    C: Clock + Sync,
+{
+    async fn normalise(&self) -> Result<NormalisationSummary, NormalisationError> {
+        let stream = &self.stream;
+        let started_at = self.clock.now();
+        let run = self.runs.begin(stream, started_at).await?;
+
+        // No lock. A derivation reads raw and writes only its own tables, so it
+        // neither takes the extraction lock nor advances the resumption point —
+        // a record landed after this began is simply picked up by the next one.
+        let records = match self.raw.records().await {
+            Ok(records) => records,
+            Err(error) => return Err(self.record_failure(run, error.into()).await),
+        };
+
+        let mut derived = Derived {
+            records_read: u64::try_from(records.len()).unwrap_or(u64::MAX),
+            ..Derived::default()
+        };
+
+        for record in &records {
+            match self.translator.translate(record, &self.zone) {
+                Ok(Translation::Workout { workout, refusals }) => {
+                    derived.workouts.push(*workout);
+                    derived.refusals.extend(refusals);
+                }
+                Ok(Translation::Retraction { of }) => derived.retracted.push(of),
+                Ok(Translation::Refused(refusals)) => {
+                    derived.records_refused = derived.records_refused.saturating_add(1);
+                    derived.refusals.extend(refusals.iter().cloned());
+                }
+                // The only thing that stops a derivation is a gap in our own
+                // vocabulary. Nothing is written, so the previous derivation is
+                // left standing rather than half-replaced.
+                Err(error) => return Err(self.record_failure(run, error).await),
+            }
+        }
+
+        // The second pass. A withdrawal removes the workout it names wherever
+        // that workout sat in the sequence, and a withdrawal naming a record
+        // never landed removes nothing and is not an error.
+        let before = derived.workouts.len();
+        derived
+            .workouts
+            .retain(|workout| !derived.retracted.contains(workout.source_record_id()));
+        let withdrawn = before.saturating_sub(derived.workouts.len());
+
+        let retractions_applied = u64::try_from(derived.retracted.len()).unwrap_or(u64::MAX);
+        let workouts_withdrawn = u64::try_from(withdrawn).unwrap_or(u64::MAX);
+
+        let written = match self.workouts.replace(run, derived.workouts).await {
+            Ok(written) => written,
+            Err(error) => return Err(self.record_failure(run, error.into()).await),
+        };
+        let refusals = match self.refusals.replace(run, derived.refusals).await {
+            Ok(refusals) => refusals,
+            Err(error) => return Err(self.record_failure(run, error.into()).await),
+        };
+
+        let summary = NormalisationSummary {
+            run_id: run,
+            records_read: RecordCount::from(derived.records_read),
+            workouts_written: written,
+            workouts_withdrawn: WorkoutCount::from(workouts_withdrawn),
+            retractions_applied: RecordCount::from(retractions_applied),
+            records_refused: RecordCount::from(derived.records_refused),
+            refusals_recorded: refusals,
+        };
+
+        let finished_at = self.clock.now();
+        if let Err(error) = self
+            .runs
+            .finish(
+                run,
+                NormalisationOutcome::Succeeded {
+                    finished_at,
+                    records_read: summary.records_read,
+                    workouts_written: summary.workouts_written,
+                    workouts_withdrawn: summary.workouts_withdrawn,
+                    retractions_applied: summary.retractions_applied,
+                    records_refused: summary.records_refused,
+                    refusals_recorded: summary.refusals_recorded,
+                },
+            )
+            .await
+        {
+            return Err(error.into());
+        }
+
+        Ok(summary)
+    }
+}
+
+impl<R, T, W, F, G, C> RefusalReporter for Normalisation<R, T, W, F, G, C>
+where
+    R: LandingRecordReader + Sync,
+    T: WorkoutTranslator + Sync,
+    W: NormalisedWorkoutStore + Sync,
+    F: RefusalStore + Sync,
+    G: NormalisationRunLog + Sync,
+    C: Clock + Sync,
+{
+    async fn refusals(&self) -> Result<RefusalReport, NormalisationError> {
+        let refusals = self.refusals.all().await?;
+        let derived_at = self
+            .runs
+            .latest_success(&self.stream)
+            .await?
+            .and_then(|run| run.outcome().finished_at());
+
+        Ok(RefusalReport {
+            stream: self.stream.clone(),
+            derived_at,
+            refusals,
+        })
+    }
+}
+
+impl NormalisationSummary {
+    /// The sum FR-005 rests on.
+    ///
+    /// Every landing record has exactly one outcome, so the four must add to
+    /// the number read: a record became a workout that stands, a workout that a
+    /// retraction later withdrew, a retraction of its own, or a refusal. A
+    /// record that went missing shows up here as arithmetic that does not
+    /// reconcile — which is why the numbers are reported at the terminal rather
+    /// than merely computed.
+    pub fn reconciles(&self) -> bool {
+        let accounted = self
+            .workouts_written
+            .as_u64()
+            .saturating_add(self.workouts_withdrawn.as_u64())
+            .saturating_add(self.retractions_applied.as_u64())
+            .saturating_add(self.records_refused.as_u64());
+        accounted == self.records_read.as_u64()
+    }
+}
