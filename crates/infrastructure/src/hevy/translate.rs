@@ -14,16 +14,12 @@
 //! the run is a template the mapping does not cover — a defect in our own
 //! vocabulary rather than in the data.
 
-use application::{
-    NormalisationError, Translation,
-    ports::WorkoutTranslator,
-};
+use application::{NormalisationError, Translation, ports::WorkoutTranslator};
 use domain::{
     gym::{
-        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone, PerformedExercise,
-        RepCount, Refusal, RefusalLocus, RefusalReason, Rir, Set, SetKind, SignedKg, Superset,
-        TimedDistance, WorkoutItem, WorkoutStart,
-        exercise::Exercise,
+        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone,
+        PerformedExercise, Refusal, RefusalLocus, RefusalReason, RepCount, Rir, Set, SetKind,
+        SignedKg, Superset, TimedDistance, WorkoutItem, WorkoutStart, exercise::Exercise,
         nonempty::AtLeastTwo,
     },
     landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
@@ -501,12 +497,7 @@ impl Scribe {
     }
 
     /// A refusal that knows which exercise it belonged to.
-    fn note_for(
-        &mut self,
-        locus: RefusalLocus,
-        exercise: Option<Exercise>,
-        reason: RefusalReason,
-    ) {
+    fn note_for(&mut self, locus: RefusalLocus, exercise: Option<Exercise>, reason: RefusalReason) {
         self.refusals.push(Refusal {
             landed_as: self.landed_as,
             source_record_id: self.source_record_id.clone(),

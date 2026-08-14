@@ -81,7 +81,10 @@ async fn content(pool: &SqlitePool) -> Result<Vec<String>, Box<dyn std::error::E
     .fetch_all(pool)
     .await?
     {
-        rows.push(format!("{} {} {} {}", row.id, row.source, row.started, row.zone));
+        rows.push(format!(
+            "{} {} {} {}",
+            row.id, row.source, row.started, row.zone
+        ));
     }
 
     for row in sqlx::query!(
@@ -180,10 +183,18 @@ fn re_derivation_restores_the_layer_identically() {
         let second = content(&pool).await?;
 
         // Discard it entirely, as an operator would to force a rebuild.
-        sqlx::query!("DELETE FROM performed_set").execute(&pool).await?;
-        sqlx::query!("DELETE FROM performed_exercise").execute(&pool).await?;
-        sqlx::query!("DELETE FROM workout_item").execute(&pool).await?;
-        sqlx::query!("DELETE FROM gym_workout").execute(&pool).await?;
+        sqlx::query!("DELETE FROM performed_set")
+            .execute(&pool)
+            .await?;
+        sqlx::query!("DELETE FROM performed_exercise")
+            .execute(&pool)
+            .await?;
+        sqlx::query!("DELETE FROM workout_item")
+            .execute(&pool)
+            .await?;
+        sqlx::query!("DELETE FROM gym_workout")
+            .execute(&pool)
+            .await?;
 
         derive(&pool).await?;
         let rebuilt = content(&pool).await?;

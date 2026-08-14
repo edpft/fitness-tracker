@@ -95,8 +95,16 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
 
         // Every other workout is untouched. A retraction removes the record it
         // names and nothing else.
-        let mut theirs: Vec<_> = produced.workouts.iter().map(domain::gym::GymWorkout::landed_as).collect();
-        let mut ours: Vec<_> = baseline.workouts.iter().map(domain::gym::GymWorkout::landed_as).collect();
+        let mut theirs: Vec<_> = produced
+            .workouts
+            .iter()
+            .map(domain::gym::GymWorkout::landed_as)
+            .collect();
+        let mut ours: Vec<_> = baseline
+            .workouts
+            .iter()
+            .map(domain::gym::GymWorkout::landed_as)
+            .collect();
         theirs.sort_unstable();
         ours.sort_unstable();
         assert_eq!(theirs, ours, "no other workout is affected");
@@ -120,7 +128,11 @@ fn two_records_for_one_workout_both_stand() {
 
     let produced = derived!(reserved, false);
 
-    assert_eq!(produced.workouts.len(), 164, "both records produce a workout");
+    assert_eq!(
+        produced.workouts.len(),
+        164,
+        "both records produce a workout"
+    );
     let Some(first) = fixture.records.first() else {
         panic!("the corpus is not empty")
     };
@@ -130,7 +142,10 @@ fn two_records_for_one_workout_both_stand() {
         .iter()
         .filter(|workout| workout.source_record_id().as_str() == shared)
         .count();
-    assert_eq!(sharing, 2, "neither is marked current and neither is removed");
+    assert_eq!(
+        sharing, 2,
+        "neither is marked current and neither is removed"
+    );
 }
 
 /// Scenario 9. FR-017 and the one exception to FR-024.

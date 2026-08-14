@@ -299,11 +299,7 @@ fn no_arguments_is_a_usage_error() {
 // --- Normalisation ----------------------------------------------------------
 
 /// The same clean environment, plus a declared zone.
-fn fitness_in(
-    arguments: &[&str],
-    database: Option<&Path>,
-    zone: &str,
-) -> std::io::Result<Output> {
+fn fitness_in(arguments: &[&str], database: Option<&Path>, zone: &str) -> std::io::Result<Output> {
     let mut command = Command::new(BINARY);
     command
         .env_remove("HEVY_API_KEY")

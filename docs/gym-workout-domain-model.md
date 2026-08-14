@@ -88,7 +88,7 @@ enum PerformedExercise {
     ForTimedDistance { exercise: TimedDistanceExercise, sets: NonEmpty<Set<TimedDistance>> },
 }
 
-struct Superset { members: NonEmpty<PerformedExercise> }   // two or more, back to back
+struct Superset { members: AtLeastTwo<PerformedExercise> }  // two or more, back to back
 
 enum WorkoutItem { Exercise(PerformedExercise), Superset(Superset) }
 
@@ -291,6 +291,9 @@ against rows written by earlier versions (§ 7).
 
 The model was written out as rules and every landed record run through it.
 **3,755 of 3,779 sets translate completely**, along with 334 of 336 supersets.
+
+*The set figure survived being made executable; the superset one needed a
+second sentence. See "What the executable run changed" below.*
 What did not fit falls into three kinds, and telling them apart is the point of
 the exercise: a model that cannot hold a genuine case needs refining, whereas a
 model that rejects a wrong record is working.
@@ -336,8 +339,30 @@ that and the following day, so any threshold from ten minutes to several hours
 gives the same answer. The corpus resolves to **136 sessions** from 163 workout
 records.
 
-Nothing in the run exercises supersession, deletion or timezone handling: the
-corpus holds no re-serve to test against.
+Nothing in the paper run exercises supersession, deletion or timezone handling:
+the corpus holds no re-serve to test against.
+
+## What the executable run changed
+
+The rules above were written out and applied by hand. Building them
+(`specs/002-hevy-workout-normalisation`) reproduced the set figure exactly and
+moved three others, in every case because the paper run stopped a level too
+early rather than because the rules were wrong. A refusal does not only remove a
+set: it can cost the set's *entry*, and a lost entry can cost its *grouping*.
+
+| | On paper | Built | Why |
+|---|---:|---:|---|
+| Sets translating | 3,755 | 3,755 | — |
+| Well-formed supersets | 334 | 334 | — |
+| Supersets in the output | 334 | **328** | Six lose so many members to the band refusals that fewer than two remain, and two members is what a superset *is*. Four keep one member, which becomes an ordinary item; two are band pairs and lose both. |
+| Exercise entries | 1,135 | **1,122** | Thirteen entries lose every set they had. Twelve are the band-resistance entries; one is a `Snatch-Grip Behind The Neck Press` whose only two sets both record a zero load on a barbell. All 1,135 still resolve through the mapping — none is unmapped. |
+| Warm-up sets | 361 | **359** | Two are the Romanian deadlift's `0, 0`, refused as zero loads. |
+| Sets carrying intensity | 2,415 | **2,413** | Two sit on sets that refused. |
+
+None of these is a defect in the model and none was repaired by weakening it.
+They are what "the grammatical part translates and the omission is recorded"
+turns out to mean two levels down, and each is pinned by a test that accounts
+for the difference.
 
 ---
 

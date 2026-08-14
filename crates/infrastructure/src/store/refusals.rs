@@ -39,8 +39,9 @@ impl SqliteRefusalStore {
 
 /// The locus, written flat, with `CHECK` constraints in the file mirroring the
 /// sum type.
-const fn locus_columns(locus: RefusalLocus) -> (&'static str, Option<i64>, Option<i64>, Option<i64>)
-{
+const fn locus_columns(
+    locus: RefusalLocus,
+) -> (&'static str, Option<i64>, Option<i64>, Option<i64>) {
     match locus {
         RefusalLocus::Record => ("record", None, None, None),
         RefusalLocus::Entry { entry } => ("entry", Some(entry as i64), None, None),
@@ -211,7 +212,12 @@ impl RefusalStore for SqliteRefusalStore {
                     .map_err(|error| corrupt(&error))?,
                 source_record_id: SourceRecordId::try_from(row.source_record_id.as_str())
                     .map_err(|error| corrupt(&error))?,
-                locus: locus_from_row(&row.locus_kind, row.entry_index, row.set_index, row.group_id)?,
+                locus: locus_from_row(
+                    &row.locus_kind,
+                    row.entry_index,
+                    row.set_index,
+                    row.group_id,
+                )?,
                 exercise: row.exercise.as_deref().map(exercise_from_row).transpose()?,
                 reason: reason_from_row(&row.reason, row.detail)?,
             });

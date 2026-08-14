@@ -14,8 +14,8 @@ pub mod retry;
 pub mod translate;
 
 pub use client::{EVENTS_ENDPOINT, HevyWorkoutEvents};
+pub use mapping::{LoadReading, Mapped};
 pub use page::parse_page;
 pub use paging::{PageCount, PageNumber};
-pub use mapping::{LoadReading, Mapped};
 pub use retry::RetryPolicy;
 pub use translate::HevyWorkoutTranslator;

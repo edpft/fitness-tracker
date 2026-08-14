@@ -8,14 +8,17 @@ record holds the reasoning and is not restated here.
 Everything in "The entity" lives in `crates/domain/src/gym/` and depends on no
 workspace crate.
 
+*Kept in step with the code as it was written; where the two ever disagree the
+code is the one that runs.*
+
 ---
 
 ## Value types
 
 | Type | Carries | Rejects at construction |
 | --- | --- | --- |
-| `Kg` | `i64` milligrams | Anything not a decimal number; more than three decimal places; a value below zero |
-| `SignedKg` | `i64` milligrams, signed | The same, without the sign rule |
+| `Kg` | `i64` grams | Anything not a decimal number; more than three decimal places; a value below zero |
+| `SignedKg` | `i64` grams, signed | The same, without the sign rule |
 | `Metres` | `i64` millimetres | Negative; non-decimal |
 | `Duration` | `i64` seconds | Negative |
 | `RepCount` | `u32` | Zero — a set of no reps is not a set (SC-002's one unmodelled case) |
@@ -84,10 +87,11 @@ struct Superset { members: AtLeastTwo<PerformedExercise> }
 enum WorkoutItem { Exercise(PerformedExercise), Superset(Superset) }
 
 struct GymWorkout {
-    items:      NonEmpty<WorkoutItem>,
-    started_at: WorkoutStart,
-    provenance: Provenance,
-    landed_as:  LandingRecordId,
+    items:            NonEmpty<WorkoutItem>,
+    started_at:       WorkoutStart,
+    provenance:       Provenance,
+    source_record_id: SourceRecordId,
+    landed_as:        LandingRecordId,
 }
 ```
 
@@ -125,28 +129,34 @@ because provenance does not change shape when a payload is interpreted.
 ```rust
 enum RefusalLocus {
     Record,
-    Exercise { entry: EntryIndex },
-    Set      { entry: EntryIndex, set: SetIndex },
-    Superset { group: SupersetId },
+    Entry    { entry: u32 },
+    Set      { entry: u32, set: u32 },
+    Grouping { group: u32 },
 }
 
 enum RefusalReason {
     ZeroOnAbsoluteLoad,          // wrong data
     BandResistance,              // declared limitation
     ZeroReps,                    // unmodelled case
-    NonContiguousSuperset,       // wrong data
-    SingleMemberSuperset,        // wrong data
-    UnknownSetKind(String),      // wrong data — the source's word, kept verbatim
-    UnrecognisedIntensity(String),
-    NoSetsInEntry,
+    NonContiguousGrouping,       // wrong data
+    SingleMemberGrouping,        // wrong data
+    NoSetsInEntry,               // wrong data
+    UnknownSetKind { kind: String },        // the source's word, kept verbatim
+    UnrecognisedIntensity { value: String },
+    UnreadableValue { field: &'static str, detail: String },
     NothingTranslatable,         // every item refused; the record yields no workout
-    UnreadablePayload(String),
+    UnreadablePayload { detail: String },
 }
 
 struct Refusal {
     landed_as: LandingRecordId,
     source_record_id: SourceRecordId,
     locus: RefusalLocus,
+    /// Which of ours the refused thing belonged to, where that was known by the
+    /// time it was refused. A position alone sends the operator back to the
+    /// payload to find out what exercise 4 was, which is what FR-022 says a
+    /// refusal must save them.
+    exercise: Option<Exercise>,
     reason: RefusalReason,
 }
 ```
@@ -159,7 +169,7 @@ and which SC-007 requires an operator to see without re-reading the payload.
 
 ```rust
 enum Translation {
-    Workout { workout: GymWorkout, refusals: Vec<Refusal> },
+    Workout { workout: Box<GymWorkout>, refusals: Vec<Refusal> },
     Retraction { of: SourceRecordId },
     Refused(NonEmpty<Refusal>),
 }
@@ -178,10 +188,13 @@ invariants hold against a writer that is not this program.
 
 ```text
 normalisation_run(id, stream, started_at, finished_at, outcome,
-                  records_read, workouts, retractions, refusals, failure_reason)
+                  records_read, workouts_written, workouts_withdrawn,
+                  retractions_applied, records_refused, refusals_recorded,
+                  failure_reason)
 
 gym_workout(landing_record_id PK  -> hevy_workout_landing(id),
-            source_record_id, started_at_utc, zone, endpoint, event_kind)
+            source_record_id, started_at_utc, zone,
+            endpoint, event_kind, event_time, run_id)
 
 workout_item(workout, position, is_superset,
              PRIMARY KEY (workout, position))
@@ -190,12 +203,13 @@ performed_exercise(workout, item_position, position, exercise, measure,
                    PRIMARY KEY (workout, item_position, position))
 
 performed_set(workout, item_position, exercise_position, position,
-              load_kind, load_mg, reps, duration_s, metres, rir, set_kind,
+              load_kind, load_grams, reps, duration_seconds, distance_mm,
+              rir, set_kind, rest_after_seconds,
               PRIMARY KEY (workout, item_position, exercise_position, position))
 
-normalisation_refusal(id, run, landing_record_id, source_record_id,
-                      locus_kind, entry_index, set_index, superset_id,
-                      reason, reason_kind, detail)
+normalisation_refusal(id, run_id, landing_record_id, source_record_id,
+                      locus_kind, entry_index, set_index, group_id,
+                      exercise, reason, kind, detail)
 ```
 
 Three notes on the projection:

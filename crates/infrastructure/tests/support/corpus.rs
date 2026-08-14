@@ -19,8 +19,8 @@ use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use application::{
     NormalisationError, StoreError,
     ports::{
-        WorkoutNormaliser as _,
         Clock, LandingRecordReader, NormalisationRunLog, NormalisedWorkoutStore, RefusalStore,
+        WorkoutNormaliser as _,
     },
 };
 use domain::{
@@ -338,7 +338,9 @@ impl NormalisationRunLog for InMemoryRunLog {
             let mut runs = self.runs.lock().map_err(|_| StoreError::Corrupt {
                 detail: "the fixture lock was poisoned".to_owned(),
             })?;
-            let id = u64::try_from(runs.len()).unwrap_or(u64::MAX).saturating_add(1);
+            let id = u64::try_from(runs.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
             runs.insert(
                 id,
                 NormalisationRun::new(
@@ -476,9 +478,11 @@ impl Derivation {
 
         let summary = normalisation.normalise().await?;
 
-        let store_broke = |_| NormalisationError::Store(StoreError::Corrupt {
-            detail: "the fixture lock was poisoned".to_owned(),
-        });
+        let store_broke = |_| {
+            NormalisationError::Store(StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })
+        };
         Ok(Produced {
             workouts: workouts.workouts().map_err(store_broke)?,
             refusals: refusals.refusals().map_err(store_broke)?,
@@ -507,7 +511,10 @@ pub fn block_on<T>(body: impl Future<Output = T>) -> Result<T, FixtureError> {
 /// Pinning a scenario to a real record rather than a synthesised one: the
 /// question these ask is what the corpus does, and a fixture built to answer it
 /// would be answering itself.
-pub fn workout_starting<'a>(produced: &'a Produced, source_record_id: &str) -> Option<&'a GymWorkout> {
+pub fn workout_starting<'a>(
+    produced: &'a Produced,
+    source_record_id: &str,
+) -> Option<&'a GymWorkout> {
     produced
         .workouts
         .iter()

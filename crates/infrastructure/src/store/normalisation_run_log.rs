@@ -8,10 +8,7 @@
 
 use application::{NormalisationRunLog, StoreError};
 use domain::{
-    gym::{
-        NormalisationOutcome, NormalisationRun, NormalisationRunId,
-        RefusalCount, WorkoutCount,
-    },
+    gym::{NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount, WorkoutCount},
     landing::{FetchedAt, LandingStream, RecordCount},
 };
 use sqlx::SqlitePool;
@@ -33,7 +30,9 @@ impl SqliteNormalisationRunLog {
 /// A count that came out of the store, which is `i64` there and never negative
 /// here.
 fn count_from_row(value: Option<i64>) -> u64 {
-    value.and_then(|value| u64::try_from(value).ok()).unwrap_or(0)
+    value
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or(0)
 }
 
 impl NormalisationRunLog for SqliteNormalisationRunLog {

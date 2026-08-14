@@ -24,9 +24,8 @@ pub use error::{
 };
 pub use ports::{
     Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExtractionRunLog,
-    ExtractionStatusReporter, LandingRecordReader,
-    LandingStore, NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore,
-    RefusalReport, RefusalReporter, RefusalStore, ResumptionPointResetter, ResumptionPointStore,
-    RunLock, RunSummary, SourceEvent, StreamStatus, Translation, WorkoutEventSource,
-    WorkoutExtractor, WorkoutNormaliser, WorkoutTranslator,
+    ExtractionStatusReporter, LandingRecordReader, LandingStore, NormalisationRunLog,
+    NormalisationSummary, NormalisedWorkoutStore, RefusalReport, RefusalReporter, RefusalStore,
+    ResumptionPointResetter, ResumptionPointStore, RunLock, RunSummary, SourceEvent, StreamStatus,
+    Translation, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutTranslator,
 };

@@ -26,7 +26,7 @@ As the operator, I derive the normalised layer from raw and every landed Hevy wo
 
 **Why this priority**: It is the feature's reason to exist. The two stories below are refinements of what happens at its edges; neither is worth building against an empty normalised layer.
 
-**Independent Test**: Derive over the 164 landed records and confirm the entity counts match the model of record — 1,135 exercise entries, 3,755 of 3,779 sets, 334 of 336 supersets — then derive again over unchanged raw and confirm the result is identical. Delivers the domain entity that every later layer reads.
+**Independent Test**: Derive over the 164 landed records and confirm the entity counts — 3,755 of 3,779 sets, 1,122 performed exercises from 1,135 landed entries, 328 supersets from the 334 well-formed groupings — then derive again over unchanged raw and confirm the result is identical. Delivers the domain entity that every later layer reads.
 
 **Acceptance Scenarios**:
 
@@ -157,9 +157,11 @@ As the operator, a landed deletion leaves the workout it names with no normalise
 
 ### Measurable Outcomes
 
-- **SC-001**: Deriving over the 164 landed records translates **3,755 of 3,779 sets** and **334 of 336 supersets** completely, reproducing the model of record's figures. The air bike's 32 sets and the sled's 9 are among the 3,755, carrying `Relative(0)` under decision 0003.
+- **SC-001**: Deriving over the 164 landed records translates **3,755 of 3,779 sets**, reproducing the model of record's figure. The air bike's 32 sets and the sled's 9 are among them, carrying `Relative(0)` under decision 0003.
+- **SC-001a**: Of the corpus's 336 groupings, **334 are well-formed** — the model of record's figure — and **328 reach the output as supersets**. The six that do not lose members to the band-resistance refusals, and a superset with fewer than two members is not one. Four keep a single member, which translates as an ordinary item rather than being lost with the grouping.
+- **SC-001b**: **1,122 of the 1,135 landed exercise entries** become a performed exercise. The thirteen that do not lost every set they had — twelve band-resistance entries, and one `Snatch-Grip Behind The Neck Press` whose only two sets both record a zero load on a barbell — and an exercise holds a non-empty sequence of sets by construction.
 - **SC-002**: The sets that do not translate are exactly the named cases and no others — 7 zero loads on absolute-load exercises, 16 band-resistance sets, 1 zero-rep set — and the supersets that do not translate are exactly one non-contiguous and one single-member grouping. A refusal outside that set is a regression, and a case in that set silently translating is a worse one.
-- **SC-003**: All 1,135 landed exercise entries resolve to an exercise, and all 134 distinct exercise template identifiers in the corpus are covered by the mapping. Zero unmapped identifiers.
+- **SC-003**: All 1,135 landed exercise entries **resolve through the mapping**, and all 134 distinct exercise template identifiers in the corpus are covered by it. Zero unmapped identifiers. Distinct from SC-001b: resolving is what the mapping does, and an entry can resolve and still translate to nothing because every one of its sets refused.
 - **SC-004**: Deriving twice over unchanged raw produces equal normalised entities and an equal set of refusals, and discarding the normalised layer entirely and re-deriving restores it identically, with no request to the source.
 - **SC-005**: Every one of the 164 landed records is accounted for by exactly one of a normalised entity, a retraction it applied, or a refusal naming it — none in two, none in none.
 - **SC-006**: A workout the source stamps at 18:00 UTC in July and one stamped at 19:00 UTC in December both read back as the same local wall-clock hour, and no normalised timestamp lacks a zone.

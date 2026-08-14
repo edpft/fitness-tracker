@@ -14,10 +14,9 @@ use std::path::Path;
 
 use application::{
     DerivationStatus, DerivationStatusReporter, ExtractionError, ExtractionStatusReporter,
-    LandingStore, NormalisationError,
-    NormalisationSummary, RefusalReport, RefusalReporter, ResumptionPointResetter,
-    ResumptionPointStore, RunSummary, StatusError, StreamStatus, WorkoutExtractor,
-    WorkoutNormaliser,
+    LandingStore, NormalisationError, NormalisationSummary, RefusalReport, RefusalReporter,
+    ResumptionPointResetter, ResumptionPointStore, RunSummary, StatusError, StreamStatus,
+    WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
@@ -28,9 +27,8 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator,
-    SqliteExtractionRunLog, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    HevyWorkoutTranslator, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };
 
 use crate::{catalogue::KnownStream, config::SourceAccess};
@@ -61,7 +59,9 @@ pub enum Outcome {
         extraction: Box<StreamStatus>,
         derivation: Box<DerivationStatus>,
     },
-    Reset { previous: Option<Watermark> },
+    Reset {
+        previous: Option<Watermark>,
+    },
 }
 
 /// The wall clock, which is the only thing a real run should take its timings

@@ -7,7 +7,8 @@
 
 use domain::gym::{
     Distance, Duration, Kg, Load, Metres, NonEmpty, RepCount, Rir, SetKind, SignedKg,
-    TimedDistance, exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
+    TimedDistance,
+    exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
     nonempty::AtLeastTwo,
 };
 use proptest::prelude::*;

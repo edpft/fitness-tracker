@@ -4,7 +4,9 @@
 //! difference between them is the difference between finding nothing new and
 //! finding nothing at all — and neither is a failure.
 
-use application::{DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus};
+use application::{
+    DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
+};
 use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
@@ -94,9 +96,7 @@ fn derivation_status(standing: &DerivationStatus) {
     if behind == 0 {
         println!("  records behind     0");
     } else {
-        println!(
-            "  records behind     {behind} — raw has moved since; run `fitness normalise`"
-        );
+        println!("  records behind     {behind} — raw has moved since; run `fitness normalise`");
     }
 }
 

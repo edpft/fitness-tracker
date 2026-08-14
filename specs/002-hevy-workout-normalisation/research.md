@@ -99,10 +99,10 @@ would make the result depend on what the vendor's catalogue says today.
 
 ## D3 — A load never becomes a float, because it is read as bytes
 
-**Decision**: `Kg` is a newtype over `i64` milligrams. The weight field is
+**Decision**: `Kg` is a newtype over `i64` grams. The weight field is
 deserialised as `&serde_json::value::RawValue`, which yields the original number
 token — `77.5`, `20.4` — and that decimal string is parsed exactly into
-milligrams.
+grams.
 
 **Rationale**: FR-014 forbids floating-point representation error, because a
 load is persisted, digested and compared against rows written by earlier
@@ -114,7 +114,7 @@ wrong at the first step: by the time you hold an `f64`, `20.4` is already
 so the bytes reach the translator unparsed, and reading the number's own
 characters is both exact and the smallest thing that could work.
 
-Milligrams rather than grams or tenths: the corpus has one decimal place, the
+Grams rather than tenths of a kilogram: the corpus has one decimal place, the
 API document promises nothing, and three spare digits cost nothing in an `i64`
 — which holds ±9.2 million tonnes.
 
@@ -127,11 +127,11 @@ does.
 
 **Consequence**: `Kg` is reachable only through `TryFrom<&str>` and `Display`,
 both of which speak kilograms. No caller handles the integer, which is what
-keeps § 25 satisfied by a type whose inside says milligrams.
+keeps § 25 satisfied by a type whose inside says grams.
 
 ## D4 — The operator's zone is required configuration with no compiled default
 
-**Decision**: `FITNESS_TIMEZONE`, an IANA identifier, validated at startup.
+**Decision**: `FITNESS_TRACKER_TIMEZONE`, an IANA identifier, validated at startup.
 `normalise` refuses to run without it. Nothing is compiled in.
 
 **Rationale**: § II.3 takes the zone from "declared operator configuration", and
@@ -150,6 +150,20 @@ here, which the spec says.
 derivation depend on the machine that ran it, so the same raw yields different
 normalised output on a laptop and a server, which breaks § 7 in a way that would
 not show up until it mattered.
+
+**The zone *database* is bundled, for the same reason and one more.** Found by
+the gate rather than by argument: `nix flake check` runs the suite in a sandbox
+with no `/usr/share/zoneinfo`, so `Europe/London` did not resolve and every test
+that declared a zone failed. It passed locally the whole time, which is exactly
+the failure mode § 34 exists to catch — "there is a system tzdata" is an
+environment assumption, and a minimal container tells the same story as the
+sandbox.
+
+Building `jiff` with `tzdb-bundle-always` fixes it, and the second reason is the
+better one: the zone rules are a versioned input to a deterministic translation
+(§ 9), so a derivation whose wall clocks depend on which tzdata the host happens
+to carry is not the re-derivable thing § 7 requires. Verified by running a
+derivation with `TZDIR` pointed at nothing.
 
 ## D5 — Retraction is absorbing, and applied after the whole corpus is read
 

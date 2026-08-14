@@ -13,8 +13,8 @@ request to any source.
 fitness normalise hevy.workouts
 ```
 
-**Environment**: `FITNESS_TIMEZONE` (IANA identifier, required — D4),
-`FITNESS_DATABASE` as extraction already uses. No flag carries the zone: it is a
+**Environment**: `FITNESS_TRACKER_TIMEZONE` (IANA identifier, required — D4),
+`FITNESS_TRACKER_DATABASE` as extraction already uses. No flag carries the zone: it is a
 declared interpretive parameter, not a per-invocation choice, and an operator
 who can pass it per run can produce two derivations that disagree.
 

@@ -1,6 +1,21 @@
 [files]
-extend-exclude = ["Cargo.lock", "flake.lock", "**/*.pinned.json"]
+# Payloads and lockfiles are recorded verbatim, not written. Correcting a typo
+# in one would corrupt a record rather than fix a word — the landed corpus in
+# particular is the bytes Hevy served, and its exercise template ids are hex
+# strings that a spellchecker reads as prose.
+extend-exclude = [
+  "Cargo.lock",
+  "flake.lock",
+  "**/*.pinned.json",
+  "crates/infrastructure/tests/fixtures/*.jsonl",
+]
 
 [default.extend-words]
 # Don't correct the app name "Hevy"
 Hevy = "Hevy"
+
+[default.extend-identifiers]
+# Hevy's exercise template ids, quoted in the mapping. They are the source's
+# identifiers and are not ours to spell differently: `040BA2E3` reads as `BA`,
+# and the fix for a mistyped one is a failing test, not a dictionary.
+"040BA2E3" = "040BA2E3"

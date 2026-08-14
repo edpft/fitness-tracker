@@ -9,9 +9,7 @@
 
 use application::{LandingRecordReader, NormalisedWorkoutStore, StoreError};
 use domain::{
-    gym::{
-        GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount,
-    },
+    gym::{GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,

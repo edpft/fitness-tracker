@@ -26,7 +26,15 @@ infrastructure = { path = "crates/infrastructure" }
 # `jiff` rather than chrono: § II requires an IANA zone identifier and says an
 # offset is not a substitute. jiff's Timestamp/Zoned split is exactly that
 # distinction, and it has no naive local type to reach for by accident.
-jiff = "0.2.35"
+#
+# The zone database is bundled rather than read from the host. § 34 forbids an
+# environment assumption, and "there is a /usr/share/zoneinfo" is one — the nix
+# sandbox has none, so `Europe/London` does not resolve there, and a minimal
+# container is the same story. It also bears on § 9: the zone is a versioned
+# input to a deterministic translation, and a derivation whose wall clocks
+# depend on the host's tzdata version is not the re-derivable thing § 7
+# requires.
+jiff = { version = "0.2.35", features = ["tzdb-bundle-always"] }
 sha2 = "0.11.0"
 thiserror = "2.0.20"
 

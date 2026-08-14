@@ -120,7 +120,6 @@ mod tests {
     use crate::catalogue::{KnownStream, lookup};
     use std::{env::VarError, path::PathBuf};
 
-
     fn hevy() -> Option<&'static KnownStream> {
         lookup("hevy.workouts")
     }

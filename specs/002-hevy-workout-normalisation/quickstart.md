@@ -8,8 +8,8 @@ every one of them is also runnable by hand. The fixture is the landed corpus —
 
 ```bash
 nix develop                    # the toolchain, sqlite3, sqlx-cli
-export FITNESS_DATABASE=local.db
-export FITNESS_TIMEZONE=Europe/London
+export FITNESS_TRACKER_DATABASE=local.db
+export FITNESS_TRACKER_TIMEZONE=Europe/London
 ```
 
 No credential. Nothing here contacts Hevy, which is the point of the layer.
@@ -33,8 +33,14 @@ forbidden and `clippy.toml` allows panics in tests for exactly this. Fixture
 builders are free functions, so they return `Result` and the test unwraps at the
 call site — the test exemptions do not reach them.
 
-The corpus fixture is loaded from `local.db` into a temporary database per test,
-so a test never writes to the operator's file and the suite is order-independent.
+The corpus is committed at
+`crates/infrastructure/tests/fixtures/hevy-workouts.jsonl` — 164 records exported
+verbatim — so the suite runs on a machine that has never talked to Hevy. The
+suites that assert translation drive the use case with in-memory ports; the one
+that asserts the store lands the fixture into a temporary SQLite file per test.
+
+They live in `infrastructure` rather than `application` because they need the
+Hevy translator, and `application` may not depend on the ring above it.
 
 ---
 
@@ -47,9 +53,11 @@ Derive over the 164 records and count.
 | Assertion | Expected |
 | ---: | --- |
 | workouts written | 163 |
-| exercise entries resolved | 1,135 |
+| exercise entries resolving through the mapping | 1,135 |
+| performed exercises in the output | 1,122 |
 | sets translated | 3,755 of 3,779 |
-| supersets translated | 334 of 336 |
+| well-formed groupings | 334 of 336 |
+| supersets in the output | 328 |
 | distinct template ids resolved | 134 of 134 |
 | unmapped ids | 0 |
 
@@ -125,8 +133,11 @@ the workout is not lost to a bad grouping.
 
 *FR-011, FR-013. Spec's "Absence is absence".*
 
-- 2,415 sets carry an intensity; the other 1,364 have `None` — not zero, and
-  not carried forward from a neighbouring set.
+- 2,413 of the 3,755 translated sets carry an intensity and the rest have
+  `None` — not zero, and not carried forward from a neighbouring set. The corpus
+  records 2,415; two of them sit on sets that refused.
+- 359 sets are warm-ups. The corpus tags 361; two are the Romanian deadlift's
+  empty-bar zeros, which refuse.
 - `rest_after` is `None` on all 3,755 translated sets. This source records none
   and none is invented from the `routine_id` on the 8 workouts that carry one
   (§ 11).
@@ -142,7 +153,7 @@ timestamp lacks a zone — which is a fact about the type, so the test that coul
 fail is the one asserting the wall clock, not the one asserting the zone exists.
 
 Derive under a second zone and confirm the instants are unchanged and the wall
-clocks move together. Then run with `FITNESS_TIMEZONE` unset and confirm the
+clocks move together. Then run with `FITNESS_TRACKER_TIMEZONE` unset and confirm the
 command refuses rather than guessing (D4).
 
 ## Scenario 8 — A withdrawn workout is absent
@@ -170,9 +181,16 @@ job. No workout containing the id translates around the gap.
 
 *FR-005. SC-005.*
 
-`records_read` equals `workouts_written` plus `retractions_applied` plus records
-that yielded no workout. Assert over the corpus that the sum reconciles and that
-no landing record id appears both as a workout and as a record-level refusal.
+`records_read` equals `workouts_written` plus `workouts_withdrawn` plus
+`retractions_applied` plus `records_refused`. Every landing record has exactly
+one outcome: it became a workout that stands, a workout a retraction later
+withdrew, a retraction of its own, or a refusal. Assert over the corpus that the
+sum reconciles and that no landing record id appears both as a workout and as a
+record-level refusal.
+
+`workouts_withdrawn` is separate from `retractions_applied` because neither
+implies the other — the corpus's one retraction names a workout never landed, so
+it withdraws nothing.
 
 ## Scenario 11 — Supersession is not resolved here
 

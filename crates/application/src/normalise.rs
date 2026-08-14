@@ -319,9 +319,8 @@ where
         // Never having derived is a fact to report, not an error to raise.
         let last_success = self.runs.latest_success(&self.stream).await?;
         let workouts_held = self.workouts.count().await?;
-        let refusals_held = RefusalCount::from(
-            u64::try_from(self.refusals.all().await?.len()).unwrap_or(u64::MAX),
-        );
+        let refusals_held =
+            RefusalCount::from(u64::try_from(self.refusals.all().await?.len()).unwrap_or(u64::MAX));
 
         let held = self.raw.count().await?.as_u64();
         let read = last_success.as_ref().map_or(0, |run| match run.outcome() {

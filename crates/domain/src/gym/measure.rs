@@ -5,12 +5,11 @@
 //! source offers is one of those recorded more or less fully.
 //!
 //! The last two are separate rather than one measure with an optional duration
-//! ([decision 0002]). A carry is time under load and a run is pace, and an
+//! — `docs/decisions/0002-distance-and-distance-over-time-are-different-measures.md`.
+//! A carry is time under load and a run is pace, and an
 //! optional duration would have meant "not captured" for a run and "does not
 //! apply" for a carry with nothing in the type to tell them apart — the same
 //! merge that got the unrecorded load removed, one field over.
-//!
-//! [decision 0002]: https://github.com/edfawcetttaylor/fitness-tracker/blob/main/docs/decisions/0002-distance-and-distance-over-time-are-different-measures.md
 
 use std::fmt;
 
@@ -54,9 +53,10 @@ impl TryFrom<String> for RepCount {
     type Error = InvalidQuantity;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let reps: u32 = value
-            .parse()
-            .map_err(|_| InvalidQuantity::NotANumber { unit: "reps", value })?;
+        let reps: u32 = value.parse().map_err(|_| InvalidQuantity::NotANumber {
+            unit: "reps",
+            value,
+        })?;
         Self::new(reps)
     }
 }

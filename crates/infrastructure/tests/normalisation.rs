@@ -29,8 +29,16 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
         .iter()
         .map(|workout| workout.exercises().count())
         .sum();
-    let sets: usize = produced.workouts.iter().map(domain::gym::GymWorkout::set_count).sum();
-    let supersets: usize = produced.workouts.iter().map(domain::gym::GymWorkout::superset_count).sum();
+    let sets: usize = produced
+        .workouts
+        .iter()
+        .map(domain::gym::GymWorkout::set_count)
+        .sum();
+    let supersets: usize = produced
+        .workouts
+        .iter()
+        .map(domain::gym::GymWorkout::superset_count)
+        .sum();
 
     assert_eq!(produced.workouts.len(), 163, "workouts");
     assert_eq!(sets, 3_755, "of 3,779 sets translate");
@@ -66,7 +74,11 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
 fn well_formed_groupings_lose_members_to_refused_entries() {
     let produced = derived!();
 
-    let survivors: usize = produced.workouts.iter().map(domain::gym::GymWorkout::superset_count).sum();
+    let survivors: usize = produced
+        .workouts
+        .iter()
+        .map(domain::gym::GymWorkout::superset_count)
+        .sum();
     let band_refusals = produced
         .refusals
         .iter()
@@ -143,7 +155,11 @@ fn assisted_and_unassisted_forms_are_one_series() {
     let produced = derived!();
 
     let mut loads: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-    for exercise in produced.workouts.iter().flat_map(domain::gym::GymWorkout::exercises) {
+    for exercise in produced
+        .workouts
+        .iter()
+        .flat_map(domain::gym::GymWorkout::exercises)
+    {
         let PerformedExercise::ForReps { exercise, sets } = exercise else {
             continue;
         };
@@ -161,7 +177,11 @@ fn assisted_and_unassisted_forms_are_one_series() {
         panic!("the corpus holds pull-ups")
     };
     // 97 plain + 159 assisted + 3 banded, one exercise, one series.
-    assert_eq!(pull_ups.len(), 259, "pull-up sets across all three templates");
+    assert_eq!(
+        pull_ups.len(),
+        259,
+        "pull-up sets across all three templates"
+    );
     assert!(
         pull_ups.iter().any(|grams| *grams < 0),
         "assistance is carried as negative load"
@@ -208,7 +228,11 @@ fn absence_is_absence() {
         };
     }
 
-    for exercise in produced.workouts.iter().flat_map(domain::gym::GymWorkout::exercises) {
+    for exercise in produced
+        .workouts
+        .iter()
+        .flat_map(domain::gym::GymWorkout::exercises)
+    {
         match exercise {
             PerformedExercise::ForReps { sets, .. } => tally!(sets),
             PerformedExercise::ForDuration { sets, .. } => tally!(sets),

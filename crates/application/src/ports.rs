@@ -17,8 +17,9 @@ use domain::gym::{
     Refusal, RefusalCount, WorkoutCount,
 };
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream, PayloadDigest,
-    Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream,
+    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
+    Watermark,
 };
 
 use crate::error::{
