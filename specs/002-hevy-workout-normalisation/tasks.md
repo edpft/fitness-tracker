@@ -233,3 +233,48 @@ and the model of record now carries a "What the executable run changed" section.
 `allow-panic-in-tests` covers a test function but not a helper defined beside
 one, so `fn derive() -> Produced` does not compile. The macro expands the panic
 inside the `#[test]` body, which is exactly what CLAUDE.md warns about.
+
+---
+
+## What the review changed
+
+Four answers from the review of the pull request moved the model, and each is a
+decision record rather than a quiet edit.
+
+**The load axis, not performable zero** ([0004]). `Absolute` and `Relative` are
+chosen by whether assistance is conventionally available, and `Absolute` admits
+zero. The old rule diagnosed the seven empty-bar warm-ups correctly by accident:
+what makes them look wrong is that a barbell has mass, which is a fact about the
+implement rather than about the axis. The seven-zero test — the sharpest
+assertion in the plan — went with it.
+
+**A run is ground covered** ([0005]). The fourth measure was added on the
+evidence that every `Running` set carries a duration and no carry does. Looking
+at the values rather than at whether they were present says otherwise: every
+entry repeats one identical distance and time across all its sets, which is an
+interval target. Prescription is stored separately and this feature has no
+prescribed side, so the duration is not carried.
+
+**Bands translate.** Refusing them foreclosed an overlay supplying a resistance
+range later, and the number written down is the operator's estimate of the band.
+
+**Weighted and unweighted variants are one exercise**, exactly as assisted and
+unassisted are. Three collapses the first pass missed.
+
+The result is that the corpus now refuses one set and two groupings, where it
+refused twenty-four and two. A model that rejects exactly the thing it has no
+shape for — the missed attempt — is a better outcome than one that rejects
+twenty-six things for five reasons, and it cost a rule that had been right for
+the wrong reason.
+
+Smaller things the review also corrected, applied everywhere they reached:
+counts are `usize` rather than `u64` with a saturating conversion at every call
+site; the store narrows to `i64` with an error rather than an `i64::MAX`
+sentinel; `nonempty` is `sequence`, since it also holds the two-or-more case;
+`MissingZone` is `MissingTimeZone`; `--timezone` joins the environment variable;
+the application no longer shapes data for the terminal; and cross-document
+identifiers (`FR-005`, `SC-002`) are gone from the code, which now says the
+thing rather than pointing at where the thing is written down.
+
+[0004]: ../../docs/decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md
+[0005]: ../../docs/decisions/0005-distance-over-time-was-prescription.md

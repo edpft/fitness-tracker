@@ -19,11 +19,12 @@ use domain::{
     gym::{
         Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone,
         PerformedExercise, Refusal, RefusalLocus, RefusalReason, RepCount, Rir, Set, SetKind,
-        SignedKg, Superset, TimedDistance, WorkoutItem, WorkoutStart, exercise::Exercise,
-        nonempty::AtLeastTwo,
+        SignedKg, Superset, WorkoutItem, WorkoutStart, exercise::Exercise, sequence::AtLeastTwo,
     },
     landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
 };
+use std::fmt;
+
 use jiff::Timestamp;
 
 use super::{
@@ -214,12 +215,6 @@ impl HevyWorkoutTranslator {
                     .ok()
                     .map(|sets| PerformedExercise::ForDistance { exercise, sets })
             }
-            Exercise::TimedDistance(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, timed_distance_of);
-                NonEmpty::new(sets)
-                    .ok()
-                    .map(|sets| PerformedExercise::ForTimedDistance { exercise, sets })
-            }
         }
     }
 
@@ -313,36 +308,32 @@ fn intensity_of(set: &PerformedSet<'_>) -> Result<Option<Rir>, RefusalReason> {
 }
 
 /// The weight column, read the way this exercise's mapping says to.
+///
+/// An absent weight is not a missing value in either reading. On an absolute
+/// exercise it is no external load — a bodyweight squat, a set of skipping — and
+/// on a relative one it is plain bodyweight. Both are real observations, which
+/// is why neither refuses.
 fn load_of(set: &PerformedSet<'_>, reading: LoadReading) -> Result<Load, RefusalReason> {
+    let unreadable = |error: &dyn fmt::Display| RefusalReason::UnreadableValue {
+        field: "weight_kg",
+        detail: error.to_string(),
+    };
     let token = number(set.weight_kg);
+
     match reading {
-        LoadReading::BandResistance => Err(RefusalReason::BandResistance),
         LoadReading::Absolute => {
             let Some(token) = token else {
-                return Err(RefusalReason::UnreadableValue {
-                    field: "weight_kg",
-                    detail: "absent on an exercise whose implement has mass".to_owned(),
-                });
+                return Ok(Load::UNLOADED);
             };
-            let mass = Kg::try_from(token).map_err(|error| RefusalReason::UnreadableValue {
-                field: "weight_kg",
-                detail: error.to_string(),
-            })?;
-            // No bar mass is assumed and no default applied: 10, 15 and 20 kg
-            // bars are all in use, so every repair is a guess.
-            Load::absolute(mass).map_err(|_| RefusalReason::ZeroOnAbsoluteLoad)
+            Kg::try_from(token)
+                .map(Load::absolute)
+                .map_err(|error| unreadable(&error))
         }
         LoadReading::Relative | LoadReading::RelativeNegated => {
-            // An absent weight on a relative exercise is plain bodyweight,
-            // which is a real observation rather than a missing one.
             let Some(token) = token else {
                 return Ok(Load::BODYWEIGHT);
             };
-            let delta =
-                SignedKg::try_from(token).map_err(|error| RefusalReason::UnreadableValue {
-                    field: "weight_kg",
-                    detail: error.to_string(),
-                })?;
+            let delta = SignedKg::try_from(token).map_err(|error| unreadable(&error))?;
             Ok(Load::relative(if reading == LoadReading::RelativeNegated {
                 delta.negated()
             } else {
@@ -388,13 +379,6 @@ fn metres_of(set: &PerformedSet<'_>) -> Result<Metres, RefusalReason> {
 
 fn distance_of(set: &PerformedSet<'_>) -> Result<Distance, RefusalReason> {
     metres_of(set).map(|metres| Distance { metres })
-}
-
-fn timed_distance_of(set: &PerformedSet<'_>) -> Result<TimedDistance, RefusalReason> {
-    Ok(TimedDistance {
-        metres: metres_of(set)?,
-        duration: duration_of(set)?,
-    })
 }
 
 /// Which of a workout's groupings are supersets, and which are malformed.

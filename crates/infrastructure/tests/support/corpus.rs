@@ -248,7 +248,7 @@ impl NormalisedWorkoutStore for InMemoryWorkouts {
         _run: NormalisationRunId,
         workouts: Vec<GymWorkout>,
     ) -> Result<WorkoutCount, StoreError> {
-        let count = u64::try_from(workouts.len()).unwrap_or(u64::MAX);
+        let count = workouts.len();
         {
             let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
                 detail: "the fixture lock was poisoned".to_owned(),
@@ -262,9 +262,7 @@ impl NormalisedWorkoutStore for InMemoryWorkouts {
         let held = self.written.lock().map_err(|_| StoreError::Corrupt {
             detail: "the fixture lock was poisoned".to_owned(),
         })?;
-        Ok(WorkoutCount::from(
-            u64::try_from(held.len()).unwrap_or(u64::MAX),
-        ))
+        Ok(WorkoutCount::from(held.len()))
     }
 }
 
@@ -304,7 +302,7 @@ impl RefusalStore for InMemoryRefusals {
         _run: NormalisationRunId,
         refusals: Vec<Refusal>,
     ) -> Result<RefusalCount, StoreError> {
-        let count = u64::try_from(refusals.len()).unwrap_or(u64::MAX);
+        let count = refusals.len();
         {
             let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
                 detail: "the fixture lock was poisoned".to_owned(),

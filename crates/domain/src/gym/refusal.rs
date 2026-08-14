@@ -5,16 +5,15 @@
 //! part does not, and translation never guesses which repair was meant.
 //!
 //! A refusal is a value with a place and a reason, not a formatted sentence.
-//! The prose satisfies a reader and defeats every other use: the assertion that
-//! matters is that the refusals are *exactly* a known set, which is a query over
-//! reasons and not a grep over text.
+//! The prose satisfies a reader and defeats every other use: what has to be
+//! assertable is that the refusals are *exactly* a known set, which is a query
+//! over reasons and not a grep over text.
 //!
-//! The three kinds are the point of recording them at all. 24 sets and 2
-//! groupings in the corpus refuse, and each is either data to fix at source, a
-//! limitation to declare, or a gap in the model — a model that cannot hold a
-//! genuine case needs refining, whereas a model that rejects a wrong record is
-//! working, and telling them apart is unavailable if the refusal is a stack
-//! trace or a dropped row.
+//! The three kinds are the point of recording them at all. Each refusal is data
+//! to fix at source, a limitation to declare, or a gap in the model — a model
+//! that cannot hold a genuine case needs refining, whereas a model that rejects
+//! a wrong record is working, and telling them apart is unavailable if the
+//! refusal is a stack trace or a dropped row.
 
 use std::fmt;
 
@@ -82,12 +81,6 @@ impl fmt::Display for RefusalKind {
 /// Why something did not translate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefusalReason {
-    /// No bar mass is assumed and no default applied: 10, 15 and 20 kg bars are
-    /// all in use, so every repair is a guess.
-    ZeroOnAbsoluteLoad,
-    /// Band tension varies through the range of motion, so no scalar is honest,
-    /// and nothing available records the mechanism.
-    BandResistance,
     /// A real event that is not a set. It needs an *attempt*, which belongs with
     /// prescribed-versus-performed.
     ZeroReps,
@@ -117,8 +110,7 @@ impl RefusalReason {
     /// Which of the three this is, and therefore what an operator does with it.
     pub const fn kind(&self) -> RefusalKind {
         match self {
-            Self::ZeroOnAbsoluteLoad
-            | Self::NonContiguousGrouping
+            Self::NonContiguousGrouping
             | Self::SingleMemberGrouping
             | Self::NoSetsInEntry
             | Self::UnknownSetKind { .. }
@@ -129,16 +121,14 @@ impl RefusalReason {
             // recorded so the record is still accounted for. It sits with wrong
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
-            Self::BandResistance => RefusalKind::DeclaredLimitation,
             Self::ZeroReps => RefusalKind::Unmodelled,
         }
     }
 
-    /// The stable key. Persisted and queried, so SC-002 is a `WHERE` clause.
+    /// The stable key. Persisted and queried, so "the refusals are exactly
+    /// these" is a `WHERE` clause rather than a grep over prose.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::ZeroOnAbsoluteLoad => "zero-on-absolute-load",
-            Self::BandResistance => "band-resistance",
             Self::ZeroReps => "zero-reps",
             Self::NonContiguousGrouping => "non-contiguous-grouping",
             Self::SingleMemberGrouping => "single-member-grouping",
@@ -167,10 +157,6 @@ impl RefusalReason {
 impl fmt::Display for RefusalReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ZeroOnAbsoluteLoad => {
-                f.write_str("zero load on an exercise whose implement has mass")
-            }
-            Self::BandResistance => f.write_str("band resistance is not modelled"),
             Self::ZeroReps => f.write_str("a set of zero reps is an attempt, not a set"),
             Self::NonContiguousGrouping => {
                 f.write_str("superset members either side of a non-member")
@@ -196,10 +182,10 @@ pub struct Refusal {
     /// Which of our exercises the refused thing belonged to, where that was
     /// known by the time it was refused.
     ///
-    /// A position alone is not enough to act on. "Exercise 4, set 2" sends the
+    /// A position alone is not enough to act on: "exercise 4, set 2" sends the
     /// operator back to the payload to find out what exercise 4 was, which is
-    /// exactly what FR-022 says a refusal must save them. `None` only where the
-    /// record failed before any exercise was resolved.
+    /// the trip a refusal exists to save them. `None` only where the record
+    /// failed before any exercise was resolved.
     pub exercise: Option<Exercise>,
     pub reason: RefusalReason,
 }

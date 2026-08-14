@@ -162,7 +162,7 @@ fn a_run_that_sees_nothing_leaves_the_point_alone() {
             .await
             .expect("an empty account is not a failure");
 
-        assert_eq!(summary.events_seen.as_u64(), 0);
+        assert_eq!(summary.events_seen.as_usize(), 0);
         assert!(!summary.resumption_point_moved);
         assert_eq!(resumption.get(), None);
         assert!(landing.records().is_empty());

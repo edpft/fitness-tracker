@@ -13,7 +13,9 @@ use domain::{
 };
 use sqlx::SqlitePool;
 
-use super::{corrupt, normalisation_run_for_storage, store_error};
+use super::{
+    corrupt, count_for_storage, count_from_storage, normalisation_run_for_storage, store_error,
+};
 
 /// The derivation history.
 #[derive(Debug, Clone)]
@@ -25,14 +27,6 @@ impl SqliteNormalisationRunLog {
     pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
-}
-
-/// A count that came out of the store, which is `i64` there and never negative
-/// here.
-fn count_from_row(value: Option<i64>) -> u64 {
-    value
-        .and_then(|value| u64::try_from(value).ok())
-        .unwrap_or(0)
 }
 
 impl NormalisationRunLog for SqliteNormalisationRunLog {
@@ -72,35 +66,32 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 finished_at,
                 records_read,
                 workouts_written,
-                workouts_withdrawn,
-                retractions_applied,
+                workouts_retracted,
+                retractions_read,
                 records_refused,
                 refusals_recorded,
             } => {
                 let finished_at = finished_at.to_string();
-                let records_read = i64::try_from(records_read.as_u64()).unwrap_or(i64::MAX);
-                let workouts_written = i64::try_from(workouts_written.as_u64()).unwrap_or(i64::MAX);
-                let workouts_withdrawn =
-                    i64::try_from(workouts_withdrawn.as_u64()).unwrap_or(i64::MAX);
-                let retractions_applied =
-                    i64::try_from(retractions_applied.as_u64()).unwrap_or(i64::MAX);
-                let records_refused = i64::try_from(records_refused.as_u64()).unwrap_or(i64::MAX);
-                let refusals_recorded =
-                    i64::try_from(refusals_recorded.as_u64()).unwrap_or(i64::MAX);
+                let records_read = count_for_storage(records_read.as_usize())?;
+                let workouts_written = count_for_storage(workouts_written.as_usize())?;
+                let workouts_retracted = count_for_storage(workouts_retracted.as_usize())?;
+                let retractions_read = count_for_storage(retractions_read.as_usize())?;
+                let records_refused = count_for_storage(records_refused.as_usize())?;
+                let refusals_recorded = count_for_storage(refusals_recorded.as_usize())?;
 
                 sqlx::query!(
                     r#"
                     UPDATE normalisation_run
                     SET finished_at = ?, outcome = 'succeeded',
-                        records_read = ?, workouts_written = ?, workouts_withdrawn = ?,
-                        retractions_applied = ?, records_refused = ?, refusals_recorded = ?
+                        records_read = ?, workouts_written = ?, workouts_retracted = ?,
+                        retractions_read = ?, records_refused = ?, refusals_recorded = ?
                     WHERE id = ?
                     "#,
                     finished_at,
                     records_read,
                     workouts_written,
-                    workouts_withdrawn,
-                    retractions_applied,
+                    workouts_retracted,
+                    retractions_read,
                     records_refused,
                     refusals_recorded,
                     id
@@ -148,8 +139,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                    finished_at AS "finished_at!: String",
                    records_read AS "records_read: i64",
                    workouts_written AS "workouts_written: i64",
-                   workouts_withdrawn AS "workouts_withdrawn: i64",
-                   retractions_applied AS "retractions_applied: i64",
+                   workouts_retracted AS "workouts_retracted: i64",
+                   retractions_read AS "retractions_read: i64",
                    records_refused AS "records_refused: i64",
                    refusals_recorded AS "refusals_recorded: i64"
             FROM normalisation_run
@@ -174,12 +165,12 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
             NormalisationOutcome::Succeeded {
                 finished_at: FetchedAt::try_from(row.finished_at.as_str())
                     .map_err(|error| corrupt(&error))?,
-                records_read: RecordCount::from(count_from_row(row.records_read)),
-                workouts_written: WorkoutCount::from(count_from_row(row.workouts_written)),
-                workouts_withdrawn: WorkoutCount::from(count_from_row(row.workouts_withdrawn)),
-                retractions_applied: RecordCount::from(count_from_row(row.retractions_applied)),
-                records_refused: RecordCount::from(count_from_row(row.records_refused)),
-                refusals_recorded: RefusalCount::from(count_from_row(row.refusals_recorded)),
+                records_read: RecordCount::from(count_from_storage(row.records_read)?),
+                workouts_written: WorkoutCount::from(count_from_storage(row.workouts_written)?),
+                workouts_retracted: WorkoutCount::from(count_from_storage(row.workouts_retracted)?),
+                retractions_read: RecordCount::from(count_from_storage(row.retractions_read)?),
+                records_refused: RecordCount::from(count_from_storage(row.records_refused)?),
+                refusals_recorded: RefusalCount::from(count_from_storage(row.refusals_recorded)?),
             },
         )))
     }
@@ -197,7 +188,7 @@ mod tests {
         for reason in [
             NormalisationFailure::StoreFailure,
             NormalisationFailure::UnmappedExercise,
-            NormalisationFailure::MissingZone,
+            NormalisationFailure::MissingTimeZone,
         ] {
             let stored = reason.as_str();
             let read = NormalisationFailure::try_from(stored).expect("a known reason reads back");

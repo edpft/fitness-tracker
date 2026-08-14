@@ -64,8 +64,8 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
             } => (
                 finished_at.to_string(),
                 "succeeded",
-                Some(i64::try_from(events_seen.as_u64()).unwrap_or(i64::MAX)),
-                Some(i64::try_from(records_landed.as_u64()).unwrap_or(i64::MAX)),
+                Some(i64::try_from(events_seen.as_usize()).unwrap_or(i64::MAX)),
+                Some(i64::try_from(records_landed.as_usize()).unwrap_or(i64::MAX)),
                 None,
             ),
             RunOutcome::Failed {
@@ -138,8 +138,10 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
             started_at,
             RunOutcome::Succeeded {
                 finished_at,
-                events_seen: EventCount::from(row.events_seen.unsigned_abs()),
-                records_landed: RecordCount::from(row.records_landed.unsigned_abs()),
+                events_seen: EventCount::from(super::count_from_storage(Some(row.events_seen))?),
+                records_landed: RecordCount::from(super::count_from_storage(Some(
+                    row.records_landed,
+                ))?),
             },
         )))
     }

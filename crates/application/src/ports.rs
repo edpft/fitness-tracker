@@ -294,15 +294,15 @@ pub trait ResumptionPointResetter {
 
 /// What one landing record became.
 ///
-/// The three outcomes of FR-005, as a sum. A record that produced no workout
-/// and no reason does not compile, and a retraction cannot carry refusals —
-/// the two mistakes most worth making impossible, since either would let a
-/// record go silently missing.
+/// The three outcomes a record can have, as a sum. A record that produced no
+/// workout and no reason does not compile, and a retraction cannot carry
+/// refusals — the two mistakes most worth making impossible, since either would
+/// let a record go silently missing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Translation {
     /// A workout, with whatever it would not accept listed beside it. A
-    /// refusal inside a record does not stop the rest of it translating
-    /// (FR-024), so both travel together.
+    /// refusal inside a record does not stop the rest of it translating, so
+    /// both travel together.
     Workout {
         workout: Box<GymWorkout>,
         refusals: Vec<Refusal>,
@@ -444,29 +444,30 @@ pub trait NormalisationRunLog {
     ) -> impl Future<Output = Result<Option<NormalisationRun>, StoreError>> + Send;
 }
 
-/// What a completed derivation is worth reporting.
+/// What a derivation did.
 ///
 /// Numbers that must add up: `records_read` equals `workouts_written` plus
-/// `workouts_withdrawn` plus `retractions_applied` plus `records_refused`.
-/// That is FR-005 asserted without reading a row, and it is printed at the
-/// terminal for the same reason.
+/// `workouts_retracted` plus `retractions_read` plus `records_refused`, so
+/// a record going missing is visible without reading a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NormalisationSummary {
     pub run_id: NormalisationRunId,
     pub records_read: RecordCount,
     pub workouts_written: WorkoutCount,
-    /// Workouts a retraction removed. Distinct from `retractions_applied`: a
-    /// retraction naming a record never landed withdraws nothing.
-    pub workouts_withdrawn: WorkoutCount,
-    pub retractions_applied: RecordCount,
+    /// How many workouts the retractions actually removed. Distinct from
+    /// `retractions_read`, which is how many withdrawal events were served: one
+    /// naming a record that was never landed removes nothing.
+    pub workouts_retracted: WorkoutCount,
+    pub retractions_read: RecordCount,
     pub records_refused: RecordCount,
     pub refusals_recorded: RefusalCount,
 }
 
-/// What the last derivation would not accept, grouped for reading.
+/// What the last derivation would not accept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefusalReport {
-    pub stream: LandingStream,
+    /// When the derivation that produced these ran, so a stale list reads as
+    /// stale rather than as current.
     pub derived_at: Option<FetchedAt>,
     /// In the order they were produced: record order, then position within a
     /// record. Grouping by kind is the reader's job, not the store's.
@@ -477,9 +478,10 @@ pub struct RefusalReport {
 
 /// Derives the normalised layer for a stream.
 ///
-/// This trait existing at all is what satisfies FR-029: `cli` implements
-/// nothing, it constructs the use case and calls this, and a future `web`
-/// handler does the same against the same signature.
+/// A driving port rather than something `cli` owns: `cli` implements nothing,
+/// it constructs the use case and calls this, and a `web` handler will do the
+/// same against the same signature. A capability only one transport can invoke
+/// has been built into that transport.
 pub trait WorkoutNormaliser {
     /// # Errors
     ///
@@ -498,7 +500,6 @@ pub trait WorkoutNormaliser {
 /// is § 38 applied to a derivation rather than only to an extraction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DerivationStatus {
-    pub stream: LandingStream,
     pub last_success: Option<NormalisationRun>,
     pub workouts_held: WorkoutCount,
     pub refusals_held: RefusalCount,

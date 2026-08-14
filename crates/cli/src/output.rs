@@ -92,7 +92,7 @@ fn derivation_status(standing: &DerivationStatus) {
     println!("  workouts           {}", standing.workouts_held);
     println!("  refusals           {}", standing.refusals_held);
 
-    let behind = standing.records_behind.as_u64();
+    let behind = standing.records_behind.as_usize();
     if behind == 0 {
         println!("  records behind     0");
     } else {
@@ -148,9 +148,8 @@ pub fn derivation_started(stream: &LandingStream) {
 /// The four numbers that must add up.
 ///
 /// `records read` equals workouts plus withdrawals plus retractions plus
-/// records refused, which is FR-005 visible at the terminal: a record that went
-/// missing shows up as arithmetic that does not reconcile, without anyone
-/// having to query a table.
+/// records refused. A record that went missing shows up as arithmetic that does
+/// not reconcile, without anyone having to query a table.
 ///
 /// Refusals are reported and do not affect the exit code. A run that recorded
 /// 26 of them succeeded — it found 26 things wrong with the data and said so,
@@ -159,11 +158,11 @@ pub fn derivation_succeeded(summary: &NormalisationSummary) {
     println!("derivation {} succeeded", summary.run_id);
     println!("  records read       {:>5}", summary.records_read);
     println!("  workouts written   {:>5}", summary.workouts_written);
-    if summary.workouts_withdrawn.as_u64() > 0 {
-        println!("  workouts withdrawn {:>5}", summary.workouts_withdrawn);
+    if summary.workouts_retracted.as_usize() > 0 {
+        println!("  workouts withdrawn {:>5}", summary.workouts_retracted);
     }
-    println!("  retractions        {:>5}", summary.retractions_applied);
-    if summary.records_refused.as_u64() > 0 {
+    println!("  retractions        {:>5}", summary.retractions_read);
+    if summary.records_refused.as_usize() > 0 {
         println!("  records refused    {:>5}", summary.records_refused);
     }
     println!("  refusals           {:>5}", summary.refusals_recorded);
@@ -181,22 +180,19 @@ pub fn derivation_succeeded(summary: &NormalisationSummary) {
 /// Three different actions — fix it at source, live with it, or note it as
 /// evidence for a later feature — and the model of record says telling them
 /// apart is the point of recording them at all.
-pub fn refusals(report: &RefusalReport) {
+pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
     let when = report
         .derived_at
         .map_or_else(|| "never".to_owned(), |at| to_the_second(&at.to_string()));
 
     if report.refusals.is_empty() {
-        println!(
-            "{} — nothing refused in the derivation of {when}",
-            report.stream
-        );
+        println!("{stream} — nothing refused in the derivation of {when}");
         return;
     }
 
     println!(
         "{} — {} refusals from the derivation of {when}",
-        report.stream,
+        stream,
         report.refusals.len()
     );
 

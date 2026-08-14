@@ -2,13 +2,8 @@
 //!
 //! Reps in reserve, on an ordinal scale of eight named positions. The positions
 //! order and compare; they do not average or subtract, and the type is built so
-//! that they cannot.
-//!
-//! Modelling them as numbers produces two errors at once: an "at least n" that
-//! admits "at least one in reserve", which nobody records, and a "between a and
-//! b" that admits `Between(8, 7)`. Eight named positions admit neither, and
-//! make "mean reps in reserve across the block" fail to compile — which is
-//! correct, because averaging an ordinal scale is not meaningful.
+//! that they cannot — "mean reps in reserve across the block" does not compile,
+//! which is correct, because averaging an ordinal scale is not meaningful.
 //!
 //! `FourOrMore` is the last position rather than an open bound applied
 //! generally: below four in reserve, precision is not claimed.

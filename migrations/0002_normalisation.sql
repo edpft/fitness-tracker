@@ -20,8 +20,8 @@ CREATE TABLE normalisation_run (
     outcome              TEXT    CHECK (outcome IN ('succeeded', 'failed')),
     records_read         INTEGER,
     workouts_written     INTEGER,
-    workouts_withdrawn   INTEGER,
-    retractions_applied  INTEGER,
+    workouts_retracted   INTEGER,
+    retractions_read     INTEGER,
     records_refused      INTEGER,
     refusals_recorded    INTEGER,
     failure_reason       TEXT,
@@ -31,11 +31,12 @@ CREATE TABLE normalisation_run (
     -- the file, including to a writer that is not this program.
     CHECK ((outcome IS NULL) = (finished_at IS NULL)),
     -- A finished derivation reports every count, because the point of them is
-    -- that they add up: a record became a workout, a withdrawn workout, a
-    -- retraction, or a refusal, and no record has two outcomes (FR-005).
+    -- that they add up: a record became a workout that stands, a workout a
+    -- retraction removed, a retraction of its own, or a refusal, and no record
+    -- has two outcomes.
     CHECK (outcome IS NULL OR (
         records_read IS NOT NULL AND workouts_written IS NOT NULL
-        AND workouts_withdrawn IS NOT NULL AND retractions_applied IS NOT NULL
+        AND workouts_retracted IS NOT NULL AND retractions_read IS NOT NULL
         AND records_refused IS NOT NULL AND refusals_recorded IS NOT NULL
     )),
     -- A failure always says why; a success never does.
@@ -83,7 +84,7 @@ CREATE TABLE performed_exercise (
     position       INTEGER NOT NULL,
     exercise       TEXT    NOT NULL,
     measure        TEXT    NOT NULL
-        CHECK (measure IN ('reps', 'duration', 'distance', 'timed-distance')),
+        CHECK (measure IN ('reps', 'duration', 'distance')),
 
     PRIMARY KEY (workout, item_position, position),
     FOREIGN KEY (workout, item_position) REFERENCES workout_item(workout, position)
@@ -95,8 +96,9 @@ CREATE TABLE performed_set (
     exercise_position  INTEGER NOT NULL,
     position           INTEGER NOT NULL,
 
-    -- `Load`, written flat. Absolute cannot be zero, which is the invariant the
-    -- whole load model turns on, so the file says so too.
+    -- `Load`, written flat. Which of the two an exercise uses is a question
+    -- about the exercise — whether assistance is conventionally available — so
+    -- it is decided by the mapping and not by any value here.
     load_kind          TEXT    NOT NULL CHECK (load_kind IN ('absolute', 'relative')),
     load_grams         INTEGER NOT NULL,
 
@@ -111,7 +113,7 @@ CREATE TABLE performed_set (
     -- Absent is absent: not zero, and not carried forward from a neighbour.
     rir                TEXT,
     set_kind           TEXT    NOT NULL CHECK (set_kind IN ('working', 'warmup')),
-    -- This source records none and none is invented (§ 11, § 37). The column
+    -- The Hevy adapter records none and none is invented (§ 11). The column
     -- exists because rest is a fact about a set even where nothing records it.
     rest_after_seconds INTEGER,
 
@@ -119,9 +121,10 @@ CREATE TABLE performed_set (
     FOREIGN KEY (workout, item_position, exercise_position)
         REFERENCES performed_exercise(workout, item_position, position),
 
-    -- Zero is impossible on the absolute axis and meaningful on the relative
-    -- one, where it is plain bodyweight.
-    CHECK (load_kind = 'relative' OR load_grams > 0),
+    -- An absolute load is external load and never negative; zero is no external
+    -- load, which is a real observation. A relative one is a delta and may be
+    -- negative, which is assistance.
+    CHECK (load_kind = 'relative' OR load_grams >= 0),
     -- Which columns the measure populates cannot be checked here — the measure
     -- is on `performed_exercise` and a CHECK sees one row. These two hold
     -- whatever it is: a set is counted in something, and repetitions are not
@@ -133,7 +136,7 @@ CREATE TABLE performed_set (
     CHECK (reps IS NULL OR reps > 0)
 ) WITHOUT ROWID;
 
--- What the domain would not accept, queryable after a derivation (FR-023).
+-- What the domain would not accept, read back after a derivation.
 --
 -- The reason is a key rather than a sentence, so "the refusals are exactly the
 -- named set" is a `WHERE` clause and not a grep. `kind` is derived from it and

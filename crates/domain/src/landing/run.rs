@@ -51,16 +51,19 @@ impl fmt::Display for RunId {
 
 /// How many events a run was served.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct EventCount(u64);
+pub struct EventCount(usize);
 
 impl EventCount {
-    pub const fn as_u64(self) -> u64 {
+    pub const fn as_usize(self) -> usize {
         self.0
     }
 }
 
-impl From<u64> for EventCount {
-    fn from(count: u64) -> Self {
+/// From a length, which is what every count here is. `usize` rather than `u64`
+/// so that counting something in memory needs no conversion and no fallback for
+/// a case that cannot arise.
+impl From<usize> for EventCount {
+    fn from(count: usize) -> Self {
         Self(count)
     }
 }
@@ -73,16 +76,19 @@ impl fmt::Display for EventCount {
 
 /// How many landing records a run wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct RecordCount(u64);
+pub struct RecordCount(usize);
 
 impl RecordCount {
-    pub const fn as_u64(self) -> u64 {
+    pub const fn as_usize(self) -> usize {
         self.0
     }
 }
 
-impl From<u64> for RecordCount {
-    fn from(count: u64) -> Self {
+/// From a length, which is what every count here is. `usize` rather than `u64`
+/// so that counting something in memory needs no conversion and no fallback for
+/// a case that cannot arise.
+impl From<usize> for RecordCount {
+    fn from(count: usize) -> Self {
         Self(count)
     }
 }

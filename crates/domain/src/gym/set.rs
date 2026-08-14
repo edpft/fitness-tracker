@@ -14,13 +14,10 @@ use super::{intensity::Rir, load::Load, measure::Duration};
 /// need warm-ups excluded and nothing else about a set's kind changes what it
 /// means.
 ///
-/// A source's own kinds are not domain kinds. Hevy's `failure` and `dropset`
-/// are both working sets to the only question asked of the field, and a set
-/// taken to failure is `Rir::Zero`, which is the reliable signal anyway — the
-/// flag was used inconsistently and abandoned: 6 uses in 2024, 70 in 2025, one
-/// in 1,335 sets in 2026, against 461 sets at the top of the scale of which
-/// only 67 carry it. An unrecognised kind fails translation rather than
-/// defaulting, which is why there is no `Other` variant to default to.
+/// A source's own kinds are not domain kinds, and mapping one onto these is the
+/// adapter's job. There is no `Other` variant, so an unrecognised kind refuses
+/// rather than defaulting — defaulting would file a set the source meant
+/// something else by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SetKind {
     Working,
@@ -59,12 +56,11 @@ pub struct Set<M> {
     /// Resting two minutes rather than three between sets is a signal of
     /// progress, so this is a fact about a set even where nothing records it.
     ///
-    /// Permanently absent from the Hevy adapter: its logged set carries no rest
-    /// field and no per-set timestamps, and reconstructing it from a linked
-    /// routine would mean assuming every set took its prescribed rest, which is
-    /// prescription masquerading as observation (§ 11). Optional rather than
-    /// missing, because that is partial data recorded as partial (§ 37) rather
-    /// than a gap in the model.
+    /// Optional rather than absent from the model: a source that records none
+    /// leaves partial data recorded as partial, which is not the same as the
+    /// model having a hole in it. Reconstructing it from a linked routine would
+    /// mean assuming every set took its prescribed rest, which is prescription
+    /// masquerading as observation (§ 11).
     pub rest_after: Option<Duration>,
 }
 

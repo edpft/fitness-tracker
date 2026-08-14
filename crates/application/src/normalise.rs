@@ -8,7 +8,7 @@
 //! Two passes over the records, and the reason for the first is the whole of
 //! how retraction works here. A withdrawal is **absorbing**, not latest-wins:
 //! every retracted source record id is collected before any workout is emitted,
-//! so the result does not depend on the order the records are read in (FR-028).
+//! so the result does not depend on the order the records are read in.
 //! Latest-wins would depend on it, and would also answer a question the corpus
 //! cannot — whether a source that deletes a workout and later serves it again
 //! has re-created it — which § 10 reserves for the canonical layer.
@@ -18,7 +18,7 @@ use domain::{
         GymWorkout, NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone,
         Refusal, RefusalCount, WorkoutCount,
     },
-    landing::{LandingStream, RecordCount, SourceRecordId},
+    landing::{LandingRecordId, LandingStream, RecordCount, SourceRecordId},
 };
 
 use crate::{
@@ -85,13 +85,21 @@ where
 }
 
 /// What translating the whole corpus produced, before it is written.
+///
+/// Collections only. A count carried alongside the thing it counts is a second
+/// answer that can disagree with the first, so every number the summary reports
+/// is read back off these.
+///
+/// `refused` is a list of records rather than a length, and it is *not*
+/// `refusals.len()`: a refusal is one omission, and a record that translated
+/// perfectly well can carry several of them. What it holds is the records that
+/// yielded no workout at all.
 #[derive(Debug, Default)]
 struct Derived {
     workouts: Vec<GymWorkout>,
     refusals: Vec<Refusal>,
     retracted: Vec<SourceRecordId>,
-    records_read: u64,
-    records_refused: u64,
+    refused: Vec<LandingRecordId>,
 }
 
 impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
@@ -116,7 +124,7 @@ where
         let reason = match error {
             NormalisationError::Store(_) => NormalisationFailure::StoreFailure,
             NormalisationError::UnmappedExercise { .. } => NormalisationFailure::UnmappedExercise,
-            NormalisationError::MissingZone => NormalisationFailure::MissingZone,
+            NormalisationError::MissingTimeZone => NormalisationFailure::MissingTimeZone,
         };
         let outcome = NormalisationOutcome::Failed {
             finished_at: self.clock.now(),
@@ -151,10 +159,8 @@ where
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
 
-        let mut derived = Derived {
-            records_read: u64::try_from(records.len()).unwrap_or(u64::MAX),
-            ..Derived::default()
-        };
+        let records_read = RecordCount::from(records.len());
+        let mut derived = Derived::default();
 
         for record in &records {
             match self.translator.translate(record, &self.zone) {
@@ -164,7 +170,7 @@ where
                 }
                 Ok(Translation::Retraction { of }) => derived.retracted.push(of),
                 Ok(Translation::Refused(refusals)) => {
-                    derived.records_refused = derived.records_refused.saturating_add(1);
+                    derived.refused.push(record.id());
                     derived.refusals.extend(refusals.iter().cloned());
                 }
                 // The only thing that stops a derivation is a gap in our own
@@ -174,17 +180,16 @@ where
             }
         }
 
-        // The second pass. A withdrawal removes the workout it names wherever
-        // that workout sat in the sequence, and a withdrawal naming a record
+        // The second pass. A retraction removes the workout it names wherever
+        // that workout sat in the sequence, and one naming a record that was
         // never landed removes nothing and is not an error.
         let before = derived.workouts.len();
         derived
             .workouts
             .retain(|workout| !derived.retracted.contains(workout.source_record_id()));
-        let withdrawn = before.saturating_sub(derived.workouts.len());
-
-        let retractions_applied = u64::try_from(derived.retracted.len()).unwrap_or(u64::MAX);
-        let workouts_withdrawn = u64::try_from(withdrawn).unwrap_or(u64::MAX);
+        let workouts_retracted = WorkoutCount::from(before.saturating_sub(derived.workouts.len()));
+        let retractions_read = RecordCount::from(derived.retracted.len());
+        let records_refused = RecordCount::from(derived.refused.len());
 
         let written = match self.workouts.replace(run, derived.workouts).await {
             Ok(written) => written,
@@ -197,11 +202,11 @@ where
 
         let summary = NormalisationSummary {
             run_id: run,
-            records_read: RecordCount::from(derived.records_read),
+            records_read,
             workouts_written: written,
-            workouts_withdrawn: WorkoutCount::from(workouts_withdrawn),
-            retractions_applied: RecordCount::from(retractions_applied),
-            records_refused: RecordCount::from(derived.records_refused),
+            workouts_retracted,
+            retractions_read,
+            records_refused,
             refusals_recorded: refusals,
         };
 
@@ -214,8 +219,8 @@ where
                     finished_at,
                     records_read: summary.records_read,
                     workouts_written: summary.workouts_written,
-                    workouts_withdrawn: summary.workouts_withdrawn,
-                    retractions_applied: summary.retractions_applied,
+                    workouts_retracted: summary.workouts_retracted,
+                    retractions_read: summary.retractions_read,
                     records_refused: summary.records_refused,
                     refusals_recorded: summary.refusals_recorded,
                 },
@@ -273,7 +278,6 @@ where
             .and_then(|run| run.outcome().finished_at());
 
         Ok(RefusalReport {
-            stream: self.stream.clone(),
             derived_at,
             refusals,
         })
@@ -319,17 +323,15 @@ where
         // Never having derived is a fact to report, not an error to raise.
         let last_success = self.runs.latest_success(&self.stream).await?;
         let workouts_held = self.workouts.count().await?;
-        let refusals_held =
-            RefusalCount::from(u64::try_from(self.refusals.all().await?.len()).unwrap_or(u64::MAX));
+        let refusals_held = RefusalCount::from(self.refusals.all().await?.len());
 
-        let held = self.raw.count().await?.as_u64();
+        let held = self.raw.count().await?.as_usize();
         let read = last_success.as_ref().map_or(0, |run| match run.outcome() {
-            NormalisationOutcome::Succeeded { records_read, .. } => records_read.as_u64(),
+            NormalisationOutcome::Succeeded { records_read, .. } => records_read.as_usize(),
             NormalisationOutcome::InFlight | NormalisationOutcome::Failed { .. } => 0,
         });
 
         Ok(DerivationStatus {
-            stream: self.stream.clone(),
             last_success,
             workouts_held,
             refusals_held,
@@ -339,21 +341,21 @@ where
 }
 
 impl NormalisationSummary {
-    /// The sum FR-005 rests on.
+    /// Whether every record is accounted for.
     ///
-    /// Every landing record has exactly one outcome, so the four must add to
-    /// the number read: a record became a workout that stands, a workout that a
+    /// Each landing record has exactly one outcome, so the four must add to the
+    /// number read: a record became a workout that stands, a workout that a
     /// retraction later withdrew, a retraction of its own, or a refusal. A
     /// record that went missing shows up here as arithmetic that does not
-    /// reconcile — which is why the numbers are reported at the terminal rather
-    /// than merely computed.
+    /// reconcile, which is why the numbers are reported rather than merely
+    /// computed.
     pub const fn reconciles(&self) -> bool {
         let accounted = self
             .workouts_written
-            .as_u64()
-            .saturating_add(self.workouts_withdrawn.as_u64())
-            .saturating_add(self.retractions_applied.as_u64())
-            .saturating_add(self.records_refused.as_u64());
-        accounted == self.records_read.as_u64()
+            .as_usize()
+            .saturating_add(self.workouts_retracted.as_usize())
+            .saturating_add(self.retractions_read.as_usize())
+            .saturating_add(self.records_refused.as_usize());
+        accounted == self.records_read.as_usize()
     }
 }

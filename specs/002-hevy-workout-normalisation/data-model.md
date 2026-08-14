@@ -17,46 +17,45 @@ code is the one that runs.*
 
 | Type | Carries | Rejects at construction |
 | --- | --- | --- |
-| `Kg` | `i64` grams | Anything not a decimal number; more than three decimal places; a value below zero |
+| `Kg` | `u64` grams | Anything not a decimal number; more than three decimal places; a negative |
 | `SignedKg` | `i64` grams, signed | The same, without the sign rule |
-| `Metres` | `i64` millimetres | Negative; non-decimal |
-| `Duration` | `i64` seconds | Negative |
-| `RepCount` | `u32` | Zero — a set of no reps is not a set (SC-002's one unmodelled case) |
+| `Metres` | `u64` millimetres | Negative; non-decimal |
+| `Duration` | `u64` seconds | Negative |
+| `RepCount` | `NonZeroU32` | Zero is unrepresentable — a missed rep is an attempt, not a set |
 | `Rir` | one of eight positions | Anything else. No `From<u8>`; the RPE mapping is the adapter's |
 | `SetKind` | `Working` \| `Warmup` | — |
 
-`Kg` and `SignedKg` are distinct types rather than one signed type with a
-predicate, because the thing that must be impossible is an absolute zero, and a
-predicate is checkable rather than impossible.
+`Kg` and `SignedKg` are distinct types rather than one signed type, because a
+mass and a mass *difference* are different things: there is no negative amount
+of weight on a bar, and assistance is only meaningful as a delta.
 
 Every one of them implements `TryFrom<String>`, and gets `as_str`/`AsRef`/
-`Display`/`TryFrom<&str>`/`FromStr` from `domain::landing::newtype`'s macros —
-which move up to `domain::newtype`, since two modules now use them.
+`Display`/`TryFrom<&str>`/`FromStr` from `domain::newtype`'s macros, which moved up
+from `landing` when a second module needed them.
 
 ### Load
 
 ```rust
 enum Load {
-    Absolute(Kg),        // Kg cannot be zero when reached this way — see below
+    Absolute(Kg),        // external load; 0 is none, which is a real answer
     Relative(SignedKg),  // 0 is plain bodyweight; negative is assistance
 }
 ```
 
-`Load::absolute` is a fallible constructor returning
-`Err(RefusalReason::ZeroOnAbsoluteLoad)` for zero. `Kg` itself permits zero,
-because a zero *distance* and a zero *bodyweight delta* are both meaningful and
-the same carrier serves them; what is impossible is an absolute load of zero,
-and that is enforced where it means something.
+Both constructors are infallible. Which reading an exercise takes is decided by
+the mapping — whether assistance is conventionally available — and never
+inferred from a value.
 
 ### Measures
 
 ```rust
-struct Distance      { metres: Metres }
-struct TimedDistance { metres: Metres, duration: Duration }
+struct Distance { metres: Metres }
 ```
 
-Four measures: `RepCount`, `Duration`, `Distance`, `TimedDistance`. The split of
-the last two is [decision 0002](../../docs/decisions/0002-distance-and-distance-over-time-are-different-measures.md).
+Three measures: `RepCount`, `Duration`, `Distance`. A fourth carrying a duration
+alongside a distance was built and removed — the duration was an interval target
+rather than a measurement. [Decision
+0005](../../docs/decisions/0005-distance-over-time-was-prescription.md).
 
 ## The entity
 
@@ -69,17 +68,15 @@ struct Set<M> {
     rest_after: Option<Duration>,   // always None from this source
 }
 
-enum RepsExercise          { /* ~120 */ }
-enum DurationExercise      { AirBike, CouchStretch, NinetyNinety, DeadHang,
-                             Stretching, JumpRope, HandstandHold, SledPush }
-enum DistanceExercise      { FarmersWalk, WalkingLunge }
-enum TimedDistanceExercise { Running }
+enum RepsExercise     { /* 117 */ }
+enum DurationExercise { AirBike, CouchStretch, NinetyNinety, DeadHang,
+                        Stretching, JumpRope, HandstandHold, SledPush }
+enum DistanceExercise { Running, FarmersWalk, WalkingLunge }
 
 enum PerformedExercise {
-    ForReps          { exercise: RepsExercise,          sets: NonEmpty<Set<RepCount>> },
-    ForDuration      { exercise: DurationExercise,      sets: NonEmpty<Set<Duration>> },
-    ForDistance      { exercise: DistanceExercise,      sets: NonEmpty<Set<Distance>> },
-    ForTimedDistance { exercise: TimedDistanceExercise, sets: NonEmpty<Set<TimedDistance>> },
+    ForReps     { exercise: RepsExercise,     sets: NonEmpty<Set<RepCount>> },
+    ForDuration { exercise: DurationExercise, sets: NonEmpty<Set<Duration>> },
+    ForDistance { exercise: DistanceExercise, sets: NonEmpty<Set<Distance>> },
 }
 
 struct Superset { members: AtLeastTwo<PerformedExercise> }
@@ -104,8 +101,8 @@ Four invariants are carried by the types and are therefore not checked anywhere:
   refuses yields no workout, which is the spec's edge case rather than an empty
   one.
 - **A set's measure is fixed by its exercise's vocabulary** — the type
-  parameter. `Set<RepCount>` cannot reach a `DurationExercise`, so SC-011 holds
-  by construction and an arbitrary instance is valid (§ 28).
+  parameter. `Set<RepCount>` cannot reach a `DurationExercise`, so an arbitrary
+  instance is valid by construction (§ 28).
 
 Contiguity is *not* a type invariant — a `Superset` holds its members and knows
 nothing of the sequence it came from. It is checked once, in the translator,
@@ -135,8 +132,6 @@ enum RefusalLocus {
 }
 
 enum RefusalReason {
-    ZeroOnAbsoluteLoad,          // wrong data
-    BandResistance,              // declared limitation
     ZeroReps,                    // unmodelled case
     NonContiguousGrouping,       // wrong data
     SingleMemberGrouping,        // wrong data

@@ -159,11 +159,11 @@ fn the_stored_layer_holds_what_the_derivation_produced() {
     };
 
     assert_eq!(workouts, 163, "workouts");
-    assert_eq!(entries, 1_122, "performed exercises");
-    assert_eq!(sets, 3_755, "performed sets");
-    assert_eq!(supersets, 328, "supersets");
-    assert_eq!(refusals, 26, "refusals");
-    assert_eq!(summary.workouts_written.as_u64(), 163);
+    assert_eq!(entries, 1_135, "performed exercises");
+    assert_eq!(sets, 3_778, "performed sets");
+    assert_eq!(supersets, 334, "supersets");
+    assert_eq!(refusals, 3, "refusals");
+    assert_eq!(summary.workouts_written.as_usize(), 163);
     assert!(summary.reconciles(), "{summary:?}");
 }
 
@@ -229,7 +229,7 @@ fn refusals_survive_the_round_trip() {
         panic!("the refusals read back")
     };
 
-    assert_eq!(report.refusals.len(), 26);
+    assert_eq!(report.refusals.len(), 3);
     assert!(
         report.derived_at.is_some(),
         "a report says when the derivation ran, so a stale list reads as stale"
@@ -239,17 +239,17 @@ fn refusals_survive_the_round_trip() {
     for refusal in &report.refusals {
         *by_reason.entry(refusal.reason.as_str()).or_insert(0) += 1;
     }
-    assert_eq!(by_reason.get("zero-on-absolute-load"), Some(&7));
-    assert_eq!(by_reason.get("band-resistance"), Some(&16));
     assert_eq!(by_reason.get("zero-reps"), Some(&1));
+    assert_eq!(by_reason.get("non-contiguous-grouping"), Some(&1));
+    assert_eq!(by_reason.get("single-member-grouping"), Some(&1));
 
-    // The exercise survives, which is what makes a refusal actionable without
-    // re-reading the payload.
+    // The exercise survives, which is what makes a refused set actionable
+    // without re-reading the payload.
     assert!(
         report
             .refusals
             .iter()
-            .filter(|refusal| refusal.reason.as_str() == "zero-on-absolute-load")
+            .filter(|refusal| refusal.reason.as_str() == "zero-reps")
             .all(|refusal| refusal.exercise.is_some()),
         "a refused set names its exercise after a round trip"
     );

@@ -74,3 +74,24 @@ fn corrupt(error: &dyn std::fmt::Display) -> StoreError {
         detail: error.to_string(),
     }
 }
+
+/// A count on its way into the store.
+///
+/// SQLite holds signed 64-bit integers and a count does not go negative, so the
+/// two representations meet here. It returns an error rather than saturating:
+/// a count that will not fit is a bug worth hearing about, and a silent
+/// `i64::MAX` would be a wrong number recorded as if it were right.
+fn count_for_storage(count: usize) -> Result<i64, StoreError> {
+    i64::try_from(count).map_err(|_| StoreError::Corrupt {
+        detail: format!("a count of {count} is larger than the store can hold"),
+    })
+}
+
+/// A count read back out of the store. Negative means the file holds something
+/// this program did not write.
+fn count_from_storage(value: Option<i64>) -> Result<usize, StoreError> {
+    let value = value.unwrap_or_default();
+    usize::try_from(value).map_err(|_| StoreError::Corrupt {
+        detail: format!("a stored count of {value} is not a count"),
+    })
+}

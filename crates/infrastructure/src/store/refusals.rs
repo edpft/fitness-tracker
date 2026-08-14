@@ -1,15 +1,15 @@
 //! What the domain would not accept, persisted so it can be read back.
 //!
-//! FR-023: refusals are queryable after a derivation, so what the domain will
-//! not accept is visible rather than surfacing only in a log. The reason is
-//! stored as a key rather than a sentence, which is what makes "the refusals
-//! are exactly the named set" a `WHERE` clause instead of a grep.
+//! Persisted so they can be read back: what the domain will not accept has to
+//! be visible rather than surfacing only in a log. The reason is stored as a key
+//! rather than a sentence, which is what makes "the refusals are exactly the
+//! named set" a `WHERE` clause instead of a grep.
 
 use application::{RefusalStore, StoreError};
 use domain::{
     gym::{
         Exercise, NormalisationRunId, Refusal, RefusalCount, RefusalLocus, RefusalReason,
-        exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
+        exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{InvalidStream, LandingRecordId, LandingStream, SourceRecordId},
 };
@@ -91,7 +91,6 @@ fn exercise_from_row(key: &str) -> Result<Exercise, StoreError> {
         .map(Exercise::Reps)
         .or_else(|_| DurationExercise::try_from(key).map(Exercise::Duration))
         .or_else(|_| DistanceExercise::try_from(key).map(Exercise::Distance))
-        .or_else(|_| TimedDistanceExercise::try_from(key).map(Exercise::TimedDistance))
         .map_err(|error| corrupt(&error))
 }
 
@@ -103,8 +102,6 @@ fn exercise_from_row(key: &str) -> Result<Exercise, StoreError> {
 fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason, StoreError> {
     let detail = detail.unwrap_or_default();
     match reason {
-        "zero-on-absolute-load" => Ok(RefusalReason::ZeroOnAbsoluteLoad),
-        "band-resistance" => Ok(RefusalReason::BandResistance),
         "zero-reps" => Ok(RefusalReason::ZeroReps),
         "non-contiguous-grouping" => Ok(RefusalReason::NonContiguousGrouping),
         "single-member-grouping" => Ok(RefusalReason::SingleMemberGrouping),
@@ -145,7 +142,7 @@ impl RefusalStore for SqliteRefusalStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        let written = u64::try_from(refusals.len()).unwrap_or(u64::MAX);
+        let written = refusals.len();
         for refusal in &refusals {
             let (locus_kind, entry_index, set_index, group_id) = locus_columns(refusal.locus);
             let landing_record_id = refusal.landed_as.as_i64();
@@ -239,11 +236,10 @@ mod tests {
     #[test]
     fn a_reason_round_trips_through_its_key() {
         for (key, kind) in [
-            ("zero-on-absolute-load", RefusalKind::WrongData),
-            ("band-resistance", RefusalKind::DeclaredLimitation),
             ("zero-reps", RefusalKind::Unmodelled),
             ("non-contiguous-grouping", RefusalKind::WrongData),
             ("single-member-grouping", RefusalKind::WrongData),
+            ("no-sets-in-entry", RefusalKind::WrongData),
         ] {
             let reason = reason_from_row(key, None).expect("a known reason reads back");
             assert_eq!(reason.as_str(), key);

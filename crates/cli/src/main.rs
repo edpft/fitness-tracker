@@ -80,7 +80,22 @@ fn command() -> ClapCommand {
                     "Derive the normalised layer from what raw already holds. \
                      Contacts no source",
                 )
-                .arg(stream_argument()),
+                .arg(stream_argument())
+                // A flag as well as a variable, because every other input to
+                // this command has one and taking half the configuration each
+                // way is a worse thing to remember than either. What it must
+                // not have is a default: nothing is compiled in, so an
+                // invocation that declares no zone is refused rather than
+                // guessed at.
+                .arg(
+                    Arg::new("timezone")
+                        .long("timezone")
+                        .env("FITNESS_TRACKER_TIMEZONE")
+                        .help(
+                            "The IANA time zone trained in, such as Europe/London. \
+                             Required: no zone is compiled in",
+                        ),
+                ),
         )
         .subcommand(
             ClapCommand::new("refusals")
@@ -180,7 +195,7 @@ impl From<NormalisationError> for Failure {
             // Not a data problem, and not something a retry helps with: the
             // mapping is code, so this is a gap to go and fill.
             NormalisationError::UnmappedExercise { .. } => exit::UNMAPPED,
-            NormalisationError::MissingZone => exit::USAGE,
+            NormalisationError::MissingTimeZone => exit::USAGE,
         };
         Self::message(error.to_string(), code)
     }
@@ -260,10 +275,11 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             Command::Extract(source_access(known, sub)?)
         }
         "normalise" => {
+            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
             // Printed before the run begins, so a long first derivation says
             // what it is doing.
             output::derivation_started(&stream);
-            Command::Normalise(config::timezone(std::env::var("FITNESS_TRACKER_TIMEZONE"))?)
+            Command::Normalise(zone)
         }
         "refusals" => Command::Refusals,
         "status" => Command::Status,
@@ -321,7 +337,7 @@ fn report(stream: &LandingStream, outcome: Outcome) {
     match outcome {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
-        Outcome::Refused(report) => output::refusals(&report),
+        Outcome::Refused(report) => output::refusals(stream, &report),
         Outcome::Reported {
             extraction,
             derivation,

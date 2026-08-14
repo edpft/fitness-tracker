@@ -51,7 +51,7 @@ pub enum RunLockError {
 /// Why an extraction run did not complete.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExtractionError {
-    /// FR-010. Nothing was landed and the resumption point did not move.
+    /// Nothing was landed and the resumption point did not move.
     #[error("another extraction run is already in progress")]
     AlreadyRunning,
 
@@ -120,9 +120,9 @@ pub enum NormalisationError {
         source_record_id: String,
     },
 
-    /// No operator zone is declared, so no timestamp can be built. § II.3 takes
-    /// the zone from configuration, and guessing one would make the derivation
-    /// depend on the machine that ran it.
+    /// No operator time zone is declared, so no timestamp can be built. § II.3
+    /// takes the zone from configuration, and guessing one would make the
+    /// derivation depend on the machine that ran it.
     #[error("no operator time zone is declared, so no workout can be given a wall clock")]
-    MissingZone,
+    MissingTimeZone,
 }

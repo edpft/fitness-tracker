@@ -18,9 +18,9 @@ use std::fmt;
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 
 use super::{
-    exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
-    measure::{Distance, Duration, RepCount, TimedDistance},
-    nonempty::{AtLeastTwo, NonEmpty},
+    exercise::{DistanceExercise, DurationExercise, RepsExercise},
+    measure::{Distance, Duration, RepCount},
+    sequence::{AtLeastTwo, NonEmpty},
     set::Set,
     time::WorkoutStart,
 };
@@ -49,10 +49,6 @@ pub enum PerformedExercise {
         exercise: DistanceExercise,
         sets: NonEmpty<Set<Distance>>,
     },
-    ForTimedDistance {
-        exercise: TimedDistanceExercise,
-        sets: NonEmpty<Set<TimedDistance>>,
-    },
 }
 
 impl PerformedExercise {
@@ -62,7 +58,6 @@ impl PerformedExercise {
             Self::ForReps { exercise, .. } => exercise.as_str(),
             Self::ForDuration { exercise, .. } => exercise.as_str(),
             Self::ForDistance { exercise, .. } => exercise.as_str(),
-            Self::ForTimedDistance { exercise, .. } => exercise.as_str(),
         }
     }
 
@@ -71,7 +66,6 @@ impl PerformedExercise {
             Self::ForReps { .. } => "reps",
             Self::ForDuration { .. } => "duration",
             Self::ForDistance { .. } => "distance",
-            Self::ForTimedDistance { .. } => "timed-distance",
         }
     }
 
@@ -81,7 +75,6 @@ impl PerformedExercise {
             Self::ForReps { sets, .. } => sets.count(),
             Self::ForDuration { sets, .. } => sets.count(),
             Self::ForDistance { sets, .. } => sets.count(),
-            Self::ForTimedDistance { sets, .. } => sets.count(),
         }
     }
 }
@@ -129,10 +122,6 @@ impl WorkoutItem {
             Self::Exercise(exercise) => Box::new(std::iter::once(exercise)),
             Self::Superset(superset) => Box::new(superset.members.iter()),
         }
-    }
-
-    pub const fn is_superset(&self) -> bool {
-        matches!(self, Self::Superset(_))
     }
 }
 
@@ -204,7 +193,10 @@ impl GymWorkout {
     }
 
     pub fn superset_count(&self) -> usize {
-        self.items.iter().filter(|item| item.is_superset()).count()
+        self.items
+            .iter()
+            .filter(|item| matches!(item, WorkoutItem::Superset(_)))
+            .count()
     }
 }
 

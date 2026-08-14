@@ -52,12 +52,11 @@ stays part of that session whichever of them recorded it.
 
 ```rust
 enum Load {
-    Absolute(Kg),         // the implement has mass; zero is impossible
+    Absolute(Kg),         // external load; 0 = none, which is a real answer
     Relative(SignedKg),   // delta against bodyweight; 0 = plain bodyweight
 }
 
 struct Distance { metres: Metres }
-struct TimedDistance { metres: Metres, duration: Duration }
 
 /// Reps in reserve. An ordinal scale: positions order and compare, they do not
 /// average or subtract.
@@ -76,16 +75,14 @@ struct Set<M> {
 }
 
 /// The exercise vocabulary, partitioned by what its members are measured in.
-enum RepsExercise          { FrontSquat, Deadlift, PullUp, ChestDip, BoxJump, /* … */ }
-enum DurationExercise      { DeadHang, HandstandHold, Stretching, SledPush, /* … */ }
-enum DistanceExercise      { FarmersWalk, WalkingLunge, /* … */ }
-enum TimedDistanceExercise { Running, /* … */ }
+enum RepsExercise     { FrontSquat, Deadlift, PullUp, ChestDip, BoxJump, /* … */ }
+enum DurationExercise { DeadHang, HandstandHold, Stretching, SledPush, /* … */ }
+enum DistanceExercise { Running, FarmersWalk, WalkingLunge, /* … */ }
 
 enum PerformedExercise {
-    ForReps          { exercise: RepsExercise,          sets: NonEmpty<Set<RepCount>> },
-    ForDuration      { exercise: DurationExercise,      sets: NonEmpty<Set<Duration>> },
-    ForDistance      { exercise: DistanceExercise,      sets: NonEmpty<Set<Distance>> },
-    ForTimedDistance { exercise: TimedDistanceExercise, sets: NonEmpty<Set<TimedDistance>> },
+    ForReps     { exercise: RepsExercise,     sets: NonEmpty<Set<RepCount>> },
+    ForDuration { exercise: DurationExercise, sets: NonEmpty<Set<Duration>> },
+    ForDistance { exercise: DistanceExercise, sets: NonEmpty<Set<Distance>> },
 }
 
 struct Superset { members: AtLeastTwo<PerformedExercise> }  // two or more, back to back
@@ -113,17 +110,25 @@ real regularity — and a fact about Hevy's storage, not about training. A
 categorisation that only tracks which columns a source fills is that source's
 schema wearing domain vocabulary.
 
-**Absolute vs Relative is decided by whether zero is performable.** A load is
-`Relative` where an unloaded version of the movement exists — a pull-up, a
-bodyweight Bulgarian split squat, a plain crunch — so zero is a real
-observation and the number is a delta against a bodyweight the set does not
-record. It is `Absolute` where the implement itself has mass, so zero is
-impossible and the number is the whole load.
+**Absolute vs Relative is decided by whether the load axis runs both ways.** A
+load is `Relative` where assistance is conventionally available as well as added
+weight — a pull-up, a chin-up, a dip. The bodyweight version is the movement,
+machines and bands routinely make it easier, and a belt routinely makes it
+harder, so the axis passes through zero and the sign carries meaning. It is
+`Absolute` where only adding is a thing anyone does — a squat, a deadlift — so
+the number is external load and none of it is a real answer.
 
-The rule earns its place by self-checking: on an absolute-load exercise a zero
-is a data error *by construction*, with no judgement required. It is also what
-keeps a 100kg squat and a bodyweight dip +10kg from being read as the same kind
-of number.
+This is a convention rather than a physical fact, which is why it is decided per
+exercise in the mapping and never inferred from a value. It is also what keeps a
+100kg squat and a bodyweight dip +10kg from being read as the same kind of
+number.
+
+An earlier version of this rule asked whether zero was *performable*, and made a
+zero on a barbell exercise an error by construction. That diagnosed the empty-bar
+warm-ups below correctly by accident: what makes them look wrong is that a
+barbell has mass, which is a fact about the implement rather than about the
+direction of the axis. [Decision
+0004](decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md).
 
 **Assistance is negative, not a separate case.** Assisted −20 and weighted +10
 sit on one axis, and the crossover through zero is a genuine progression that
@@ -142,28 +147,29 @@ was added for — deterministic translation cannot tell a zero that means
 belongs to the mapping. A variant for absence would have absorbed the empty-bar
 warm-ups below and hidden the pattern that makes them diagnosable.
 
-**Bands are not modelled.** Band tension varies through the range of motion, so
-no scalar is honest. Nothing available records one anyway: assistance arrives as
-a bare number with no mechanism attached, and the account's assisted loads run
-`0, 7, 14, 21, 28, 35, 42` — stacked bands rather than a machine stack, which
-deterministic translation (§ 9) cannot distinguish. Band-named sets carry
-operator estimates, not measurements. Band and machine assistance are therefore
-not comparable, and that is a limitation to declare rather than one the value
-can express.
+**Band tension is recorded as given, and what it means is declared.** Tension
+varies through the range of motion, so no scalar is the whole truth — but the
+number that was written down is the operator's estimate of the band, and
+discarding it forecloses an overlay supplying a resistance range later. So a
+banded lateral raise reads its number as external load, and a banded pull-up
+negates it onto the relative axis like any other assistance.
 
-**Four measures, because there are four things you can count.** Repetitions,
-elapsed time, ground covered, and ground covered in a time. Everything else a
-source offers is one of those recorded more or less fully.
+What stays a declared limitation is comparability. The account's assisted loads
+run `0, 7, 14, 21, 28, 35, 42` — stacked bands rather than a machine stack — and
+deterministic translation (§ 9) cannot tell the two apart, so band and machine
+assistance are not the same series even though they sit on the same axis.
 
-The last two were one measure with an optional duration until the data was run
-against them, and the split is [decision
-0002](decisions/0002-distance-and-distance-over-time-are-different-measures.md).
-A carry is time under load and a run is pace, and the corpus never once leaves
-it ambiguous which of the two an exercise is: all 19 `Running` sets carry a
-duration and none of the 41 carry sets does. An optional duration would have
-meant "not captured" for a run and "does not apply" for a carry with nothing to
-tell them apart — the same merge that got the `Unrecorded` load removed, one
-field over.
+**Three measures, because there are three things you can count.** Repetitions,
+elapsed time, and ground covered. Everything else a source offers is one of
+those recorded more or less fully.
+
+A fourth — ground covered in a time — was added and then removed. Every entry
+that would have used it repeats one identical distance and duration across all
+of its sets (`400m/150s ×3`, `200m/60s ×5`), and identical across the entry is
+the signature of a target rather than a measurement. It was an interval
+prescription with nowhere else to go, which is § 11 working exactly as this
+document predicts it will when the prescribed side is missing. [Decision
+0005](decisions/0005-distance-over-time-was-prescription.md).
 
 The partition is by measure alone, which is what makes a stored measurement type
 unnecessary: an exercise's measure is fixed by which vocabulary it belongs to,
@@ -292,19 +298,20 @@ against rows written by earlier versions (§ 7).
 The model was written out as rules and every landed record run through it.
 **3,755 of 3,779 sets translate completely**, along with 334 of 336 supersets.
 
-*The set figure survived being made executable; the superset one needed a
-second sentence. See "What the executable run changed" below.*
+*Those were the figures on paper. Building the rules and then reviewing them
+moved both — see "What building it changed" below. The short version is that
+3,778 of 3,779 sets translate and the one that does not is the missed attempt.*
 What did not fit falls into three kinds, and telling them apart is the point of
 the exercise: a model that cannot hold a genuine case needs refining, whereas a
 model that rejects a wrong record is working.
 
-| | Sets | Verdict |
-|---|---:|---|
-| Zero load on an absolute-load exercise | 7 | Wrong data |
-| Band resistance | 16 | Known limitation, accepted |
-| A set of zero reps | 1 | Genuine case, not modelled |
-| Non-contiguous superset | — | Wrong data |
-| Single-member superset | — | Wrong data |
+| | Sets | Verdict on paper | Verdict now |
+|---|---:|---|---|
+| Zero load on an absolute-load exercise | 7 | Wrong data | Translates — no external load ([0004](decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md)) |
+| Band resistance | 16 | Known limitation, accepted | Translates — the number is read as load ([0004](decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md)) |
+| A set of zero reps | 1 | Genuine case, not modelled | Unchanged |
+| Non-contiguous superset | — | Wrong data | Unchanged |
+| Single-member superset | — | Wrong data | Unchanged |
 
 **The seven zeros are all the bottom of a warm-up ramp** — `0, 5, 10` on a good
 morning; `0, 15, 20` on an overhead squat; `0, 0` then `105, 105, 105` on a
@@ -325,12 +332,11 @@ prescribed-versus-performed (open question 3).
 
 Two things the run settled that argument had not:
 
-**Load applicability is nearly a non-question.** Bodyweight movements are
-`Relative(0)`, which covers running, skipping, stretching and mobility work.
-That leaves two exercises where resistance applies, is not bodyweight, and was
-never captured — the air bike's fan and the sled's load, 41 sets between them.
-Small enough to defer, and named in open question 5 rather than paid for with a
-variant on `Load`.
+**Load applicability is nearly a non-question.** Movements with nothing on them
+are `Absolute(0)` — no external load — which covers running, skipping,
+stretching and mobility work. That leaves the sled: it has plates on it, the
+number is not recorded, and `Absolute(0)` therefore understates it. Nine sets, a
+declared limitation, and not paid for with a variant on `Load`.
 
 **The session rule is not an arbitrary threshold.** Of 27 consecutive same-day
 workout pairs, the largest gap between one ending and the next starting is
@@ -342,29 +348,54 @@ records.
 Nothing in the paper run exercises supersession, deletion or timezone handling:
 the corpus holds no re-serve to test against.
 
-## What the executable run changed
+## What building it changed
 
-The rules above were written out and applied by hand. Building them
-(`specs/002-hevy-workout-normalisation`) reproduced the set figure exactly and
-moved three others, in every case because the paper run stopped a level too
-early rather than because the rules were wrong. A refusal does not only remove a
-set: it can cost the set's *entry*, and a lost entry can cost its *grouping*.
+The rules above were written out and applied by hand, then built, then reviewed.
+Both of the later steps moved figures, and in every case the paper run had
+stopped a level too early rather than the rules being wrong about training.
 
-| | On paper | Built | Why |
-|---|---:|---:|---|
-| Sets translating | 3,755 | 3,755 | — |
-| Well-formed supersets | 334 | 334 | — |
-| Supersets in the output | 334 | **328** | Six lose so many members to the band refusals that fewer than two remain, and two members is what a superset *is*. Four keep one member, which becomes an ordinary item; two are band pairs and lose both. |
-| Exercise entries | 1,135 | **1,122** | Thirteen entries lose every set they had. Twelve are the band-resistance entries; one is a `Snatch-Grip Behind The Neck Press` whose only two sets both record a zero load on a barbell. All 1,135 still resolve through the mapping — none is unmapped. |
-| Warm-up sets | 361 | **359** | Two are the Romanian deadlift's `0, 0`, refused as zero loads. |
-| Sets carrying intensity | 2,415 | **2,413** | Two sit on sets that refused. |
+**Building them** showed that a refusal does not only remove a set: it can cost
+the set's *entry*, and a lost entry can cost its *grouping* the second member
+that made it a superset. On the paper figures that turned 1,135 entries into
+1,122 and 334 supersets into 328.
 
-None of these is a defect in the model and none was repaired by weakening it.
-They are what "the grammatical part translates and the omission is recorded"
-turns out to mean two levels down, and each is pinned by a test that accounts
-for the difference.
+**Reviewing them** removed the refusals those cascades came from. With
+`Absolute` admitting zero ([0004]) and band resistance read as load, nothing
+refuses except the missed attempt and the two malformed groupings — so the
+cascades have nothing to cascade from.
 
----
+| | On paper | Built |
+|---|---:|---:|
+| Sets translating | 3,755 of 3,779 | **3,778** |
+| Exercise entries | 1,135 | 1,135 |
+| Supersets | 334 of 336 | 334 |
+| Warm-up sets | 361 | 361 |
+| Sets carrying intensity | 2,415 | **2,414** |
+| Refusals | 26 | **3** |
+
+The one set that does not translate is the missed attempt, and the two groupings
+that do not are the two that fail the definition of a superset. A model that
+rejects exactly the things it has no shape for is a better result than one that
+rejects twenty-six things for five different reasons — and getting there meant
+giving up a rule that had been diagnosing seven records correctly for the wrong
+reason.
+
+[0004]: decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md
+
+## Known aliases, for the edit overlay
+
+Templates the operator has used to stand for a different movement. Deterministic
+translation cannot see any of this — the template does not determine what was
+performed — so the mapping does not pretend to, and these wait for the overlay.
+
+| Template | Has also meant |
+|---|---|
+| `Cable Twist (Up to down)` | A bent-over cable chop |
+| `Inverted Row`, `Low Row (Suspension)` | Ring rows — the builtin exercises carry a picture and metadata that a custom one does not, so they get used in preference |
+| `Seated Palms Up Wrist Curl` | A generic dumbbell wrist flexion |
+| `Seated Wrist Extension (Barbell)`, `Reverse Wrist Curl (Dumbbell)` | A generic dumbbell wrist extension |
+| `Triceps Extension (Cable)` | The overhead variant |
+| `Stretching` | A deep squat stretch |
 
 ## Prescribed vs performed
 
@@ -463,21 +494,22 @@ row.
    silently, and leaves a day without a measurement wanting a value it does not
    have (§ 37).
 2. ~~**Does `Distance` carry an optional duration, or are carries and runs
-   different measures?**~~ **Settled**: different measures. [Decision
-   0002](decisions/0002-distance-and-distance-over-time-are-different-measures.md).
+   different measures?**~~ **Settled**: neither. There is one distance measure
+   and no duration on it, because the duration was a target rather than an
+   observation. [Decision
+   0005](decisions/0005-distance-over-time-was-prescription.md).
 3. **Attempts.** A rep attempted and missed is a real event and not a set. One
    occurrence so far. Belongs with prescribed-versus-performed, since a source
    with no prescribed side leaves nowhere to record intent that went unmet.
 4. **The grouping layer** — "all squatting volume", "all pull-up variants". A
    relation over exercises, many-to-many, added without unpicking identity. Not
    designed.
-5. ~~**Resistance that is neither bodyweight nor recorded**~~ — the air bike's
-   fan, the sled's load, 41 sets across two exercises. **Settled**: they
-   translate as `Relative(0)`, and that the load is not a measurement of what
-   was moved is a declared limitation rather than something the value says.
+5. ~~**Resistance that is neither bodyweight nor recorded**~~ — **Settled**, and
+   mostly dissolved. An air bike carries no external load, and `Absolute(0)`
+   says exactly that. The sled does carry one and it is not recorded, so nine
+   sets understate what was moved: one declared limitation rather than two.
    [Decision
-   0003](decisions/0003-unrecorded-resistance-translates-as-relative-zero.md),
-   which also says when to revisit it.
+   0004](decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md).
 6. **Overlay anchors below the workout.** § II.2 requires overlays anchor to
    source identity, and Hevy publishes none below the workout, so the obligation
    is unsatisfiable as written. An anchor derived from content — exercise,

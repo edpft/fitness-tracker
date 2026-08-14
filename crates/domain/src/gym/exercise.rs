@@ -17,10 +17,16 @@
 //! absorbs both, and an attribute schema would not have absorbed the safety bar
 //! or the Zercher case.
 //!
-//! The vocabulary is only as large as the evidence requires — 130 exercises for
-//! the 134 templates the corpus holds — and it grows when a record needs it to,
-//! never ahead of one. The four fewer than 134 are the collapses: assisted and
-//! unassisted are one exercise here, and `Overhead Squat` has two template ids.
+//! **What is here is what has been needed so far, not what exists.** 128
+//! exercises cover the 134 templates one source has served; a second source, or
+//! programming that introduces a movement nobody has recorded yet, adds
+//! members. Nothing about the vocabulary is closed, and an exercise is added
+//! here before anything can map onto it.
+//!
+//! The six fewer than 134 are collapses, and they are all the same collapse: a
+//! variant that differs only in how the movement is loaded is not a different
+//! movement. Assisted and unassisted are one exercise, weighted and unweighted
+//! are one exercise, and `Overhead Squat` happens to have two template ids.
 //!
 //! Each variant carries a stable text key, which is what the store writes and
 //! reads back. Renaming a variant without changing its key is free; changing a
@@ -94,7 +100,6 @@ vocabulary! {
         AboveAndBelowTheKneePauseSnatch => "above-and-below-the-knee-pause-snatch",
         BackExtensionHyperextension => "back-extension-hyperextension",
         BackExtensionMachine => "back-extension-machine",
-        BackExtensionWeightedHyperextension => "back-extension-weighted-hyperextension",
         BackSquatWithSnatchPushPress => "back-squat-with-snatch-push-press",
         BandPullaparts => "band-pullaparts",
         BandedScapulaProtraction => "banded-scapula-protraction",
@@ -116,7 +121,6 @@ vocabulary! {
         ChinUp => "chin-up",
         CleanAndPress => "clean-and-press",
         Crunch => "crunch",
-        CrunchWeighted => "crunch-weighted",
         DeadBug => "dead-bug",
         DeadliftBarbell => "deadlift-barbell",
         DeadliftDumbbell => "deadlift-dumbbell",
@@ -192,7 +196,7 @@ vocabulary! {
         SingleLegExtensions => "single-leg-extensions",
         SingleLegRomanianDeadliftBarbell => "single-leg-romanian-deadlift-barbell",
         SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell",
-        SissySquatWeighted => "sissy-squat-weighted",
+        SissySquat => "sissy-squat",
         SitUp => "sit-up",
         SleeperStretch => "sleeper-stretch",
         Snatch => "snatch",
@@ -232,22 +236,16 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Exercises counted in ground covered, with no clock on them.
+    /// Exercises counted in ground covered.
     ///
-    /// A carry is time under load. Nothing in the corpus records a duration
-    /// alongside one, on any of their 41 sets.
+    /// A carry and a run are both this. `Running` was briefly its own measure,
+    /// carrying the duration alongside — until the records showed every entry
+    /// repeating one identical distance and time across all its sets, which is an
+    /// interval target rather than anything that was measured.
     DistanceExercise {
         FarmersWalk => "farmers-walk",
-        WalkingLungeDumbbell => "walking-lunge-dumbbell",
-    }
-}
-
-vocabulary! {
-    /// Exercises counted in ground covered and the time it took.
-    ///
-    /// A run is pace. Every one of the corpus's 19 running sets carries both.
-    TimedDistanceExercise {
         Running => "running",
+        WalkingLungeDumbbell => "walking-lunge-dumbbell",
     }
 }
 
@@ -261,7 +259,6 @@ pub enum Exercise {
     Reps(RepsExercise),
     Duration(DurationExercise),
     Distance(DistanceExercise),
-    TimedDistance(TimedDistanceExercise),
 }
 
 impl Exercise {
@@ -270,7 +267,6 @@ impl Exercise {
             Self::Reps(exercise) => exercise.as_str(),
             Self::Duration(exercise) => exercise.as_str(),
             Self::Distance(exercise) => exercise.as_str(),
-            Self::TimedDistance(exercise) => exercise.as_str(),
         }
     }
 
@@ -281,7 +277,6 @@ impl Exercise {
             Self::Reps(_) => "reps",
             Self::Duration(_) => "duration",
             Self::Distance(_) => "distance",
-            Self::TimedDistance(_) => "timed-distance",
         }
     }
 }

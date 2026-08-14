@@ -1,7 +1,11 @@
 # 0002 — Distance and distance-over-time are different measures
 
 **Date**: 2026-08-14
-**Status**: Accepted
+**Status**: Superseded by [0005](0005-distance-over-time-was-prescription.md). The
+split was right that a carry and a run are different things; it was wrong about
+what made them different. Every entry that would have used the timed measure
+repeats one identical distance and duration across all of its sets, which is an
+interval target rather than a measurement.
 **Revises**: `docs/gym-workout-domain-model.md` — the declared `Distance` type, and
 open question 2.
 **Raised by**: `specs/002-hevy-workout-normalisation`, question Q3.

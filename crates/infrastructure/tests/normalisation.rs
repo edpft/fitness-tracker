@@ -41,53 +41,14 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
         .sum();
 
     assert_eq!(produced.workouts.len(), 163, "workouts");
-    assert_eq!(sets, 3_755, "of 3,779 sets translate");
+    assert_eq!(entries, 1_135, "every landed exercise entry translates");
+    assert_eq!(supersets, 334, "every well-formed grouping is a superset");
 
-    // 336 groupings, of which 334 are well-formed — the model of record's
-    // figure, and `well_formed_groupings_lose_members_to_refused_entries`
-    // reproduces it. 328 survive as supersets: six lose so many members to the
-    // band-resistance refusals that fewer than two are left, and two members is
-    // what a superset *is*. The paper run that produced 334 did not model that
-    // interaction; this is the number after it.
-    assert_eq!(supersets, 328, "supersets that survive with two members");
-
-    // 1,135 entries were landed and every one of them resolves through the
-    // mapping (see `every_landed_template_resolves`). 1,122 of them become a
-    // performed exercise: the other thirteen lost every set they had, and an
-    // exercise holds a non-empty sequence of sets by construction. Twelve are
-    // the band-resistance entries and one is a `Snatch-Grip Behind The Neck
-    // Press` whose only two sets both record a zero load on a barbell.
-    assert_eq!(entries, 1_122, "exercise entries that translate");
-}
-
-/// Why 334 well-formed groupings become 328 supersets.
-///
-/// A refused set can cost its entry, and a lost entry can cost its grouping the
-/// second member that made it a superset. The six are named here so that the
-/// difference between the model of record's figure and this one stays a fact
-/// about the data rather than a number nobody can account for.
-///
-/// The four that keep one member degrade to an ordinary item — the exercise
-/// that did translate is kept, because dropping it would cost a good
-/// observation to a neighbour's bad one. Two are band pairs and lose both.
-#[test]
-fn well_formed_groupings_lose_members_to_refused_entries() {
-    let produced = derived!();
-
-    let survivors: usize = produced
-        .workouts
-        .iter()
-        .map(domain::gym::GymWorkout::superset_count)
-        .sum();
-    let band_refusals = produced
-        .refusals
-        .iter()
-        .filter(|refusal| refusal.reason == domain::gym::RefusalReason::BandResistance)
-        .count();
-
-    assert_eq!(band_refusals, 16, "band-resistance sets");
-    assert_eq!(survivors, 328, "supersets");
-    assert_eq!(334 - survivors, 6, "groupings that lost a member");
+    // One set in the corpus does not translate: 95 kg for zero reps, an attempt
+    // that failed. It is a real event and it is not a set, and nothing else is
+    // refused — the model rejects exactly the thing it has no shape for.
+    assert_eq!(sets, 3_778, "of 3,779 sets translate");
+    assert_eq!(produced.refusals.len(), 3, "one set and two groupings");
 }
 
 /// SC-003. Every template the corpus holds is covered, so no derivation of it
@@ -194,8 +155,8 @@ fn assisted_and_unassisted_forms_are_one_series() {
     let Some(dips) = loads.get("chest-dip") else {
         panic!("the corpus holds chest dips")
     };
-    // 84 plain + 277 assisted, less the 30 assisted sets recording zero — those
-    // translate too, as `Relative(0)`, so the total is the full 361.
+    // 84 plain + 277 assisted. The 30 assisted sets recording zero translate
+    // too, as plain bodyweight, so the total is the full 361.
     assert_eq!(dips.len(), 361, "chest dip sets across both templates");
 }
 
@@ -237,21 +198,16 @@ fn absence_is_absence() {
             PerformedExercise::ForReps { sets, .. } => tally!(sets),
             PerformedExercise::ForDuration { sets, .. } => tally!(sets),
             PerformedExercise::ForDistance { sets, .. } => tally!(sets),
-            PerformedExercise::ForTimedDistance { sets, .. } => tally!(sets),
         }
     }
 
-    // 2,415 sets in the corpus record an intensity. Two of them sit on sets
-    // that refused — the zero-rep attempt at the top of the scale, and one
-    // zero-load set — so 2,413 reach the normalised layer.
-    assert_eq!(with_intensity, 2_413, "sets carrying an intensity");
-    assert_eq!(with_intensity + without_intensity, 3_755, "sets in total");
-    // 361 sets are tagged as warm-ups in the corpus. Two are the Romanian
-    // deadlift's `0, 0` — the bottom of a ramp, recorded with the bar's own
-    // mass unwritten — so they refuse and 359 translate. No positional rule
-    // reconstructs warm-ups anyway: the corpus opens workouts with heavy
-    // bridging singles tagged this way.
-    assert_eq!(warmups, 359, "warm-up sets");
+    // 2,415 sets in the corpus record an intensity. One sits on the zero-rep
+    // attempt, which refuses, so 2,414 reach the normalised layer.
+    assert_eq!(with_intensity, 2_414, "sets carrying an intensity");
+    assert_eq!(with_intensity + without_intensity, 3_778, "sets in total");
+    // No positional rule reconstructs these: the corpus opens workouts with
+    // heavy bridging singles tagged as warm-ups.
+    assert_eq!(warmups, 361, "warm-up sets");
     assert_eq!(
         with_rest, 0,
         "this source records no rest, and none is invented"
@@ -336,14 +292,18 @@ fn every_record_is_accounted_for() {
     let produced = derived!();
     let summary = produced.summary;
 
-    assert_eq!(summary.records_read.as_u64(), 164, "records read");
-    assert_eq!(summary.workouts_written.as_u64(), 163, "workouts written");
-    assert_eq!(summary.retractions_applied.as_u64(), 1, "retractions");
+    assert_eq!(summary.records_read.as_usize(), 164, "records read");
+    assert_eq!(summary.workouts_written.as_usize(), 163, "workouts written");
+    assert_eq!(summary.retractions_read.as_usize(), 1, "retractions served");
     assert_eq!(
-        summary.workouts_withdrawn.as_u64(),
+        summary.workouts_retracted.as_usize(),
         0,
-        "the corpus's retraction names a workout never landed"
+        "the one retraction names a workout that was never landed"
     );
-    assert_eq!(summary.records_refused.as_u64(), 0, "records refused whole");
+    assert_eq!(
+        summary.records_refused.as_usize(),
+        0,
+        "records refused whole"
+    );
     assert!(summary.reconciles(), "the numbers add up: {summary:?}");
 }

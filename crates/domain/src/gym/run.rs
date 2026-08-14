@@ -49,16 +49,16 @@ impl fmt::Display for NormalisationRunId {
 
 /// How many gym workouts a derivation wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct WorkoutCount(u64);
+pub struct WorkoutCount(usize);
 
 impl WorkoutCount {
-    pub const fn as_u64(self) -> u64 {
+    pub const fn as_usize(self) -> usize {
         self.0
     }
 }
 
-impl From<u64> for WorkoutCount {
-    fn from(count: u64) -> Self {
+impl From<usize> for WorkoutCount {
+    fn from(count: usize) -> Self {
         Self(count)
     }
 }
@@ -71,16 +71,16 @@ impl fmt::Display for WorkoutCount {
 
 /// How many refusals a derivation recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct RefusalCount(u64);
+pub struct RefusalCount(usize);
 
 impl RefusalCount {
-    pub const fn as_u64(self) -> u64 {
+    pub const fn as_usize(self) -> usize {
         self.0
     }
 }
 
-impl From<u64> for RefusalCount {
-    fn from(count: u64) -> Self {
+impl From<usize> for RefusalCount {
+    fn from(count: usize) -> Self {
         Self(count)
     }
 }
@@ -111,7 +111,7 @@ pub enum NormalisationFailure {
     #[error("an exercise template is not in the mapping")]
     UnmappedExercise,
     #[error("no operator time zone is declared")]
-    MissingZone,
+    MissingTimeZone,
 }
 
 impl NormalisationFailure {
@@ -120,7 +120,7 @@ impl NormalisationFailure {
         match self {
             Self::StoreFailure => "store_failure",
             Self::UnmappedExercise => "unmapped_exercise",
-            Self::MissingZone => "missing_zone",
+            Self::MissingTimeZone => "missing_zone",
         }
     }
 }
@@ -132,7 +132,7 @@ impl TryFrom<&str> for NormalisationFailure {
         match value {
             "store_failure" => Ok(Self::StoreFailure),
             "unmapped_exercise" => Ok(Self::UnmappedExercise),
-            "missing_zone" => Ok(Self::MissingZone),
+            "missing_zone" => Ok(Self::MissingTimeZone),
             other => Err(UnknownNormalisationFailure {
                 value: other.to_owned(),
             }),
@@ -154,17 +154,17 @@ impl std::str::FromStr for NormalisationFailure {
 /// succeeded and failed, and cannot report what it produced without having
 /// finished.
 ///
-/// The counts on the success arm are what FR-005 is asserted with:
-/// `records_read` equals `workouts_written` plus `workouts_withdrawn` plus
-/// `retractions_applied` plus `records_refused`. A record that went missing
-/// shows up as arithmetic that does not reconcile.
+/// The counts on the success arm exist to add up: `records_read` equals
+/// `workouts_written` plus `workouts_retracted` plus `retractions_read` plus
+/// `records_refused`. Every record has exactly one outcome, so a record that
+/// went missing shows up as arithmetic that does not reconcile.
 ///
-/// `workouts_withdrawn` is separate from `retractions_applied` because the two
-/// count different things and neither implies the other. A retraction is a
-/// record read; a withdrawal is a workout that a retraction removed. The
-/// corpus's one retraction names a workout never landed, so it withdraws
-/// nothing — and a run reporting one retraction and no withdrawal is reporting
-/// exactly that, rather than looking like a bug.
+/// The two retraction counts measure different things and neither implies the
+/// other. `retractions_read` is how many withdrawal events the source served;
+/// `workouts_retracted` is how many workouts those events actually removed. A
+/// retraction naming a record that was never landed removes nothing, so a run
+/// reporting one retraction and no retracted workout is reporting exactly that
+/// rather than looking like a bug.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NormalisationOutcome {
     InFlight,
@@ -172,8 +172,8 @@ pub enum NormalisationOutcome {
         finished_at: FetchedAt,
         records_read: RecordCount,
         workouts_written: WorkoutCount,
-        workouts_withdrawn: WorkoutCount,
-        retractions_applied: RecordCount,
+        workouts_retracted: WorkoutCount,
+        retractions_read: RecordCount,
         records_refused: RecordCount,
         refusals_recorded: RefusalCount,
     },

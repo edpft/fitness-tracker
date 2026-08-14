@@ -28,9 +28,9 @@ fn a_tombstone_for_a_workout_never_landed_withdraws_nothing() {
     let produced = derived!();
 
     assert_eq!(produced.workouts.len(), 163);
-    assert_eq!(produced.summary.retractions_applied.as_u64(), 1);
+    assert_eq!(produced.summary.retractions_read.as_usize(), 1);
     assert_eq!(
-        produced.summary.workouts_withdrawn.as_u64(),
+        produced.summary.workouts_retracted.as_usize(),
         0,
         "it names a workout that was never landed"
     );
@@ -74,7 +74,7 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
         let produced = derived!(withdrawable, reversed);
 
         assert_eq!(
-            produced.summary.records_read.as_u64(),
+            produced.summary.records_read.as_usize(),
             165,
             "the corpus plus one synthetic update"
         );
@@ -83,8 +83,8 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
             163,
             "the workout the retraction names is the one absent (reversed: {reversed})"
         );
-        assert_eq!(produced.summary.workouts_withdrawn.as_u64(), 1);
-        assert_eq!(produced.summary.retractions_applied.as_u64(), 1);
+        assert_eq!(produced.summary.workouts_retracted.as_usize(), 1);
+        assert_eq!(produced.summary.retractions_read.as_usize(), 1);
         assert!(produced.summary.reconciles(), "{:?}", produced.summary);
 
         let withdrawn = produced

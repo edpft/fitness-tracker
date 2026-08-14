@@ -1,7 +1,9 @@
 # 0003 — The air bike and the sled translate as `Relative(0)`
 
 **Date**: 2026-08-14
-**Status**: Accepted, as a declared limitation
+**Status**: Superseded by [0004](0004-the-load-axis-is-bidirectional-or-it-is-not.md).
+With `Absolute` admitting zero, an air bike carrying no external load needs no
+special case at all. What survives is the sled, and 0004 says so.
 **Resolves**: `docs/gym-workout-domain-model.md`, open question 5.
 **Raised by**: `specs/002-hevy-workout-normalisation`, question Q2.
 

@@ -30,13 +30,13 @@ pub enum ConfigError {
     MissingDatabase,
 
     #[error(
-        "no time zone: set FITNESS_TRACKER_TIMEZONE to an IANA identifier such as Europe/London. \
-         Nothing is compiled in, because a default would be an assumption about where you train \
-         — silently right here and silently wrong elsewhere"
+        "no time zone: pass --timezone or set FITNESS_TRACKER_TIMEZONE to an IANA identifier \
+         such as Europe/London. Nothing is compiled in, because a default would be an \
+         assumption about where you train — silently right here and silently wrong elsewhere"
     )]
     MissingTimeZone,
 
-    #[error("FITNESS_TRACKER_TIMEZONE is set to {value:?}, which is not an IANA identifier")]
+    #[error("{value:?} is not an IANA time zone identifier")]
     UnknownTimeZone { value: String },
 }
 
@@ -47,16 +47,16 @@ pub enum ConfigError {
 /// correct for this account and wrong for the next, and because it would be
 /// correct here no test would ever catch it.
 ///
-/// It is deliberately not a flag. A zone is a declared interpretive parameter,
-/// not a per-invocation choice, and an operator who can pass it per run can
-/// produce two derivations that disagree.
+/// The value is passed in rather than read here, so this is testable without
+/// touching the process environment. Which of the flag and the variable it came
+/// from is clap's business.
 ///
 /// # Errors
 ///
 /// [`ConfigError`] if it is unset or is not an identifier the database knows.
-pub fn timezone(declared: Result<String, VarError>) -> Result<OperatorZone, ConfigError> {
+pub fn timezone(declared: Option<&str>) -> Result<OperatorZone, ConfigError> {
     let value = match declared {
-        Ok(value) if !value.trim().is_empty() => value,
+        Some(value) if !value.trim().is_empty() => value.to_owned(),
         _ => return Err(ConfigError::MissingTimeZone),
     };
 

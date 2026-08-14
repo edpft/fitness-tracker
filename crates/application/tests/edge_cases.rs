@@ -137,7 +137,7 @@ fn an_empty_account_is_a_success_rather_than_a_failure() {
             .await
             .expect("an empty account is not a failure");
 
-        assert_eq!(summary.events_seen.as_u64(), 0);
+        assert_eq!(summary.events_seen.as_usize(), 0);
         assert_eq!(summary.records_landed, RecordCount::from(0));
         assert!(landing.records().is_empty());
         assert!(

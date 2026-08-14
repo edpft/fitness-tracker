@@ -6,10 +6,9 @@
 //! hand-picked example works.
 
 use domain::gym::{
-    Distance, Duration, Kg, Load, Metres, NonEmpty, RepCount, Rir, SetKind, SignedKg,
-    TimedDistance,
-    exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
-    nonempty::AtLeastTwo,
+    Distance, Kg, Load, Metres, NonEmpty, RepCount, Rir, SetKind, SignedKg,
+    exercise::{DistanceExercise, DurationExercise, RepsExercise},
+    sequence::AtLeastTwo,
 };
 use proptest::prelude::*;
 
@@ -60,18 +59,29 @@ proptest! {
         prop_assert!(Kg::try_from(text.as_str()).is_err());
     }
 
-    /// The one thing `Load::Absolute` exists to make impossible.
+    /// An absolute load is external load, and zero is a real answer: a
+    /// bodyweight squat, a set of skipping. What it can never be is negative,
+    /// which the type carries rather than checks.
     #[test]
-    fn an_absolute_load_is_never_zero(grams in 0_i64..500_000) {
-        let Some(mass) = Kg::from_grams(grams) else {
-            prop_assert!(false, "a non-negative gram count is a mass");
+    fn an_absolute_load_is_external_load_and_admits_none(grams in 0_u64..500_000) {
+        let Load::Absolute(held) = Load::absolute(Kg::from_grams(grams)) else {
+            prop_assert!(false, "absolute built a relative load");
             return Ok(());
         };
-        match Load::absolute(mass) {
-            Ok(Load::Absolute(held)) => prop_assert!(!held.is_zero()),
-            Ok(Load::Relative(_)) => prop_assert!(false, "absolute built a relative load"),
-            Err(_) => prop_assert_eq!(grams, 0),
-        }
+        prop_assert_eq!(held.as_grams(), grams);
+        prop_assert_eq!(held.is_none(), grams == 0);
+    }
+
+    /// A pound reading converts exactly, without a float and without a second
+    /// rounding step.
+    #[test]
+    fn a_pound_reading_converts_without_a_float(pounds in 0_u32..1_000) {
+        let text = pounds.to_string();
+        let Ok(mass) = Kg::from_pounds(&text) else {
+            prop_assert!(false, "{text} lb is a mass");
+            return Ok(());
+        };
+        prop_assert_eq!(mass.as_grams(), u64::from(pounds) * 453_592);
     }
 
     /// Zero is a real observation on the relative axis — it is a plain
@@ -100,11 +110,8 @@ proptest! {
     }
 
     #[test]
-    fn a_distance_round_trips(millimetres in 0_i64..1_000_000) {
-        let Some(metres) = Metres::from_millimetres(millimetres) else {
-            prop_assert!(false, "a non-negative millimetre count is a distance");
-            return Ok(());
-        };
+    fn a_distance_round_trips(millimetres in 0_u64..1_000_000) {
+        let metres = Metres::from_millimetres(millimetres);
         prop_assert_eq!(Ok(metres), Metres::try_from(metres.to_string().trim_end_matches('m')));
     }
 
@@ -166,9 +173,12 @@ fn every_exercise_key_is_distinct_and_reversible() {
     check!(RepsExercise);
     check!(DurationExercise);
     check!(DistanceExercise);
-    check!(TimedDistanceExercise);
 
-    assert_eq!(seen.len(), 130, "the vocabulary the corpus needs");
+    assert_eq!(
+        seen.len(),
+        128,
+        "the vocabulary this build has needed so far"
+    );
 }
 
 /// A set carries its measure in its type, so these four are the only shapes
@@ -179,9 +189,7 @@ fn a_set_cannot_disagree_with_its_exercise() {
     let Ok(reps) = RepCount::new(5) else {
         panic!("five is a rep count")
     };
-    let Some(metres) = Metres::from_millimetres(20_000) else {
-        panic!("twenty metres is a distance")
-    };
+    let metres = Metres::from_millimetres(20_000);
 
     let for_reps = domain::gym::Set {
         load: Load::BODYWEIGHT,
@@ -197,18 +205,7 @@ fn a_set_cannot_disagree_with_its_exercise() {
         kind: SetKind::Warmup,
         rest_after: None,
     };
-    let for_timed = domain::gym::Set {
-        load: Load::BODYWEIGHT,
-        measure: TimedDistance {
-            metres,
-            duration: Duration::from_seconds(60),
-        },
-        intensity: None,
-        kind: SetKind::Working,
-        rest_after: None,
-    };
 
     assert_eq!(for_reps.measure.as_u32(), 5);
     assert_eq!(for_distance.measure.metres, metres);
-    assert_eq!(for_timed.measure.duration.as_seconds(), 60);
 }

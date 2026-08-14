@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\",\n                   started_at AS \"started_at!: String\",\n                   finished_at AS \"finished_at!: String\",\n                   records_read AS \"records_read: i64\",\n                   workouts_written AS \"workouts_written: i64\",\n                   workouts_withdrawn AS \"workouts_withdrawn: i64\",\n                   retractions_applied AS \"retractions_applied: i64\",\n                   records_refused AS \"records_refused: i64\",\n                   refusals_recorded AS \"refusals_recorded: i64\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   started_at AS \"started_at!: String\",\n                   finished_at AS \"finished_at!: String\",\n                   records_read AS \"records_read: i64\",\n                   workouts_written AS \"workouts_written: i64\",\n                   workouts_retracted AS \"workouts_retracted: i64\",\n                   retractions_read AS \"retractions_read: i64\",\n                   records_refused AS \"records_refused: i64\",\n                   refusals_recorded AS \"refusals_recorded: i64\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -59,24 +59,24 @@
         }
       },
       {
-        "name": "workouts_withdrawn: i64",
+        "name": "workouts_retracted: i64",
         "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "normalisation_run",
-            "name": "workouts_withdrawn"
+            "name": "workouts_retracted"
           }
         }
       },
       {
-        "name": "retractions_applied: i64",
+        "name": "retractions_read: i64",
         "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "normalisation_run",
-            "name": "retractions_applied"
+            "name": "retractions_read"
           }
         }
       },
@@ -118,5 +118,5 @@
       true
     ]
   },
-  "hash": "83dc121347b72485bb229a93a30be17cec4788a4999ac0fab2ba6285d6d3f9ee"
+  "hash": "2a94ef046bcab0de5ad93fc9fe0df7e51a21c4a8484a3589e337cd48769d8d17"
 }

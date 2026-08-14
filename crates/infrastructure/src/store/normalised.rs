@@ -9,7 +9,10 @@
 
 use application::{LandingRecordReader, NormalisedWorkoutStore, StoreError};
 use domain::{
-    gym::{GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount},
+    gym::{
+        GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount,
+        WorkoutItem,
+    },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -17,7 +20,9 @@ use domain::{
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::{corrupt, normalisation_run_for_storage, store_error};
+use super::{
+    corrupt, count_for_storage, count_from_storage, normalisation_run_for_storage, store_error,
+};
 
 /// Raw, read-only, for Hevy workouts.
 #[derive(Debug, Clone)]
@@ -159,7 +164,7 @@ impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        let written = u64::try_from(workouts.len()).unwrap_or(u64::MAX);
+        let written = workouts.len();
         for workout in &workouts {
             write_workout(&mut tx, run_id, workout).await?;
         }
@@ -173,7 +178,7 @@ impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
-        Ok(WorkoutCount::from(u64::try_from(row.count).unwrap_or(0)))
+        Ok(WorkoutCount::from(count_from_storage(Some(row.count))?))
     }
 }
 
@@ -214,8 +219,8 @@ async fn write_workout(
     .map_err(|error| store_error(&error))?;
 
     for (position, item) in workout.items().iter().enumerate() {
-        let position = i64::try_from(position).unwrap_or(i64::MAX);
-        let is_superset = i64::from(item.is_superset());
+        let position = count_for_storage(position)?;
+        let is_superset = i64::from(matches!(item, WorkoutItem::Superset(_)));
 
         sqlx::query!(
             "INSERT INTO workout_item (workout, position, is_superset) VALUES (?, ?, ?)",
@@ -228,7 +233,7 @@ async fn write_workout(
         .map_err(|error| store_error(&error))?;
 
         for (member, exercise) in item.exercises().enumerate() {
-            let member = i64::try_from(member).unwrap_or(i64::MAX);
+            let member = count_for_storage(member)?;
             write_exercise(tx, landing_record_id, position, member, exercise).await?;
         }
     }
@@ -268,6 +273,7 @@ async fn write_exercise(
     match exercise {
         PerformedExercise::ForReps { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
+                let ordinal = count_for_storage(ordinal)?;
                 let reps = i64::from(set.measure.as_u32());
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
                     .reps(Some(reps))
@@ -277,7 +283,13 @@ async fn write_exercise(
         }
         PerformedExercise::ForDuration { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
-                let seconds = i64::try_from(set.measure.as_seconds()).unwrap_or(i64::MAX);
+                let ordinal = count_for_storage(ordinal)?;
+                let seconds =
+                    count_for_storage(usize::try_from(set.measure.as_seconds()).map_err(
+                        |_| application::StoreError::Corrupt {
+                            detail: "a duration larger than the store can hold".to_owned(),
+                        },
+                    )?)?;
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
                     .duration(Some(seconds))
                     .execute()
@@ -286,20 +298,10 @@ async fn write_exercise(
         }
         PerformedExercise::ForDistance { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
-                let millimetres = set.measure.metres.as_millimetres();
+                let ordinal = count_for_storage(ordinal)?;
+                let millimetres = metres_for_storage(set.measure.metres)?;
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
                     .distance(Some(millimetres))
-                    .execute()
-                    .await?;
-            }
-        }
-        PerformedExercise::ForTimedDistance { sets, .. } => {
-            for (ordinal, set) in sets.iter().enumerate() {
-                let millimetres = set.measure.metres.as_millimetres();
-                let seconds = i64::try_from(set.measure.duration.as_seconds()).unwrap_or(i64::MAX);
-                write_set(tx, Row::new(workout, item_position, position, ordinal, set))
-                    .distance(Some(millimetres))
-                    .duration(Some(seconds))
                     .execute()
                     .await?;
             }
@@ -327,18 +329,23 @@ impl Row {
         workout: i64,
         item_position: i64,
         exercise_position: i64,
-        ordinal: usize,
+        position: i64,
         set: &Set<M>,
     ) -> Self {
+        // SQLite stores signed integers, so the domain's unsigned mass narrows
+        // here and nowhere else. A relative load is already signed.
         let (load_kind, load_grams) = match set.load {
-            Load::Absolute(mass) => ("absolute", mass.as_grams()),
+            Load::Absolute(mass) => (
+                "absolute",
+                i64::try_from(mass.as_grams()).unwrap_or(i64::MAX),
+            ),
             Load::Relative(delta) => ("relative", delta.as_grams()),
         };
         Self {
             workout,
             item_position,
             exercise_position,
-            position: i64::try_from(ordinal).unwrap_or(i64::MAX),
+            position,
             load_kind,
             load_grams,
             rir: set.intensity.map(|rir| rir.as_str().to_owned()),
@@ -348,7 +355,7 @@ impl Row {
             },
             rest_after_seconds: set
                 .rest_after
-                .map(|rest| i64::try_from(rest.as_seconds()).unwrap_or(i64::MAX)),
+                .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
         }
     }
 }
@@ -420,4 +427,11 @@ impl SetWrite<'_, '_> {
         .map_err(|error| store_error(&error))?;
         Ok(())
     }
+}
+
+/// A distance on its way into the store, checked rather than saturated.
+fn metres_for_storage(metres: domain::gym::Metres) -> Result<i64, StoreError> {
+    i64::try_from(metres.as_millimetres()).map_err(|_| StoreError::Corrupt {
+        detail: "a distance larger than the store can hold".to_owned(),
+    })
 }

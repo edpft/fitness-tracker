@@ -1,10 +1,9 @@
 //! What the domain will not accept, and why.
 //!
-//! User story 2. § 37 is not satisfied by translating what fits: 24 sets and 2
-//! groupings in the corpus do not translate, and each is either data to fix at
-//! source, a limitation to declare, or a gap in the model. Telling them apart
-//! is the whole value, and it is unavailable if the refusal is a stack trace or
-//! a dropped row.
+//! § 37 is not satisfied by translating what fits. One set and two groupings in
+//! the corpus do not translate, and telling apart what is wrong data from what
+//! the model does not hold is the whole value — unavailable if the refusal is a
+//! stack trace or a dropped row.
 //!
 //! Every assertion here is over `RefusalReason`, never over rendered text. The
 //! claim is that the refusals are *exactly* a known set, which is a query and
@@ -15,7 +14,7 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use domain::gym::{Load, PerformedExercise, RefusalKind, RefusalLocus, RefusalReason};
+use domain::gym::{PerformedExercise, RefusalKind, RefusalLocus, RefusalReason};
 use support::{corpus, derived};
 
 fn by_reason(produced: &corpus::Produced) -> BTreeMap<&'static str, usize> {
@@ -37,8 +36,6 @@ fn the_refusals_are_exactly_the_named_set() {
     let produced = derived!();
 
     let expected: BTreeMap<&str, usize> = [
-        ("zero-on-absolute-load", 7),
-        ("band-resistance", 16),
         ("zero-reps", 1),
         ("non-contiguous-grouping", 1),
         ("single-member-grouping", 1),
@@ -47,94 +44,7 @@ fn the_refusals_are_exactly_the_named_set() {
     .collect();
 
     assert_eq!(by_reason(&produced), expected);
-    assert_eq!(produced.refusals.len(), 26, "24 sets and 2 groupings");
-}
-
-/// Scenario 4. **The mapping's specification.**
-///
-/// 93 sets carry a zero load. Every zero on a relative-load exercise is plain
-/// bodyweight and translates; every zero on an absolute-load one is impossible
-/// by construction and refuses. So the 134 load interpretations are right if
-/// and only if exactly seven refuse — and the test fails in both directions: an
-/// eighth means a bodyweight movement was called absolute, a sixth means the
-/// reverse.
-#[test]
-fn exactly_seven_zeros_refuse_and_they_sit_where_the_model_says() {
-    let produced = derived!();
-
-    let mut on: BTreeMap<&str, usize> = BTreeMap::new();
-    for refusal in &produced.refusals {
-        if refusal.reason != RefusalReason::ZeroOnAbsoluteLoad {
-            continue;
-        }
-        let Some(exercise) = refusal.exercise else {
-            panic!("a refused set knows its exercise")
-        };
-        *on.entry(exercise.as_str()).or_insert(0) += 1;
-
-        // Every one names its position and its kind, so an operator can act on
-        // it without re-reading the payload.
-        assert!(
-            matches!(refusal.locus, RefusalLocus::Set { .. }),
-            "a refused set names its position: {:?}",
-            refusal.locus
-        );
-        assert_eq!(refusal.kind(), RefusalKind::WrongData);
-    }
-
-    // The four the model of record narrates by name: the bottom of a warm-up
-    // ramp on a good morning, an overhead squat and a Romanian deadlift, plus
-    // the behind-the-neck press. They mean "empty bar" or "PVC pipe", which is
-    // real technique work recorded lossily — the event is genuine and the
-    // recording is wrong, so it is fixed at source rather than by weakening the
-    // type.
-    let expected: BTreeMap<&str, usize> = [
-        ("good-morning-barbell", 1),
-        ("overhead-squat", 2),
-        ("romanian-deadlift-barbell", 2),
-        ("snatch-grip-behind-the-neck-press", 2),
-    ]
-    .into_iter()
-    .collect();
-    assert_eq!(on, expected, "seven zeros, and where they sit");
-}
-
-/// The other side of the same test, and the half that catches the opposite
-/// mistake.
-///
-/// 93 sets carry a zero load; 7 refuse, so 86 translate as `Relative(0)`. If a
-/// bodyweight movement had been called absolute, those sets would have refused
-/// instead — so this number moving is the same defect seen from the other end.
-#[test]
-fn the_other_eighty_six_zeros_translate_as_plain_bodyweight() {
-    let produced = derived!();
-
-    let refused = produced
-        .refusals
-        .iter()
-        .filter(|refusal| refusal.reason == RefusalReason::ZeroOnAbsoluteLoad)
-        .count();
-
-    let bodyweight = produced
-        .workouts
-        .iter()
-        .flat_map(domain::gym::GymWorkout::exercises)
-        .map(|exercise| match exercise {
-            PerformedExercise::ForReps { sets, .. } => sets
-                .iter()
-                .filter(|set| set.load == Load::BODYWEIGHT)
-                .count(),
-            _ => 0,
-        })
-        .sum::<usize>();
-
-    assert_eq!(refused, 7);
-    // Plain bodyweight covers both a recorded zero and an absent weight — the
-    // two are one observation, which is the point of the relative axis.
-    assert!(
-        bodyweight >= 86,
-        "at least the 86 translated zeros are plain bodyweight, found {bodyweight}"
-    );
+    assert_eq!(produced.refusals.len(), 3, "one set and two groupings");
 }
 
 /// The three kinds are the deliverable. A model that cannot hold a genuine case
@@ -154,10 +64,8 @@ fn every_refusal_says_what_to_do_about_it() {
     }
 
     let expected: BTreeMap<&str, usize> = [
-        // 7 zero loads, 1 non-contiguous grouping, 1 single-member grouping.
-        ("wrong data", 9),
-        // The 16 band-resistance sets. Nothing to fix.
-        ("declared limitation", 16),
+        // The two malformed groupings.
+        ("wrong data", 2),
         // The one missed attempt: 95 kg for zero reps at the top of the scale.
         ("unmodelled", 1),
     ]

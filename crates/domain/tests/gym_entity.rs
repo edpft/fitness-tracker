@@ -14,9 +14,8 @@
 use domain::{
     gym::{
         AtLeastTwo, Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone,
-        PerformedExercise, RepCount, Set, SetKind, SignedKg, Superset, TimedDistance, WorkoutItem,
-        WorkoutStart,
-        exercise::{DistanceExercise, DurationExercise, RepsExercise, TimedDistanceExercise},
+        PerformedExercise, RepCount, Set, SetKind, SignedKg, Superset, WorkoutItem, WorkoutStart,
+        exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
 };
@@ -24,11 +23,7 @@ use proptest::prelude::*;
 
 fn load() -> impl Strategy<Value = Load> {
     prop_oneof![
-        // Absolute is fallible, so the generator has to go through the
-        // constructor — which is the point: it cannot produce a zero one.
-        (1_i64..500_000).prop_filter_map("a non-zero mass is an absolute load", |grams| {
-            Kg::from_grams(grams).and_then(|mass| Load::absolute(mass).ok())
-        }),
+        (0_u64..500_000).prop_map(|grams| Load::absolute(Kg::from_grams(grams))),
         (-100_000_i64..500_000).prop_map(|grams| Load::relative(SignedKg::from_grams(grams))),
     ]
 }
@@ -81,8 +76,7 @@ fn at_least_two<T: std::fmt::Debug + 'static>(
 }
 
 fn performed_exercise() -> impl Strategy<Value = PerformedExercise> {
-    let metres =
-        || (0_i64..100_000).prop_filter_map("a non-negative distance", Metres::from_millimetres);
+    let metres = || (0_u64..100_000).prop_map(Metres::from_millimetres);
     let seconds = || (0_u64..3_600).prop_map(Duration::from_seconds);
 
     prop_oneof![
@@ -115,17 +109,6 @@ fn performed_exercise() -> impl Strategy<Value = PerformedExercise> {
                 DistanceExercise::ALL
                     .get(at)
                     .map(|&exercise| PerformedExercise::ForDistance { exercise, sets })
-            }),
-        (
-            (0_usize..TimedDistanceExercise::ALL.len()),
-            non_empty(set_of((metres(), seconds()).prop_map(
-                |(metres, duration)| { TimedDistance { metres, duration } }
-            ))),
-        )
-            .prop_filter_map("the vocabulary is not empty", |(at, sets)| {
-                TimedDistanceExercise::ALL
-                    .get(at)
-                    .map(|&exercise| PerformedExercise::ForTimedDistance { exercise, sets })
             }),
     ]
 }
@@ -192,18 +175,18 @@ proptest! {
         );
     }
 
-    /// No absolute load in an arbitrary workout is zero.
-    ///
-    /// The generator reaches `Load::absolute` for every one of them, so a zero
-    /// would have to survive the constructor to appear here.
+    /// Every set carries a load, whichever measure it is counted in. Load is a
+    /// property of a set rather than a kind of set, so there is no arm here
+    /// where one is absent.
     #[test]
-    fn no_absolute_load_is_ever_zero(workout in workout()) {
+    fn every_set_carries_a_load(workout in workout()) {
         macro_rules! check {
             ($sets:expr) => {
                 for set in $sets.iter() {
-                    if let Load::Absolute(mass) = set.load {
-                        prop_assert!(!mass.is_zero(), "an absolute load is never zero");
-                    }
+                    prop_assert!(matches!(
+                        set.load,
+                        Load::Absolute(_) | Load::Relative(_)
+                    ));
                 }
             };
         }
@@ -213,7 +196,6 @@ proptest! {
                 PerformedExercise::ForReps { sets, .. } => check!(sets),
                 PerformedExercise::ForDuration { sets, .. } => check!(sets),
                 PerformedExercise::ForDistance { sets, .. } => check!(sets),
-                PerformedExercise::ForTimedDistance { sets, .. } => check!(sets),
             }
         }
     }
@@ -230,7 +212,6 @@ proptest! {
                 PerformedExercise::ForReps { .. } => "reps",
                 PerformedExercise::ForDuration { .. } => "duration",
                 PerformedExercise::ForDistance { .. } => "distance",
-                PerformedExercise::ForTimedDistance { .. } => "timed-distance",
             };
             prop_assert_eq!(exercise.measure(), expected);
         }

@@ -1,21 +1,19 @@
 # Contract: the exercise mapping
 
-Phase 1. The mapping itself is `crates/infrastructure/src/hevy/mapping.rs` — 134
-entries, code rather than data (§ 9). This document holds the rules it was
-authored against and the entries where a rule had to be applied rather than
-read off. The table is not reproduced here: a rule stated twice is a rule that
-drifts, and the code is the one that runs.
+The mapping itself is `crates/infrastructure/src/hevy/mapping.rs` — 134 template
+ids onto 128 exercises, code rather than data (§ 9). This document holds the
+rules it was authored against. The table is not reproduced here: a rule stated
+twice is a rule that drifts, and the code is the one that runs.
 
 ## What an entry resolves
 
 Per `exercise_template_id`, and nothing else:
 
-1. **Which of our exercises** it is — many-to-one, so `Pull Up`, `Pull Up
-   (Assisted)` and `Pull Up (Band)` all reach `PullUp`.
-2. **Which measure** that exercise is in, which follows from the vocabulary the
-   exercise belongs to and so is not a separate field.
-3. **How to read the weight column**: `Absolute`, `Relative`, `RelativeNegated`
-   (an assisted variant), or `BandResistance` (refused).
+1. **Which of our exercises** it is — many-to-one.
+2. **Which measure** that exercise is in, which follows from the vocabulary it
+   belongs to and so is not a separate field.
+3. **How to read the weight column**: `Absolute`, `Relative`, or
+   `RelativeNegated`.
 
 Titles inform the mapping and never key it. `Overhead Squat` has two template
 ids — a builtin and a custom — and template `DDB29047` has appeared under two
@@ -24,78 +22,77 @@ on the id.
 
 ## The rules
 
-**Load is `Absolute` where no unloaded version of the movement exists.** The
-implement has mass, so zero is impossible and a zero is a data error by
-construction. `Relative` where an unloaded version does exist, so zero is a real
-observation and the number is a delta against a bodyweight the set does not
-record.
+**A variant that differs only in how the movement is loaded is not a different
+movement.** Assisted and unassisted are one exercise; weighted and unweighted
+are one exercise. This is the mapping's reason to exist (§ 8), and it is what
+makes `Pull Up` (97 sets), `Pull Up (Assisted)` (159) and `Pull Up (Band)` (3)
+one series rather than three.
 
 **An assisted variant negates.** Hevy has no assistance concept — assisted
 movements are separately-named exercises carrying a positive weight — so
 `RelativeNegated` turns 20 into −20 and puts assistance and added weight on one
-axis. This is the mapping's reason to exist (§ 8).
+axis.
 
-**A band-resistance exercise refuses.** Band tension varies through the range of
-motion, nothing records the mechanism, and the account's assisted loads run `0,
-7, 14, 21, 28, 35, 42` — stacked bands rather than a machine stack, which
-deterministic translation cannot tell apart. Four templates, 16 sets:
-`Banded Scapula Protraction` (5), `Band Pullaparts` (5), `Front Raise (Band)`
-(3), `Lateral Raise (Band)` (3).
+**Load is `Relative` where assistance is conventionally available**, so the axis
+runs through zero in both directions and the sign carries meaning. `Absolute`
+otherwise, where the number is external load and none of it is a real answer.
 
-`Pull Up (Band)` is **not** among them. It is band *assistance*, not band
-resistance — 3 sets at a recorded 14 — and it maps to `PullUp` with
-`RelativeNegated` like any other assisted pull-up. That band assistance and
-machine assistance are not comparable is the limitation the model of record
-declares; it is not a reason to refuse the set.
+This is a convention about how a movement is trained, not a physical fact about
+it, which is why it is decided here per exercise and never inferred from a
+value. A squat has a bodyweight version and is still `Absolute`: adding weight is
+the whole progression and taking weight away is not a thing anyone does. A
+pull-up is `Relative` because both directions are routine. Three families are
+`Relative` today — pull-up, chin-up, chest dip — and the list grows by editing
+this table, never by a record arriving.
 
-**Where our category and the source's differ, ours wins.** One entry:
+**Band resistance is load; band assistance is negative.** A banded lateral raise
+reads its number as external load like any other. A banded pull-up takes weight
+off, so it negates. Neither refuses: the number is the operator's estimate of the
+band, and discarding it forecloses an overlay supplying a resistance range later.
+
+What stays a declared limitation is comparability — the account's assisted loads
+run `0, 7, 14, 21, 28, 35, 42`, stacked bands rather than a machine stack, and
+deterministic translation cannot tell the two apart. Same axis, not the same
+series.
+
+**Where our category and the source's differ, ours wins.** Two entries.
 `Sled Push`, which Hevy calls distance-and-duration and which records thirty
-seconds and a zero distance on all nine sets. It is a `DurationExercise` here,
-so the zero distance is never read and never refused.
+seconds and a zero distance on all nine sets, is a duration exercise here.
+`Running`, which records a distance and a duration, is a distance exercise: the
+duration was an interval target rather than a measurement.
 
-## The entries a rule had to be applied to
+## What the mapping does not decide
 
-Fourteen templates record at least one zero weight, and which of them are
-`Absolute` is the whole judgement. Ten are `Relative`, so their zeros are plain
-bodyweight and translate; four are `Absolute`, so their seven zeros refuse.
+**What was actually performed**, where the operator has used a template to stand
+for something else. Six such cases are recorded in the model of record under
+"Known aliases, for the edit overlay". A template does not determine the
+movement, so a deterministic mapping does not pretend it does — those wait for
+the overlay, where an operator assertion is the right kind of input.
 
-The pair that shows the rule is doing real work:
+**Whether an implement has irreducible mass.** A barbell always weighs
+something, so a barbell exercise recording no external load is recording lossily.
+The mapping could say so and does not: nothing consumes it, and it was the
+accidental basis of the rule this one replaces
+([decision 0004](../../../docs/decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md)).
 
-| | Load | Because |
-| --- | --- | --- |
-| `Romanian Deadlift (Barbell)` | Absolute | There is no barbell RDL without a barbell |
-| `Single Leg Romanian Deadlift (Dumbbell)` | Relative | A single-leg RDL is a balance drill before it is a loaded hinge, and four sets in the corpus were done that way |
-
-Nothing in the titles forces that split. What forces it is asking whether the
-movement can be performed unloaded — and the answer differs, though both are
-Romanian deadlifts and one names a dumbbell.
-
-The other three `Absolute` templates carrying zeros are `Overhead Squat` (custom
-id), `Snatch-Grip Behind The Neck Press` and `Good Morning (Barbell)`. The other
-nine `Relative` ones are listed in [research.md](../research.md), D2.
+**`ExerciseTemplate.type`**, Hevy's declared exercise type. It is the only
+published carrier of the sign convention and is invisible in a workout payload,
+so it informed this table when it was authored and is not read when translation
+runs. Reading it then would put a network request inside a derivation that must
+not make one, and would make the result depend on what the vendor's catalogue
+says today rather than on what the record holds.
 
 ## How the mapping is held to account
 
-**Exactly seven zeros refuse.** Not a target the table is tuned to hit — it
-falls out of asking "can this be done unloaded?" 134 times, and it is wrong in
-both directions: an eighth refusal means a `Relative` movement was called
-`Absolute`, and a sixth means the reverse. Pinned by
-[quickstart.md](../quickstart.md) scenario 4.
-
 **Every template resolves.** All 134 ids in the corpus reach an entry, and an id
-that does not stops the run naming itself (FR-017). The vocabulary is code, so a
-gap in it is a defect to fix rather than data to record around.
+that does not stops the run naming itself. The vocabulary is code, so a gap in it
+is a defect to fix rather than data to record around.
 
-**The collapses hold.** `Pull Up` (97 sets) with `Pull Up (Assisted)` (159) and
-`Pull Up (Band)` (3); `Chest Dip` (84) with `Chest Dip (Assisted)` (277). One
-exercise each, one series each, assistance negative.
+**The collapses hold.** The pull-up family's three templates and the chest dip's
+two each reach one exercise; a weighted crunch reaches the same exercise as a
+plain one, and a weighted hyperextension the same as an unweighted one.
 
-## What the mapping does not consult
-
-`ExerciseTemplate.type`, Hevy's declared exercise type, is the only published
-carrier of the sign convention and is invisible in a workout payload. It
-informed this table when it was authored and is not read when translation runs
-— which closes the question 001 left open. Reading it at translation time would
-put a network request inside a derivation that must not make one, and would make
-the result depend on what the vendor's catalogue says today rather than on what
-the record holds.
+**The axis readings are right.** A squat and a deadlift are `Absolute`; a pull-up
+and a dip are `Relative`. Asserted directly, because a wrong reading no longer
+shows up as a refusal — under the previous rule it did, which was the accident
+that made it look self-checking.

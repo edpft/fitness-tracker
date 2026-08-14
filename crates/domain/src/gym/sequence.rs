@@ -3,20 +3,15 @@
 //! Two of them, because the entity has two different minimums and they mean
 //! different things. An exercise holds at least one set, since an exercise
 //! nobody performed is not an observation. A superset holds at least two
-//! members, because "performed back to back" is a relation and one thing is
-//! not back to back with anything.
+//! members, because "performed back to back" is a relation and one thing is not
+//! back to back with anything.
 //!
 //! Both store the mandatory elements as their own fields rather than validating
 //! a `Vec`. That is § 24 read strictly: the minimum is not a rule the type
 //! checks, it is the shape the type has. It also removes every panic path —
 //! `first` returns a `&T` because there is a `T` to borrow, not because a
-//! constructor promised there would be — which matters here, since `panic`,
-//! `unwrap` and `unreachable` are all `forbid`.
-//!
-//! Written here rather than taken from a crate for the second one: the
-//! two-or-more case is what makes the corpus's single-member grouping
-//! unrepresentable instead of merely rejected, and no published container
-//! offers it. Having written that, the first is twenty lines.
+//! constructor promised there would be — which matters where `panic`, `unwrap`
+//! and `unreachable` are all `forbid`.
 
 use std::{fmt, iter};
 

@@ -1,17 +1,12 @@
 //! What a set is counted in.
 //!
-//! Four measures, because there are four things you can count: repetitions,
-//! elapsed time, ground covered, and ground covered in a time. Everything a
-//! source offers is one of those recorded more or less fully.
+//! Three measures, because there are three things you can count: repetitions,
+//! elapsed time, and ground covered.
 //!
-//! The last two are separate rather than one measure with an optional duration
-//! — `docs/decisions/0002-distance-and-distance-over-time-are-different-measures.md`.
-//! A carry is time under load and a run is pace, and an
-//! optional duration would have meant "not captured" for a run and "does not
-//! apply" for a carry with nothing in the type to tell them apart — the same
-//! merge that got the unrecorded load removed, one field over.
+//! An exercise's measure is fixed by which vocabulary it belongs to, so a set
+//! and its exercise cannot disagree and nothing needs validating.
 
-use std::fmt;
+use std::{fmt, num::NonZeroU32};
 
 /// Why a quantity could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,26 +21,31 @@ pub enum InvalidQuantity {
 
 /// How many times the movement was performed.
 ///
-/// Zero is rejected. A rep attempted and missed is a real event and is not a
-/// set, so no refinement of this type holds it honestly — it needs an
-/// *attempt*, which belongs with prescribed-versus-performed. The corpus holds
-/// exactly one: 95 kg for zero reps at no reps in reserve.
+/// Zero is unrepresentable rather than rejected. A rep attempted and missed is a
+/// real event and is not a set, so it needs an *attempt*, which belongs with
+/// prescribed-versus-performed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RepCount(u32);
+pub struct RepCount(NonZeroU32);
 
 impl RepCount {
     pub const fn as_u32(self) -> u32 {
-        self.0
+        self.0.get()
     }
 
     /// # Errors
     ///
     /// [`InvalidQuantity::ZeroReps`] for zero.
     pub const fn new(reps: u32) -> Result<Self, InvalidQuantity> {
-        if reps == 0 {
-            return Err(InvalidQuantity::ZeroReps);
+        match NonZeroU32::new(reps) {
+            Some(reps) => Ok(Self(reps)),
+            None => Err(InvalidQuantity::ZeroReps),
         }
-        Ok(Self(reps))
+    }
+}
+
+impl From<NonZeroU32> for RepCount {
+    fn from(reps: NonZeroU32) -> Self {
+        Self(reps)
     }
 }
 
@@ -69,10 +69,10 @@ impl fmt::Display for RepCount {
 
 /// Elapsed time, in seconds.
 ///
-/// Its own type rather than `jiff::Span`, because what a set records is a
-/// scalar count of seconds and a span carries calendar units that would have to
-/// be normalised away every time two were compared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Its own type rather than `jiff::Span`, because what a set records is a scalar
+/// count of seconds and a span carries calendar units that would have to be
+/// normalised away every time two were compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Duration(u64);
 
 impl Duration {
@@ -115,26 +115,21 @@ impl fmt::Display for Duration {
 
 /// Ground covered, in millimetres.
 ///
-/// Millimetres for the reason grams serve a load: the value is persisted and
-/// compared, so it must not depend on a float's rounding. Nothing outside this
-/// module sees them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Metres(i64);
+/// Unsigned: you cannot cover a negative distance. Millimetres for the reason
+/// grams serve a load — the value is persisted and compared, so it must not
+/// depend on a float's rounding — and nothing outside this module sees them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Metres(u64);
 
 impl Metres {
     pub const ZERO: Self = Self(0);
 
-    pub const fn as_millimetres(self) -> i64 {
+    pub const fn as_millimetres(self) -> u64 {
         self.0
     }
 
-    /// `None` for a negative, which is a corrupt row rather than a rejected
-    /// input.
-    pub const fn from_millimetres(millimetres: i64) -> Option<Self> {
-        if millimetres < 0 {
-            return None;
-        }
-        Some(Self(millimetres))
+    pub const fn from_millimetres(millimetres: u64) -> Self {
+        Self(millimetres)
     }
 }
 
@@ -160,12 +155,12 @@ impl TryFrom<String> for Metres {
         while padded.len() < 3 {
             padded.push('0');
         }
-        let whole: i64 = if whole.is_empty() {
+        let whole: u64 = if whole.is_empty() {
             0
         } else {
             whole.parse().map_err(|_| malformed())?
         };
-        let fraction: i64 = padded.parse().map_err(|_| malformed())?;
+        let fraction: u64 = padded.parse().map_err(|_| malformed())?;
         whole
             .checked_mul(1_000)
             .and_then(|scaled| scaled.checked_add(fraction))
@@ -187,8 +182,8 @@ impl fmt::Display for Metres {
     }
 }
 
-/// Ground covered. A carry, a walking lunge — time under load, unclocked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Ground covered. A carry, a walking lunge, a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Distance {
     pub metres: Metres,
 }
@@ -196,19 +191,6 @@ pub struct Distance {
 impl fmt::Display for Distance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.metres)
-    }
-}
-
-/// Ground covered in a time. A run — pace, which a carry has no version of.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TimedDistance {
-    pub metres: Metres,
-    pub duration: Duration,
-}
-
-impl fmt::Display for TimedDistance {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} in {}", self.metres, self.duration)
     }
 }
 

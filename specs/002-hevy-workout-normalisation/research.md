@@ -5,8 +5,9 @@ recorded in `docs/decisions/`; nothing here re-argues them. What follows is what
 planning had to settle in order to write the design, checked against the 164
 landed records rather than inferred.
 
-Every count quoted was produced by querying `hevy_workout_landing` directly. The
-model of record's figures were re-verified in the process and all of them hold:
+Every count quoted was produced by querying `hevy_workout_landing` directly.
+Sections marked superseded were overtaken by review; they are kept because what
+they got wrong is worth reading. The corpus figures themselves all hold:
 164 records (163 `updated`, 1 `deleted`), 1,135 exercise entries, 3,779 sets,
 134 distinct templates, 361 warm-ups, 2,415 RPEs, 93 zero loads, 336 supersets
 of which 2 are malformed, 1 zero-rep set.
@@ -36,66 +37,41 @@ mapping in `domain` keyed on an abstract "source exercise id", which buys
 nothing: the abstraction has exactly one inhabitant and would still need a
 per-source table somewhere to populate it.
 
-## D2 — The mapping was derived from the corpus, and the seven zeros validate it
+## D2 — The mapping was derived from the corpus
 
 **Decision**: each of the 134 templates gets an exercise, a measure and a load
-interpretation, authored by reading what the template actually recorded. The
-rules, in the order they bind:
+reading, authored by reading what the template records and what the movement is.
 
-1. **Measure follows the fields the template populates**, except where the
-   model overrides the source's category. Reps → `ForReps`; duration alone →
-   `ForDuration`; distance alone → `ForDistance`; distance and duration →
-   `ForTimedDistance`.
-2. **Load is `Absolute` where no unloaded version of the movement exists** — the
-   implement has mass — and `Relative` where one does.
-3. **An assisted variant is the unassisted exercise with its load negated.**
-4. **A band-resistance exercise is refused**, as a declared limitation.
+1. **Measure follows the fields the template populates**, except where the model
+   overrides the source's category — `Sled Push` and `Running` both do.
+2. **A variant differing only in how the movement is loaded is not a different
+   movement**: assisted and unassisted are one exercise, weighted and unweighted
+   are one exercise.
+3. **Load is `Relative` where assistance is conventionally available** and
+   `Absolute` otherwise; an assisted variant negates.
 
-**What the corpus decided, that argument could not**: rule 2 is a judgement per
-template, and the corpus grades it. 93 sets carry a zero load, and the model of
-record says exactly 7 of them are errors. Every zero on a `Relative` template is
-a real observation — plain bodyweight — and every zero on an `Absolute` one is
-impossible by construction. So the load interpretations are right if and only if
-the zeros distribute like this:
+**Superseded in part.** Rule 3 was originally "`Absolute` where no unloaded
+version of the movement exists", and this section claimed the corpus graded it:
+93 sets carry a zero load, the model of record said exactly 7 were errors, and
+the load readings were right if and only if those 7 refused. It was the sharpest
+assertion in the feature.
 
-| Template | Zeros | Load | Why |
-| --- | ---: | --- | --- |
-| `Chest Dip (Assisted)` | 30 | Relative, negated | An unassisted dip is the zero |
-| `Pull Up (Assisted)` | 20 | Relative, negated | Likewise |
-| `Hammer Twists` | 12 | Relative | Bodyweight rotation |
-| `Pike Pull Through` | 5 | Relative | Bodyweight |
-| `Back Extension (Weighted Hyperextension)` | 4 | Relative | The unweighted hyperextension is the movement |
-| `Bulgarian Split Squat` | 4 | Relative | Named in the model of record as the motivating case |
-| `Single Leg Romanian Deadlift (Dumbbell)` | 4 | Relative | A single-leg RDL is a balance drill before it is a loaded hinge |
-| `Sissy Squat (Weighted)` | 3 | Relative | The unweighted sissy squat is the movement |
-| `Chest Supported Y Raise (Dumbbell)` | 3 | Relative | Bodyweight Y raise exists |
-| `Crunch (Weighted)` | 1 | Relative | The model names the plain crunch |
-| **`Overhead Squat`** (custom id) | **2** | **Absolute** | A barbell overhead squat has a bar |
-| **`Snatch-Grip Behind The Neck Press`** | **2** | **Absolute** | Likewise |
-| **`Romanian Deadlift (Barbell)`** | **2** | **Absolute** | Likewise |
-| **`Good Morning (Barbell)`** | **1** | **Absolute** | Likewise |
+It was also wrong, and wrong in a way that a corpus cannot catch. What makes `0,
+5, 10` on a good morning look like an error is that a barbell has mass — a fact
+about the *implement*. The rule encoded it as a fact about the load axis, so one
+distinction was carrying two jobs and the test was checking the second. Under
+the rule that replaced it the seven translate, and the mapping is held to
+account by asserting the axis readings directly instead.
+[Decision 0004](../../docs/decisions/0004-the-load-axis-is-bidirectional-or-it-is-not.md).
 
-86 translate, **7 refuse**, and the seven are the ones the model of record
-narrates by name — the bottom of a warm-up ramp on a good morning, an overhead
-squat and a Romanian deadlift, plus the behind-the-neck press. The figure is not
-a target the mapping is tuned to hit; it falls out of asking "can this be done
-unloaded?" 134 times.
-
-The pairing that carries the same weight in the other direction: `Single Leg
-Romanian Deadlift (Dumbbell)` is `Relative` while `Romanian Deadlift (Barbell)`
-is `Absolute`. Nothing about the titles forces that. What forces it is that you
-can do a single-leg RDL with nothing in your hands and you cannot do a barbell
-RDL without a barbell — which is rule 2 doing exactly the work the model of
-record claims for it.
-
-**Alternatives considered**: deriving load interpretation from Hevy's
+**Alternatives considered**: deriving the load reading from Hevy's
 `ExerciseTemplate.type`. Rejected, and this closes the open question 001 left
 open. The declared type is the only published carrier of the sign convention, so
 it informs the mapping when it is authored — but it cannot determine it, because
 `Pull Up` is `reps_only` and `Pull Up (Assisted)` is `bodyweight_assisted_reps`
 while both are one exercise here. Consulting it at translation time would also
-mean a network request during a derivation that must not make one (FR-002), and
-would make the result depend on what the vendor's catalogue says today.
+mean a network request during a derivation that must not make one, and would make
+the result depend on what the vendor's catalogue says today.
 
 ## D3 — A load never becomes a float, because it is read as bytes
 
@@ -262,11 +238,14 @@ with one override:
 | `Sled Push` | 9 | Duration — **override** |
 | `Walking Lunge (Dumbbell)` | 26 | Distance |
 | `Farmers Walk` | 15 | Distance |
-| `Running` | 19 | TimedDistance |
+| `Running` | 19 | Distance |
 
-`Sled Push` is the override the model of record names: Hevy calls it
-distance-and-duration, and what it holds is a duration and a zero distance, on
-all nine sets. Ours wins, and the mapping is where that is decided — so the zero
-distance is never read and never refused.
+Two overrides, both the same rule: our category beats the source's, and the
+mapping is where that is decided. `Sled Push` is called distance-and-duration by
+Hevy and holds a duration and a zero distance on all nine sets, so the zero is
+never read. `Running` records a distance and a duration, and the duration was an
+interval target rather than a measurement — every entry repeats one identical
+pair across all its sets
+([decision 0005](../../docs/decisions/0005-distance-over-time-was-prescription.md)).
 
-The remaining 3,571 sets are `ForReps`.
+The remaining 3,570 sets that translate are `ForReps`.
