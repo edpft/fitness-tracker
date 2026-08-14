@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM normalisation_refusal",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "2ea97437a48d12ea16961841939be28b143724b7583c390e03a567e6a7c56d69"
+}

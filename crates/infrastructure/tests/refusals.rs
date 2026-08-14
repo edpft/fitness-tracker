@@ -16,18 +16,7 @@ mod support;
 use std::collections::BTreeMap;
 
 use domain::gym::{Load, PerformedExercise, RefusalKind, RefusalLocus, RefusalReason};
-use support::corpus;
-
-fn derive() -> corpus::Produced {
-    let Ok(fixture) = corpus::derivation() else {
-        panic!("the corpus fixture loads")
-    };
-    match corpus::block_on(fixture.run(false)) {
-        Ok(Ok(produced)) => produced,
-        Ok(Err(error)) => panic!("the corpus derives: {error}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    }
-}
+use support::{corpus, derived};
 
 fn by_reason(produced: &corpus::Produced) -> BTreeMap<&'static str, usize> {
     let mut counts = BTreeMap::new();
@@ -45,7 +34,7 @@ fn by_reason(produced: &corpus::Produced) -> BTreeMap<&'static str, usize> {
 /// it cannot express.
 #[test]
 fn the_refusals_are_exactly_the_named_set() {
-    let produced = derive();
+    let produced = derived!();
 
     let expected: BTreeMap<&str, usize> = [
         ("zero-on-absolute-load", 7),
@@ -71,7 +60,7 @@ fn the_refusals_are_exactly_the_named_set() {
 /// reverse.
 #[test]
 fn exactly_seven_zeros_refuse_and_they_sit_where_the_model_says() {
-    let produced = derive();
+    let produced = derived!();
 
     let mut on: BTreeMap<&str, usize> = BTreeMap::new();
     for refusal in &produced.refusals {
@@ -118,7 +107,7 @@ fn exactly_seven_zeros_refuse_and_they_sit_where_the_model_says() {
 /// instead — so this number moving is the same defect seen from the other end.
 #[test]
 fn the_other_eighty_six_zeros_translate_as_plain_bodyweight() {
-    let produced = derive();
+    let produced = derived!();
 
     let refused = produced
         .refusals
@@ -129,7 +118,7 @@ fn the_other_eighty_six_zeros_translate_as_plain_bodyweight() {
     let bodyweight = produced
         .workouts
         .iter()
-        .flat_map(|workout| workout.exercises())
+        .flat_map(domain::gym::GymWorkout::exercises)
         .map(|exercise| match exercise {
             PerformedExercise::ForReps { sets, .. } => sets
                 .iter()
@@ -153,7 +142,7 @@ fn the_other_eighty_six_zeros_translate_as_plain_bodyweight() {
 /// operator has to be able to tell which without opening the payload.
 #[test]
 fn every_refusal_says_what_to_do_about_it() {
-    let produced = derive();
+    let produced = derived!();
 
     let mut kinds: BTreeMap<&'static str, usize> = BTreeMap::new();
     for refusal in &produced.refusals {
@@ -185,7 +174,7 @@ fn every_refusal_says_what_to_do_about_it() {
 /// exercises still translate as ordinary items in their recorded order.
 #[test]
 fn a_malformed_grouping_does_not_cost_its_members() {
-    let produced = derive();
+    let produced = derived!();
 
     let malformed: Vec<&domain::gym::Refusal> = produced
         .refusals
@@ -241,7 +230,7 @@ fn a_malformed_grouping_does_not_cost_its_members() {
 /// prescribed-versus-performed. Recorded as unmodelled rather than coerced.
 #[test]
 fn the_missed_attempt_is_refused_as_unmodelled() {
-    let produced = derive();
+    let produced = derived!();
 
     let attempts: Vec<&domain::gym::Refusal> = produced
         .refusals
@@ -262,7 +251,7 @@ fn the_missed_attempt_is_refused_as_unmodelled() {
     // domain will not hold is the zero, which is why the reason is the reps and
     // not the weight.
     assert_eq!(
-        attempt.exercise.map(|exercise| exercise.as_str()),
+        attempt.exercise.map(domain::gym::Exercise::as_str),
         Some("front-squat")
     );
 }
@@ -271,7 +260,7 @@ fn the_missed_attempt_is_refused_as_unmodelled() {
 /// outcome and the numbers add up.
 #[test]
 fn no_record_is_both_a_workout_and_a_refusal_of_itself() {
-    let produced = derive();
+    let produced = derived!();
 
     let record_level: Vec<_> = produced
         .refusals

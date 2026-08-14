@@ -76,7 +76,7 @@ impl PerformedExercise {
     }
 
     /// How many sets were performed. Never zero.
-    pub fn set_count(&self) -> usize {
+    pub const fn set_count(&self) -> usize {
         match self {
             Self::ForReps { sets, .. } => sets.count(),
             Self::ForDuration { sets, .. } => sets.count(),
@@ -119,7 +119,12 @@ pub enum WorkoutItem {
 impl WorkoutItem {
     /// Every performed exercise in this item, in order — one, or a superset's
     /// members.
-    pub fn exercises(&self) -> Box<dyn Iterator<Item = &PerformedExercise> + '_> {
+    ///
+    /// `Send` on the box because a store writes these across an await, and a
+    /// boxed iterator is not `Send` unless it says so. Cheaper than an enum
+    /// iterator here, and the bound is honest: what it yields is a shared
+    /// reference to a type with no interior mutability.
+    pub fn exercises(&self) -> Box<dyn Iterator<Item = &PerformedExercise> + Send + '_> {
         match self {
             Self::Exercise(exercise) => Box::new(std::iter::once(exercise)),
             Self::Superset(superset) => Box::new(superset.members.iter()),

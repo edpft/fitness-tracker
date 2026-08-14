@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT landing_record_id AS \"landing_record_id!: i64\",\n                   source_record_id AS \"source_record_id!: String\",\n                   locus_kind AS \"locus_kind!: String\",\n                   entry_index AS \"entry_index: i64\",\n                   set_index AS \"set_index: i64\",\n                   group_id AS \"group_id: i64\",\n                   exercise AS \"exercise: String\",\n                   reason AS \"reason!: String\",\n                   detail AS \"detail: String\"\n            FROM normalisation_refusal\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "landing_record_id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "locus_kind!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "locus_kind"
+          }
+        }
+      },
+      {
+        "name": "entry_index: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "entry_index"
+          }
+        }
+      },
+      {
+        "name": "set_index: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "set_index"
+          }
+        }
+      },
+      {
+        "name": "group_id: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "group_id"
+          }
+        }
+      },
+      {
+        "name": "exercise: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "reason!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "detail: String",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_refusal",
+            "name": "detail"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "4185790652b4fa8c186b23564957597b2b935c4e0b8f983ddad28b99383cd527"
+}

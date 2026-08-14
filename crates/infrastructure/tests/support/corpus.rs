@@ -19,6 +19,7 @@ use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use application::{
     NormalisationError, StoreError,
     ports::{
+        WorkoutNormaliser as _,
         Clock, LandingRecordReader, NormalisationRunLog, NormalisedWorkoutStore, RefusalStore,
     },
 };
@@ -248,10 +249,12 @@ impl NormalisedWorkoutStore for InMemoryWorkouts {
         workouts: Vec<GymWorkout>,
     ) -> Result<WorkoutCount, StoreError> {
         let count = u64::try_from(workouts.len()).unwrap_or(u64::MAX);
-        let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
-            detail: "the fixture lock was poisoned".to_owned(),
-        })?;
-        *held = workouts;
+        {
+            let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            *held = workouts;
+        }
         Ok(WorkoutCount::from(count))
     }
 
@@ -302,10 +305,12 @@ impl RefusalStore for InMemoryRefusals {
         refusals: Vec<Refusal>,
     ) -> Result<RefusalCount, StoreError> {
         let count = u64::try_from(refusals.len()).unwrap_or(u64::MAX);
-        let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
-            detail: "the fixture lock was poisoned".to_owned(),
-        })?;
-        *held = refusals;
+        {
+            let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            *held = refusals;
+        }
         Ok(RefusalCount::from(count))
     }
 
@@ -329,19 +334,22 @@ impl NormalisationRunLog for InMemoryRunLog {
         stream: &LandingStream,
         at: FetchedAt,
     ) -> Result<NormalisationRunId, StoreError> {
-        let mut runs = self.runs.lock().map_err(|_| StoreError::Corrupt {
-            detail: "the fixture lock was poisoned".to_owned(),
-        })?;
-        let id = u64::try_from(runs.len()).unwrap_or(u64::MAX).saturating_add(1);
-        runs.insert(
-            id,
-            NormalisationRun::new(
-                NormalisationRunId::from(id),
-                stream.clone(),
-                at,
-                NormalisationOutcome::InFlight,
-            ),
-        );
+        let id = {
+            let mut runs = self.runs.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            let id = u64::try_from(runs.len()).unwrap_or(u64::MAX).saturating_add(1);
+            runs.insert(
+                id,
+                NormalisationRun::new(
+                    NormalisationRunId::from(id),
+                    stream.clone(),
+                    at,
+                    NormalisationOutcome::InFlight,
+                ),
+            );
+            id
+        };
         Ok(NormalisationRunId::from(id))
     }
 
@@ -350,17 +358,19 @@ impl NormalisationRunLog for InMemoryRunLog {
         run: NormalisationRunId,
         outcome: NormalisationOutcome,
     ) -> Result<(), StoreError> {
-        let mut runs = self.runs.lock().map_err(|_| StoreError::Corrupt {
-            detail: "the fixture lock was poisoned".to_owned(),
-        })?;
-        if let Some(held) = runs.get(&run.as_u64()) {
-            let replacement = NormalisationRun::new(
-                held.id(),
-                held.stream().clone(),
-                held.started_at(),
-                outcome,
-            );
-            runs.insert(run.as_u64(), replacement);
+        {
+            let mut runs = self.runs.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            if let Some(held) = runs.get(&run.as_u64()) {
+                let replacement = NormalisationRun::new(
+                    held.id(),
+                    held.stream().clone(),
+                    held.started_at(),
+                    outcome,
+                );
+                runs.insert(run.as_u64(), replacement);
+            }
         }
         Ok(())
     }
@@ -464,7 +474,6 @@ impl Derivation {
             zone,
         );
 
-        use application::ports::WorkoutNormaliser as _;
         let summary = normalisation.normalise().await?;
 
         let store_broke = |_| NormalisationError::Store(StoreError::Corrupt {
@@ -621,4 +630,20 @@ fn next_landing_id(fixture: &Derivation) -> LandingRecordId {
         .max()
         .unwrap_or(0);
     LandingRecordId::try_from(highest.saturating_add(1)).unwrap_or(LandingRecordId::FIRST)
+}
+
+/// Derive over the corpus, flattening the runtime and the derivation into one
+/// answer.
+///
+/// Nothing here panics. The suites assert with the `derived!` macro instead, so
+/// the panic lands inside a `#[test]` body where `clippy.toml` allows it — the
+/// exemptions do not reach a free function like this one.
+///
+/// # Errors
+///
+/// [`FixtureError`] if the fixture will not load, and
+/// [`NormalisationError`] if the derivation fails.
+pub fn derive(reversed: bool) -> Result<Result<Produced, NormalisationError>, FixtureError> {
+    let fixture = derivation()?;
+    block_on(async move { fixture.run(reversed).await })
 }

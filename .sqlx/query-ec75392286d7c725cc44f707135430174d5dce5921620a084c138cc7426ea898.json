@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   endpoint AS \"endpoint!: String\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   event_kind AS \"event_kind!: String\",\n                   event_time AS \"event_time: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM hevy_workout_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "endpoint!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "name": "fetched_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "fetched_at"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "event_kind!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "event_kind"
+          }
+        }
+      },
+      {
+        "name": "event_time: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "event_time"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 6,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "ec75392286d7c725cc44f707135430174d5dce5921620a084c138cc7426ea898"
+}

@@ -16,27 +16,16 @@ mod support;
 
 use application::NormalisationError;
 use domain::gym::RefusalReason;
-use support::corpus;
+use support::{corpus, derived};
 
 /// The record already in raw: a tombstone for a workout never landed.
 const TOMBSTONE: &str = "93d50b8d-f806-4042-959f-263dbb6a53f7";
-
-fn derive(fixture: &corpus::Derivation, reversed: bool) -> corpus::Produced {
-    match corpus::block_on(fixture.run(reversed)) {
-        Ok(Ok(produced)) => produced,
-        Ok(Err(error)) => panic!("the derivation succeeds: {error}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    }
-}
 
 /// Scenario 8, first half. The tombstone withdraws nothing, fails nothing, and
 /// is not a refusal — nothing about it was rejected.
 #[test]
 fn a_tombstone_for_a_workout_never_landed_withdraws_nothing() {
-    let Ok(fixture) = corpus::derivation() else {
-        panic!("the corpus fixture loads")
-    };
-    let produced = derive(&fixture, false);
+    let produced = derived!();
 
     assert_eq!(produced.workouts.len(), 163);
     assert_eq!(produced.summary.retractions_applied.as_u64(), 1);
@@ -73,7 +62,7 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
     let Ok(fixture) = corpus::derivation() else {
         panic!("the corpus fixture loads")
     };
-    let baseline = derive(&fixture, false);
+    let baseline = derived!();
 
     // Give the tombstone something to withdraw: an `updated` record for the
     // identifier it names, built from a real workout so the body is genuine.
@@ -82,7 +71,7 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
     };
 
     for reversed in [false, true] {
-        let produced = derive(&withdrawable, reversed);
+        let produced = derived!(withdrawable, reversed);
 
         assert_eq!(
             produced.summary.records_read.as_u64(),
@@ -106,8 +95,8 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
 
         // Every other workout is untouched. A retraction removes the record it
         // names and nothing else.
-        let mut theirs: Vec<_> = produced.workouts.iter().map(|w| w.landed_as()).collect();
-        let mut ours: Vec<_> = baseline.workouts.iter().map(|w| w.landed_as()).collect();
+        let mut theirs: Vec<_> = produced.workouts.iter().map(domain::gym::GymWorkout::landed_as).collect();
+        let mut ours: Vec<_> = baseline.workouts.iter().map(domain::gym::GymWorkout::landed_as).collect();
         theirs.sort_unstable();
         ours.sort_unstable();
         assert_eq!(theirs, ours, "no other workout is affected");
@@ -129,7 +118,7 @@ fn two_records_for_one_workout_both_stand() {
         panic!("the synthetic re-serve builds")
     };
 
-    let produced = derive(&reserved, false);
+    let produced = derived!(reserved, false);
 
     assert_eq!(produced.workouts.len(), 164, "both records produce a workout");
     let Some(first) = fixture.records.first() else {

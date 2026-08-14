@@ -12,37 +12,25 @@
 
 mod support;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use domain::gym::{Load, PerformedExercise, SetKind};
 use infrastructure::hevy::mapping;
-use support::corpus;
-
-/// Derive over the corpus, or fail the test saying which step broke.
-fn derive() -> corpus::Produced {
-    let Ok(fixture) = corpus::derivation() else {
-        panic!("the corpus fixture loads")
-    };
-    match corpus::block_on(fixture.run(false)) {
-        Ok(Ok(produced)) => produced,
-        Ok(Err(error)) => panic!("the corpus derives: {error}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    }
-}
+use support::{corpus, derived};
 
 /// Scenario 1. The counts the model of record produced on paper, reproduced by
 /// code — which is the whole point of the feature.
 #[test]
 fn the_corpus_translates_to_the_model_of_records_figures() {
-    let produced = derive();
+    let produced = derived!();
 
     let entries: usize = produced
         .workouts
         .iter()
         .map(|workout| workout.exercises().count())
         .sum();
-    let sets: usize = produced.workouts.iter().map(|w| w.set_count()).sum();
-    let supersets: usize = produced.workouts.iter().map(|w| w.superset_count()).sum();
+    let sets: usize = produced.workouts.iter().map(domain::gym::GymWorkout::set_count).sum();
+    let supersets: usize = produced.workouts.iter().map(domain::gym::GymWorkout::superset_count).sum();
 
     assert_eq!(produced.workouts.len(), 163, "workouts");
     assert_eq!(sets, 3_755, "of 3,779 sets translate");
@@ -76,9 +64,9 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
 /// observation to a neighbour's bad one. Two are band pairs and lose both.
 #[test]
 fn well_formed_groupings_lose_members_to_refused_entries() {
-    let produced = derive();
+    let produced = derived!();
 
-    let survivors: usize = produced.workouts.iter().map(|w| w.superset_count()).sum();
+    let survivors: usize = produced.workouts.iter().map(domain::gym::GymWorkout::superset_count).sum();
     let band_refusals = produced
         .refusals
         .iter()
@@ -152,10 +140,10 @@ fn re_derivation_is_identical_and_order_does_not_matter() {
 /// argument for the load model rests on this collapse holding.
 #[test]
 fn assisted_and_unassisted_forms_are_one_series() {
-    let produced = derive();
+    let produced = derived!();
 
     let mut loads: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-    for exercise in produced.workouts.iter().flat_map(|w| w.exercises()) {
+    for exercise in produced.workouts.iter().flat_map(domain::gym::GymWorkout::exercises) {
         let PerformedExercise::ForReps { exercise, sets } = exercise else {
             continue;
         };
@@ -179,7 +167,7 @@ fn assisted_and_unassisted_forms_are_one_series() {
         "assistance is carried as negative load"
     );
     assert!(
-        pull_ups.iter().any(|grams| *grams == 0),
+        pull_ups.contains(&0),
         "a plain pull-up is a real zero, not an absence"
     );
 
@@ -195,7 +183,7 @@ fn assisted_and_unassisted_forms_are_one_series() {
 /// neighbouring set, and not reconstructed from a linked routine (§ 11, § 37).
 #[test]
 fn absence_is_absence() {
-    let produced = derive();
+    let produced = derived!();
 
     let mut with_intensity = 0_usize;
     let mut without_intensity = 0_usize;
@@ -220,7 +208,7 @@ fn absence_is_absence() {
         };
     }
 
-    for exercise in produced.workouts.iter().flat_map(|w| w.exercises()) {
+    for exercise in produced.workouts.iter().flat_map(domain::gym::GymWorkout::exercises) {
         match exercise {
             PerformedExercise::ForReps { sets, .. } => tally!(sets),
             PerformedExercise::ForDuration { sets, .. } => tally!(sets),
@@ -253,7 +241,7 @@ fn absence_is_absence() {
 /// alone. What can fail, and so is what is asserted, is the wall clock.
 #[test]
 fn the_wall_clock_survives_both_switchovers() {
-    let produced = derive();
+    let produced = derived!();
 
     // Two real workouts, one either side of a switchover. Both were trained in
     // the evening, and both must read as the evening — which is the whole of
@@ -321,7 +309,7 @@ fn a_different_declared_zone_moves_the_wall_clock_and_not_the_instant() {
 /// Scenario 10. Every record accounted for, exactly once (FR-005, SC-005).
 #[test]
 fn every_record_is_accounted_for() {
-    let produced = derive();
+    let produced = derived!();
     let summary = produced.summary;
 
     assert_eq!(summary.records_read.as_u64(), 164, "records read");

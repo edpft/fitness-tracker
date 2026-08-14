@@ -263,7 +263,7 @@ impl NormalisationSummary {
     /// record that went missing shows up here as arithmetic that does not
     /// reconcile — which is why the numbers are reported at the terminal rather
     /// than merely computed.
-    pub fn reconciles(&self) -> bool {
+    pub const fn reconciles(&self) -> bool {
         let accounted = self
             .workouts_written
             .as_u64()

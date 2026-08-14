@@ -129,6 +129,14 @@ const fn timed(exercise: TimedDistanceExercise, load: LoadReading) -> Mapped {
 /// Ordered by how much of the corpus each accounts for, so the entries that
 /// matter most are the ones read first. The comment on each is the source's
 /// title and the number of sets it carried.
+///
+/// `match_same_arms` is allowed because two arms agreeing is the mapping
+/// *working*: `Pull Up (Assisted)` and `Pull Up (Band)` reach one exercise on
+/// purpose, and merging them would delete the per-template comment that says
+/// which source template each covers. `too_many_lines` is allowed for the same
+/// reason a phone book is long. Neither is a forbidden lint, and neither is
+/// hiding a defect.
+#[allow(clippy::too_many_lines, clippy::match_same_arms)]
 pub fn lookup(template_id: &str) -> Option<Mapped> {
     let mapped = match template_id {
         "D04AC939" => reps(RepsExercise::SquatBarbell, LoadReading::Absolute),              // Squat (Barbell) (377)

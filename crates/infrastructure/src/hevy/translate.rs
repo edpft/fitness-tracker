@@ -103,7 +103,7 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
             ));
         };
 
-        let items = self.items(&workout.exercises, &mut scribe, record)?;
+        let items = Self::items(&workout.exercises, &mut scribe, record)?;
         let Ok(items) = NonEmpty::new(items) else {
             return Ok(scribe.nothing_translatable());
         };
@@ -124,7 +124,6 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
 impl HevyWorkoutTranslator {
     /// The workout's ordered items, with groupings resolved.
     fn items(
-        self,
         entries: &[ExerciseEntry<'_>],
         scribe: &mut Scribe,
         record: &LandedRecord,
@@ -136,7 +135,7 @@ impl HevyWorkoutTranslator {
         let mut pending_group: Option<u32> = None;
 
         for entry in entries {
-            let Some(exercise) = self.entry(entry, scribe, record)? else {
+            let Some(exercise) = Self::entry(entry, scribe, record)? else {
                 // A refused entry ends any run it was part of, because the
                 // members either side of it are no longer back to back.
                 flush(&mut items, &mut pending, &mut pending_group);
@@ -163,7 +162,6 @@ impl HevyWorkoutTranslator {
 
     /// One exercise entry with its sets, or nothing if none of them survived.
     fn entry(
-        self,
         entry: &ExerciseEntry<'_>,
         scribe: &mut Scribe,
         record: &LandedRecord,
@@ -187,7 +185,7 @@ impl HevyWorkoutTranslator {
             return Ok(None);
         }
 
-        Ok(self.sets(entry, mapped, scribe))
+        Ok(Self::sets(entry, mapped, scribe))
     }
 
     /// The entry's sets, in the measure its exercise is counted in.
@@ -197,32 +195,31 @@ impl HevyWorkoutTranslator {
     /// work, and is what makes a set that disagrees with its exercise
     /// impossible to build rather than something to check for.
     fn sets(
-        self,
         entry: &ExerciseEntry<'_>,
         mapped: Mapped,
         scribe: &mut Scribe,
     ) -> Option<PerformedExercise> {
         match mapped.exercise {
             Exercise::Reps(exercise) => {
-                let sets = self.collect(entry, mapped, scribe, reps_of);
+                let sets = Self::collect(entry, mapped, scribe, reps_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForReps { exercise, sets })
             }
             Exercise::Duration(exercise) => {
-                let sets = self.collect(entry, mapped, scribe, duration_of);
+                let sets = Self::collect(entry, mapped, scribe, duration_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDuration { exercise, sets })
             }
             Exercise::Distance(exercise) => {
-                let sets = self.collect(entry, mapped, scribe, distance_of);
+                let sets = Self::collect(entry, mapped, scribe, distance_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDistance { exercise, sets })
             }
             Exercise::TimedDistance(exercise) => {
-                let sets = self.collect(entry, mapped, scribe, timed_distance_of);
+                let sets = Self::collect(entry, mapped, scribe, timed_distance_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForTimedDistance { exercise, sets })
@@ -236,7 +233,6 @@ impl HevyWorkoutTranslator {
     /// kind — which are the same questions whatever a set is counted in — are
     /// asked once here rather than four times above.
     fn collect<M>(
-        self,
         entry: &ExerciseEntry<'_>,
         mapped: Mapped,
         scribe: &mut Scribe,
@@ -375,7 +371,7 @@ fn reps_of(set: &PerformedSet<'_>) -> Result<RepCount, RefusalReason> {
 fn duration_of(set: &PerformedSet<'_>) -> Result<Duration, RefusalReason> {
     set.duration_seconds
         .map(Duration::from_seconds)
-        .ok_or(RefusalReason::UnreadableValue {
+        .ok_or_else(|| RefusalReason::UnreadableValue {
             field: "duration_seconds",
             detail: "absent on an exercise counted in elapsed time".to_owned(),
         })

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    UPDATE normalisation_run\n                    SET finished_at = ?, outcome = 'failed', failure_reason = ?\n                    WHERE id = ?\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "b868b9e7ba191924f9d7f727929f148e67012f9fe8e75c5e5be7e05537431208"
+}

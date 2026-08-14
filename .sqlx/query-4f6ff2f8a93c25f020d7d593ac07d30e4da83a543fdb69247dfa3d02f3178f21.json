@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workout_item (workout, position, is_superset) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4f6ff2f8a93c25f020d7d593ac07d30e4da83a543fdb69247dfa3d02f3178f21"
+}

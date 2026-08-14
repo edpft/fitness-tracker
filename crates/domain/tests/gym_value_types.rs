@@ -95,10 +95,7 @@ proptest! {
     /// A set of zero reps is an attempt, not a set.
     #[test]
     fn a_rep_count_is_never_zero(reps in 0_u32..1000) {
-        match RepCount::new(reps) {
-            Ok(count) => prop_assert_eq!(count.as_u32(), reps),
-            Err(_) => prop_assert_eq!(reps, 0),
-        }
+        if let Ok(count) = RepCount::new(reps) { prop_assert_eq!(count.as_u32(), reps) } else { prop_assert_eq!(reps, 0) }
     }
 
     #[test]
