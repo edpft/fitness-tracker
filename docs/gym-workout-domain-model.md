@@ -80,9 +80,9 @@ enum DurationExercise { DeadHang, HandstandHold, Stretching, /* … */ }
 enum DistanceExercise { Running, FarmersWalk, WalkingLunge, /* … */ }
 
 enum PerformedExercise {
-    Reps     { exercise: RepsExercise,     sets: NonEmpty<Set<RepCount>> },
-    Duration { exercise: DurationExercise, sets: NonEmpty<Set<Duration>> },
-    Distance { exercise: DistanceExercise, sets: NonEmpty<Set<Distance>> },
+    ForReps     { exercise: RepsExercise,     sets: NonEmpty<Set<RepCount>> },
+    ForDuration { exercise: DurationExercise, sets: NonEmpty<Set<Duration>> },
+    ForDistance { exercise: DistanceExercise, sets: NonEmpty<Set<Distance>> },
 }
 
 struct Superset { members: NonEmpty<PerformedExercise> }   // two or more, back to back
