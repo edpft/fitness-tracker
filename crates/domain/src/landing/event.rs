@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use super::{ids::InvalidIdentifier, newtype::string_name};
+use crate::newtype::string_name;
+
+use super::ids::InvalidIdentifier;
 
 /// A kind the source used that we do not recognise.
 ///

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO normalisation_refusal (\n                    run_id, landing_record_id, source_record_id,\n                    locus_kind, entry_index, set_index, group_id,\n                    exercise, reason, kind, detail\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "9d5fac7a216be9a9bec590b41b19d3e7773bd7e3f739e59f8d485e8c27fc7110"
+}

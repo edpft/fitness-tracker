@@ -12,7 +12,7 @@ mod wiring;
 
 use std::{path::PathBuf, process::ExitCode};
 
-use application::{ExtractionError, SourceError, StatusError, StoreError};
+use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
@@ -33,6 +33,10 @@ mod exit {
     pub const STORE: u8 = 3;
     /// Missing configuration, or an unusable invocation.
     pub const USAGE: u8 = 4;
+    /// The exercise vocabulary has a gap. A defect in this build rather than in
+    /// the data, and its own code because it is the one thing an operator
+    /// cannot fix by correcting a record.
+    pub const UNMAPPED: u8 = 5;
 }
 
 /// The command surface, built rather than derived.
@@ -69,6 +73,34 @@ fn command() -> ClapCommand {
                     "Override the source's API root for this run. \
                              Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
                 )),
+        )
+        .subcommand(
+            ClapCommand::new("normalise")
+                .about(
+                    "Derive the normalised layer from what raw already holds. \
+                     Contacts no source",
+                )
+                .arg(stream_argument())
+                // A flag as well as a variable, because every other input to
+                // this command has one and taking half the configuration each
+                // way is a worse thing to remember than either. What it must
+                // not have is a default: nothing is compiled in, so an
+                // invocation that declares no zone is refused rather than
+                // guessed at.
+                .arg(
+                    Arg::new("timezone")
+                        .long("timezone")
+                        .env("FITNESS_TRACKER_TIMEZONE")
+                        .help(
+                            "The IANA time zone trained in, such as Europe/London. \
+                             Required: no zone is compiled in",
+                        ),
+                ),
+        )
+        .subcommand(
+            ClapCommand::new("refusals")
+                .about("List what the last derivation would not accept, grouped by what to do about it")
+                .arg(stream_argument()),
         )
         .subcommand(
             ClapCommand::new("status")
@@ -156,10 +188,24 @@ impl From<ExtractionError> for Failure {
     }
 }
 
+impl From<NormalisationError> for Failure {
+    fn from(error: NormalisationError) -> Self {
+        let code = match &error {
+            NormalisationError::Store(_) => exit::STORE,
+            // Not a data problem, and not something a retry helps with: the
+            // mapping is code, so this is a gap to go and fill.
+            NormalisationError::UnmappedExercise { .. } => exit::UNMAPPED,
+            NormalisationError::MissingTimeZone => exit::USAGE,
+        };
+        Self::message(error.to_string(), code)
+    }
+}
+
 impl From<WiringError> for Failure {
     fn from(error: WiringError) -> Self {
         match error {
             WiringError::Extraction(error) => Self::from(error),
+            WiringError::Normalisation(error) => Self::from(error),
             WiringError::Status(error) => Self::from(error),
             WiringError::Store(error) => Self::from(error),
             // Both of these are mistakes in this build rather than in the
@@ -228,6 +274,14 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             output::run_started(&stream);
             Command::Extract(source_access(known, sub)?)
         }
+        "normalise" => {
+            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            // Printed before the run begins, so a long first derivation says
+            // what it is doing.
+            output::derivation_started(&stream);
+            Command::Normalise(zone)
+        }
+        "refusals" => Command::Refusals,
         "status" => Command::Status,
         "reset" => Command::Reset,
         other => {
@@ -282,7 +336,12 @@ fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, 
 fn report(stream: &LandingStream, outcome: Outcome) {
     match outcome {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
-        Outcome::Reported(status) => output::status(&status),
+        Outcome::Derived(summary) => output::derivation_succeeded(&summary),
+        Outcome::Refused(report) => output::refusals(stream, &report),
+        Outcome::Reported {
+            extraction,
+            derivation,
+        } => output::status(&extraction, &derivation),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }
 }

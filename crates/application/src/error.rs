@@ -51,7 +51,7 @@ pub enum RunLockError {
 /// Why an extraction run did not complete.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExtractionError {
-    /// FR-010. Nothing was landed and the resumption point did not move.
+    /// Nothing was landed and the resumption point did not move.
     #[error("another extraction run is already in progress")]
     AlreadyRunning,
 
@@ -98,4 +98,31 @@ impl From<RunLockError> for ExtractionError {
 pub enum StatusError {
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Why a derivation of the normalised layer did not complete.
+///
+/// Note what is **not** here: any variant for bad data. That is the feature's
+/// central distinction. A wrong record produces a `Refusal` and a successful
+/// run, because refusing something a source served is the layer working rather
+/// than failing. Only a defect in our own code stops a derivation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NormalisationError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+
+    /// The exercise vocabulary has a gap. Naming the identifier is the whole
+    /// point: the mapping is code (§ 9), so this is a defect to go and fix, and
+    /// no workout containing the identifier translates around it.
+    #[error("no exercise is mapped for template {template_id}, seen on record {source_record_id}")]
+    UnmappedExercise {
+        template_id: String,
+        source_record_id: String,
+    },
+
+    /// No operator time zone is declared, so no timestamp can be built. § II.3
+    /// takes the zone from configuration, and guessing one would make the
+    /// derivation depend on the machine that ran it.
+    #[error("no operator time zone is declared, so no workout can be given a wall clock")]
+    MissingTimeZone,
 }

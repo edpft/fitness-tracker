@@ -322,15 +322,13 @@ impl LandingStore for InMemoryLanding {
                 detail: "stub store".to_owned(),
             });
         }
-        let landed = u64::try_from(records.len()).unwrap_or(u64::MAX);
+        let landed = records.len();
         guard(&self.records).extend(records.into_iter().map(|record| (run, record)));
         Ok(RecordCount::from(landed))
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
-        Ok(RecordCount::from(
-            u64::try_from(guard(&self.records).len()).unwrap_or(u64::MAX),
-        ))
+        Ok(RecordCount::from(guard(&self.records).len()))
     }
 }
 

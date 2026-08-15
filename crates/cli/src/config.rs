@@ -8,6 +8,8 @@
 
 use std::{env::VarError, path::PathBuf};
 
+use domain::gym::OperatorZone;
+
 use crate::catalogue::KnownStream;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,6 +28,39 @@ pub enum ConfigError {
 
     #[error("no database path: pass --database or set FITNESS_TRACKER_DATABASE")]
     MissingDatabase,
+
+    #[error(
+        "no time zone: pass --timezone or set FITNESS_TRACKER_TIMEZONE to an IANA identifier \
+         such as Europe/London. Nothing is compiled in, because a default would be an \
+         assumption about where you train — silently right here and silently wrong elsewhere"
+    )]
+    MissingTimeZone,
+
+    #[error("{value:?} is not an IANA time zone identifier")]
+    UnknownTimeZone { value: String },
+}
+
+/// The zone the operator declares they train in.
+///
+/// § II.3 takes it from configuration, and § 34 forbids an environment
+/// assumption — so there is no default. A compiled-in `Europe/London` would be
+/// correct for this account and wrong for the next, and because it would be
+/// correct here no test would ever catch it.
+///
+/// The value is passed in rather than read here, so this is testable without
+/// touching the process environment. Which of the flag and the variable it came
+/// from is clap's business.
+///
+/// # Errors
+///
+/// [`ConfigError`] if it is unset or is not an identifier the database knows.
+pub fn timezone(declared: Option<&str>) -> Result<OperatorZone, ConfigError> {
+    let value = match declared {
+        Some(value) if !value.trim().is_empty() => value.to_owned(),
+        _ => return Err(ConfigError::MissingTimeZone),
+    };
+
+    OperatorZone::try_from(value.as_str()).map_err(|_| ConfigError::UnknownTimeZone { value })
 }
 
 /// What it takes to reach a source.

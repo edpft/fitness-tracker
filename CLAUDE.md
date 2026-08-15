@@ -39,10 +39,25 @@ demonstration that the hexagonal split is real. A capability that only one of
 them can invoke is a sign the capability has been built into a transport.
 
 `application` re-exports its ports and errors at the crate root but keeps its
-use cases behind `extract` and `status`. That is not tidiness: it makes
-`application::extract::…` greppable, and the `use-case-isolation` check uses it
-to stop a driven adapter calling the application that is supposed to be driving
-it.
+use cases behind `extract`, `normalise` and `status`. That is not tidiness: it
+makes `application::extract::…` greppable, and the `use-case-isolation` check
+uses it to stop a driven adapter calling the application that is supposed to be
+driving it.
+
+**A source's identifiers live with that source's adapter, never in `domain`.**
+The exercise mapping is keyed on Hevy's `exercise_template_id` and so sits in
+`infrastructure/src/hevy/mapping.rs`; what `domain` owns is the vocabulary it
+points at. A domain holding a vendor's identifiers is a domain shaped by a
+source, which is the one thing § II.3 rules out — and the second source's
+mapping is then a second adapter-side table rather than a `domain` that knows
+about two vendors.
+
+**Integration tests that need an adapter live at the adapter's ring.** The
+normalisation suites drive the *use case* but need the Hevy translator, and
+`application` may not depend on the ring above it — so they are in
+`crates/infrastructure/tests/`. That is the hexagon working rather than a
+compromise: the use case is generic over its ports, so the test supplying real
+ones belongs where real ones live.
 
 Adding a crate takes three edits, and the third is easy to forget:
 
@@ -52,6 +67,11 @@ Adding a crate takes three edits, and the third is easy to forget:
 3. a ring in `crateRings` in `flake.nix`
 
 The `workspace-members` and `architecture` checks catch 2 and 3.
+
+**A test fixture that is not `.rs` needs a fourth edit.** `commonCargoSources`
+takes Rust sources and `Cargo.toml` and nothing else, so a `.jsonl` corpus has
+to be named in the flake's fileset explicitly — omit it and the tests find an
+empty file inside the sandbox while passing on your machine.
 
 ## Conventions
 

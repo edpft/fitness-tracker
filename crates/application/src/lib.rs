@@ -15,12 +15,17 @@
 
 pub mod error;
 pub mod extract;
+pub mod normalise;
 pub mod ports;
 pub mod status;
 
-pub use error::{ExtractionError, RunLockError, SourceError, StatusError, StoreError};
+pub use error::{
+    ExtractionError, NormalisationError, RunLockError, SourceError, StatusError, StoreError,
+};
 pub use ports::{
-    Clock, EventBatch, ExtractionRunLog, ExtractionStatusReporter, LandingStore,
+    Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExtractionRunLog,
+    ExtractionStatusReporter, LandingRecordReader, LandingStore, NormalisationRunLog,
+    NormalisationSummary, NormalisedWorkoutStore, RefusalReport, RefusalReporter, RefusalStore,
     ResumptionPointResetter, ResumptionPointStore, RunLock, RunSummary, SourceEvent, StreamStatus,
-    WorkoutEventSource, WorkoutExtractor,
+    Translation, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutTranslator,
 };

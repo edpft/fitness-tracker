@@ -7,7 +7,9 @@
 
 use std::fmt;
 
-use super::{event::EventKind, newtype::string_name, time::EventTime};
+use crate::newtype::string_name;
+
+use super::{event::EventKind, time::EventTime};
 
 /// Why an endpoint could not be constructed.
 ///

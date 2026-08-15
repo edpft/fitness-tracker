@@ -27,7 +27,7 @@ web ──┘
 | `domain` | The core | Entities, value objects, and the rules that govern them. Depends on no workspace crate, and never on a framework, database, or transport. Data-type dependencies — a timestamp, a hash — are fine. |
 | `application` | Use cases and ports | The things your software *does*, and the traits it needs the outside world to satisfy. Ports are declared here, in the application's own vocabulary, and implemented further out. |
 | `infrastructure` | Driven adapters | Implementations of the driven ports: a database, an HTTP client, a filesystem. The one place a technology choice is allowed to show. |
-| `cli` | Driving adapter, composition root | The operator's entry point: `fitness extract`, `status`, `reset`. Extraction is invoked from a terminal or an external scheduler, never over HTTP. |
+| `cli` | Driving adapter, composition root | The operator's entry point: `fitness extract`, `normalise`, `refusals`, `status`, `reset`. Extraction is invoked from a terminal or an external scheduler, never over HTTP. |
 | `web` | Driving adapter, composition root | The HTTP surface. Translates requests into use-case calls. |
 
 `cli` and `web` are peers at the same ring. Neither depends on the other, and a
@@ -42,30 +42,49 @@ Two consequences worth keeping in mind:
   store and clock, which is why its tests use fakes and touch no I/O. If a test
   needs a database, the dependency is pointing the wrong way.
 
-## Running extraction
+## Collecting and normalising
 
 ```bash
-export HEVY_API_KEY=...          # from https://hevy.com/settings?developer
+export HEVY_API_KEY=...              # from https://hevy.com/settings?developer
 export FITNESS_TRACKER_DATABASE=./local.db
+export FITNESS_TRACKER_TIMEZONE=Europe/London
 
-fitness extract hevy             # collect since the resumption point
-fitness status                   # when extraction last succeeded
-fitness reset hevy               # discard the position; next run collects everything
+fitness extract   hevy.workouts      # collect since the resumption point
+fitness normalise hevy.workouts      # derive gym workouts from what raw holds
+fitness refusals  hevy.workouts      # what the domain would not accept, and why
+fitness status    hevy.workouts      # where both derivations stand
+fitness reset     hevy.workouts      # discard the position; next run collects everything
 ```
+
+`normalise` contacts nothing. It reads raw and writes the normalised layer, so
+it works with every source down and can run while an extraction is in flight —
+it takes no lock and moves no resumption point.
 
 | Variable | Flag | Required | Default |
 | --- | --- | --- | --- |
-| `HEVY_API_KEY` | *none, deliberately* | yes | — |
+| `HEVY_API_KEY` | *none, deliberately* | to extract | — |
 | `FITNESS_TRACKER_DATABASE` | `--database` | yes | — |
+| `FITNESS_TRACKER_TIMEZONE` | *none, deliberately* | to normalise | — |
 | `HEVY_API_BASE_URL` | `--base-url` | no | `https://api.hevyapp.com` |
 
 The credential has no flag. A secret on the command line lands in shell history
 and in `ps` output; put it in the environment or an untracked `.env`.
 
+The time zone has no flag either, and no default. It is a declared interpretive
+parameter rather than a per-invocation choice — an operator who can pass it per
+run can produce two derivations that disagree — and a compiled-in default would
+be an assumption about where you train, silently right for one account and
+silently wrong for the next.
+
 Exit codes are part of the contract, so an external scheduler can tell outcomes
-apart: `0` success (including a run that found nothing), `1` the source was
-unreachable or rejected the credential, `2` another run is in progress, `3` the
-store, `4` usage.
+apart: `0` success (including a run that found nothing, and a derivation that
+recorded refusals), `1` the source was unreachable or rejected the credential,
+`2` another run is in progress, `3` the store, `4` usage, `5` an exercise
+template the mapping does not cover.
+
+Refusals do not affect the exit code. A derivation that recorded 26 of them
+succeeded: it found 26 things wrong with the data and said so, which is the
+feature working.
 
 ## Commands
 

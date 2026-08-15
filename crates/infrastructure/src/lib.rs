@@ -10,8 +10,10 @@ pub mod hevy;
 pub mod lock;
 pub mod store;
 
-pub use hevy::{HevyWorkoutEvents, PageCount, PageNumber, RetryPolicy};
+pub use hevy::{HevyWorkoutEvents, HevyWorkoutTranslator, PageCount, PageNumber, RetryPolicy};
 pub use lock::FileRunLock;
 pub use store::{
-    HevyWorkoutLandingStore, SqliteExtractionRunLog, SqliteResumptionPointStore, connect,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExtractionRunLog,
+    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
 };

@@ -92,8 +92,8 @@ where
         since: Option<Watermark>,
     ) -> Result<Collected, ExtractionError> {
         let mut resume = None;
-        let mut events_seen = 0_u64;
-        let mut records_landed = 0_u64;
+        let mut events_seen = 0_usize;
+        let mut records_landed = 0_usize;
         let mut newest_event: Option<EventTime> = None;
 
         loop {
@@ -120,7 +120,7 @@ where
             }
 
             let landed = self.landing.append(run, to_land).await?;
-            records_landed = records_landed.saturating_add(landed.as_u64());
+            records_landed = records_landed.saturating_add(landed.as_usize());
 
             // The source says when it has finished. Asking it again after that
             // is a question it has already answered.

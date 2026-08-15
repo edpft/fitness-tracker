@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM performed_set",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "23dbff81f7eb7e88aef1314282a54025790368d3fb56fa888aaac30204a197eb"
+}

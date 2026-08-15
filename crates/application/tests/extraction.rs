@@ -160,7 +160,7 @@ fn a_first_run_lands_every_workout_the_source_holds() {
 
         let summary = extraction.extract().await.expect("a first run");
 
-        assert_eq!(summary.events_seen.as_u64(), 164);
+        assert_eq!(summary.events_seen.as_usize(), 164);
         assert_eq!(summary.records_landed, RecordCount::from(164));
         assert_eq!(seen.landing.records().len(), 164);
 
@@ -365,7 +365,7 @@ fn a_reset_and_rerun_lands_nothing_when_payloads_are_identical() {
 
         let rerun = extraction.extract().await.expect("the rerun");
 
-        assert_eq!(rerun.events_seen.as_u64(), 164, "everything is re-served");
+        assert_eq!(rerun.events_seen.as_usize(), 164, "everything is re-served");
         assert_eq!(
             rerun.records_landed,
             RecordCount::from(0),

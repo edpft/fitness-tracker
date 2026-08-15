@@ -7,7 +7,7 @@ use domain::landing::{
 };
 use sqlx::SqlitePool;
 
-use super::{run_id_for_storage, store_error};
+use super::{count_from_storage, run_id_for_storage, store_error};
 
 /// The landing table for Hevy workouts.
 ///
@@ -113,7 +113,7 @@ impl LandingStore for HevyWorkoutLandingStore {
         .map_err(|error| store_error(&error))?;
 
         let mut ordinal = next.highest;
-        let mut landed = 0_u64;
+        let mut landed = 0_usize;
 
         for record in &records {
             ordinal = ordinal.saturating_add(1);
@@ -173,7 +173,7 @@ impl LandingStore for HevyWorkoutLandingStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        Ok(RecordCount::from(row.total.unsigned_abs()))
+        Ok(RecordCount::from(count_from_storage(Some(row.total))?))
     }
 }
 

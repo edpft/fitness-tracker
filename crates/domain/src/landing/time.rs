@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use jiff::Timestamp;
 
-use super::newtype::instant;
+use crate::newtype::instant;
 
 /// Why an instant could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    UPDATE normalisation_run\n                    SET finished_at = ?, outcome = 'succeeded',\n                        records_read = ?, workouts_written = ?, workouts_retracted = ?,\n                        retractions_read = ?, records_refused = ?, refusals_recorded = ?\n                    WHERE id = ?\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "4e9f282f5f6d6e4885ead55222ced709077fee175d60db25c942c946bad14285"
+}

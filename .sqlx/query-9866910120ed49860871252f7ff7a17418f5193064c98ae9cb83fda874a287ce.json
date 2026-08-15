@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT workout AS \"workout!: i64\", item_position AS \"item!: i64\",\n               exercise_position AS \"exercise!: i64\", position AS \"position!: i64\",\n               load_kind AS \"load_kind!: String\", load_grams AS \"load_grams!: i64\",\n               reps AS \"reps: i64\", duration_seconds AS \"duration: i64\",\n               distance_mm AS \"distance: i64\", rir AS \"rir: String\",\n               set_kind AS \"set_kind!: String\"\n        FROM performed_set\n        ORDER BY workout, item_position, exercise_position, position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "workout!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "workout"
+          }
+        }
+      },
+      {
+        "name": "item!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "item_position"
+          }
+        }
+      },
+      {
+        "name": "exercise!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "exercise_position"
+          }
+        }
+      },
+      {
+        "name": "position!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "load_kind!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "reps: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "duration: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "rir: String",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "rir"
+          }
+        }
+      },
+      {
+        "name": "set_kind!: String",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "set_kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "9866910120ed49860871252f7ff7a17418f5193064c98ae9cb83fda874a287ce"
+}

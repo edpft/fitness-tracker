@@ -70,6 +70,11 @@
             # `sqlx::migrate!` embeds these, and `query!` is verified against
             # the schema they produce.
             ./migrations
+            # The landed corpus, which the normalisation suites assert against.
+            # `commonCargoSources` takes `.rs` and `Cargo.toml` and nothing
+            # else, so a fixture in any other format has to be named here or
+            # the tests find an empty file inside the sandbox.
+            ./crates/infrastructure/tests/fixtures
             # Offline query metadata. Regenerate with `cargo sqlx prepare`
             # after changing a query; a stale directory fails the build here
             # rather than surprising someone later.
