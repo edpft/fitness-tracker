@@ -121,12 +121,22 @@ impl Programme {
     /// Rebuild a programme that was already authored.
     ///
     /// Runs the three checks that depend on nothing but the programme itself and
-    /// **does not re-run the ladder check**. That is deliberate: the ladder was
-    /// proved buildable against the parameters in force when this was authored,
-    /// and those may since have been superseded. Re-checking against today's
-    /// parameters would ask a different question and could refuse a programme
-    /// that was valid when written — which § 12 says is a durable record, not a
-    /// thing to be re-litigated on every read.
+    /// **does not re-run the ladder check**.
+    ///
+    /// The ladder check asks whether a span makes a ladder over a duration, and
+    /// the span belongs to the parameters rather than to the programme. Re-running
+    /// it on read would therefore assert "this programme's duration works with the
+    /// span *currently* in force", which is not a property of the stored
+    /// programme — the span it was authored against may since have been
+    /// superseded.
+    ///
+    /// It could not fail in any case: the two ways `Ladder::new` refuses are a
+    /// duration below two and a span that does not rise, and the `programme` and
+    /// `generation_parameters` tables both carry a `CHECK` excluding them. So this
+    /// is about the check meaning the wrong thing rather than about it failing.
+    /// Keeping it out also keeps `ProgrammeStore` able to answer its own question
+    /// without another store's data, which is what lets a programme still be
+    /// displayed when the parameters are the thing that is broken.
     ///
     /// A stored programme failing one of the three is corrupt rather than
     /// inconsistent, and the store reports it that way.

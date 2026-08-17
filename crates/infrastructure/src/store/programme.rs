@@ -6,11 +6,12 @@
 //!
 //! **Reading uses `Programme::rehydrate`, not `Programme::new`.** The three
 //! consistency checks that depend on nothing but the programme are re-run,
-//! because a row edited by hand should be caught. The ladder check is not, because
-//! it was proved against the parameters in force when the programme was authored
-//! and those may since have been superseded — re-checking against today's would
-//! ask a different question and could refuse something that was valid when
-//! written.
+//! because a row edited by hand should be caught. The ladder check is not: its
+//! span comes from the parameters, so on read it would be asserting that this
+//! programme's duration works with whatever span is in force *now* — not a
+//! property of the stored programme. Leaving it out is also what lets this store
+//! answer without reading another one, so a programme can still be shown when the
+//! parameters are what is broken.
 
 use application::{ProgrammeStore, StoreError};
 use domain::{

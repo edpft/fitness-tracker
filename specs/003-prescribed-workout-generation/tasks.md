@@ -127,7 +127,7 @@ other slot's from its own last performance.
 
 - [ ] T041 [P] [US1] Implement the TOML shapes and their conversion into `domain` types in `crates/infrastructure/src/programme/document.rs`, rejecting any remaining `TODO` by field path. No `toml` type escapes this module
 - [X] T042 [P] [US1] Implement `GenerationParameterStore` in `crates/infrastructure/src/store/parameters.rs`, superseding by `authored_at` and never overwriting (§ 12)
-- [ ] T043 [P] [US1] Implement `ProgrammeStore` in `crates/infrastructure/src/store/programme.rs`, same supersession rule
+- [X] T043 [P] [US1] Implement `ProgrammeStore` in `crates/infrastructure/src/store/programme.rs`, same supersession rule
 - [ ] T044 [US1] Implement `PrescribedWorkoutStore` in `crates/infrastructure/src/store/prescription.rs` — `issue` writing once and never rewriting, `issued_for` reading back a date
 
 ### Generation
