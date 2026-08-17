@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use super::{intensity::Rir, load::Load, measure::Duration};
+use super::{intensity::Rir, load::Load, measure::Duration, outcome::Performed};
 
 /// Working or warm-up, and nothing else.
 ///
@@ -48,7 +48,11 @@ impl fmt::Display for SetKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Set<M> {
     pub load: Load,
-    pub measure: M,
+    /// What became of it. A completed set carries its measure and a failed
+    /// attempt carries none, so no arithmetic can take a quantity from a
+    /// failure. The load is outside this, because a failed attempt is a load
+    /// that was on the bar.
+    pub outcome: Performed<M>,
     /// Absent where nothing recorded it. Not zero, and never carried forward
     /// from a neighbouring set.
     pub intensity: Option<Rir>,
@@ -66,7 +70,7 @@ pub struct Set<M> {
 
 impl<M: fmt::Display> fmt::Display for Set<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} × {}", self.load, self.measure)?;
+        write!(f, "{} × {}", self.load, self.outcome)?;
         if let Some(intensity) = self.intensity {
             write!(f, " @ {intensity} in reserve")?;
         }

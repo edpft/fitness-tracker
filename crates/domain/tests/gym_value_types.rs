@@ -6,7 +6,7 @@
 //! hand-picked example works.
 
 use domain::gym::{
-    Distance, Kg, Load, Metres, NonEmpty, RepCount, Rir, SetKind, SignedKg,
+    Distance, Kg, Load, Metres, NonEmpty, Performed, RepCount, Rir, SetKind, SignedKg,
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
     sequence::AtLeastTwo,
 };
@@ -193,19 +193,25 @@ fn a_set_cannot_disagree_with_its_exercise() {
 
     let for_reps = domain::gym::Set {
         load: Load::BODYWEIGHT,
-        measure: reps,
+        outcome: Performed::Completed(reps),
         intensity: Some(Rir::Two),
         kind: SetKind::Working,
         rest_after: None,
     };
     let for_distance = domain::gym::Set {
         load: Load::BODYWEIGHT,
-        measure: Distance { metres },
+        outcome: Performed::Completed(Distance { metres }),
         intensity: None,
         kind: SetKind::Warmup,
         rest_after: None,
     };
 
-    assert_eq!(for_reps.measure.as_u32(), 5);
-    assert_eq!(for_distance.measure.metres, metres);
+    let Some(reps_performed) = for_reps.outcome.completed() else {
+        panic!("a completed set carries its measure")
+    };
+    let Some(distance_performed) = for_distance.outcome.completed() else {
+        panic!("a completed set carries its measure")
+    };
+    assert_eq!(reps_performed.as_u32(), 5);
+    assert_eq!(distance_performed.metres, metres);
 }

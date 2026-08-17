@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\"\n            FROM gym_workout AS w\n            WHERE NOT EXISTS (\n                    SELECT 1\n                    FROM gym_workout AS superseding\n                    JOIN hevy_workout_landing AS later\n                        ON later.id = superseding.landing_record_id\n                    JOIN hevy_workout_landing AS this\n                        ON this.id = w.landing_record_id\n                    WHERE superseding.source_record_id = w.source_record_id\n                      AND later.serve_ordinal > this.serve_ordinal\n            )\n            ORDER BY w.started_at_utc DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "on_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1e8bc22bf45dab43cb44fc2253989892e44241e9c259d2ace311507f0b790b28"
+}

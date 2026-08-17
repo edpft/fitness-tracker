@@ -17,7 +17,7 @@
 use application::{NormalisationError, Translation, ports::WorkoutTranslator};
 use domain::{
     gym::{
-        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone,
+        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone, Performed,
         PerformedExercise, Refusal, RefusalLocus, RefusalReason, RepCount, Rir, Set, SetKind,
         SignedKg, Superset, WorkoutItem, WorkoutStart, exercise::Exercise, sequence::AtLeastTwo,
     },
@@ -250,7 +250,10 @@ impl HevyWorkoutTranslator {
     ) -> Result<Set<M>, RefusalReason> {
         Ok(Set {
             load: load_of(set, mapped.load)?,
-            measure: measure_of(set)?,
+            // Every set the source serves is a completed one here. The zero-rep
+            // sentinel that makes a `Performed::Failed` is read in
+            // `measure_of`'s caller, where the rep count is in hand.
+            outcome: Performed::Completed(measure_of(set)?),
             intensity: intensity_of(set)?,
             kind: kind_of(&set.kind)?,
             // Hevy's logged set carries no rest field and no per-set
