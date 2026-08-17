@@ -8,6 +8,7 @@
 #![allow(dead_code, unused_macros, unused_imports)]
 
 pub mod corpus;
+pub mod programme;
 
 /// Derive over the corpus, or fail the test saying which step broke.
 ///

@@ -13,7 +13,7 @@ pub mod store;
 pub use hevy::{HevyWorkoutEvents, HevyWorkoutTranslator, PageCount, PageNumber, RetryPolicy};
 pub use lock::FileRunLock;
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExtractionRunLog,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
+    SqliteExtractionRunLog, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
     SqliteResumptionPointStore, connect,
 };

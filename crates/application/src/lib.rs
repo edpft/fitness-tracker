@@ -20,12 +20,17 @@ pub mod ports;
 pub mod status;
 
 pub use error::{
-    ExtractionError, NormalisationError, RunLockError, SourceError, StatusError, StoreError,
+    ExtractionError, NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError,
+    StoreError,
 };
 pub use ports::{
-    Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExtractionRunLog,
-    ExtractionStatusReporter, LandingRecordReader, LandingStore, NormalisationRunLog,
-    NormalisationSummary, NormalisedWorkoutStore, RefusalReport, RefusalReporter, RefusalStore,
-    ResumptionPointResetter, ResumptionPointStore, RunLock, RunSummary, SourceEvent, StreamStatus,
-    Translation, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutTranslator,
+    Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExerciseHistory,
+    ExtractionRunLog, ExtractionStatusReporter, GenerationParameterStore, LandingRecordReader,
+    LandingStore, LastPerformance, NormalisationRunLog, NormalisationSummary,
+    NormalisedWorkoutStore, Performance, PerformedSetSummary, PerformedWorkoutReader,
+    PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore,
+    RefusalReport, RefusalReporter, RefusalStore, ResumptionPointResetter, ResumptionPointStore,
+    RunLock, RunSummary, SourceEvent, StreamStatus, Translation, UnderivableReason,
+    UnderivableSlot, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
+    WorkoutTranslator,
 };

@@ -1,0 +1,127 @@
+# The programme in force, as far as the record shows it.
+#
+# Authored intent (§ 12), not a derivation. Read once by
+# `fitness programme author`, converted into domain types at the adapter
+# boundary, and stored with the date it was authored.
+#
+# The two values marked TODO are the ladder's span — the one genuinely open
+# number, recorded as D8 in specs/003-prescribed-workout-generation/research.md.
+# Authoring rejects the document while either remains rather than defaulting:
+# a placeholder that authors successfully is worse than one that fails.
+
+[programme]
+template         = "v1"
+primary          = "knee_dominant"
+primary_exercise = "front-squat"
+gating_role      = "heavy"
+start            = "2026-07-06"
+# Weeks, not cycles. The last one is the test, so this is 7 climbing weeks.
+duration_weeks   = 8
+
+# Which weekday is which session role. A date on no listed weekday is an error
+# naming these days, never an implicit nearest match.
+[programme.weekdays]
+monday = "light"
+friday = "heavy"
+
+# The starting 1RM. Fixed for the whole block; only the exit test replaces it,
+# and that replacement anchors the *next* block.
+#
+# 2026-07-03 ramped to a completed single at 90 and then failed 95. That failure
+# is the corpus's only zero-rep set, and it is what bounds this number.
+[programme.anchor]
+load       = "90kg"
+provenance = "tested"
+from       = "2026-07-03"
+
+# One fill per slot. A slot taking one exercise takes a string; a slot that
+# alternates by session role takes a table keyed by role; a supersetted slot
+# takes a `members` list.
+[fills]
+plyometric    = "pogo"
+power         = "box-jump"
+knee_dominant = "front-squat"
+upper_push    = "chest-dip"
+upper_pull    = "pull-up"
+core          = "cable-twist-up-to-down"
+mobility_hold = "handstand-hold"
+
+# Alternates by role. This is why the history projection is unbounded: on any
+# given session the exercise being prescribed was last performed two sessions
+# ago, not one.
+[fills.hip_dominant]
+light = "back-extension-machine"
+heavy = "nordic-hamstrings-curls"
+
+[fills.arms]
+members = ["preacher-curl-barbell", "overhead-triceps-extension-cable"]
+
+[fills.forearms.light]
+members = ["seated-wrist-extension-barbell", "seated-palms-up-wrist-curl"]
+
+[fills.forearms.heavy]
+members = ["reverse-wrist-curl-dumbbell", "seated-palms-up-wrist-curl"]
+
+[fills.mobility_stretch]
+members = ["dead-hang", "couch-stretch", "ninety-ninety", "stretching"]
+
+# Generation parameters (§ 14). Only the current value is required, because what
+# they produced is recorded concretely on the prescription that used them.
+
+[parameters]
+back_off_of_top_set = "85%"
+plate_increment     = "2.5kg"
+
+# The light session's top set, as a percentage of that week's heavy top set.
+# 88.5% reproduces 72.5 / 75 / 77.5 against 82.5 / 85 / 87.5 across three
+# validated weeks. A flat -10kg offset fits those three equally well and was
+# rejected for not being portable to a different anchor.
+light_of_heavy = "88.5%"
+
+# The ladder: where the heavy top set starts and finishes, as percentages of the
+# anchor. The weekly step is DERIVED from these and duration_weeks.
+#
+# Bounds for choosing these, none of them decisive:
+#   - 5/3/1 embeds ~1.25kg/week for a lower-body lift
+#   - a classic linear block finishes near 102.5-105% of entry
+#   - a demonstrated ~99kg in Apr 2025 means ~9kg of regain before new ground
+#   - a reset costs 4 of 7 climbing weeks, so leave room for one
+[parameters.ladder]
+start = "TODO"
+end   = "TODO"
+
+# Constant within a block. Descending reps across the block — fives, threes,
+# singles — is the textbook linear variant and is deferred, because the record
+# has held these fixed per role since the July test while the load climbed.
+[parameters.roles.light]
+top_set_reps = 3
+
+[parameters.roles.heavy]
+top_set_reps = 1
+
+# Percentages of the top set, with their rep counts.
+[[parameters.warmup]]
+of_top_set = "40%"
+reps       = 4
+
+[[parameters.warmup]]
+of_top_set = "60%"
+reps       = 3
+
+[[parameters.warmup]]
+of_top_set = "80%"
+reps       = 2
+
+[[parameters.warmup]]
+of_top_set = "90%"
+reps       = 1
+
+# From docs/primary-lift-progression.md. The drop and the increment are chosen
+# as a pair so both land on the plate grid and both cost four weeks.
+[parameters.reset.first]
+drop             = "-10%"
+reclimb_per_week = "5kg"
+
+[parameters.reset.second]
+drop             = "-5%"
+reclimb_per_week = "2.5kg"

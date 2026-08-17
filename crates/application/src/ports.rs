@@ -10,20 +10,26 @@
 //! runtime or inside an HTTP handler. One line per method now is cheaper than
 //! re-declaring every port when the `web` ring gains a surface.
 
-use std::future::Future;
+use std::{collections::BTreeMap, future::Future};
+
+use jiff::{Timestamp, civil::Date};
 
 use domain::gym::{
-    GymWorkout, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone,
-    Refusal, RefusalCount, WorkoutCount,
+    GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
+    OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::Exercise,
 };
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream,
-    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
-    Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
+    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
+    SourceRecordId, Watermark,
+};
+use domain::prescription::{
+    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, SlotId,
 };
 
 use crate::error::{
-    ExtractionError, NormalisationError, RunLockError, SourceError, StatusError, StoreError,
+    ExtractionError, NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError,
+    StoreError,
 };
 
 // --- Driven ports -----------------------------------------------------------
@@ -522,4 +528,281 @@ pub trait RefusalReporter {
     ///
     /// [`NormalisationError`] if the store is unavailable.
     fn refusals(&self) -> impl Future<Output = Result<RefusalReport, NormalisationError>> + Send;
+}
+
+// ---------------------------------------------------------------------------
+// Prescription (003)
+//
+// The one place § 11's permitted direction is exercised. A prescription may be
+// derived by reading the performed record; nothing reads the other way, and no
+// port below returns both kinds of value.
+// ---------------------------------------------------------------------------
+
+/// One working performance of one exercise, on one date.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Performance {
+    pub on: Date,
+    /// Which landing record it came from. Kept so a prescription can be traced
+    /// back to the observation it was derived from.
+    pub landed_as: LandingRecordId,
+    pub sets: Vec<PerformedSetSummary>,
+}
+
+/// Enough of a set for double progression and for the gate.
+///
+/// Deliberately not the whole `Set<M>`: rest is never recorded by the one source
+/// in use, and the set kind is already filtered to working sets before this is
+/// built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PerformedSetSummary {
+    pub load: Load,
+    /// A completed count, or a failed attempt. The gate reads this and nothing
+    /// else; `intensity` is deliberately absent, because an effort report is not
+    /// an input to any derivation.
+    pub outcome: Performed<RepCount>,
+}
+
+/// What the projection knows about an exercise.
+///
+/// **Not `Option`.** Three states matter and they are different: performed
+/// before, never performed, and performed but unusable. An `Option` collapses
+/// the first two at the call site, and that is exactly the shape that invites a
+/// `None` to become a default load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LastPerformance {
+    Performed(Performance),
+    NeverPerformed,
+}
+
+/// A slot the generator could not derive, and why.
+///
+/// A value rather than an error: FR-011 wants the system to say which slot and
+/// why without substituting a guess, and the rest of the workout is still worth
+/// issuing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnderivableSlot {
+    pub slot: SlotId,
+    pub exercise: &'static str,
+    pub reason: UnderivableReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum UnderivableReason {
+    #[error("never performed, and the programme sets no starting load")]
+    NeverPerformed,
+    #[error("its last performance recorded no working set to progress from")]
+    NoWorkingSet,
+}
+
+/// The projection of the performed record that prescription reads.
+pub trait ExerciseHistory {
+    /// The most recent working performance of each exercise asked about.
+    ///
+    /// Unbounded in time: an alternating slot's exercise was last performed two
+    /// sessions ago, not one. Batched rather than one call per slot, because
+    /// eleven round trips to answer one question is the shape that becomes an
+    /// N+1 the first time a programme grows.
+    ///
+    /// Where two landing records share a source record id, the later-served one
+    /// is read (§ 10). Warm-ups are excluded.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn last_performances(
+        &self,
+        exercises: &[Exercise],
+    ) -> impl Future<Output = Result<BTreeMap<Exercise, LastPerformance>, StoreError>> + Send;
+
+    /// Every working performance of one exercise, oldest first.
+    ///
+    /// The ladder position needs this and `last_performances` cannot supply it:
+    /// deciding whether the ladder advances, holds or suspends means asking of
+    /// each gating session in turn whether its top set completed or failed, and
+    /// whether a failed load had already been failed once. That is a series, not
+    /// a latest value.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn performances(
+        &self,
+        exercise: Exercise,
+    ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
+
+    /// The newest performance in the record, whatever exercise it was of.
+    ///
+    /// § 38: a prescription derived from history that stops four days before the
+    /// last session is visibly stale rather than quietly wrong.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
+}
+
+/// Whole performed workouts, for projecting into a prescription shape.
+///
+/// Separate from [`ExerciseHistory`] because it answers a different question at
+/// a different grain, and merging them would give one port two reasons to
+/// change. It returns the domain entity untouched, because projection operates
+/// on the workout entire — its items, its groupings, its ordering.
+pub trait PerformedWorkoutReader {
+    /// Oldest first, § 10 applied.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<GymWorkout>, StoreError>> + Send;
+}
+
+/// The § 14 parameters, in force as one version.
+pub trait GenerationParameterStore {
+    /// The greatest `authored_at`, with the version it came from.
+    ///
+    /// § 14 requires only the current value. Superseded rows are retained and no
+    /// derivation reads one; an issued prescription names the version it used,
+    /// which is what makes that safe.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn current(
+        &self,
+    ) -> impl Future<Output = Result<Option<(Timestamp, GenerationParameters)>, StoreError>> + Send;
+
+    /// Author a set, superseding by date rather than overwriting (§ 12).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn author(
+        &self,
+        authored_at: Timestamp,
+        parameters: &GenerationParameters,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// The authored programme.
+pub trait ProgrammeStore {
+    /// The programme in force, with the identity the store gave it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn current(
+        &self,
+    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn author(
+        &self,
+        programme: &Programme,
+    ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
+}
+
+/// What was issued.
+pub trait PrescribedWorkoutStore {
+    /// Record a prescription, in full. Written once and never rewritten (§ 12).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn issue(
+        &self,
+        workout: &PrescribedWorkout,
+    ) -> impl Future<Output = Result<PrescribedWorkoutId, StoreError>> + Send;
+
+    /// What was issued for a date, if anything.
+    ///
+    /// Read before issuing, so asking twice for one date returns what was
+    /// already issued rather than a second prescription. The derived ladder
+    /// position makes double-advance structurally impossible; this makes the
+    /// *output* idempotent too.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn issued_for(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<(PrescribedWorkoutId, PrescribedWorkout)>, StoreError>> + Send;
+}
+
+/// The identity the store gives an issued prescription.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PrescribedWorkoutId(i64);
+
+impl PrescribedWorkoutId {
+    pub const fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub const fn as_i64(self) -> i64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for PrescribedWorkoutId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A prescription, and enough to report it honestly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prescription {
+    pub id: PrescribedWorkoutId,
+    pub workout: PrescribedWorkout,
+    /// False when the date already had a prescription and this is that one.
+    pub freshly_issued: bool,
+    /// § 38. The newest performance the derivation read.
+    pub history_through: Option<Date>,
+    /// Slots that could not be derived (FR-011). Not an error.
+    pub underivable: Vec<UnderivableSlot>,
+}
+
+/// Issue the prescription for a date.
+pub trait WorkoutPrescriber {
+    /// The date is the only argument.
+    ///
+    /// The session role, the week and the ladder position are all derived — the
+    /// role from the programme's calendar, the position from the performed
+    /// record. Passing any of them would be passing a derived value, which is
+    /// the mistake `HevyWorkoutLandingStore::STREAM` exists to avoid on the
+    /// extraction side, and would let a caller prescribe a heavy session on a
+    /// light day.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] for no programme, no parameters, a date the
+    /// programme does not run, or an unavailable store.
+    fn prescribe(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Prescription, PrescriptionError>> + Send;
+}
+
+/// Store an authored programme and its parameters.
+pub trait ProgrammeAuthor {
+    /// Takes `domain` types.
+    ///
+    /// The document format is converted in `infrastructure`, so nothing here
+    /// knows one exists — which is what keeps § 21's exemption honest.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] if the store is unavailable, or the programme is
+    /// inconsistent in a way the types could not catch.
+    fn author(
+        &self,
+        programme: &Programme,
+        parameters: &GenerationParameters,
+    ) -> impl Future<Output = Result<ProgrammeId, PrescriptionError>> + Send;
 }
