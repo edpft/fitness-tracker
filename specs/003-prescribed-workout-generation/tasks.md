@@ -114,7 +114,7 @@ other slot's from its own last performance.
 - [ ] T033 [P] [US1] Write quickstart group 1 scenarios US1-1 to US1-3 and US1-5 in `crates/infrastructure/tests/prescription.rs` — structure, fatigue order, the primary reading no performed value, and the back-off following the top set
 - [X] T034 [P] [US1] Write US1-6 in `crates/infrastructure/tests/prescription.rs` — the alternating hip-dominant fill reads two sessions back. Assert on the **date** the history came from, not only the load
 - [ ] T035 [P] [US1] Write US1-7 in `crates/infrastructure/tests/prescription.rs` — a never-performed exercise is reported as underivable, with no guessed load
-- [ ] T036 [P] [US1] Write US1-8 and US1-9 in `crates/infrastructure/tests/prescription.rs` — the prescription is stored in full, and no performed query returns prescribed data
+- [X] T036 [P] [US1] Write US1-8 and US1-9 in `crates/infrastructure/tests/prescription.rs` — the prescription is stored in full, and no performed query returns prescribed data
 - [ ] T037 [P] [US1] Write the § 10 supersession test in `crates/infrastructure/tests/prescription.rs` — two landing records sharing a source id, synthetic, where the later-served one is the history read (D3)
 - [ ] T038 [P] [US1] Write the SC-008 test in `crates/infrastructure/tests/prescription.rs` — discard all generated output, regenerate from stored authored data, assert identical
 
@@ -126,7 +126,7 @@ other slot's from its own last performance.
 ### The authored side
 
 - [ ] T041 [P] [US1] Implement the TOML shapes and their conversion into `domain` types in `crates/infrastructure/src/programme/document.rs`, rejecting any remaining `TODO` by field path. No `toml` type escapes this module
-- [ ] T042 [P] [US1] Implement `GenerationParameterStore` in `crates/infrastructure/src/store/parameters.rs`, superseding by `authored_at` and never overwriting (§ 12)
+- [X] T042 [P] [US1] Implement `GenerationParameterStore` in `crates/infrastructure/src/store/parameters.rs`, superseding by `authored_at` and never overwriting (§ 12)
 - [ ] T043 [P] [US1] Implement `ProgrammeStore` in `crates/infrastructure/src/store/programme.rs`, same supersession rule
 - [ ] T044 [US1] Implement `PrescribedWorkoutStore` in `crates/infrastructure/src/store/prescription.rs` — `issue` writing once and never rewriting, `issued_for` reading back a date
 

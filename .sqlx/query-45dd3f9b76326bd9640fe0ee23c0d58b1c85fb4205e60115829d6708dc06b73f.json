@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT weekday AS \"weekday!: String\", role AS \"role!: String\"\n        FROM programme_weekday\n        WHERE programme = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_weekday",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "role!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_weekday",
+            "name": "role"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "45dd3f9b76326bd9640fe0ee23c0d58b1c85fb4205e60115829d6708dc06b73f"
+}

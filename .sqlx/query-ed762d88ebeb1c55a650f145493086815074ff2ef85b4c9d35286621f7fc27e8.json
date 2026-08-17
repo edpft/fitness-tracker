@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\", authored_at AS \"authored_at!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   gating_role AS \"gating_role!: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\"\n            FROM programme\n            ORDER BY authored_at DESC, id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "authored_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "authored_at"
+          }
+        }
+      },
+      {
+        "name": "primary_pattern!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "primary_pattern"
+          }
+        }
+      },
+      {
+        "name": "primary_exercise!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "primary_exercise"
+          }
+        }
+      },
+      {
+        "name": "anchor_grams!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "anchor_grams"
+          }
+        }
+      },
+      {
+        "name": "anchor_provenance!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "anchor_provenance"
+          }
+        }
+      },
+      {
+        "name": "anchor_from!: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "anchor_from"
+          }
+        }
+      },
+      {
+        "name": "gating_role!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "gating_role"
+          }
+        }
+      },
+      {
+        "name": "start_date!: String",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "name": "duration_weeks!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "duration_weeks"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ed762d88ebeb1c55a650f145493086815074ff2ef85b4c9d35286621f7fc27e8"
+}

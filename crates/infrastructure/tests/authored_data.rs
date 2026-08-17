@@ -7,8 +7,8 @@
 
 mod support;
 
-use application::GenerationParameterStore as _;
-use infrastructure::{SqliteGenerationParameterStore, connect};
+use application::{GenerationParameterStore as _, ProgrammeStore as _};
+use infrastructure::{SqliteGenerationParameterStore, SqliteProgrammeStore, connect};
 use sqlx::SqlitePool;
 use support::{corpus, programme};
 
@@ -155,4 +155,147 @@ fn parameters_missing_a_role_are_corrupt_not_defaulted() {
         Ok(other) => panic!("a missing role must be corrupt, got {other:?}"),
         Err(error) => panic!("a runtime is available: {error}"),
     }
+}
+
+// --- The programme ---------------------------------------------------------
+
+async fn programme_store()
+-> Result<(SqliteProgrammeStore, SqlitePool, tempfile::TempDir), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let pool = connect(&directory.path().join("test.db")).await?;
+    Ok((SqliteProgrammeStore::new(pool.clone()), pool, directory))
+}
+
+macro_rules! programmes {
+    () => {
+        match corpus::block_on(programme_store()) {
+            Ok(Ok(opened)) => opened,
+            Ok(Err(error)) => panic!("a store opens: {error}"),
+            Err(error) => panic!("a runtime is available: {error}"),
+        }
+    };
+}
+
+#[test]
+fn an_unauthored_store_has_no_programme() {
+    let (store, _pool, _directory) = programmes!();
+    assert_eq!(run!(store.current()), None);
+}
+
+/// The eleven fills survive the round trip, in all four shapes.
+///
+/// This is the assertion the programme store exists for. A slot is single or a
+/// superset, and either may alternate by role — four combinations across eleven
+/// slots, flattened into one table and grouped back out. Comparing the whole
+/// `SlotFills` covers every one of them at once.
+#[test]
+fn a_programme_round_trips_with_every_fill_shape() {
+    let (store, _pool, _directory) = programmes!();
+    let Ok(authored) = programme::programme() else {
+        panic!("the fixture programme is consistent")
+    };
+
+    let id = run!(store.author(&authored));
+
+    let Some((read_id, read_back)) = run!(store.current()) else {
+        panic!("what was authored is in force")
+    };
+    assert_eq!(read_id, id);
+
+    // The single, the alternating single, the same-both-ways superset and the
+    // alternating superset, all in one comparison.
+    assert_eq!(
+        read_back.fills(),
+        authored.fills(),
+        "every slot fill round trips, in every shape"
+    );
+
+    assert_eq!(read_back.primary(), authored.primary());
+    assert_eq!(read_back.primary_exercise(), authored.primary_exercise());
+    assert_eq!(read_back.gating_role(), authored.gating_role());
+    assert_eq!(
+        read_back.anchor(),
+        authored.anchor(),
+        "the anchor round trips"
+    );
+    assert_eq!(
+        read_back.calendar().start(),
+        authored.calendar().start(),
+        "the block's start round trips"
+    );
+    assert_eq!(
+        read_back.calendar().duration_weeks(),
+        authored.calendar().duration_weeks()
+    );
+}
+
+/// The weekday mapping round trips, including which role each day carries.
+#[test]
+fn the_weekday_mapping_round_trips() {
+    let (store, _pool, _directory) = programmes!();
+    let Ok(authored) = programme::programme() else {
+        panic!("the fixture programme is consistent")
+    };
+    run!(store.author(&authored));
+
+    let Some((_, read_back)) = run!(store.current()) else {
+        panic!("what was authored is in force")
+    };
+
+    let mut authored_days: Vec<_> = authored.calendar().weekdays().iter().collect();
+    let mut read_days: Vec<_> = read_back.calendar().weekdays().iter().collect();
+    authored_days.sort_by_key(|(day, _)| format!("{day:?}"));
+    read_days.sort_by_key(|(day, _)| format!("{day:?}"));
+    assert_eq!(read_days, authored_days);
+}
+
+/// Authoring supersedes by date, and the earlier programme is kept.
+#[test]
+fn authoring_a_programme_supersedes_and_retains() {
+    let (store, pool, _directory) = programmes!();
+    let Ok(first) = programme::programme() else {
+        panic!("the fixture programme is consistent")
+    };
+
+    let first_id = run!(store.author(&first));
+    let second_id = run!(store.author(&first));
+    assert_ne!(first_id, second_id, "each authoring gets its own identity");
+
+    let count = run!(async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM programme")
+            .fetch_one(&pool)
+            .await
+    });
+    assert_eq!(count, 2, "the superseded programme is kept");
+}
+
+/// The three inconsistencies the types cannot catch are refused at authoring.
+///
+/// Refused before the store, so a programme that cannot work never reaches it —
+/// which is why these assert on the constructor rather than on `author`.
+#[test]
+fn the_three_inconsistencies_are_refused() {
+    let Ok(gating) = programme::gating_on_a_role_it_never_runs() else {
+        panic!("the fixture literals are valid")
+    };
+    assert!(
+        gating.is_err(),
+        "a programme gating on a role it never runs would never advance"
+    );
+
+    let Ok(measure) = programme::primary_not_counted_in_reps() else {
+        panic!("the fixture literals are valid")
+    };
+    assert!(
+        measure.is_err(),
+        "a top set is a number of repetitions, so the primary must be counted in them"
+    );
+
+    let Ok(slot) = programme::primary_does_not_fill_its_slot() else {
+        panic!("the fixture literals are valid")
+    };
+    assert!(
+        slot.is_err(),
+        "a programme must not name one exercise as primary and prescribe another"
+    );
 }

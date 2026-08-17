@@ -15,5 +15,6 @@ pub use lock::FileRunLock;
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqliteNormalisationRunLog, SqliteProgrammeStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
 };

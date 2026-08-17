@@ -96,6 +96,81 @@ impl Programme {
         zone: TimeZone,
         parameters: &GenerationParameters,
     ) -> Result<Self, InconsistentProgramme> {
+        Self::check(primary, primary_exercise, &fills, gating_role, &weekdays)?;
+
+        // 4. And the span has to make a ladder over this duration. Checked here
+        //    so an unbuildable plan fails at authoring rather than at the first
+        //    `prescribe`.
+        Ladder::new(
+            parameters.ladder_start,
+            parameters.ladder_end,
+            duration_weeks,
+        )?;
+
+        Ok(Self {
+            primary,
+            primary_exercise,
+            fills,
+            anchor,
+            gating_role,
+            calendar: Calendar::new(start, duration_weeks, weekdays, zone),
+            authored_at: Timestamp::now(),
+        })
+    }
+
+    /// Rebuild a programme that was already authored.
+    ///
+    /// Runs the three checks that depend on nothing but the programme itself and
+    /// **does not re-run the ladder check**. That is deliberate: the ladder was
+    /// proved buildable against the parameters in force when this was authored,
+    /// and those may since have been superseded. Re-checking against today's
+    /// parameters would ask a different question and could refuse a programme
+    /// that was valid when written — which § 12 says is a durable record, not a
+    /// thing to be re-litigated on every read.
+    ///
+    /// A stored programme failing one of the three is corrupt rather than
+    /// inconsistent, and the store reports it that way.
+    ///
+    /// # Errors
+    ///
+    /// [`InconsistentProgramme`] for any of the three parameter-independent
+    /// checks.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the same list as `new`, minus the parameters it does not need"
+    )]
+    pub fn rehydrate(
+        primary: PrimaryPattern,
+        primary_exercise: Exercise,
+        fills: SlotFills,
+        anchor: Anchor,
+        gating_role: SessionRole,
+        start: Date,
+        duration_weeks: u32,
+        weekdays: Weekdays,
+        zone: TimeZone,
+        authored_at: Timestamp,
+    ) -> Result<Self, InconsistentProgramme> {
+        Self::check(primary, primary_exercise, &fills, gating_role, &weekdays)?;
+        Ok(Self {
+            primary,
+            primary_exercise,
+            fills,
+            anchor,
+            gating_role,
+            calendar: Calendar::new(start, duration_weeks, weekdays, zone),
+            authored_at,
+        })
+    }
+
+    /// The three checks that need nothing but the programme.
+    fn check(
+        primary: PrimaryPattern,
+        primary_exercise: Exercise,
+        fills: &SlotFills,
+        gating_role: SessionRole,
+        weekdays: &Weekdays,
+    ) -> Result<(), InconsistentProgramme> {
         // 1. A programme gating on a role it never runs would never advance.
         if !weekdays.runs(gating_role) {
             return Err(InconsistentProgramme::GatingRoleNeverRuns {
@@ -117,10 +192,7 @@ impl Programme {
         let filled = match fills.content(primary.slot(), gating_role) {
             super::template::SlotContent::Single(exercise) => *exercise,
             // Unreachable by construction: `PrimaryPattern::slot` returns only
-            // the four strength slots, and all four are single. Deferring to the
-            // primary rather than reaching into the superset keeps this
-            // panic-free without inventing an error variant for a state the
-            // types already exclude.
+            // the four strength slots, and all four are single.
             super::template::SlotContent::Superset(_) => primary_exercise,
         };
         if filled != primary_exercise {
@@ -130,25 +202,7 @@ impl Programme {
                 fill: filled.as_str(),
             });
         }
-
-        // 4. And the span has to make a ladder over this duration. Checked here
-        //    so an unbuildable plan fails at authoring rather than at the first
-        //    `prescribe`.
-        Ladder::new(
-            parameters.ladder_start,
-            parameters.ladder_end,
-            duration_weeks,
-        )?;
-
-        Ok(Self {
-            primary,
-            primary_exercise,
-            fills,
-            anchor,
-            gating_role,
-            calendar: Calendar::new(start, duration_weeks, weekdays, zone),
-            authored_at: Timestamp::now(),
-        })
+        Ok(())
     }
 
     pub const fn primary(&self) -> PrimaryPattern {
