@@ -1,0 +1,207 @@
+# Primary Lift Progression
+
+Governs the primary strength slot only. Non-primary slots progress by double
+progression against observed history and are out of scope here.
+
+That split is deliberate and is the reason this document exists. The rest of the
+session works well on double progression; only the primary lower-body lift needs
+something else, because only the primary has a 1RM the programme is trying to
+move.
+
+## Position
+
+The prescription is planned in advance and executed as written. There is no
+scoring, no rep range, and no effort report feeding any decision.
+
+RIR is captured on the primary's sets but is not an input to any derivation. It
+is an observation, retained in case a retrospective check is ever wanted.
+
+The rationale is resolution. A gate reading a signal finer than the operator can
+discriminate does not autoregulate — it introduces a decision point resolved by
+mood. On lower-body lifts the discriminable states are coarse, so no gate is
+better than a gate that pretends otherwise.
+
+**A plan and a mechanism for handling failure are two different things.** This
+document holds both, and conflating them caused a wrong turn once already. The
+plan is § The plan: a ladder generated from a duration and a starting 1RM. The
+failure mechanism is § Stall detection and § Reset protocol, which take over
+when the plan turns out to have been too ambitious. Neither is derived from the
+other, and the plan is not designed around the possibility of failing.
+
+## What the generator is for
+
+Given **a number of weeks** and **a starting 1RM**, generate a programme which,
+if performed, leaves the tested 1RM at the end higher than it was at the start.
+
+That is the whole requirement. Calendar goals, target numbers for the year, and
+what to do about a stall are all outside it.
+
+No template can guarantee the outcome. What one supplies is a structured
+overload with a defined endpoint, and a test that says whether it worked.
+
+## The anchor
+
+The anchor is the **starting 1RM**, and it is **fixed for the duration of the
+block**. Every prescribed load derives from it.
+
+It carries its provenance, because the four ways of arriving at it are not
+equally good: a **test** is measured, an **e1RM** is derived, an **asserted**
+value is neither. Once a series of blocks is running the exit test of one block
+is the entry anchor of the next, so there is one source; the others are
+bootstraps, used for the first block or after a gap.
+
+**The anchor does not climb.** An earlier version of this document had it
+advancing +2.5kg per week, which describes the same load sequence from the other
+end and cost the model its endpoint: a value that climbs indefinitely has no
+block to be the plan for. What climbs is the ladder's position, expressed as a
+percentage of a fixed anchor, so the block's last climbing week is a stated
+intention rather than wherever the schedule happened to reach.
+
+**Only a test replaces it**, and a test ends a block. So within a block the
+anchor is a constant, and nothing performed moves it — which is what makes the
+whole prescription computable in advance from two inputs.
+
+**An e1RM from a submaximal set is not a measurement.** A set left with
+repetitions in reserve says nothing about a maximum, whatever a formula returns
+for it. Only a set taken to failure, or a genuine single, supports an estimate.
+This is worth stating because the arithmetic is available on every set in the
+record and is meaningless on almost all of them.
+
+## The plan
+
+**A linear block: intensity ascends across the duration, and the block ends in a
+test.** The standard template, and the one that takes exactly the two inputs
+above.
+
+Given a duration of `W` weeks and an anchor `A`:
+
+- The final week is the test, so there are `W - 1` climbing weeks.
+- The ladder runs from `start` to `end`, as percentages of `A`, spread evenly
+  across those climbing weeks.
+- Each week's heavy top set is `quantise(A × percentage)`.
+- The light session's top set is a percentage of that week's heavy top set.
+- Warm-ups and back-off sets are percentages of their own session's top set —
+  never of the anchor. See `prescribed-workout-domain-model.md`.
+
+**The endpoint is authored and the weekly step is derived**, not the other way
+round. The endpoint is a claim about how much can be gained in the time
+available, which personal history and a reference programme can both inform. A
+weekly step is a number with nothing behind it, and multiplying it by a duration
+produces an endpoint nobody chose.
+
+**Where the endpoint comes from.** This is the one genuinely unresolved number
+and the honest answer is that a standard template supplies it. 5/3/1 embeds
+roughly 1.25kg per week for a lower-body lift, by advancing a training max 5kg
+every four-week cycle. A classic linear block finishes around 102.5–105% of the
+entry 1RM. Choosing a template is choosing the gain, which is why "just pick a
+template" is a real answer to a question that otherwise has none.
+
+Personal history bounds it further, and the boundary that matters is **regain
+versus new ground**: ground already covered comes back fast, and ground never
+covered does not. A block whose endpoint sits below a previously demonstrated
+max is asking for regain and is the safer first block.
+
+**Repetitions are constant per session role within a block.** Currently one on
+the heavy session and three on the light one. The textbook linear block descends
+the reps as the intensity climbs — fives, then threes, then singles — and this
+one does not, because the record does not: the rep counts have been fixed per
+role since the July test while the load climbed. Descending reps is a legitimate
+variant and is deferred rather than rejected; it changes the ladder from a
+percentage series into a series of `(percentage, reps)` pairs and nothing else.
+
+## Stall detection
+
+This and the section below are the failure mechanism. They are not part of
+making the plan.
+
+- A **miss** holds the ladder and re-issues the same loads the following week.
+- A **second miss at the same load** is a stall and triggers a reset.
+
+Because a miss re-issues the week, loads necessarily repeat, so "same load
+twice" is always reachable. No further sequencing rule is required.
+
+## Reset protocol
+
+| | Drop | Re-climb | Round trip |
+|---|---|---|---|
+| **Reset 1** | −10% | +5kg weekly | 4 weeks |
+| **Reset 2** | −5% | +2.5kg weekly | 4 weeks |
+
+The drop and the increment are chosen as a pair so both land on the 2.5kg plate
+grid and both cost the same four weeks. A stall therefore has a fixed price
+regardless of which reset is in play.
+
+The second reset is the genuine slowdown: +2.5kg weekly is baseline rate off a
+lower start, whereas +5kg weekly is faster than baseline and functions as a
+bounce.
+
+**A reset suspends the ladder rather than altering the anchor.** The drop is
+taken from the failed load, the re-climb runs at the reset's own rate, and when
+the sequence reaches the failed load again the ladder resumes from where it left
+off. The anchor is untouched, because the anchor is a measurement of where the
+block started and a stall is not evidence about that.
+
+Worked example from a 90kg failed load:
+
+| Week | Load | Result |
+|---|---|---|
+| 1 | 90 | miss |
+| 2 | 90 | miss → reset 1 |
+| 3 | 80 | pass |
+| 4 | 85 | pass |
+| 5 | 90 | miss |
+| 6 | 90 | miss → reset 2 |
+| 7 | 80 | pass |
+| 8 | 82.5 | pass |
+| 9 | 85 | pass |
+| 10 | 87.5 | pass |
+| 11 | 90 | miss |
+
+## Blocks and testing
+
+Block length is bounded by the nutrition phase: 12 weeks maximum for a deficit,
+8 for maintenance. Every block contains at least one test, leaving 11 or 7
+climbing weeks.
+
+The test is unconditional. A block ending mid-re-climb requires no special
+handling — the test runs regardless.
+
+A test coming in below the ladder's final week is the **expected** outcome after
+stalls, not a failure signal. It confirms what the stalls already implied. The
+ladder's endpoint is an intention, and the test says how much of it was real.
+
+Because the test replaces the anchor, the stall count does not need resetting.
+Its subject no longer exists.
+
+## Deliberately undecided
+
+- **Third stall.** No protocol. Within an 11-week ceiling, three stalls do not
+  fit before a test intervenes, so the case is not reachable in practice. If it
+  becomes reachable, the alternation model already offers a candidate response —
+  a persistent stall near the ceiling is the stated switch point to a hinge
+  block.
+- **Anchor carry-across block boundaries.** Not specified; the test at the
+  boundary makes it mostly moot, but the case of a block ending before its test
+  has not been examined.
+- **Interaction between reset cost and block runway.** A stall costs four of 7
+  or 11 climbing weeks. This is a real constraint on what a maintenance block
+  can achieve, and it belongs in the periodisation model rather than here. It
+  does bound the endpoint: a ladder leaving no room for one reset cannot survive
+  a stall within the block.
+- **Descending repetitions across the block.** The textbook linear block does
+  this; § The plan records why v1 does not.
+- **Fractional plates.** 2.5kg is the smallest available increment, so the climb
+  rate is slowed by cadence rather than step size. 0.5kg pairs would remove that
+  constraint. Not proposed.
+
+## Evidence requirements
+
+The gate is negative — the plan proceeds by default and retreats on evidence.
+This requires the performed record to distinguish **trained and failed** from
+**did not train**. A failed attempt must be recorded as an attempt.
+
+The logging app supports this: Hevy records a failed attempt as zero
+repetitions. The discriminator is the rep count and not the `failure` set type,
+which means "taken to failure" and appears on 77 completed sets in the record
+against one genuine failure. Translating it is specified in
+`specs/003-prescribed-workout-generation`.
