@@ -325,17 +325,37 @@ match; recorded in [contracts/cli.md](./contracts/cli.md).
 two unknowns and reverse-engineered a candidate anchor from four sessions. With the
 anchor fixed and authored, most of that dissolves.
 
-**What is now known, and on what evidence:**
+**Stated by the operator**, and so not open at all:
 
-| Value | Value | Evidence |
+| Value | Value | |
 | --- | --- | --- |
-| Anchor | **90kg**, tested 2026-07-03 | A completed single with a failed 95 above it. The one measurement of this lift's 1RM in the record |
-| Top-set reps | heavy **1**, light **3** | Constant across every session since the July test |
-| Light of heavy | **88.5%** | Reproduces 72.5/75/77.5 against 82.5/85/87.5 across three validated weeks. A flat −10kg offset fits equally well and was rejected for not being portable to a different anchor |
-| Back-off | **85%** of the session's top set | Six sessions checked, four exact, two the known hand errors |
-| Warm-up ramp | ~**40/60/80/90%** at 4/3/2/1 reps | Three sessions. The weakest of these, and the least consequential |
+| Anchor | **90kg**, tested 2026-07-03 | A completed single with a failed 95 above it — the one measurement of this lift's 1RM in the record. The operator named the session; the record supplied the number |
+| Back-off | **85%** of the session's top set | Where the record disagrees — three light sessions before 10 August — that is operator error, confirmed as such |
+| Warm-up ramp | **4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%** of the top set | |
 | Plate increment | **2.5kg** | Equipment |
 | Reset protocols | −10%/+5kg, −5%/+2.5kg | `primary-lift-progression.md` |
+
+**An operator input rather than a parameter:**
+
+| Value | |
+| --- | --- |
+| Duration | Supplied per block. Taking a duration and a starting 1RM is the whole point of the generator, and the ladder's step is the span divided by it — so a different duration is a different plan rather than the same plan run longer |
+
+**Inferred from the performed record and not confirmed.** These are marked
+`INFERRED` in the authored document. They are probably right; none of them was
+stated, and the distinction is what stops a fitted value passing as intent:
+
+| Value | Value | How it was arrived at |
+| --- | --- | --- |
+| Light of heavy | **88.5%** | Solved from three weeks of light/heavy pairs. A flat −10kg offset fits those three equally well and was rejected for not being portable to a different anchor — itself an unconfirmed judgement |
+| Top-set reps | heavy **1**, light **3** | Read off every session since the July test. Well evidenced; they have not varied within a role |
+| Accessory scheme | **4–6 × 3 sets** | Eyeballed across pull-ups, curls and wrist work. Both the range and the decision to use one range for ten slots are unconfirmed |
+
+**Why the distinction is not pedantry.** The back-off held at 67.5kg for three
+consecutive sessions while the top set climbed 75 → 77.5. Fitting the back-off the
+way these three were fitted would have yielded "the back-off holds while the top
+set moves" — a mistake encoded as a rule. It was avoided because the operator
+stated the value, not because the method was sound.
 
 **What remains unknown: the ladder's start and end percentages.** One number in
 substance, since the start follows from the endpoint and the duration once a rate is

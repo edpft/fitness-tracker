@@ -9,6 +9,12 @@
 //! `tests/fixtures/programme.toml` still carries `TODO` for it. These numbers
 //! exist so the machinery can be exercised, and a test asserting a real
 //! prescribed load must not read them as the programme's intent.
+//!
+//! Three others are inferred from the performed record rather than stated by the
+//! operator, and the document marks them `INFERRED`: the light-of-heavy
+//! percentage, the accessory range, and the per-role top-set repetitions. The
+//! back-off percentage, the warm-up ramp and the anchor are the operator's own.
+//! The duration is neither — it is an input the operator supplies per block.
 
 use application::StoreError;
 use domain::{
@@ -60,9 +66,9 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
 
 /// The parameters, with a **test** ladder span.
 ///
-/// Everything except the span is evidenced: the back-off percentage reproduces
-/// six sessions of the record, the light-of-heavy percentage reproduces three
-/// validated weeks, and the rep counts have been constant per role since July.
+/// The back-off percentage and the warm-up ramp are the operator's own. The
+/// light-of-heavy percentage, the accessory range and the per-role repetitions are
+/// inferred from the record; see the module note.
 ///
 /// # Errors
 ///

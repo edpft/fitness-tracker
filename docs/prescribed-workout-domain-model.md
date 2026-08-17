@@ -359,12 +359,15 @@ right. Checked against the corpus:
 | Fri 17 Jul | 82.5 | 70.1 | 70 | ✓ |
 | Mon 13 Jul | 72.5 | 61.6 | 67.5 | ✗ |
 
-The two misses are light-session Mondays before 10 August, and they are
-arithmetic errors rather than a different rule — the back-off was held at 67.5
-across three sessions while the top set moved. That is the defect the rule
-corrects, and it is why the earlier reading of this document could not reproduce
-the record: on 3 August the top set rose and the back-off did not, which no
-function of the anchor produces.
+The two misses are light-session Mondays before 10 August, and the operator has
+confirmed them as operator error rather than a different rule — the back-off was
+held at 67.5 across three sessions while the top set moved. That confirmation
+matters: it is what makes 85% a stated intention rather than a percentage fitted
+to five of six sessions with the sixth explained away.
+
+It is also why the earlier reading of this document could not reproduce the
+record. On 3 August the top set rose and the back-off did not, which no function
+of the anchor produces — and generation must not reproduce it.
 
 Quantisation is **nearest, ties down**: 85% of 80 is 68, which quantises to
 67.5. Settled in `specs/003-prescribed-workout-generation`. The increment is a
@@ -600,25 +603,27 @@ informative and a missed session is not.
    current value, because what they produced is recorded concretely in the
    issued prescription. What is known to be needed:
 
-   - **Warm-up ramp** — percentages and reps. The record is consistent at
-     roughly 40/60/80/90% of the top set for 4/3/2/1 reps across the last three
-     sessions, but that is reverse-engineered from three points and has never
-     been authored anywhere.
+   - **Warm-up ramp** — stated: 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%, all of
+     the session's own top set.
    - **Back-off percentage** — 85%. The rounding is settled and is code, not a
      parameter: nearest, ties down.
-   - **Top-set reps by session role** — heavy 1, light 3. Constant within a
-     block; descending reps across the block is the textbook variant and is
-     deferred.
-   - **The light session's top set as a percentage of the heavy one** — 88.5%
-     reproduces the record's three validated weeks, where a flat −10kg offset
-     reproduces them equally well. The percentage is preferred for being
-     portable to a different anchor, where the offset is not.
+   - **Top-set reps by session role** — heavy 1, light 3, read off the record
+     rather than stated. Constant within a block; descending reps across the
+     block is the textbook variant and is deferred.
+   - **The light session's top set as a percentage of the heavy one** — 88.5%,
+     solved from three weeks of the record rather than stated. A flat −10kg
+     offset fits those three equally well; the percentage is preferred for being
+     portable to a different anchor, which is itself an unconfirmed judgement.
    - **The ladder's start and end percentages** of the anchor. The weekly step
      is
      derived from these and the duration, not authored.
    - **Plate increment** — 2.5kg. The rounding rule that consumes it is code.
    - **Reset drops and re-climb rates** — −10%/+5kg and −5%/+2.5kg, from
      `primary-lift-progression.md`.
+
+   **Duration belongs to the programme, not here.** It is supplied per block,
+   and the ladder's step is the span divided by it — so it is an input rather
+   than a value to be settled once.
 
    None of these is stored today. They are the authored inputs a generated
    workout is a function of, and the reason a programme cannot yet run is that
