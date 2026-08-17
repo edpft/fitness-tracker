@@ -592,6 +592,23 @@ pub enum UnderivableReason {
     NeverPerformed,
     #[error("its last performance recorded no working set to progress from")]
     NoWorkingSet,
+    /// A static slot counted in time or ground covered.
+    ///
+    /// The mobility work. Double progression is a rule about repetitions, and a
+    /// sixty-second hold does not progress — so its prescription has to come from
+    /// the programme, and the programme carries no duration for a slot. A real
+    /// gap, named rather than filled with a plausible minute.
+    #[error("a static slot needs a duration, and the programme carries none")]
+    NoAuthoredDuration,
+    /// The primary slot's fill is not counted in repetitions.
+    #[error("a top set is a number of repetitions, and this exercise is not counted in them")]
+    NotCountedInReps,
+    /// The primary slot resolved to a superset, which the template excludes.
+    #[error("the primary slot is not a single exercise")]
+    NotSingle,
+    /// The programme's span and duration do not make a ladder.
+    #[error("the programme's span and duration do not make a ladder")]
+    NoLadder,
 }
 
 /// The projection of the performed record that prescription reads.

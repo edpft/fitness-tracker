@@ -17,6 +17,7 @@ pub mod error;
 pub mod extract;
 pub mod normalise;
 pub mod ports;
+pub mod prescribe;
 pub mod status;
 
 pub use error::{

@@ -165,6 +165,14 @@ pub enum PrescriptionError {
     #[error(transparent)]
     InconsistentProgramme(#[from] domain::prescription::InconsistentProgramme),
 
+    /// Every slot failed to derive, so there is no workout to issue.
+    ///
+    /// Distinct from a slot or two being underivable, which is a value on the
+    /// result: a prescription with ten good slots and one gap is worth issuing,
+    /// and one with no slots at all is not a prescription.
+    #[error("no slot could be derived, so there is no workout to issue")]
+    NothingDerivable,
+
     /// No operator time zone is declared. The same gap as
     /// [`NormalisationError::MissingTimeZone`], and it bites harder here: the
     /// zone decides which calendar day "the next session" falls on.

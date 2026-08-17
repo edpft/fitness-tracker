@@ -92,12 +92,12 @@ pub enum Prescribed<M> {
         effort: Rir,
         predicted: Option<Target<M>>,
     },
-    /// Load open; effort binds; measure pinned. Programme v1's RPE cap.
+    /// Load open; effort binds; measure pinned.
     ///
-    /// Reachable and currently unreached: no programme against the present
-    /// schema issues one. It stays because variants are append-only — a v1
-    /// programme still generating still needs it — and it is recorded here so
-    /// nobody reads the enum as a menu of live options.
+    /// Originally programme v1's RPE cap, and recorded here as reachable but
+    /// unreached. It turned out to be exactly what a block's exit **test** is:
+    /// one repetition, nothing in reserve, and the load is whatever the day
+    /// allows. That is the only thing that issues one now.
     Autoregulated { measure: Target<M>, effort: Rir },
 }
 
@@ -173,6 +173,19 @@ impl<M> PrescribedSet<M> {
             },
             rest_after: None,
             warmup: true,
+        }
+    }
+
+    /// Load open, measure pinned, effort binding. A test.
+    ///
+    /// The variant recorded as reachable-but-unreached turns out to be exactly
+    /// what a block's exit test is: work up to a single, nothing left in reserve,
+    /// and the load is whatever the day allows.
+    pub const fn autoregulated(measure: Target<M>, effort: Rir) -> Self {
+        Self {
+            prescription: Prescribed::Autoregulated { measure, effort },
+            rest_after: None,
+            warmup: false,
         }
     }
 
