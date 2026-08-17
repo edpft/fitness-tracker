@@ -255,6 +255,23 @@ pub struct ResetProtocol {
     pub reclimb_per_week: Kg,
 }
 
+/// The scheme every non-primary strength and hypertrophy slot runs.
+///
+/// Double progression: work the range, and when the top of it is reached at every
+/// working set, add an increment and start again at the bottom.
+///
+/// **One range for all of them, which is a simplification.** The record runs
+/// pull-ups at six, curls around four to six and wrist work at six — close enough
+/// that one range reproduces the shape, and different enough that a per-slot range
+/// would be more faithful. Deferred rather than hidden: a slot-keyed range is a
+/// bigger authored surface and nothing yet needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AccessoryScheme {
+    pub low: RepCount,
+    pub high: RepCount,
+    pub sets: RepCount,
+}
+
 /// Everything consulted when generating, in force as one version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationParameters {
@@ -267,6 +284,7 @@ pub struct GenerationParameters {
     pub ladder_start: Percentage,
     pub ladder_end: Percentage,
     pub top_set_reps: super::schedule::PerRole<TopSetReps>,
+    pub accessory: AccessoryScheme,
     pub plate_increment: PlateIncrement,
     pub first_reset: ResetProtocol,
     pub second_reset: ResetProtocol,

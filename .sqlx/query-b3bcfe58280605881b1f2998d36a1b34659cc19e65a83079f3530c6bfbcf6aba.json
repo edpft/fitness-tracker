@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT of_top_set_bp AS \"of_top_set_bp!: i64\", reps AS \"reps!: i64\"\n            FROM generation_warmup_step\n            WHERE parameters_authored_at = ?\n            ORDER BY position ASC\n            ",
+  "query": "\n        SELECT of_top_set_bp AS \"of_top_set_bp!: i64\", reps AS \"reps!: i64\"\n        FROM generation_warmup_step\n        WHERE parameters_authored_at = ?\n        ORDER BY position ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "5f5546f34d4915d68e5e9ecf7d569b726b1abf276cb157f7c18247f20c3b3d05"
+  "hash": "b3bcfe58280605881b1f2998d36a1b34659cc19e65a83079f3530c6bfbcf6aba"
 }

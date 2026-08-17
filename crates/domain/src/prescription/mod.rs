@@ -30,8 +30,8 @@ pub mod workout;
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance};
 pub use ladder::{InvalidLadder, Ladder};
 pub use parameters::{
-    GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage, PlateIncrement,
-    ResetProtocol, TopSetReps, WarmupStep,
+    AccessoryScheme, GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage,
+    PlateIncrement, ResetProtocol, TopSetReps, WarmupStep,
 };
 pub use quantise::{quantise, quantise_loaded};
 pub use schedule::{

@@ -52,6 +52,73 @@ fn reps_from_storage(reps: i64) -> Result<RepCount, StoreError> {
     RepCount::new(count).map_err(|error| corrupt(&error))
 }
 
+/// The warm-up ramp for one parameter version.
+async fn read_warmup(
+    pool: &SqlitePool,
+    authored_at: &str,
+) -> Result<NonEmpty<WarmupStep>, StoreError> {
+    let steps = sqlx::query!(
+        r#"
+        SELECT of_top_set_bp AS "of_top_set_bp!: i64", reps AS "reps!: i64"
+        FROM generation_warmup_step
+        WHERE parameters_authored_at = ?
+        ORDER BY position ASC
+        "#,
+        authored_at
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut warmup = Vec::with_capacity(steps.len());
+    for step in steps {
+        warmup.push(WarmupStep {
+            of_top_set: bp_from_storage(step.of_top_set_bp)?,
+            reps: reps_from_storage(step.reps)?,
+        });
+    }
+    NonEmpty::new(warmup).map_err(|_| corrupt(&"generation parameters with no warm-up ramp"))
+}
+
+/// The top-set repetitions for both session roles.
+///
+/// Both or nothing. `PerRole` is a struct precisely so a missing role is
+/// unrepresentable in Rust, which makes this boundary the only place a row deleted
+/// by hand can be caught — and it is reported rather than defaulted.
+async fn read_role_reps(
+    pool: &SqlitePool,
+    authored_at: &str,
+) -> Result<(TopSetReps, TopSetReps), StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT role AS "role!: String", top_set_reps AS "top_set_reps!: i64"
+        FROM generation_role_reps
+        WHERE parameters_authored_at = ?
+        "#,
+        authored_at
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut light = None;
+    let mut heavy = None;
+    for row in rows {
+        let reps = TopSetReps::new(reps_from_storage(row.top_set_reps)?);
+        match SessionRole::try_from(row.role.clone()) {
+            Ok(SessionRole::Light) => light = Some(reps),
+            Ok(SessionRole::Heavy) => heavy = Some(reps),
+            Err(error) => return Err(corrupt(&error)),
+        }
+    }
+    let (Some(light), Some(heavy)) = (light, heavy) else {
+        return Err(corrupt(
+            &"generation parameters missing a session role's repetitions",
+        ));
+    };
+    Ok((light, heavy))
+}
+
 #[derive(Debug, Clone)]
 pub struct SqliteGenerationParameterStore {
     pool: SqlitePool,
@@ -73,6 +140,9 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                    ladder_start_bp AS "ladder_start_bp!: i64",
                    ladder_end_bp AS "ladder_end_bp!: i64",
                    plate_increment_grams AS "plate_increment_grams!: i64",
+                   accessory_low AS "accessory_low!: i64",
+                   accessory_high AS "accessory_high!: i64",
+                   accessory_sets AS "accessory_sets!: i64",
                    reset1_drop_bp AS "reset1_drop_bp!: i64",
                    reset1_reclimb_grams AS "reset1_reclimb_grams!: i64",
                    reset2_drop_bp AS "reset2_drop_bp!: i64",
@@ -94,59 +164,8 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             .parse()
             .map_err(|_| corrupt(&"an authoring date that is not an instant"))?;
 
-        let steps = sqlx::query!(
-            r#"
-            SELECT of_top_set_bp AS "of_top_set_bp!: i64", reps AS "reps!: i64"
-            FROM generation_warmup_step
-            WHERE parameters_authored_at = ?
-            ORDER BY position ASC
-            "#,
-            row.authored_at
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        let mut warmup = Vec::with_capacity(steps.len());
-        for step in steps {
-            warmup.push(WarmupStep {
-                of_top_set: bp_from_storage(step.of_top_set_bp)?,
-                reps: reps_from_storage(step.reps)?,
-            });
-        }
-        let warmup = NonEmpty::new(warmup)
-            .map_err(|_| corrupt(&"generation parameters with no warm-up ramp"))?;
-
-        let role_rows = sqlx::query!(
-            r#"
-            SELECT role AS "role!: String", top_set_reps AS "top_set_reps!: i64"
-            FROM generation_role_reps
-            WHERE parameters_authored_at = ?
-            "#,
-            row.authored_at
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        // Both roles or nothing. `PerRole` is a struct precisely so a missing one
-        // is unrepresentable in Rust, which means this is the boundary that has
-        // to assert it.
-        let mut light = None;
-        let mut heavy = None;
-        for role_row in role_rows {
-            let reps = TopSetReps::new(reps_from_storage(role_row.top_set_reps)?);
-            match SessionRole::try_from(role_row.role.clone()) {
-                Ok(SessionRole::Light) => light = Some(reps),
-                Ok(SessionRole::Heavy) => heavy = Some(reps),
-                Err(error) => return Err(corrupt(&error)),
-            }
-        }
-        let (Some(light), Some(heavy)) = (light, heavy) else {
-            return Err(corrupt(
-                &"generation parameters missing a session role's repetitions",
-            ));
-        };
+        let warmup = read_warmup(&self.pool, &row.authored_at).await?;
+        let (light, heavy) = read_role_reps(&self.pool, &row.authored_at).await?;
 
         Ok(Some((
             authored_at,
@@ -157,6 +176,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                 ladder_start: bp_from_storage(row.ladder_start_bp)?,
                 ladder_end: bp_from_storage(row.ladder_end_bp)?,
                 top_set_reps: PerRole { light, heavy },
+                accessory: domain::prescription::AccessoryScheme {
+                    low: reps_from_storage(row.accessory_low)?,
+                    high: reps_from_storage(row.accessory_high)?,
+                    sets: reps_from_storage(row.accessory_sets)?,
+                },
                 plate_increment: PlateIncrement::new(grams_from_storage(
                     row.plate_increment_grams,
                 )?)
@@ -190,6 +214,9 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let ladder_start = bp_for_storage(parameters.ladder_start);
         let ladder_end = bp_for_storage(parameters.ladder_end);
         let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
+        let accessory_low = i64::from(parameters.accessory.low.as_u32());
+        let accessory_high = i64::from(parameters.accessory.high.as_u32());
+        let accessory_sets = i64::from(parameters.accessory.sets.as_u32());
         let reset1_drop = bp_for_storage(parameters.first_reset.drop);
         let reset1_reclimb = grams_for_storage(parameters.first_reset.reclimb_per_week)?;
         let reset2_drop = bp_for_storage(parameters.second_reset.drop);
@@ -200,10 +227,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             INSERT INTO generation_parameters (
                 authored_at, back_off_bp, light_of_heavy_bp,
                 ladder_start_bp, ladder_end_bp, plate_increment_grams,
+                accessory_low, accessory_high, accessory_sets,
                 reset1_drop_bp, reset1_reclimb_grams,
                 reset2_drop_bp, reset2_reclimb_grams
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
             stamp,
             back_off,
@@ -211,6 +239,9 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             ladder_start,
             ladder_end,
             increment,
+            accessory_low,
+            accessory_high,
+            accessory_sets,
             reset1_drop,
             reset1_reclimb,
             reset2_drop,

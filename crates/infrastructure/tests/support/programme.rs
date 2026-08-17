@@ -101,6 +101,11 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             heavy: TopSetReps::new(reps(1)?),
         },
         plate_increment: PlateIncrement::new(kg("2.5")?).map_err(invalid)?,
+        accessory: domain::prescription::AccessoryScheme {
+            low: reps(4)?,
+            high: reps(6)?,
+            sets: reps(3)?,
+        },
         first_reset: ResetProtocol {
             drop: pct("-10%")?,
             reclimb_per_week: kg("5")?,

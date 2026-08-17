@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   back_off_bp AS \"back_off_bp!: i64\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_start_bp AS \"ladder_start_bp!: i64\",\n                   ladder_end_bp AS \"ladder_end_bp!: i64\",\n                   plate_increment_grams AS \"plate_increment_grams!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   back_off_bp AS \"back_off_bp!: i64\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_start_bp AS \"ladder_start_bp!: i64\",\n                   ladder_end_bp AS \"ladder_end_bp!: i64\",\n                   plate_increment_grams AS \"plate_increment_grams!: i64\",\n                   accessory_low AS \"accessory_low!: i64\",\n                   accessory_high AS \"accessory_high!: i64\",\n                   accessory_sets AS \"accessory_sets!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -70,8 +70,41 @@
         }
       },
       {
-        "name": "reset1_drop_bp!: i64",
+        "name": "accessory_low!: i64",
         "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "accessory_low"
+          }
+        }
+      },
+      {
+        "name": "accessory_high!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "accessory_high"
+          }
+        }
+      },
+      {
+        "name": "accessory_sets!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "accessory_sets"
+          }
+        }
+      },
+      {
+        "name": "reset1_drop_bp!: i64",
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +115,7 @@
       },
       {
         "name": "reset1_reclimb_grams!: i64",
-        "ordinal": 7,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +126,7 @@
       },
       {
         "name": "reset2_drop_bp!: i64",
-        "ordinal": 8,
+        "ordinal": 11,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +137,7 @@
       },
       {
         "name": "reset2_reclimb_grams!: i64",
-        "ordinal": 9,
+        "ordinal": 12,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -127,8 +160,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "bb7dce7c84f04ce4607ccf6c0b434e0aabce489c0c63abc663a244626f9869a9"
+  "hash": "e089f367fb644bfbc45d6aa85b04c2d27a663d7944431d4e22238e6c41473914"
 }

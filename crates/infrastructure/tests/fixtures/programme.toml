@@ -90,9 +90,17 @@ light_of_heavy = "88.5%"
 start = "TODO"
 end   = "TODO"
 
-# Constant within a block. Descending reps across the block — fives, threes,
-# singles — is the textbook linear variant and is deferred, because the record
-# has held these fixed per role since the July test while the load climbed.
+# The double-progression scheme every non-primary strength and hypertrophy slot
+# runs. One range for all of them; the record runs pull-ups at six, curls around
+# four to six and wrist work at six.
+[parameters.accessory]
+reps = "4-6"
+sets = 3
+
+# The primary's top set, per session role. Constant within a block — descending
+# reps across the block, fives then threes then singles, is the textbook linear
+# variant and is deferred, because the record has held these fixed per role since
+# the July test while the load climbed.
 [parameters.roles.light]
 top_set_reps = 3
 

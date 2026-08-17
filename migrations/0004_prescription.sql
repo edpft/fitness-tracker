@@ -35,6 +35,13 @@ CREATE TABLE generation_parameters (
 
     plate_increment_grams  INTEGER NOT NULL CHECK (plate_increment_grams > 0),
 
+    -- The double-progression scheme every non-primary strength and hypertrophy
+    -- slot runs. One range for all of them is a simplification the domain
+    -- records; a per-slot range would be more faithful and is deferred.
+    accessory_low          INTEGER NOT NULL CHECK (accessory_low > 0),
+    accessory_high         INTEGER NOT NULL CHECK (accessory_high > 0),
+    accessory_sets         INTEGER NOT NULL CHECK (accessory_sets > 0),
+
     -- From `docs/primary-lift-progression.md`. Drops are negative.
     reset1_drop_bp         INTEGER NOT NULL CHECK (reset1_drop_bp < 0),
     reset1_reclimb_grams   INTEGER NOT NULL CHECK (reset1_reclimb_grams > 0),
@@ -42,7 +49,9 @@ CREATE TABLE generation_parameters (
     reset2_reclimb_grams   INTEGER NOT NULL CHECK (reset2_reclimb_grams > 0),
 
     -- A ladder that does not rise is not a plan.
-    CHECK (ladder_end_bp > ladder_start_bp)
+    CHECK (ladder_end_bp > ladder_start_bp),
+    -- A range must span; equal bounds would be a fixed count.
+    CHECK (accessory_high > accessory_low)
 ) WITHOUT ROWID;
 
 CREATE TABLE generation_warmup_step (
