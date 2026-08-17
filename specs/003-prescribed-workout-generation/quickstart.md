@@ -202,9 +202,15 @@ reintroducing stored state.
 
 ---
 
-## Scenario group 4 — the round trip (SC-010)
+## Scenario group 4 — the round trip (SC-010, SC-012)
 
-The generative test the prescribed model has been asking for, mechanised.
+**The projection is a model invariant; the comparison against the corpus is a
+diagnostic.** Nothing in the corpus was issued from a prescription, so a
+divergence between what generation produces for a past date and what was actually
+prescribed is information rather than a failure — it locates a parameter nobody
+has stated, a template that has since changed, or arithmetic done wrong by hand.
+The criterion that does assert agreement is SC-012, and it cannot run until
+generation has issued something and that session has been trained.
 
 ```rust
 // Sketch. For each session in the corpus:
@@ -218,15 +224,17 @@ let divergences = satisfies(&projection.shape, &prescribed.workout.shape());
 | --- | --- | --- |
 | SC-010a | All fifteen sessions since 15 June project without panicking | `every_session_projects` |
 | SC-010b | Structure agrees: blocks, order, grouping, slots | `generation_reproduces_the_structure_of_the_record` |
-| SC-010c | Loads agree from 2026-08-07 onward | `generation_reproduces_the_loads_from_august` |
+| SC-010c | Loads are compared to 2026-08-07 onward, and every divergence is attributable | `divergences_from_the_record_are_attributable` |
 | SC-010d | A projected `Exactly(6)` satisfies a prescribed `Range { 4, 6 }` | `satisfaction_is_direction_aware` |
 | SC-010e | A projected shape cannot be issued | *compile-fail test* |
 | SC-010f | The 95kg failure projects with `IntendedMeasureUnknown` | `a_failed_attempt_projects_a_gap` |
 
-**SC-010c excludes three sessions knowingly**, and the exclusion is written into the
-test as a named list rather than a date cutoff, with the reason beside it: the
-back-off loads of 13 July, 20 July and 3 August were computed wrongly by hand. A
-test that reproduced them would be requiring the system to reproduce a defect.
+**SC-010c asserts attribution, not agreement.** Each divergence must fall into one
+of three named buckets — an unstated parameter, a template change, or hand
+arithmetic — and a divergence outside them is a defect in generation. That is
+strictly stronger than a date cutoff with three named exclusions, which is what an
+earlier draft had: a cutoff hides every divergence before it, where attribution
+makes each one say what it is.
 
 **SC-010e is a compile-fail test, not a runtime one.** FR-034 is held by the types —
 only generation can build a `PrescribedWorkout`, because only generation has an

@@ -368,13 +368,14 @@ stated rather than inferred. The current model reaches the same loads from a sta
 plan instead.
 
 **What this blocks and what it does not.** It blocks SC-001 — a real workout — and
-writing SC-003's expected loads. It does not block Phase 1 design or the
+demonstrating SC-001. It does not block Phase 1 design or the
 implementation of anything: the parameter store, the ladder derivation, the
 projection and the CLI are all indifferent to the value.
 
-**How the gap is held open safely.** SC-003's expected loads are written with the
-values absent, so the test does not compile until they are supplied. A placeholder
-that runs green is worse than one that will not build.
+**How the gap is held open safely.** The authored document carries `TODO` where the
+span belongs and authoring refuses it, so no prescription can be issued from a
+guessed span. A placeholder that authors successfully is worse than one that
+fails.
 
 ---
 
@@ -411,15 +412,27 @@ not a coincidence; it is why the prescribed model says the issued grouping "is
 structurally what the performed model calls `WorkoutItem`". So a total function
 from performance to prescription shape exists, and writing it down buys two things.
 
-1. **The generative test stops being a reading exercise.** The prescribed model's
-   own validation question — would this model, given the current programme, produce
-   the routines currently in use? — becomes a comparison of two `WorkoutShape`
-   values rather than a human comparing a printout against a database. SC-002 and
-   SC-003 are checkable across all fifteen sessions this way, and a divergence
-   names itself instead of being noticed or not.
+1. **A divergence names itself.** Comparing a projection against a generated
+   prescription reports what differed, in the domain's own vocabulary, instead of
+   a human reading a printout against a database.
 2. **It separates what a prescription *is* from what makes it issued.** That
    factoring was latent and wrong in the first draft of this plan, where
    `PrescribedWorkout` bundled the items with the anchor and the date.
+
+**This is a forward invariant, and the corpus does not satisfy it.** The property
+is that a session performed under an issued prescription projects back to
+something that prescription is satisfied by. Nothing in the corpus was issued: it
+records a programme run by hand, whose template changed while it ran and whose
+arithmetic was sometimes wrong. Comparing a projection against a *regenerated*
+prescription for a past date is therefore a diagnostic — it says where the model
+and the history part company, and each parting has a cause worth naming — and it
+is not a test the model should be expected to pass. An earlier draft of this
+document had SC-002 and SC-003 asserting reproduction, which would have made
+reproducing human error a requirement.
+
+The distinction matters for what the comparison is *for*. Against the corpus it
+locates unstated parameters, template changes and hand-arithmetic mistakes.
+Against sessions performed after generation starts issuing, it locates defects.
 
 **The § 11 hazard this closes, which is the reason for the split.** § 11 makes the
 separation one-directional: prescribed data never satisfies a query about what
@@ -472,11 +485,10 @@ reports divergences and asserts nothing about which one is right.
   should have guaranteed, and the § 11 hazard above stays open.
 - **Compare printed output as text.** Rejected: brittle against formatting, and it
   cannot express "a performed 6 satisfies a prescribed 4–6".
-- **Skip the projection and assert SC-003 against hand-written expected loads.**
-  Rejected as strictly weaker — hand-written expectations are what the back-off
-  error came from — but the two are not exclusive, and the load table for the
-  primary is still written out explicitly because it is the value most worth
-  pinning.
+- **Skip the projection and assert against hand-written expected loads.**
+  Rejected: hand-written expectations are what the back-off error came from, and
+  an expectation copied out of the record would make the record the
+  specification.
 
 **Scope held**: no CLI surface for this. `fitness prescribe --from-performed` is a
 plausible command and is not in this feature; the projection exists as a `domain`

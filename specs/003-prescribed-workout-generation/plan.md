@@ -65,12 +65,17 @@ workouts already normalised:
    so a projection cannot be stored as a prescription — which is the § 11 hazard the
    split closes. D9.
 
-Two of the spec's success criteria are the sharp tests and neither needs a new
-fixture: **SC-003**, that regenerating the sessions from 2026-08-07 onward
-reproduces the loads actually prescribed, and **SC-006/SC-007**, that the 95kg
-attempt becomes visible without moving any total. D9 changes how the first is
-checked — SC-010 makes it a comparison of two values rather than a reading of
-printed output.
+**SC-006/SC-007 is the sharp test and needs no new fixture**: the 95kg attempt
+becomes visible without moving any total.
+
+**The corpus is not the specification**, and SC-002/SC-003 say so. Comparing what
+generation produces for a past date against what was actually prescribed is a
+*diagnostic*: nothing in the corpus was issued from a prescription, its template
+changed while it ran, and some of its arithmetic was done wrong by hand. Each
+divergence must be attributable to one of those three, and one that is not is a
+defect — which is a stronger and more honest assertion than reproduction. The
+criterion that does assert agreement is SC-012, and it cannot run until generation
+has issued a session and that session has been trained.
 
 ## Technical Context
 
@@ -118,8 +123,9 @@ programme, one primary lift, one template, 11 slots. Single user, single operato
 start and end percentages are an operator input this plan cannot derive: they are a
 claim about achievable gain, not anything the record implies. Everything else is now
 evidenced — the anchor is the 3 July test at 90kg, the rep counts are constant per
-role, and the light-of-heavy and back-off percentages reproduce the record. The span
-does not block Phase 1 design; it does block SC-001 and SC-003. See
+role, and the back-off percentage is the operator's own. Several of the others are
+fitted from the record rather than stated, which is recorded in D8 as a gap of the
+same kind. The span does not block Phase 1 design; it does block SC-001. See
 [research.md](./research.md), D8.
 
 ## Constitution Check
@@ -153,7 +159,7 @@ surfaced rather than resolved silently; see below.*
 | **§ 27** Types first | PASS | Task order is domain vocabulary → the outcome change → ports → store → generation → CLI |
 | **§ 28** A random instance is valid | PASS | `proptest` over every new newtype, and over `Prescribed` — an arbitrary prescription pins an axis |
 | **§ 29/30** Integration tests at ports are primary | PASS | Every [quickstart.md](./quickstart.md) scenario drives generation through its ports against the landed corpus |
-| **§ 31** Red-green-refactor at the port boundary | PASS | SC-003 and SC-005 are written before the derivation and fail until the percentage tables and the reset arithmetic are right |
+| **§ 31** Red-green-refactor at the port boundary | PASS | SC-005 and SC-011 are written before the derivation and fail until the ladder and the reset arithmetic are right. SC-003 is a diagnostic rather than a gate, and is not what red-green runs against |
 | **§ 32/33** Minimal scope, no proof-of-concept code | PASS | No canonical layer, no correspondence, no routine writing, no pattern vocabulary. Each is in the spec's Out of Scope with a reason |
 | **§ 34** Deployment-agnostic | PASS | Database path, zone and the authoring document's path are all configuration |
 | **§ 35** Credentials never in version control | N/A | This feature makes no request |
@@ -352,10 +358,14 @@ recorded. Four observations from building the artifacts:
   FR-011 distinguishes a slot whose exercise has no history from a slot that
   failed to derive. An `Option<Performance>` conflates them at the call site, so
   the port returns a type that names the case.
-- **SC-003 is the mapping test of this feature**, and it is written before the
-  percentage tables exist. It will fail loudly and specifically until the
-  authored values are right, which is how the values get authored — the same
-  mechanism 002 used for the exercise mapping's seven zeros.
+- **This feature has no equivalent of 002's seven-zero test, and pretending it
+  did was a mistake.** 002 could assert an exact count because the corpus was the
+  authority on what the source had served. Here the corpus is a record of a
+  hand-run programme, so an exact-reproduction assertion would require the model
+  to reproduce human error and a template that has since changed. SC-003 is
+  therefore an attribution check — every divergence falls into a named bucket or
+  it is a defect — and SC-005's eleven-week table is the exact one, because it
+  comes from the model of record rather than from history.
 - **The operator's round-trip observation changed the type factoring and found a
   missing port.** `PrescribedWorkout` originally bundled the items with the anchor
   and the date; splitting `WorkoutShape` out is strictly better and was not
@@ -374,6 +384,6 @@ recorded. Four observations from building the artifacts:
   a revision should move in.
 
 The gap design did not close: **the ladder's span remains unknown**, so
-SC-003's expected values cannot be written until the operator supplies it. This
+SC-001 cannot be demonstrated until the operator supplies it. This
 is recorded as an authored-value gap rather than a design one (D8), and it is the
 one thing that stands between this plan and a workout.

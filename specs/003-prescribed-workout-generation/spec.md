@@ -181,8 +181,8 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 ### Measurable Outcomes
 
 - **SC-001**: The operator obtains a complete, trainable prescription for a named date in a single request, with no manual arithmetic.
-- **SC-002**: Running generation against the programme in force reproduces the structure of every one of the fifteen sessions trained since 15 June 2026 — same blocks, same order, same grouping, same slots.
-- **SC-003**: Regenerating a past session from the anchor and history in force at that date reproduces the loads actually prescribed on that date, for every session from 7 August 2026 onward. Sessions before that date are excluded knowingly: the back-off loads of 13 July, 20 July and 3 August were computed wrongly by hand and the correct rule does not reproduce them.
+- **SC-002**: Running generation against the programme in force produces a session whose structure the operator recognises — five blocks in fatigue order, the strength block's four patterns with the upper pair supersetted, the hypertrophy block's two supersets and single core slot. Checked against the fifteen sessions trained since 15 June 2026 as a **diagnostic**: divergences are listed, not required to be absent. The corpus records a programme that was run by hand and changed while it ran, so a model that reproduced it exactly would be reproducing its mistakes.
+- **SC-003**: Regenerating a past session from the anchor and history in force at that date and comparing it against what was actually prescribed yields a **list of divergences**, each attributable to one of: a parameter not yet stated, a change to the template since that session, or an arithmetic error made by hand. A divergence with no such attribution is a defect in generation. This is deliberately not a reproduction requirement — see SC-012 for the criterion that does assert agreement.
 - **SC-004**: The two back-off errors visible in the corpus cannot recur, because no prescribed load is arrived at by hand.
 - **SC-005**: The eleven-week worked example in `primary-lift-progression.md` is reproduced exactly, load for load.
 - **SC-011**: A block generated from a duration and a starting 1RM alone — no other operator input beyond the ladder endpoint — produces a complete primary loading series for every week, ending in a test.
@@ -190,7 +190,8 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 - **SC-007**: No total, count or maximum estimate anywhere in the system changes as a result of that attempt becoming visible.
 - **SC-008**: Discarding all generated output and regenerating from the stored authored data reproduces it identically.
 - **SC-009**: An operator reading a prescription issued six months earlier can see every value it was derived from without consulting anything outside the stored record.
-- **SC-010**: Every one of the fifteen sessions trained since 15 June 2026 can be projected into a prescription shape, and each projection can be compared against what generation produces for that date — turning SC-002 and SC-003 from a reading of printed output into a comparison of two values. Where the two differ, the difference is reported as a list of specific divergences rather than a pass or fail.
+- **SC-010**: Every performed workout projects into a prescription shape. Total over the corpus's 164 workouts — no session fails to project — which is the model's own invariant rather than a claim about any of them being well-formed. Projection is what makes SC-003's comparison expressible at all.
+- **SC-012**: For a session performed *after* generation began issuing, its projection satisfies the prescription that was issued for that date, except where the operator deliberately diverged. This is the forward invariant the round trip is really about, and it is the only criterion here that asserts agreement. It cannot be evaluated against the corpus, because nothing in the corpus was issued.
 
 ## Assumptions
 

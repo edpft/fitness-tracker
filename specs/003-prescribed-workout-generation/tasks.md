@@ -30,9 +30,10 @@ This does not change what US3 delivers, and it does not make US1 depend on US3's
 phase. It is recorded because silently reorganising a spec's stories is how a
 plan and its tasks drift apart.
 
-**Blocked tasks are marked ⛔.** Research D8's ladder span is not yet authored, so
-a handful of tasks can be written but not completed. They are the ones that assert
-a real primary load. Everything else proceeds.
+**One task is blocked, marked ⛔.** Research D8's ladder span is not yet authored,
+so no real prescription can be issued. Nothing else waits on it: an earlier version
+of this file also blocked the corpus comparison, on the assumption that it asserted
+reproduction. It asserts attribution instead, which needs no span.
 
 ---
 
@@ -151,7 +152,7 @@ other slot's from its own last performance.
 - [ ] T055 [US1] Implement `satisfies(performed, prescribed) -> Vec<Divergence>` in `crates/domain/src/prescription/project.rs`, treating a projected `Exactly(n)` as agreeing with a prescribed `Range` containing `n`
 - [ ] T056 [P] [US1] Write SC-010a, SC-010b and SC-010d in `crates/infrastructure/tests/round_trip.rs` — all fifteen sessions project; generation reproduces their structure; satisfaction is direction-aware
 - [ ] T057 [P] [US1] Write SC-010e as a compile-fail test in `crates/domain/tests/`: `store.issue(projection.shape)` must not compile
-- [ ] T058 ⛔ [US1] Write SC-010c in `crates/infrastructure/tests/round_trip.rs` — generation reproduces the loads from 2026-08-07 onward, with 13 July, 20 July and 3 August excluded by a named list and the reason beside it. **Blocked on the ladder span (D8).** Write the table with the values absent so it does not compile
+- [ ] T058 [US1] Write SC-010c in `crates/infrastructure/tests/round_trip.rs` — compare generation against what was prescribed from 2026-08-07 onward, and assert every divergence is attributable to an unstated parameter, a template change, or hand arithmetic. A divergence outside those is a defect. **No longer blocked**: attribution does not need the ladder span, where reproduction would have
 
 **Checkpoint**: a workout is issued and printed for a real date, from real
 history, with everything except the primary's absolute loads verified.

@@ -69,8 +69,18 @@ the architect. It names no language, framework, library, schema or API. The
 single mention of the CLI and web adapters appears in Out of Scope, where the
 point being made is which driving adapters this feature does *not* deliver.
 
-**On SC-003.** The criterion deliberately excludes three sessions before
-2026-08-07. The back-off loads of 13 July, 20 July and 3 August were computed
-incorrectly by hand, and a spec that required the correct rule to reproduce them
-would be requiring the system to reproduce a defect. The exclusion is stated in
-the criterion itself so it cannot be mistaken for an oversight.
+**On SC-002, SC-003 and SC-012.** These were revised after the operator pointed out
+that the round trip is a property of the model going forward, not of the corpus. An
+earlier draft had SC-002 and SC-003 asserting that generation reproduces the
+fifteen sessions since 15 June — which would have made the corpus the
+specification, and so required the model to reproduce a template that changed while
+it ran and arithmetic that was sometimes wrong.
+
+They now assert *attribution*: every divergence between generation and the record
+falls into a named bucket — an unstated parameter, a template change, or hand
+arithmetic — and one that does not is a defect. SC-012 carries the agreement
+assertion and applies only to sessions performed after generation began issuing,
+because nothing in the corpus was issued.
+
+This is stronger rather than weaker. A date cutoff with three named exclusions
+hides every divergence before it; attribution makes each one say what it is.
