@@ -14,6 +14,6 @@ pub use hevy::{HevyWorkoutEvents, HevyWorkoutTranslator, PageCount, PageNumber, 
 pub use lock::FileRunLock;
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
-    SqliteExtractionRunLog, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
+    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };

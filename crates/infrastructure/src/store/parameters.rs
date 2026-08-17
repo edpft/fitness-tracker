@@ -1,0 +1,267 @@
+//! The § 14 generation parameters.
+//!
+//! **Superseded by date, never overwritten.** Only the current value is required
+//! — that is § 14 — and the reason it holds is that an issued prescription
+//! records what these produced. So a superseded percentage answers no question,
+//! and keeping it costs nothing.
+//!
+//! "The one in force" is therefore the greatest `authored_at`, which is a `WHERE`
+//! clause rather than a mutable flag. Same reasoning as the normalised layer
+//! having no `is_current` column.
+
+use application::{GenerationParameterStore, StoreError};
+use domain::{
+    gym::{Kg, NonEmpty, RepCount},
+    prescription::{
+        GenerationParameters, PerRole, Percentage, PlateIncrement, ResetProtocol, SessionRole,
+        TopSetReps, WarmupStep,
+    },
+};
+use jiff::Timestamp;
+use sqlx::SqlitePool;
+
+use super::{corrupt, store_error};
+
+/// A percentage on its way into the store.
+///
+/// Basis points are `i32` in the domain and SQLite stores `i64`; the widening is
+/// free and lives here rather than at each call site.
+const fn bp_for_storage(percentage: Percentage) -> i64 {
+    percentage.as_basis_points() as i64
+}
+
+fn bp_from_storage(points: i64) -> Result<Percentage, StoreError> {
+    let narrowed = i32::try_from(points)
+        .map_err(|_| corrupt(&"a percentage larger than the domain can hold"))?;
+    Percentage::from_basis_points(narrowed).map_err(|error| corrupt(&error))
+}
+
+fn grams_for_storage(mass: Kg) -> Result<i64, StoreError> {
+    i64::try_from(mass.as_grams()).map_err(|_| corrupt(&"a mass larger than the store can hold"))
+}
+
+fn grams_from_storage(grams: i64) -> Result<Kg, StoreError> {
+    let unsigned = u64::try_from(grams)
+        .map_err(|_| corrupt(&"a mass stored as a negative number of grams"))?;
+    Ok(Kg::from_grams(unsigned))
+}
+
+fn reps_from_storage(reps: i64) -> Result<RepCount, StoreError> {
+    let count =
+        u32::try_from(reps).map_err(|_| corrupt(&"a repetition count the domain cannot hold"))?;
+    RepCount::new(count).map_err(|error| corrupt(&error))
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteGenerationParameterStore {
+    pool: SqlitePool,
+}
+
+impl SqliteGenerationParameterStore {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl GenerationParameterStore for SqliteGenerationParameterStore {
+    async fn current(&self) -> Result<Option<(Timestamp, GenerationParameters)>, StoreError> {
+        let Some(row) = sqlx::query!(
+            r#"
+            SELECT authored_at AS "authored_at!: String",
+                   back_off_bp AS "back_off_bp!: i64",
+                   light_of_heavy_bp AS "light_of_heavy_bp!: i64",
+                   ladder_start_bp AS "ladder_start_bp!: i64",
+                   ladder_end_bp AS "ladder_end_bp!: i64",
+                   plate_increment_grams AS "plate_increment_grams!: i64",
+                   reset1_drop_bp AS "reset1_drop_bp!: i64",
+                   reset1_reclimb_grams AS "reset1_reclimb_grams!: i64",
+                   reset2_drop_bp AS "reset2_drop_bp!: i64",
+                   reset2_reclimb_grams AS "reset2_reclimb_grams!: i64"
+            FROM generation_parameters
+            ORDER BY authored_at DESC
+            LIMIT 1
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?
+        else {
+            return Ok(None);
+        };
+
+        let authored_at: Timestamp = row
+            .authored_at
+            .parse()
+            .map_err(|_| corrupt(&"an authoring date that is not an instant"))?;
+
+        let steps = sqlx::query!(
+            r#"
+            SELECT of_top_set_bp AS "of_top_set_bp!: i64", reps AS "reps!: i64"
+            FROM generation_warmup_step
+            WHERE parameters_authored_at = ?
+            ORDER BY position ASC
+            "#,
+            row.authored_at
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut warmup = Vec::with_capacity(steps.len());
+        for step in steps {
+            warmup.push(WarmupStep {
+                of_top_set: bp_from_storage(step.of_top_set_bp)?,
+                reps: reps_from_storage(step.reps)?,
+            });
+        }
+        let warmup = NonEmpty::new(warmup)
+            .map_err(|_| corrupt(&"generation parameters with no warm-up ramp"))?;
+
+        let role_rows = sqlx::query!(
+            r#"
+            SELECT role AS "role!: String", top_set_reps AS "top_set_reps!: i64"
+            FROM generation_role_reps
+            WHERE parameters_authored_at = ?
+            "#,
+            row.authored_at
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        // Both roles or nothing. `PerRole` is a struct precisely so a missing one
+        // is unrepresentable in Rust, which means this is the boundary that has
+        // to assert it.
+        let mut light = None;
+        let mut heavy = None;
+        for role_row in role_rows {
+            let reps = TopSetReps::new(reps_from_storage(role_row.top_set_reps)?);
+            match SessionRole::try_from(role_row.role.clone()) {
+                Ok(SessionRole::Light) => light = Some(reps),
+                Ok(SessionRole::Heavy) => heavy = Some(reps),
+                Err(error) => return Err(corrupt(&error)),
+            }
+        }
+        let (Some(light), Some(heavy)) = (light, heavy) else {
+            return Err(corrupt(
+                &"generation parameters missing a session role's repetitions",
+            ));
+        };
+
+        Ok(Some((
+            authored_at,
+            GenerationParameters {
+                warmup,
+                back_off_of_top_set: bp_from_storage(row.back_off_bp)?,
+                light_of_heavy: bp_from_storage(row.light_of_heavy_bp)?,
+                ladder_start: bp_from_storage(row.ladder_start_bp)?,
+                ladder_end: bp_from_storage(row.ladder_end_bp)?,
+                top_set_reps: PerRole { light, heavy },
+                plate_increment: PlateIncrement::new(grams_from_storage(
+                    row.plate_increment_grams,
+                )?)
+                .map_err(|error| corrupt(&error))?,
+                first_reset: ResetProtocol {
+                    drop: bp_from_storage(row.reset1_drop_bp)?,
+                    reclimb_per_week: grams_from_storage(row.reset1_reclimb_grams)?,
+                },
+                second_reset: ResetProtocol {
+                    drop: bp_from_storage(row.reset2_drop_bp)?,
+                    reclimb_per_week: grams_from_storage(row.reset2_reclimb_grams)?,
+                },
+            },
+        )))
+    }
+
+    async fn author(
+        &self,
+        authored_at: Timestamp,
+        parameters: &GenerationParameters,
+    ) -> Result<(), StoreError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+
+        let stamp = authored_at.to_string();
+        let back_off = bp_for_storage(parameters.back_off_of_top_set);
+        let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
+        let ladder_start = bp_for_storage(parameters.ladder_start);
+        let ladder_end = bp_for_storage(parameters.ladder_end);
+        let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
+        let reset1_drop = bp_for_storage(parameters.first_reset.drop);
+        let reset1_reclimb = grams_for_storage(parameters.first_reset.reclimb_per_week)?;
+        let reset2_drop = bp_for_storage(parameters.second_reset.drop);
+        let reset2_reclimb = grams_for_storage(parameters.second_reset.reclimb_per_week)?;
+
+        sqlx::query!(
+            r"
+            INSERT INTO generation_parameters (
+                authored_at, back_off_bp, light_of_heavy_bp,
+                ladder_start_bp, ladder_end_bp, plate_increment_grams,
+                reset1_drop_bp, reset1_reclimb_grams,
+                reset2_drop_bp, reset2_reclimb_grams
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ",
+            stamp,
+            back_off,
+            light_of_heavy,
+            ladder_start,
+            ladder_end,
+            increment,
+            reset1_drop,
+            reset1_reclimb,
+            reset2_drop,
+            reset2_reclimb
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        for (position, step) in parameters.warmup.iter().enumerate() {
+            let position = i64::try_from(position)
+                .map_err(|_| corrupt(&"a warm-up ramp longer than the store can hold"))?;
+            let of_top_set = bp_for_storage(step.of_top_set);
+            let reps = i64::from(step.reps.as_u32());
+            sqlx::query!(
+                r"
+                INSERT INTO generation_warmup_step (
+                    parameters_authored_at, position, of_top_set_bp, reps
+                )
+                VALUES (?, ?, ?, ?)
+                ",
+                stamp,
+                position,
+                of_top_set,
+                reps
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+
+        for role in SessionRole::ALL {
+            let key = role.as_str();
+            let reps = i64::from(parameters.top_set_reps.get(*role).as_rep_count().as_u32());
+            sqlx::query!(
+                r"
+                INSERT INTO generation_role_reps (
+                    parameters_authored_at, role, top_set_reps
+                )
+                VALUES (?, ?, ?)
+                ",
+                stamp,
+                key,
+                reps
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(())
+    }
+}

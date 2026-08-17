@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO generation_parameters (\n                authored_at, back_off_bp, light_of_heavy_bp,\n                ladder_start_bp, ladder_end_bp, plate_increment_grams,\n                reset1_drop_bp, reset1_reclimb_grams,\n                reset2_drop_bp, reset2_reclimb_grams\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "e9ecb95f877a10cd1fe243b3f553d621ef9f94a258feb1aa53b8372378ecffeb"
+}

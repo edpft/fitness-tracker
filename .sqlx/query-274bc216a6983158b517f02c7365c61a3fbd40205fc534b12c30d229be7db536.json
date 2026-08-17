@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT role AS \"role!: String\", top_set_reps AS \"top_set_reps!: i64\"\n            FROM generation_role_reps\n            WHERE parameters_authored_at = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "role!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "name": "top_set_reps!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "top_set_reps"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "274bc216a6983158b517f02c7365c61a3fbd40205fc534b12c30d229be7db536"
+}
