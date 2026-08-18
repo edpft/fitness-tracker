@@ -682,73 +682,99 @@ document only for as long as `v1` does.
 Correction 3 below moves that endpoint again — from the entry anchor to what has
 actually been lifted since — but not back into anyone's hands. It stays derived.
 
-### Correction 3: the gain is measured, and the test prescribes nothing
+### Correction 3: the block plans a gain, and the literature says how much
 
-**Written after the operator read the above, and it replaces the open question
-this section originally ended with.**
-
-Two things were wrong. The first is small and the code already had it right:
-**no load is prescribed for the exit test.** `WeekKind::Test` carries no
-percentage, which is why the type is a variant rather than a flag. A test is
-worked up to. A number is still wanted for the warm-up ramp, but it is an
-expectation and has to be presented as one — the tables above showed 95% in the
-test row as though it were a prescription, and that is corrected.
-
-The second is the substance. The derivation above prescribes every
-intensification week against the entry test's 1RM, which makes the implied 1RM
+**Written after two wrong turns, both mine.** The first draft prescribed every
+intensification week against the entry test's 1RM, which made the implied 1RM
 climb 97.1 → 97.9 → 98.6 → 99.3 → 100.0% and arrive at exactly what was tested
-at the start. **That is a maintenance block wearing a periodisation costume.**
-The operator's account of the intent is the opposite: the intensification weeks
-should be landing *above* what the entry test predicts, and the exit test then
-confirms the gain and ideally beats it.
+at the start — a maintenance block wearing a periodisation costume. The second
+draft concluded that planning a gain needs a number and there was nowhere honest
+to get one, and proposed deriving the load from performed top sets instead.
 
-**Planning that gain needs a number, and there is nowhere honest to get one.**
-It is the total-gain parameter under its fifth name — a ladder span, an opening
-proximity, an RIR per phase, an opening percentage, and now a gain rate. The
-handover's warning applies to this paragraph as much as to any earlier one: if
-the operator is being asked for a number that determines the loads, the mistake
-has been re-introduced.
+That was wrong, and the operator named the error precisely: what they rejected
+was *themselves* picking a percentage or a weight out of the air, not a number
+the literature supplies. Three sources of expertise are available — the
+published literature, the performed record, and what the operator states — and
+refusing the first one because the third had declined to guess is how this went
+round in circles.
 
-**So do not plan it — measure it.** Every intensification week is already a
-single top set worked up to; the 2025 record shows exactly that, one row a week,
-and the last of them is the exit test only because its repetition count is the
-target. Make that structural:
+**The literature is unanimous, and the number is 105% of the entry 1RM.**
+
+| Source | What it plans |
+| --- | --- |
+| Russian Squat Routine, 6 weeks | Ends with a single at **105%** of the starting max; 5–10% expected |
+| Arbic, 17-week block periodisation | Tests at **105%** of the *original* 1RM; built so the lifter can double it |
+| Meet attempt convention | Third attempt 103% standard, **105%** aggressive; a PR attempt is 102–107% of the previous best |
+| Peaking-block main work | 87–95% of the entry max, arriving above 100% only at the end |
+
+So the endpoint is a literature constant of exactly the same standing as
+Prilepin's bands and the repetitions-in-reserve table. It is not authored, and
+asking the operator for it would be the mistake — not using it.
+
+**A note on what this vindicates.** `v1`'s ladder ended at 105%, and the
+handover dismissed that as "the linear model's invented 105% endpoint". It was
+not invented. It is the standard figure, and it was discarded on the grounds
+that nobody could justify it — at which point nobody looked.
+
+**In our terms**, where the exit test is a rep max rather than a single:
 
 ```text
-each intensification week   work up to a top set of N reps, N descending to
-                            the target
-the prescribed load         an expectation, for the warm-up ramp only, derived
-                            from the block's most recent performed top set
-                            through the same table:
-                                1RM_now  = load_last / rm(reps_last)
-                                expected = rm(N) × 1RM_now
+endpoint = 105% × rm(target)
+         = 1.05 × 95%        for a 3RM target
+         ≈ 100% of the entry 1RM
 ```
 
-Perform to plan and this is identical to prescribing against the entry anchor.
-Beat it and every later week climbs with you, which is the operator's "slightly
-higher percentages than the entry test would expect" arriving as a consequence
-rather than an assumption. Miss it and every later week comes down, which is
-`v1`'s stall mechanism generalised rather than a second one.
+A 3RM block plans to exit with a **triple at about the entry test's one-rep
+max**, which is a claim a person can hold in their head, and it falls out of two
+literature facts rather than out of anyone's optimism.
 
-**This is not the autoregulation `primary-lift-progression.md` rules out.** That
-rule excludes a *recorded effort* — an RIR, a rep quality, a mood — feeding a
-decision, on the grounds that the operator cannot discriminate finely enough for
-the signal to mean anything. A load lifted for a stated number of repetitions is
-not an effort report; it is an observation, as coarse and objective as they
-come. The model already reads exactly this signal twice: double progression
-reads each accessory's last performance, and stall detection reads the
-primary's. What is new here is only that the primary's own ladder reads it too.
+### The tables, with the endpoint applied
 
-**What it costs.** The intensification phase stops being a pure function of the
-anchor and the duration, so `prescribe` needs the block's performed top sets to
-issue an intensification week — the same walk `ExerciseHistory::performances`
-already does for `v1`'s ladder position. Accumulation is unaffected: it stays a
-function of the anchor, Prilepin and the rung count, because a set with three
-repetitions in reserve is not a measurement of anything.
+```text
+11 weeks — 1 test + 5 accumulation + 5 intensification, target 3RM
+  wk  2  accum   5×6  72.5%  30 lifts
+  wk  3  accum   5×5  75.0%  25 lifts
+  wk  4  accum   5×4  77.5%  20 lifts
+  wk  5  accum   5×3  80.0%  15 lifts
+  wk  6  accum   5×2  82.5%  10 lifts
+  wk  7  intens  1×7  82.5%   → implies a 1RM of  97.1% of entry
+  wk  8  intens  1×6  86.8%   → implies a 1RM of  99.2%
+  wk  9  intens  1×5  91.1%   → implies a 1RM of 101.2%
+  wk 10  intens  1×4  95.4%   → implies a 1RM of 103.2%
+  wk 11  intens  1×3    —      exit test: no load prescribed, 99.8% is the
+                               warm-up target and 105% is what it is for
 
-**And it removes the last authored number from the block.** Duration, target
-repetition count and entry test go in; everything else is the table, Prilepin,
-and what has actually been lifted since.
+7 weeks — 1 test + 3 accumulation + 3 intensification, target 3RM
+  wk  5  intens  1×5  82.5%   → implies a 1RM of  91.7% of entry
+  wk  6  intens  1×4  91.1%   → implies a 1RM of  98.5%
+  wk  7  intens  1×3    —      exit test; the same 105% endpoint, reached in
+                               three rungs rather than five
+```
+
+**The implied 1RM climbing past 100% is the point**, and it is what the operator
+described: the intensification weeks land above what the entry test predicts,
+and the exit test confirms the gain rather than discovering it. A shorter block
+climbs the same span in fewer, larger steps, which is the property duration has
+had since D2.
+
+**No load is prescribed for a test week.** `WeekKind::Test` already carries no
+percentage, which is why the type is a variant rather than a flag. The endpoint
+is the warm-up ramp's target and is presented as an expectation. The tables in
+the first draft of this decision showed it in the test row as though it were a
+prescription.
+
+**The second draft's measured-anchor mechanism is dropped.** Re-deriving each
+intensification week from the block's performed top sets would work, but it
+solves a problem that does not exist once the endpoint is known, and `v1`'s
+stall and reset protocol already covers a block that turns out to have been too
+ambitious.
+
+### What is left authored
+
+Duration, the target repetition count, and the entry test. Every load in the
+block comes from those three plus three literature constants: the
+repetitions-in-reserve table, Prilepin's bands, and the 105% endpoint. **D8
+closes.**
 
 **Sources**: Prilepin's chart as published at
 <https://www.precisionpointtraining.com/strength-training-articles/prilepins-chart/>
@@ -758,3 +784,13 @@ Periodization for Powerlifting: Revisited and Revised*; the
 descending-repetition peaking convention from
 <https://www.sugdenbarbell.co.uk/routines/Tokars-5x3-System>; the
 repetitions-in-reserve table from D10.
+
+**Sources for the 105% endpoint**: the Russian Squat Routine as published at
+<https://liftvault.com/programs/powerlifting/russian-squat-routine-spreadsheet/>
+and <https://www.castironstrength.com/russian-squat-routine/>; Brad Arbic's
+17-week block periodisation programme at
+<https://liftvault.com/programs/powerlifting/17-week-block-periodization-powerlifting-peaking-program-by-brad-arbic/>;
+meet-attempt convention from
+<https://www.castiron-lift.com/blogs/news/powerlifting-meet-prep-peaking-advanced-uk>;
+Smolov's explicitly planned weekly load increases at
+<https://www.powerliftingtowin.com/smolov/>.

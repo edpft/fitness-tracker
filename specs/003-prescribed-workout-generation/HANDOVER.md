@@ -49,8 +49,10 @@ target RM     what the block is for, e.g. a 3RM
 entry test    the anchor, tested before the block begins
 ```
 
-**Nothing else.** Several plausible-looking extra parameters were proposed
-during design and every one was rejected by the operator as a guess in disguise:
+**Nothing else *from the operator*.** Several plausible-looking extra parameters
+were proposed during design and every one was rejected — but read the next
+paragraph before drawing the conclusion this list originally invited. What was
+rejected was **the operator** supplying these numbers, not the numbers existing:
 
 - a total gain / ladder span (`92.5% → 105%`)
 - an "opening proximity" to the rep-max
@@ -61,6 +63,12 @@ Each renamed the previous one. **The percentages belong to the template, and the
 template is code** (§ 9: deterministic derivation is code, operator override is
 data). If you find yourself asking the operator for a number that determines the
 loads, you have re-introduced the same mistake.
+
+**And if you find yourself refusing a number because the operator declined to
+invent it, you have made the opposite one, which cost longer.** The literature
+supplies every one of the values in that list; D11 fills them in. The rule is
+about where a number comes from, not about whether the block is allowed to have
+any.
 
 ### Structure
 
@@ -101,8 +109,13 @@ The RPE/RIR table published by Reactive Training Systems reduces exactly to:
 
 Its role is **not** to prescribe. It fixes the ramp's *endpoint*: a 3RM test is
 three reps at RIR 0, which the table puts at 95% of 1RM. So a 3RM block's ramp
-terminates at 95% as a fact rather than an ambition — which is precisely what
-the linear model's invented 105% endpoint could never be.
+terminates at 95% as a fact rather than an ambition.
+
+That reading was too narrow. It fixes the relationship between a repetition
+count and a load at one moment; it says nothing about how much the block gains,
+and D11 correction 3 supplies that from the literature. The same passage
+dismissed "the linear model's invented 105% endpoint" — 105% is the standard
+figure in every peaking programme consulted, and was not invented.
 
 **RIR is never an input to a derivation.** `primary-lift-progression.md` says so
 explicitly: it is an observation, retained for a retrospective check. A design
@@ -182,39 +195,51 @@ Three consequences, all in [research.md](./research.md) D11:
   5×5, 5×4, 5×3, 5×2, then 1×5, 1×4, 1×3 — from the phase split and the target,
   compared with the record only afterwards.
 
-### The gain is measured, not planned — D11 correction 3
+### The block plans a gain, and the literature says how much — D11 correction 3
 
-The first draft of D11 prescribed every intensification week against the entry
-test's 1RM, which made the implied 1RM climb 97.1 → 97.9 → 98.6 → 99.3 → 100.0%
-and arrive at exactly what was tested at the start. A maintenance block wearing
-a periodisation costume. The operator caught it, and said what the intent had
-been all along: the intensification weeks should land *above* what the entry
-test predicts, with the exit test confirming the gain and ideally beating it.
+**This one went round in circles twice and the operator stopped it.** The first
+attempt prescribed intensification against the entry 1RM, arriving at exactly
+what was tested at the start. The second concluded that planning a gain needs a
+number nobody could honestly supply, and proposed deriving each week from
+performed top sets instead.
 
-**Planning that needs a number, and there is nowhere honest to get one.** It is
-the total-gain parameter under its fifth name — a ladder span, an opening
-proximity, an RIR per phase, an opening percentage, and now a gain rate.
+Both were the same mistake: **refusing a number the literature supplies, because
+the operator had declined to invent one.** What was rejected earlier was the
+operator picking a percentage out of the air. That is not the same thing as
+consulting a published programme, and treating it as the same thing cost three
+rounds.
 
-So it is not planned. Every intensification week is a single top set worked up
-to, the last one being the exit test only because its repetition count is the
-target, and **the prescribed load is an expectation for the warm-up ramp derived
-from the block's most recent performed top set** through the same table. Perform
-to plan and it is identical to prescribing against the anchor; beat it and every
-later week climbs with you.
+**There are three sources of expertise here — the published literature, the
+performed record, and what the operator states in conversation — and a rule that
+bars one of them is a bug in the method.** The record is a diagnostic and the
+operator will not guess; that leaves the literature carrying the numbers, which
+is exactly what it is for.
+
+**The endpoint is 105% of the entry 1RM.** The Russian Squat Routine ends with a
+single at 105% of the starting max; Arbic's 17-week block programme tests at
+105% of the *original* 1RM and is built so the lifter can double it; meet
+convention puts a PR attempt at 102–107% of the previous best. In our terms,
+where the exit is a rep max rather than a single, `105% × rm(target)` — for a
+3RM, about **100% of the entry 1RM**, so a 3RM block plans to exit with a triple
+at the entry test's one-rep max.
+
+**`v1`'s 105% was never invented.** This note called it "the linear model's
+invented 105% endpoint". It is the standard figure, discarded because nobody
+could justify it, at which point nobody looked.
+
+The intensification ladder therefore spans accumulation's exit to that endpoint,
+and the implied 1RM climbs past 100% on the way — 97.1, 99.2, 101.2, 103.2,
+105.0 over five rungs. **That is the operator's stated intent arriving as
+arithmetic**: the intensification weeks land above what the entry test predicts,
+and the exit test confirms the gain rather than discovering it.
 
 **No load is prescribed for a test week**, which `WeekKind::Test` already says
-by carrying no percentage.
+by carrying no percentage. The endpoint is the warm-up ramp's target.
 
-This is not the autoregulation `primary-lift-progression.md` rules out. That
-excludes a recorded *effort* feeding a decision; a load lifted for a stated
-number of repetitions is an observation, and the model already reads it twice —
-double progression and stall detection.
-
-**It costs one thing**: intensification stops being a pure function of the
-anchor and the duration, so `prescribe` needs the block's performed top sets to
-issue one. Accumulation is untouched, because a set at three repetitions in
-reserve measures nothing.
-
+**What is left authored**: duration, the target repetition count, and the entry
+test. Every load comes from those three plus three literature constants — the
+repetitions-in-reserve table, Prilepin's bands, and the 105% endpoint. D8
+closes.
 ---
 
 ## Evidence: the operator's own block, recovered from the corpus
