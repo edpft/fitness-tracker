@@ -568,3 +568,144 @@ anything to be recovered from a record whose efforts do not agree with its loads
 
 **Sources**: the chart as published at <https://fitnesscalcs.com/rpe-chart/>,
 attributed to Reactive Training Systems and to Zourdos et al. (2016).
+
+---
+
+## D11: The block's percentages are Prilepin's, and the span is derived
+
+**The question D8 left open**: the percentage table for an
+accumulation-into-intensification block, and how it scales when duration changes
+the rung count. It is answered here, with two corrections to what was recorded
+as settled and one question that has to go back to the operator.
+
+### The relation, and where each number comes from
+
+One relation does both phases — the table D10 already adopted, read at RIR 0,
+which is what a rep max is:
+
+```text
+rm(reps) = 100 − 2.5 × (reps − 1)          % of 1RM for a true reps-rep max
+```
+
+**Intensification** runs one set, so the set can be a rep max, and the phase is
+a ladder of them: repetitions descend to the target and the load climbs to
+`rm(target)`. A 3RM block terminates at 95% because the table says a 3RM *is*
+95% — the endpoint D10 made a fact rather than an ambition.
+
+**Accumulation** runs many sets, so no set can be a rep max, and the distance
+below it is what needed a source. **Prilepin's chart is that source**, because
+it pins the total number of lifts admissible in each intensity band:
+
+| %1RM | reps/set | total lifts | optimal |
+| --- | --- | --- | --- |
+| < 70% | 3–6 | 18–30 | 24 |
+| 70–79% | 3–6 | 12–24 | 18 |
+| 80–89% | 2–4 | 10–20 | 15 |
+| 90%+ | 1–2 | 4–10 | 7 |
+
+Holding accumulation a constant three repetitions in reserve — `rm(reps) − 15` —
+lands every rung inside its band, and lands the three-rep rung exactly on
+Prilepin's optimum. Nothing was tuned to make that happen: the proximity is the
+table's own step, and the bands are Prilepin's.
+
+**Three in reserve is a template constant, not an autoregulation gate.**
+`primary-lift-progression.md` forbids RIR as an input to a derivation, and this
+does not breach it: what that rule excludes is a *recorded* effort feeding a
+decision, which introduces a decision point resolved by mood. A planning
+constant chosen once, in code, from a published table is § 9's "deterministic
+derivation is code" — the same standing the endpoint already has. The handover
+lists "an RIR per phase" among the parameters the operator rejected; it was
+rejected as *an authored parameter*, and it is not one here.
+
+### The tables this produces
+
+The phase split is the one already recorded: week 1 is the entry test, and the
+remainder splits with intensification dropping first. Accumulation's repetitions
+descend to 2 over its rungs; intensification's descend to the target over its
+own; sets are 5 across in accumulation and 1 in intensification.
+
+```text
+7 weeks — 1 test, 3 accumulation, 3 intensification, target 3RM
+  wk 2  accum  5×4  77.5%  20 lifts       wk 5  intens 1×5  82.5%
+  wk 3  accum  5×3  80.0%  15 lifts       wk 6  intens 1×4  88.75%
+  wk 4  accum  5×2  82.5%  10 lifts       wk 7  intens 1×3  95.0%   ← exit test
+
+11 weeks — 1 test, 5 accumulation, 5 intensification, target 3RM
+  wk 2  accum  5×6  72.5%  30 lifts       wk  7  intens 1×7  82.5%
+  wk 3  accum  5×5  75.0%  25 lifts       wk  8  intens 1×6  85.6%
+  wk 4  accum  5×4  77.5%  20 lifts       wk  9  intens 1×5  88.75%
+  wk 5  accum  5×3  80.0%  15 lifts       wk 10  intens 1×4  91.9%
+  wk 6  accum  5×2  82.5%  10 lifts       wk 11  intens 1×3  95.0%  ← exit test
+```
+
+**Duration changes where the block starts and never where it finishes**, which
+is the property the linear ladder already has and the reason its step is derived
+rather than authored. A 7-week block climbs 6.25 points a week through
+intensification; an 11-week block climbs 3.1.
+
+**The 8-week case reproduces the 2025 block's structure exactly** — 5×5, 5×4,
+5×3, 5×2, then 1×5, 1×4, 1×3. That is corroboration rather than fitting: the
+repetitions fall out of the phase split and the target, and were compared
+against the record afterwards. The *loads* do not agree, and should not — that
+block opened at 63% of its own estimated 1RM, which the operator has said was a
+guess.
+
+**Two rungs exceed Prilepin and want one set fewer.** 5×6 is 30 lifts and 5×5 is
+25, against a band admitting 24. Four sets on both — 24 and 20 — brings them
+inside, and the chart's weightlifting provenance argues the same way: a squat
+has far more time under tension than a snatch, so its totals should run lower
+rather than higher.
+
+### Correction 1: the wave is not a drop in load
+
+The handover records that "the second phase restarts at higher reps and lower
+load than the first ended", from the 2025 block's 5×2@80 into 1×5@77.5. Under
+this derivation intensification opens at *the same* load accumulation left off
+at, with the repetitions jumping from 2 to 5 and the sets collapsing from 5 to
+1.
+
+The drop in the record is an artefact of that block's accumulation ramp being
+unusually steep — it climbed from 63% to 84% in four weeks because it started
+too light, not because it was meant to overshoot. What is real in the
+observation is that **the set gets much harder while the session gets much
+easier**, and that survives here intact. A load that has to fall is a constraint
+nothing in the literature asks for.
+
+### Correction 2: the ladder span is derived at both ends, and D8 closes
+
+`ladder_start` and `ladder_end` have been `TODO` since the feature began,
+because neither could be chosen without guessing. Under `v2` neither is chosen:
+intensification's endpoint is `rm(target)` from the table, and its start is
+where accumulation finished, which Prilepin fixes. The `TODO` stays in the
+document only for as long as `v1` does.
+
+### The question that does go back to the operator
+
+**Every percentage here is of the entry test's implied 1RM, so the ladder plans
+to arrive at exactly the entry test and no further.** An 11-week block ending at
+95% of the entry 1RM ends on the load it started from.
+
+That is not obviously wrong. The exit test is a *test*, prescribed as a
+repetition count rather than a load, so whatever it comes in at is what it comes
+in at, and the gain is measured rather than planned. It is also what "the whole
+point of an entry test is not having to guess" implies: a block asserting a gain
+would be back to the total-gain parameter D10 removed.
+
+But it means the plan contains no claim that it works, and the alternative is
+standard: percentages of a **training max** set below the tested one — Wendler's
+90% is the usual figure — so the ladder's top rung is comfortably achievable and
+the test exceeds it. That is one number, from the literature rather than from
+the operator, and it scales every load in the block by the same factor.
+
+**This is the one thing here worth an operator decision**, because it is the
+difference between a block that finishes where it started and one that finishes
+above it.
+
+**Sources**: Prilepin's chart as published at
+<https://www.precisionpointtraining.com/strength-training-articles/prilepins-chart/>
+and at <https://70sbig.com/blog/2012/05/prilepins-chart/>, which carries the
+weightlifting-provenance caveat; block-phase intensities from eliteFTS, *Block
+Periodization for Powerlifting: Revisited and Revised*; the
+descending-repetition peaking convention from
+<https://www.sugdenbarbell.co.uk/routines/Tokars-5x3-System>; the
+repetitions-in-reserve table from D10.

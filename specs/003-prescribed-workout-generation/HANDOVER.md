@@ -161,15 +161,41 @@ equally well" and preferred the percentage for portability. That was the right
 the trap in this file's method section, caught in the act.** Two `INFERRED`
 values are left; treat both as suspect in the same way.
 
-### The one genuinely open question
+### The percentage table — answered, in research D11
 
-**The percentage table for an accumulation-into-intensification block, and how
-it scales when duration changes the rung count.**
+**Prilepin's chart supplies it, and nothing here is authored.**
+Intensification's set is a rep max, so its load is the table D10 adopted read at
+RIR 0. Accumulation cannot be a rep max, and Prilepin's admissible total lifts
+per intensity band fix how far below it sits: three repetitions in reserve lands
+every rung inside its band and the three-rep rung on the chart's optimum.
 
-This is a literature question, not a question for the operator. Prilepin's chart
-and standard block-periodisation templates are the sources. Do *not* reconstruct
-it from the operator's 2025 block — its opening load was, by the operator's own
-account, a guess.
+Three consequences, all in [research.md](./research.md) D11:
+
+- **`ladder_start` and `ladder_end` stop being authored.** The span is derived
+  at both ends, so the `TODO` that has blocked T080 since the feature began
+  outlives only `v1`.
+- **The wave is not a drop in load.** Intensification opens at the load
+  accumulation left off at, with repetitions jumping and sets collapsing. The
+  drop in the 2025 record comes from an accumulation ramp that started too
+  light, not from a design that meant to overshoot.
+- **The 8-week case reproduces the 2025 block's sets and repetitions exactly** —
+  5×5, 5×4, 5×3, 5×2, then 1×5, 1×4, 1×3 — from the phase split and the target,
+  compared with the record only afterwards.
+
+### The one genuinely open question, and it is the operator's
+
+**Every percentage is of the entry test's implied 1RM, so the block plans to
+arrive at exactly the entry test and no further.**
+
+Defensible as it stands: the exit test is prescribed as a repetition count and
+not a load, so the gain is measured rather than planned, and a block asserting a
+gain would be the total-gain parameter D10 removed coming back. The alternative
+is standard and costs one literature number rather than an operator guess —
+percentages of a **training max** set below the tested one, Wendler's 90% being
+the usual figure.
+
+It is the difference between a block that finishes where it started and one that
+finishes above it, so it is not a judgement to make on the operator's behalf.
 
 ---
 
