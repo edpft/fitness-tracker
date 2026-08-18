@@ -299,3 +299,76 @@ fn the_three_inconsistencies_are_refused() {
         "a programme must not name one exercise as primary and prescribe another"
     );
 }
+
+// --- The authored document -------------------------------------------------
+
+/// The fixture document refuses to author while the ladder span is `TODO`.
+///
+/// The value the operator has not settled is the one thing standing between this
+/// programme and a real prescription, and a placeholder that authored
+/// successfully would produce a workout indistinguishable from a decided one.
+#[test]
+fn an_unsettled_document_refuses_to_author() {
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/programme.toml"
+    ));
+    let Ok(document) = infrastructure::Document::read(path) else {
+        panic!("the fixture document is valid TOML")
+    };
+
+    match document.parameters() {
+        Err(infrastructure::DocumentError::Unsettled { field }) => {
+            assert!(
+                field.starts_with("parameters.ladder"),
+                "the ladder's span is what is unsettled, not {field}"
+            );
+        }
+        Ok(_) => panic!("a document with a TODO must not author"),
+        Err(other) => panic!("the refusal names the unsettled field, got {other}"),
+    }
+}
+
+/// With the span supplied, the whole document converts — every fill shape, the
+/// anchor, the weekday mapping and the parameters.
+#[test]
+fn a_settled_document_authors() {
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/programme.toml"
+    ));
+    let Ok(text) = std::fs::read_to_string(path) else {
+        panic!("the fixture document is readable")
+    };
+    // A span, so the rest of the document can be exercised. Not the operator's:
+    // theirs is still `TODO`, and that is the point of the test above.
+    let settled = text
+        .replace(r#"start = "TODO""#, r#"start = "92.5%""#)
+        .replace(r#"end   = "TODO""#, r#"end   = "105%""#);
+
+    let Ok(document) = toml::from_str::<infrastructure::Document>(&settled) else {
+        panic!("the settled document is valid TOML")
+    };
+    let Ok(parameters) = document.parameters() else {
+        panic!("a settled document's parameters convert")
+    };
+    let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
+        panic!("Europe/London is a zone")
+    };
+    let programme = match document.programme(&parameters, zone) {
+        Ok(programme) => programme,
+        Err(error) => panic!("the document describes a consistent programme: {error}"),
+    };
+
+    // The fills the document describes, in all four shapes.
+    let Ok(expected) = programme::parameters() else {
+        panic!("the fixture parameters are valid")
+    };
+    assert_eq!(
+        parameters.back_off_of_top_set, expected.back_off_of_top_set,
+        "the document and the Rust fixture agree"
+    );
+    assert_eq!(parameters.static_hold, expected.static_hold);
+    assert_eq!(programme.fills(), &programme::fills());
+    assert_eq!(programme.calendar().duration_weeks(), 8);
+}

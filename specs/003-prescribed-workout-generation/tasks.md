@@ -112,12 +112,12 @@ other slot's from its own last performance.
 
 ### Tests first (§ 31)
 
-- [ ] T033 [P] [US1] Write quickstart group 1 scenarios US1-1 to US1-3 and US1-5 in `crates/infrastructure/tests/prescription.rs` — structure, fatigue order, the primary reading no performed value, and the back-off following the top set
+- [X] T033 [P] [US1] Write quickstart group 1 scenarios US1-1 to US1-3 and US1-5 in `crates/infrastructure/tests/prescription.rs` — structure, fatigue order, the primary reading no performed value, and the back-off following the top set
 - [X] T034 [P] [US1] Write US1-6 in `crates/infrastructure/tests/prescription.rs` — the alternating hip-dominant fill reads two sessions back. Assert on the **date** the history came from, not only the load
-- [ ] T035 [P] [US1] Write US1-7 in `crates/infrastructure/tests/prescription.rs` — a never-performed exercise is reported as underivable, with no guessed load
+- [X] T035 [P] [US1] Write US1-7 in `crates/infrastructure/tests/prescription.rs` — a never-performed exercise is reported as underivable, with no guessed load
 - [X] T036 [P] [US1] Write US1-8 and US1-9 in `crates/infrastructure/tests/prescription.rs` — the prescription is stored in full, and no performed query returns prescribed data
-- [ ] T037 [P] [US1] Write the § 10 supersession test in `crates/infrastructure/tests/prescription.rs` — two landing records sharing a source id, synthetic, where the later-served one is the history read (D3)
-- [ ] T038 [P] [US1] Write the SC-008 test in `crates/infrastructure/tests/prescription.rs` — discard all generated output, regenerate from stored authored data, assert identical
+- [X] T037 [P] [US1] Write the § 10 supersession test in `crates/infrastructure/tests/prescription.rs` — two landing records sharing a source id, synthetic, where the later-served one is the history read (D3)
+- [X] T038 [P] [US1] Write the SC-008 test in `crates/infrastructure/tests/prescription.rs` — discard all generated output, regenerate from stored authored data, assert identical
 
 ### The read side
 
@@ -129,13 +129,13 @@ other slot's from its own last performance.
 - [ ] T041 [P] [US1] Implement the TOML shapes and their conversion into `domain` types in `crates/infrastructure/src/programme/document.rs`, rejecting any remaining `TODO` by field path. No `toml` type escapes this module
 - [X] T042 [P] [US1] Implement `GenerationParameterStore` in `crates/infrastructure/src/store/parameters.rs`, superseding by `authored_at` and never overwriting (§ 12)
 - [X] T043 [P] [US1] Implement `ProgrammeStore` in `crates/infrastructure/src/store/programme.rs`, same supersession rule
-- [ ] T044 [US1] Implement `PrescribedWorkoutStore` in `crates/infrastructure/src/store/prescription.rs` — `issue` writing once and never rewriting, `issued_for` reading back a date
+- [X] T044 [US1] Implement `PrescribedWorkoutStore` in `crates/infrastructure/src/store/prescription.rs` — `issue` writing once and never rewriting, `issued_for` reading back a date
 
 ### Generation
 
-- [ ] T045 [US1] Implement the generation use case in `crates/application/src/prescribe.rs`: resolve the date to a week and role, read the ladder position, derive the primary's warm-ups, top set and back-offs, derive every other slot by double progression from `last_performances`, and collect `UnderivableSlot`s as values rather than errors (FR-011)
-- [ ] T046 [US1] Implement `ProgrammeAuthor` in `crates/application/src/prescribe.rs`, running the three consistency checks before storing
-- [ ] T047 [US1] Make `prescribe` idempotent per date: read `issued_for` first and return what was already issued with `freshly_issued: false` (FR-010)
+- [X] T045 [US1] Implement the generation use case in `crates/application/src/prescribe.rs`: resolve the date to a week and role, read the ladder position, derive the primary's warm-ups, top set and back-offs, derive every other slot by double progression from `last_performances`, and collect `UnderivableSlot`s as values rather than errors (FR-011)
+- [X] T046 [US1] Implement `ProgrammeAuthor` in `crates/application/src/prescribe.rs`, running the three consistency checks before storing
+- [X] T047 [US1] Make `prescribe` idempotent per date: read `issued_for` first and return what was already issued with `freshly_issued: false` (FR-010)
 
 ### The CLI
 

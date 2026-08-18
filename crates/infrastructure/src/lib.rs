@@ -8,10 +8,12 @@
 
 pub mod hevy;
 pub mod lock;
+pub mod programme;
 pub mod store;
 
 pub use hevy::{HevyWorkoutEvents, HevyWorkoutTranslator, PageCount, PageNumber, RetryPolicy};
 pub use lock::FileRunLock;
+pub use programme::{Document, DocumentError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
