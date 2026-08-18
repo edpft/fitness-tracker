@@ -816,3 +816,214 @@ meet-attempt convention from
 <https://www.castiron-lift.com/blogs/news/powerlifting-meet-prep-peaking-advanced-uk>;
 Smolov's explicitly planned weekly load increases at
 <https://www.powerliftingtowin.com/smolov/>.
+
+## D12: Three phases, and a plan with no repetitions in reserve
+
+**The operator brought research to this, and it changed three things D11 had
+settled**: how short a block can be, how its weeks divide, and — after a
+correction they made directly — where accumulation's loads come from.
+
+### The split is stated, and it is a rotation rather than a table
+
+```text
+8 weeks   3 accumulation, 3 intensification, 2 realisation
+9 weeks   4, 3, 2
+10 weeks  4, 4, 2
+11 weeks  4, 4, 3
+12 weeks  5, 4, 3
+```
+
+The first four rows are the operator's. The fifth is not authored: **each week
+beyond the eighth goes to accumulation, then intensification, then realisation,
+in rotation**, which reproduces all four stated rows and answers every duration
+they did not state. A rule was worth having because the calendar hands over
+whatever it hands over, and a table would refuse a window nobody had tabulated.
+
+**One correction, settled with the operator on 2026-08-18.** The research as
+stated gave the fourth row as twelve weeks at 4-4-3, and 4-4-3 sums to eleven.
+The first three rows sum exactly, and the increments walk accumulation →
+intensification → realisation in order, so eleven weeks is 4-4-3 and twelve is
+5-4-3. That matters concretely: the operator's autumn window is the eleven-week
+one.
+
+### Realisation is a third phase, and the literature has it
+
+D11 had two phases with the exit test as the last intensification week. Every
+source consulted has three, and gives the third one a length:
+
+| Source | Accumulation | Intensification | Realisation |
+| --- | --- | --- | --- |
+| Bartolomei et al. (PMC4637911), Table 5 | 2–6 weeks | 2–4 weeks | 2 weeks |
+| Hevy Coach, *Block Periodization* | 3–6 weeks | 3–6 weeks | 1–3 weeks (7–10 days short taper, 3 weeks long) |
+| Kilo, *Principles of Periodization* | 3-week mesocycles | 3-week mesocycles | — |
+
+So 3-3-2 as a floor is not merely the operator's preference; it is the shortest
+arrangement that gives all three phases the length their sources ask for. The
+intensities agree too: accumulation submaximal, intensification 75–90%,
+**realisation 90% and up with volume reduced** — which is what the block's last
+rungs come out at without being told to.
+
+### The duration counts phase weeks, and the calendar carries one more
+
+3 + 3 + 2 is eight and leaves no week for the entry test, so the entry test is
+not inside the count. It is taken the week before the block opens, which is also
+how the operator's calendar reads it: a 3RM on Friday 18 September, then the
+phases from the week of 21 September to 29 November — ten weeks, which is 4-4-2.
+
+`Block::duration_weeks` is therefore what the table above counts and
+`Block::total_weeks` is one longer. `MINIMUM_WEEKS` is 8, not 7.
+
+### The block exits on a single, and that is where the 1RM belongs
+
+**The operator asked whether two lifting days a week should chase a 3RM on one
+and a 1RM on the other, instead of one being lighter.** Settled on 2026-08-18:
+no — the second session stays the same week's rung at 85%, and the single arrives
+as the last rungs of realisation.
+
+Three reasons, in the order they matter:
+
+- **A second target measures nothing new.** Every load in this block is derived
+  through `rm(reps)`, in which a 3RM *is* 95% of a 1RM. A 1RM day tells you
+  something the 3RM day does not only if that table is wrong, and in that case
+  the table is what wants revising rather than the week.
+- **Two ladders both ending near-maximal double the top-end exposure on one
+  lift**, and this design has deliberately given up RIR as an input, so there is
+  nothing left to absorb a bad week.
+- **Realisation is where the literature puts singles**, and there is now a
+  two-to-three week phase to hold them. The descending-repetition peaking
+  convention is a sequence of rep maxes ending in one.
+
+So the repetition ladder runs from intensification straight through realisation
+to a single, and **the exit test is a single whatever the entry test was**.
+Entering on a triple and exiting on a single is deliberate: a cold maximal single
+measures technique as much as strength, and a peaked one is what the realisation
+weeks were for. The operator's own record already does this — the March 2025 back
+squat block entered at `5×1@95` and exited at `1×1@110`.
+
+**The endpoint therefore simplifies.** D11 had `105% × rm(target)`, which for a
+3RM target came to about 100% of the entry one-rep maximum and needed explaining
+every time. With a single at the end it is 105% of the entry one-rep maximum
+flat, which is what the literature actually says, and the block plans a 5% gain
+measured in the unit it was planned in.
+
+**The third input changes meaning, and there are still three.** It was "the
+repetition maximum the block is for"; it is now the repetition count of the entry
+test, and nothing else in the block reads it. Every load comes from the duration
+and the literature constants.
+
+### Correction 4: there is no RIR in a percentage-based plan
+
+**The operator's correction, 2026-08-18, and it is the important one in this
+decision.** D11 placed accumulation three repetitions in reserve below the
+maximum for its repetition count — `rm(reps) − 15` — and argued at length that a
+planning constant taken from a published table was not the autoregulation
+`primary-lift-progression.md` forbids. That argument was about the wrong thing.
+**A percentage-based plan states percentages.** Reaching one by subtracting a
+number of repetitions in reserve from a maximum puts an RIR parameter in the
+plan whatever the arithmetic is called, and `5 × RIR` is a coefficient of the
+RTS grid rather than anything Prilepin published.
+
+**Prilepin's chart places the phase without it, and the column that does it was
+sitting unread.** The chart's repetitions-per-set column says where a set of a
+given size belongs: threes to sixes are admissible at any intensity, a double
+first appears at 80%, a single at 90%. Accumulation descends to a double, so its
+heaviest rung is one, and 80% is the lightest load the chart will put a double
+at. Every earlier rung is one repetition more and **2.5 points lighter, which is
+the repetition-maximum table's own slope along the repetitions axis** — the one
+coefficient of that grid which is not about effort.
+
+```text
+accumulation(reps) = 80% − 2.5 × (reps − 2)
+```
+
+Both numbers are published, neither is chosen here, and no reserve appears in
+either. The loads it produces are the same shape 2.5 points lower:
+
+| reps | 7 | 6 | 5 | 4 | 3 | 2 |
+| --- | --- | --- | --- | --- | --- | --- |
+| load | 67.5% | 70% | 72.5% | 75% | 77.5% | 80% |
+| sets | 4 | 4 | 4 | 5 | 5 | 5 |
+| lifts | 28 | 24 | 20 | 20 | 15 | 10 |
+
+Seven is as far up as it goes: the longest block the next section admits gives
+accumulation six weeks, and its first rung is one repetition above that.
+
+Every one of those pairings still falls inside the band Prilepin admits for its
+load, which is the property the reserve constant was introduced to obtain.
+`PER_REPETITION_IN_RESERVE` is deleted rather than left unused: a public constant
+whose only purpose was this is an invitation to make the same mistake again.
+
+**Scope, as the operator stated it**: the primary lift's block periodisation.
+RIR as an *observation* on performed sets is untouched, the accessory schemes are
+untouched, and the test week's open single is still `Rir::Zero`, which is how
+that type says "a maximum attempt" rather than a reserve.
+
+### The tables
+
+```text
+10 weeks — entry test the week before, then 4 accumulation, 4 intensification,
+2 realisation. The operator's autumn window. Eleven weeks of calendar, ten of
+plan.
+
+  wk  1  test    3RM             the anchor; no load prescribed
+  wk  2  accum   4×5   72.5%     20 lifts
+  wk  3  accum   5×4   75.0%     20 lifts
+  wk  4  accum   5×3   77.5%     15 lifts
+  wk  5  accum   5×2   80.0%     10 lifts   ← accumulation exits at 80%, always
+  wk  6  intens  1×6   80.0%     → implies a 1RM of  91.4% of entry
+  wk  7  intens  1×5   85.0%     → implies  94.4%
+  wk  8  intens  1×4   90.0%     → implies  97.2%
+  wk  9  intens  1×3   95.0%     → implies 100.0%
+  wk 10  realis  1×2  100.0%     → implies 102.5%
+  wk 11  realis  1×1    —         exit test: 105% is what the ramp is for
+
+8 weeks — 3, 3, 2. The floor, in nine weeks of calendar.
+
+  wk  1  test    3RM
+  wk  2  accum   5×4   75.0%
+  wk  3  accum   5×3   77.5%
+  wk  4  accum   5×2   80.0%
+  wk  5  intens  1×5   80.0%     → implies  88.8%
+  wk  6  intens  1×4   86.25%    → implies  93.2%
+  wk  7  intens  1×3   92.5%     → implies  97.3%
+  wk  8  realis  1×2   98.75%    → implies 101.2%
+  wk  9  realis  1×1    —         exit test, the same 105% in fewer rungs
+```
+
+**Two things worth noticing, neither of them designed in.** The implied maximum
+crosses 100% at the intensification/realisation boundary in the ten-week case and
+inside realisation's first rung in the eight-week one — the phase boundary and the
+point where the plan passes the entry maximum arrive at the same place without
+being made to. And realisation's rungs come out at 100% and above, which is the
+90%-and-up zone every source assigns that phase.
+
+**One ladder runs through intensification and realisation**, repetitions
+descending and load climbing without a break at the boundary. A discontinuity
+there would be a number somebody chose, and there is none available. What
+realisation contributes is the last rungs; what makes it a taper is that its
+weeks are the ones to strip volume from, which is a question for the second
+session and the accessory schemes rather than for the top set.
+
+### The upper bound is derived too
+
+The top set opens at the load accumulation finished on, at a repetition count
+equal to the number of weeks the two phases it spans hold. At fifteen weeks that
+is a set of nine at 80%, and 80% is exactly a nine-repetition maximum. At sixteen
+it is a set of ten at 80%, which is heavier than a ten-repetition maximum — not a
+hard set but an impossible one. **So the longest block is fifteen weeks, and
+nobody authored that number.** It also lands about where the literature stops
+describing one block and starts describing two: 6 + 4 + 3 is thirteen.
+
+### What is left authored
+
+Duration, the repetition count of the entry test, and the entry test itself. Every
+load comes from those plus three published constants: Prilepin's chart, the
+repetition-maximum table's repetitions axis, and the 105% endpoint.
+
+**Sources**: the operator's research and its citations —
+<https://doclachjames.substack.com/p/making-sense-of-strength-periodisation>,
+Bartolomei et al. at <https://pmc.ncbi.nlm.nih.gov/articles/PMC4637911/>,
+<https://barbend.com/different-types-of-training-periodization/>,
+<https://trainkilo.com/blogs/inside-the-system/principles-of-periodization-the-foundation-of-long-term-progress>
+and <https://hevycoach.com/glossary/block-periodization/>. Prilepin's chart and
+the 105% endpoint keep the sources listed under D11.

@@ -1,45 +1,87 @@
 //! The block: what each training week of a periodised programme prescribes.
 //!
 //! **Three inputs, and every load in the block comes out of them**: how many
-//! weeks the calendar allows, which repetition maximum the block is for, and the
-//! entry test that anchors it. Nothing else is authored. Research D11 has the
-//! derivation and its sources; what follows is what a reader of the code needs
-//! in order not to undo it.
+//! training weeks the calendar allows, the repetition count the entry test is
+//! performed at, and the entry test itself. Nothing else is authored. Research
+//! D11 has the loading derivation and D12 the phase structure; what follows is
+//! what a reader of the code needs in order not to undo them.
 //!
 //! ```text
-//! week 1        entry test at the target repetition count
+//! week 1        entry test, at its own repetition count
 //! weeks 2..     accumulation    — five sets across, reps descending, load rising
-//!    ..N        intensification — one top set,      reps descending, load rising
-//! week N        the last intensification week IS the exit test
+//!    ..         intensification — one top set,      reps descending, load rising
+//!    ..N        realisation     — one top set,      descending to a single
+//! week N        the last realisation week IS the exit test, and it is a 1RM
 //! ```
 //!
-//! **The two phases are loaded by different rules because they are doing
-//! different things**, and neither rule is a parameter:
+//! **The duration counts phase weeks, and the calendar carries one more.** The
+//! operator's table — 8 weeks as 3-3-2, 9 as 4-3-2, 10 as 4-4-2, 11 as 4-4-3 —
+//! counts accumulation, intensification and realisation and leaves no week for
+//! the entry test, because the entry test is taken the week before the block
+//! opens. So [`Block::duration_weeks`] is what that table counts and
+//! [`Block::total_weeks`] is one longer.
 //!
-//! - Accumulation runs many sets, so no set can be a maximum. It sits a constant
-//!   three repetitions in reserve below one, which is what puts every rung
-//!   inside the band Prilepin's chart admits for that week's total number of
-//!   lifts — and the three-rep rung exactly on the chart's optimum.
-//! - Intensification runs a single top set climbing to the block's endpoint,
-//!   which is **105% of the entry maximum**: the figure the Russian squat
-//!   routine, Arbic's block programme and meet-attempt convention all land on.
+//! **The split is a rule, not four rows.** Eight weeks is the shortest block
+//! anyone runs, at 3-3-2, and every week beyond it goes to accumulation, then
+//! intensification, then realisation, in rotation. That reproduces the operator's
+//! four rows exactly and carries on past them — 12 weeks is 5-4-3 — so a
+//! duration nobody tabulated still plans.
+//!
+//! **There is no RIR anywhere in this plan.** The operator settled that on
+//! 2026-08-18: a percentage-based plan states percentages, and reaching one by
+//! subtracting a number of repetitions in reserve from a maximum is an RIR
+//! parameter whatever it is called. Accumulation used to be placed that way and
+//! is not any more — Prilepin's own repetitions-per-set column places it, and the
+//! loads it produces are the same shape without the reserve.
+//!
+//! **The three phases are loaded by two rules, and neither is a parameter:**
+//!
+//! - Accumulation runs many sets, so no set can be a maximum. Its heaviest rung
+//!   is a double, and Prilepin's chart says the lightest load a double belongs at
+//!   is 80% — below that the chart asks for sets of three to six. So the phase is
+//!   pinned at 80% for its double and every earlier rung is one repetition more
+//!   and 2.5 points lighter, which is the repetition-maximum table's own slope.
+//!   Both numbers come from published tables; neither is chosen here.
+//! - Intensification and realisation run a single top set, and **one ladder runs
+//!   through both of them**: the repetitions descend without interruption to the
+//!   single the block finishes on, and the load climbs without interruption from
+//!   where accumulation left off to the block's endpoint. A discontinuity at the
+//!   phase boundary would be a number somebody chose, and there is no such
+//!   number here. What realisation contributes is the last rungs — the ones at
+//!   and above the entry maximum — which is why the literature's realisation
+//!   intensity of 90% and up falls out of the span rather than being asserted
+//!   over it.
+//!
+//! **The endpoint is 105% of the entry one-rep maximum**, and the exit test is a
+//! single, so the block plans a 5% gain and tests it in the unit it was planned
+//! in. That is the figure the Russian squat routine, Arbic's block programme and
+//! meet-attempt convention all land on.
 //!
 //! **105% is a convention rather than a measurement**, and is recorded as one.
 //! Its authority is that it is shared — this block can be read against every
 //! published block that also finishes at 105% — and it is falsifiable against
 //! the operator's own exit tests, which a number chosen here would not be.
 //!
-//! **Duration changes where the block starts and never where it finishes.** A
-//! seven-week block climbs the same span in three rungs that an eleven-week
-//! block climbs in five. That is the same property the `v1` ladder has, and the
+//! **Every percentage here is a share of the one-rep maximum**, and the entry
+//! test is not one: a three-repetition test is converted through
+//! [`rep_max`](crate::prescription::rep_max) where the [`Anchor`] is built, not
+//! here. Entering on a triple and exiting on a single is deliberate — a cold
+//! maximal single measures technique as much as strength, and a peaked one is
+//! what the block spent its realisation weeks preparing.
+//!
+//! **Duration changes where the block starts and never where it finishes.** An
+//! eight-week block climbs the same span in five rungs that a twelve-week block
+//! climbs in seven. That is the same property the `v1` ladder has, and the
 //! reason a duration is an input rather than a parameter.
+//!
+//! [`Anchor`]: crate::prescription::Anchor
 
 use crate::gym::RepCount;
 
 use crate::prescription::{
     parameters::Percentage,
     prilepin,
-    repmax::{PER_REPETITION_IN_RESERVE, rep_max},
+    repmax::{PER_REPETITION, rep_max},
     schedule::{WeekIndex, WeekKind},
 };
 
@@ -47,26 +89,33 @@ use crate::prescription::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidBlock {
     #[error(
-        "a block needs an entry test and at least three weeks of each phase, \
-         so {weeks} weeks is too few for one"
+        "the shortest block anyone runs is three weeks of accumulation, three \
+         of intensification and two of realisation, so {weeks} weeks is too few \
+         for one"
     )]
     TooShort { weeks: u32 },
     #[error(
-        "a {target}-repetition maximum is too many repetitions to plan a block \
-         around"
+        "{weeks} weeks of phases would open the top set above the maximum for \
+         its own repetition count, so it is too long for one block"
     )]
-    TargetTooHigh { target: u32 },
+    TooLong { weeks: u32 },
+    #[error(
+        "an entry test at {reps} repetitions is too many for the \
+         repetition-maximum table to convert"
+    )]
+    EntryTestTooLong { reps: u32 },
 }
 
-/// Which half of the block a week belongs to.
+/// Which phase of the block a week belongs to.
 ///
-/// The tests are not a phase. Week 1 establishes the anchor and week N spends
-/// it, and neither is a rung — which [`WeekKind`] already says for the exit and
-/// this says for the entry.
+/// The tests are not a phase. Week 1 establishes the anchor and the block's last
+/// week spends it, and neither is a rung — which [`WeekKind`] already says for
+/// the exit and this says for the entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Accumulation,
     Intensification,
+    Realisation,
 }
 
 impl Phase {
@@ -75,6 +124,7 @@ impl Phase {
         match self {
             Self::Accumulation => "accumulation",
             Self::Intensification => "intensification",
+            Self::Realisation => "realisation",
         }
     }
 }
@@ -112,12 +162,17 @@ pub enum WeekPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block {
     duration_weeks: u32,
-    target: RepCount,
+    entry_reps: RepCount,
 }
 
+/// The shortest block's split, which every longer one grows from.
+const SHORTEST: (u32, u32, u32) = (3, 3, 2);
+
 impl Block {
-    /// One entry test and three weeks of each phase.
-    pub const MINIMUM_WEEKS: u32 = 7;
+    /// Three weeks of accumulation, three of intensification and two of
+    /// realisation — the shortest block the literature admits, and the operator's
+    /// own floor.
+    pub const MINIMUM_WEEKS: u32 = SHORTEST.0 + SHORTEST.1 + SHORTEST.2;
     /// The most sets across accumulation will run.
     ///
     /// A ceiling rather than a count: Prilepin's band for the week's load caps
@@ -125,74 +180,122 @@ impl Block {
     /// the chart is what decides. Five is where the operator's own block sat and
     /// is what the lighter weeks come out at anyway.
     pub const ACCUMULATION_SETS: u32 = 5;
-    /// Repetitions in reserve on every accumulation set.
-    pub const ACCUMULATION_RESERVE: i32 = 3;
-    /// Where the block plans to finish, as a share of the entry maximum.
+    /// The repetition count accumulation descends to.
+    ///
+    /// Two, because a double is the smallest set Prilepin's chart will put in a
+    /// many-set week and the load it belongs at is the chart's own boundary. A
+    /// phase descending past it would leave the band that admits it.
+    pub const ACCUMULATION_FLOOR_REPS: u32 = 2;
+    /// Where the block plans to finish, as a share of the entry one-rep maximum.
     pub const ENDPOINT: i32 = 10_500;
 
     /// # Errors
     ///
-    /// [`InvalidBlock`] for a block too short to hold both phases, or a target
-    /// repetition count so high that its ladder leaves the table.
-    pub fn new(duration_weeks: u32, target: RepCount) -> Result<Self, InvalidBlock> {
+    /// [`InvalidBlock`] for a block too short to hold all three phases, one so
+    /// long that its repetition ladder leaves the table, or an entry test at a
+    /// repetition count the table cannot convert.
+    pub fn new(duration_weeks: u32, entry_reps: RepCount) -> Result<Self, InvalidBlock> {
         if duration_weeks < Self::MINIMUM_WEEKS {
             return Err(InvalidBlock::TooShort {
                 weeks: duration_weeks,
             });
         }
+        if rep_max(entry_reps).is_none() {
+            return Err(InvalidBlock::EntryTestTooLong {
+                reps: entry_reps.as_u32(),
+            });
+        }
         let block = Self {
             duration_weeks,
-            target,
+            entry_reps,
         };
-        // The longest rung of either ladder has to sit on the table, and the
-        // endpoint has to be derivable. Checked here so an unplannable block
-        // fails at authoring rather than at the first `prescribe`.
-        if block.endpoint().is_none() || block.longest_rung().is_none() {
-            return Err(InvalidBlock::TargetTooHigh {
-                target: target.as_u32(),
+        // Checked here so an unplannable block fails at authoring rather than at
+        // the first `prescribe`.
+        if !block.top_set_ladder_is_liftable() {
+            return Err(InvalidBlock::TooLong {
+                weeks: duration_weeks,
             });
         }
         Ok(block)
     }
 
+    /// Weeks of phases: what the operator's table counts, and what the entry
+    /// test sits outside of.
     pub const fn duration_weeks(self) -> u32 {
         self.duration_weeks
     }
 
-    pub const fn target(self) -> RepCount {
-        self.target
+    /// Weeks the block occupies, entry test included. One more than
+    /// [`Self::duration_weeks`], and the number of entries [`Self::weeks`]
+    /// returns.
+    pub const fn total_weeks(self) -> u32 {
+        self.duration_weeks.saturating_add(1)
     }
 
-    /// Weeks of intensification. **It drops first**, so an odd number of phase
-    /// weeks gives the extra one to accumulation.
-    pub const fn intensification_weeks(self) -> u32 {
-        (self.duration_weeks - 1) / 2
+    /// The repetition count the entry test is performed at.
+    ///
+    /// Not the exit test's: the block finishes on a single whatever it opened
+    /// on. This says what is being measured at the start, and nothing else in
+    /// the block reads it — every load below comes from the duration and the
+    /// three literature constants.
+    pub const fn entry_reps(self) -> RepCount {
+        self.entry_reps
     }
 
     /// Weeks of accumulation.
     pub const fn accumulation_weeks(self) -> u32 {
-        (self.duration_weeks - 1) - self.intensification_weeks()
+        self.split().0
     }
 
-    /// What the block finishes at, as a share of the entry maximum: 105% of the
-    /// maximum, expressed at the target repetition count.
+    /// Weeks of intensification.
+    pub const fn intensification_weeks(self) -> u32 {
+        self.split().1
+    }
+
+    /// Weeks of realisation, the last of which is the exit test.
+    pub const fn realisation_weeks(self) -> u32 {
+        self.split().2
+    }
+
+    /// The split, as one rule.
     ///
-    /// For a three-rep target that is a little under the entry one-rep maximum,
-    /// which is the whole claim the block makes and is small enough to hold in
-    /// your head.
+    /// Eight weeks is 3-3-2 and each week beyond it goes to accumulation, then
+    /// intensification, then realisation, in rotation. The operator's four rows
+    /// come out of it — 8: 3-3-2, 9: 4-3-2, 10: 4-4-2, 11: 4-4-3 — and so does
+    /// every duration they did not tabulate.
+    const fn split(self) -> (u32, u32, u32) {
+        let extra = self.duration_weeks - Self::MINIMUM_WEEKS;
+        // The three phases take turns, accumulation first. A whole rotation goes
+        // to all three; what is left over goes to the front of the order.
+        let rotations = extra / 3;
+        let over = extra % 3;
+        (
+            SHORTEST.0 + rotations + if over >= 1 { 1 } else { 0 },
+            SHORTEST.1 + rotations + if over >= 2 { 1 } else { 0 },
+            SHORTEST.2 + rotations,
+        )
+    }
+
+    /// The rungs the single top set runs over: intensification and realisation
+    /// together, because one ladder runs through both.
+    const fn top_set_weeks(self) -> u32 {
+        self.intensification_weeks() + self.realisation_weeks()
+    }
+
+    /// What the block finishes at, as a share of the entry one-rep maximum.
+    ///
+    /// 105%, whatever the duration and whatever the entry test measured. The
+    /// exit test is a single, so this needs no conversion to be read: the block
+    /// plans to add five percent to the maximum it started from.
     #[must_use]
     pub fn endpoint(self) -> Option<Percentage> {
-        let at_target = rep_max(self.target)?.as_basis_points();
-        let scaled = i64::from(at_target)
-            .checked_mul(i64::from(Self::ENDPOINT))?
-            .checked_div(i64::from(Percentage::WHOLE.as_basis_points()))?;
-        Percentage::from_basis_points(i32::try_from(scaled).ok()?).ok()
+        Percentage::from_basis_points(Self::ENDPOINT).ok()
     }
 
     /// What each week prescribes.
     #[must_use]
     pub fn weeks(self) -> Vec<WeekPlan> {
-        (1..=self.duration_weeks)
+        (1..=self.total_weeks())
             .filter_map(|week| WeekIndex::new(week).ok().and_then(|week| self.week(week)))
             .collect()
     }
@@ -200,17 +303,19 @@ impl Block {
     /// What one week prescribes, or `None` for a week past the block.
     #[must_use]
     pub fn week(self, week: WeekIndex) -> Option<WeekPlan> {
-        if week.as_u32() > self.duration_weeks {
+        if week.as_u32() > self.total_weeks() {
             return None;
         }
         if week.as_u32() == 1 {
-            return Some(WeekPlan::EntryTest { reps: self.target });
+            return Some(WeekPlan::EntryTest {
+                reps: self.entry_reps,
+            });
         }
         let rung = week.as_u32() - 1;
         if rung <= self.accumulation_weeks() {
             return self.accumulation(rung);
         }
-        self.intensification(rung - self.accumulation_weeks())
+        self.top_set(rung - self.accumulation_weeks())
     }
 
     /// Which kind of week this is, in the vocabulary the calendar and the store
@@ -226,14 +331,28 @@ impl Block {
     /// Rung `k` of accumulation, one-based.
     ///
     /// Repetitions descend to two, so the phase's length decides where they
-    /// start. The load is a constant distance below the maximum for that
-    /// repetition count, which is what holds every week inside Prilepin's band.
+    /// start. The load is pinned at the double and steps down the
+    /// repetition-maximum table's slope from there, which is what holds every
+    /// week inside Prilepin's band without any reference to effort.
     fn accumulation(self, rung: u32) -> Option<WeekPlan> {
-        let reps = RepCount::new(self.accumulation_weeks().checked_sub(rung)? + 2).ok()?;
-        let below = PER_REPETITION_IN_RESERVE.checked_mul(Self::ACCUMULATION_RESERVE)?;
-        let load =
-            Percentage::from_basis_points(rep_max(reps)?.as_basis_points().checked_sub(below)?)
-                .ok()?;
+        let reps = RepCount::new(
+            self.accumulation_weeks()
+                .checked_sub(rung)?
+                .checked_add(Self::ACCUMULATION_FLOOR_REPS)?,
+        )
+        .ok()?;
+        // 80%, where the chart stops asking for sets of three to six and starts
+        // admitting a double — then one repetition further up the ladder for
+        // every 2.5 points down it.
+        let pinned = prilepin::floor_for_sets_of(Self::ACCUMULATION_FLOOR_REPS)?;
+        let steps =
+            i32::try_from(reps.as_u32().checked_sub(Self::ACCUMULATION_FLOOR_REPS)?).ok()?;
+        let load = Percentage::from_basis_points(
+            pinned
+                .as_basis_points()
+                .checked_sub(PER_REPETITION.checked_mul(steps)?)?,
+        )
+        .ok()?;
         // Five across, unless five would put the week over the total lifts
         // Prilepin's band for that load admits — which it does at six and seven
         // repetitions, and which is the chart doing work rather than being cited.
@@ -246,25 +365,31 @@ impl Block {
         })
     }
 
-    /// Rung `k` of intensification, one-based. The last one is the exit test.
+    /// Rung `k` of the single top set, one-based over intensification and
+    /// realisation together. The last one is the exit test.
     ///
-    /// Repetitions descend to the target, and the load spans accumulation's exit
-    /// to the block's endpoint — so the maximum each week implies climbs past
-    /// the entry test on the way, which is the gain the block is planning.
-    fn intensification(self, rung: u32) -> Option<WeekPlan> {
-        let weeks = self.intensification_weeks();
-        let reps =
-            RepCount::new(self.target.as_u32().checked_add(weeks)?.checked_sub(rung)?).ok()?;
-        let endpoint = self.endpoint()?;
+    /// Repetitions descend to one and the load spans accumulation's exit to the
+    /// block's endpoint, both without a break at the phase boundary — so the
+    /// maximum each week implies climbs past the entry test on the way, which is
+    /// the gain the block is planning. Which phase a rung belongs to is the
+    /// split's business, not the ladder's.
+    fn top_set(self, rung: u32) -> Option<WeekPlan> {
+        let weeks = self.top_set_weeks();
+        let reps = RepCount::new(weeks.checked_sub(rung)?.checked_add(1)?).ok()?;
         if rung == weeks {
             return Some(WeekPlan::ExitTest {
                 reps,
-                expected: endpoint,
+                expected: self.endpoint()?,
             });
         }
+        let phase = if rung <= self.intensification_weeks() {
+            Phase::Intensification
+        } else {
+            Phase::Realisation
+        };
 
         let start = self.accumulation_exit()?.as_basis_points();
-        let span = i64::from(endpoint.as_basis_points().checked_sub(start)?);
+        let span = i64::from(self.endpoint()?.as_basis_points().checked_sub(start)?);
         // Multiply before dividing, so the rounding happens once rather than
         // accumulating across the phase.
         let advanced = span
@@ -272,7 +397,7 @@ impl Block {
             .checked_div(i64::from(weeks.checked_sub(1)?))?;
         let points = i64::from(start).checked_add(advanced)?;
         Some(WeekPlan::Working {
-            phase: Phase::Intensification,
+            phase,
             sets: RepCount::new(1).ok()?,
             reps,
             load: Percentage::from_basis_points(i32::try_from(points).ok()?).ok()?,
@@ -288,17 +413,28 @@ impl Block {
         }
     }
 
-    /// The highest repetition count either ladder reaches, which is the one that
-    /// has to sit on the table.
-    fn longest_rung(self) -> Option<Percentage> {
-        let accumulation = RepCount::new(self.accumulation_weeks() + 1).ok()?;
-        let intensification = RepCount::new(
-            self.target
-                .as_u32()
-                .checked_add(self.intensification_weeks())?
-                - 1,
-        )
-        .ok()?;
-        rep_max(accumulation).and_then(|_| rep_max(intensification))
+    /// Whether the top-set ladder opens at a load its own repetition count can
+    /// carry.
+    ///
+    /// **This is what bounds the duration, and the bound is derived rather than
+    /// authored.** The ladder opens where accumulation finished and its opening
+    /// repetition count is the length of the two phases it spans, so a long
+    /// enough block asks for a set of nine, ten, eleven at 80% — and past nine
+    /// that is a load above the maximum for the repetition count, which is not a
+    /// hard set but an impossible one. The longest block that survives the test
+    /// is fifteen weeks, which is also about where the literature stops
+    /// describing one block rather than two.
+    fn top_set_ladder_is_liftable(self) -> bool {
+        let Some(opening) = RepCount::new(self.top_set_weeks())
+            .ok()
+            .and_then(rep_max)
+            .map(Percentage::as_basis_points)
+        else {
+            return false;
+        };
+        let Some(start) = self.accumulation_exit().map(Percentage::as_basis_points) else {
+            return false;
+        };
+        start <= opening
     }
 }

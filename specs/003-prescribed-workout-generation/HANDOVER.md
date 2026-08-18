@@ -29,7 +29,7 @@ What the operator actually wants, and what was settled in conversation, is
 
 | Window | Programme | State |
 | --- | --- | --- |
-| 7+ weeks | Block periodisation: entry test → accumulation → intensification | **not built** |
+| 9+ weeks (a test week and 8 of phases) | Block periodisation: entry test → accumulation → intensification → realisation | **built in `domain`** |
 | short, interrupted | Linear top-set/back-off, +2.5kg, reset protocol | built, works |
 
 `Programme` is already `enum { V1(..), V2(..) }` with append-only variants,
@@ -44,10 +44,15 @@ the pre-Christmas window and the operator has said so.
 ### Inputs — and there are only three
 
 ```text
-duration      weeks available, from the family calendar
-target RM     what the block is for, e.g. a 3RM
-entry test    the anchor, tested before the block begins
+duration      weeks of phases available, from the family calendar
+entry reps    the repetition count the entry test is performed at, e.g. 3
+entry test    the anchor, tested the week before the block begins
 ```
+
+**The second input changed meaning in D12** and there are still three of them. It
+used to be "the repetition maximum the block is for"; the block now finishes on a
+single whatever it opened on, so what this says is what is being *measured* at the
+start. Nothing else in the block reads it.
 
 **Nothing else *from the operator*.** Several plausible-looking extra parameters
 were proposed during design and every one was rejected — but read the next
@@ -73,31 +78,39 @@ any.
 ### Structure
 
 ```text
-week 1        entry test at the target RM
+week 1        entry test, at its own repetition count
 weeks 2..     accumulation    — many sets, reps descending, load rising
-   ..N        intensification — one set, reps descending, load rising
-week N        the last intensification week IS the exit test (not a separate week)
+   ..         intensification — one set,  reps descending, load rising
+   ..N        realisation     — one set,  descending to a single
+week N        the last realisation week IS the exit test, and it is a 1RM
 ```
 
-- Phase split: the entry test takes one week; the remainder splits 50/50 with
-  **intensification dropping first**. Minimum 3 of each, so **minimum block is 7
-  weeks** (1 + 3 + 3).
-- The rep ladder is generated **backwards from the target RM**. A 3RM target
-  with 5 intensification weeks gives 7, 6, 5, 4, 3. Duration sets the rung
-  count; this is what makes the block adapt to whatever the calendar gives.
-- The second phase restarts at *higher* reps and *lower* load than the first
-  ended. That wave is the design, not an artefact.
+**Superseded by D12, in three places.** There are three phases rather than two;
+the split is stated by the operator's research rather than divided 50/50; and the
+duration counts *phase* weeks, with the entry test the week before them.
 
-Derived split, verified against the operator's stated rule:
+- The rep ladder is generated **backwards from a single**, and runs unbroken
+  through intensification and realisation. Duration sets the rung count; this is
+  what makes the block adapt to whatever the calendar gives.
+- The second phase restarts at *higher* reps and the *same* load the first
+  finished on. That wave is the design; the drop in the 2025 record is an
+  artefact (D11 correction 1).
+
+The split, as the operator's research states it and D12 records it:
 
 ```text
-block  phase wks  accum  intens
-    7          6      3       3
-    8          7      4       3
-    9          8      4       4
-   10          9      5       4
-   11         10      5       5
+phase wks  accum  intens  realis
+        8      3       3       2
+        9      4       3       2
+       10      4       4       2
+       11      4       4       3
+       12      5       4       3
 ```
+
+Each week beyond the eighth goes to accumulation, then intensification, then
+realisation, in rotation, so a duration nobody tabulated still plans. **The
+maximum is fifteen weeks and it is derived, not authored** — beyond that the top
+set opens above the maximum for its own repetition count.
 
 ### Loads
 
@@ -117,9 +130,14 @@ and D11 correction 3 supplies that from the literature. The same passage
 dismissed "the linear model's invented 105% endpoint" — 105% is the standard
 figure in every peaking programme consulted, and was not invented.
 
-**RIR is never an input to a derivation.** `primary-lift-progression.md` says so
-explicitly: it is an observation, retained for a retrospective check. A design
-that consults it contradicts the model of record.
+**RIR is never an input to a derivation, and D12 goes further: there is no RIR in
+the primary lift's block at all.** `primary-lift-progression.md` says it is an
+observation, retained for a retrospective check. D11 argued that a *planning*
+constant of three repetitions in reserve was a different thing; the operator
+rejected that on 2026-08-18, and the argument was wrong — a percentage-based plan
+states percentages, and `5 × RIR` is a coefficient of the RTS grid rather than
+anything Prilepin published. Prilepin's repetitions-per-set column places
+accumulation instead. See D12, correction 4.
 
 ### Sessions within the week
 
@@ -155,6 +173,15 @@ same week's rung, lighter, and it costs no new parameter.
 85% of the week's load.** Not a variation on the light day — the operator was
 offered one and declined it. `light_of_heavy` carries into `v2` unchanged in
 meaning; only the number moved, and why it moved is the next section.
+
+**Re-asked and re-settled the same day.** The operator asked whether the two days
+should chase a 3RM on one and a 1RM on the other instead. No: within this model a
+1RM day measures nothing a 3RM day does not already imply, because every load is
+derived through `rm(reps)` in which a 3RM *is* 95% of a 1RM. Two ladders both
+ending near-maximal would also double the top-end exposure on one lift, with RIR
+deliberately unavailable to absorb a bad week. **The single belongs in
+realisation**, which is where the peaking literature puts it and which now exists
+as a phase. See D12.
 
 ### The `INFERRED` parameter that was wrong, and how
 
@@ -218,10 +245,10 @@ is exactly what it is for.
 **The endpoint is 105% of the entry 1RM.** The Russian Squat Routine ends with a
 single at 105% of the starting max; Arbic's 17-week block programme tests at
 105% of the *original* 1RM and is built so the lifter can double it; meet
-convention puts a PR attempt at 102–107% of the previous best. In our terms,
-where the exit is a rep max rather than a single, `105% × rm(target)` — for a
-3RM, about **100% of the entry 1RM**, so a 3RM block plans to exit with a triple
-at the entry test's one-rep max.
+convention puts a PR attempt at 102–107% of the previous best. **D12 simplified
+the arithmetic**: the exit test is a single, so the endpoint is 105% of the entry
+1RM flat rather than `105% × rm(target)`, and the block plans a 5% gain measured
+in the unit it was planned in.
 
 **`v1`'s 105% was never invented *by us*.** This note called it "the linear
 model's invented 105% endpoint" and discarded it, at which point nobody looked
@@ -279,7 +306,7 @@ w/c 31 Aug     holiday
 Sun 13 Sep     deficit ends  ← REAL DEADLINE for a plannable programme
 Fri 11–Mon 14  holiday
 Fri 18 Sep     3RM front squat test — the autumn block's anchor
-w/c 14 Sep     autumn block begins → Sun 29 Nov = 11 weeks → 5 accumulation / 5 intensification
+w/c 21 Sep     autumn block begins → Sun 29 Nov = 10 phase weeks → 4 accum / 4 intens / 2 realis
 Mon 30 Nov     mini-cut to Christmas — v1 linear territory, too short for a block
 New Year       next proper block
 ```
@@ -383,11 +410,13 @@ block's entry anchor" was wrong and has been corrected.
 ## Suggested order
 
 1. ~~**Fix the calendar**~~ — done. See "Known gaps".
-2. **Research the percentage table** for accumulation/intensification. The last
-   unknown, and it is a literature question.
-3. **Build `v2`** beside `v1`. `Ladder` becomes a table lookup; the anchor,
-   slots, template, fills, quantisation, all four stores, the document reader,
-   the CLI and every accessory scheme are untouched.
+2. ~~**Research the percentage table**~~ — done, D11 and D12.
+3. ~~**Build `v2`** beside `v1`~~ — `domain::prescription::v2::Block` is built
+   and tested (research D11 and D12). What is *not* built is everything above it:
+   nothing in `application`, the CLI or the stores selects `v2` yet, so the anchor
+   conversion (a 3RM entry test into the 1RM every percentage is a share of), the
+   phase-aware second session and the calendar's extra test week are all still to
+   come.
 4. **User story 2**, so a failed attempt stops being a refusal.
 5. The rest: stall/reset for `v1`, the round trip, the decision records (`0006`,
    `0007`) named in [plan.md](./plan.md).

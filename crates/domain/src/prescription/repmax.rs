@@ -14,11 +14,15 @@
 //! prescribed side speaks — a repetition count and a share of a maximum. See
 //! research D10.
 //!
-//! The rest of the grid is not modelled, and deliberately. `RIR` as an
-//! *observation* is retained on performed sets and feeds no derivation
-//! (`docs/primary-lift-progression.md`); where a plan needs to sit a fixed
-//! distance below a maximum it subtracts a template constant from this, which is
-//! a decision taken once in code rather than a signal read back from a session.
+//! **The rest of the grid is not modelled, and the primary lift's block contains
+//! no repetitions in reserve at all.** The operator settled that on 2026-08-18:
+//! a percentage-based plan states percentages, and a plan that reaches a
+//! percentage by subtracting a number of repetitions in reserve from a maximum
+//! has an RIR parameter in it however the arithmetic is presented. What the block
+//! uses from here is the reps axis — [`PER_REPETITION`], the cost of one more
+//! repetition — and the `RIR = 0` line itself, which is what a repetition maximum
+//! *is*. `RIR` as an *observation* is retained on performed sets and feeds no
+//! derivation (`docs/primary-lift-progression.md`).
 //!
 //! **This is a rounded presentation of real data, not a measurement.** Every
 //! extra repetition costs 2.5 points and the underlying RTS data is not
@@ -29,15 +33,13 @@ use crate::gym::RepCount;
 
 use super::parameters::Percentage;
 
-/// What one repetition in reserve is worth, in basis points.
-///
-/// Public because a phase that plans below a maximum measures the distance in
-/// these, and because a caller multiplying by 500 by hand is a caller who has
-/// forgotten which axis they are on.
-pub const PER_REPETITION_IN_RESERVE: i32 = 500;
-
 /// What one extra repetition costs, in basis points.
-const PER_REPETITION: i32 = 250;
+///
+/// The table's slope along the repetitions axis, and the only slope the block
+/// uses. The grid's other coefficient — five points per repetition in reserve —
+/// is deliberately absent: it had a constant here until 2026-08-18, and the
+/// constant was how RIR got into a percentage-based plan.
+pub const PER_REPETITION: i32 = 250;
 
 /// The share of a one-rep maximum that an `n`-rep maximum represents.
 ///
