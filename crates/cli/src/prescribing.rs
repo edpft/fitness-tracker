@@ -33,7 +33,7 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let id = Authoring::new(
-        SqliteProgrammeStore::new(pool.clone()),
+        SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         SqliteGenerationParameterStore::new(pool),
     )
     .author(&programme, &parameters)
@@ -54,10 +54,10 @@ pub async fn prescribe(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone());
+    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteProgrammeStore::new(pool.clone()),
+        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
     });
@@ -98,7 +98,7 @@ async fn resolve(programmes: &SqliteProgrammeStore, given: Option<&str>) -> Resu
     let today = programme.calendar().today(jiff::Timestamp::now());
     programme.calendar().next_programmed(today).ok_or_else(|| {
         Failure::message(
-            format!("this programme runs on no day within a week of {today}"),
+            format!("this programme has no session on or after {today}"),
             exit::STORE,
         )
     })

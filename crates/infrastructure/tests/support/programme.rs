@@ -24,8 +24,8 @@ use domain::{
         sequence::{AtLeastTwo, NonEmpty},
     },
     prescription::{
-        Anchor, AnchorProvenance, GenerationParameters, PerRole, Percentage, PlateIncrement,
-        Programme, ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
+        Anchor, AnchorProvenance, Calendar, GenerationParameters, PerRole, Percentage,
+        PlateIncrement, Programme, ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
         v1::{Fill, SlotFills, StaticFill},
     },
 };
@@ -215,6 +215,29 @@ pub fn weekdays() -> Result<Weekdays, ProgrammeFixtureError> {
     .map_err(invalid)
 }
 
+/// The block's calendar: eight training weeks from 2026-07-06, uninterrupted.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the date or the weekday list is invalid.
+pub fn calendar() -> Result<Calendar, ProgrammeFixtureError> {
+    calendar_running(weekdays()?, &[])
+}
+
+/// The same block, run on given weekdays and skipping given weeks.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the date is invalid, or if a named week falls
+/// outside the block.
+pub fn calendar_running(
+    weekdays: Weekdays,
+    skipping: &[Date],
+) -> Result<Calendar, ProgrammeFixtureError> {
+    let start = Date::new(2026, 7, 6).map_err(invalid)?;
+    Calendar::new(start, 8, skipping, weekdays, zone()?).map_err(invalid)
+}
+
 /// A whole programme, ready to prescribe from.
 ///
 /// Eight weeks from 2026-07-06, gating on the heavy session — the block the
@@ -225,18 +248,24 @@ pub fn weekdays() -> Result<Weekdays, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
 pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
+    programme_skipping(&[])
+}
+
+/// The same programme, with named weeks it does not run.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the programme is inconsistent, or if a named
+/// week falls outside the block.
+pub fn programme_skipping(weeks: &[Date]) -> Result<Programme, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    let start = Date::new(2026, 7, 6).map_err(invalid)?;
     Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
         fills()?,
         anchor()?,
         SessionRole::Heavy,
-        start,
-        8,
-        weekdays()?,
-        zone()?,
+        calendar_running(weekdays()?, weeks)?,
         &parameters,
     )
     .map_err(invalid)
@@ -254,7 +283,6 @@ pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
 pub fn gating_on_a_role_it_never_runs()
 -> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    let start = Date::new(2026, 7, 6).map_err(invalid)?;
     // Monday only, and Monday is light — so a heavy gate never fires.
     let monday_only =
         Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)]).map_err(invalid)?;
@@ -264,10 +292,7 @@ pub fn gating_on_a_role_it_never_runs()
         fills()?,
         anchor()?,
         SessionRole::Heavy,
-        start,
-        8,
-        monday_only,
-        zone()?,
+        calendar_running(monday_only, &[])?,
         &parameters,
     ))
 }
@@ -280,17 +305,13 @@ pub fn gating_on_a_role_it_never_runs()
 pub fn primary_not_counted_in_reps()
 -> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    let start = Date::new(2026, 7, 6).map_err(invalid)?;
     Ok(Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Distance(DistanceExercise::Running),
         fills()?,
         anchor()?,
         SessionRole::Heavy,
-        start,
-        8,
-        weekdays()?,
-        zone()?,
+        calendar()?,
         &parameters,
     ))
 }
@@ -303,7 +324,6 @@ pub fn primary_not_counted_in_reps()
 pub fn primary_does_not_fill_its_slot()
 -> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    let start = Date::new(2026, 7, 6).map_err(invalid)?;
     Ok(Programme::new(
         // Names the knee-dominant slot as primary, but the primary exercise is a
         // deadlift, and the knee-dominant fill is a front squat.
@@ -312,10 +332,7 @@ pub fn primary_does_not_fill_its_slot()
         fills()?,
         anchor()?,
         SessionRole::Heavy,
-        start,
-        8,
-        weekdays()?,
-        zone()?,
+        calendar()?,
         &parameters,
     ))
 }

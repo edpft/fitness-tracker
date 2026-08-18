@@ -35,8 +35,8 @@ pub use parameters::{
 };
 pub use quantise::{quantise, quantise_loaded};
 pub use schedule::{
-    Calendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole, SessionRole, UnknownSessionRole,
-    WeekIndex, WeekKind, Weekdays,
+    Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
+    SessionRole, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
 };
 pub use shape::{
     Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,

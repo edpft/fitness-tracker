@@ -18,9 +18,9 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        AccessoryScheme, Anchor, AnchorProvenance, GenerationParameters, InconsistentProgramme,
-        PerRole, Percentage, PlateIncrement, Programme, ResetProtocol, SessionRole, TopSetReps,
-        WarmupStep, Weekdays,
+        AccessoryScheme, Anchor, AnchorProvenance, Calendar, GenerationParameters,
+        InconsistentProgramme, InvalidCalendar, PerRole, Percentage, PlateIncrement, Programme,
+        ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
         v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -44,6 +44,8 @@ pub enum DocumentError {
     Invalid { field: String, detail: String },
     #[error(transparent)]
     Inconsistent(#[from] InconsistentProgramme),
+    #[error("programme.interruptions: {0}")]
+    Uncalendarable(#[from] InvalidCalendar),
 }
 
 fn invalid(field: &str, detail: impl std::fmt::Display) -> DocumentError {
@@ -118,6 +120,13 @@ struct ProgrammeSection {
     gating_role: String,
     start: String,
     duration_weeks: u32,
+    /// The weeks the block does not run, each named by a date inside it.
+    ///
+    /// Defaulted rather than required, because a block with nothing in its way
+    /// is a real state and not an unsettled one — unlike a `TODO`, which is a
+    /// decision nobody has taken yet.
+    #[serde(default)]
+    interruptions: Vec<String>,
     weekdays: BTreeMap<String, String>,
     anchor: AnchorSection,
 }
@@ -300,6 +309,26 @@ impl Document {
         )
         .map_err(|error| invalid("programme.anchor", error))?;
 
+        let mut interruptions = Vec::with_capacity(section.interruptions.len());
+        for (at, week) in section.interruptions.iter().enumerate() {
+            let field = format!("programme.interruptions[{at}]");
+            interruptions.push(
+                settled(&field, week)?
+                    .parse::<Date>()
+                    .map_err(|error| invalid(&field, error))?,
+            );
+        }
+
+        let calendar = Calendar::new(
+            settled("programme.start", &section.start)?
+                .parse::<Date>()
+                .map_err(|error| invalid("programme.start", error))?,
+            section.duration_weeks,
+            &interruptions,
+            weekdays,
+            zone,
+        )?;
+
         Ok(Programme::new(
             PrimaryPattern::try_from(section.primary_pattern.clone())
                 .map_err(|error| invalid("programme.primary", error))?,
@@ -308,12 +337,7 @@ impl Document {
             anchor,
             SessionRole::try_from(section.gating_role.clone())
                 .map_err(|error| invalid("programme.gating_role", error))?,
-            settled("programme.start", &section.start)?
-                .parse::<Date>()
-                .map_err(|error| invalid("programme.start", error))?,
-            section.duration_weeks,
-            weekdays,
-            zone,
+            calendar,
             parameters,
         )?)
     }

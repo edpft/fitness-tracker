@@ -16,12 +16,12 @@
 use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{
-        Kg, RepCount,
+        Kg, OperatorZone, RepCount,
         exercise::Exercise,
         sequence::{AtLeastTwo, TooShort},
     },
     prescription::{
-        Anchor, AnchorProvenance, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
+        Anchor, AnchorProvenance, Calendar, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
         v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -146,11 +146,19 @@ impl SlotRows {
 #[derive(Debug, Clone)]
 pub struct SqliteProgrammeStore {
     pool: SqlitePool,
+    /// The zone the operator declares they train in.
+    ///
+    /// Configuration rather than programme data, so it is supplied here and not
+    /// read from a row (§ II.3). The calendar needs one to answer "today", and
+    /// answering it in UTC is how a session lands on the wrong day for anyone
+    /// who trains in the evening — or, in a zone ahead of UTC, first thing in
+    /// the morning.
+    zone: OperatorZone,
 }
 
 impl SqliteProgrammeStore {
-    pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub const fn new(pool: SqlitePool, zone: OperatorZone) -> Self {
+        Self { pool, zone }
     }
 }
 
@@ -181,6 +189,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
 
         let fills = read_fills(&self.pool, row.id).await?;
         let weekdays = read_weekdays(&self.pool, row.id).await?;
+        let interruptions = read_interruptions(&self.pool, row.id).await?;
 
         let anchor_grams = u64::try_from(row.anchor_grams)
             .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
@@ -196,23 +205,24 @@ impl ProgrammeStore for SqliteProgrammeStore {
         let duration = u32::try_from(row.duration_weeks)
             .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
 
+        let calendar = Calendar::new(
+            row.start_date
+                .parse::<Date>()
+                .map_err(|_| corrupt(&"a start date that is not a date"))?,
+            duration,
+            &interruptions,
+            weekdays,
+            self.zone.as_time_zone(),
+        )
+        .map_err(|error| corrupt(&error))?;
+
         let programme = Programme::rehydrate(
             PrimaryPattern::try_from(row.primary_pattern).map_err(|error| corrupt(&error))?,
             exercise_of(&row.primary_exercise)?,
             fills,
             anchor,
             SessionRole::try_from(row.gating_role).map_err(|error| corrupt(&error))?,
-            row.start_date
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"a start date that is not a date"))?,
-            duration,
-            weekdays,
-            // The zone is operator configuration rather than programme data, and
-            // the calendar needs one. Taken from the anchor's own recording zone
-            // would be wrong — that is a fact about the test, not about where the
-            // operator trains — so `Calendar` is rebuilt with UTC here and the
-            // caller re-places it. See the note in `prescribe`.
-            jiff::tz::TimeZone::UTC,
+            calendar,
             row.authored_at
                 .parse()
                 .map_err(|_| corrupt(&"an authoring date that is not an instant"))?,
@@ -295,22 +305,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .map_err(|error| store_error(&error))?;
         }
 
-        for (day, role) in programme.calendar().weekdays().iter() {
-            let day_key = weekday_key(day);
-            let role_key = role.as_str();
-            sqlx::query!(
-                r"
-                INSERT INTO programme_weekday (programme, weekday, role)
-                VALUES (?, ?, ?)
-                ",
-                id,
-                day_key,
-                role_key
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
+        write_calendar(&mut tx, id, programme.calendar()).await?;
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(ProgrammeId::new(id))
@@ -397,6 +392,79 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
         mobility_hold: rows_for(SlotId::MobilityHold)?.single(SlotId::MobilityHold)?,
         mobility_stretch: rows_for(SlotId::MobilityStretch)?.superset(SlotId::MobilityStretch)?,
     })
+}
+
+/// When the block runs: its weekdays, and the weeks it skips.
+///
+/// Split out of `author` so that function stays inside the line budget. The two
+/// go together because both answer "does this date carry a session", which is
+/// the question `Calendar::place` is rebuilt from on read.
+async fn write_calendar(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    programme: i64,
+    calendar: &domain::prescription::Calendar,
+) -> Result<(), StoreError> {
+    for week in calendar.interruptions().iter() {
+        let week = week.to_string();
+        sqlx::query!(
+            r"
+            INSERT INTO programme_interruption (programme, week)
+            VALUES (?, ?)
+            ",
+            programme,
+            week
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+
+    for (day, role) in calendar.weekdays().iter() {
+        let day_key = weekday_key(day);
+        let role_key = role.as_str();
+        sqlx::query!(
+            r"
+            INSERT INTO programme_weekday (programme, weekday, role)
+            VALUES (?, ?, ?)
+            ",
+            programme,
+            day_key,
+            role_key
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
+}
+
+/// The weeks the block does not run.
+///
+/// Ordered by the stored date so a rebuilt programme reads back the same
+/// calendar it was authored with, whatever order the rows were written in.
+async fn read_interruptions(pool: &SqlitePool, programme: i64) -> Result<Vec<Date>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT week AS "week!: String"
+        FROM programme_interruption
+        WHERE programme = ?
+        ORDER BY week ASC
+        "#,
+        programme
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut weeks = Vec::with_capacity(rows.len());
+    for row in rows {
+        weeks.push(
+            row.week
+                .parse::<Date>()
+                .map_err(|_| corrupt(&"an interrupted week that is not a date"))?,
+        );
+    }
+    Ok(weeks)
 }
 
 /// Which weekdays the programme runs, and as what.

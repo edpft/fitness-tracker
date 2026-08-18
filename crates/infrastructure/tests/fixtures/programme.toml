@@ -34,7 +34,16 @@ start            = "2026-07-06"
 # ladder's weekly step is the span divided by this, so a different duration is a
 # different plan rather than the same plan run longer. Eight here is a fixture
 # value and nothing more.
-duration_weeks   = 8
+duration_weeks = 8
+
+# The weeks the block does not run, each named by a date inside it.
+#
+# **The duration above counts training weeks.** A week away is not a week of the
+# plan: the session after it is the same rung of the ladder as the session
+# before it, and the block ends one calendar week later for each week listed
+# here. Left empty is a real state and not an unsettled one, which is why this
+# takes no `TODO` — the block the corpus was trained under ran straight through.
+interruptions = []
 
 # Which weekday is which session role. A date on no listed weekday is an error
 # naming these days, never an implicit nearest match.

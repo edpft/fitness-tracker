@@ -58,7 +58,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone());
+    let programmes = SqliteProgrammeStore::new(pool.clone(), corpus::zone()?);
     let parameters = SqliteGenerationParameterStore::new(pool.clone());
     Authoring::new(programmes, parameters)
         .author(&programme::programme()?, &programme::parameters()?)
@@ -67,7 +67,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone()),
+            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
         }),

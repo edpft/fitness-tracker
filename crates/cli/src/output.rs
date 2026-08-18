@@ -245,6 +245,23 @@ pub fn programme_authored(
         calendar.start(),
         programme.gating_role(),
     );
+    let skipped: Vec<String> = calendar
+        .interruptions()
+        .iter()
+        .map(|week| week.to_string())
+        .collect();
+    if !skipped.is_empty() {
+        // Printed because the operator has to be able to see that the block
+        // knows about the holiday. The alternative — silence — looks identical
+        // to the bug this replaced, where a week away quietly cost a rung.
+        let label = if skipped.len() == 1 { "week" } else { "weeks" };
+        println!(
+            "  not running the {label} of {} — {} training weeks over {} calendar weeks",
+            skipped.join(", "),
+            calendar.duration_weeks(),
+            calendar.calendar_weeks(),
+        );
+    }
     println!("anchor {}, fixed for the block", programme.anchor());
     println!(
         "  ladder {} → {} of anchor over {} climbing weeks; week {} is the test",

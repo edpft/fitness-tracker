@@ -8,7 +8,7 @@
 //! Fills are inputs rather than choices the programme makes. Generation produces
 //! the loading series, never the exercise selection.
 
-use jiff::{Timestamp, civil::Date, tz::TimeZone};
+use jiff::Timestamp;
 
 use crate::{
     gym::exercise::Exercise,
@@ -78,33 +78,32 @@ impl Programme {
     /// primary that is not counted in repetitions, a primary exercise that does
     /// not fill the slot named as primary, or a span and duration that do not
     /// make a ladder.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "an authored programme genuinely has this many inputs, and a \
-                  builder would let a caller stop halfway — which is what the \
-                  totality of SlotFills exists to prevent"
-    )]
     pub fn new(
         primary: PrimaryPattern,
         primary_exercise: Exercise,
         fills: SlotFills,
         anchor: Anchor,
         gating_role: SessionRole,
-        start: Date,
-        duration_weeks: u32,
-        weekdays: Weekdays,
-        zone: TimeZone,
+        calendar: Calendar,
         parameters: &GenerationParameters,
     ) -> Result<Self, InconsistentProgramme> {
-        Self::check(primary, primary_exercise, &fills, gating_role, &weekdays)?;
+        Self::check(
+            primary,
+            primary_exercise,
+            &fills,
+            gating_role,
+            calendar.weekdays(),
+        )?;
 
         // 4. And the span has to make a ladder over this duration. Checked here
         //    so an unbuildable plan fails at authoring rather than at the first
-        //    `prescribe`.
+        //    `prescribe`. Training weeks, not calendar ones: a block interrupted
+        //    by a holiday is the same ladder run over a longer stretch of the
+        //    year, not a longer ladder.
         Ladder::new(
             parameters.ladder_start,
             parameters.ladder_end,
-            duration_weeks,
+            calendar.duration_weeks(),
         )?;
 
         Ok(Self {
@@ -113,7 +112,7 @@ impl Programme {
             fills,
             anchor,
             gating_role,
-            calendar: Calendar::new(start, duration_weeks, weekdays, zone),
+            calendar,
             authored_at: Timestamp::now(),
         })
     }
@@ -145,30 +144,29 @@ impl Programme {
     ///
     /// [`InconsistentProgramme`] for any of the three parameter-independent
     /// checks.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the same list as `new`, minus the parameters it does not need"
-    )]
     pub fn rehydrate(
         primary: PrimaryPattern,
         primary_exercise: Exercise,
         fills: SlotFills,
         anchor: Anchor,
         gating_role: SessionRole,
-        start: Date,
-        duration_weeks: u32,
-        weekdays: Weekdays,
-        zone: TimeZone,
+        calendar: Calendar,
         authored_at: Timestamp,
     ) -> Result<Self, InconsistentProgramme> {
-        Self::check(primary, primary_exercise, &fills, gating_role, &weekdays)?;
+        Self::check(
+            primary,
+            primary_exercise,
+            &fills,
+            gating_role,
+            calendar.weekdays(),
+        )?;
         Ok(Self {
             primary,
             primary_exercise,
             fills,
             anchor,
             gating_role,
-            calendar: Calendar::new(start, duration_weeks, weekdays, zone),
+            calendar,
             authored_at,
         })
     }

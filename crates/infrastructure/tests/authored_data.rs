@@ -163,7 +163,11 @@ async fn programme_store()
 -> Result<(SqliteProgrammeStore, SqlitePool, tempfile::TempDir), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    Ok((SqliteProgrammeStore::new(pool.clone()), pool, directory))
+    Ok((
+        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        pool,
+        directory,
+    ))
 }
 
 macro_rules! programmes {
@@ -226,6 +230,50 @@ fn a_programme_round_trips_with_every_fill_shape() {
     assert_eq!(
         read_back.calendar().duration_weeks(),
         authored.calendar().duration_weeks()
+    );
+}
+
+/// The weeks the block does not run survive the round trip, and still place.
+///
+/// The store is where this can go wrong quietly: a programme read back without
+/// its interruptions is a valid programme that prescribes the wrong week, and
+/// nothing about it looks broken. So the assertion is on the placement and not
+/// only on the rows.
+#[test]
+fn the_interrupted_weeks_round_trip() {
+    let (store, _pool, _directory) = programmes!();
+    let (Ok(away), Ok(after)) = (
+        jiff::civil::Date::new(2026, 7, 20),
+        jiff::civil::Date::new(2026, 7, 27),
+    ) else {
+        panic!("the dates are valid")
+    };
+    let Ok(authored) = programme::programme_skipping(&[away]) else {
+        panic!("a week inside the block can be skipped")
+    };
+
+    let _id = run!(store.author(&authored));
+    let Some((_, read_back)) = run!(store.current()) else {
+        panic!("what was authored is in force")
+    };
+
+    assert_eq!(
+        read_back
+            .calendar()
+            .interruptions()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![away],
+        "the week the operator named comes back as they named it"
+    );
+    assert!(
+        read_back.calendar().place(away).is_err(),
+        "a stored interruption still refuses its own week"
+    );
+    assert_eq!(
+        read_back.calendar().place(after).ok(),
+        authored.calendar().place(after).ok(),
+        "and the week after it is the same rung it was authored to be"
     );
 }
 
@@ -329,22 +377,29 @@ fn an_unsettled_document_refuses_to_author() {
     }
 }
 
-/// With the span supplied, the whole document converts — every fill shape, the
-/// anchor, the weekday mapping and the parameters.
-#[test]
-fn a_settled_document_authors() {
+/// The fixture document with a ladder span supplied.
+///
+/// A span, so the rest of the document can be exercised. Not the operator's:
+/// theirs is still `TODO`, and that is the point of the test above. A free
+/// function returning `Result`, because the test exemptions do not reach one.
+fn settled_document() -> Result<String, Box<dyn std::error::Error>> {
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/programme.toml"
     ));
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let text = std::fs::read_to_string(path)?;
+    Ok(text
+        .replace(r#"start = "TODO""#, r#"start = "92.5%""#)
+        .replace(r#"end   = "TODO""#, r#"end   = "105%""#))
+}
+
+/// With the span supplied, the whole document converts — every fill shape, the
+/// anchor, the weekday mapping and the parameters.
+#[test]
+fn a_settled_document_authors() {
+    let Ok(settled) = settled_document() else {
         panic!("the fixture document is readable")
     };
-    // A span, so the rest of the document can be exercised. Not the operator's:
-    // theirs is still `TODO`, and that is the point of the test above.
-    let settled = text
-        .replace(r#"start = "TODO""#, r#"start = "92.5%""#)
-        .replace(r#"end   = "TODO""#, r#"end   = "105%""#);
 
     let Ok(document) = toml::from_str::<infrastructure::Document>(&settled) else {
         panic!("the settled document is valid TOML")
@@ -374,4 +429,98 @@ fn a_settled_document_authors() {
     };
     assert_eq!(programme.fills(), &expected_fills);
     assert_eq!(programme.calendar().duration_weeks(), 8);
+    assert!(
+        programme.calendar().interruptions().is_empty(),
+        "the fixture block has nothing in its way"
+    );
+}
+
+/// A document naming a week away authors a block that skips it.
+///
+/// The key is optional, so this is also the assertion that it is read at all: a
+/// document whose `interruptions` went unparsed would author a programme that
+/// looks exactly like the one above.
+#[test]
+fn a_document_can_name_the_weeks_the_block_does_not_run() {
+    let Ok(settled) = settled_document() else {
+        panic!("the fixture document is readable")
+    };
+    // Inside the block, which starts 2026-07-06 and runs eight training weeks.
+    let named = settled.replace("interruptions = []", r#"interruptions = ["2026-07-20"]"#);
+    assert_ne!(named, settled, "the fixture carries the key to replace");
+
+    let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
+        panic!("the amended document is valid TOML")
+    };
+    let (Ok(parameters), Ok(zone)) = (
+        document.parameters(),
+        jiff::tz::TimeZone::get("Europe/London"),
+    ) else {
+        panic!("the parameters convert and Europe/London is a zone")
+    };
+    let programme = match document.programme(&parameters, zone) {
+        Ok(programme) => programme,
+        Err(error) => panic!("the document describes a consistent programme: {error}"),
+    };
+
+    let (Ok(away), Ok(after)) = (
+        jiff::civil::Date::new(2026, 7, 20),
+        jiff::civil::Date::new(2026, 7, 27),
+    ) else {
+        panic!("the dates are valid")
+    };
+    assert_eq!(
+        programme
+            .calendar()
+            .interruptions()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![away]
+    );
+    assert_eq!(
+        programme.calendar().duration_weeks(),
+        8,
+        "the duration counts training weeks, so a holiday does not shorten it"
+    );
+    assert_eq!(programme.calendar().calendar_weeks(), 9);
+    assert!(programme.calendar().place(away).is_err());
+    match programme.calendar().place(after) {
+        Ok((domain::prescription::WeekKind::Climbing(week), _)) => {
+            assert_eq!(week.as_u32(), 3, "the week after the holiday is week three");
+        }
+        other => panic!("2026-07-27 is a climbing week, got {other:?}"),
+    }
+}
+
+/// A week outside the block is refused rather than ignored.
+#[test]
+fn a_document_naming_a_week_outside_the_block_does_not_author() {
+    let Ok(settled) = settled_document() else {
+        panic!("the fixture document is readable")
+    };
+    // The block starts 2026-07-06; this is the week before it.
+    let named = settled.replace("interruptions = []", r#"interruptions = ["2026-06-29"]"#);
+
+    let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
+        panic!("the amended document is valid TOML")
+    };
+    let Ok(parameters) = document.parameters() else {
+        panic!("the parameters convert")
+    };
+    let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
+        panic!("Europe/London is a zone")
+    };
+    match document.programme(&parameters, zone) {
+        Err(infrastructure::DocumentError::Uncalendarable(error)) => {
+            assert!(
+                matches!(
+                    error,
+                    domain::prescription::InvalidCalendar::InterruptionBeforeStart { .. }
+                ),
+                "the refusal says the week is before the block, got {error}"
+            );
+        }
+        Ok(_) => panic!("a week outside the block must not author"),
+        Err(other) => panic!("the refusal names the calendar, got {other}"),
+    }
 }
