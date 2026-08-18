@@ -2,10 +2,11 @@
 
 Written 2026-08-18, mid-feature, for whoever picks this up next.
 
-**Branch**: `003-prescribed-workout-generation`, 16 commits ahead of `main`,
-nothing pushed. 227 tests pass, `clippy --all-targets -- --deny warnings` is
-clean, `nix flake check`'s `architecture` and `use-case-isolation` pass. 52 of
-80 tasks in [tasks.md](./tasks.md).
+**Branch**: `003-prescribed-workout-generation`, 18 commits ahead of `main`,
+nothing pushed. 239 tests pass, `clippy --all-targets -- --deny warnings` is
+clean, and **the whole of `nix flake check` passes** — `typos` and `toml-fmt`
+were red when this note was first written and are fixed. 52 of 80 tasks in
+[tasks.md](./tasks.md), plus the calendar fix, which is not one of them.
 
 Read [spec.md](./spec.md), [plan.md](./plan.md) and [research.md](./research.md)
 before writing code. This note covers what those cannot: what changed *during*
@@ -107,15 +108,53 @@ the linear model's invented 105% endpoint could never be.
 explicitly: it is an observation, retained for a retrospective check. A design
 that consults it contradicts the model of record.
 
-### The one genuinely open question
+### Sessions within the week
 
-**The percentage table for an accumulation-into-intensification block, and how
-it scales when duration changes the rung count.**
+**One primary lift at a time.** The operator settled this on 2026-08-18: not two
+lower-body lifts progressing in parallel. That matters, because their own
+periodised block did the opposite and the corpus shows it plainly — front squat
+on Mondays and only Mondays, deadlift on Wednesdays, back squat on Fridays,
+three ladders running concurrently and phase-shifted against each other (the
+deadlift was at its week 8 while the front squat was at its week 7). **That
+pattern is not the model to rebuild.** It also means the record says *nothing*
+about a second weekly session of one lift: there has never been one during a
+block.
+
+**A rung belongs to a lift and a week, not to a session.** Two sessions cannot
+each take a rung — an 11-week block would need twenty-odd of them, which
+contradicts duration setting the rung count. So the ladder hangs off the
+primary, and the second session is derived from the same week's rung.
+
+The literature is consistent about *how*: two sessions of one lift are
+differentiated by role, never repeated. Starr's light day is 70–80% of the heavy
+day's top set; the Texas Method's volume day is ~85–90% of its intensity day;
+DUP runs ~70% against ~80% in one week. All three cluster on **the lighter
+session being 70–90% of the heavier one**, which is where the `light_of_heavy`
+already in the model sits at 88.5% — so that parameter is not the invention its
+`INFERRED` marking suggests.
+
+One structural point, because it decides the shape: **the Texas Method splits
+volume from intensity inside the week because it has no blocks.** `v2` has
+blocks. Splitting again inside the week would do the same job twice, and the
+block-periodisation sources say the opposite — both sessions carry the block's
+character, differentiated by load or by variation. So the second session is the
+same week's rung, lighter, and it costs no new parameter.
+
+### The two genuinely open questions
+
+**1. The percentage table for an accumulation-into-intensification block, and
+how it scales when duration changes the rung count.**
 
 This is a literature question, not a question for the operator. Prilepin's chart
 and standard block-periodisation templates are the sources. Do *not* reconstruct
 it from the operator's 2025 block — its opening load was, by the operator's own
 account, a guess.
+
+**2. Whether the lighter session runs the same lift or a variation.** Asked on
+2026-08-18 and not yet answered. Same lift at `light_of_heavy` is one option;
+eliteFTS recommends a variation for a squat-focused block, which the template
+already supports as an alternating fill and which costs nothing structurally
+either. Nothing else in the `v2` design turns on the answer.
 
 ---
 
@@ -165,13 +204,14 @@ block's entry anchor" was wrong and has been corrected.
 
 ## Known gaps in what *is* built
 
-- **The calendar counts calendar weeks, not training weeks.** `Calendar::place`
-  computes days-since-start ÷ 7, so a holiday week silently consumes a ladder
-  position. The operator's current block has two holiday weeks in it, and
-  working around them by hand is exactly what they want to stop doing. This is
-  the constraint calendar, listed as "Not modelled here" in the prescribed model
-  and now a requirement. **Fix this early — it is a correctness bug, not a
-  feature.**
+- ~~**The calendar counts calendar weeks, not training weeks.**~~ **Fixed**
+  (`fix: count training weeks, not calendar weeks`). A block's duration counts
+  training weeks; the weeks it skips are authored per block, named by a date
+  inside them, and stored in `programme_interruption` (migration `0005`). A date
+  in a skipped week is refused rather than answered with a neighbour's loading,
+  and `--date` defaults to the next *session* rather than the next programmed
+  weekday. The programme store now takes the operator's zone, so `today` no
+  longer resolves in UTC.
 - **`PerformedWorkoutReader`** is declared and deliberately not implemented; it
   needs a whole `GymWorkout` rebuilt from five tables. Belongs with the round
   trip.
@@ -245,8 +285,7 @@ block's entry anchor" was wrong and has been corrected.
 
 ## Suggested order
 
-1. **Fix the calendar** to count training weeks, with a holiday list on the
-   programme. Correctness bug, blocks everything else.
+1. ~~**Fix the calendar**~~ — done. See "Known gaps".
 2. **Research the percentage table** for accumulation/intensification. The last
    unknown, and it is a literature question.
 3. **Build `v2`** beside `v1`. `Ladder` becomes a table lookup; the anchor,
