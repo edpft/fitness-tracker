@@ -17,6 +17,6 @@ pub use programme::{Document, DocumentError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore, SqliteProgrammeStore,
-    SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
+    SqliteProgrammeStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };

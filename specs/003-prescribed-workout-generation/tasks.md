@@ -143,16 +143,16 @@ other slot's from its own last performance.
 - [X] T049 [US1] Add `programme author` and `programme show` to `crates/cli/src/main.rs`, and the prescription arm to `crates/cli/src/wiring.rs`
 - [X] T050 [US1] Implement the rendering in `crates/cli/src/output.rs` — the header with date, weekday, role, week, ladder percentage, anchor with provenance and `history through`; blocks with their slots; supersets bracketed; underivable slots in place
 - [X] T051 [US1] Implement the `programme show` ladder table in `crates/cli/src/output.rs` — every week with its percentage, heavy and light loads, and state
-- [ ] T052 [US1] Pin the composed `--date` default in its own unit test in `crates/cli/src/config.rs`. A stub cannot catch a wrong default, and "next programmed day at or after today" is exactly the kind that passes against a mock and fails in the gym
+- [X] T052 [US1] Pin the composed `--date` default in its own unit test in `crates/cli/src/config.rs`. A stub cannot catch a wrong default, and "next programmed day at or after today" is exactly the kind that passes against a mock and fails in the gym
 - [X] T053 [US1] Regenerate `.sqlx` with `cargo sqlx prepare --workspace`
 
 ### The round trip (D9, SC-010)
 
-- [ ] T054 [P] [US1] Implement `project(&GymWorkout) -> Projection` and `ProjectionGap` in `crates/domain/src/prescription/project.rs`, assigning slots by position against the template and recording `SlotUnassignable` where the structure diverges
-- [ ] T055 [US1] Implement `satisfies(performed, prescribed) -> Vec<Divergence>` in `crates/domain/src/prescription/project.rs`, treating a projected `Exactly(n)` as agreeing with a prescribed `Range` containing `n`
-- [ ] T056 [P] [US1] Write SC-010a, SC-010b and SC-010d in `crates/infrastructure/tests/round_trip.rs` — all fifteen sessions project; generation reproduces their structure; satisfaction is direction-aware
-- [ ] T057 [P] [US1] Write SC-010e as a compile-fail test in `crates/domain/tests/`: `store.issue(projection.shape)` must not compile
-- [ ] T058 [US1] Write SC-010c in `crates/infrastructure/tests/round_trip.rs` — compare generation against what was prescribed from 2026-08-07 onward, and assert every divergence is attributable to an unstated parameter, a template change, or hand arithmetic. A divergence outside those is a defect. **No longer blocked**: attribution does not need the ladder span, where reproduction would have
+- [X] T054 [P] [US1] Implement `project(&GymWorkout) -> Projection` and `ProjectionGap` in `crates/domain/src/prescription/project.rs`, assigning slots by position against the template and recording `SlotUnassignable` where the structure diverges
+- [X] T055 [US1] Implement `satisfies(performed, prescribed) -> Vec<Divergence>` in `crates/domain/src/prescription/project.rs`, treating a projected `Exactly(n)` as agreeing with a prescribed `Range` containing `n`
+- [X] T056 [P] [US1] Write SC-010a, SC-010b and SC-010d in `crates/infrastructure/tests/round_trip.rs` — all fifteen sessions project; generation reproduces their structure; satisfaction is direction-aware
+- [X] T057 [P] [US1] Write SC-010e as a compile-fail test: `store.issue(projection.shape)` must not compile. **Landed as a ```compile_fail``` doctest on `domain::prescription::project` rather than a file in `crates/domain/tests/`** — an integration test cannot assert that something fails to compile without `trybuild`, and a doctest needs no dependency and is already a flake check (`workspace-doctest`). A companion doctest that *must* compile sits beside it, so the assertion cannot pass because of a typo
+- [X] T058 [US1] Write SC-010c in `crates/infrastructure/tests/round_trip.rs` — compare generation against what was prescribed from 2026-08-07 onward, and assert every divergence is attributable to an unstated parameter, a template change, or hand arithmetic. A divergence outside those is a defect. **No longer blocked**: attribution does not need the ladder span, where reproduction would have
 
 **Checkpoint**: a workout is issued and printed for a real date, from real
 history, with everything except the primary's absolute loads verified.

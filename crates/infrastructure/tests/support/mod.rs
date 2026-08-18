@@ -9,6 +9,7 @@
 
 pub mod corpus;
 pub mod programme;
+pub mod store;
 
 /// Derive over the corpus, or fail the test saying which step broke.
 ///

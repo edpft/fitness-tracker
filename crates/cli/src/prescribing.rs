@@ -17,7 +17,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
-use crate::{Failure, exit, output};
+use crate::{Failure, config, config::ConfigError, exit, output};
 
 /// Read a document and store the programme it describes.
 pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
@@ -74,17 +74,11 @@ pub async fn prescribe(
 
 /// The date to prescribe for.
 ///
-/// **Defaults forward rather than to today.** "The next session" is what an
-/// operator wants on a rest day and today is what they want on a training day,
-/// and the next programmed day at or after today gives both. It is printed, so
-/// the default is never silent.
+/// **The defaulting itself is [`config::date`]**, which takes the calendar and
+/// the clock and is unit-tested. What is left here is the part that needs the
+/// store: a default is relative to the programme in force, so the programme has
+/// to be read before the date can be worked out.
 async fn resolve(programmes: &SqliteProgrammeStore, given: Option<&str>) -> Result<Date, Failure> {
-    if let Some(text) = given {
-        return text
-            .parse::<Date>()
-            .map_err(|error| Failure::usage(&format!("{text:?} is not a date: {error}")));
-    }
-
     let current = application::ProgrammeStore::current(programmes)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -95,11 +89,10 @@ async fn resolve(programmes: &SqliteProgrammeStore, given: Option<&str>) -> Resu
         ));
     };
 
-    let today = programme.calendar().today(jiff::Timestamp::now());
-    programme.calendar().next_programmed(today).ok_or_else(|| {
-        Failure::message(
-            format!("this programme has no session on or after {today}"),
-            exit::STORE,
-        )
+    config::date(given, programme.calendar(), jiff::Timestamp::now()).map_err(|error| match error {
+        // A date that will not parse is the operator's typing; a block with no
+        // session left is the store's state. They exit differently.
+        ConfigError::NotADate { .. } => Failure::usage(&error),
+        _ => Failure::message(error.to_string(), exit::STORE),
     })
 }

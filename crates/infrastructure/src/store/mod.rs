@@ -21,7 +21,7 @@ pub mod run_log;
 use application::StoreError;
 use domain::{gym::NormalisationRunId, landing::RunId};
 
-pub use history::SqliteExerciseHistory;
+pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};

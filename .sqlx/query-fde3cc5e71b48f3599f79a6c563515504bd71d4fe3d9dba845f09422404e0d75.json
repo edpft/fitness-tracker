@@ -1,0 +1,182 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT i.position AS \"item_position!: i64\", i.is_superset AS \"is_superset!: i64\",\n                   e.position AS \"exercise_position!: i64\",\n                   e.exercise AS \"exercise!: String\", e.measure AS \"measure!: String\",\n                   s.load_kind AS \"load_kind!: String\", s.load_grams AS \"load_grams!: i64\",\n                   s.outcome AS \"outcome!: String\",\n                   s.reps AS \"reps: i64\", s.duration_seconds AS \"duration_seconds: i64\",\n                   s.distance_mm AS \"distance_mm: i64\",\n                   s.rir AS \"rir: String\", s.set_kind AS \"set_kind!: String\",\n                   s.rest_after_seconds AS \"rest_after_seconds: i64\"\n            FROM workout_item AS i\n            JOIN performed_exercise AS e\n              ON e.workout = i.workout AND e.item_position = i.position\n            JOIN performed_set AS s\n              ON s.workout = e.workout AND s.item_position = e.item_position\n             AND s.exercise_position = e.position\n            WHERE i.workout = ?\n            ORDER BY i.position ASC, e.position ASC, s.position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "item_position!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_item",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "is_superset!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_item",
+            "name": "is_superset"
+          }
+        }
+      },
+      {
+        "name": "exercise_position!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "measure!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "measure"
+          }
+        }
+      },
+      {
+        "name": "load_kind!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "outcome!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance_mm: i64",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "rir: String",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "rir"
+          }
+        }
+      },
+      {
+        "name": "set_kind!: String",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "set_kind"
+          }
+        }
+      },
+      {
+        "name": "rest_after_seconds: i64",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "rest_after_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "fde3cc5e71b48f3599f79a6c563515504bd71d4fe3d9dba845f09422404e0d75"
+}
