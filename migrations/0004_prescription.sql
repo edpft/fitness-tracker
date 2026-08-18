@@ -42,6 +42,10 @@ CREATE TABLE generation_parameters (
     accessory_high         INTEGER NOT NULL CHECK (accessory_high > 0),
     accessory_sets         INTEGER NOT NULL CHECK (accessory_sets > 0),
 
+    -- How long a static hold is held for. The mobility work does not progress,
+    -- so its prescription comes from here rather than from observed history.
+    static_hold_seconds    INTEGER NOT NULL CHECK (static_hold_seconds > 0),
+
     -- From `docs/primary-lift-progression.md`. Drops are negative.
     reset1_drop_bp         INTEGER NOT NULL CHECK (reset1_drop_bp < 0),
     reset1_reclimb_grams   INTEGER NOT NULL CHECK (reset1_reclimb_grams > 0),

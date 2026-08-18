@@ -13,9 +13,13 @@
 use std::collections::BTreeMap;
 
 use domain::{
-    gym::{Kg, Load, NonEmpty, RepCount, exercise::Exercise, sequence::AtLeastTwo},
+    gym::{
+        Kg, Load, NonEmpty, RepCount,
+        exercise::{DurationExercise, Exercise, RepsExercise},
+        sequence::AtLeastTwo,
+    },
     prescription::{
-        GenerationParameters, PrescribedExercise, PrescribedItem, PrescribedSet,
+        Block, GenerationParameters, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, SessionRole, SlotId,
         SupersetMember, Target, WeekKind, WorkoutShape, quantise_loaded, v1::SlotContent,
     },
@@ -97,10 +101,20 @@ where
 
         let (week, role) = programme.calendar().place(date)?;
 
-        // Every exercise the programme can prescribe, in one call. Both sides of
-        // every alternating fill, because this session prescribes one and the
-        // next needs the other's history.
-        let wanted = programme.fills().every_exercise();
+        // Every exercise the programme can prescribe that progresses, in one
+        // call. Both sides of every alternating fill, because this session
+        // prescribes one and the next needs the other's history — and only the
+        // repetitions vocabulary, because a hold does not progress and the port
+        // will not be asked about one.
+        let wanted: Vec<RepsExercise> = programme
+            .fills()
+            .every_exercise()
+            .into_iter()
+            .filter_map(|exercise| match exercise {
+                Exercise::Reps(reps) => Some(reps),
+                Exercise::Duration(_) | Exercise::Distance(_) => None,
+            })
+            .collect();
         let history = self.ports.history.last_performances(&wanted).await?;
 
         let mut items = Vec::new();
@@ -120,16 +134,13 @@ where
             week,
             programme.anchor(),
             parameters,
+            parameters_at,
             programme_id,
             Timestamp::now(),
         );
 
         let id = self.ports.prescriptions.issue(&workout).await?;
         let history_through = self.ports.history.newest_performance().await?;
-
-        // The parameter version is recorded on the workout by value, so naming it
-        // here would be a second copy of the same fact.
-        let _ = parameters_at;
 
         Ok(Prescription {
             id,
@@ -153,7 +164,7 @@ fn issue_slots(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
-    history: &BTreeMap<Exercise, LastPerformance>,
+    history: &BTreeMap<RepsExercise, LastPerformance>,
 ) -> Vec<Derived> {
     let mut issued = Vec::new();
     let accessory = |slot: SlotId| accessory_slot(programme, parameters, role, history, slot);
@@ -319,7 +330,7 @@ fn pair(
     programme: &Programme,
     parameters: &GenerationParameters,
     role: SessionRole,
-    history: &BTreeMap<Exercise, LastPerformance>,
+    history: &BTreeMap<RepsExercise, LastPerformance>,
     slots: [SlotId; 2],
 ) -> Derived {
     let mut members = Vec::new();
@@ -359,7 +370,7 @@ fn accessory_slot(
     programme: &Programme,
     parameters: &GenerationParameters,
     role: SessionRole,
-    history: &BTreeMap<Exercise, LastPerformance>,
+    history: &BTreeMap<RepsExercise, LastPerformance>,
     slot: SlotId,
 ) -> Derived {
     match programme.fills().content(slot, role) {
@@ -393,10 +404,49 @@ fn accessory_slot(
     }
 }
 
+/// How a slot's numbers are arrived at.
+///
+/// A total function of `(slot, primacy)`, which is what the model of record says:
+/// the primary gets a top set and back-offs, every other strength and hypertrophy
+/// slot gets double progression, and the plyometric, power and mobility blocks are
+/// static. A slot therefore collapses to just an exercise, and a primary-style
+/// scheme on a non-primary slot is unwritable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scheme {
+    /// Re-issue the last performance exactly. No progression, by design: a set
+    /// of pogos or box jumps is there to be done, not to be added to.
+    Static,
+    /// A hold, for the authored length, every time.
+    Hold,
+    DoubleProgression,
+}
+
+const fn scheme_of(slot: SlotId) -> Scheme {
+    match slot.block() {
+        Block::Plyometric | Block::Power => Scheme::Static,
+        Block::Mobility => Scheme::Hold,
+        Block::Strength | Block::Hypertrophy => Scheme::DoubleProgression,
+    }
+}
+
+/// A static hold: the authored duration, once.
+const fn hold(parameters: &GenerationParameters, exercise: DurationExercise) -> PrescribedExercise {
+    let set = PrescribedSet::fixed(
+        // Unloaded, and the pinned axis is volume rather than intensity — which
+        // is how a slot with no load still prescribes something.
+        Load::UNLOADED,
+        Target::Exactly(parameters.static_hold),
+    );
+    PrescribedExercise::ForDuration {
+        exercise,
+        sets: NonEmpty::of(set, Vec::new()),
+    }
+}
+
 /// One exercise's sets, by double progression against its own last performance.
 fn one_exercise(
     parameters: &GenerationParameters,
-    history: &BTreeMap<Exercise, LastPerformance>,
+    history: &BTreeMap<RepsExercise, LastPerformance>,
     exercise: Exercise,
     slot: SlotId,
 ) -> Result<PrescribedExercise, UnderivableSlot> {
@@ -406,28 +456,46 @@ fn one_exercise(
         reason,
     };
 
-    // Only the reps vocabulary progresses. A static slot counted in duration —
-    // the mobility work — has nothing in the programme to prescribe from, which
-    // is a gap the programme has rather than a failure here.
-    let Exercise::Reps(reps_exercise) = exercise else {
-        return Err(underivable(UnderivableReason::NoAuthoredDuration));
-    };
+    // A hold needs no history at all: it is the authored duration, every time.
+    if scheme_of(slot) == Scheme::Hold {
+        let Exercise::Duration(duration_exercise) = exercise else {
+            return Err(underivable(UnderivableReason::NotAHold));
+        };
+        return Ok(hold(parameters, duration_exercise));
+    }
 
-    let Some(LastPerformance::Performed(last)) = history.get(&exercise) else {
+    let Exercise::Reps(reps_exercise) = exercise else {
+        return Err(underivable(UnderivableReason::NotCountedInReps));
+    };
+    let Some(LastPerformance::Performed(last)) = history.get(&reps_exercise) else {
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
+    let sets = match scheme_of(slot) {
+        // Re-issue what was done: same load, same count, same number of sets.
+        Scheme::Static => {
+            let mut issued = Vec::new();
+            for set in &last.sets {
+                let Some(reps) = set.outcome.completed() else {
+                    continue;
+                };
+                issued.push(PrescribedSet::fixed(set.load, Target::Exactly(*reps)));
+            }
+            issued
+        }
+        Scheme::DoubleProgression => {
+            let load = progressed_load(parameters, last)
+                .ok_or_else(|| underivable(UnderivableReason::NoWorkingSet))?;
+            let target = Target::range(parameters.accessory.low, parameters.accessory.high)
+                .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
+            (0..parameters.accessory.sets.as_u32())
+                .map(|_| PrescribedSet::fixed(load, target))
+                .collect()
+        }
+        // Handled above, before any history was needed.
+        Scheme::Hold => Vec::new(),
+    };
 
-    let load = progressed_load(parameters, last)
-        .ok_or_else(|| underivable(UnderivableReason::NoWorkingSet))?;
-
-    let mut sets = Vec::new();
-    let target = Target::range(parameters.accessory.low, parameters.accessory.high)
-        .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
-    for _ in 0..parameters.accessory.sets.as_u32() {
-        sets.push(PrescribedSet::fixed(load, target));
-    }
     let sets = NonEmpty::new(sets).map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
-
     Ok(PrescribedExercise::ForReps {
         exercise: reps_exercise,
         sets,

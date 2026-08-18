@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 
 use application::{ExerciseHistory, LastPerformance, Performance, PerformedSetSummary, StoreError};
 use domain::{
-    gym::{Load, Performed, RepCount, SignedKg, exercise::Exercise},
+    gym::{Load, Performed, RepCount, SignedKg, exercise::RepsExercise},
     landing::LandingRecordId,
 };
 use jiff::civil::Date;
@@ -123,8 +123,8 @@ fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
 impl ExerciseHistory for SqliteExerciseHistory {
     async fn last_performances(
         &self,
-        exercises: &[Exercise],
-    ) -> Result<BTreeMap<Exercise, LastPerformance>, StoreError> {
+        exercises: &[RepsExercise],
+    ) -> Result<BTreeMap<RepsExercise, LastPerformance>, StoreError> {
         let mut answers = BTreeMap::new();
         for exercise in exercises {
             // Every exercise asked about gets an answer, and a named one. An
@@ -141,7 +141,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
         Ok(answers)
     }
 
-    async fn performances(&self, exercise: Exercise) -> Result<Vec<Performance>, StoreError> {
+    async fn performances(&self, exercise: RepsExercise) -> Result<Vec<Performance>, StoreError> {
         let key = exercise.as_str();
         let rows = sqlx::query!(
             r#"

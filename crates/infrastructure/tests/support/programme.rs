@@ -112,6 +112,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             high: reps(6)?,
             sets: reps(3)?,
         },
+        static_hold: domain::gym::Duration::from_seconds(60),
         first_reset: ResetProtocol {
             drop: pct("-10%")?,
             reclimb_per_week: kg("5")?,

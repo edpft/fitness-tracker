@@ -120,6 +120,10 @@ end   = "TODO"
 reps = "4-6"
 sets = 3
 
+# How long a static hold is held for. The mobility work does not progress; it is
+# held, and for the same length every time.
+static_hold = "60s"
+
 # INFERRED. The primary's top set, per session role, read off every session
 # since the July test. Well evidenced — they have not varied within a role — and
 # still not stated.

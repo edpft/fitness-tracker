@@ -61,6 +61,13 @@ pub struct PrescribedWorkout {
     week: WeekKind,
     anchor: Anchor,
     parameters: GenerationParameters,
+    /// Which authored version those parameters came from.
+    ///
+    /// The values are recorded here too, which is what § 14 rests on — but the
+    /// version is the join back to the authored set, and without it two
+    /// prescriptions generated under different parameters are indistinguishable
+    /// except by comparing every field.
+    parameters_authored_at: Timestamp,
     programme: ProgrammeId,
     issued_at: Timestamp,
 }
@@ -80,6 +87,7 @@ impl PrescribedWorkout {
         week: WeekKind,
         anchor: Anchor,
         parameters: GenerationParameters,
+        parameters_authored_at: Timestamp,
         programme: ProgrammeId,
         issued_at: Timestamp,
     ) -> Self {
@@ -90,6 +98,7 @@ impl PrescribedWorkout {
             week,
             anchor,
             parameters,
+            parameters_authored_at,
             programme,
             issued_at,
         }
@@ -117,6 +126,10 @@ impl PrescribedWorkout {
 
     pub const fn parameters(&self) -> &GenerationParameters {
         &self.parameters
+    }
+
+    pub const fn parameters_authored_at(&self) -> Timestamp {
+        self.parameters_authored_at
     }
 
     pub const fn programme(&self) -> ProgrammeId {

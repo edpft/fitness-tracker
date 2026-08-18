@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\", programme AS \"programme!: i64\",\n                   session_role AS \"session_role!: String\",\n                   week_kind AS \"week_kind!: String\", week_index AS \"week_index: i64\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   parameters_authored_at AS \"parameters_authored_at!: String\",\n                   issued_at AS \"issued_at!: String\"\n            FROM prescribed_workout\n            WHERE issued_for = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "programme!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "programme"
+          }
+        }
+      },
+      {
+        "name": "session_role!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "session_role"
+          }
+        }
+      },
+      {
+        "name": "week_kind!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "week_kind"
+          }
+        }
+      },
+      {
+        "name": "week_index: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "week_index"
+          }
+        }
+      },
+      {
+        "name": "anchor_grams!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_grams"
+          }
+        }
+      },
+      {
+        "name": "anchor_provenance!: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_provenance"
+          }
+        }
+      },
+      {
+        "name": "anchor_from!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_from"
+          }
+        }
+      },
+      {
+        "name": "parameters_authored_at!: String",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "parameters_authored_at"
+          }
+        }
+      },
+      {
+        "name": "issued_at!: String",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "issued_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ef3d66b85b396f2e864b767808526d8397fb9de7aa7f6c53d9a1f234640143ff"
+}

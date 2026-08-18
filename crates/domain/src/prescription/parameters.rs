@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use crate::gym::{Kg, RepCount};
+use crate::gym::{Duration, Kg, RepCount};
 
 /// Why a percentage could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -285,6 +285,12 @@ pub struct GenerationParameters {
     pub ladder_end: Percentage,
     pub top_set_reps: super::schedule::PerRole<TopSetReps>,
     pub accessory: AccessoryScheme,
+    /// How long a static hold is held for.
+    ///
+    /// The mobility work does not progress — it is held, and the same length
+    /// every time — so its prescription comes from here rather than from
+    /// history. One duration for every static slot.
+    pub static_hold: Duration,
     pub plate_increment: PlateIncrement,
     pub first_reset: ResetProtocol,
     pub second_reset: ResetProtocol,

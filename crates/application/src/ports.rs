@@ -16,7 +16,7 @@ use jiff::{Timestamp, civil::Date};
 
 use domain::gym::{
     GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
-    OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::Exercise,
+    OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
 };
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -592,14 +592,9 @@ pub enum UnderivableReason {
     NeverPerformed,
     #[error("its last performance recorded no working set to progress from")]
     NoWorkingSet,
-    /// A static slot counted in time or ground covered.
-    ///
-    /// The mobility work. Double progression is a rule about repetitions, and a
-    /// sixty-second hold does not progress — so its prescription has to come from
-    /// the programme, and the programme carries no duration for a slot. A real
-    /// gap, named rather than filled with a plausible minute.
-    #[error("a static slot needs a duration, and the programme carries none")]
-    NoAuthoredDuration,
+    /// A mobility slot filled with something that is not counted in time.
+    #[error("a hold is counted in time, and this exercise is not")]
+    NotAHold,
     /// The primary slot's fill is not counted in repetitions.
     #[error("a top set is a number of repetitions, and this exercise is not counted in them")]
     NotCountedInReps,
@@ -612,6 +607,12 @@ pub enum UnderivableReason {
 }
 
 /// The projection of the performed record that prescription reads.
+///
+/// **Typed to the repetitions vocabulary.** Double progression is a rule about
+/// repetitions, and the outcome it reads is a `Performed<RepCount>` — so a
+/// duration or distance exercise has no business reaching it. Narrowing the
+/// signature is what makes that structural: asking for a hold's history is a
+/// compile error rather than a row the adapter cannot decode.
 pub trait ExerciseHistory {
     /// The most recent working performance of each exercise asked about.
     ///
@@ -628,8 +629,8 @@ pub trait ExerciseHistory {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn last_performances(
         &self,
-        exercises: &[Exercise],
-    ) -> impl Future<Output = Result<BTreeMap<Exercise, LastPerformance>, StoreError>> + Send;
+        exercises: &[RepsExercise],
+    ) -> impl Future<Output = Result<BTreeMap<RepsExercise, LastPerformance>, StoreError>> + Send;
 
     /// Every working performance of one exercise, oldest first.
     ///
@@ -644,7 +645,7 @@ pub trait ExerciseHistory {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn performances(
         &self,
-        exercise: Exercise,
+        exercise: RepsExercise,
     ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
 
     /// The newest performance in the record, whatever exercise it was of.

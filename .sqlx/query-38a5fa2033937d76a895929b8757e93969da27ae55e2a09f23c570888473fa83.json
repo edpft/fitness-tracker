@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT position AS \"position!: i64\", exercise AS \"exercise!: String\",\n               measure AS \"measure!: String\"\n        FROM prescribed_exercise\n        WHERE workout = ? AND item_position = ?\n        ORDER BY position ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "measure!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "measure"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "38a5fa2033937d76a895929b8757e93969da27ae55e2a09f23c570888473fa83"
+}

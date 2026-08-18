@@ -15,7 +15,7 @@ use application::{
     NormalisationSummary, WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts},
 };
-use domain::gym::{Performed, exercise::Exercise, exercise::RepsExercise};
+use domain::gym::{Performed, exercise::RepsExercise};
 use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymWorkoutStore,
@@ -110,7 +110,7 @@ macro_rules! run {
 #[test]
 fn the_primarys_series_is_ordered_and_complete() {
     let (history, _directory) = history!();
-    let front_squat = Exercise::Reps(RepsExercise::FrontSquat);
+    let front_squat = RepsExercise::FrontSquat;
 
     let performances = run!(history.performances(front_squat));
 
@@ -151,7 +151,7 @@ fn the_primarys_series_is_ordered_and_complete() {
 #[test]
 fn the_july_test_session_reads_back() {
     let (history, _directory) = history!();
-    let front_squat = Exercise::Reps(RepsExercise::FrontSquat);
+    let front_squat = RepsExercise::FrontSquat;
 
     let performances = run!(history.performances(front_squat));
     let Some(july) = performances
@@ -194,8 +194,8 @@ fn the_july_test_session_reads_back() {
 fn an_alternating_fill_reaches_past_the_last_session() {
     let (history, _directory) = history!();
 
-    let nordic = Exercise::Reps(RepsExercise::NordicHamstringsCurls);
-    let back_extension = Exercise::Reps(RepsExercise::BackExtensionMachine);
+    let nordic = RepsExercise::NordicHamstringsCurls;
+    let back_extension = RepsExercise::BackExtensionMachine;
 
     let both = run!(history.last_performances(&[nordic, back_extension]));
 
@@ -228,10 +228,7 @@ fn an_alternating_fill_reaches_past_the_last_session() {
 fn a_never_performed_exercise_is_named_not_absent() {
     let (history, _directory) = empty_history!();
 
-    let asked = [
-        Exercise::Reps(RepsExercise::FrontSquat),
-        Exercise::Reps(RepsExercise::SissySquat),
-    ];
+    let asked = [RepsExercise::FrontSquat, RepsExercise::SissySquat];
     let answers = run!(history.last_performances(&asked));
 
     assert_eq!(
@@ -248,7 +245,7 @@ fn a_never_performed_exercise_is_named_not_absent() {
     }
 
     // And the series read agrees: empty, not an error.
-    let series = run!(history.performances(Exercise::Reps(RepsExercise::FrontSquat)));
+    let series = run!(history.performances(RepsExercise::FrontSquat));
     assert!(series.is_empty());
     assert_eq!(run!(history.newest_performance()), None);
 }
@@ -264,9 +261,9 @@ fn the_corpus_covers_every_exercise_it_taught_the_vocabulary() {
     let (history, _directory) = history!();
 
     let sample = [
-        Exercise::Reps(RepsExercise::FrontSquat),
-        Exercise::Reps(RepsExercise::SissySquat),
-        Exercise::Reps(RepsExercise::CableTwistUpToDown),
+        RepsExercise::FrontSquat,
+        RepsExercise::SissySquat,
+        RepsExercise::CableTwistUpToDown,
     ];
     let answers = run!(history.last_performances(&sample));
 
@@ -301,7 +298,7 @@ fn the_newest_performance_is_the_corpuss_last_session() {
 #[test]
 fn warm_ups_are_not_history() {
     let (history, _directory) = history!();
-    let front_squat = Exercise::Reps(RepsExercise::FrontSquat);
+    let front_squat = RepsExercise::FrontSquat;
 
     let performances = run!(history.performances(front_squat));
     let Some(recent) = performances.last() else {
@@ -321,7 +318,7 @@ fn warm_ups_are_not_history() {
 #[test]
 fn a_completed_set_carries_its_count() {
     let (history, _directory) = history!();
-    let front_squat = Exercise::Reps(RepsExercise::FrontSquat);
+    let front_squat = RepsExercise::FrontSquat;
 
     let performances = run!(history.performances(front_squat));
     let mut counted = 0_usize;
