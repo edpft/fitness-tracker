@@ -223,9 +223,15 @@ where the exit is a rep max rather than a single, `105% × rm(target)` — for a
 3RM, about **100% of the entry 1RM**, so a 3RM block plans to exit with a triple
 at the entry test's one-rep max.
 
-**`v1`'s 105% was never invented.** This note called it "the linear model's
-invented 105% endpoint". It is the standard figure, discarded because nobody
-could justify it, at which point nobody looked.
+**`v1`'s 105% was never invented *by us*.** This note called it "the linear
+model's invented 105% endpoint" and discarded it, at which point nobody looked
+it up. It is the standard figure — and, as the operator observed, suspiciously
+round in every source, which makes it a shared convention rather than a finding.
+That is still worth more than a private invention: it makes the block comparable
+with published ones, and it is falsifiable against the operator's own exit tests
+after two or three blocks. **Revising it against those results would be
+legitimate; fitting it to the record now would not**, and `light_of_heavy` is
+the cautionary tale for the difference.
 
 The intensification ladder therefore spans accumulation's exit to that endpoint,
 and the implied 1RM climbs past 100% on the way — 97.1, 99.2, 101.2, 103.2,

@@ -707,9 +707,31 @@ round in circles.
 | Meet attempt convention | Third attempt 103% standard, **105%** aggressive; a PR attempt is 102–107% of the previous best |
 | Peaking-block main work | 87–95% of the entry max, arriving above 100% only at the end |
 
-So the endpoint is a literature constant of exactly the same standing as
-Prilepin's bands and the repetitions-in-reserve table. It is not authored, and
-asking the operator for it would be the mistake — not using it.
+**It is a convention, not a measurement, and it should be recorded as one.**
+105% is suspiciously round, and it is round in every source, which is what a
+shared convention looks like rather than what a finding looks like. Prilepin's
+bands came out of thousands of training logs and the repetitions-in-reserve
+table is a rounded presentation of real data; this is a number everyone repeats.
+As the operator put it: if everyone else is inventing it, we can invent it too.
+
+That is not a shrug. A shared convention is worth more here than a private
+invention would be, for two reasons that have nothing to do with it being
+correct. It makes this block comparable with published ones — a programme
+finishing at 105% can be read against every other programme finishing at 105%.
+And it is **falsifiable against the operator's own record**, which a number
+picked in this room would not be: each block ends in a test, so after two or
+three of them the exit results say whether 105% was optimistic, pessimistic or
+about right for this lifter.
+
+**Revising it then would be legitimate where fitting it now would not**, and the
+difference is worth stating precisely, because this repository has already made
+the mistake once with `light_of_heavy`. Fitting a parameter to the record
+in advance produces a number that reproduces the record and predicts nothing.
+Checking a stated convention against outcomes it did not see is how a convention
+earns or loses its place. The first is circular; the second is a measurement.
+
+Until then it stands, and asking the operator for a replacement would be the
+mistake — not using it.
 
 **A note on what this vindicates.** `v1`'s ladder ended at 105%, and the
 handover dismissed that as "the linear model's invented 105% endpoint". It was
