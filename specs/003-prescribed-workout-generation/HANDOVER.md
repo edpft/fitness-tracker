@@ -4,8 +4,8 @@ Written 2026-08-18, mid-feature, for whoever picks this up next.
 
 **Branch**: `003-prescribed-workout-generation`, 16 commits ahead of `main`,
 nothing pushed. 227 tests pass, `clippy --all-targets -- --deny warnings` is
-clean, `nix flake check`'s `architecture` and `use-case-isolation` pass. 52 of 80
-tasks in [tasks.md](./tasks.md).
+clean, `nix flake check`'s `architecture` and `use-case-isolation` pass. 52 of
+80 tasks in [tasks.md](./tasks.md).
 
 Read [spec.md](./spec.md), [plan.md](./plan.md) and [research.md](./research.md)
 before writing code. This note covers what those cannot: what changed *during*
@@ -15,25 +15,26 @@ the work, and what it cost to find out.
 
 ## The one thing to understand first
 
-**The design changed fundamentally near the end, and the code has not caught up.**
+**The design changed fundamentally near the end, and the code has not caught
+up.**
 
-What is built is a *linear* progression for the primary lift: a percentage ladder
-climbing to an authored endpoint, with a drop-and-re-climb on failure. It works
-end to end — `fitness prescribe` issues a complete, trainable session from the
-operator's real store.
+What is built is a *linear* progression for the primary lift: a percentage
+ladder climbing to an authored endpoint, with a drop-and-re-climb on failure. It
+works end to end — `fitness prescribe` issues a complete, trainable session from
+the operator's real store.
 
-What the operator actually wants, and what was settled in conversation, is **two**
-programme types selected by how many weeks the calendar allows:
+What the operator actually wants, and what was settled in conversation, is
+**two** programme types selected by how many weeks the calendar allows:
 
 | Window | Programme | State |
 | --- | --- | --- |
 | 7+ weeks | Block periodisation: entry test → accumulation → intensification | **not built** |
 | short, interrupted | Linear top-set/back-off, +2.5kg, reset protocol | built, works |
 
-`Programme` is already `enum { V1(..), V2(..) }` with append-only variants, which
-is exactly this shape. **The linear work becomes `v1`. Periodisation is a new
-`v2`.** Do not delete or rewrite the linear model — it is the right tool for the
-pre-Christmas window and the operator has said so.
+`Programme` is already `enum { V1(..), V2(..) }` with append-only variants,
+which is exactly this shape. **The linear work becomes `v1`. Periodisation is a
+new `v2`.** Do not delete or rewrite the linear model — it is the right tool for
+the pre-Christmas window and the operator has said so.
 
 ---
 
@@ -47,8 +48,8 @@ target RM     what the block is for, e.g. a 3RM
 entry test    the anchor, tested before the block begins
 ```
 
-**Nothing else.** Several plausible-looking extra parameters were proposed during
-design and every one was rejected by the operator as a guess in disguise:
+**Nothing else.** Several plausible-looking extra parameters were proposed
+during design and every one was rejected by the operator as a guess in disguise:
 
 - a total gain / ladder span (`92.5% → 105%`)
 - an "opening proximity" to the rep-max
@@ -72,9 +73,9 @@ week N        the last intensification week IS the exit test (not a separate wee
 - Phase split: the entry test takes one week; the remainder splits 50/50 with
   **intensification dropping first**. Minimum 3 of each, so **minimum block is 7
   weeks** (1 + 3 + 3).
-- The rep ladder is generated **backwards from the target RM**. A 3RM target with
-  5 intensification weeks gives 7, 6, 5, 4, 3. Duration sets the rung count; this
-  is what makes the block adapt to whatever the calendar gives.
+- The rep ladder is generated **backwards from the target RM**. A 3RM target
+  with 5 intensification weeks gives 7, 6, 5, 4, 3. Duration sets the rung
+  count; this is what makes the block adapt to whatever the calendar gives.
 - The second phase restarts at *higher* reps and *lower* load than the first
   ended. That wave is the design, not an artefact.
 
@@ -99,8 +100,8 @@ The RPE/RIR table published by Reactive Training Systems reduces exactly to:
 
 Its role is **not** to prescribe. It fixes the ramp's *endpoint*: a 3RM test is
 three reps at RIR 0, which the table puts at 95% of 1RM. So a 3RM block's ramp
-terminates at 95% as a fact rather than an ambition — which is precisely what the
-linear model's invented 105% endpoint could never be.
+terminates at 95% as a fact rather than an ambition — which is precisely what
+the linear model's invented 105% endpoint could never be.
 
 **RIR is never an input to a derivation.** `primary-lift-progression.md` says so
 explicitly: it is an observation, retained for a retrospective check. A design
@@ -108,8 +109,8 @@ that consults it contradicts the model of record.
 
 ### The one genuinely open question
 
-**The percentage table for an accumulation-into-intensification block, and how it
-scales when duration changes the rung count.**
+**The percentage table for an accumulation-into-intensification block, and how
+it scales when duration changes the rung count.**
 
 This is a literature question, not a question for the operator. Prilepin's chart
 and standard block-periodisation templates are the sources. Do *not* reconstruct
@@ -133,11 +134,11 @@ week  sets  reps  load   tonnage
    8     1     3    90       270   ┘ ← 3RM test, RIR 0 (week 7 missed)
 ```
 
-Back squat and deadlift show the same shape in the same period, and **both record
-an entry test** (deadlift `3×3@125` then `2×1@145`; back squat `4×3@85` … `5×1@95`,
-exiting at `1×1@110`). Accessories in the same period look completely different —
-`leg-extension 3×12` throughout with load climbing — which independently confirms
-the primary/accessory split the model draws.
+Back squat and deadlift show the same shape in the same period, and **both
+record an entry test** (deadlift `3×3@125` then `2×1@145`; back squat `4×3@85` …
+`5×1@95`, exiting at `1×1@110`). Accessories in the same period look completely
+different — `leg-extension 3×12` throughout with load climbing — which
+independently confirms the primary/accessory split the model draws.
 
 ---
 
@@ -156,9 +157,9 @@ New Year       next proper block
 
 **Anchors are per primary lift and do not carry across blocks.** The operator
 alternates front squat with RDLs and possibly Bulgarian split squats, so a front
-squat block's exit test anchors nothing but the next front squat block. An earlier
-claim in this repo that "the previous block's exit test is the next block's entry
-anchor" was wrong and has been corrected.
+squat block's exit test anchors nothing but the next front squat block. An
+earlier claim in this repo that "the previous block's exit test is the next
+block's entry anchor" was wrong and has been corrected.
 
 ---
 
@@ -166,20 +167,23 @@ anchor" was wrong and has been corrected.
 
 - **The calendar counts calendar weeks, not training weeks.** `Calendar::place`
   computes days-since-start ÷ 7, so a holiday week silently consumes a ladder
-  position. The operator's current block has two holiday weeks in it, and working
-  around them by hand is exactly what they want to stop doing. This is the
-  constraint calendar, listed as "Not modelled here" in the prescribed model and
-  now a requirement. **Fix this early — it is a correctness bug, not a feature.**
+  position. The operator's current block has two holiday weeks in it, and
+  working around them by hand is exactly what they want to stop doing. This is
+  the constraint calendar, listed as "Not modelled here" in the prescribed model
+  and now a requirement. **Fix this early — it is a correctness bug, not a
+  feature.**
 - **`PerformedWorkoutReader`** is declared and deliberately not implemented; it
-  needs a whole `GymWorkout` rebuilt from five tables. Belongs with the round trip.
-- **User story 2 (the zero-rep sentinel) is not done.** The operator's failed 95kg
-  of 2026-07-03 is still a `RefusalReason::ZeroReps`. `Performed<M>` exists and
-  the store column exists; only the translator arm and the refusal removal remain.
+  needs a whole `GymWorkout` rebuilt from five tables. Belongs with the round
+  trip.
+- **User story 2 (the zero-rep sentinel) is not done.** The operator's failed
+  95kg of 2026-07-03 is still a `RefusalReason::ZeroReps`. `Performed<M>` exists
+  and the store column exists; only the translator arm and the refusal removal
+  remain.
 - **User story 3 (stall, reset, re-climb) is not done.** It belongs to `v1`.
 - **The round trip** (`project` / `satisfies`) is designed but unwritten.
 - **Three parameters remain marked `INFERRED`** in
-  `crates/infrastructure/tests/fixtures/programme.toml`: `light_of_heavy`,
-  the per-role top-set repetitions, and the per-block accessory ranges. They were
+  `crates/infrastructure/tests/fixtures/programme.toml`: `light_of_heavy`, the
+  per-role top-set repetitions, and the per-block accessory ranges. They were
   read off the record rather than stated. Under `v2` the first two may disappear
   entirely.
 
@@ -195,9 +199,9 @@ anchor" was wrong and has been corrected.
   would have produced "the back-off holds while the top set moves" — a hand
   arithmetic error encoded as a rule.
 - **The corpus is a diagnostic, not a specification.** It records a hand-run
-  programme whose template changed while it ran and whose arithmetic was sometimes
-  wrong. Success criteria assert *attribution* — every divergence falls into a
-  named bucket — not reproduction. See SC-002, SC-003, SC-012.
+  programme whose template changed while it ran and whose arithmetic was
+  sometimes wrong. Success criteria assert *attribution* — every divergence
+  falls into a named bucket — not reproduction. See SC-002, SC-003, SC-012.
 - **A repeated exclusion is evidence the criterion is the wrong shape.** SC-003
   once excluded three sessions by date; that should have been read as the shape
   being wrong rather than the cutoff.
@@ -205,12 +209,12 @@ anchor" was wrong and has been corrected.
 **On the toolchain**
 
 - **Check `_sqlx_migrations` before modifying any migration.** A
-  modified-after-applied migration broke the operator's store at the start of this
-  work. `0004` was extended twice on the grounds that it had never been applied —
-  true both times, but verified only the second time. **Any further change to
-  `0004` should be an `0005`.**
-- **`cargo sqlx prepare --workspace` silently skips test targets.** It needs
-  `-- --all-targets`, or the build breaks offline with confusing errors. Also:
+  modified-after-applied migration broke the operator's store at the start of
+  this work. `0004` was extended twice on the grounds that it had never been
+  applied — true both times, but verified only the second time. **Any further
+  change to `0004` should be an `0005`.**
+- **`cargo sqlx prepare --workspace` silently skips test targets.** It needs `--
+  --all-targets`, or the build breaks offline with confusing errors. Also:
   running it against a broken tree leaves the cache incomplete and produces a
   second, misleading round of failures.
 - **Tests passing is not the gate passing.** `clippy --all-targets -- --deny
@@ -220,20 +224,20 @@ anchor" was wrong and has been corrected.
   proptest strategy helpers must use `prop_filter_map` with `.ok()`, never
   `panic!`. `#[tokio::test]` and clap's derive macros are unusable for the same
   reason.
-- **Scripted multi-file edits mangled files three times here** — a replacement hit
-  the wrong occurrence and spliced a match arm into a function body; a TOML key
-  landed inside the wrong table. Read the region back before running the next
-  command, not after.
-- **SQLite WAL sidecars persist.** `rm db` without `rm db-wal db-shm` leaves stale
-  migration state and produces baffling errors.
+- **Scripted multi-file edits mangled files three times here** — a replacement
+  hit the wrong occurrence and spliced a match arm into a function body; a TOML
+  key landed inside the wrong table. Read the region back before running the
+  next command, not after.
+- **SQLite WAL sidecars persist.** `rm db` without `rm db-wal db-shm` leaves
+  stale migration state and produces baffling errors.
 
 **On working with this operator**
 
 - Ask real questions or none. Do not write "I need one thing from you" and then
   not ask it.
 - Do not narrate process problems they cannot act on.
-- Long summaries with rhetorical questions are not wanted. They have not read the
-  code; explain findings, not your own workflow.
+- Long summaries with rhetorical questions are not wanted. They have not read
+  the code; explain findings, not your own workflow.
 - When they say a value is an example, it is an example. Do not derive structure
   from it.
 
@@ -245,12 +249,12 @@ anchor" was wrong and has been corrected.
    programme. Correctness bug, blocks everything else.
 2. **Research the percentage table** for accumulation/intensification. The last
    unknown, and it is a literature question.
-3. **Build `v2`** beside `v1`. `Ladder` becomes a table lookup; the anchor, slots,
-   template, fills, quantisation, all four stores, the document reader, the CLI
-   and every accessory scheme are untouched.
+3. **Build `v2`** beside `v1`. `Ladder` becomes a table lookup; the anchor,
+   slots, template, fills, quantisation, all four stores, the document reader,
+   the CLI and every accessory scheme are untouched.
 4. **User story 2**, so a failed attempt stops being a refusal.
-5. The rest: stall/reset for `v1`, the round trip, the decision records
-   (`0006`, `0007`) named in [plan.md](./plan.md).
+5. The rest: stall/reset for `v1`, the round trip, the decision records (`0006`,
+   `0007`) named in [plan.md](./plan.md).
 
 The operator's deadline is **Sunday 13 September**. Steps 1 to 3 are what has to
 land by then.
