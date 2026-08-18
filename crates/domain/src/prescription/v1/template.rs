@@ -22,7 +22,7 @@
 use std::fmt;
 
 use crate::{
-    gym::{exercise::Exercise, sequence::AtLeastTwo},
+    gym::{RepCount, exercise::Exercise, sequence::AtLeastTwo},
     prescription::{
         schedule::{PerRole, SessionRole},
         shape::SlotId,
@@ -104,6 +104,20 @@ impl fmt::Display for PrimaryPattern {
     }
 }
 
+/// A static slot's whole prescription.
+///
+/// **Set at the start of the block and never derived.** A static slot does not
+/// progress, so there is nothing for history to say about it — and reading the
+/// last performance would mean a bad session re-issuing itself. Pogos are three
+/// sets of twenty because that is what the programme says, not because that is
+/// what happened last time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticFill {
+    pub exercise: Exercise,
+    pub sets: RepCount,
+    pub reps: RepCount,
+}
+
 /// What fills a slot, which may differ by session role.
 ///
 /// The alternating case is why the history projection is unbounded: on any given
@@ -145,6 +159,8 @@ impl<T> Fill<T> {
 pub enum SlotContent<'a> {
     Single(&'a Exercise),
     Superset(&'a AtLeastTwo<Exercise>),
+    /// A slot the programme prescribes outright.
+    Static(&'a StaticFill),
 }
 
 /// One fill per slot, total by construction.
@@ -154,8 +170,8 @@ pub enum SlotContent<'a> {
 /// strength block's four patterns, which is what these six fields are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotFills {
-    pub plyometric: Fill<Exercise>,
-    pub power: Fill<Exercise>,
+    pub plyometric: Fill<StaticFill>,
+    pub power: Fill<StaticFill>,
     pub knee_dominant: Fill<Exercise>,
     pub upper_push: Fill<Exercise>,
     pub upper_pull: Fill<Exercise>,
@@ -174,8 +190,8 @@ impl SlotFills {
     /// here until it is filled — which is the point of the exhaustive match.
     pub const fn content(&self, slot: SlotId, role: SessionRole) -> SlotContent<'_> {
         match slot {
-            SlotId::Plyometric => SlotContent::Single(self.plyometric.for_role(role)),
-            SlotId::Power => SlotContent::Single(self.power.for_role(role)),
+            SlotId::Plyometric => SlotContent::Static(self.plyometric.for_role(role)),
+            SlotId::Power => SlotContent::Static(self.power.for_role(role)),
             SlotId::KneeDominant => SlotContent::Single(self.knee_dominant.for_role(role)),
             SlotId::UpperPush => SlotContent::Single(self.upper_push.for_role(role)),
             SlotId::UpperPull => SlotContent::Single(self.upper_pull.for_role(role)),
@@ -195,9 +211,10 @@ impl SlotFills {
     /// other's history next time.
     pub fn every_exercise(&self) -> Vec<Exercise> {
         let mut exercises = Vec::new();
+        for statics in [&self.plyometric, &self.power] {
+            exercises.extend(statics.all().into_iter().map(|fill| fill.exercise));
+        }
         for single in [
-            &self.plyometric,
-            &self.power,
             &self.knee_dominant,
             &self.upper_push,
             &self.upper_pull,

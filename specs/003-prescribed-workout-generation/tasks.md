@@ -139,12 +139,12 @@ other slot's from its own last performance.
 
 ### The CLI
 
-- [ ] T048 [US1] Add `prescribe` to `crates/cli/src/main.rs` using the clap **builder** API, with `--date` defaulting forward to the next programmed day at or after today
-- [ ] T049 [US1] Add `programme author` and `programme show` to `crates/cli/src/main.rs`, and the prescription arm to `crates/cli/src/wiring.rs`
-- [ ] T050 [US1] Implement the rendering in `crates/cli/src/output.rs` — the header with date, weekday, role, week, ladder percentage, anchor with provenance and `history through`; blocks with their slots; supersets bracketed; underivable slots in place
-- [ ] T051 [US1] Implement the `programme show` ladder table in `crates/cli/src/output.rs` — every week with its percentage, heavy and light loads, and state
+- [X] T048 [US1] Add `prescribe` to `crates/cli/src/main.rs` using the clap **builder** API, with `--date` defaulting forward to the next programmed day at or after today
+- [X] T049 [US1] Add `programme author` and `programme show` to `crates/cli/src/main.rs`, and the prescription arm to `crates/cli/src/wiring.rs`
+- [X] T050 [US1] Implement the rendering in `crates/cli/src/output.rs` — the header with date, weekday, role, week, ladder percentage, anchor with provenance and `history through`; blocks with their slots; supersets bracketed; underivable slots in place
+- [X] T051 [US1] Implement the `programme show` ladder table in `crates/cli/src/output.rs` — every week with its percentage, heavy and light loads, and state
 - [ ] T052 [US1] Pin the composed `--date` default in its own unit test in `crates/cli/src/config.rs`. A stub cannot catch a wrong default, and "next programmed day at or after today" is exactly the kind that passes against a mock and fails in the gym
-- [ ] T053 [US1] Regenerate `.sqlx` with `cargo sqlx prepare --workspace`
+- [X] T053 [US1] Regenerate `.sqlx` with `cargo sqlx prepare --workspace`
 
 ### The round trip (D9, SC-010)
 

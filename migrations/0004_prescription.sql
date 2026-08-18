@@ -35,12 +35,15 @@ CREATE TABLE generation_parameters (
 
     plate_increment_grams  INTEGER NOT NULL CHECK (plate_increment_grams > 0),
 
-    -- The double-progression scheme every non-primary strength and hypertrophy
-    -- slot runs. One range for all of them is a simplification the domain
-    -- records; a per-slot range would be more faithful and is deferred.
-    accessory_low          INTEGER NOT NULL CHECK (accessory_low > 0),
-    accessory_high         INTEGER NOT NULL CHECK (accessory_high > 0),
-    accessory_sets         INTEGER NOT NULL CHECK (accessory_sets > 0),
+    -- The double-progression scheme each block's non-primary slots run. One per
+    -- block rather than one per slot: the slots within a block are prescribed
+    -- alike, and the two blocks differ from each other.
+    strength_low           INTEGER NOT NULL CHECK (strength_low > 0),
+    strength_high          INTEGER NOT NULL CHECK (strength_high > 0),
+    strength_sets          INTEGER NOT NULL CHECK (strength_sets > 0),
+    hypertrophy_low        INTEGER NOT NULL CHECK (hypertrophy_low > 0),
+    hypertrophy_high       INTEGER NOT NULL CHECK (hypertrophy_high > 0),
+    hypertrophy_sets       INTEGER NOT NULL CHECK (hypertrophy_sets > 0),
 
     -- How long a static hold is held for. The mobility work does not progress,
     -- so its prescription comes from here rather than from observed history.
@@ -55,7 +58,8 @@ CREATE TABLE generation_parameters (
     -- A ladder that does not rise is not a plan.
     CHECK (ladder_end_bp > ladder_start_bp),
     -- A range must span; equal bounds would be a fixed count.
-    CHECK (accessory_high > accessory_low)
+    CHECK (strength_high > strength_low),
+    CHECK (hypertrophy_high > hypertrophy_low)
 ) WITHOUT ROWID;
 
 CREATE TABLE generation_warmup_step (
@@ -116,6 +120,14 @@ CREATE TABLE programme_slot_fill (
     -- Position within a supersetted slot; 0 for a single one.
     position   INTEGER NOT NULL DEFAULT 0,
     exercise   TEXT    NOT NULL,
+
+    -- A static slot carries its whole prescription: it is set at the start of
+    -- the block and never derived, so there is nothing for history to say about
+    -- it. Absent for every other slot, whose numbers come from the parameters or
+    -- from the record.
+    static_sets INTEGER CHECK (static_sets IS NULL OR static_sets > 0),
+    static_reps INTEGER CHECK (static_reps IS NULL OR static_reps > 0),
+    CHECK ((static_sets IS NULL) = (static_reps IS NULL)),
 
     PRIMARY KEY (programme, slot, role, position)
 );

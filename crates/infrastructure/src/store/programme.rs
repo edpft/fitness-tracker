@@ -16,13 +16,13 @@
 use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{
-        Kg,
+        Kg, RepCount,
         exercise::Exercise,
         sequence::{AtLeastTwo, TooShort},
     },
     prescription::{
         Anchor, AnchorProvenance, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
-        v1::{Fill, PrimaryPattern, SlotFills},
+        v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -68,6 +68,8 @@ struct FillRow {
     slot: SlotId,
     role: Option<SessionRole>,
     exercise: Exercise,
+    /// Present only for a static slot, which carries its whole prescription.
+    statics: Option<(RepCount, RepCount)>,
 }
 
 /// The fills for one slot, grouped out of the flat rows.
@@ -81,6 +83,9 @@ struct SlotRows {
     same: Vec<Exercise>,
     light: Vec<Exercise>,
     heavy: Vec<Exercise>,
+    same_static: Vec<StaticFill>,
+    light_static: Vec<StaticFill>,
+    heavy_static: Vec<StaticFill>,
 }
 
 impl SlotRows {
@@ -98,6 +103,23 @@ impl SlotRows {
         let ([light], [heavy]) = (self.light.as_slice(), self.heavy.as_slice()) else {
             return Err(corrupt(&format!(
                 "slot {slot} alternates but does not hold one exercise per role"
+            )));
+        };
+        Ok(Fill::Alternating(PerRole {
+            light: *light,
+            heavy: *heavy,
+        }))
+    }
+
+    /// A statically prescribed fill.
+    fn statics(&self, slot: SlotId) -> Result<Fill<StaticFill>, StoreError> {
+        if let [only] = self.same_static.as_slice() {
+            return Ok(Fill::Same(*only));
+        }
+        let ([light], [heavy]) = (self.light_static.as_slice(), self.heavy_static.as_slice())
+        else {
+            return Err(corrupt(&format!(
+                "slot {slot} is static and does not hold one prescription per role"
             )));
         };
         Ok(Fill::Alternating(PerRole {
@@ -243,20 +265,30 @@ impl ProgrammeStore for SqliteProgrammeStore {
         .map_err(|error| store_error(&error))?
         .id;
 
-        for (slot, role, position, exercise) in flatten(programme.fills()) {
-            let slot_key = slot.as_str();
-            let role_key = role.map(SessionRole::as_str);
-            let exercise_key = exercise.as_str();
+        for fill in flatten(programme.fills()) {
+            let slot_key = fill.slot.as_str();
+            let role_key = fill.role.map(SessionRole::as_str);
+            let exercise_key = fill.exercise.as_str();
+            let (static_sets, static_reps) = fill.statics.map_or((None, None), |(sets, reps)| {
+                (
+                    Some(i64::from(sets.as_u32())),
+                    Some(i64::from(reps.as_u32())),
+                )
+            });
             sqlx::query!(
                 r"
-                INSERT INTO programme_slot_fill (programme, slot, role, position, exercise)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO programme_slot_fill (
+                    programme, slot, role, position, exercise, static_sets, static_reps
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ",
                 id,
                 slot_key,
                 role_key,
-                position,
-                exercise_key
+                fill.position,
+                exercise_key,
+                static_sets,
+                static_reps
             )
             .execute(&mut *tx)
             .await
@@ -295,7 +327,8 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
     let fill_rows = sqlx::query!(
         r#"
         SELECT slot AS "slot!: String", role AS "role: String",
-               exercise AS "exercise!: String"
+               exercise AS "exercise!: String",
+               static_sets AS "static_sets: i64", static_reps AS "static_reps: i64"
         FROM programme_slot_fill
         WHERE programme = ?
         ORDER BY slot ASC, position ASC
@@ -315,6 +348,10 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
                 None => None,
             },
             exercise: exercise_of(&fill.exercise)?,
+            statics: match (fill.static_sets, fill.static_reps) {
+                (Some(sets), Some(reps)) => Some((count_of(sets)?, count_of(reps)?)),
+                _ => None,
+            },
         });
     }
 
@@ -322,6 +359,19 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
         std::collections::BTreeMap::new();
     for fill in parsed {
         let entry = grouped.entry(fill.slot).or_default();
+        if let Some((sets, reps)) = fill.statics {
+            let fixed = StaticFill {
+                exercise: fill.exercise,
+                sets,
+                reps,
+            };
+            match fill.role {
+                None => entry.same_static.push(fixed),
+                Some(SessionRole::Light) => entry.light_static.push(fixed),
+                Some(SessionRole::Heavy) => entry.heavy_static.push(fixed),
+            }
+            continue;
+        }
         match fill.role {
             None => entry.same.push(fill.exercise),
             Some(SessionRole::Light) => entry.light.push(fill.exercise),
@@ -335,8 +385,8 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
     };
 
     Ok(SlotFills {
-        plyometric: rows_for(SlotId::Plyometric)?.single(SlotId::Plyometric)?,
-        power: rows_for(SlotId::Power)?.single(SlotId::Power)?,
+        plyometric: rows_for(SlotId::Plyometric)?.statics(SlotId::Plyometric)?,
+        power: rows_for(SlotId::Power)?.statics(SlotId::Power)?,
         knee_dominant: rows_for(SlotId::KneeDominant)?.single(SlotId::KneeDominant)?,
         upper_push: rows_for(SlotId::UpperPush)?.single(SlotId::UpperPush)?,
         upper_pull: rows_for(SlotId::UpperPull)?.single(SlotId::UpperPull)?,
@@ -398,18 +448,48 @@ fn exercise_of(key: &str) -> Result<Exercise, StoreError> {
 /// Exhaustive over the eleven slots by construction: each is named once, so
 /// adding a slot to the template leaves this function failing to compile until it
 /// is handled.
-fn flatten(fills: &SlotFills) -> Vec<(SlotId, Option<SessionRole>, i64, Exercise)> {
+fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
     let mut rows = Vec::new();
 
-    let mut single = |slot: SlotId, fill: &Fill<Exercise>| match fill {
-        Fill::Same(exercise) => rows.push((slot, None, 0, *exercise)),
-        Fill::Alternating(per_role) => {
-            rows.push((slot, Some(SessionRole::Light), 0, per_role.light));
-            rows.push((slot, Some(SessionRole::Heavy), 0, per_role.heavy));
+    let mut statics = |slot: SlotId, fill: &Fill<StaticFill>| {
+        let mut push = |role, fixed: &StaticFill| {
+            rows.push(FlatFill {
+                slot,
+                role,
+                position: 0,
+                exercise: fixed.exercise,
+                statics: Some((fixed.sets, fixed.reps)),
+            });
+        };
+        match fill {
+            Fill::Same(fixed) => push(None, fixed),
+            Fill::Alternating(per_role) => {
+                push(Some(SessionRole::Light), &per_role.light);
+                push(Some(SessionRole::Heavy), &per_role.heavy);
+            }
         }
     };
-    single(SlotId::Plyometric, &fills.plyometric);
-    single(SlotId::Power, &fills.power);
+    statics(SlotId::Plyometric, &fills.plyometric);
+    statics(SlotId::Power, &fills.power);
+
+    let mut single = |slot: SlotId, fill: &Fill<Exercise>| {
+        let mut push = |role, exercise| {
+            rows.push(FlatFill {
+                slot,
+                role,
+                position: 0,
+                exercise,
+                statics: None,
+            });
+        };
+        match fill {
+            Fill::Same(exercise) => push(None, *exercise),
+            Fill::Alternating(per_role) => {
+                push(Some(SessionRole::Light), per_role.light);
+                push(Some(SessionRole::Heavy), per_role.heavy);
+            }
+        }
+    };
     single(SlotId::KneeDominant, &fills.knee_dominant);
     single(SlotId::UpperPush, &fills.upper_push);
     single(SlotId::UpperPull, &fills.upper_pull);
@@ -417,28 +497,23 @@ fn flatten(fills: &SlotFills) -> Vec<(SlotId, Option<SessionRole>, i64, Exercise
     single(SlotId::Core, &fills.core);
     single(SlotId::MobilityHold, &fills.mobility_hold);
 
-    let mut superset = |slot: SlotId, fill: &Fill<AtLeastTwo<Exercise>>| match fill {
-        Fill::Same(members) => {
+    let mut superset = |slot: SlotId, fill: &Fill<AtLeastTwo<Exercise>>| {
+        let mut push = |role, members: &AtLeastTwo<Exercise>| {
             for (position, exercise) in members.iter().enumerate() {
-                rows.push((slot, None, position_of(position), *exercise));
-            }
-        }
-        Fill::Alternating(per_role) => {
-            for (position, exercise) in per_role.light.iter().enumerate() {
-                rows.push((
+                rows.push(FlatFill {
                     slot,
-                    Some(SessionRole::Light),
-                    position_of(position),
-                    *exercise,
-                ));
+                    role,
+                    position: position_of(position),
+                    exercise: *exercise,
+                    statics: None,
+                });
             }
-            for (position, exercise) in per_role.heavy.iter().enumerate() {
-                rows.push((
-                    slot,
-                    Some(SessionRole::Heavy),
-                    position_of(position),
-                    *exercise,
-                ));
+        };
+        match fill {
+            Fill::Same(members) => push(None, members),
+            Fill::Alternating(per_role) => {
+                push(Some(SessionRole::Light), &per_role.light);
+                push(Some(SessionRole::Heavy), &per_role.heavy);
             }
         }
     };
@@ -447,6 +522,21 @@ fn flatten(fills: &SlotFills) -> Vec<(SlotId, Option<SessionRole>, i64, Exercise
     superset(SlotId::MobilityStretch, &fills.mobility_stretch);
 
     rows
+}
+
+/// One fill row, ready to write.
+struct FlatFill {
+    slot: SlotId,
+    role: Option<SessionRole>,
+    position: i64,
+    exercise: Exercise,
+    statics: Option<(RepCount, RepCount)>,
+}
+
+/// A repetition count as the store holds it.
+fn count_of(value: i64) -> Result<RepCount, StoreError> {
+    let count = u32::try_from(value).map_err(|_| corrupt(&"a count the domain cannot hold"))?;
+    RepCount::new(count).map_err(|error| corrupt(&error))
 }
 
 /// A member position on its way into the store.

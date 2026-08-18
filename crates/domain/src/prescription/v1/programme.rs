@@ -203,7 +203,9 @@ impl Programme {
             super::template::SlotContent::Single(exercise) => *exercise,
             // Unreachable by construction: `PrimaryPattern::slot` returns only
             // the four strength slots, and all four are single.
-            super::template::SlotContent::Superset(_) => primary_exercise,
+            super::template::SlotContent::Superset(_) | super::template::SlotContent::Static(_) => {
+                primary_exercise
+            }
         };
         if filled != primary_exercise {
             return Err(InconsistentProgramme::PrimaryDoesNotFillItsSlot {

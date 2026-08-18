@@ -56,13 +56,24 @@ from       = "2026-07-03"
 # alternates by session role takes a table keyed by role; a supersetted slot
 # takes a `members` list.
 [fills]
-plyometric    = "pogo"
-power         = "box-jump"
 knee_dominant = "front-squat"
 upper_push    = "chest-dip"
 upper_pull    = "pull-up"
 core          = "cable-twist-up-to-down"
 mobility_hold = "handstand-hold"
+
+# The static slots carry their whole prescription: they do not progress, so there
+# is nothing for history to say about them — and deriving them from the last
+# session would let a bad set re-issue itself.
+[fills.plyometric]
+exercise = "pogo"
+sets     = 3
+reps     = 20
+
+[fills.power]
+exercise = "box-jump"
+sets     = 3
+reps     = 5
 
 # Alternates by role. This is why the history projection is unbounded: on any
 # given session the exercise being prescribed was last performed two sessions
@@ -117,11 +128,16 @@ static_hold = "60s"
 start = "TODO"
 end   = "TODO"
 
-# INFERRED. The double-progression scheme every non-primary strength and
-# hypertrophy slot runs. One range for all of them, eyeballed from pull-ups at
-# six, curls around four to six and wrist work at six. Both the range and the
-# decision to use one range for ten slots are unconfirmed.
-[parameters.accessory]
+# INFERRED. The double-progression scheme each block's non-primary slots run.
+# One per block rather than one per slot: the slots within a block are prescribed
+# alike, and the two blocks differ from each other. The ranges themselves were
+# eyeballed from pull-ups at six, curls around four to six and wrist work at six,
+# and are unconfirmed.
+[parameters.strength]
+reps = "4-6"
+sets = 3
+
+[parameters.hypertrophy]
 reps = "4-6"
 sets = 3
 

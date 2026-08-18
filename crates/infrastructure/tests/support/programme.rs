@@ -26,7 +26,7 @@ use domain::{
     prescription::{
         Anchor, AnchorProvenance, GenerationParameters, PerRole, Percentage, PlateIncrement,
         Programme, ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
-        v1::{Fill, SlotFills},
+        v1::{Fill, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -107,7 +107,12 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             heavy: TopSetReps::new(reps(1)?),
         },
         plate_increment: PlateIncrement::new(kg("2.5")?).map_err(invalid)?,
-        accessory: domain::prescription::AccessoryScheme {
+        strength: domain::prescription::AccessoryScheme {
+            low: reps(4)?,
+            high: reps(6)?,
+            sets: reps(3)?,
+        },
+        hypertrophy: domain::prescription::AccessoryScheme {
             low: reps(4)?,
             high: reps(6)?,
             sets: reps(3)?,
@@ -126,16 +131,32 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
 
 /// The eleven slot fills the record shows.
 ///
-/// Infallible: every superset here is built with `AtLeastTwo::of`, which takes
-/// its two mandatory members by value and so cannot be short.
-pub fn fills() -> SlotFills {
+/// Fallible again since the static slots carry repetition counts, which are
+/// constructed rather than taken by value.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if a literal here is invalid.
+pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
+    // Static prescriptions, authored rather than derived. Unwrapped here because
+    // these literals are non-zero by inspection and a fallible fixture builder
+    // would push the panic to every call site.
+    let (three, five, twenty) = (reps(3)?, reps(5)?, reps(20)?);
     let pair = |first: RepsExercise, second: RepsExercise| {
         AtLeastTwo::of(Exercise::Reps(first), Exercise::Reps(second), Vec::new())
     };
 
-    SlotFills {
-        plyometric: Fill::Same(Exercise::Reps(RepsExercise::Pogo)),
-        power: Fill::Same(Exercise::Reps(RepsExercise::BoxJump)),
+    Ok(SlotFills {
+        plyometric: Fill::Same(StaticFill {
+            exercise: Exercise::Reps(RepsExercise::Pogo),
+            sets: three,
+            reps: twenty,
+        }),
+        power: Fill::Same(StaticFill {
+            exercise: Exercise::Reps(RepsExercise::BoxJump),
+            sets: three,
+            reps: five,
+        }),
         knee_dominant: Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
         upper_push: Fill::Same(Exercise::Reps(RepsExercise::ChestDip)),
         upper_pull: Fill::Same(Exercise::Reps(RepsExercise::PullUp)),
@@ -168,7 +189,7 @@ pub fn fills() -> SlotFills {
                 Exercise::Duration(DurationExercise::Stretching),
             ],
         )),
-    }
+    })
 }
 
 /// The anchor the July test established: 90kg, measured.
@@ -209,7 +230,7 @@ pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
     Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
-        fills(),
+        fills()?,
         anchor()?,
         SessionRole::Heavy,
         start,
@@ -240,7 +261,7 @@ pub fn gating_on_a_role_it_never_runs()
     Ok(Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
-        fills(),
+        fills()?,
         anchor()?,
         SessionRole::Heavy,
         start,
@@ -263,7 +284,7 @@ pub fn primary_not_counted_in_reps()
     Ok(Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Distance(DistanceExercise::Running),
-        fills(),
+        fills()?,
         anchor()?,
         SessionRole::Heavy,
         start,
@@ -288,7 +309,7 @@ pub fn primary_does_not_fill_its_slot()
         // deadlift, and the knee-dominant fill is a front squat.
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::DeadliftBarbell),
-        fills(),
+        fills()?,
         anchor()?,
         SessionRole::Heavy,
         start,

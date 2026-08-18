@@ -255,16 +255,16 @@ pub struct ResetProtocol {
     pub reclimb_per_week: Kg,
 }
 
-/// The scheme every non-primary strength and hypertrophy slot runs.
+/// The double-progression scheme one block's slots run.
 ///
-/// Double progression: work the range, and when the top of it is reached at every
-/// working set, add an increment and start again at the bottom.
+/// Work the range, and when the top of it is reached at every working set, add an
+/// increment and start again at the bottom.
 ///
-/// **One range for all of them, which is a simplification.** The record runs
-/// pull-ups at six, curls around four to six and wrist work at six — close enough
-/// that one range reproduces the shape, and different enough that a per-slot range
-/// would be more faithful. Deferred rather than hidden: a slot-keyed range is a
-/// bigger authored surface and nothing yet needs it.
+/// **One scheme per block, not one per slot and not one for everything.** The
+/// slots within a block are prescribed alike — every non-primary strength slot
+/// shares a scheme, and so does every hypertrophy slot — while the two blocks
+/// differ from each other. A per-slot scheme is a larger authored surface that
+/// nothing yet needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessoryScheme {
     pub low: RepCount,
@@ -284,7 +284,10 @@ pub struct GenerationParameters {
     pub ladder_start: Percentage,
     pub ladder_end: Percentage,
     pub top_set_reps: super::schedule::PerRole<TopSetReps>,
-    pub accessory: AccessoryScheme,
+    /// Every non-primary strength slot.
+    pub strength: AccessoryScheme,
+    /// Every hypertrophy slot.
+    pub hypertrophy: AccessoryScheme,
     /// How long a static hold is held for.
     ///
     /// The mobility work does not progress — it is held, and the same length

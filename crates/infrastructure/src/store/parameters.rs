@@ -140,9 +140,12 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                    ladder_start_bp AS "ladder_start_bp!: i64",
                    ladder_end_bp AS "ladder_end_bp!: i64",
                    plate_increment_grams AS "plate_increment_grams!: i64",
-                   accessory_low AS "accessory_low!: i64",
-                   accessory_high AS "accessory_high!: i64",
-                   accessory_sets AS "accessory_sets!: i64",
+                   strength_low AS "strength_low!: i64",
+                   strength_high AS "strength_high!: i64",
+                   strength_sets AS "strength_sets!: i64",
+                   hypertrophy_low AS "hypertrophy_low!: i64",
+                   hypertrophy_high AS "hypertrophy_high!: i64",
+                   hypertrophy_sets AS "hypertrophy_sets!: i64",
                    static_hold_seconds AS "static_hold_seconds!: i64",
                    reset1_drop_bp AS "reset1_drop_bp!: i64",
                    reset1_reclimb_grams AS "reset1_reclimb_grams!: i64",
@@ -177,10 +180,15 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                 ladder_start: bp_from_storage(row.ladder_start_bp)?,
                 ladder_end: bp_from_storage(row.ladder_end_bp)?,
                 top_set_reps: PerRole { light, heavy },
-                accessory: domain::prescription::AccessoryScheme {
-                    low: reps_from_storage(row.accessory_low)?,
-                    high: reps_from_storage(row.accessory_high)?,
-                    sets: reps_from_storage(row.accessory_sets)?,
+                strength: domain::prescription::AccessoryScheme {
+                    low: reps_from_storage(row.strength_low)?,
+                    high: reps_from_storage(row.strength_high)?,
+                    sets: reps_from_storage(row.strength_sets)?,
+                },
+                hypertrophy: domain::prescription::AccessoryScheme {
+                    low: reps_from_storage(row.hypertrophy_low)?,
+                    high: reps_from_storage(row.hypertrophy_high)?,
+                    sets: reps_from_storage(row.hypertrophy_sets)?,
                 },
                 static_hold: domain::gym::Duration::from_seconds(
                     u64::try_from(row.static_hold_seconds)
@@ -219,9 +227,12 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let ladder_start = bp_for_storage(parameters.ladder_start);
         let ladder_end = bp_for_storage(parameters.ladder_end);
         let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
-        let accessory_low = i64::from(parameters.accessory.low.as_u32());
-        let accessory_high = i64::from(parameters.accessory.high.as_u32());
-        let accessory_sets = i64::from(parameters.accessory.sets.as_u32());
+        let strength_low = i64::from(parameters.strength.low.as_u32());
+        let strength_high = i64::from(parameters.strength.high.as_u32());
+        let strength_sets = i64::from(parameters.strength.sets.as_u32());
+        let hypertrophy_low = i64::from(parameters.hypertrophy.low.as_u32());
+        let hypertrophy_high = i64::from(parameters.hypertrophy.high.as_u32());
+        let hypertrophy_sets = i64::from(parameters.hypertrophy.sets.as_u32());
         let static_hold = i64::try_from(parameters.static_hold.as_seconds())
             .map_err(|_| corrupt(&"a static hold longer than the store can hold"))?;
         let reset1_drop = bp_for_storage(parameters.first_reset.drop);
@@ -234,11 +245,13 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             INSERT INTO generation_parameters (
                 authored_at, back_off_bp, light_of_heavy_bp,
                 ladder_start_bp, ladder_end_bp, plate_increment_grams,
-                accessory_low, accessory_high, accessory_sets, static_hold_seconds,
+                strength_low, strength_high, strength_sets,
+                hypertrophy_low, hypertrophy_high, hypertrophy_sets,
+                static_hold_seconds,
                 reset1_drop_bp, reset1_reclimb_grams,
                 reset2_drop_bp, reset2_reclimb_grams
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
             stamp,
             back_off,
@@ -246,9 +259,12 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             ladder_start,
             ladder_end,
             increment,
-            accessory_low,
-            accessory_high,
-            accessory_sets,
+            strength_low,
+            strength_high,
+            strength_sets,
+            hypertrophy_low,
+            hypertrophy_high,
+            hypertrophy_sets,
             static_hold,
             reset1_drop,
             reset1_reclimb,

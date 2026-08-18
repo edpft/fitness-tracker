@@ -43,5 +43,7 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
-pub use v1::{Fill, InconsistentProgramme, PrimaryPattern, Programme, SlotContent, SlotFills};
+pub use v1::{
+    Fill, InconsistentProgramme, PrimaryPattern, Programme, SlotContent, SlotFills, StaticFill,
+};
 pub use workout::{PrescribedWorkout, ProgrammeId};

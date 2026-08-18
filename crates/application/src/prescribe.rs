@@ -278,9 +278,14 @@ fn primary_slot_item(
             Target::Exactly(reps),
         ));
 
+        // The back-offs run the strength block's scheme, the primary being a
+        // strength slot. Their own sets and repetitions are not separately
+        // authored — the record shows the two roles differing, which is a
+        // distinction nobody has stated.
         let back_off = quantise_loaded(parameters.back_off_of_top_set.of(load), increment);
-        let back_off_reps = parameters.accessory.high;
-        for _ in 0..parameters.accessory.sets.as_u32() {
+        let scheme = scheme_for(parameters, Block::Strength);
+        let back_off_reps = scheme.high;
+        for _ in 0..scheme.sets.as_u32() {
             sets.push(PrescribedSet::fixed(
                 Load::Absolute(back_off),
                 Target::Exactly(back_off_reps),
@@ -374,6 +379,15 @@ fn accessory_slot(
     slot: SlotId,
 ) -> Derived {
     match programme.fills().content(slot, role) {
+        // Authored outright: no history is read and none is needed.
+        SlotContent::Static(fill) => match static_exercise(fill) {
+            Ok(exercise) => Derived::item(PrescribedItem::Exercise { slot, exercise }),
+            Err(reason) => Derived::Underivable(UnderivableSlot {
+                slot,
+                exercise: fill.exercise.as_str(),
+                reason,
+            }),
+        },
         SlotContent::Single(exercise) => match one_exercise(parameters, history, *exercise, slot) {
             Ok(exercise) => Derived::item(PrescribedItem::Exercise { slot, exercise }),
             Err(reason) => Derived::Underivable(reason),
@@ -404,6 +418,17 @@ fn accessory_slot(
     }
 }
 
+/// The scheme a block's non-primary slots run.
+const fn scheme_for(
+    parameters: &GenerationParameters,
+    block: Block,
+) -> &domain::prescription::AccessoryScheme {
+    match block {
+        Block::Hypertrophy => &parameters.hypertrophy,
+        _ => &parameters.strength,
+    }
+}
+
 /// How a slot's numbers are arrived at.
 ///
 /// A total function of `(slot, primacy)`, which is what the model of record says:
@@ -413,8 +438,9 @@ fn accessory_slot(
 /// scheme on a non-primary slot is unwritable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scheme {
-    /// Re-issue the last performance exactly. No progression, by design: a set
-    /// of pogos or box jumps is there to be done, not to be added to.
+    /// Prescribed outright by the programme. No progression and no history: a
+    /// static slot is set at the start of the block, so reading the last
+    /// performance would let a bad session re-issue itself.
     Static,
     /// A hold, for the authored length, every time.
     Hold,
@@ -443,6 +469,22 @@ const fn hold(parameters: &GenerationParameters, exercise: DurationExercise) -> 
     }
 }
 
+/// A static slot, exactly as the programme prescribes it.
+fn static_exercise(
+    fill: &domain::prescription::StaticFill,
+) -> Result<PrescribedExercise, UnderivableReason> {
+    let Exercise::Reps(exercise) = fill.exercise else {
+        return Err(UnderivableReason::NotCountedInReps);
+    };
+    let sets = (0..fill.sets.as_u32())
+        .map(|_| PrescribedSet::fixed(Load::UNLOADED, Target::Exactly(fill.reps)))
+        .collect();
+    Ok(PrescribedExercise::ForReps {
+        exercise,
+        sets: NonEmpty::new(sets).map_err(|_| UnderivableReason::NoWorkingSet)?,
+    })
+}
+
 /// One exercise's sets, by double progression against its own last performance.
 fn one_exercise(
     parameters: &GenerationParameters,
@@ -457,6 +499,7 @@ fn one_exercise(
     };
 
     // A hold needs no history at all: it is the authored duration, every time.
+    // A static slot never reaches here — `accessory_slot` prescribes it outright.
     if scheme_of(slot) == Scheme::Hold {
         let Exercise::Duration(duration_exercise) = exercise else {
             return Err(underivable(UnderivableReason::NotAHold));
@@ -470,30 +513,14 @@ fn one_exercise(
     let Some(LastPerformance::Performed(last)) = history.get(&reps_exercise) else {
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
-    let sets = match scheme_of(slot) {
-        // Re-issue what was done: same load, same count, same number of sets.
-        Scheme::Static => {
-            let mut issued = Vec::new();
-            for set in &last.sets {
-                let Some(reps) = set.outcome.completed() else {
-                    continue;
-                };
-                issued.push(PrescribedSet::fixed(set.load, Target::Exactly(*reps)));
-            }
-            issued
-        }
-        Scheme::DoubleProgression => {
-            let load = progressed_load(parameters, last)
-                .ok_or_else(|| underivable(UnderivableReason::NoWorkingSet))?;
-            let target = Target::range(parameters.accessory.low, parameters.accessory.high)
-                .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
-            (0..parameters.accessory.sets.as_u32())
-                .map(|_| PrescribedSet::fixed(load, target))
-                .collect()
-        }
-        // Handled above, before any history was needed.
-        Scheme::Hold => Vec::new(),
-    };
+    let scheme = scheme_for(parameters, slot.block());
+    let load = progressed_load(parameters, scheme, last)
+        .ok_or_else(|| underivable(UnderivableReason::NoWorkingSet))?;
+    let target = Target::range(scheme.low, scheme.high)
+        .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
+    let sets: Vec<_> = (0..scheme.sets.as_u32())
+        .map(|_| PrescribedSet::fixed(load, target))
+        .collect();
 
     let sets = NonEmpty::new(sets).map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
     Ok(PrescribedExercise::ForReps {
@@ -508,12 +535,16 @@ fn one_exercise(
 /// A failed attempt is not the top of the range, so a session that failed
 /// re-issues rather than advancing — which is the same rule the primary's gate
 /// runs, arrived at from the other direction.
-fn progressed_load(parameters: &GenerationParameters, last: &Performance) -> Option<Load> {
+fn progressed_load(
+    parameters: &GenerationParameters,
+    scheme: &domain::prescription::AccessoryScheme,
+    last: &Performance,
+) -> Option<Load> {
     let heaviest = last.sets.last()?;
     let reached_top = last.sets.iter().all(|set| {
         set.outcome
             .completed()
-            .is_some_and(|reps| *reps >= parameters.accessory.high)
+            .is_some_and(|reps| *reps >= scheme.high)
     });
 
     if !reached_top {

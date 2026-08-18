@@ -21,7 +21,7 @@ use domain::{
         AccessoryScheme, Anchor, AnchorProvenance, GenerationParameters, InconsistentProgramme,
         PerRole, Percentage, PlateIncrement, Programme, ResetProtocol, SessionRole, TopSetReps,
         WarmupStep, Weekdays,
-        v1::{Fill, PrimaryPattern, SlotFills},
+        v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -136,7 +136,8 @@ struct ParametersSection {
     light_of_heavy: String,
     static_hold: String,
     ladder: LadderSection,
-    accessory: AccessorySection,
+    strength: AccessorySection,
+    hypertrophy: AccessorySection,
     roles: BTreeMap<String, RoleSection>,
     warmup: Vec<WarmupSection>,
     reset: ResetSection,
@@ -222,19 +223,6 @@ impl Document {
             )?))
         };
 
-        let (low, high) = p
-            .accessory
-            .reps
-            .split_once('-')
-            .ok_or_else(|| invalid("parameters.accessory.reps", "a range reads as low-high"))?;
-        let parse = |field: &str, value: &str| -> Result<RepCount, DocumentError> {
-            value
-                .trim()
-                .parse::<u32>()
-                .map_err(|error| invalid(field, error))
-                .and_then(|count| reps(field, count))
-        };
-
         Ok(GenerationParameters {
             warmup,
             back_off_of_top_set: percentage(
@@ -248,11 +236,8 @@ impl Document {
                 light: role("light")?,
                 heavy: role("heavy")?,
             },
-            accessory: AccessoryScheme {
-                low: parse("parameters.accessory.reps", low)?,
-                high: parse("parameters.accessory.reps", high)?,
-                sets: reps("parameters.accessory.sets", p.accessory.sets)?,
-            },
+            strength: scheme("parameters.strength", &p.strength)?,
+            hypertrophy: scheme("parameters.hypertrophy", &p.hypertrophy)?,
             static_hold: seconds("parameters.static_hold", &p.static_hold)?,
             plate_increment: PlateIncrement::new(mass(
                 "parameters.plate_increment",
@@ -336,8 +321,8 @@ impl Document {
     /// The eleven fills.
     fn fills(&self) -> Result<SlotFills, DocumentError> {
         Ok(SlotFills {
-            plyometric: self.single("plyometric")?,
-            power: self.single("power")?,
+            plyometric: self.statics("plyometric")?,
+            power: self.statics("power")?,
             knee_dominant: self.single("knee_dominant")?,
             upper_push: self.single("upper_push")?,
             upper_pull: self.single("upper_pull")?,
@@ -348,6 +333,58 @@ impl Document {
             mobility_hold: self.single("mobility_hold")?,
             mobility_stretch: self.superset("mobility_stretch")?,
         })
+    }
+
+    /// A statically prescribed slot: an exercise plus its sets and repetitions.
+    ///
+    /// The whole prescription is authored, because a static slot does not
+    /// progress and so has nothing to derive from.
+    fn statics(&self, slot: &str) -> Result<Fill<StaticFill>, DocumentError> {
+        let field = format!("fills.{slot}");
+        let value = self
+            .fills
+            .get(slot)
+            .ok_or_else(|| invalid(&field, "no fill for this slot"))?;
+        let table = value.as_table().ok_or_else(|| {
+            invalid(
+                &field,
+                "a static slot is a table of exercise, sets and reps",
+            )
+        })?;
+
+        let read = |section: &toml::Value| -> Result<StaticFill, DocumentError> {
+            let key = section
+                .get("exercise")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| invalid(&field, "no exercise"))?;
+            let count = |name: &str| -> Result<RepCount, DocumentError> {
+                let value = section
+                    .get(name)
+                    .and_then(toml::Value::as_integer)
+                    .ok_or_else(|| invalid(&field, format!("no {name}")))?;
+                let value = u32::try_from(value).map_err(|error| invalid(&field, error))?;
+                reps(&field, value)
+            };
+            Ok(StaticFill {
+                exercise: exercise(&field, key)?,
+                sets: count("sets")?,
+                reps: count("reps")?,
+            })
+        };
+
+        if table.contains_key("exercise") {
+            return Ok(Fill::Same(read(value)?));
+        }
+        let by_role = |role: &str| -> Result<StaticFill, DocumentError> {
+            let section = table
+                .get(role)
+                .ok_or_else(|| invalid(&field, format!("no {role} prescription")))?;
+            read(section)
+        };
+        Ok(Fill::Alternating(PerRole {
+            light: by_role("light")?,
+            heavy: by_role("heavy")?,
+        }))
     }
 
     /// A slot filled with one exercise, the same both ways or one per role.
@@ -417,6 +454,26 @@ impl Document {
             heavy: by_role("heavy")?,
         }))
     }
+}
+
+/// One block's double-progression scheme.
+fn scheme(field: &str, section: &AccessorySection) -> Result<AccessoryScheme, DocumentError> {
+    let (low, high) = section
+        .reps
+        .split_once('-')
+        .ok_or_else(|| invalid(field, "a range reads as low-high"))?;
+    let count = |value: &str| -> Result<RepCount, DocumentError> {
+        value
+            .trim()
+            .parse::<u32>()
+            .map_err(|error| invalid(field, error))
+            .and_then(|parsed| reps(field, parsed))
+    };
+    Ok(AccessoryScheme {
+        low: count(low)?,
+        high: count(high)?,
+        sets: reps(field, section.sets)?,
+    })
 }
 
 fn weekday(key: &str) -> Result<jiff::civil::Weekday, DocumentError> {

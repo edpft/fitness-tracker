@@ -369,6 +369,9 @@ fn a_settled_document_authors() {
         "the document and the Rust fixture agree"
     );
     assert_eq!(parameters.static_hold, expected.static_hold);
-    assert_eq!(programme.fills(), &programme::fills());
+    let Ok(expected_fills) = programme::fills() else {
+        panic!("the fixture fills are valid")
+    };
+    assert_eq!(programme.fills(), &expected_fills);
     assert_eq!(programme.calendar().duration_weeks(), 8);
 }

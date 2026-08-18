@@ -262,12 +262,15 @@ pub fn programme_authored(
         parameters.back_off_of_top_set, parameters.plate_increment,
     );
     println!(
-        "  accessories {}-{} × {} sets; holds {}",
-        parameters.accessory.low,
-        parameters.accessory.high,
-        parameters.accessory.sets,
-        parameters.static_hold,
+        "  strength slots {} × {}-{}; hypertrophy slots {} × {}-{}",
+        parameters.strength.sets,
+        parameters.strength.low,
+        parameters.strength.high,
+        parameters.hypertrophy.sets,
+        parameters.hypertrophy.low,
+        parameters.hypertrophy.high,
     );
+    println!("  holds {}", parameters.static_hold);
 }
 
 /// The prescription, as a session to train from.
