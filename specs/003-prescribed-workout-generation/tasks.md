@@ -122,11 +122,11 @@ other slot's from its own last performance.
 ### The read side
 
 - [X] T039 [US1] Implement `ExerciseHistory` in `crates/infrastructure/src/store/history.rs`: `last_performances` batched over the exercises asked about, `performances` for one exercise oldest-first, `newest_performance`, all excluding warm-ups and all resolving § 10 by `serve_ordinal` in the `WHERE` clause
-- [ ] T040 [P] [US1] Implement `PerformedWorkoutReader` in `crates/infrastructure/src/store/performed.rs`, returning whole `GymWorkout`s in a date range with § 10 applied
+- [X] T040 [P] [US1] Implement `PerformedWorkoutReader` in `crates/infrastructure/src/store/performed.rs`, returning whole `GymWorkout`s in a date range with § 10 applied
 
 ### The authored side
 
-- [ ] T041 [P] [US1] Implement the TOML shapes and their conversion into `domain` types in `crates/infrastructure/src/programme/document.rs`, rejecting any remaining `TODO` by field path. No `toml` type escapes this module
+- [X] T041 [P] [US1] Implement the TOML shapes and their conversion into `domain` types in `crates/infrastructure/src/programme/document.rs`, rejecting any remaining `TODO` by field path. No `toml` type escapes this module
 - [X] T042 [P] [US1] Implement `GenerationParameterStore` in `crates/infrastructure/src/store/parameters.rs`, superseding by `authored_at` and never overwriting (§ 12)
 - [X] T043 [P] [US1] Implement `ProgrammeStore` in `crates/infrastructure/src/store/programme.rs`, same supersession rule
 - [X] T044 [US1] Implement `PrescribedWorkoutStore` in `crates/infrastructure/src/store/prescription.rs` — `issue` writing once and never rewriting, `issued_for` reading back a date

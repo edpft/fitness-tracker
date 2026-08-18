@@ -8,6 +8,7 @@
 mod catalogue;
 mod config;
 mod output;
+mod prescribing;
 mod wiring;
 
 use std::{path::PathBuf, process::ExitCode};
@@ -107,6 +108,8 @@ fn command() -> ClapCommand {
                 .about("Report the most recent successful extraction")
                 .arg(stream_argument()),
         )
+        .subcommand(prescribe_command())
+        .subcommand(programme_command())
         .subcommand(
             ClapCommand::new("reset")
                 .about(
@@ -114,6 +117,54 @@ fn command() -> ClapCommand {
                      Lands nothing and removes nothing",
                 )
                 .arg(stream_argument()),
+        )
+}
+
+/// Issue a prescription.
+///
+/// No stream argument: the catalogue is one entry per thing this build can
+/// *collect*, and generation collects nothing. A stream here would be a category
+/// error, and none of the `SOURCE_`-style environment derivation applies.
+fn prescribe_command() -> ClapCommand {
+    ClapCommand::new("prescribe")
+        .about("Issue the prescription for a date, or show what was already issued")
+        .arg(timezone_argument())
+        .arg(Arg::new("date").long("date").value_name("date").help(
+            "The session to prescribe for, as YYYY-MM-DD. \
+                     Defaults to the next programmed day at or after today",
+        ))
+}
+
+/// Author the programme.
+fn programme_command() -> ClapCommand {
+    ClapCommand::new("programme")
+        .about("Author the programme from a document")
+        .arg(timezone_argument())
+        .subcommand_required(true)
+        .subcommand(
+            ClapCommand::new("author")
+                .about("Read a programme document and store it, superseding the previous one")
+                .arg(
+                    Arg::new("path")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf))
+                        .help("The document to read"),
+                ),
+        )
+}
+
+/// The zone the operator trains in.
+///
+/// No default is compiled in, here as everywhere: the zone decides which
+/// calendar day a session falls on, and guessing one is an assumption about
+/// where the operator lives.
+fn timezone_argument() -> Arg {
+    Arg::new("timezone")
+        .long("timezone")
+        .env("FITNESS_TRACKER_TIMEZONE")
+        .help(
+            "The IANA time zone trained in, such as Europe/London. \
+             Required: no zone is compiled in",
         )
 }
 
@@ -260,12 +311,33 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         return Err(Failure::message("no command given", exit::USAGE));
     };
 
+    // Prescription is not a stream. The catalogue is one entry per thing this
+    // build can *collect*, and generation collects nothing — so these two are
+    // dispatched before any stream is looked up.
+    let database = config::database(matches.get_one::<PathBuf>("database").cloned())?;
+    match name {
+        "prescribe" => {
+            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let date = sub.get_one::<String>("date").map(String::as_str);
+            return prescribing::prescribe(&database, &zone, date).await;
+        }
+        "programme" => {
+            let Some(("author", author)) = sub.subcommand() else {
+                return Err(Failure::message("no programme command given", exit::USAGE));
+            };
+            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let Some(path) = author.get_one::<PathBuf>("path") else {
+                return Err(Failure::message("no document given", exit::USAGE));
+            };
+            return prescribing::author(&database, &zone, path).await;
+        }
+        _ => {}
+    }
+
     let known = named_stream(sub)?;
     let stream = known
         .landing_stream()
         .map_err(|error| Failure::usage(&error))?;
-    let database = config::database(matches.get_one::<PathBuf>("database").cloned())?;
-
     let command = match name {
         "extract" => {
             // Printed before the run begins, so a long first collection says

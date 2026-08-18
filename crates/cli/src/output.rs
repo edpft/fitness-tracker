@@ -229,3 +229,196 @@ pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
 fn short(id: &str) -> String {
     id.chars().take(8).collect()
 }
+
+/// What was authored.
+pub fn programme_authored(
+    id: domain::prescription::ProgrammeId,
+    programme: &domain::prescription::Programme,
+    parameters: &domain::prescription::GenerationParameters,
+) {
+    let calendar = programme.calendar();
+    println!(
+        "authored programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
+        programme.primary_exercise(),
+        programme.primary(),
+        calendar.duration_weeks(),
+        calendar.start(),
+        programme.gating_role(),
+    );
+    println!("anchor {}, fixed for the block", programme.anchor());
+    println!(
+        "  ladder {} → {} of anchor over {} climbing weeks; week {} is the test",
+        parameters.ladder_start,
+        parameters.ladder_end,
+        calendar.duration_weeks().saturating_sub(1),
+        calendar.duration_weeks(),
+    );
+    println!(
+        "  heavy top set × {}; light top set × {} at {} of the heavy load",
+        parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
+    );
+    println!(
+        "  back-off {} of top set, plate increment {}kg",
+        parameters.back_off_of_top_set, parameters.plate_increment,
+    );
+    println!(
+        "  accessories {}-{} × {} sets; holds {}",
+        parameters.accessory.low,
+        parameters.accessory.high,
+        parameters.accessory.sets,
+        parameters.static_hold,
+    );
+}
+
+/// The prescription, as a session to train from.
+pub fn prescription(issued: &application::Prescription) {
+    let workout = &issued.workout;
+    let lead = if issued.freshly_issued {
+        "prescribing"
+    } else {
+        "already issued for"
+    };
+    let weekday = workout.issued_for().weekday();
+    println!(
+        "{lead} {} ({weekday:?}, {})",
+        workout.issued_for(),
+        workout.session_role(),
+    );
+    println!(
+        "anchor {}, {}{}",
+        workout.anchor(),
+        workout.week(),
+        issued
+            .history_through
+            .map(|through| format!(", history through {through}"))
+            .unwrap_or_default(),
+    );
+    println!();
+
+    let mut block = None;
+    for item in workout.shape().items().iter() {
+        let Some(slot) = item.slots().next() else {
+            continue;
+        };
+        if block != Some(slot.block()) {
+            block = Some(slot.block());
+            println!("  {}", slot.block());
+        }
+
+        let members: Vec<_> = item.exercises().collect();
+        let paired = members.len() > 1;
+        for (at, exercise) in members.iter().enumerate() {
+            let marker = if !paired {
+                "   "
+            } else if at == 0 {
+                " ┐ "
+            } else if at + 1 == members.len() {
+                " ┘ "
+            } else {
+                " │ "
+            };
+            println!("   {marker}{}", describe(exercise));
+        }
+    }
+
+    if !issued.underivable.is_empty() {
+        println!();
+        for slot in &issued.underivable {
+            println!(
+                "  {} ({}) — not derivable: {}",
+                slot.slot, slot.exercise, slot.reason
+            );
+        }
+    }
+
+    println!();
+    if issued.freshly_issued {
+        println!("issued as prescription {}", issued.id);
+    } else {
+        println!("already issued as prescription {}", issued.id);
+    }
+}
+
+/// One exercise's line: its name, then its sets collapsed where they repeat.
+///
+/// Written the way an operator writes a session down — `3 × 6 @ 30kg`, sets
+/// first — rather than the way the type nests.
+fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
+    use domain::prescription::PrescribedExercise;
+    let lines: Vec<String> = match exercise {
+        PrescribedExercise::ForReps { sets, .. } => sets.iter().map(set_line).collect(),
+        PrescribedExercise::ForDuration { sets, .. } => sets.iter().map(set_line).collect(),
+        PrescribedExercise::ForDistance { sets, .. } => sets.iter().map(set_line).collect(),
+    };
+
+    // Consecutive identical sets read as `3 × …`, which is how they are written
+    // down and how they are actually performed.
+    let mut collapsed: Vec<(String, usize)> = Vec::new();
+    for line in lines {
+        match collapsed.last_mut() {
+            Some((last, count)) if *last == line => *count += 1,
+            _ => collapsed.push((line, 1)),
+        }
+    }
+
+    let sets = collapsed
+        .into_iter()
+        .map(|(line, count)| {
+            if count == 1 {
+                line
+            } else {
+                format!("{count} × {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("{:<32} {sets}", exercise.exercise_key())
+}
+
+/// One set: the measure, then the load, then whatever qualifies it.
+fn set_line<M: std::fmt::Display>(set: &domain::prescription::PrescribedSet<M>) -> String {
+    use domain::prescription::Prescribed;
+    let mut line = match &set.prescription {
+        // An unloaded movement has no load worth printing. `Load` keeps
+        // absolute-zero ("no external load" — a pogo, a stretch) apart from
+        // relative-zero ("plain bodyweight" — a pull-up, where assistance and
+        // added weight are both conventional), and only the second is worth a
+        // word on the line.
+        Prescribed::Fixed { load, measure, .. } if unloaded(*load) => format!("{measure}"),
+        Prescribed::Fixed { load, measure, .. } => format!("{measure} @ {}", weight(*load)),
+        Prescribed::ToEffort { load, effort, .. } => {
+            format!("as many as @ {}, {effort} in reserve", weight(*load))
+        }
+        // A test: the load is what the day allows, so there is none to print.
+        Prescribed::Autoregulated { measure, effort } => {
+            format!("{measure} — work up, {effort} in reserve")
+        }
+    };
+    if set.warmup {
+        line.push_str(" (warm-up)");
+    }
+    line
+}
+
+/// External load that is simply absent, as against bodyweight on an axis where
+/// assistance is conventional.
+const fn unloaded(load: domain::gym::Load) -> bool {
+    matches!(load, domain::gym::Load::Absolute(mass) if mass.is_none())
+}
+
+/// A load, written the short way.
+///
+/// `Load`'s own `Display` spells out "no external load" and "bodyweight +10 kg",
+/// which is right for a diagnostic and too long for a line an operator reads in
+/// the gym.
+fn weight(load: domain::gym::Load) -> String {
+    use domain::gym::Load;
+    match load {
+        Load::Absolute(mass) if mass.is_none() => "bodyweight".to_owned(),
+        Load::Absolute(mass) => format!("{mass}kg"),
+        Load::Relative(delta) if delta.as_grams() == 0 => "bodyweight".to_owned(),
+        Load::Relative(delta) if delta.as_grams() < 0 => format!("bodyweight {delta}kg"),
+        Load::Relative(delta) => format!("bodyweight +{delta}kg"),
+    }
+}
