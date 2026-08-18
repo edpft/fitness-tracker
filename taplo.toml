@@ -1,0 +1,13 @@
+# How the TOML in this repository is formatted.
+#
+# One rule, and it is for the programme document. That file is authored and read
+# by a person: its columns line up so a value can be checked against the one
+# above it without counting characters, which is the whole reason the programme
+# is a document rather than thirty command-line flags. Taplo's default strips
+# that alignment out. Cargo's manifests keep the default, because they are read
+# by cargo and every other Rust repository formats them that way.
+[[rule]]
+include = ["crates/infrastructure/tests/fixtures/*.toml"]
+
+[rule.formatting]
+align_entries = true

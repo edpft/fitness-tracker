@@ -83,7 +83,7 @@
             ./clippy.toml
             # ./rustfmt.toml
             ./deny.toml
-            # ./taplo.toml
+            ./taplo.toml
           ];
         };
 
