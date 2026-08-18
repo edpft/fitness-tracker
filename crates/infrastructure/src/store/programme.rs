@@ -22,7 +22,7 @@ use domain::{
     },
     prescription::{
         Anchor, AnchorProvenance, Calendar, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
-        v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
+        linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -257,7 +257,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
                 anchor_grams, anchor_provenance, anchor_from,
                 gating_role, start_date, duration_weeks
             )
-            VALUES (?, 'v1', ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
             authored_at,

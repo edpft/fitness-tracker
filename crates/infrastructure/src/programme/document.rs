@@ -21,7 +21,7 @@ use domain::{
         AccessoryScheme, Anchor, AnchorProvenance, Calendar, GenerationParameters,
         InconsistentProgramme, InvalidCalendar, PerRole, Percentage, PlateIncrement, Programme,
         ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
-        v1::{Fill, PrimaryPattern, SlotFills, StaticFill},
+        linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -282,10 +282,14 @@ impl Document {
         zone: TimeZone,
     ) -> Result<Programme, DocumentError> {
         let section = &self.programme;
-        if section.template != "v1" {
+        if section.template != "linear" {
             return Err(invalid(
                 "programme.template",
-                format!("{:?} is not a template this build knows", section.template),
+                format!(
+                    "{:?} is not a template this build can read; it reads \
+                     \"linear\", which was called \"v1\" until 2026-08-18",
+                    section.template
+                ),
             ));
         }
 

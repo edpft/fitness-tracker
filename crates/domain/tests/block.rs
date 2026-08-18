@@ -16,7 +16,7 @@
 use domain::gym::RepCount;
 use domain::prescription::{
     Percentage,
-    v2::{Block, InvalidBlock, Phase, WeekPlan},
+    block::{Block, InvalidBlock, Phase, WeekPlan},
 };
 use proptest::prelude::*;
 

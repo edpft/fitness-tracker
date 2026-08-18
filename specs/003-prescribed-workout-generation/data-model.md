@@ -463,7 +463,7 @@ with a named field per slot — so a programme missing a fill does not compile. 
 is the same mechanism as `StrengthBlock`'s four patterns:
 
 ```rust
-pub mod v1 {
+pub mod linear {
     pub enum PrimaryPattern { KneeDominant, HipDominant, UpperPush, UpperPull }
 
     pub struct StrengthBlock {

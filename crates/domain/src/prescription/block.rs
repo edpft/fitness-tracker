@@ -1,4 +1,19 @@
-//! The block: what each training week of a periodised programme prescribes.
+//! Block periodisation: what each training week of a periodised programme
+//! prescribes.
+//!
+//! **The [`linear`](super::linear) template is not superseded by this and is not
+//! going anywhere.** The two answer different questions about the same lift. A
+//! linear top-set ladder is the right tool for a short or interrupted window —
+//! the weeks before Christmas, a run broken up by travel — and periodisation is
+//! the right tool when the calendar gives eight training weeks and a test week
+//! besides. Which one a programme uses is decided per programme, from the number
+//! of weeks available. They were `v1` and `v2` until 2026-08-18, which named them
+//! as versions of one thing when they are two models of periodisation.
+//!
+//! **A note on the word.** [`Block`] here is a *periodised* block — the plan this
+//! module builds. "Block" also gets used loosely across this crate for any
+//! programme's run of weeks, including a linear one, and that looser sense is
+//! what `duration_weeks` and `WeekKind` mean by it.
 //!
 //! **Three inputs, and every load in the block comes out of them**: how many
 //! training weeks the calendar allows, the repetition count the entry test is
@@ -71,7 +86,7 @@
 //!
 //! **Duration changes where the block starts and never where it finishes.** An
 //! eight-week block climbs the same span in five rungs that a twelve-week block
-//! climbs in seven. That is the same property the `v1` ladder has, and the
+//! climbs in seven. That is the same property the linear ladder has, and the
 //! reason a duration is an input rather than a parameter.
 //!
 //! [`Anchor`]: crate::prescription::Anchor

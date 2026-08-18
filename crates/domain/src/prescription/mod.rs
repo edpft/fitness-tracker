@@ -18,7 +18,9 @@
 //! Neither is derived from the other.
 
 pub mod anchor;
+pub mod block;
 pub mod ladder;
+pub mod linear;
 pub mod parameters;
 pub mod prilepin;
 pub mod quantise;
@@ -26,12 +28,13 @@ pub mod repmax;
 pub mod schedule;
 pub mod shape;
 pub mod target;
-pub mod v1;
-pub mod v2;
 pub mod workout;
 
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance};
 pub use ladder::{InvalidLadder, Ladder};
+pub use linear::{
+    Fill, InconsistentProgramme, PrimaryPattern, Programme, SlotContent, SlotFills, StaticFill,
+};
 pub use parameters::{
     AccessoryScheme, GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage,
     PlateIncrement, ResetProtocol, TopSetReps, WarmupStep,
@@ -47,7 +50,4 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
-pub use v1::{
-    Fill, InconsistentProgramme, PrimaryPattern, Programme, SlotContent, SlotFills, StaticFill,
-};
 pub use workout::{PrescribedWorkout, ProgrammeId};

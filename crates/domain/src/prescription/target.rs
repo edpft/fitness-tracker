@@ -94,10 +94,11 @@ pub enum Prescribed<M> {
     },
     /// Load open; effort binds; measure pinned.
     ///
-    /// Originally programme v1's RPE cap, and recorded here as reachable but
-    /// unreached. It turned out to be exactly what a block's exit **test** is:
-    /// one repetition, nothing in reserve, and the load is whatever the day
-    /// allows. That is the only thing that issues one now.
+    /// Originally the RPE cap in the operator's own programme v1 — a version of
+    /// their document, never a template of ours — and recorded here as reachable
+    /// but unreached. It turned out to be exactly what a block's exit
+    /// **test** is: one repetition, nothing in reserve, and the load is whatever
+    /// the day allows. That is the only thing that issues one now.
     Autoregulated { measure: Target<M>, effort: Rir },
 }
 

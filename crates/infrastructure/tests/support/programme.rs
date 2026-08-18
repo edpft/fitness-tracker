@@ -26,7 +26,7 @@ use domain::{
     prescription::{
         Anchor, AnchorProvenance, Calendar, GenerationParameters, PerRole, Percentage,
         PlateIncrement, Programme, ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
-        v1::{Fill, SlotFills, StaticFill},
+        linear::{Fill, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};

@@ -32,14 +32,20 @@ What the operator actually wants, and what was settled in conversation, is
 | 9+ weeks (a test week and 8 of phases) | Block periodisation: entry test → accumulation → intensification → realisation | **built in `domain`** |
 | short, interrupted | Linear top-set/back-off, +2.5kg, reset protocol | built, works |
 
-`Programme` is already `enum { V1(..), V2(..) }` with append-only variants,
-which is exactly this shape. **The linear work becomes `v1`. Periodisation is a
-new `v2`.** Do not delete or rewrite the linear model — it is the right tool for
-the pre-Christmas window and the operator has said so.
+**The linear work becomes the `linear` template. Periodisation is a new `block`
+template beside it.** Do not delete or rewrite the linear model — it is the
+right tool for the pre-Christmas window and the operator has said so.
+
+They were `v1` and `v2` until 2026-08-18. Renamed because they are two models of
+periodisation rather than two versions of one programme, and because `v1`/`v2`
+collided with the operator's own programme document versions, which really are
+v1 and v2.1. **`Programme` is not the `enum { V1, V2 }` this note used to
+claim** — that was never built. `Programme` is one struct in `linear`, and the
+store's `template` column is the discriminator.
 
 ---
 
-## The `v2` design, as settled
+## The `block` design, as settled
 
 ### Inputs — and there are only three
 
@@ -49,10 +55,10 @@ entry reps    the repetition count the entry test is performed at, e.g. 3
 entry test    the anchor, tested the week before the block begins
 ```
 
-**The second input changed meaning in D12** and there are still three of them. It
-used to be "the repetition maximum the block is for"; the block now finishes on a
-single whatever it opened on, so what this says is what is being *measured* at the
-start. Nothing else in the block reads it.
+**The second input changed meaning in D12** and there are still three of them.
+It used to be "the repetition maximum the block is for"; the block now finishes
+on a single whatever it opened on, so what this says is what is being *measured*
+at the start. Nothing else in the block reads it.
 
 **Nothing else *from the operator*.** Several plausible-looking extra parameters
 were proposed during design and every one was rejected — but read the next
@@ -86,8 +92,8 @@ week N        the last realisation week IS the exit test, and it is a 1RM
 ```
 
 **Superseded by D12, in three places.** There are three phases rather than two;
-the split is stated by the operator's research rather than divided 50/50; and the
-duration counts *phase* weeks, with the entry test the week before them.
+the split is stated by the operator's research rather than divided 50/50; and
+the duration counts *phase* weeks, with the entry test the week before them.
 
 - The rep ladder is generated **backwards from a single**, and runs unbroken
   through intensification and realisation. Duration sets the rung count; this is
@@ -130,13 +136,13 @@ and D11 correction 3 supplies that from the literature. The same passage
 dismissed "the linear model's invented 105% endpoint" — 105% is the standard
 figure in every peaking programme consulted, and was not invented.
 
-**RIR is never an input to a derivation, and D12 goes further: there is no RIR in
-the primary lift's block at all.** `primary-lift-progression.md` says it is an
-observation, retained for a retrospective check. D11 argued that a *planning*
+**RIR is never an input to a derivation, and D12 goes further: there is no RIR
+in the primary lift's block at all.** `primary-lift-progression.md` says it is
+an observation, retained for a retrospective check. D11 argued that a *planning*
 constant of three repetitions in reserve was a different thing; the operator
-rejected that on 2026-08-18, and the argument was wrong — a percentage-based plan
-states percentages, and `5 × RIR` is a coefficient of the RTS grid rather than
-anything Prilepin published. Prilepin's repetitions-per-set column places
+rejected that on 2026-08-18, and the argument was wrong — a percentage-based
+plan states percentages, and `5 × RIR` is a coefficient of the RTS grid rather
+than anything Prilepin published. Prilepin's repetitions-per-set column places
 accumulation instead. See D12, correction 4.
 
 ### Sessions within the week
@@ -163,7 +169,7 @@ DUP runs ~70% against ~80% in one week. All three cluster on **the lighter
 session being 70–90% of the heavier one**.
 
 One structural point, because it decides the shape: **the Texas Method splits
-volume from intensity inside the week because it has no blocks.** `v2` has
+volume from intensity inside the week because it has no blocks.** `block` has
 blocks. Splitting again inside the week would do the same job twice, and the
 block-periodisation sources say the opposite — both sessions carry the block's
 character, differentiated by load or by variation. So the second session is the
@@ -171,17 +177,17 @@ same week's rung, lighter, and it costs no new parameter.
 
 **Settled 2026-08-18: both sessions run the front squat, and the lighter one is
 85% of the week's load.** Not a variation on the light day — the operator was
-offered one and declined it. `light_of_heavy` carries into `v2` unchanged in
+offered one and declined it. `light_of_heavy` carries into `block` unchanged in
 meaning; only the number moved, and why it moved is the next section.
 
-**Re-asked and re-settled the same day.** The operator asked whether the two days
-should chase a 3RM on one and a 1RM on the other instead. No: within this model a
-1RM day measures nothing a 3RM day does not already imply, because every load is
-derived through `rm(reps)` in which a 3RM *is* 95% of a 1RM. Two ladders both
-ending near-maximal would also double the top-end exposure on one lift, with RIR
-deliberately unavailable to absorb a bad week. **The single belongs in
-realisation**, which is where the peaking literature puts it and which now exists
-as a phase. See D12.
+**Re-asked and re-settled the same day.** The operator asked whether the two
+days should chase a 3RM on one and a 1RM on the other instead. No: within this
+model a 1RM day measures nothing a 3RM day does not already imply, because every
+load is derived through `rm(reps)` in which a 3RM *is* 95% of a 1RM. Two ladders
+both ending near-maximal would also double the top-end exposure on one lift,
+with RIR deliberately unavailable to absorb a bad week. **The single belongs in
+realisation**, which is where the peaking literature puts it and which now
+exists as a phase. See D12.
 
 ### The `INFERRED` parameter that was wrong, and how
 
@@ -213,7 +219,7 @@ Three consequences, all in [research.md](./research.md) D11:
 
 - **`ladder_start` and `ladder_end` stop being authored.** The span is derived
   at both ends, so the `TODO` that has blocked T080 since the feature began
-  outlives only `v1`.
+  outlives only the linear template.
 - **The wave is not a drop in load.** Intensification opens at the load
   accumulation left off at, with repetitions jumping and sets collapsing. The
   drop in the 2025 record comes from an accumulation ramp that started too
@@ -246,19 +252,19 @@ is exactly what it is for.
 single at 105% of the starting max; Arbic's 17-week block programme tests at
 105% of the *original* 1RM and is built so the lifter can double it; meet
 convention puts a PR attempt at 102–107% of the previous best. **D12 simplified
-the arithmetic**: the exit test is a single, so the endpoint is 105% of the entry
-1RM flat rather than `105% × rm(target)`, and the block plans a 5% gain measured
-in the unit it was planned in.
+the arithmetic**: the exit test is a single, so the endpoint is 105% of the
+entry 1RM flat rather than `105% × rm(target)`, and the block plans a 5% gain
+measured in the unit it was planned in.
 
-**`v1`'s 105% was never invented *by us*.** This note called it "the linear
-model's invented 105% endpoint" and discarded it, at which point nobody looked
-it up. It is the standard figure — and, as the operator observed, suspiciously
-round in every source, which makes it a shared convention rather than a finding.
-That is still worth more than a private invention: it makes the block comparable
-with published ones, and it is falsifiable against the operator's own exit tests
-after two or three blocks. **Revising it against those results would be
-legitimate; fitting it to the record now would not**, and `light_of_heavy` is
-the cautionary tale for the difference.
+**The linear ladder's 105% was never invented *by us*.** This note called it
+"the linear model's invented 105% endpoint" and discarded it, at which point
+nobody looked it up. It is the standard figure — and, as the operator observed,
+suspiciously round in every source, which makes it a shared convention rather
+than a finding. That is still worth more than a private invention: it makes the
+block comparable with published ones, and it is falsifiable against the
+operator's own exit tests after two or three blocks. **Revising it against those
+results would be legitimate; fitting it to the record now would not**, and
+`light_of_heavy` is the cautionary tale for the difference.
 
 The intensification ladder therefore spans accumulation's exit to that endpoint,
 and the implied 1RM climbs past 100% on the way — 97.1, 99.2, 101.2, 103.2,
@@ -306,8 +312,8 @@ w/c 31 Aug     holiday
 Sun 13 Sep     deficit ends  ← REAL DEADLINE for a plannable programme
 Fri 11–Mon 14  holiday
 Fri 18 Sep     3RM front squat test — the autumn block's anchor
-w/c 21 Sep     autumn block begins → Sun 29 Nov = 10 phase weeks → 4 accum / 4 intens / 2 realis
-Mon 30 Nov     mini-cut to Christmas — v1 linear territory, too short for a block
+w/c 21 Sep     autumn block begins → Sun 29 Nov = 10 phase weeks (4-4-2)
+Mon 30 Nov     mini-cut to Christmas — linear territory, too short for a block
 New Year       next proper block
 ```
 
@@ -336,14 +342,14 @@ block's entry anchor" was wrong and has been corrected.
   95kg of 2026-07-03 is still a `RefusalReason::ZeroReps`. `Performed<M>` exists
   and the store column exists; only the translator arm and the refusal removal
   remain.
-- **User story 3 (stall, reset, re-climb) is not done.** It belongs to `v1`.
+- **User story 3 (stall, reset, re-climb) is not done.** It belongs to `linear`.
 - **The round trip** (`project` / `satisfies`) is designed but unwritten.
 - **Two parameters remain marked `INFERRED`** in
   `crates/infrastructure/tests/fixtures/programme.toml`: the per-role top-set
   repetitions and the per-block accessory ranges. They were read off the record
   rather than stated, and the third one — `light_of_heavy` — turned out to be
-  wrong when the operator looked at it. Under `v2` the top-set repetitions may
-  disappear entirely.
+  wrong when the operator looked at it. Under `block` the top-set repetitions
+  may disappear entirely.
 - **The hip-dominant slot alternates because there is no single hinge
   accessory.** Stated by the operator on 2026-08-18: the pattern splits into
   hamstring-focused and lower-back-focused work and one exercise does not cover
@@ -411,15 +417,15 @@ block's entry anchor" was wrong and has been corrected.
 
 1. ~~**Fix the calendar**~~ — done. See "Known gaps".
 2. ~~**Research the percentage table**~~ — done, D11 and D12.
-3. ~~**Build `v2`** beside `v1`~~ — `domain::prescription::v2::Block` is built
-   and tested (research D11 and D12). What is *not* built is everything above it:
-   nothing in `application`, the CLI or the stores selects `v2` yet, so the anchor
-   conversion (a 3RM entry test into the 1RM every percentage is a share of), the
-   phase-aware second session and the calendar's extra test week are all still to
-   come.
+3. ~~**Build the block template** beside the linear one~~ —
+   `domain::prescription::block::Block` is built and tested (research D11 and
+   D12). What is *not* built is everything above it: nothing in `application`,
+   the CLI or the stores selects it yet, so the anchor conversion (a 3RM entry
+   test into the 1RM every percentage is a share of), the phase-aware second
+   session and the calendar's extra test week are all still to come.
 4. **User story 2**, so a failed attempt stops being a refusal.
-5. The rest: stall/reset for `v1`, the round trip, the decision records (`0006`,
-   `0007`) named in [plan.md](./plan.md).
+5. The rest: stall/reset for `linear`, the round trip, the decision records
+   (`0006`, `0007`) named in [plan.md](./plan.md).
 
 The operator's deadline is **Sunday 13 September**. Steps 1 to 3 are what has to
 land by then.

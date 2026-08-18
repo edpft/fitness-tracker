@@ -258,7 +258,7 @@ crates/
 │           ├── parameters.rs        GenerationParameters, Percentage, PlateIncrement
 │           ├── schedule.rs          SessionRole, WeekIndex, the cycle calendar
 │           ├── ladder.rs            Ladder — the block plan, and its positions
-│           └── v1/                  the template and the programme rule
+│           └── linear/              the template and the programme rule
 │               ├── template.rs      StrengthBlock, HypertrophyBlock, the five blocks
 │               └── programme.rs     Programme, and generation over it
 ├── application/                 ring 1

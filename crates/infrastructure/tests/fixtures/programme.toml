@@ -22,7 +22,7 @@
 # Everything unmarked is the operator's own.
 
 [programme]
-template         = "v1"
+template         = "linear"
 primary          = "knee_dominant"
 primary_exercise = "front-squat"
 gating_role      = "heavy"

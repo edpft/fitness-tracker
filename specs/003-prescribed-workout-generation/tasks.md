@@ -76,8 +76,8 @@ ports. Nothing in Phase 3+ starts until this phase is done.
 
 - [X] T020 Implement `Ladder` in `crates/domain/src/prescription/ladder.rs`: `start`, `end` and `climbing_weeks`, with `heavy_top_set(anchor, week)` deriving the step as `(end − start) / (climbing_weeks − 1)`, quantising through T012, returning `None` for the test week, and handling a single climbing week without dividing by zero (D2)
 - [X] T021 Implement `GenerationParameters`, `WarmupStep` and `ResetProtocol` in `crates/domain/src/prescription/parameters.rs`, including `ladder_start`, `ladder_end` and `light_of_heavy`, and no `anchor_per_week`
-- [X] T022 Implement the `v1` template in `crates/domain/src/prescription/v1/template.rs` — `PrimaryPattern`, `StrengthBlock` with four named pattern fields, `HypertrophyBlock` with `arms`, `forearms` and a single unsupersetted `core`, and `SlotFills` total over the eleven slots
-- [X] T023 Implement `Programme` in `crates/domain/src/prescription/v1/programme.rs` carrying `anchor`, `duration_weeks`, `gating_role`, `start`, `weekdays` and `fills`, plus the three consistency checks in [contracts/ports.md](./contracts/ports.md)
+- [X] T022 Implement the `linear` template in `crates/domain/src/prescription/linear/template.rs` — `PrimaryPattern`, `StrengthBlock` with four named pattern fields, `HypertrophyBlock` with `arms`, `forearms` and a single unsupersetted `core`, and `SlotFills` total over the eleven slots
+- [X] T023 Implement `Programme` in `crates/domain/src/prescription/linear/programme.rs` carrying `anchor`, `duration_weeks`, `gating_role`, `start`, `weekdays` and `fills`, plus the three consistency checks in [contracts/ports.md](./contracts/ports.md)
 - [X] T024 Implement `PrescribedWorkout` in `crates/domain/src/prescription/workout.rs` as a `WorkoutShape` plus `issued_for`, `session_role`, `week`, `anchor`, `parameters`, `programme` and `issued_at` — constructible only with all of them, so a projection cannot produce one (FR-034, D9)
 
 ### Property tests (§ 28)

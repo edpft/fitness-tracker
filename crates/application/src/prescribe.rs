@@ -21,7 +21,7 @@ use domain::{
     prescription::{
         Block, GenerationParameters, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, SessionRole, SlotId,
-        SupersetMember, Target, WeekKind, WorkoutShape, quantise_loaded, v1::SlotContent,
+        SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent, quantise_loaded,
     },
 };
 use jiff::{Timestamp, civil::Date};

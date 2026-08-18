@@ -26,16 +26,20 @@ the record until it was restated as a percentage of the top set.*
 | **Programme** | Code + § 12 data | A rule for generating a series of prescribed workouts, plus its authored inputs. |
 | **Prescribed workout** | § 12 data | The concrete issued prescription. The only prescribed entity stored. |
 
-The template is a builder, so there is no template value anywhere. `V1` is a
-module, and selecting a variant is selecting among programme types:
+The template is a builder, so there is no template value anywhere. `linear` is
+a module, and selecting a variant is selecting among programme types:
 
 ```rust
-pub enum Programme { V1(v1::Programme), V2(v2::Programme) }
+pub enum Programme { Linear(linear::Programme), Block(block::Programme) }
 ```
 
-Variants coexist and are append-only: a programme written against V1 keeps
-generating against V1 after V2 exists, so a variant is never edited or removed,
-only added.
+Variants coexist and are append-only: a programme written against `linear` keeps
+generating against it after `block` exists, so a variant is never edited or
+removed, only added.
+
+The two are named for the periodisation they run — linear, and block. They were
+`v1` and `v2` until 2026-08-18, which read as versions of one thing and collided
+with the operator's own programme versions, which really are v1 and v2.1.
 
 § 14 governs a narrow subset — warm-up percentages, loading tables, plate
 quantisation — where only the current value is required, because what they
@@ -54,7 +58,7 @@ Five blocks in fatigue order: plyometric, power, strength, hypertrophy,
 mobility.
 
 ```rust
-pub mod v1 {
+pub mod linear {
     /// Exactly one primary. Two and zero are both unconstructible.
     pub enum Primary { KneeDominant, HipDominant, UpperPush, UpperPull }
 
@@ -342,7 +346,7 @@ percentage tables, not two rules.
 
 Scheme selection is programme-level, not template-level. Programme v1 gave the
 primary an RPE cap; v2.1 gave it a percentage anchor. The structure was
-untouched, so both are programmes against `V1`. Warm-ups follow scheme for the
+untouched, so both are programmes against `linear`. Warm-ups follow scheme for the
 same reason: the template says only that exactly one strength slot is primary,
 never which, and never what that earns it.
 

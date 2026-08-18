@@ -674,10 +674,10 @@ nothing in the literature asks for.
 ### Correction 2: the ladder span is derived at both ends, and D8 closes
 
 `ladder_start` and `ladder_end` have been `TODO` since the feature began,
-because neither could be chosen without guessing. Under `v2` neither is chosen:
+because neither could be chosen without guessing. Under `block` neither is chosen:
 intensification's endpoint is `rm(target)` from the table, and its start is
 where accumulation finished, which Prilepin fixes. The `TODO` stays in the
-document only for as long as `v1` does.
+document only for as long as the linear template does.
 
 Correction 3 below moves that endpoint again — from the entry anchor to what has
 actually been lifted since — but not back into anyone's hands. It stays derived.
@@ -733,7 +733,7 @@ earns or loses its place. The first is circular; the second is a measurement.
 Until then it stands, and asking the operator for a replacement would be the
 mistake — not using it.
 
-**A note on what this vindicates.** `v1`'s ladder ended at 105%, and the
+**A note on what this vindicates.** The linear ladder ended at 105%, and the
 handover dismissed that as "the linear model's invented 105% endpoint". It was
 not invented. It is the standard figure, and it was discarded on the grounds
 that nobody could justify it — at which point nobody looked.
@@ -787,9 +787,9 @@ prescription.
 
 **The second draft's measured-anchor mechanism is dropped.** Re-deriving each
 intensification week from the block's performed top sets would work, but it
-solves a problem that does not exist once the endpoint is known, and `v1`'s
-stall and reset protocol already covers a block that turns out to have been too
-ambitious.
+solves a problem that does not exist once the endpoint is known, and the linear
+template's stall and reset protocol already covers a block that turns out to
+have been too ambitious.
 
 ### What is left authored
 
