@@ -20,11 +20,14 @@
 pub mod anchor;
 pub mod ladder;
 pub mod parameters;
+pub mod prilepin;
 pub mod quantise;
+pub mod repmax;
 pub mod schedule;
 pub mod shape;
 pub mod target;
 pub mod v1;
+pub mod v2;
 pub mod workout;
 
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance};
@@ -34,6 +37,7 @@ pub use parameters::{
     PlateIncrement, ResetProtocol, TopSetReps, WarmupStep,
 };
 pub use quantise::{quantise, quantise_loaded};
+pub use repmax::rep_max;
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
     SessionRole, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
