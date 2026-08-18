@@ -95,12 +95,18 @@ fn the_worked_ladder_reproduces_its_table() {
 
 /// The light session tracks the heavy one at the authored proportion.
 ///
-/// 88.5% reproduces the three validated weeks in the record: 82.5/85/87.5 heavy
-/// against 72.5/75/77.5 light.
+/// **It deliberately does not reproduce the record.** The three validated weeks
+/// ran 72.5/75/77.5 light against 82.5/85/87.5 heavy — a flat −10kg every time.
+/// An earlier version of this test asserted that, through an 88.5% fitted to it;
+/// the operator has since stated 85%, which is one plate lighter and is a
+/// decision rather than a curve through three points. The divergence from the
+/// record is attributable to a parameter that was different when those sessions
+/// were trained by hand, which is exactly the bucket SC-002 asks divergences to
+/// fall into.
 #[test]
-fn the_light_session_reproduces_the_record() {
+fn the_light_session_tracks_the_heavy_one() {
     let (Ok(start), Ok(end), Ok(increment), Ok(anchor), Ok(light_of_heavy)) =
-        (pct("92.5%"), pct("105%"), grid(), kg("90"), pct("88.5%"))
+        (pct("92.5%"), pct("105%"), grid(), kg("90"), pct("85%"))
     else {
         panic!("the fixture values are all valid")
     };
@@ -108,7 +114,8 @@ fn the_light_session_reproduces_the_record() {
         panic!("a rising span over seven weeks is a ladder")
     };
 
-    let expected = ["72.5", "75", "77.5"];
+    // 85% of the heavy weeks 82.5, 85 and 87.5, on the 2.5kg grid.
+    let expected = ["70", "72.5", "75"];
     for (offset, want) in expected.iter().enumerate() {
         let index = u32::try_from(offset).unwrap_or(0) + 1;
         let (Ok(w), Ok(want_kg)) = (week(index), kg(want)) else {

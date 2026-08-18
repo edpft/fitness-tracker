@@ -347,7 +347,7 @@ stated, and the distinction is what stops a fitted value passing as intent:
 
 | Value | Value | How it was arrived at |
 | --- | --- | --- |
-| Light of heavy | **88.5%** | Solved from three weeks of light/heavy pairs. A flat −10kg offset fits those three equally well and was rejected for not being portable to a different anchor — itself an unconfirmed judgement |
+| Light of heavy | **85%** | Stated by the operator 2026-08-18. Was 88.5%, solved from three weeks of light/heavy pairs that are a flat −10kg apart — a ratio fitted to an offset, drifting across the three where the offset does not. The percentage is still the right shape; the number in it had to be chosen |
 | Top-set reps | heavy **1**, light **3** | Read off every session since the July test. Well evidenced; they have not varied within a role |
 | Accessory scheme | **4–6 × 3 sets** | Eyeballed across pull-ups, curls and wrist work. Both the range and the decision to use one range for ten slots are unconfirmed |
 

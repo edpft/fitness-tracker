@@ -129,9 +129,7 @@ The literature is consistent about *how*: two sessions of one lift are
 differentiated by role, never repeated. Starr's light day is 70–80% of the heavy
 day's top set; the Texas Method's volume day is ~85–90% of its intensity day;
 DUP runs ~70% against ~80% in one week. All three cluster on **the lighter
-session being 70–90% of the heavier one**, which is where the `light_of_heavy`
-already in the model sits at 88.5% — so that parameter is not the invention its
-`INFERRED` marking suggests.
+session being 70–90% of the heavier one**.
 
 One structural point, because it decides the shape: **the Texas Method splits
 volume from intensity inside the week because it has no blocks.** `v2` has
@@ -140,21 +138,38 @@ block-periodisation sources say the opposite — both sessions carry the block's
 character, differentiated by load or by variation. So the second session is the
 same week's rung, lighter, and it costs no new parameter.
 
-### The two genuinely open questions
+**Settled 2026-08-18: both sessions run the front squat, and the lighter one is
+85% of the week's load.** Not a variation on the light day — the operator was
+offered one and declined it. `light_of_heavy` carries into `v2` unchanged in
+meaning; only the number moved, and why it moved is the next section.
 
-**1. The percentage table for an accumulation-into-intensification block, and
-how it scales when duration changes the rung count.**
+### The `INFERRED` parameter that was wrong, and how
+
+`light_of_heavy` was 88.5%, solved from the record's three validated weeks:
+72.5 / 75 / 77.5 light against 82.5 / 85 / 87.5 heavy.
+
+**Every one of those pairs is a flat −10kg.** The percentage was a ratio fitted
+to an offset. It reproduces all three only because quantisation rounds it back
+onto the plate grid, and it drifts across them — 87.9%, 88.2%, 88.6% — where the
+offset does not drift at all. The operator spotted it in one line: "I think it's
+really 10kg pretending to be a percentage."
+
+The note in `research.md` had even recorded that the offset "fits those three
+equally well" and preferred the percentage for portability. That was the right
+*shape* — an offset is a far larger relative drop at a 60kg anchor than at a
+90kg one — and it did not license solving for the number inside it. **This is
+the trap in this file's method section, caught in the act.** Two `INFERRED`
+values are left; treat both as suspect in the same way.
+
+### The one genuinely open question
+
+**The percentage table for an accumulation-into-intensification block, and how
+it scales when duration changes the rung count.**
 
 This is a literature question, not a question for the operator. Prilepin's chart
 and standard block-periodisation templates are the sources. Do *not* reconstruct
 it from the operator's 2025 block — its opening load was, by the operator's own
 account, a guess.
-
-**2. Whether the lighter session runs the same lift or a variation.** Asked on
-2026-08-18 and not yet answered. Same lift at `light_of_heavy` is one option;
-eliteFTS recommends a variation for a squat-focused block, which the template
-already supports as an alternating fill and which costs nothing structurally
-either. Nothing else in the `v2` design turns on the answer.
 
 ---
 
@@ -221,11 +236,18 @@ block's entry anchor" was wrong and has been corrected.
   remain.
 - **User story 3 (stall, reset, re-climb) is not done.** It belongs to `v1`.
 - **The round trip** (`project` / `satisfies`) is designed but unwritten.
-- **Three parameters remain marked `INFERRED`** in
-  `crates/infrastructure/tests/fixtures/programme.toml`: `light_of_heavy`, the
-  per-role top-set repetitions, and the per-block accessory ranges. They were
-  read off the record rather than stated. Under `v2` the first two may disappear
-  entirely.
+- **Two parameters remain marked `INFERRED`** in
+  `crates/infrastructure/tests/fixtures/programme.toml`: the per-role top-set
+  repetitions and the per-block accessory ranges. They were read off the record
+  rather than stated, and the third one — `light_of_heavy` — turned out to be
+  wrong when the operator looked at it. Under `v2` the top-set repetitions may
+  disappear entirely.
+- **The hip-dominant slot alternates because there is no single hinge
+  accessory.** Stated by the operator on 2026-08-18: the pattern splits into
+  hamstring-focused and lower-back-focused work and one exercise does not cover
+  both. It is a fact about the vocabulary rather than a loading device, so
+  nothing about periodisation follows from it — and the primary slot does not
+  alternate for the same reason inverted.
 
 ---
 

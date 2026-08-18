@@ -191,6 +191,14 @@ generator's job.
 - **Slot fills**, including the variations alternated across the two sessions in
   a cycle (Nordic curls one day, back extension the other).
 
+**Why that one alternates, stated by the operator on 2026-08-18: there is no
+single hinge accessory.** The pattern splits into hamstring-focused work and
+lower-back-focused work, and one exercise does not cover both — so the slot
+takes two fills and shows one per session. It is a fact about the vocabulary,
+not a loading device, and nothing about periodisation follows from it. The
+primary slot does not alternate for the same reason inverted: one lift does
+cover it, and **both sessions of the week run that lift.**
+
 Fills are inputs, not choices the programme makes. Generation produces the
 loading series, not the exercise selection.
 
@@ -610,10 +618,14 @@ informative and a missed session is not.
    - **Top-set reps by session role** — heavy 1, light 3, read off the record
      rather than stated. Constant within a block; descending reps across the
      block is the textbook variant and is deferred.
-   - **The light session's top set as a percentage of the heavy one** — 88.5%,
-     solved from three weeks of the record rather than stated. A flat −10kg
-     offset fits those three equally well; the percentage is preferred for being
-     portable to a different anchor, which is itself an unconfirmed judgement.
+   - **The light session's top set as a percentage of the heavy one** — 85%,
+     stated by the operator on 2026-08-18. It was 88.5%, solved from three weeks
+     of the record; every one of those light and heavy pairs is a flat −10kg
+     apart, so the percentage was a ratio fitted to an offset and drifted across
+     the three (87.9%, 88.2%, 88.6%) where the offset did not drift at all. A
+     percentage is still the right shape — an offset is a far larger relative
+     drop at a 60kg anchor — but the number in it has to be chosen rather than
+     solved for.
    - **The ladder's start and end percentages** of the anchor. The weekly step
      is
      derived from these and the duration, not authored.

@@ -98,7 +98,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
     Ok(GenerationParameters {
         warmup,
         back_off_of_top_set: pct("85%")?,
-        light_of_heavy: pct("88.5%")?,
+        light_of_heavy: pct("85%")?,
         // A test span. See the module note.
         ladder_start: pct("92.5%")?,
         ladder_end: pct("105%")?,

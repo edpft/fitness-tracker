@@ -113,12 +113,23 @@ members = ["dead-hang", "couch-stretch", "ninety-ninety", "stretching"]
 back_off_of_top_set = "85%"
 plate_increment     = "2.5kg"
 
-# INFERRED. The light session's top set, as a percentage of that week's heavy
-# top set. Solved from three weeks of light/heavy pairs — 72.5 / 75 / 77.5
-# against 82.5 / 85 / 87.5 — rather than stated. A flat -10kg offset fits those
-# three equally well and was rejected for not being portable to a different
-# anchor, which is a judgement nobody has confirmed either.
-light_of_heavy = "88.5%"
+# The light session's top set, as a percentage of that week's heavy top set.
+# Stated by the operator on 2026-08-18, and the first version of this number was
+# wrong in an instructive way.
+#
+# It was 88.5%, solved from three weeks of light/heavy pairs — 72.5 / 75 / 77.5
+# against 82.5 / 85 / 87.5. Every one of those pairs is a flat -10kg. The
+# percentage was a ratio fitted to an offset: it reproduces all three only
+# because quantisation rounds it back onto the plate grid, and it drifts across
+# them (87.9%, 88.2%, 88.6%) where the offset does not drift at all. Fitting a
+# parameter to the record produced a number with a decimal place and no
+# decision behind it.
+#
+# 85% is a decision. It is one plate lighter than the record's light days, it is
+# inside the 70-90% band that Starr, the Texas Method and DUP all land in, and
+# it is a percentage rather than an offset so it stays meaningful when the
+# anchor moves.
+light_of_heavy = "85%"
 
 # How long a static hold is held for. The mobility work does not progress; it is
 # held, and for the same length every time. Inside [parameters], not inside a

@@ -408,10 +408,16 @@ duration says everything it said, and says it with an endpoint.
 
 **`light_of_heavy` replaces a per-role percentage of the anchor.** The light session
 is derived from that week's heavy top set, so the two move together by construction
-and one ladder serves both roles. 88.5% reproduces the record's three validated
-weeks — 82.5/85/87.5 heavy against 72.5/75/77.5 light. A flat −10kg offset fits those
-three points equally well and was rejected for not being portable: at a 60kg anchor
-it would be a far larger relative drop.
+and one ladder serves both roles.
+
+**The value is 85%, and the value it replaced is a cautionary tale.** It was 88.5%,
+solved from the record's three validated weeks — 82.5/85/87.5 heavy against
+72.5/75/77.5 light. Every one of those pairs is a flat −10kg; the percentage was a
+ratio fitted to an offset, reproducing all three only because quantisation rounds it
+back onto the plate grid, and drifting across them (87.9%, 88.2%, 88.6%) where the
+offset does not drift at all. The operator stated 85% on 2026-08-18. A percentage is
+still the right shape — an offset is a far larger relative drop at a 60kg anchor than
+at a 90kg one — but the number in it has to be chosen rather than solved for.
 
 **Percentage is integer.** Basis points, not a float — the same reasoning as `Kg`.
 A percentage that round-trips differently across builds would make a stored

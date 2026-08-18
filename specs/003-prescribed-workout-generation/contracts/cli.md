@@ -74,7 +74,7 @@ issued as prescription 12
 The loads above are **illustrative**, not a fixture. The primary's numbers depend on
 the ladder's span, which is not yet authored (research D8) — the 100% shown here is
 what a 92.5%→105% ladder would reach in week 6 of 8, putting the light top set at
-88.5% of 90kg.
+85% of 90kg.
 
 **What the header carries and why.** The resolved date and weekday, so the default
 is visible; the role, so a wrong weekday mapping is obvious; the week and ladder
@@ -141,7 +141,7 @@ anchor 90kg (tested 2026-07-03), fixed for the block
 parameters authored 2026-08-17T19:20:04+01:00
   ladder 92.5% → 105% of anchor over 7 climbing weeks, +2.08%/week derived
   week 8 is the test
-  heavy top set 1 rep; light top set 3 reps at 88.5% of the heavy load
+  heavy top set 1 rep; light top set 3 reps at 85% of the heavy load
   warm-up 40/60/80/90% of top set at 4/3/2/1 reps
   back-off 85% of top set, plate increment 2.5kg
   reset 1 −10% at +5kg/week; reset 2 −5% at +2.5kg/week

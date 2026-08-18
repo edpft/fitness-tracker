@@ -164,9 +164,11 @@ start = "TODO"      # a classic block opens around 92.5%
 end   = "TODO"      # 105% of 90kg is 94.5 -> 95kg
 
 # The light session's top set, as a percentage of that week's heavy top set.
-# 88.5% reproduces 72.5/75/77.5 against 82.5/85/87.5 across three validated
-# weeks. A flat -10kg offset fits equally well and loses at a different anchor.
-light_of_heavy = "88.5%"
+# Stated by the operator on 2026-08-18. It was 88.5%, fitted to three light and
+# heavy pairs that are a flat -10kg apart — a ratio drawn through an offset,
+# which drifts across the three where the offset does not. 85% is one plate
+# lighter and is a decision.
+light_of_heavy = "85%"
 
 # Percentages of the top set, with their rep counts. Four steps, matching the
 # ramp the record shows; the percentages themselves are approximate there and
