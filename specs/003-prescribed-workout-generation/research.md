@@ -515,3 +515,56 @@ plausible command and is not in this feature; the projection exists as a `domain
 function and a test mechanism. Adding a command would mean deciding how a projected
 shape is displayed so that nobody mistakes it for a prescription, which is a
 question worth its own answer.
+
+---
+
+## D10: The load comes from a reps-and-RIR table, not from a guessed opener
+
+**Decision**: A working load is `anchor × %1RM(reps, RIR)`, where the percentage
+comes from the RPE/RIR table published by Reactive Training Systems
+(Tuchscherer), and the programme states an RIR per phase rather than an opening
+proximity.
+
+**Why the earlier design was wrong.** The linear ladder needed a total gain to
+assert; replacing it with an "opening proximity" only moved the guess. As the
+operator put it: a load you can do five-by-five without grinding is itself a
+five-rep-at-two-in-reserve test, and *the whole point of an entry test is not
+having to guess*. An opening proximity is a second guess wearing the first one's
+clothes.
+
+An RIR per phase is not a guess. It is the thing periodisation actually
+prescribes — accumulate further from failure, intensify closer to it, test at
+zero — and combined with the rep ladder it determines the load outright.
+
+**The table.** Published as a grid of RPE against repetitions; it reduces exactly
+to one expression, which is what makes it code rather than data:
+
+```text
+%1RM = 100 − 2.5 × (reps − 1) − 5 × RIR
+```
+
+Verified against every cell consulted: 1 rep at RIR 0 is 100%, 5 at RIR 2 is 80%,
+3 at RIR 1 is 90%, 10 at RIR 0 is 77.5%. RPE and RIR are the same scale inverted
+(`RIR = 10 − RPE`), so the domain holds RIR, which is what the performed record
+already carries.
+
+**A caveat worth carrying.** The published grid is uniform — every extra
+repetition costs 2.5% and every repetition in reserve 5%. The underlying RTS data
+is not perfectly linear, and this is a rounded presentation of it. It is accurate
+enough to prescribe from and should not be mistaken for a measurement.
+
+**What it says about the 2025 block, and what it does not.** Comparing that
+block's loads against the table shows them 4 to 12 points below what its recorded
+efforts imply. That is *not* evidence the block was under-loaded, because the
+comparison is confounded: the only anchor available is derived from the block's
+own exit test, and moving that number was the block's whole purpose. Its entry
+1RM is unrecorded. So the table is adopted on its own authority rather than
+because it reproduces the record — which is the right way round, and the opposite
+of how the back-off percentage was nearly arrived at.
+
+**What is still not settled**: the RIR per phase. Accumulation, intensification
+and the test each need one, and they are programme parameters rather than
+anything to be recovered from a record whose efforts do not agree with its loads.
+
+**Sources**: the chart as published at <https://fitnesscalcs.com/rpe-chart/>,
+attributed to Reactive Training Systems and to Zourdos et al. (2016).
