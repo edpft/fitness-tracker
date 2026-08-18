@@ -668,3 +668,64 @@ fn the_schema_refuses_a_success_that_reports_no_counts() {
         );
     });
 }
+
+// --- The schema enforces its own declared types -----------------------------
+
+/// Every table is `STRICT`, so a declared type is enforced rather than advisory.
+///
+/// SQLite's declared types are only affinities, so `load_grams INTEGER` accepted
+/// `'banana'` and stored it as TEXT from `0001` until `0006` rebuilt every table.
+/// Asserted against the applied schema rather than by grepping the migrations,
+/// because what matters is what the file ends up being — and a table added later
+/// without `STRICT` fails here rather than in six months.
+///
+/// **`programme_slot_fill` is the one exception and it is not an oversight.**
+/// `STRICT` implies `NOT NULL` on every primary-key column, and its nullable
+/// `role` is how `0004` says "this slot does not alternate by session role". It
+/// is listed by name so that adding a second exception has to be deliberate.
+/// `_sqlx_migrations` is sqlx's own table and not ours to declare.
+#[test]
+fn every_table_enforces_its_declared_types() {
+    runtime().expect("a tokio runtime").block_on(async {
+        let (_directory, pool) = store().await.expect("a store");
+        let lax: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_table_list
+              WHERE type = 'table' AND strict = 0
+                AND name NOT LIKE 'sqlite_%'
+                AND name != '_sqlx_migrations'
+              ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("the schema lists its tables");
+
+        assert_eq!(lax, vec!["programme_slot_fill".to_owned()]);
+    });
+}
+
+/// And what that buys: a count column will not accept a word.
+///
+/// The row below satisfies every CHECK `extraction_run` carries — it is a
+/// finished, successful run reporting both counts and no failure reason — so the
+/// only thing wrong with it is the type of `events_seen`. Before `0006` this
+/// insert succeeded and the count came back as text.
+#[test]
+fn a_count_column_refuses_a_word() {
+    runtime().expect("a tokio runtime").block_on(async {
+        let (_directory, pool) = store().await.expect("a store");
+        let refused = sqlx::query(
+            "INSERT INTO extraction_run
+                 (stream, started_at, finished_at, outcome, events_seen, records_landed)
+             VALUES ('hevy.workouts', '2026-08-18T00:00:00Z', '2026-08-18T00:01:00Z',
+                     'succeeded', 'banana', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect_err("a word is not a count");
+
+        assert!(
+            refused.to_string().contains("cannot store TEXT value"),
+            "refused for the wrong reason: {refused}"
+        );
+    });
+}
