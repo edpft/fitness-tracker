@@ -628,14 +628,14 @@ own; sets are 5 across in accumulation and 1 in intensification.
 7 weeks — 1 test, 3 accumulation, 3 intensification, target 3RM
   wk 2  accum  5×4  77.5%  20 lifts       wk 5  intens 1×5  82.5%
   wk 3  accum  5×3  80.0%  15 lifts       wk 6  intens 1×4  88.75%
-  wk 4  accum  5×2  82.5%  10 lifts       wk 7  intens 1×3  95.0%   ← exit test
+  wk 4  accum  5×2  82.5%  10 lifts       wk 7  intens 1×3  (test)
 
 11 weeks — 1 test, 5 accumulation, 5 intensification, target 3RM
   wk 2  accum  5×6  72.5%  30 lifts       wk  7  intens 1×7  82.5%
   wk 3  accum  5×5  75.0%  25 lifts       wk  8  intens 1×6  85.6%
   wk 4  accum  5×4  77.5%  20 lifts       wk  9  intens 1×5  88.75%
   wk 5  accum  5×3  80.0%  15 lifts       wk 10  intens 1×4  91.9%
-  wk 6  accum  5×2  82.5%  10 lifts       wk 11  intens 1×3  95.0%  ← exit test
+  wk 6  accum  5×2  82.5%  10 lifts       wk 11  intens 1×3  (test)
 ```
 
 **Duration changes where the block starts and never where it finishes**, which
@@ -679,27 +679,76 @@ intensification's endpoint is `rm(target)` from the table, and its start is
 where accumulation finished, which Prilepin fixes. The `TODO` stays in the
 document only for as long as `v1` does.
 
-### The question that does go back to the operator
+Correction 3 below moves that endpoint again — from the entry anchor to what has
+actually been lifted since — but not back into anyone's hands. It stays derived.
 
-**Every percentage here is of the entry test's implied 1RM, so the ladder plans
-to arrive at exactly the entry test and no further.** An 11-week block ending at
-95% of the entry 1RM ends on the load it started from.
+### Correction 3: the gain is measured, and the test prescribes nothing
 
-That is not obviously wrong. The exit test is a *test*, prescribed as a
-repetition count rather than a load, so whatever it comes in at is what it comes
-in at, and the gain is measured rather than planned. It is also what "the whole
-point of an entry test is not having to guess" implies: a block asserting a gain
-would be back to the total-gain parameter D10 removed.
+**Written after the operator read the above, and it replaces the open question
+this section originally ended with.**
 
-But it means the plan contains no claim that it works, and the alternative is
-standard: percentages of a **training max** set below the tested one — Wendler's
-90% is the usual figure — so the ladder's top rung is comfortably achievable and
-the test exceeds it. That is one number, from the literature rather than from
-the operator, and it scales every load in the block by the same factor.
+Two things were wrong. The first is small and the code already had it right:
+**no load is prescribed for the exit test.** `WeekKind::Test` carries no
+percentage, which is why the type is a variant rather than a flag. A test is
+worked up to. A number is still wanted for the warm-up ramp, but it is an
+expectation and has to be presented as one — the tables above showed 95% in the
+test row as though it were a prescription, and that is corrected.
 
-**This is the one thing here worth an operator decision**, because it is the
-difference between a block that finishes where it started and one that finishes
-above it.
+The second is the substance. The derivation above prescribes every
+intensification week against the entry test's 1RM, which makes the implied 1RM
+climb 97.1 → 97.9 → 98.6 → 99.3 → 100.0% and arrive at exactly what was tested
+at the start. **That is a maintenance block wearing a periodisation costume.**
+The operator's account of the intent is the opposite: the intensification weeks
+should be landing *above* what the entry test predicts, and the exit test then
+confirms the gain and ideally beats it.
+
+**Planning that gain needs a number, and there is nowhere honest to get one.**
+It is the total-gain parameter under its fifth name — a ladder span, an opening
+proximity, an RIR per phase, an opening percentage, and now a gain rate. The
+handover's warning applies to this paragraph as much as to any earlier one: if
+the operator is being asked for a number that determines the loads, the mistake
+has been re-introduced.
+
+**So do not plan it — measure it.** Every intensification week is already a
+single top set worked up to; the 2025 record shows exactly that, one row a week,
+and the last of them is the exit test only because its repetition count is the
+target. Make that structural:
+
+```text
+each intensification week   work up to a top set of N reps, N descending to
+                            the target
+the prescribed load         an expectation, for the warm-up ramp only, derived
+                            from the block's most recent performed top set
+                            through the same table:
+                                1RM_now  = load_last / rm(reps_last)
+                                expected = rm(N) × 1RM_now
+```
+
+Perform to plan and this is identical to prescribing against the entry anchor.
+Beat it and every later week climbs with you, which is the operator's "slightly
+higher percentages than the entry test would expect" arriving as a consequence
+rather than an assumption. Miss it and every later week comes down, which is
+`v1`'s stall mechanism generalised rather than a second one.
+
+**This is not the autoregulation `primary-lift-progression.md` rules out.** That
+rule excludes a *recorded effort* — an RIR, a rep quality, a mood — feeding a
+decision, on the grounds that the operator cannot discriminate finely enough for
+the signal to mean anything. A load lifted for a stated number of repetitions is
+not an effort report; it is an observation, as coarse and objective as they
+come. The model already reads exactly this signal twice: double progression
+reads each accessory's last performance, and stall detection reads the
+primary's. What is new here is only that the primary's own ladder reads it too.
+
+**What it costs.** The intensification phase stops being a pure function of the
+anchor and the duration, so `prescribe` needs the block's performed top sets to
+issue an intensification week — the same walk `ExerciseHistory::performances`
+already does for `v1`'s ladder position. Accumulation is unaffected: it stays a
+function of the anchor, Prilepin and the rung count, because a set with three
+repetitions in reserve is not a measurement of anything.
+
+**And it removes the last authored number from the block.** Duration, target
+repetition count and entry test go in; everything else is the table, Prilepin,
+and what has actually been lifted since.
 
 **Sources**: Prilepin's chart as published at
 <https://www.precisionpointtraining.com/strength-training-articles/prilepins-chart/>

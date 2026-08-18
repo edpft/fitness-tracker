@@ -182,20 +182,38 @@ Three consequences, all in [research.md](./research.md) D11:
   5×5, 5×4, 5×3, 5×2, then 1×5, 1×4, 1×3 — from the phase split and the target,
   compared with the record only afterwards.
 
-### The one genuinely open question, and it is the operator's
+### The gain is measured, not planned — D11 correction 3
 
-**Every percentage is of the entry test's implied 1RM, so the block plans to
-arrive at exactly the entry test and no further.**
+The first draft of D11 prescribed every intensification week against the entry
+test's 1RM, which made the implied 1RM climb 97.1 → 97.9 → 98.6 → 99.3 → 100.0%
+and arrive at exactly what was tested at the start. A maintenance block wearing
+a periodisation costume. The operator caught it, and said what the intent had
+been all along: the intensification weeks should land *above* what the entry
+test predicts, with the exit test confirming the gain and ideally beating it.
 
-Defensible as it stands: the exit test is prescribed as a repetition count and
-not a load, so the gain is measured rather than planned, and a block asserting a
-gain would be the total-gain parameter D10 removed coming back. The alternative
-is standard and costs one literature number rather than an operator guess —
-percentages of a **training max** set below the tested one, Wendler's 90% being
-the usual figure.
+**Planning that needs a number, and there is nowhere honest to get one.** It is
+the total-gain parameter under its fifth name — a ladder span, an opening
+proximity, an RIR per phase, an opening percentage, and now a gain rate.
 
-It is the difference between a block that finishes where it started and one that
-finishes above it, so it is not a judgement to make on the operator's behalf.
+So it is not planned. Every intensification week is a single top set worked up
+to, the last one being the exit test only because its repetition count is the
+target, and **the prescribed load is an expectation for the warm-up ramp derived
+from the block's most recent performed top set** through the same table. Perform
+to plan and it is identical to prescribing against the anchor; beat it and every
+later week climbs with you.
+
+**No load is prescribed for a test week**, which `WeekKind::Test` already says
+by carrying no percentage.
+
+This is not the autoregulation `primary-lift-progression.md` rules out. That
+excludes a recorded *effort* feeding a decision; a load lifted for a stated
+number of repetitions is an observation, and the model already reads it twice —
+double progression and stall detection.
+
+**It costs one thing**: intensification stops being a pure function of the
+anchor and the duration, so `prescribe` needs the block's performed top sets to
+issue one. Accumulation is untouched, because a set at three repetitions in
+reserve measures nothing.
 
 ---
 
