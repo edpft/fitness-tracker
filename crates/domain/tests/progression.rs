@@ -384,9 +384,11 @@ fn an_untrained_block_is_at_its_first_week() {
 /// A block whose entry test found a ceiling opens climbing back to it.
 ///
 /// The test completed 90 and failed 95, so the block opens at 95 and gets there
-/// the way any re-climb does: the first reset's drop from the failed load, then
-/// its rate. Nothing has been performed yet, so this is the state the very first
-/// session of the block is issued from.
+/// the way any re-climb does: a drop from the failed load, then a climb back.
+/// **The second reset's protocol, not the first** — the gentler pair, because an
+/// entry has lost no ground and because its rate is the ladder's own, so there is
+/// no seam where the climb becomes the plan. Nothing has been performed yet, so
+/// this is the state the very first session of the block is issued from.
 #[test]
 fn an_entry_test_that_found_a_ceiling_opens_climbing_back_to_it() {
     let (Ok((first, second)), Ok(increment), Ok(failed)) = (protocols(), grid(), kg("95")) else {
@@ -395,9 +397,9 @@ fn an_entry_test_that_found_a_ceiling_opens_climbing_back_to_it() {
 
     let progress = progress_after(&[], Some(failed), first, second, increment);
 
-    // −10% of 95 is 85.5, and the plate grid takes it to 85.
-    let Ok(opening) = kg("85") else {
-        panic!("85 is a mass")
+    // −5% of 95 is 90.25, and the plate grid takes it to 90.
+    let Ok(opening) = kg("90") else {
+        panic!("90 is a mass")
     };
     assert_eq!(progress.climb_back(), Some(ClimbBack::Entry));
     assert_eq!(
@@ -427,19 +429,19 @@ fn the_entry_climb_spends_no_stall() {
         panic!("the fixture values are all valid")
     };
 
-    // Climb in from the entry (85, 90), reach 95, then stall there twice.
-    let Ok((eighty_five, ninety)) =
-        (|| Ok::<_, Box<dyn std::error::Error>>((kg("85")?, kg("90")?)))()
+    // Climb in from the entry (90, 92.5), reach 95, then stall there twice.
+    let Ok((ninety, ninety_two_five)) =
+        (|| Ok::<_, Box<dyn std::error::Error>>((kg("90")?, kg("92.5")?)))()
     else {
         panic!("the loads are masses")
     };
     let performed = [
         GatingTopSet {
-            load: eighty_five,
+            load: ninety,
             completed: true,
         },
         GatingTopSet {
-            load: ninety,
+            load: ninety_two_five,
             completed: true,
         },
         GatingTopSet {

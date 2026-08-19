@@ -106,10 +106,10 @@ macro_rules! top_set {
 /// The block opens climbing in from its entry test, through the real store.
 ///
 /// **The sharp assertion.** The entry test of 3 July completed 90 and failed 95,
-/// so the block opens by dropping the first reset's 10% from that failed 95 —
-/// 85.5, which the plate grid takes to 85 — and climbing back to it. What is
-/// prescribed for the block's first gating Friday is therefore 85, not the
-/// ladder's own first rung of 95.
+/// so the block opens by dropping the second reset's 5% from that failed 95 —
+/// 90.25, which the plate grid takes to 90 — and climbing back to it at 2.5kg a
+/// week. What is prescribed for the block's first gating Friday is therefore 90,
+/// not the ladder's own first rung of 95.
 ///
 /// The two numbers being different is the whole point: it is what tells "opened
 /// from the test" apart from "opened on the plan".
@@ -135,8 +135,8 @@ fn the_block_opens_climbing_in_from_its_entry_test() {
         panic!("the ladder builds")
     };
 
-    let Ok(climbing_in) = "85".to_owned().try_into().map(domain::gym::Load::Absolute) else {
-        panic!("85 is a mass")
+    let Ok(climbing_in) = "90".to_owned().try_into().map(domain::gym::Load::Absolute) else {
+        panic!("90 is a mass")
     };
     assert_eq!(
         load,
@@ -155,10 +155,10 @@ fn the_block_opens_climbing_in_from_its_entry_test() {
 /// A session the gate does not watch does not move the progression (US3-10).
 ///
 /// **Counted out, because the numbers are what carry the assertion.** The block
-/// opens climbing in at 85 toward the 95 its entry test failed. By Monday
+/// opens climbing in at 90 toward the 95 its entry test failed. By Monday
 /// 2026-07-13 it has had one Friday — 10 July, completed — so the climb has
-/// advanced once, at the first reset's +5kg, to 90. The light session's top set
-/// is 85% of that, which the grid puts at 77.5.
+/// advanced once, at the second reset's +2.5kg, to 92.5. The light session's top
+/// set is 85% of that, which the grid puts at 77.5.
 ///
 /// It has also had a Monday, 6 July, trained and completed. **If the light
 /// session gated too the climb would have advanced twice**, reaching 95, arriving

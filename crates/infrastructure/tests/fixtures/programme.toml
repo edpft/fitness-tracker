@@ -62,8 +62,10 @@ friday = "heavy"
 load = "90kg"
 # What the test failed above the load it completed, if it found the ceiling.
 # **This is what the block opens at**: the ladder starts here and the
-# drop-and-re-climb protocol is how the block gets back to it, which costs no
-# stall — the next failure still gets both resets. Omit the key for a test that
+# drop-and-re-climb protocol is how the block gets back to it, at the *second*
+# reset's -5% and +2.5kg — the gentler pair, and the same rate the ladder itself
+# climbs at, so the whole block advances by one increment a week. It costs no
+# stall: the next failure still gets both resets. Omit the key for a test that
 # failed nothing, and the block opens one climb above `load` instead.
 failed     = "95kg"
 provenance = "tested"

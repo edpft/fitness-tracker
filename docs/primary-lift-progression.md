@@ -88,8 +88,10 @@ Given a duration of `W` weeks and an anchor `A`:
   above what it completed if it failed nothing, and adds `climb_per_week` for
   each week after the first.
 - A block whose test failed something **climbs in** to that load first, by the
-  drop-and-re-climb protocol below. Those weeks are not ladder positions and
-  they cost no stall.
+  drop-and-re-climb protocol below at the **second** reset's −5% and +2.5kg —
+  the gentler pair, because an entry has lost no ground and because that rate is
+  the ladder's own, so the whole block advances by one increment a week. Those
+  weeks are not ladder positions and they cost no stall.
 - The light session's top set is a percentage of that week's heavy top set.
 - Warm-ups and back-off sets are percentages of their own session's top set —
   never of the anchor. See `prescribed-workout-domain-model.md`.

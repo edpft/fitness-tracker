@@ -18,9 +18,19 @@ the test failed a load     the block opens at that load, and climbs in to it
 the test failed nothing    the block opens one climb above what it completed
 ```
 
-"Climbs in" means the drop-and-re-climb protocol, unchanged: the first reset's
-−10% from the failed load, then +5kg a week back up to it, at which point the
-ladder takes over at its first rung — which is that same failed load.
+"Climbs in" means the drop-and-re-climb protocol, unchanged in mechanism: the
+**second** reset's −5% from the failed load, then +2.5kg a week back up to it, at
+which point the ladder takes over at its first rung — which is that same failed
+load.
+
+**The second reset's protocol rather than the first**, for two reasons. The first
+reset is the steeper pair — a 10% drop re-climbed at 5kg a week — because it is
+recovering ground a stall has just cost; an entry has lost nothing and is
+approaching a load the lifter has never held. And the second reset's rate *is*
+`ladder_climb_per_week`, which `docs/primary-lift-progression.md` already calls
+"baseline rate off a lower start" — so the climbing-in weeks and the ladder weeks
+advance by the same increment and the block is one continuous climb with no seam
+where the approach becomes the plan.
 
 **The entry climb spends no stall.** A block that opens this way still has both
 resets available to its first real failure. `ClimbBack::Entry` carries that, and
@@ -70,32 +80,32 @@ integration suite had exactly this shape and had to be moved.
 
 ## What it costs
 
-**The plan it produces is materially more ambitious than the old one, and than
-what the operator has been running.** From the corpus's own entry test — 90
-completed, 95 failed on 2026-07-03 — an 8-week block plans:
+**The plan it produces is more ambitious than the old one, and than what the
+operator has been running.** From the corpus's own entry test — 90 completed, 95
+failed on 2026-07-03 — an 8-week block issues:
 
 ```text
-climbing in   85    90                          the drop from 95, at +5kg
-the ladder    95    97.5  100  102.5  105  107.5  110
-of anchor     105.6%              …             122.2%
+week    1     2     3     4     5     6     7     8
+load    90    92.5  95    97.5  100   102.5 105   test
+        └ climbing in ┘   └────── the ladder ──────┘
 ```
 
-Against a tested 90kg. The old span model finished at 94.5, and the operator's
-own hand-run block through July and August went 82.5, 85, 87.5 with 92.5 planned
-for 28 August. **This plans roughly 15kg above what they are actually doing.**
+One increment a week from 90 to 105, against a tested 90kg. The old span model
+finished at 94.5, and the operator's own hand-run block through July and August
+went 82.5, 85, 87.5 with 92.5 planned for 28 August.
+
+The ladder itself runs to 110 at its seventh rung, but a block only reaches that
+if nothing is spent climbing in and nothing stalls — which is the plan being an
+intention rather than a prediction, and is the same thing `programme show`'s
+table has always displayed.
 
 That is not hidden and it is not obviously wrong: the block opens above the
 anchor because the anchor is a *completed* single and the test proved 95 was
 reachable-but-missed, and the whole design says the reset protocol — not the
-plan — is what discovers the ceiling. A plan that is too ambitious drops 10% and
-re-climbs, which is the mechanism working rather than failing. But it is a large
-change in character and the number is recorded here so that revising it later is
-a decision rather than a discovery.
+plan — is what discovers the ceiling.
 
-**What would soften it, if the operator wants that**, in increasing order of
-change: run the entry climb at the second reset's protocol instead of the first
-(−5%/+2.5kg — this only changes the two climbing-in weeks, not the finish); lower
-`ladder_climb_per_week`; or open the ladder at the *dropped* load rather than the
+**What would soften it further, if the operator wants that**: lower
+`ladder_climb_per_week`, or open the ladder at the *dropped* load rather than the
 failed one, which would be a different decision from this one and should be
 recorded as such.
 

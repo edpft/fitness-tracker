@@ -363,13 +363,13 @@ block's entry anchor" was wrong and has been corrected.
   stopped existing (D13) and the opening became a derivation from the entry test
   (D14). The fixture carries no `TODO`, `fitness prescribe` issues from it, and
   **all 80 tasks are done**.
-- **The derived plan is much more ambitious than what the operator runs.** From
-  the corpus's entry test — 90 completed, 95 failed — an 8-week block plans 85
-  and 90 climbing in, then 95 … 110, which is 105.6% to 122.2% of the tested
-  anchor. The record's own July–August block ran 82.5, 85, 87.5 with 92.5 planned
+- **The derived plan is more ambitious than what the operator runs.** From the
+  corpus's entry test — 90 completed, 95 failed — an 8-week block issues one
+  increment a week from 90 to 105: 90, 92.5 climbing in, then 95 … 105, then the
+  test. The record's own July–August block ran 82.5, 85, 87.5 with 92.5 planned
   for 28 August. Attributable to a template change (SC-002) and defensible — the
-  reset protocol is what finds the ceiling — but it is a large change and
-  decision `0009` lists what would soften it.
+  reset protocol is what finds the ceiling — but decision `0009` lists what would
+  soften it further.
 - **Two parameters remain marked `INFERRED`** in
   `crates/infrastructure/tests/fixtures/programme.toml`: the per-role top-set
   repetitions and the per-block accessory ranges. They were read off the record

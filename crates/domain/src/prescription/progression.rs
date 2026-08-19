@@ -15,10 +15,12 @@
 //!
 //! **A block whose entry test found a ceiling opens re-climbing, and that costs
 //! no stall.** The test failed a load; the block opens at that load and reaches
-//! it the same way a stall reaches it, at the first reset's drop and rate. It is
-//! [`ClimbBack::Entry`] rather than [`ClimbBack::Reset`] precisely so it cannot
-//! be counted: the operator settled on 2026-08-19 that the next failure still
-//! gets both resets. See
+//! it the same way a stall reaches it, at the *second* reset's drop and rate —
+//! the gentler pair, because an entry has lost no ground and because that rate
+//! is the ladder's own, which leaves no seam where the climb becomes the plan.
+//! It is [`ClimbBack::Entry`] rather than [`ClimbBack::Reset`] precisely so it
+//! cannot be counted: the operator settled on 2026-08-19 that the next failure
+//! still gets both resets. See
 //! `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
 //!
 //! **The anchor is not a parameter of anything here, which is FR-021 held by the
@@ -113,12 +115,20 @@ pub enum ClimbBack {
 impl ClimbBack {
     /// The protocol this climb runs at.
     ///
-    /// The entry runs at the first reset's, because it is a first failure — the
-    /// second reset is defined as the slowdown *after* one.
+    /// **The entry runs at the second reset's, not the first.** The first reset
+    /// is the steeper of the two — a 10% drop re-climbed at 5kg a week — because
+    /// it is recovering ground a stall has just cost. An entry has lost nothing:
+    /// it is approaching a load the lifter has never held, off a test rather
+    /// than off a failure inside the block.
+    ///
+    /// It also makes the block one continuous climb. The second reset's rate is
+    /// `ladder_climb_per_week` — `docs/primary-lift-progression.md` calls it
+    /// "baseline rate off a lower start" — so the entry weeks and the ladder
+    /// weeks advance by the same increment and there is no seam between them.
     const fn protocol(self, first: ResetProtocol, second: ResetProtocol) -> ResetProtocol {
         match self {
-            Self::Entry | Self::Reset(Reset::First) => first,
-            Self::Reset(Reset::Second) => second,
+            Self::Entry | Self::Reset(Reset::Second) => second,
+            Self::Reset(Reset::First) => first,
         }
     }
 }
@@ -247,7 +257,15 @@ pub fn progress_after(
         Progress::Climbing {
             week: WeekIndex::FIRST,
         },
-        |failed| begin(ClimbBack::Entry, failed, first, increment, WeekIndex::FIRST),
+        |failed| {
+            begin(
+                ClimbBack::Entry,
+                failed,
+                second,
+                increment,
+                WeekIndex::FIRST,
+            )
+        },
     );
     // **How many stalls the block has had, which is not the same as what state it
     // is in.** A reset that completes puts the plan back in charge, so the state

@@ -1113,10 +1113,15 @@ the test failed a load     the block opens at that load, and climbs in to it
 the test failed nothing    the block opens one climb above what it completed
 ```
 
-Climbing in is the existing drop-and-re-climb protocol at the first reset's
-−10% and +5kg a week. **It spends no stall**, so the first real failure still
-gets both resets — the operator was explicit about that, and `ClimbBack::Entry`
-makes it structural rather than a convention.
+Climbing in is the existing drop-and-re-climb protocol at the **second** reset's
+−5% and +2.5kg a week. The first reset is the steeper pair and exists to recover
+ground a stall has cost; an entry has lost nothing. The second's rate is also
+`ladder_climb_per_week`, so the climbing-in weeks and the ladder weeks advance by
+the same increment and the block is one continuous climb.
+
+**It spends no stall**, so the first real failure still gets both resets — the
+operator was explicit about that, and `ClimbBack::Entry` makes it structural
+rather than a convention.
 
 ### What this closes, and what it cost to see
 
@@ -1129,14 +1134,14 @@ and the third time this feature has learned it.
 
 ### The consequence worth stating plainly
 
-The derived plan is much more ambitious than the old span model or than what the
+The derived plan is more ambitious than the old span model or than what the
 operator has been running. From the corpus's entry test — 90 completed, 95 failed
-on 2026-07-03 — an 8-week block plans 85, 90 climbing in, then 95, 97.5, 100,
-102.5, 105, 107.5, 110: from 105.6% to 122.2% of the tested 90kg. The old model
+on 2026-07-03 — an 8-week block issues one increment a week from 90 to 105: 90,
+92.5 climbing in, then 95, 97.5, 100, 102.5, 105, then the test. The old model
 finished at 94.5, and the record's own July–August block ran 82.5, 85, 87.5 with
 92.5 planned for 28 August.
 
-That is a divergence of roughly 15kg and it is attributable to a template change,
+That is a divergence of roughly 12.5kg and it is attributable to a template change,
 which is the bucket SC-002 asks for. It follows from the anchor being a
 *completed* single while the test proved 95 was reachable and missed — and from
 the design putting regulation in the reset protocol rather than in the plan. It
