@@ -198,18 +198,18 @@ exist in the record until Phase 4 is done.
 
 ### Tests first (§ 31)
 
-- [ ] T065 [P] [US3] Write `a_reset_never_touches_the_anchor` in `crates/infrastructure/tests/progression.rs` first. FR-021 is the whole point of separating the plan from the failure mechanism, and it is the invariant an implementation is most likely to break for convenience
-- [ ] T066 [P] [US3] Write US3-5 to US3-8 in `crates/infrastructure/tests/progression.rs` — hold, suspend, resume at the suspended week, and the second reset
-- [ ] T067 [P] [US3] Write SC-005 in `crates/infrastructure/tests/progression.rs` — the eleven-week table, load for load, anchor constant
-- [ ] T068 [P] [US3] Write US3-9 and US3-10 in `crates/infrastructure/tests/progression.rs` — a test anchors the next block; a non-gating miss does not touch the ladder
-- [ ] T069 [P] [US3] Write `asking_twice_does_not_double_advance` in `crates/infrastructure/tests/progression.rs` — a regression test against reintroducing stored position state
+- [X] T065 [P] [US3] Write `a_reset_never_touches_the_anchor` in `crates/infrastructure/tests/progression.rs` first. FR-021 is the whole point of separating the plan from the failure mechanism, and it is the invariant an implementation is most likely to break for convenience
+- [X] T066 [P] [US3] Write US3-5 to US3-8 in `crates/infrastructure/tests/progression.rs` — hold, suspend, resume at the suspended week, and the second reset
+- [X] T067 [P] [US3] Write SC-005 in `crates/infrastructure/tests/progression.rs` — the eleven-week table, load for load, anchor constant
+- [X] T068 [P] [US3] Write US3-9 and US3-10 in `crates/infrastructure/tests/progression.rs` — a test anchors the next block; a non-gating miss does not touch the ladder
+- [X] T069 [P] [US3] Write `asking_twice_does_not_double_advance` in `crates/infrastructure/tests/progression.rs` — a regression test against reintroducing stored position state
 
 ### Implementation
 
-- [ ] T070 [US3] Implement ladder-position derivation in `crates/domain/src/prescription/ladder.rs`: walk the gating sessions in order, advancing on a completed top set, holding on a failure, and suspending on a second failure at a load already failed
-- [ ] T071 [US3] Implement the reset sequence in `crates/domain/src/prescription/ladder.rs` — drop taken from the **failed load**, re-climb at the reset's rate, resume the ladder at the suspended week when the re-climb reaches that load (FR-019, FR-020, FR-021)
-- [ ] T072 [US3] Wire the derivation into `crates/application/src/prescribe.rs` via `ExerciseHistory::performances`, gated to the programme's gating role
-- [ ] T073 [US3] Surface the ladder state in `programme show` and `fitness status` in `crates/cli/src/output.rs`
+- [X] T070 [US3] Implement ladder-position derivation in `crates/domain/src/prescription/ladder.rs`: walk the gating sessions in order, advancing on a completed top set, holding on a failure, and suspending on a second failure at a load already failed
+- [X] T071 [US3] Implement the reset sequence in `crates/domain/src/prescription/ladder.rs` — drop taken from the **failed load**, re-climb at the reset's rate, resume the ladder at the suspended week when the re-climb reaches that load (FR-019, FR-020, FR-021)
+- [X] T072 [US3] Wire the derivation into `crates/application/src/prescribe.rs` via `ExerciseHistory::performances`, gated to the programme's gating role
+- [X] T073 [US3] Surface the ladder state in `programme show` and `fitness status` in `crates/cli/src/output.rs`
 
 **Checkpoint**: the worked example reproduces exactly, and the anchor has not
 moved once.
@@ -220,7 +220,7 @@ moved once.
 
 - [ ] T074 [P] Write `docs/decisions/0006-prescription-reads-the-normalised-layer.md` — the § II.4 deviation, why supersession could not be deferred with matching, and what stays unresolved
 - [ ] T075 [P] Write `docs/decisions/0007-a-zero-rep-set-is-a-failed-attempt.md` — the reversal of 002's shipped behaviour, and the 77-versus-1 evidence
-- [ ] T076 [P] Add the `prescription` section to `fitness status` in `crates/cli/src/output.rs` and `crates/cli/src/main.rs` (§ 38)
+- [X] T076 [P] Add the `prescription` section to `fitness status` in `crates/cli/src/output.rs` and `crates/cli/src/main.rs` (§ 38)
 - [ ] T077 [P] Update `docs/gym-workout-domain-model.md` — its open question 3 is resolved by `Performed<M>`, and `Set<M>` no longer holds `measure`
 - [ ] T078 Run `nix flake check` and confirm `architecture` verifies no `toml` type in `domain`, and `use-case-isolation` still passes
 - [ ] T079 Walk [quickstart.md](./quickstart.md) end to end against the real store

@@ -94,6 +94,22 @@ impl<T> PerRole<T> {
 pub struct WeekIndex(u32);
 
 impl WeekIndex {
+    /// The first week of a block.
+    ///
+    /// A constant because one is always a valid week and a caller that starts at
+    /// the beginning should not have to handle an error that cannot happen.
+    pub const FIRST: Self = Self(1);
+
+    /// The week after this one.
+    ///
+    /// Saturating, which is not a real limit: a block of four billion weeks is
+    /// refused long before this, and the alternative is an error nobody can act
+    /// on.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+
     /// # Errors
     ///
     /// [`InvalidWeek`] for zero. Weeks are one-based because the operator

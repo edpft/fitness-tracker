@@ -23,6 +23,7 @@ pub mod ladder;
 pub mod linear;
 pub mod parameters;
 pub mod prilepin;
+pub mod progression;
 pub mod project;
 pub mod quantise;
 pub mod repmax;
@@ -40,6 +41,7 @@ pub use parameters::{
     AccessoryScheme, GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage,
     PlateIncrement, ResetProtocol, TopSetReps, WarmupStep,
 };
+pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use quantise::{quantise, quantise_loaded};
 pub use repmax::rep_max;

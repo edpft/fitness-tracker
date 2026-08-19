@@ -19,9 +19,10 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, GenerationParameters, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, SessionRole, SlotId,
-        SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent, quantise_loaded,
+        Block, GatingTopSet, GenerationParameters, PrescribedExercise, PrescribedItem,
+        PrescribedSet, PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress,
+        SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent,
+        progress_after, quantise_loaded,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -29,7 +30,7 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::PrescriptionError,
     ports::{
-        ExerciseHistory, GenerationParameterStore, LastPerformance, Performance,
+        ExerciseHistory, GenerationParameterStore, LadderStanding, LastPerformance, Performance,
         PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore, UnderivableReason,
         UnderivableSlot, WorkoutPrescriber,
     },
@@ -77,6 +78,23 @@ where
     G: GenerationParameterStore + Sync,
     S: PrescribedWorkoutStore + Sync,
 {
+    async fn standing(&self, on: Date) -> Result<LadderStanding, PrescriptionError> {
+        let Some((programme_id, programme)) = self.ports.programmes.current().await? else {
+            return Err(PrescriptionError::NoProgramme);
+        };
+        let Some((_, parameters)) = self.ports.parameters.current().await? else {
+            return Err(PrescriptionError::NoParameters);
+        };
+        let progress = self.progress(&programme, &parameters, on).await?;
+        Ok(LadderStanding {
+            programme_id,
+            programme,
+            parameters,
+            progress,
+            history_through: self.ports.history.newest_performance().await?,
+        })
+    }
+
     async fn prescribe(&self, date: Date) -> Result<Prescription, PrescriptionError> {
         // Read what was issued before doing any work. Asking twice for one date
         // returns what was already issued rather than a second prescription, and
@@ -117,9 +135,16 @@ where
             .collect();
         let history = self.ports.history.last_performances(&wanted).await?;
 
+        // **Where the primary's rung comes from.** The calendar says whether this
+        // is a climbing week or the test; it does not say which rung, because a
+        // miss holds the ladder and a stall suspends it. So the position is walked
+        // out of the gating sessions performed so far (US3) and is derived on every
+        // read — there is no stored counter to advance twice.
+        let progress = self.progress(&programme, &parameters, date).await?;
+
         let mut items = Vec::new();
         let mut underivable = Vec::new();
-        for derived in issue_slots(&programme, &parameters, role, week, &history) {
+        for derived in issue_slots(&programme, &parameters, role, week, progress, &history) {
             match derived {
                 Derived::Item(item) => items.push(*item),
                 Derived::Underivable(slot) => underivable.push(slot),
@@ -152,6 +177,102 @@ where
     }
 }
 
+impl<H, P, G, S> Prescribing<H, P, G, S>
+where
+    H: ExerciseHistory + Sync,
+    P: ProgrammeStore + Sync,
+    G: GenerationParameterStore + Sync,
+    S: PrescribedWorkoutStore + Sync,
+{
+    /// Where the primary's progression stands, walked out of the record.
+    ///
+    /// **Only the gating role gates** (US3-10). A miss on the other session says
+    /// nothing about the ladder, so the other session's sets never reach the
+    /// mechanism — which is the filter below and not a rule inside it.
+    ///
+    /// **Only sessions inside this block count.** A date the calendar will not
+    /// place is before the block, after it, or in a week it skips, and none of
+    /// those is a rung of this plan.
+    /// **Only sessions before the date being prescribed.** A prescription is
+    /// issued before the session it prescribes, so a session on the day itself is
+    /// not evidence about what to do that day — and issuing for a past date would
+    /// otherwise read forward through the record and answer with a rung the
+    /// operator could not have been given at the time.
+    async fn progress(
+        &self,
+        programme: &Programme,
+        parameters: &GenerationParameters,
+        before: Date,
+    ) -> Result<Progress, PrescriptionError> {
+        let Exercise::Reps(primary) = programme.primary_exercise() else {
+            // A programme whose primary is not counted in repetitions has no
+            // ladder to be at a position on. Authoring refuses one (A-5), so this
+            // is the type system's edge rather than a state to handle.
+            return Ok(Progress::Climbing {
+                week: domain::prescription::WeekIndex::FIRST,
+            });
+        };
+
+        let performances = self.ports.history.performances(primary).await?;
+        let mut gating: Vec<GatingTopSet> = Vec::new();
+        for performance in &performances {
+            if performance.on >= before {
+                continue;
+            }
+            let Ok((_, role)) = programme.calendar().place(performance.on) else {
+                continue;
+            };
+            if role != programme.gating_role() {
+                continue;
+            }
+            if let Some(top) = top_set_of(performance) {
+                gating.push(top);
+            }
+        }
+
+        Ok(progress_after(
+            &gating,
+            parameters.first_reset,
+            parameters.second_reset,
+            parameters.plate_increment,
+        ))
+    }
+}
+
+/// A gating session's top set: the heaviest working set, and what became of it.
+///
+/// **Heaviest rather than first.** In a session issued from this template the top
+/// set is the first working set and the back-offs are lighter, so the two agree;
+/// in the hand-run record they do not always, because that block opened with heavy
+/// bridging singles tagged as warm-ups. Taking the heaviest is right under both
+/// readings, and the failed attempt this exists to notice is by construction the
+/// heaviest thing attempted.
+///
+/// `None` where the session recorded no working set at all, which is a session
+/// that says nothing about the ladder rather than a miss.
+fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
+    let mut heaviest: Option<(u64, &crate::ports::PerformedSetSummary)> = None;
+    for set in &performance.sets {
+        // Only an absolute load is comparable on this axis, and the primary is a
+        // barbell lift. A relative one — assisted or weighted bodyweight — is left
+        // out rather than compared against a mass it is not measured from.
+        let Load::Absolute(mass) = set.load else {
+            continue;
+        };
+        let grams = mass.as_grams();
+        if heaviest.is_none_or(|(held, _)| grams > held) {
+            heaviest = Some((grams, set));
+        }
+    }
+    heaviest.map(|(_, set)| GatingTopSet {
+        load: match set.load {
+            Load::Absolute(mass) => mass,
+            Load::Relative(_) => Kg::NONE,
+        },
+        completed: set.outcome.completed().is_some(),
+    })
+}
+
 /// Every slot, in issue order.
 ///
 /// The strength block issues the primary first, then the upper pair supersetted,
@@ -164,6 +285,7 @@ fn issue_slots(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
+    progress: Progress,
     history: &BTreeMap<RepsExercise, LastPerformance>,
 ) -> Vec<Derived> {
     let mut issued = Vec::new();
@@ -179,6 +301,7 @@ fn issue_slots(
         parameters,
         role,
         week,
+        progress,
         primary_slot,
     ));
 
@@ -217,6 +340,7 @@ fn primary_slot_item(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
+    progress: Progress,
     slot: SlotId,
 ) -> Derived {
     let SlotContent::Single(exercise) = programme.fills().content(slot, role) else {
@@ -239,7 +363,11 @@ fn primary_slot_item(
     let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
 
     let top_set = match week {
-        WeekKind::Climbing(index) => {
+        // **The calendar says whether, and the record says which.** A climbing week
+        // takes its load from where the progression has got to, not from the week
+        // the date falls in — those agree until the first miss and diverge after
+        // it, which is the whole of US3.
+        WeekKind::Climbing(_) => {
             let Ok(ladder) = programme.ladder(parameters) else {
                 return Derived::Underivable(UnderivableSlot {
                     slot,
@@ -249,11 +377,11 @@ fn primary_slot_item(
             };
             match role {
                 SessionRole::Heavy => {
-                    ladder.heavy_top_set(programme.anchor().load(), index, increment)
+                    progress.heavy_top_set(ladder, programme.anchor().load(), increment)
                 }
-                SessionRole::Light => ladder.light_top_set(
+                SessionRole::Light => progress.light_top_set(
+                    ladder,
                     programme.anchor().load(),
-                    index,
                     increment,
                     parameters.light_of_heavy,
                 ),

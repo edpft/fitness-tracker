@@ -24,7 +24,7 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, SlotId,
+    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, Progress, SlotId,
 };
 
 use crate::error::{
@@ -786,8 +786,43 @@ pub struct Prescription {
     pub underivable: Vec<UnderivableSlot>,
 }
 
+/// Where a block's plan stands, for reporting rather than for prescribing.
+///
+/// **The whole of what a report needs and nothing a session needs.** § 38 asks
+/// that staleness be observable, and on the prescribed side that means three
+/// things at once: which programme is in force, where the ladder has got to, and
+/// how current the record it was derived from is. A caller printing a ladder table
+/// needs all three and needs no workout at all.
+#[derive(Debug, Clone)]
+pub struct LadderStanding {
+    pub programme_id: ProgrammeId,
+    pub programme: Programme,
+    pub parameters: GenerationParameters,
+    /// Derived from the gating sessions before the date asked about.
+    pub progress: Progress,
+    /// The newest performance the derivation could see. `None` for an empty
+    /// record — which is not the same as a stale one.
+    pub history_through: Option<Date>,
+}
+
 /// Issue the prescription for a date.
 pub trait WorkoutPrescriber {
+    /// Where the plan stands, without issuing anything.
+    ///
+    /// Separate from [`Self::prescribe`] because it writes nothing: asking where
+    /// the ladder is should not put a prescription in the store, and a report that
+    /// issued one would change the thing it was reporting on.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] for no programme, no parameters, or an unavailable
+    /// store. Not for a date the programme does not run: a standing is about the
+    /// block rather than about a session.
+    fn standing(
+        &self,
+        on: Date,
+    ) -> impl Future<Output = Result<LadderStanding, PrescriptionError>> + Send;
+
     /// The date is the only argument.
     ///
     /// The session role, the week and the ladder position are all derived — the

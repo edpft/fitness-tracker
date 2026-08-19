@@ -10,6 +10,7 @@ use application::{
 use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
+    prescription::WeekIndex,
 };
 
 pub fn run_started(stream: &LandingStream) {
@@ -288,6 +289,83 @@ pub fn programme_authored(
         parameters.hypertrophy.high,
     );
     println!("  holds {}", parameters.static_hold);
+}
+
+/// The programme in force, with its ladder week by week and where it stands.
+///
+/// **The table is the point.** A span and a duration are two numbers; what an
+/// operator needs to see is the load each week asks for, and which of those weeks
+/// they are actually on — which after a miss is not the week the calendar is in.
+pub fn programme_standing(standing: &application::LadderStanding) {
+    let programme = &standing.programme;
+    let parameters = &standing.parameters;
+    let calendar = programme.calendar();
+
+    println!(
+        "programme {} — {}, {} primary, {} training weeks from {}, gating on the {} session",
+        standing.programme_id,
+        programme.primary_exercise(),
+        programme.primary(),
+        calendar.duration_weeks(),
+        calendar.start(),
+        programme.gating_role(),
+    );
+    println!("anchor {}, fixed for the block", programme.anchor());
+    match standing.history_through {
+        Some(through) => println!("history through {through}"),
+        // § 38: an empty record and a stale one are different, and a report that
+        // printed nothing here would look the same for both.
+        None => println!("history through — nothing performed yet"),
+    }
+
+    let Ok(ladder) = programme.ladder(parameters) else {
+        println!("  no ladder: the block is too short to climb");
+        return;
+    };
+    let anchor = programme.anchor().load();
+    let increment = parameters.plate_increment;
+    let standing_week = standing.progress.week();
+
+    println!("  week  of anchor    heavy    light");
+    for week in 1..=calendar.duration_weeks() {
+        let Ok(index) = WeekIndex::new(week) else {
+            continue;
+        };
+        let Some(percentage) = ladder.percentage(index) else {
+            println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "test");
+            continue;
+        };
+        let heavy = ladder.heavy_top_set(anchor, index, increment);
+        let light = ladder.light_top_set(anchor, index, increment, parameters.light_of_heavy);
+        // The rung the record puts the operator on, which after a miss is behind
+        // the calendar.
+        let here = if index == standing_week { " ←" } else { "" };
+        // Formatted into strings first: a width in a format spec only applies if
+        // the `Display` impl routes through `Formatter::pad`, and these do not.
+        println!(
+            "  {week:>4}  {:>9}  {:>7}  {:>7}{here}",
+            format!("{percentage}"),
+            heavy.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
+            light.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
+        );
+    }
+
+    match standing.progress.reset() {
+        None => println!(
+            "  on the plan at week {standing_week} of {}",
+            ladder.climbing_weeks()
+        ),
+        Some(reset) => {
+            let load = standing
+                .progress
+                .heavy_top_set(ladder, anchor, increment)
+                .map_or_else(|| "—".to_owned(), |load| format!("{load}"));
+            println!(
+                "  the {reset} reset is in play: re-climbing at {load}, and the ladder resumes \
+                 at week {standing_week}"
+            );
+        }
+    }
 }
 
 /// The prescription, as a session to train from.

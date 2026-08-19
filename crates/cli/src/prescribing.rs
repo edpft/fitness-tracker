@@ -44,6 +44,35 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
     Ok(())
 }
 
+/// Report the programme in force and where its ladder stands.
+///
+/// **Reads and prints, and issues nothing.** Asking where the ladder is should not
+/// put a prescription in the store — a report that changed what it reports on is
+/// worse than no report.
+pub async fn standing(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
+    let pool = connect(database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let prescriber = Prescribing::new(PrescriptionPorts {
+        history: SqliteExerciseHistory::new(pool.clone()),
+        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        parameters: SqliteGenerationParameterStore::new(pool.clone()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool, zone.id().to_owned()),
+    });
+
+    // Today in the operator's zone, because "where the ladder stands" is a
+    // question about now and the answer moves at local midnight.
+    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
+    let standing = prescriber
+        .standing(today)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::programme_standing(&standing);
+    Ok(())
+}
+
 /// Issue the prescription for a date.
 pub async fn prescribe(
     database: &Path,

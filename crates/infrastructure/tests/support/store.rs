@@ -26,6 +26,13 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 /// The directory comes back with the pool because dropping it deletes the file
 /// the pool is talking to.
 pub async fn derived_and_authored() -> Fallible<(tempfile::TempDir, SqlitePool)> {
+    with_programme(programme::programme()?).await
+}
+
+/// The same, with a programme the caller chose.
+pub async fn with_programme(
+    programme: domain::prescription::Programme,
+) -> Fallible<(tempfile::TempDir, SqlitePool)> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
 
@@ -57,7 +64,7 @@ pub async fn derived_and_authored() -> Fallible<(tempfile::TempDir, SqlitePool)>
         SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(&programme::programme()?, &programme::parameters()?)
+    .author(&programme, &programme::parameters()?)
     .await?;
 
     Ok((directory, pool))

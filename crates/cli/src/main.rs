@@ -11,7 +11,10 @@ mod output;
 mod prescribing;
 mod wiring;
 
-use std::{path::PathBuf, process::ExitCode};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgMatches, Command as ClapCommand, value_parser};
@@ -105,8 +108,13 @@ fn command() -> ClapCommand {
         )
         .subcommand(
             ClapCommand::new("status")
-                .about("Report the most recent successful extraction")
-                .arg(stream_argument()),
+                .about("Report the most recent successful extraction, and the programme in force")
+                .arg(stream_argument())
+                // Optional here, unlike everywhere else it appears. § 34 forbids a
+                // default and § 38 wants staleness observable even when things are
+                // wrong — so a status with no zone reports the streams and says
+                // what it could not read, rather than refusing to report at all.
+                .arg(timezone_argument().required(false)),
         )
         .subcommand(prescribe_command())
         .subcommand(programme_command())
@@ -138,8 +146,10 @@ fn prescribe_command() -> ClapCommand {
 /// Author the programme.
 fn programme_command() -> ClapCommand {
     ClapCommand::new("programme")
-        .about("Author the programme from a document")
-        .arg(timezone_argument())
+        .about("Author the programme, or report the one in force")
+        // Global across `author` and `show`, so `--timezone` may be typed on
+        // either side of the subcommand. Both need it and neither has a default.
+        .arg(timezone_argument().global(true))
         .subcommand_required(true)
         .subcommand(
             ClapCommand::new("author")
@@ -151,6 +161,10 @@ fn programme_command() -> ClapCommand {
                         .help("The document to read"),
                 ),
         )
+        .subcommand(ClapCommand::new("show").about(
+            "Report the programme in force, its ladder week by week, and which \
+                 rung the record puts you on",
+        ))
 }
 
 /// The zone the operator trains in.
@@ -198,6 +212,13 @@ impl Failure {
             message: message.into(),
             code,
         }
+    }
+
+    /// What went wrong, for a caller reporting it in place rather than exiting on
+    /// it. `status` needs this: an unauthored programme is a state to describe,
+    /// not a reason to fail a staleness report.
+    fn message_text(&self) -> &str {
+        &self.message
     }
 }
 
@@ -322,14 +343,17 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             return prescribing::prescribe(&database, &zone, date).await;
         }
         "programme" => {
-            let Some(("author", author)) = sub.subcommand() else {
-                return Err(Failure::message("no programme command given", exit::USAGE));
-            };
             let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
-            let Some(path) = author.get_one::<PathBuf>("path") else {
-                return Err(Failure::message("no document given", exit::USAGE));
+            return match sub.subcommand() {
+                Some(("author", author)) => {
+                    let Some(path) = author.get_one::<PathBuf>("path") else {
+                        return Err(Failure::message("no document given", exit::USAGE));
+                    };
+                    prescribing::author(&database, &zone, path).await
+                }
+                Some(("show", _)) => prescribing::standing(&database, &zone).await,
+                _ => Err(Failure::message("no programme command given", exit::USAGE)),
             };
-            return prescribing::author(&database, &zone, path).await;
         }
         _ => {}
     }
@@ -364,8 +388,46 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         }
     };
 
+    let reporting = matches!(command, Command::Status);
     report(&stream, wiring::run(command, known, &database).await?);
+
+    // § 38 on the prescribed side: which programme is in force, where its ladder
+    // stands, and how current the record it derives from is. Appended to `status`
+    // rather than given a command of its own, because "is anything stale?" is one
+    // question and answering half of it is how a stale programme goes unnoticed.
+    if reporting {
+        prescription_status(
+            &database,
+            sub.get_one::<String>("timezone").map(String::as_str),
+        )
+        .await?;
+    }
     Ok(())
+}
+
+/// The prescription section of `status`, and why it may be absent.
+async fn prescription_status(database: &Path, declared: Option<&str>) -> Result<(), Failure> {
+    // A blank line, so the prescribed side reads as its own section rather than as
+    // more of the derivation's.
+    println!();
+    let Ok(zone) = config::timezone(declared) else {
+        // Not a failure: the stream half of the report is what an operator reaches
+        // for when ingestion looks broken, and it must not stop working because a
+        // zone is unset. Saying so beats printing nothing.
+        println!(
+            "prescription — needs a time zone; pass --timezone or set FITNESS_TRACKER_TIMEZONE"
+        );
+        return Ok(());
+    };
+    match prescribing::standing(database, &zone).await {
+        Ok(()) => Ok(()),
+        // An unauthored programme is a legitimate state for a store that only
+        // extracts, so it is reported rather than made an exit code.
+        Err(failure) => {
+            println!("prescription — {}", failure.message_text());
+            Ok(())
+        }
+    }
 }
 
 /// The catalogue entry this invocation names.

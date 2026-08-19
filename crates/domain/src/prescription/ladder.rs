@@ -30,8 +30,10 @@
 //!
 //! **This module holds the plan and not the response to it failing.** A stall
 //! suspends the ladder and re-climbs from the failed load, and that is a
-//! separate mechanism that never touches the anchor. Conflating the two is a
-//! mistake the model has already made once.
+//! separate mechanism that never touches the anchor: it lives in
+//! [`super::progression`]. Conflating the two is a mistake the model has already
+//! made once, which is why the two are two modules and not two halves of this
+//! one.
 
 use crate::gym::Kg;
 

@@ -238,6 +238,20 @@ pub fn calendar_running(
     Calendar::new(start, 8, skipping, weekdays, zone()?).map_err(invalid)
 }
 
+/// The same block, started on a given date.
+///
+/// **Which weeks are inside the block decides which performed sessions gate the
+/// ladder.** The corpus's one failed attempt is on Friday 2026-07-03, the week
+/// before the block above opens, so a test about the failure mechanism has to
+/// start the block early enough to contain it.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the date or the weekday list is invalid.
+pub fn calendar_from(start: Date, weekdays: Weekdays) -> Result<Calendar, ProgrammeFixtureError> {
+    Calendar::new(start, 8, &[], weekdays, zone()?).map_err(invalid)
+}
+
 /// A whole programme, ready to prescribe from.
 ///
 /// Eight weeks from 2026-07-06, gating on the heavy session — the block the
@@ -266,6 +280,26 @@ pub fn programme_skipping(weeks: &[Date]) -> Result<Programme, ProgrammeFixtureE
         anchor()?,
         SessionRole::Heavy,
         calendar_running(weekdays()?, weeks)?,
+        &parameters,
+    )
+    .map_err(invalid)
+}
+
+/// The same programme, started on a given date.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
+/// mistake in this file rather than in the code under test.
+pub fn programme_from(start: Date) -> Result<Programme, ProgrammeFixtureError> {
+    let parameters = parameters()?;
+    Programme::new(
+        domain::prescription::PrimaryPattern::KneeDominant,
+        Exercise::Reps(RepsExercise::FrontSquat),
+        fills()?,
+        anchor()?,
+        SessionRole::Heavy,
+        calendar_from(start, weekdays()?)?,
         &parameters,
     )
     .map_err(invalid)
