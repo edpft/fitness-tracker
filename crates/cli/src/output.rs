@@ -265,9 +265,7 @@ pub fn programme_authored(
     }
     println!("anchor {}, fixed for the block", programme.anchor());
     println!(
-        "  ladder opens at {} of anchor and climbs {} a week over {} climbing weeks; \
-         week {} is the test",
-        parameters.ladder_start,
+        "  ladder climbs {}kg a week over {} climbing weeks; week {} is the test",
         parameters.ladder_climb_per_week,
         calendar.duration_weeks().saturating_sub(1),
         calendar.duration_weeks(),
@@ -339,8 +337,8 @@ pub fn programme_standing(standing: &application::LadderStanding) {
             println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "test");
             continue;
         };
-        let heavy = ladder.heavy_top_set(anchor, index, increment);
-        let light = ladder.light_top_set(anchor, index, increment, parameters.light_of_heavy);
+        let heavy = ladder.heavy_top_set(index, increment);
+        let light = ladder.light_top_set(index, increment, parameters.light_of_heavy);
         // The rung the record puts the operator on, which after a miss is behind
         // the calendar.
         let here = if index == standing_week { " ←" } else { "" };
@@ -354,19 +352,29 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         );
     }
 
-    match standing.progress.reset() {
+    match standing.progress.climb_back() {
         None => println!(
             "  on the plan at week {standing_week} of {}",
             ladder.climbing_weeks()
         ),
-        Some(reset) => {
+        Some(climb) => {
             let load = standing
                 .progress
-                .heavy_top_set(ladder, anchor, increment)
+                .heavy_top_set(ladder, increment)
                 .map_or_else(|| "—".to_owned(), |load| format!("{load}"));
+            // The entry climb is deliberately not called a reset: it has spent
+            // no stall, so both resets are still available to the next failure.
+            let describing = match climb {
+                domain::prescription::ClimbBack::Entry => {
+                    "the block is climbing in from its entry test".to_owned()
+                }
+                domain::prescription::ClimbBack::Reset(reset) => {
+                    format!("the {reset} reset is in play")
+                }
+            };
             println!(
-                "  the {reset} reset is in play: re-climbing at {load}, and the ladder resumes \
-                 at week {standing_week}"
+                "  {describing}: re-climbing at {load}, and the ladder resumes at \
+                 week {standing_week}"
             );
         }
     }

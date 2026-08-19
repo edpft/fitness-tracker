@@ -388,7 +388,9 @@ recorded. Four observations from building the artifacts:
   the operator for that span established there is no span: half of what was left
   of D8 stopped existing rather than being answered (D13).
 
-The gap design did not close: **the ladder's opening remains unknown**, so
-SC-001 cannot be demonstrated until the operator supplies it. This
-is recorded as an authored-value gap rather than a design one (D8), and it is the
-one thing that stands between this plan and a workout.
+~~The gap design did not close: **the ladder's opening remains unknown**~~ —
+**closed 2026-08-19, and not by supplying it.** The opening is derived from the
+entry test the anchor records (D14, decision `0009`), as the endpoint beside it
+had already stopped existing (D13, decision `0008`). D8 was an authored-value gap
+that turned out to be two values the model does not have, and nothing now stands
+between this plan and a workout.

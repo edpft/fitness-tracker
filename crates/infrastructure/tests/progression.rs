@@ -1,16 +1,22 @@
-//! The failure mechanism, wired up: a real miss holds a real ladder.
+//! The failure mechanism, wired up: a real entry test opens a real block.
 //!
 //! User story 3 through its ports. The mechanism's arithmetic is asserted in
-//! `crates/domain/tests/progression.rs` — nine hand-built sequences including the
+//! `crates/domain/tests/progression.rs` — hand-built sequences including the
 //! worked example load for load — and what needs a store is the wiring: that the
 //! *record* decides which rung a date gets, and that the calendar week it falls in
 //! does not.
 //!
-//! **The corpus supplies a genuine miss**, which is why this needs no synthetic
-//! session. The front squat of Friday 2026-07-03 was 95kg for zero repetitions,
-//! and user story 2 made it a failed attempt in the record. Friday is the fixture
-//! programme's gating day, so a block containing that Friday has a missed gating
-//! top set in its first week.
+//! **The corpus supplies a genuine entry test.** The front squat of Friday
+//! 2026-07-03 completed a single at 90 and then failed 95 for zero repetitions,
+//! which user story 2 made a failed attempt in the record and which the fixture
+//! programme's anchor records as its ceiling.
+//!
+//! **That is also why no in-block miss is asserted here.** It is the corpus's only
+//! failure, and since 2026-08-19 a block opens *from* its entry test rather than
+//! containing it — `Programme::new` refuses one that does not, because a block
+//! holding its own entry test would read that failure twice. So the block starts
+//! the Monday after, the record has no missed gating set inside it, and US3-5
+//! stays where its arithmetic is: the domain suite.
 
 mod support;
 
@@ -35,9 +41,13 @@ type Prescriber = Prescribing<
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// A store whose block opens on 2026-06-29, so the 3rd of July is inside it.
+/// The Monday after the 3 July entry test. The block cannot start earlier: its
+/// own test would fall inside it.
+const BLOCK_START: Date = Date::constant(2026, 7, 6);
+
+/// A store whose block opens on 2026-07-06, the Monday after its entry test.
 async fn ready() -> Fallible<(Prescriber, tempfile::TempDir)> {
-    let start = Date::constant(2026, 6, 29);
+    let start = BLOCK_START;
     let (directory, pool) = store::with_programme(programme::programme_from(start)?).await?;
     Ok((
         Prescribing::new(PrescriptionPorts {
@@ -93,115 +103,88 @@ macro_rules! top_set {
     }};
 }
 
-/// The ladder holds after a missed gating top set, and the calendar does not.
+/// The block opens climbing in from its entry test, through the real store.
 ///
-/// **The sharp assertion.** 2026-07-10 is the *second* Friday of this block, so the
-/// calendar places it in week 2 — and the record says the first Friday's top set
-/// was missed, so the ladder is still at week 1. What is prescribed is week 1's
-/// load. Before US3 this was week 2's, which is what makes the two numbers
-/// different enough to tell apart.
+/// **The sharp assertion.** The entry test of 3 July completed 90 and failed 95,
+/// so the block opens by dropping the first reset's 10% from that failed 95 —
+/// 85.5, which the plate grid takes to 85 — and climbing back to it. What is
+/// prescribed for the block's first gating Friday is therefore 85, not the
+/// ladder's own first rung of 95.
+///
+/// The two numbers being different is the whole point: it is what tells "opened
+/// from the test" apart from "opened on the plan".
 #[test]
-fn a_missed_gating_session_holds_the_prescribed_ladder() {
+fn the_block_opens_climbing_in_from_its_entry_test() {
     let (prescriber, _directory) = ready!();
     let (issued, load) = top_set!(&prescriber, Date::constant(2026, 7, 10));
 
     assert_eq!(issued.workout.session_role(), SessionRole::Heavy);
     assert_eq!(
         issued.workout.week(),
-        WeekKind::Climbing(WeekIndex::FIRST.next()),
+        WeekKind::Climbing(WeekIndex::FIRST),
         "the calendar still says which week of the block this is"
     );
 
-    let (Ok(anchor), Ok(parameters)) = (programme::anchor(), programme::parameters()) else {
+    let Ok(parameters) = programme::parameters() else {
         panic!("the fixtures build")
     };
-    let Ok(programme) = programme::programme_from(Date::constant(2026, 6, 29)) else {
+    let Ok(programme) = programme::programme_from(BLOCK_START) else {
         panic!("the programme builds")
     };
     let Ok(ladder) = programme.ladder(&parameters) else {
         panic!("the ladder builds")
     };
-    let held = ladder.heavy_top_set(anchor.load(), WeekIndex::FIRST, parameters.plate_increment);
-    let advanced = ladder.heavy_top_set(
-        anchor.load(),
-        WeekIndex::FIRST.next(),
-        parameters.plate_increment,
-    );
-    assert_ne!(held, advanced, "the two rungs must be distinguishable");
 
+    let Ok(climbing_in) = "85".to_owned().try_into().map(domain::gym::Load::Absolute) else {
+        panic!("85 is a mass")
+    };
     assert_eq!(
         load,
-        held.map(domain::gym::Load::Absolute),
-        "a miss re-issues the rung, and 95kg for zero reps on 3 July was a miss"
+        Some(climbing_in),
+        "the block climbs in from the load its entry test failed"
+    );
+    assert_ne!(
+        load,
+        ladder
+            .heavy_top_set(WeekIndex::FIRST, parameters.plate_increment)
+            .map(domain::gym::Load::Absolute),
+        "and that is not the ladder's own first rung, which is the failed load itself"
     );
 }
 
-/// A session the gate does not watch does not move the ladder (US3-10).
+/// A session the gate does not watch does not move the progression (US3-10).
 ///
-/// **Counted out, because the numbers are what carry the assertion.** By Monday
-/// 2026-07-13 this block has had two Fridays — 3 July missed, 10 July completed —
-/// so the ladder held at week one and then advanced to week two. It has also had a
-/// Monday, 6 July, which was trained and completed. If the light session gated too
-/// the position would be week *three*.
+/// **Counted out, because the numbers are what carry the assertion.** The block
+/// opens climbing in at 85 toward the 95 its entry test failed. By Monday
+/// 2026-07-13 it has had one Friday — 10 July, completed — so the climb has
+/// advanced once, at the first reset's +5kg, to 90. The light session's top set
+/// is 85% of that, which the grid puts at 77.5.
 ///
-/// So asserting week two rather than week three is the assertion that only the
-/// gating role gates, and it is checked through the load actually prescribed rather
-/// than through the mechanism's own state.
+/// It has also had a Monday, 6 July, trained and completed. **If the light
+/// session gated too the climb would have advanced twice**, reaching 95, arriving
+/// at the ladder's first rung and prescribing 85% of 95 — which is 80. Asserting
+/// 77.5 rather than 80 is the assertion that only the gating role gates, and it
+/// is checked through the load actually prescribed rather than through the
+/// mechanism's own state.
 #[test]
 fn only_the_gating_role_gates() {
     let (prescriber, _directory) = ready!();
     let (issued, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
     assert_eq!(issued.workout.session_role(), SessionRole::Light);
 
-    let (Ok(anchor), Ok(parameters)) = (programme::anchor(), programme::parameters()) else {
-        panic!("the fixtures build")
+    let (Ok(gated), Ok(ungated)) = (
+        "77.5"
+            .to_owned()
+            .try_into()
+            .map(domain::gym::Load::Absolute),
+        "80".to_owned().try_into().map(domain::gym::Load::Absolute),
+    ) else {
+        panic!("both are masses")
     };
-    let Ok(programme) = programme::programme_from(Date::constant(2026, 6, 29)) else {
-        panic!("the programme builds")
-    };
-    let Ok(ladder) = programme.ladder(&parameters) else {
-        panic!("the ladder builds")
-    };
-    let light_of = |week: WeekIndex| {
-        ladder
-            .light_top_set(
-                anchor.load(),
-                week,
-                parameters.plate_increment,
-                parameters.light_of_heavy,
-            )
-            .map(domain::gym::Load::Absolute)
-    };
-
-    let gated = light_of(WeekIndex::FIRST.next());
-    let ungated = light_of(WeekIndex::FIRST.next().next());
-    assert_ne!(gated, ungated, "the two rungs must be distinguishable");
+    assert_ne!(gated, ungated, "the two positions must be distinguishable");
     assert_eq!(
-        light, gated,
-        "two Fridays have gone by, one of them missed, and the Monday between them \
-         is not a rung"
-    );
-}
-
-/// Asking twice does not advance the position.
-///
-/// **The regression test against reintroducing stored position state.** The ladder
-/// is walked out of the record on every read, so two reads of one date are two
-/// reads of the same record — and the second returns what was issued rather than
-/// issuing again.
-#[test]
-fn asking_twice_does_not_double_advance() {
-    let (prescriber, _directory) = ready!();
-    let date = Date::constant(2026, 7, 10);
-
-    let first = run!(prescriber.prescribe(date));
-    let second = run!(prescriber.prescribe(date));
-
-    assert!(first.freshly_issued);
-    assert!(!second.freshly_issued, "the second read issues nothing");
-    assert_eq!(
-        first.workout.shape(),
-        second.workout.shape(),
-        "and the loads are the ones already issued"
+        light,
+        Some(gated),
+        "one Friday has gone by, and the Monday before it does not advance the climb"
     );
 }

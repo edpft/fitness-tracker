@@ -3,17 +3,19 @@
 Written 2026-08-18, mid-feature. **Updated 2026-08-19**, and the numbers below
 are the current ones.
 
-**Branch**: `003-prescribed-workout-generation`, 34 commits ahead of `main`,
+**Branch**: `003-prescribed-workout-generation`, 35 commits ahead of `main`,
 nothing pushed. 285 tests pass and **the whole of `nix flake check` passes** — all
-18 checks. **79 of 80 tasks** in [tasks.md](./tasks.md) are done; the one left is
-T080, and it needs a number from the operator rather than any code.
+18 checks. **All 80 tasks** in [tasks.md](./tasks.md) are done. The feature is
+complete; the next thing is wiring `block` above `domain`, which is a feature of
+its own.
 
-**Read D13 in [research.md](./research.md) and
-`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md` before anything
-else.** The linear ladder no longer has an endpoint, which contradicts several
-passages further down this file that were written before that was settled. Where
-they conflict, D13 wins. The passages are left standing because *why* they were
-wrong is the most useful thing in this document.
+**Read D13 and D14 in [research.md](./research.md), and decisions `0008` and
+`0009`, before anything else.** The linear ladder no longer has an endpoint *or*
+an authored opening: it climbs at a stated rate from wherever the entry test puts
+it. That contradicts several passages further down this file, written before
+either was settled. Where they conflict, D13 and D14 win. The passages are left
+standing because *why* they were wrong is the most useful thing in this
+document.
 
 Read [spec.md](./spec.md), [plan.md](./plan.md) and [research.md](./research.md)
 before writing code. This note covers what those cannot: what changed *during*
@@ -356,10 +358,18 @@ block's entry anchor" was wrong and has been corrected.
   and re-climb when the plan was too ambitious.
 - ~~**The round trip** (`project` / `satisfies`) is designed but unwritten.~~
   **Done**, as attribution rather than reproduction (T058, SC-010c).
-- **The ladder's opening is the last unauthored value, and T080 is the last open
-  task.** `[parameters.ladder] start` is still `TODO` and authoring still refuses
-  the document while it is. Its companion `end` was removed rather than filled in
-  — see D13. Nothing else stands between this branch and a real workout.
+- ~~**The ladder's opening is the last unauthored value.**~~ **Gone, not
+  answered.** Both of D8's `TODO`s were dissolved on 2026-08-19: the endpoint
+  stopped existing (D13) and the opening became a derivation from the entry test
+  (D14). The fixture carries no `TODO`, `fitness prescribe` issues from it, and
+  **all 80 tasks are done**.
+- **The derived plan is much more ambitious than what the operator runs.** From
+  the corpus's entry test — 90 completed, 95 failed — an 8-week block plans 85
+  and 90 climbing in, then 95 … 110, which is 105.6% to 122.2% of the tested
+  anchor. The record's own July–August block ran 82.5, 85, 87.5 with 92.5 planned
+  for 28 August. Attributable to a template change (SC-002) and defensible — the
+  reset protocol is what finds the ceiling — but it is a large change and
+  decision `0009` lists what would soften it.
 - **Two parameters remain marked `INFERRED`** in
   `crates/infrastructure/tests/fixtures/programme.toml`: the per-role top-set
   repetitions and the per-block accessory ranges. They were read off the record
@@ -435,9 +445,8 @@ block's entry anchor" was wrong and has been corrected.
 2. ~~**Research the percentage table**~~ — done, D11 and D12.
 3. ~~**User story 2**, user story 3, the round trip, the decision records~~ —
    all done. `0006`, `0007` and `0008` are written.
-4. **Ask the operator where the ladder opens**, and author it in the fixture and
-   in their own programme. That is T080 and it is the whole of what is left in
-   this feature.
+4. ~~**Ask the operator where the ladder opens**~~ — asked, and the answer was
+   that it is not authored at all. See D14. T080 is closed and so is the feature.
 5. **Wire `block` above `domain`.** `domain::prescription::block::Block` is built
    and tested (research D11, D12) and nothing above it selects it: no
    `application` use case, no CLI, no store. The anchor conversion (a 3RM entry
@@ -446,5 +455,5 @@ block's entry anchor" was wrong and has been corrected.
    the autumn block's dependency**, per the calendar above, and it is a feature
    of its own rather than a task in this one.
 
-The operator's deadline is **Sunday 13 September**. Step 4 is what has to land by
-then; step 5 is what the autumn block needs.
+The operator's deadline is **Sunday 13 September**. Step 5 is what the autumn
+block needs, and it is now the only thing outstanding.

@@ -64,7 +64,7 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
     TimeZone::get("Europe/London").map_err(invalid)
 }
 
-/// The parameters, with a **test** ladder opening and climb.
+/// The parameters, with a **test** ladder climb.
 ///
 /// The back-off percentage and the warm-up ramp are the operator's own. The
 /// light-of-heavy percentage, the accessory range and the per-role repetitions are
@@ -99,8 +99,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
         warmup,
         back_off_of_top_set: pct("85%")?,
         light_of_heavy: pct("85%")?,
-        // A test opening and rate. See the module note.
-        ladder_start: pct("92.5%")?,
+        // A test rate. See the module note.
         ladder_climb_per_week: kg("2.5")?,
         top_set_reps: PerRole {
             light: TopSetReps::new(reps(3)?),
@@ -199,7 +198,9 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] if the date or load is invalid.
 pub fn anchor() -> Result<Anchor, ProgrammeFixtureError> {
     let from = Date::new(2026, 7, 3).map_err(invalid)?;
-    Anchor::new(kg("90")?, AnchorProvenance::Tested, from).map_err(invalid)
+    // The 3 July test: a completed single at 90, then a failed 95. The failed
+    // load is what the block opens at.
+    Anchor::new(kg("90")?, Some(kg("95")?), AnchorProvenance::Tested, from).map_err(invalid)
 }
 
 /// Monday light, Friday heavy — what the record has run since June.

@@ -137,7 +137,6 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             SELECT authored_at AS "authored_at!: String",
                    back_off_bp AS "back_off_bp!: i64",
                    light_of_heavy_bp AS "light_of_heavy_bp!: i64",
-                   ladder_start_bp AS "ladder_start_bp!: i64",
                    ladder_climb_grams AS "ladder_climb_grams!: i64",
                    plate_increment_grams AS "plate_increment_grams!: i64",
                    strength_low AS "strength_low!: i64",
@@ -177,7 +176,6 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                 warmup,
                 back_off_of_top_set: bp_from_storage(row.back_off_bp)?,
                 light_of_heavy: bp_from_storage(row.light_of_heavy_bp)?,
-                ladder_start: bp_from_storage(row.ladder_start_bp)?,
                 ladder_climb_per_week: grams_from_storage(row.ladder_climb_grams)?,
                 top_set_reps: PerRole { light, heavy },
                 strength: domain::prescription::AccessoryScheme {
@@ -224,7 +222,6 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let stamp = authored_at.to_string();
         let back_off = bp_for_storage(parameters.back_off_of_top_set);
         let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
-        let ladder_start = bp_for_storage(parameters.ladder_start);
         let ladder_climb = grams_for_storage(parameters.ladder_climb_per_week)?;
         let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
         let strength_low = i64::from(parameters.strength.low.as_u32());
@@ -244,19 +241,18 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             r"
             INSERT INTO generation_parameters (
                 authored_at, back_off_bp, light_of_heavy_bp,
-                ladder_start_bp, ladder_climb_grams, plate_increment_grams,
+                ladder_climb_grams, plate_increment_grams,
                 strength_low, strength_high, strength_sets,
                 hypertrophy_low, hypertrophy_high, hypertrophy_sets,
                 static_hold_seconds,
                 reset1_drop_bp, reset1_reclimb_grams,
                 reset2_drop_bp, reset2_reclimb_grams
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
             stamp,
             back_off,
             light_of_heavy,
-            ladder_start,
             ladder_climb,
             increment,
             strength_low,

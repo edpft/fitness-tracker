@@ -172,6 +172,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
                    anchor_grams AS "anchor_grams!: i64",
                    anchor_provenance AS "anchor_provenance!: String",
                    anchor_from AS "anchor_from!: String",
+                   anchor_failed_grams AS "anchor_failed_grams: i64",
                    gating_role AS "gating_role!: String",
                    start_date AS "start_date!: String",
                    duration_weeks AS "duration_weeks!: i64"
@@ -193,8 +194,17 @@ impl ProgrammeStore for SqliteProgrammeStore {
 
         let anchor_grams = u64::try_from(row.anchor_grams)
             .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
+        let anchor_failed = row
+            .anchor_failed_grams
+            .map(|grams| {
+                u64::try_from(grams)
+                    .map(Kg::from_grams)
+                    .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
+            })
+            .transpose()?;
         let anchor = Anchor::new(
             Kg::from_grams(anchor_grams),
+            anchor_failed,
             AnchorProvenance::try_from(row.anchor_provenance).map_err(|error| corrupt(&error))?,
             row.anchor_from
                 .parse::<Date>()
@@ -246,6 +256,14 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .map_err(|_| corrupt(&"an anchor larger than the store can hold"))?;
         let provenance = programme.anchor().provenance().as_str();
         let anchor_from = programme.anchor().from().to_string();
+        let anchor_failed = programme
+            .anchor()
+            .failed()
+            .map(|failed| {
+                i64::try_from(failed.as_grams())
+                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
+            })
+            .transpose()?;
         let gating = programme.gating_role().as_str();
         let start = programme.calendar().start().to_string();
         let duration = i64::from(programme.calendar().duration_weeks());
@@ -254,10 +272,10 @@ impl ProgrammeStore for SqliteProgrammeStore {
             r"
             INSERT INTO programme (
                 authored_at, template, primary_pattern, primary_exercise,
-                anchor_grams, anchor_provenance, anchor_from,
+                anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 gating_role, start_date, duration_weeks
             )
-            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
             authored_at,
@@ -266,6 +284,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             anchor_grams,
             provenance,
             anchor_from,
+            anchor_failed,
             gating,
             start,
             duration

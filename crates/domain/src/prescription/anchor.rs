@@ -77,9 +77,17 @@ impl fmt::Display for AnchorProvenance {
 ///
 /// Provenance is a constructor argument rather than a setter, so an anchor that
 /// exists is an anchor that knows where it came from.
+///
+/// **It carries the test's whole outcome, not just its best set.** A test that
+/// found the ceiling completed one load and failed the one above it, and both
+/// halves are evidence: the completed load is the maximum, and the failed load
+/// is where the block opens. A test that failed nothing did not find the
+/// ceiling, and the block opens one increment above what it did reach. See
+/// `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Anchor {
     load: Kg,
+    failed: Option<Kg>,
     provenance: AnchorProvenance,
     from: Date,
 }
@@ -87,25 +95,40 @@ pub struct Anchor {
 impl Anchor {
     /// # Errors
     ///
-    /// [`InvalidAnchor`] for no load. A block anchored at zero prescribes an
-    /// empty bar every week.
+    /// [`InvalidAnchor::NoLoad`] for no load — a block anchored at zero
+    /// prescribes an empty bar every week — and
+    /// [`InvalidAnchor::FailedBelowCompleted`] for a failed load at or below the
+    /// completed one, which is not a test that found a ceiling.
     pub const fn new(
         load: Kg,
+        failed: Option<Kg>,
         provenance: AnchorProvenance,
         from: Date,
     ) -> Result<Self, InvalidAnchor> {
         if load.as_grams() == 0 {
-            return Err(InvalidAnchor);
+            return Err(InvalidAnchor::NoLoad);
+        }
+        if let Some(failed) = failed
+            && failed.as_grams() <= load.as_grams()
+        {
+            return Err(InvalidAnchor::FailedBelowCompleted);
         }
         Ok(Self {
             load,
+            failed,
             provenance,
             from,
         })
     }
 
+    /// The heaviest single the test completed. This is the maximum.
     pub const fn load(self) -> Kg {
         self.load
+    }
+
+    /// What the test failed above it, if it found the ceiling.
+    pub const fn failed(self) -> Option<Kg> {
+        self.failed
     }
 
     pub const fn provenance(self) -> AnchorProvenance {
@@ -118,15 +141,26 @@ impl Anchor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("an anchor of no load is not a maximum")]
-pub struct InvalidAnchor;
+pub enum InvalidAnchor {
+    #[error("an anchor of no load is not a maximum")]
+    NoLoad,
+    #[error("a failed load at or below the completed one is not a ceiling")]
+    FailedBelowCompleted,
+}
 
 impl fmt::Display for Anchor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}kg ({}, from {})",
-            self.load, self.provenance, self.from
-        )
+        match self.failed {
+            Some(failed) => write!(
+                f,
+                "{}kg ({}, from {}, failed {}kg)",
+                self.load, self.provenance, self.from, failed
+            ),
+            None => write!(
+                f,
+                "{}kg ({}, from {})",
+                self.load, self.provenance, self.from
+            ),
+        }
     }
 }

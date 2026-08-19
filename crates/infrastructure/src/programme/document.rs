@@ -134,6 +134,10 @@ struct ProgrammeSection {
 #[derive(serde::Deserialize)]
 struct AnchorSection {
     load: String,
+    /// What the test failed above `load`, if it found the ceiling. Absent is a
+    /// test that failed nothing, which is a different state and not a default.
+    #[serde(default)]
+    failed: Option<String>,
     provenance: String,
     from: String,
 }
@@ -154,7 +158,6 @@ struct ParametersSection {
 
 #[derive(serde::Deserialize)]
 struct LadderSection {
-    start: String,
     climb_per_week: String,
 }
 
@@ -239,7 +242,6 @@ impl Document {
                 &p.back_off_of_top_set,
             )?,
             light_of_heavy: percentage("parameters.light_of_heavy", &p.light_of_heavy)?,
-            ladder_start: percentage("parameters.ladder.start", &p.ladder.start)?,
             ladder_climb_per_week: mass(
                 "parameters.ladder.climb_per_week",
                 &p.ladder.climb_per_week,
@@ -306,8 +308,15 @@ impl Document {
         }
         let weekdays = Weekdays::new(days).map_err(|error| invalid("programme.weekdays", error))?;
 
+        let failed = section
+            .anchor
+            .failed
+            .as_deref()
+            .map(|value| mass("programme.anchor.failed", value))
+            .transpose()?;
         let anchor = Anchor::new(
             mass("programme.anchor.load", &section.anchor.load)?,
+            failed,
             AnchorProvenance::try_from(section.anchor.provenance.clone())
                 .map_err(|error| invalid("programme.anchor.provenance", error))?,
             settled("programme.anchor.from", &section.anchor.from)?

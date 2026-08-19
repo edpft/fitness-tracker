@@ -281,13 +281,15 @@ pub struct GenerationParameters {
     /// Deriving it from the heavy load rather than from the anchor is what makes
     /// the two roles move together by construction.
     pub light_of_heavy: Percentage,
-    /// Where the climb opens, as a share of the anchor.
-    pub ladder_start: Percentage,
     /// What the plan adds each climbing week. There is no authored endpoint:
     /// the climb runs until the calendar stops it, and what regulates it is the
     /// reset protocol rather than a stated top. Same kind as
     /// [`ResetProtocol::reclimb_per_week`], because a reset is this climb run at
     /// a different rate off a lower start.
+    ///
+    /// **There is no opening percentage beside it.** Where the ladder opens is
+    /// derived from the entry test the anchor records, not authored — see
+    /// `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
     pub ladder_climb_per_week: Kg,
     pub top_set_reps: super::schedule::PerRole<TopSetReps>,
     /// Every non-primary strength slot.

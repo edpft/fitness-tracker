@@ -187,11 +187,15 @@ makes "a number of weeks and a starting 1RM" a complete statement of the
 generator's job.
 
 - **Duration** — how many weeks the block runs for. The last is the test.
-- **An entry anchor** — the starting 1RM, with its provenance.
-- **The ladder's opening**, as a percentage of the anchor, and **the rate it
-  climbs at**. Both authored. There is no endpoint: the climb runs at its rate
-  until the calendar stops it, and the reset protocol is what regulates it. See
-  `decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
+- **An entry anchor** — the test that precedes the block, with its provenance:
+  the heaviest single completed, and the load failed above it if the test found
+  one. The block opens from the second where there is one.
+- **The rate the ladder climbs at.** Authored, and the only loading parameter
+  that is. There is no endpoint and no opening: the climb runs at its rate until
+  the calendar stops it, the entry test says where it starts, and the reset
+  protocol is what regulates it. See
+  `decisions/0008-the-linear-ladder-climbs-at-a-rate.md` and
+  `decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
 - **The primary exercise**, and which strength slot is primary.
 - **Slot fills**, including the variations alternated across the two sessions in
   a cycle (Nordic curls one day, back extension the other).
@@ -642,10 +646,10 @@ informative and a missed session is not.
      percentage is still the right shape — an offset is a far larger relative
      drop at a 60kg anchor — but the number in it has to be chosen rather than
      solved for.
-   - **The ladder's opening percentage** of the anchor — still `TODO`, and the
-     one number the linear template asks for beyond the duration and the anchor.
    - **The ladder's climb per week** — 2.5kg, stated by the operator on
-     2026-08-19, and the same number the second reset re-climbs at.
+     2026-08-19, and the same number the second reset re-climbs at. **The only
+     loading parameter left**: where the ladder opens is derived from the entry
+     test, and there is no endpoint at all.
    - **Plate increment** — 2.5kg. The rounding rule that consumes it is code.
    - **Reset drops and re-climb rates** — −10%/+5kg and −5%/+2.5kg, from
      `primary-lift-progression.md`.

@@ -30,7 +30,7 @@ other, and the plan is not designed around the possibility of failing.
 
 ## What the generator is for
 
-Given **a number of weeks** and **a starting 1RM**, generate a programme which,
+Given **a number of weeks** and **an entry test**, generate a programme which,
 if performed, leaves the tested 1RM at the end higher than it was at the start.
 
 That is the whole requirement. Calendar goals, target numbers for the year, and
@@ -41,8 +41,16 @@ overload at a defined rate, and a test that says whether it worked.
 
 ## The anchor
 
-The anchor is the **starting 1RM**, and it is **fixed for the duration of the
-block**. Every prescribed load derives from it.
+The anchor is the **entry test's outcome**, and it is **fixed for the duration
+of the block**. It carries two things: the heaviest single completed, which is
+the starting 1RM, and the load failed above it if the test found one. Both are
+evidence and the block reads both — see
+`decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+
+**The test precedes the block it anchors, and a block may not contain its own
+entry test.** The test session is in the performed record, so a block holding it
+would read that failure twice: once as the opening it derived from, once as a
+missed gating set inside itself. Authoring refuses it.
 
 It carries its provenance, because the four ways of arriving at it are not
 equally good: a **test** is measured, an **e1RM** is derived, an **asserted**
@@ -76,8 +84,12 @@ above.
 Given a duration of `W` weeks and an anchor `A`:
 
 - The final week is the test, so there are `W - 1` climbing weeks.
-- The ladder opens at `quantise(A × start)` and adds `climb_per_week` to it for
+- The ladder opens at the load the entry test failed, or one `climb_per_week`
+  above what it completed if it failed nothing, and adds `climb_per_week` for
   each week after the first.
+- A block whose test failed something **climbs in** to that load first, by the
+  drop-and-re-climb protocol below. Those weeks are not ladder positions and
+  they cost no stall.
 - The light session's top set is a percentage of that week's heavy top set.
 - Warm-ups and back-off sets are percentages of their own session's top set —
   never of the anchor. See `prescribed-workout-domain-model.md`.
@@ -96,6 +108,14 @@ slowest honest climb and it lands every rung on the grid at every anchor. It is
 also the rate the reset protocol below already names: the second reset re-climbs
 at +2.5kg a week, which that section calls "baseline rate off a lower start".
 The two are one number and it was stated in prose before it was a parameter.
+
+**Where the opening comes from — the test, and nothing else.** A test that failed
+a load located the ceiling, and the block's job is to reach it and go past; a
+test that failed nothing established only a floor, and the block starts by
+beating it. Neither branch asks anyone for a percentage, which is what closed the
+last unauthored value in the model. **The plan this produces is ambitious**: a
+block opening on a failed load starts above its own anchor, and it is the reset
+protocol rather than the plan that finds the real ceiling.
 
 **What duration does here, and what it does not.** It says how long the climb
 runs. An interrupted eight weeks is the same plan as a twelve stopped earlier,

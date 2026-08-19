@@ -350,51 +350,51 @@ fn the_three_inconsistencies_are_refused() {
 
 // --- The authored document -------------------------------------------------
 
-/// The fixture document refuses to author while the ladder span is `TODO`.
+/// A document still carrying a `TODO` refuses to author.
 ///
-/// The value the operator has not settled is the one thing standing between this
-/// programme and a real prescription, and a placeholder that authored
-/// successfully would produce a workout indistinguishable from a decided one.
+/// **The fixture no longer has one**, so this puts one back. D8's two unsettled
+/// values are gone — the ladder's endpoint stopped existing (D13) and its
+/// opening is now derived from the entry test (D14) — but the mechanism has to
+/// keep working, because a placeholder that authored successfully would produce
+/// a workout indistinguishable from a decided one. Injecting the `TODO` is what
+/// keeps this a test of the refusal rather than a test of the fixture.
 #[test]
 fn an_unsettled_document_refuses_to_author() {
-    let path = std::path::Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/programme.toml"
-    ));
-    let Ok(document) = infrastructure::Document::read(path) else {
-        panic!("the fixture document is valid TOML")
+    let Ok(settled) = settled_document() else {
+        panic!("the fixture document is readable")
+    };
+    let unsettled = settled.replace(r#"climb_per_week = "2.5kg""#, r#"climb_per_week = "TODO""#);
+    assert_ne!(unsettled, settled, "the fixture carries the key to replace");
+
+    let Ok(document) = toml::from_str::<infrastructure::Document>(&unsettled) else {
+        panic!("the amended document is valid TOML")
     };
 
     match document.parameters() {
         Err(infrastructure::DocumentError::Unsettled { field }) => {
-            assert!(
-                field.starts_with("parameters.ladder"),
-                "the ladder's opening is what is unsettled, not {field}"
-            );
+            assert_eq!(field, "parameters.ladder.climb_per_week");
         }
         Ok(_) => panic!("a document with a TODO must not author"),
         Err(other) => panic!("the refusal names the unsettled field, got {other}"),
     }
 }
 
-/// The fixture document with the ladder's opening supplied.
+/// The fixture document, which is now settled throughout.
 ///
-/// A span, so the rest of the document can be exercised. Not the operator's:
-/// theirs is still `TODO`, and that is the point of the test above. A free
+/// It carried `TODO`s until 2026-08-19 and this returned it with them filled in.
+/// Nothing is left to fill: see `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`
+/// and `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`. A free
 /// function returning `Result`, because the test exemptions do not reach one.
 fn settled_document() -> Result<String, Box<dyn std::error::Error>> {
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/programme.toml"
     ));
-    let text = std::fs::read_to_string(path)?;
-    // Only the ladder's opening is still `TODO`; the climb is stated. See
-    // docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md.
-    Ok(text.replace(r#"start          = "TODO""#, r#"start          = "92.5%""#))
+    Ok(std::fs::read_to_string(path)?)
 }
 
-/// With the opening supplied, the whole document converts — every fill shape, the
-/// anchor, the weekday mapping and the parameters.
+/// The whole document converts — every fill shape, the anchor, the weekday
+/// mapping and the parameters.
 #[test]
 fn a_settled_document_authors() {
     let Ok(settled) = settled_document() else {

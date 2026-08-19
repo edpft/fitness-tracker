@@ -33,9 +33,9 @@ fitness extract hevy.workouts
 fitness normalise hevy.workouts
 ```
 
-Then author the programme. **This will fail until the ladder's opening is
-supplied** (research D8, narrowed by D13) — the document rejects a remaining
-`TODO` rather than defaulting. The climb beside it is stated at 2.5kg a week:
+Then author the programme. **The fixture is settled throughout** — D8's two
+unauthored values were dissolved rather than filled in on 2026-08-19 (D13, D14),
+so nothing here carries a `TODO`. The document would still reject one:
 
 ```bash
 fitness programme author crates/infrastructure/tests/fixtures/programme.toml
@@ -309,12 +309,9 @@ known, the light-of-heavy percentage is evidenced against three weeks, and the
 back-off and warm-up percentages are evidenced against six and three sessions
 respectively.
 
-No test above that asserts a real primary load can be written until the ladder's
-opening is stated. SC-010c's expected table and the fixture document are both
-written with the value absent so that neither compiles — a placeholder that runs
-green is worse than one that will not build.
-
-Everything else in this guide is writable now: the plan's property tests (US3-1 to
-US3-4) hold for any opening, the whole failure group is independent of it, group 2
-needs none at all, and group 4's structural comparison (SC-010b) is about blocks,
-order, grouping and slots rather than loads.
+~~No test above that asserts a real primary load can be written until the
+ladder's opening is stated.~~ **All of them can, since 2026-08-19.** The opening
+is derived from the entry test rather than authored (D14), so there is no value
+left to wait on and the fixture carries no `TODO`. The refusal mechanism is
+retained and tested by injecting one, because the next authored value will need
+it.

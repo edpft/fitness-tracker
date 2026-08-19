@@ -30,12 +30,12 @@ This does not change what US3 delivers, and it does not make US1 depend on US3's
 phase. It is recorded because silently reorganising a spec's stories is how a
 plan and its tasks drift apart.
 
-**One task is blocked, marked ⛔.** Research D8's ladder opening is not yet
-authored, so no real prescription can be issued. Its other half — the endpoint —
-was dissolved rather than answered on 2026-08-19 (D13). Nothing else waits on it:
-an earlier version of this file also blocked the corpus comparison, on the
-assumption that it asserted reproduction. It asserts attribution instead, which
-needs no authored load.
+**Nothing is blocked any more.** One task carried a ⛔ for the whole feature —
+T080, D8's unauthored ladder values — and on 2026-08-19 both were dissolved
+rather than answered: the endpoint stopped existing (D13) and the opening became
+a derivation from the entry test (D14). An earlier version of this file also
+blocked the corpus comparison, on the assumption that it asserted reproduction.
+It asserts attribution instead, which needs no authored load.
 
 ---
 
@@ -77,7 +77,7 @@ ports. Nothing in Phase 3+ starts until this phase is done.
 ### The plan (US3's plan half — blocking for US1)
 
 - [X] T020 Implement `Ladder` in `crates/domain/src/prescription/ladder.rs`: `start`, `end` and `climbing_weeks`, with `heavy_top_set(anchor, week)` deriving the step as `(end − start) / (climbing_weeks − 1)`, quantising through T012, returning `None` for the test week, and handling a single climbing week without dividing by zero (D2)
-- [X] T021 Implement `GenerationParameters`, `WarmupStep` and `ResetProtocol` in `crates/domain/src/prescription/parameters.rs`, including `ladder_start`, `ladder_climb_per_week` and `light_of_heavy`, and no `anchor_per_week`. (`ladder_end` until D13 replaced it with the rate)
+- [X] T021 Implement `GenerationParameters`, `WarmupStep` and `ResetProtocol` in `crates/domain/src/prescription/parameters.rs`, including `ladder_climb_per_week` and `light_of_heavy`, and no `anchor_per_week`. (`ladder_start` and `ladder_end` until D13 and D14 removed both — the rate replaced the endpoint, the entry test replaced the opening)
 - [X] T022 Implement the `linear` template in `crates/domain/src/prescription/linear/template.rs` — `PrimaryPattern`, `StrengthBlock` with four named pattern fields, `HypertrophyBlock` with `arms`, `forearms` and a single unsupersetted `core`, and `SlotFills` total over the eleven slots
 - [X] T023 Implement `Programme` in `crates/domain/src/prescription/linear/programme.rs` carrying `anchor`, `duration_weeks`, `gating_role`, `start`, `weekdays` and `fills`, plus the three consistency checks in [contracts/ports.md](./contracts/ports.md)
 - [X] T024 Implement `PrescribedWorkout` in `crates/domain/src/prescription/workout.rs` as a `WorkoutShape` plus `issued_for`, `session_role`, `week`, `anchor`, `parameters`, `programme` and `issued_at` — constructible only with all of them, so a projection cannot produce one (FR-034, D9)
@@ -226,7 +226,15 @@ moved once.
 - [X] T077 [P] Update `docs/gym-workout-domain-model.md` — its open question 3 is resolved by `Performed<M>`, and `Set<M>` no longer holds `measure`
 - [X] T078 Run `nix flake check` and confirm `architecture` verifies no `toml` type in `domain`, and `use-case-isolation` still passes. **Both claims were wrong and are now true.** `architecture` reads path dependencies only, so a registry crate like `toml` is invisible to it — a new `document-format-is-an-adapters` check does that job, verified by adding `toml` to `domain` and watching it fail. `use-case-isolation` named `extract` and `status` only, so `prescribe` and `normalise` were unguarded; it now names all four and is scoped to `src`, because an integration test at this ring drives a use case legitimately
 - [X] T079 Walk [quickstart.md](./quickstart.md) end to end against the real store. Walked against a **copy** of `local.db`, which was still at migration 2: `0003`–`0008` applied cleanly to real data, normalisation produced 164 workouts and 2 refusals (the zero-rep set is a failed attempt), authoring refused the `TODO` span naming the field, and with a span supplied `programme show` and `prescribe --date 2026-08-10` both issued. `programme show` put the derived rung at week 5 while the calendar was in week 6 — a real miss holding a real ladder. Extraction was not run: it would contact the source with the operator's key
-- [ ] T080 ⛔ Author the ladder's opening in `crates/infrastructure/tests/fixtures/programme.toml` and in the operator's own programme, then issue a real workout (SC-001). **Half done**: asked for the span, the operator answered that a linear block has no endpoint at all — it opens somewhere and adds 2.5kg a week, regulated by the reset protocol. So `end` is gone rather than answered (migration `0009`, decision `0008`, research D13) and `climb_per_week = "2.5kg"` is stated in the fixture. What is still `TODO`, and still refuses to author, is `start` — the one number the linear template asks for beyond the duration and the anchor
+- [X] T080 Author the ladder's opening in `crates/infrastructure/tests/fixtures/programme.toml` and in the operator's own programme, then issue a real workout (SC-001). **Closed by not authoring anything.** Asked for the span, the operator answered that a linear block has no endpoint — it climbs at a stated rate, regulated by the reset protocol (D13, decision `0008`, migration `0009`). Asked then where it opens, they answered that a block is preceded by a test and opens from it: at the load the test failed, climbed in to by the drop-and-re-climb protocol, or one climb above what it completed if nothing failed (D14, decision `0009`, migration `0010`). So both of D8's `TODO`s are gone rather than filled in, the fixture carries none, and `fitness prescribe` issues from it
+
+---
+
+## What is left
+
+Nothing in this feature. All 80 tasks are done and `nix flake check` passes.
+
+**The next thing is not a task here.** `domain::prescription::block::Block` is built and tested (research D11, D12) and nothing above it selects it — no `application` use case, no CLI, no store. The autumn block needs that, and it is a feature of its own. See [HANDOVER.md](./HANDOVER.md).
 
 ---
 
@@ -286,7 +294,7 @@ Setup, Foundational, then User Story 1. At the end of Phase 3 the operator can
 run `fitness prescribe` and get a trainable session. That is the whole point of
 the feature and everything after it is correctness over time.
 
-**The MVP is reachable without the ladder's opening.** T058 and T080 are the only
+**The MVP was reachable without the ladder's opening.** T058 and T080 were the only
 blocked tasks in it, and both concern the primary's absolute loads. The structure,
 the accessories, the storage and the round trip are all verifiable now.
 

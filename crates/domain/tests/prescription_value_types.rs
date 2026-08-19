@@ -111,7 +111,7 @@ proptest! {
         ],
         from in a_date(),
     ) {
-        let Ok(anchor) = Anchor::new(Kg::from_grams(grams), provenance, from) else {
+        let Ok(anchor) = Anchor::new(Kg::from_grams(grams), None, provenance, from) else {
             panic!("a non-zero load is an anchor")
         };
         prop_assert!(anchor.load().as_grams() > 0);
@@ -121,7 +121,39 @@ proptest! {
 
     #[test]
     fn an_anchor_of_no_load_is_refused(from in a_date()) {
-        prop_assert!(Anchor::new(Kg::NONE, AnchorProvenance::Tested, from).is_err());
+        prop_assert!(Anchor::new(Kg::NONE, None, AnchorProvenance::Tested, from).is_err());
+    }
+
+    /// A failed load at or below what was completed is not a ceiling.
+    ///
+    /// It would open the block below the test that anchors it, which is not a
+    /// state the model has: a test either found the ceiling above its best set
+    /// or did not find one at all.
+    #[test]
+    fn a_failed_load_below_the_completed_one_is_refused(
+        grams in 20_000_u64..300_000,
+        under in 0_u64..20_000,
+        from in a_date(),
+    ) {
+        let completed = Kg::from_grams(grams);
+        prop_assert!(
+            Anchor::new(
+                completed,
+                Some(Kg::from_grams(grams - under)),
+                AnchorProvenance::Tested,
+                from,
+            )
+            .is_err()
+        );
+        prop_assert!(
+            Anchor::new(
+                completed,
+                Some(Kg::from_grams(grams + 2_500)),
+                AnchorProvenance::Tested,
+                from,
+            )
+            .is_ok()
+        );
     }
 
     /// Weeks are one-based, and zero is refused rather than silently meaning the

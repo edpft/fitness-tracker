@@ -8,9 +8,23 @@
 //!
 //! ```text
 //! climbing weeks = duration - 1          the last week is the test
-//! opening        = quantise(anchor × start)
+//! opening        = the entry test's failed load, or its completed load + climb
 //! heavy(w)       = quantise(opening + climb × (w - 1))
 //! ```
+//!
+//! **The opening is derived from the entry test, not authored.** A test that
+//! found the ceiling failed a load, and that failed load is where the block
+//! opens — the block gets back to it through the drop-and-re-climb protocol,
+//! which is also what regulates every later failure. A test that failed nothing
+//! did not find the ceiling, so the block opens one increment above what it did
+//! reach. Either way nobody chooses a percentage. See
+//! `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+//!
+//! **So the anchor seeds the ladder and then does nothing else.** Warm-ups and
+//! back-offs are shares of their own session's top set, and the light session is
+//! a share of the heavy one, so no load anywhere is a percentage of the anchor.
+//! [`Ladder::implied_percentage`] divides one back out for reporting and is
+//! consumed by nothing.
 //!
 //! **The climb is a rate, and the block has no authored endpoint.** An earlier
 //! model authored the endpoint and derived the weekly step from it, on the
@@ -26,11 +40,6 @@
 //! the same plan as an uninterrupted twelve, stopped earlier. In `block`,
 //! duration shapes the plan — it sets the rung count and the phase split — and a
 //! different duration really is a different programme.
-//!
-//! **The start is a percentage of the anchor rather than a bar weight**, so it
-//! stays meaningful when the anchor moves. The climb is a mass, because 2.5kg is
-//! the smallest plate and a rate expressed as a percentage would land between
-//! plates at some anchors and not others.
 //!
 //! **A week that repeats the previous week's load is a legitimate plan, not a
 //! defect.** It cannot happen at a climb of one plate or more, but a smaller
@@ -50,10 +59,33 @@
 use crate::gym::Kg;
 
 use super::{
+    anchor::Anchor,
     parameters::{Percentage, PlateIncrement},
     quantise::quantise_loaded,
     schedule::WeekIndex,
 };
+
+/// Where a block opens, from the test that anchors it.
+///
+/// **The failed load, if the test found the ceiling.** The block does not open
+/// *below* it and work up as a plan — it opens there, and the drop-and-re-climb
+/// protocol is how it gets back, which is [`super::progression`]'s job rather
+/// than this one's.
+///
+/// **Otherwise one climb above what was completed.** A test that failed nothing
+/// did not find a ceiling, so its completed load is a floor and the block starts
+/// by beating it.
+fn opening(anchor: Anchor, climb_per_week: Kg, increment: PlateIncrement) -> Kg {
+    let load = anchor.failed().unwrap_or_else(|| {
+        Kg::from_grams(
+            anchor
+                .load()
+                .as_grams()
+                .saturating_add(climb_per_week.as_grams()),
+        )
+    });
+    quantise_loaded(load, increment)
+}
 
 /// Why a ladder could not be built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -64,27 +96,30 @@ pub enum InvalidLadder {
     DoesNotRise,
 }
 
-/// A block's plan: an opening share of a fixed anchor, and a weekly climb.
+/// A block's plan: where it opens, and what it adds each week.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ladder {
-    start: Percentage,
+    opening: Kg,
     climb_per_week: Kg,
     climbing_weeks: u32,
 }
 
 impl Ladder {
-    /// Build from an authored opening, a weekly climb and a block duration.
+    /// Build from an entry test, a weekly climb and a block duration.
     ///
-    /// `duration_weeks` counts the test, so the climbing weeks are one fewer.
+    /// `duration_weeks` counts the exit test, so the climbing weeks are one
+    /// fewer. The entry test is not one of them: it is the week before the block
+    /// and is what the anchor records.
     ///
     /// # Errors
     ///
     /// [`InvalidLadder::NoClimbingWeeks`] if the block is too short to climb at
     /// all, and [`InvalidLadder::DoesNotRise`] if the climb is nothing.
-    pub const fn new(
-        start: Percentage,
+    pub fn new(
+        anchor: Anchor,
         climb_per_week: Kg,
         duration_weeks: u32,
+        increment: PlateIncrement,
     ) -> Result<Self, InvalidLadder> {
         if duration_weeks < 2 {
             return Err(InvalidLadder::NoClimbingWeeks);
@@ -93,7 +128,7 @@ impl Ladder {
             return Err(InvalidLadder::DoesNotRise);
         }
         Ok(Self {
-            start,
+            opening: opening(anchor, climb_per_week, increment),
             climb_per_week,
             climbing_weeks: duration_weeks - 1,
         })
@@ -103,8 +138,9 @@ impl Ladder {
         self.climbing_weeks
     }
 
-    pub const fn start(self) -> Percentage {
-        self.start
+    /// The load the first climbing week asks for.
+    pub const fn opening(self) -> Kg {
+        self.opening
     }
 
     pub const fn climb_per_week(self) -> Kg {
@@ -116,25 +152,15 @@ impl Ladder {
     /// `None` for the block's test week, which is not a ladder position and has
     /// no load — the type says so, so a caller cannot ask for a load that does
     /// not exist.
-    ///
-    /// The opening is quantised before the climb is added, so every week's load
-    /// is a whole number of plates above the first rather than a rounding of its
-    /// own share of the anchor.
     #[must_use]
-    pub fn heavy_top_set(
-        self,
-        anchor: Kg,
-        week: WeekIndex,
-        increment: PlateIncrement,
-    ) -> Option<Kg> {
+    pub fn heavy_top_set(self, week: WeekIndex, increment: PlateIncrement) -> Option<Kg> {
         let offset = week.as_offset();
         if offset >= self.climbing_weeks {
             return None;
         }
 
-        let opening = quantise_loaded(self.start.of(anchor), increment);
         let climbed = u64::from(offset).checked_mul(self.climb_per_week.as_grams())?;
-        let grams = opening.as_grams().checked_add(climbed)?;
+        let grams = self.opening.as_grams().checked_add(climbed)?;
 
         Some(quantise_loaded(Kg::from_grams(grams), increment))
     }
@@ -146,12 +172,11 @@ impl Ladder {
     #[must_use]
     pub fn light_top_set(
         self,
-        anchor: Kg,
         week: WeekIndex,
         increment: PlateIncrement,
         light_of_heavy: Percentage,
     ) -> Option<Kg> {
-        self.heavy_top_set(anchor, week, increment)
+        self.heavy_top_set(week, increment)
             .map(|heavy| quantise_loaded(light_of_heavy.of(heavy), increment))
     }
 
@@ -170,7 +195,7 @@ impl Ladder {
         week: WeekIndex,
         increment: PlateIncrement,
     ) -> Option<Percentage> {
-        let load = self.heavy_top_set(anchor, week, increment)?;
+        let load = self.heavy_top_set(week, increment)?;
         let whole = i64::from(Percentage::WHOLE.as_basis_points());
 
         let points = i64::try_from(load.as_grams())

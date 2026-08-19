@@ -128,7 +128,7 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 
 **The plan**
 
-- **FR-012**: The system MUST generate a block's whole primary loading series from two inputs — a duration in weeks and a starting 1RM — plus the authored ladder opening and weekly rate.
+- **FR-012**: The system MUST generate a block's whole primary loading series from two inputs — a duration in weeks and an entry test — plus the authored weekly rate. Where the ladder opens is derived from the test: the load it failed, or one climb above what it completed if it failed nothing.
 - **FR-013**: The anchor MUST be constant for the duration of a block. No performed value may change it, and effort reports MUST NOT be an input to any derivation.
 - **FR-014**: The final week of a block MUST be a test. The ladder's climbing weeks are therefore one fewer than the duration.
 - **FR-015**: The ladder's weekly step MUST be derived from the authored start and end percentages and the number of climbing weeks, not authored directly.
@@ -169,8 +169,8 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 
 - **Generation parameters**: The values consulted when authoring a prescription — percentages, repetition counts, increments, reset rates. Only the current value is required (§ 14), because what they produced is recorded concretely in the issued workout.
 - **Programme**: A rule for generating a series of prescribed workouts, plus its authored inputs — duration, primary exercise, slot fills, gating role and entry anchor. Its purpose is to increase the primary exercise's maximum.
-- **Anchor**: The starting 1RM every primary load derives from, carrying its provenance — measured by test, derived, or asserted. **Constant for the block's duration.** Replaced only by a test, which ends a block. A stall does not touch it.
-- **Ladder**: The block's plan — a load per climbing week, opening at an authored percentage of the anchor and climbing by an authored rate. There is no endpoint: the climb runs until the calendar stops it and the reset protocol regulates it. The last week of a block is a test rather than a ladder position.
+- **Anchor**: The entry test the block derives from, carrying its provenance — measured by test, derived, or asserted — and holding both the heaviest single completed and the load failed above it, if the test found one. **Constant for the block's duration**, and dated before the block starts. Replaced only by a test, which ends a block. A stall does not touch it.
+- **Ladder**: The block's plan — a load per climbing week, opening where the entry test says and climbing by an authored rate. There is no endpoint: the climb runs until the calendar stops it and the reset protocol regulates it. The last week of a block is a test rather than a ladder position.
 - **Prescribed workout**: The concrete issued prescription for one date. An ordered sequence of items with grouping, each item slot-tagged, each set pinning at least one axis. The only prescribed entity stored.
 - **Prescribed set**: One instruction — a load, a target measure, an optional effort guide, and an optional rest instruction. Distinct in shape from a performed set: prescribed rest is an instruction whose absence means none was given, where performed rest is an observation whose absence means none was recorded.
 - **Workout shape**: The instructional content of a session — its items, groupings and sets — separated from the facts that make a prescription *issued*: the date, the anchor, the parameters and the programme. A generated prescription is a shape plus those facts. A projection of a performance is a shape and nothing else, which is what makes it unstorable as a prescription.
@@ -185,7 +185,7 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 - **SC-003**: Regenerating a past session from the anchor and history in force at that date and comparing it against what was actually prescribed yields a **list of divergences**, each attributable to one of: a parameter not yet stated, a change to the template since that session, or an arithmetic error made by hand. A divergence with no such attribution is a defect in generation. This is deliberately not a reproduction requirement — see SC-012 for the criterion that does assert agreement.
 - **SC-004**: The two back-off errors visible in the corpus cannot recur, because no prescribed load is arrived at by hand.
 - **SC-005**: The eleven-week worked example in `primary-lift-progression.md` is reproduced exactly, load for load.
-- **SC-011**: A block generated from a duration and a starting 1RM alone — no other operator input beyond the ladder's opening and rate — produces a complete primary loading series for every week, ending in a test.
+- **SC-011**: A block generated from a duration and an entry test alone — no other operator input beyond the ladder's rate — produces a complete primary loading series for every week, ending in a test.
 - **SC-006**: The failed 95kg attempt of 2026-07-03 appears in the training record as a failed attempt, and refusals over the landed corpus fall from three to two.
 - **SC-007**: No total, count or maximum estimate anywhere in the system changes as a result of that attempt becoming visible.
 - **SC-008**: Discarding all generated output and regenerating from the stored authored data reproduces it identically.

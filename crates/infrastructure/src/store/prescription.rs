@@ -277,6 +277,14 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             .map_err(|_| corrupt(&"an anchor larger than the store can hold"))?;
         let provenance = workout.anchor().provenance().as_str();
         let anchor_from = workout.anchor().from().to_string();
+        let anchor_failed = workout
+            .anchor()
+            .failed()
+            .map(|failed| {
+                i64::try_from(failed.as_grams())
+                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
+            })
+            .transpose()?;
         // The version the parameters came from — the join back to the authored
         // set. The values themselves are on the row too, which is what § 14
         // rests on; this is what tells two versions apart.
@@ -288,10 +296,10 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             INSERT INTO prescribed_workout (
                 programme, issued_for, zone, session_role,
                 week_kind, week_index,
-                anchor_grams, anchor_provenance, anchor_from,
+                anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 parameters_authored_at, issued_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             programme,
@@ -303,6 +311,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             anchor_grams,
             provenance,
             anchor_from,
+            anchor_failed,
             parameters_at,
             issued_at
         )
@@ -367,6 +376,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                    anchor_grams AS "anchor_grams!: i64",
                    anchor_provenance AS "anchor_provenance!: String",
                    anchor_from AS "anchor_from!: String",
+                   anchor_failed_grams AS "anchor_failed_grams: i64",
                    parameters_authored_at AS "parameters_authored_at!: String",
                    issued_at AS "issued_at!: String"
             FROM prescribed_workout
@@ -385,8 +395,17 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 
         let anchor_grams = u64::try_from(row.anchor_grams)
             .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
+        let anchor_failed = row
+            .anchor_failed_grams
+            .map(|grams| {
+                u64::try_from(grams)
+                    .map(Kg::from_grams)
+                    .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
+            })
+            .transpose()?;
         let anchor = Anchor::new(
             Kg::from_grams(anchor_grams),
+            anchor_failed,
             AnchorProvenance::try_from(row.anchor_provenance).map_err(|error| corrupt(&error))?,
             row.anchor_from
                 .parse::<Date>()

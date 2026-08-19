@@ -1097,3 +1097,56 @@ long as we get" is the actual intent and a duration-shaped plan is a fiction.
 anchor. Still `TODO`, still refusing to author, and still the one number the
 linear template asks for beyond the duration and the anchor. It is a real
 operator input, not something to derive.
+
+---
+
+## D14: The block opens from its entry test, and D8 closes
+
+**Decided 2026-08-19, by the operator, and it is the end of D8.** Recorded in
+full as `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+
+D13 removed the ladder's endpoint. This removes its opening, which was the other
+half of D8 and the last `TODO` in the authored document:
+
+```text
+the test failed a load     the block opens at that load, and climbs in to it
+the test failed nothing    the block opens one climb above what it completed
+```
+
+Climbing in is the existing drop-and-re-climb protocol at the first reset's
+−10% and +5kg a week. **It spends no stall**, so the first real failure still
+gets both resets — the operator was explicit about that, and `ClimbBack::Entry`
+makes it structural rather than a convention.
+
+### What this closes, and what it cost to see
+
+D8 spent three bounds and several hundred words reasoning about "what total gain
+is reasonable for a given duration", and the answer was that neither number it
+was reasoning about exists. The endpoint stopped existing in D13; the opening
+turns out to be evidence rather than a choice. **Both were dissolved by asking
+the operator rather than by more research**, which is the same lesson D13 records
+and the third time this feature has learned it.
+
+### The consequence worth stating plainly
+
+The derived plan is much more ambitious than the old span model or than what the
+operator has been running. From the corpus's entry test — 90 completed, 95 failed
+on 2026-07-03 — an 8-week block plans 85, 90 climbing in, then 95, 97.5, 100,
+102.5, 105, 107.5, 110: from 105.6% to 122.2% of the tested 90kg. The old model
+finished at 94.5, and the record's own July–August block ran 82.5, 85, 87.5 with
+92.5 planned for 28 August.
+
+That is a divergence of roughly 15kg and it is attributable to a template change,
+which is the bucket SC-002 asks for. It follows from the anchor being a
+*completed* single while the test proved 95 was reachable and missed — and from
+the design putting regulation in the reset protocol rather than in the plan. It
+is recorded so that revising it is a decision rather than a discovery; the
+decision record lists what would soften it.
+
+### One invariant this forced
+
+**A block may not contain its own entry test**, and `Programme::new` refuses one
+that does. The test session is in the performed record, so a block containing it
+would read that failure twice — as the opening it derived from, and as a missed
+gating set inside itself. The integration fixture had exactly that shape and
+moved from a 2026-06-29 start to 2026-07-06.

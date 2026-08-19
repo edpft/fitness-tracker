@@ -13,11 +13,22 @@
 //! the re-climb reaching the load  resume the ladder where it was suspended
 //! ```
 //!
+//! **A block whose entry test found a ceiling opens re-climbing, and that costs
+//! no stall.** The test failed a load; the block opens at that load and reaches
+//! it the same way a stall reaches it, at the first reset's drop and rate. It is
+//! [`ClimbBack::Entry`] rather than [`ClimbBack::Reset`] precisely so it cannot
+//! be counted: the operator settled on 2026-08-19 that the next failure still
+//! gets both resets. See
+//! `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+//!
 //! **The anchor is not a parameter of anything here, which is FR-021 held by the
 //! signature.** A reset takes its drop from the *failed load*, re-climbs at its
 //! own rate, and resumes the ladder untouched. The anchor is a measurement of
 //! where the block started and a stall is not evidence about that, so there is no
 //! way to write code here that moves it — § 24 rather than a rule to remember.
+//! [`progress_after`] takes the entry test's *failed* load, which is one number
+//! out of the anchor and not the anchor: it seeds the opening state and nothing
+//! can write back to it.
 //!
 //! **No effort report is read.** A [`GatingTopSet`] carries what was on the bar
 //! and whether it went up, and nothing else. That is the model of record's
@@ -84,16 +95,53 @@ impl std::fmt::Display for Reset {
     }
 }
 
+/// Why the primary is climbing back to a load rather than following the plan.
+///
+/// **Two reasons, and only one of them spends a stall.** They run identically —
+/// same drop, same rate, same resumption — so the distinction exists to stop the
+/// entry being counted as a reset, and to stop a report calling it one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClimbBack {
+    /// The block's opening. Its entry test failed a load, and the block climbs to
+    /// that load before the plan proper begins. Spends no stall: the next failure
+    /// is still the first reset.
+    Entry,
+    /// A stall inside the block.
+    Reset(Reset),
+}
+
+impl ClimbBack {
+    /// The protocol this climb runs at.
+    ///
+    /// The entry runs at the first reset's, because it is a first failure — the
+    /// second reset is defined as the slowdown *after* one.
+    const fn protocol(self, first: ResetProtocol, second: ResetProtocol) -> ResetProtocol {
+        match self {
+            Self::Entry | Self::Reset(Reset::First) => first,
+            Self::Reset(Reset::Second) => second,
+        }
+    }
+}
+
+impl std::fmt::Display for ClimbBack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Entry => f.write_str("entry"),
+            Self::Reset(reset) => write!(f, "{reset} reset"),
+        }
+    }
+}
+
 /// Where the primary's progression has got to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Progress {
     /// On the plan, at this climbing week.
     Climbing { week: WeekIndex },
-    /// Suspended. Climbing back toward the load that was failed, at the reset's
-    /// own rate, and the ladder resumes at the week it was suspended at when the
-    /// re-climb arrives.
+    /// Climbing back toward a load that was failed, at that climb's own rate, and
+    /// the ladder resumes at the week it was suspended at when the re-climb
+    /// arrives. Either a stall inside the block or the block's own opening.
     ReClimbing {
-        reset: Reset,
+        climb: ClimbBack,
         /// What to prescribe now.
         load: Kg,
         /// The load that was failed, and where the ladder waits.
@@ -109,14 +157,9 @@ impl Progress {
     /// a position and carries no load. A re-climb always has one, because it is a
     /// load rather than a position.
     #[must_use]
-    pub fn heavy_top_set(
-        self,
-        ladder: Ladder,
-        anchor: Kg,
-        increment: PlateIncrement,
-    ) -> Option<Kg> {
+    pub fn heavy_top_set(self, ladder: Ladder, increment: PlateIncrement) -> Option<Kg> {
         match self {
-            Self::Climbing { week } => ladder.heavy_top_set(anchor, week, increment),
+            Self::Climbing { week } => ladder.heavy_top_set(week, increment),
             Self::ReClimbing { load, .. } => Some(load),
         }
     }
@@ -130,11 +173,10 @@ impl Progress {
     pub fn light_top_set(
         self,
         ladder: Ladder,
-        anchor: Kg,
         increment: PlateIncrement,
         light_of_heavy: super::parameters::Percentage,
     ) -> Option<Kg> {
-        self.heavy_top_set(ladder, anchor, increment)
+        self.heavy_top_set(ladder, increment)
             .map(|heavy| quantise_loaded(light_of_heavy.of(heavy), increment))
     }
 
@@ -149,12 +191,31 @@ impl Progress {
         }
     }
 
-    /// Whether the ladder is suspended, and by which reset.
+    /// Which reset is in play, if the ladder is suspended by one.
+    ///
+    /// `None` for the block's entry climb, which is not a reset and must not be
+    /// reported or counted as one.
     #[must_use]
     pub const fn reset(self) -> Option<Reset> {
         match self {
+            Self::Climbing { .. }
+            | Self::ReClimbing {
+                climb: ClimbBack::Entry,
+                ..
+            } => None,
+            Self::ReClimbing {
+                climb: ClimbBack::Reset(reset),
+                ..
+            } => Some(reset),
+        }
+    }
+
+    /// Why the primary is climbing back, if it is.
+    #[must_use]
+    pub const fn climb_back(self) -> Option<ClimbBack> {
+        match self {
             Self::Climbing { .. } => None,
-            Self::ReClimbing { reset, .. } => Some(reset),
+            Self::ReClimbing { climb, .. } => Some(climb),
         }
     }
 }
@@ -166,17 +227,28 @@ impl Progress {
 /// then advance it twice. Nothing here reads a clock, a store or a previous
 /// answer.
 ///
-/// **No anchor**, which is the point: see the module note.
+/// **No anchor**, which is the point: see the module note. `entry_failed` is the
+/// one number taken out of it — what the entry test failed, if it found a
+/// ceiling — and it seeds the opening state without anything being able to write
+/// back to it.
 #[must_use]
 pub fn progress_after(
     gating: &[GatingTopSet],
+    entry_failed: Option<Kg>,
     first: ResetProtocol,
     second: ResetProtocol,
     increment: PlateIncrement,
 ) -> Progress {
-    let mut progress = Progress::Climbing {
-        week: WeekIndex::FIRST,
-    };
+    // A block whose entry test found a ceiling opens climbing back to it. The
+    // ladder's first week *is* that load, so this arrives exactly where the plan
+    // was going to start — and `stalls` stays at zero, which is what makes the
+    // next failure the first reset rather than the second.
+    let mut progress = entry_failed.map_or(
+        Progress::Climbing {
+            week: WeekIndex::FIRST,
+        },
+        |failed| begin(ClimbBack::Entry, failed, first, increment, WeekIndex::FIRST),
+    );
     // **How many stalls the block has had, which is not the same as what state it
     // is in.** A reset that completes puts the plan back in charge, so the state
     // says nothing about whether a stall has already been spent — and the next
@@ -208,8 +280,20 @@ pub fn progress_after(
         // interrupted the plan itself or a re-climb of it.
         let suspended = progress.week();
         progress = match stalls {
-            0 => begin(Reset::First, set.load, first, increment, suspended),
-            1 => begin(Reset::Second, set.load, second, increment, suspended),
+            0 => begin(
+                ClimbBack::Reset(Reset::First),
+                set.load,
+                first,
+                increment,
+                suspended,
+            ),
+            1 => begin(
+                ClimbBack::Reset(Reset::Second),
+                set.load,
+                second,
+                increment,
+                suspended,
+            ),
             // A third stall, which the model of record leaves undecided: within an
             // eleven-week ceiling three do not fit before a test intervenes.
             // Holding is the absence of a protocol rather than a third one, and it
@@ -230,7 +314,7 @@ const fn advance(
     second: ResetProtocol,
 ) -> Progress {
     let Progress::ReClimbing {
-        reset,
+        climb,
         load,
         toward,
         resuming_at,
@@ -242,10 +326,7 @@ const fn advance(
         return Progress::Climbing { week: week.next() };
     };
 
-    let rate = match reset {
-        Reset::First => first.reclimb_per_week,
-        Reset::Second => second.reclimb_per_week,
-    };
+    let rate = climb.protocol(first, second).reclimb_per_week;
     let next = quantise_loaded(
         Kg::from_grams(load.as_grams().saturating_add(rate.as_grams())),
         increment,
@@ -256,7 +337,7 @@ const fn advance(
         Progress::Climbing { week: resuming_at }
     } else {
         Progress::ReClimbing {
-            reset,
+            climb,
             load: next,
             toward,
             resuming_at,
@@ -264,16 +345,16 @@ const fn advance(
     }
 }
 
-/// Suspend the ladder and drop back from the load that was failed.
+/// Drop back from the load that was failed, and climb to it.
 fn begin(
-    reset: Reset,
+    climb: ClimbBack,
     failed: Kg,
     protocol: ResetProtocol,
     increment: PlateIncrement,
     resuming_at: WeekIndex,
 ) -> Progress {
     Progress::ReClimbing {
-        reset,
+        climb,
         // The drop is applied to the failed load. `applied_to` adds a negative
         // proportion to the whole, so −10% of 90kg is 81kg, and the plate grid
         // takes it to 80.

@@ -78,10 +78,11 @@ consequence of the vocabulary partition, not a constraint this contract adds.
 TOML, read once, converted to `domain` types immediately (research D6). No `toml`
 type reaches `domain`, and the `architecture` check verifies the ring.
 
-The document below is the programme in force as far as the record shows it. **The
-one `TODO` is the ladder's opening** — the one genuinely open value, research D8
-as narrowed by D13 — and `fitness programme author` rejects the document while it
-remains, rather than defaulting.
+The document below is the programme in force as far as the record shows it. **It
+carries no `TODO`** — D8's two unauthored values were dissolved rather than filled
+in on 2026-08-19 (research D13 and D14). `fitness programme author` still rejects
+a document carrying one, rather than defaulting; the `TODO`s remaining below are
+in the warm-up ramp, which this contract has never settled.
 
 Everything else is now evidenced: the anchor is the 3 July test, the light-of-heavy
 percentage reproduces three validated weeks, and the rep counts have been constant
@@ -149,15 +150,14 @@ members = ["dead-hang", "couch-stretch", "ninety-ninety", "stretching"]
 back_off_of_top_set = "85%"
 plate_increment     = "2.5kg"
 
-# The ladder: where the heavy top set opens, as a percentage of the anchor, and
-# what it adds each climbing week. The step is AUTHORED and there is no endpoint —
-# the climb runs until the calendar stops it, and the reset protocol regulates it
-# (research D13, decision 0008). This reversed research D2, which had the
-# endpoint authored and the step derived.
+# The ladder: what the heavy top set adds each climbing week. The step is
+# AUTHORED and there is no endpoint — the climb runs until the calendar stops it,
+# and the reset protocol regulates it (research D13, decision 0008). This
+# reversed research D2, which had the endpoint authored and the step derived.
 #
-# The opening is the one genuinely open value (research D8).
+# Where it opens is not here: it comes from the entry test in [programme.anchor]
+# (research D14, decision 0009).
 [parameters.ladder]
-start          = "TODO"     # a classic block opens around 92.5%
 climb_per_week = "2.5kg"   # the smallest plate, and the second reset's rate
 
 # The light session's top set, as a percentage of that week's heavy top set.

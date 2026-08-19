@@ -53,6 +53,13 @@ pub enum InconsistentProgramme {
     },
     #[error("the ladder is not a plan: {0}")]
     Ladder(#[from] InvalidLadder),
+    #[error(
+        "this programme starts on {start} but its entry test is dated {tested},          which is not before it"
+    )]
+    EntryTestIsNotBeforeTheBlock {
+        start: jiff::civil::Date,
+        tested: jiff::civil::Date,
+    },
 }
 
 /// A rule for generating a series of prescribed workouts, plus its inputs.
@@ -95,15 +102,31 @@ impl Programme {
             calendar.weekdays(),
         )?;
 
-        // 4. And the climb has to make a ladder over this duration. Checked here
+        // 4. The entry test precedes the block it anchors.
+        //
+        //    Not pedantry about dates: the test session is in the performed
+        //    record, so a block that contains its own entry test reads that
+        //    session as a gating one *and* opens re-climbing from it — the same
+        //    failure counted twice, once as the block's opening and once as a
+        //    miss inside it. Refusing here is what makes the opening derivation
+        //    safe. See `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+        if anchor.from() >= calendar.start() {
+            return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
+                start: calendar.start(),
+                tested: anchor.from(),
+            });
+        }
+
+        // 5. And the climb has to make a ladder over this duration. Checked here
         //    so an unbuildable plan fails at authoring rather than at the first
         //    `prescribe`. Training weeks, not calendar ones: a block interrupted
         //    by a holiday is the same ladder run over a longer stretch of the
         //    year, not a longer ladder.
         Ladder::new(
-            parameters.ladder_start,
+            anchor,
             parameters.ladder_climb_per_week,
             calendar.duration_weeks(),
+            parameters.plate_increment,
         )?;
 
         Ok(Self {
@@ -253,11 +276,12 @@ impl Programme {
     ///
     /// [`InvalidLadder`] only if the parameters handed in differ from the ones
     /// the programme was authored against.
-    pub const fn ladder(&self, parameters: &GenerationParameters) -> Result<Ladder, InvalidLadder> {
+    pub fn ladder(&self, parameters: &GenerationParameters) -> Result<Ladder, InvalidLadder> {
         Ladder::new(
-            parameters.ladder_start,
+            self.anchor,
             parameters.ladder_climb_per_week,
             self.calendar.duration_weeks(),
+            parameters.plate_increment,
         )
     }
 

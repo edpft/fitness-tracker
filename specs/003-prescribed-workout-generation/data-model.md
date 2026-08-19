@@ -285,7 +285,8 @@ pub enum WeekKind { Climbing(WeekIndex), Test }
 ```
 
 **The step is authored, never derived**: each climbing week is one
-`ladder_climb_per_week` above the last, opening at `quantise(anchor × start)`.
+`ladder_climb_per_week` above the last, opening at the load the entry test failed
+— or one climb above what it completed, if it failed nothing (D14).
 Revised 2026-08-19 — this said the reverse, and derived the step by dividing a
 span by `climbing_weeks − 1`. See
 `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
@@ -397,9 +398,8 @@ pub struct GenerationParameters {
     pub warmup: NonEmpty<WarmupStep>,
     pub back_off_of_top_set: Percentage,
     pub top_set_reps: PerRole<TopSetReps>,
-    /// Where the climb opens, as a share of the anchor, and what it adds each
-    /// climbing week. There is no endpoint.
-    pub ladder_start: Percentage,
+    /// What the climb adds each climbing week. There is no endpoint, and no
+    /// opening either: the entry test on the `Anchor` says where it starts.
     pub ladder_climb_per_week: Kg,
     /// The light session's top set, as a percentage of that week's heavy one.
     pub light_of_heavy: Percentage,
@@ -505,7 +505,7 @@ scope for this feature entirely.
 
 ```text
 generation_parameters      authored_at (PK), back_off_bp, plate_increment_grams,
-                           ladder_start_bp, ladder_climb_grams, light_of_heavy_bp,
+                           ladder_climb_grams, light_of_heavy_bp,
                            reset1_drop_bp, reset1_reclimb_grams,
                            reset2_drop_bp, reset2_reclimb_grams
 generation_warmup_step     parameters_authored_at, position, of_top_set_bp, reps

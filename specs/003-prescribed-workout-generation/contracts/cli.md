@@ -72,9 +72,9 @@ issued as prescription 12
 ```
 
 The loads above are **illustrative**, not a fixture. The primary's numbers depend on
-the ladder's opening, which is not yet authored (research D8) — the 100% shown here
-is what a ladder opening at 92.5% and climbing 2.5kg a week would reach in week 6
-of 8, putting the light top set at 85% of 90kg.
+what the entry test found (research D14) — the 100% shown here is illustrative of
+a block whose ladder has reached the anchor, with the light top set at 85% of the
+heavy load.
 
 **What the header carries and why.** The resolved date and weekday, so the default
 is visible; the role, so a wrong weekday mapping is obvious; the week and ladder
@@ -137,10 +137,9 @@ so a superseded row is never consulted but also never lost.
 ```text
 authored programme 3 — front squat, knee-dominant primary, 8 weeks from
 2026-07-06, gating on the heavy session
-anchor 90kg (tested 2026-07-03), fixed for the block
+anchor 90kg (tested, from 2026-07-03, failed 95kg), fixed for the block
 parameters authored 2026-08-17T19:20:04+01:00
-  ladder 92.5% → 105% of anchor over 7 climbing weeks, +2.08%/week derived
-  week 8 is the test
+  ladder climbs 2.5kg a week over 7 climbing weeks; week 8 is the test
   heavy top set 1 rep; light top set 3 reps at 85% of the heavy load
   warm-up 40/60/80/90% of top set at 4/3/2/1 reps
   back-off 85% of top set, plate increment 2.5kg
@@ -157,15 +156,15 @@ Prints the same block as `author`, plus the slot fills and the whole ladder with
 the position reached and how it got there:
 
 ```text
-anchor 90kg (tested 2026-07-03) — fixed for this block
+anchor 90kg (tested, from 2026-07-03, failed 95kg) — fixed for this block
 
-week  ladder   heavy   light   state
-  1    92.5%    82.5    72.5   completed
-  2    94.6%      85      75   completed
-  3    96.7%    87.5    77.5   completed
-  4    98.8%      90    79.5   failed, held
-  5    98.8%      90    79.5   failed → reset 1
-  6      —         80      —   re-climbing (+5kg/week)
+week  of anchor   heavy   light   state
+  1     105.55%      95      80   completed
+  2     108.33%    97.5    82.5   completed
+  3     111.11%     100      85   completed
+  4     113.88%   102.5    87.5   failed, held
+  5     113.88%   102.5    87.5   failed → reset 1
+  6       —          92.5     —   re-climbing (+5kg/week)
   7      —       85       —    re-climbing
   8     test
 ```
@@ -185,7 +184,7 @@ Gains a third section, beside extraction and derivation:
 prescription
   programme        3, front squat, week 6 of 8
   anchor           90kg (tested, from 2026-07-03), fixed for the block
-  ladder           at 100% of anchor; opened at 92.5%, climbing 2.5kg a week
+  ladder           at 100% of anchor; opened from the entry test, climbing 2.5kg a week
   last issued      2026-08-14 (prescription 11)
   next programmed  2026-08-17 (Monday, light)
 ```

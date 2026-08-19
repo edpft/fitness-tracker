@@ -232,6 +232,7 @@ where
 
         Ok(progress_after(
             &gating,
+            programme.anchor().failed(),
             parameters.first_reset,
             parameters.second_reset,
             parameters.plate_increment,
@@ -376,15 +377,10 @@ fn primary_slot_item(
                 });
             };
             match role {
-                SessionRole::Heavy => {
-                    progress.heavy_top_set(ladder, programme.anchor().load(), increment)
+                SessionRole::Heavy => progress.heavy_top_set(ladder, increment),
+                SessionRole::Light => {
+                    progress.light_top_set(ladder, increment, parameters.light_of_heavy)
                 }
-                SessionRole::Light => progress.light_top_set(
-                    ladder,
-                    programme.anchor().load(),
-                    increment,
-                    parameters.light_of_heavy,
-                ),
             }
         }
         // A test has no ladder position; its load is what the day allows.
