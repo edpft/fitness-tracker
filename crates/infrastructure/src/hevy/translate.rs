@@ -227,7 +227,7 @@ impl HevyWorkoutTranslator {
         entry: &ExerciseEntry<'_>,
         mapped: Mapped,
         scribe: &mut Scribe,
-        measure_of: fn(&PerformedSet<'_>) -> Result<M, RefusalReason>,
+        measure_of: fn(&PerformedSet<'_>) -> Result<Performed<M>, RefusalReason>,
     ) -> Vec<Set<M>> {
         let mut translated = Vec::with_capacity(entry.sets.len());
         for set in &entry.sets {
@@ -246,14 +246,15 @@ impl HevyWorkoutTranslator {
     fn one_set<M>(
         set: &PerformedSet<'_>,
         mapped: Mapped,
-        measure_of: fn(&PerformedSet<'_>) -> Result<M, RefusalReason>,
+        measure_of: fn(&PerformedSet<'_>) -> Result<Performed<M>, RefusalReason>,
     ) -> Result<Set<M>, RefusalReason> {
         Ok(Set {
             load: load_of(set, mapped.load)?,
-            // Every set the source serves is a completed one here. The zero-rep
-            // sentinel that makes a `Performed::Failed` is read in
-            // `measure_of`'s caller, where the rep count is in hand.
-            outcome: Performed::Completed(measure_of(set)?),
+            // The outcome comes from the measure reader, because the sentinel that
+            // distinguishes a failed attempt *is* a measure: zero repetitions.
+            // Only the repetition reader has one; a hold of no seconds and a run
+            // of no distance are not attempts at anything.
+            outcome: measure_of(set)?,
             intensity: intensity_of(set)?,
             kind: kind_of(&set.kind)?,
             // Hevy's logged set carries no rest field and no per-set
@@ -346,21 +347,32 @@ fn load_of(set: &PerformedSet<'_>, reading: LoadReading) -> Result<Load, Refusal
     }
 }
 
-fn reps_of(set: &PerformedSet<'_>) -> Result<RepCount, RefusalReason> {
+/// The repetition column, and the one place an outcome is decided.
+///
+/// **Zero repetitions is a failed attempt, and the count is the discriminator.**
+/// Not the source's `failure` set type, which means "taken to failure" and sits on
+/// 77 sets in the corpus against this one — keying on it would file 76 completed
+/// working sets as attempts and take their volume out of every total. `0002`
+/// refused this case as unmodelled; the prescribed side now gives it meaning, and
+/// decision record `0007` records the reversal.
+///
+/// An *absent* rep count still refuses. A source serving no value at all on an
+/// exercise counted in repetitions has told us nothing, which is a different thing
+/// from telling us the lift was missed.
+fn reps_of(set: &PerformedSet<'_>) -> Result<Performed<RepCount>, RefusalReason> {
     let Some(reps) = set.reps else {
         return Err(RefusalReason::UnreadableValue {
             field: "reps",
             detail: "absent on an exercise counted in repetitions".to_owned(),
         });
     };
-    // Zero is the one genuine gap: a rep attempted and missed is a real event
-    // and is not a set, and it needs an attempt rather than a weaker RepCount.
-    RepCount::new(reps).map_err(|_| RefusalReason::ZeroReps)
+    Ok(RepCount::new(reps).map_or(Performed::Failed, Performed::Completed))
 }
 
-fn duration_of(set: &PerformedSet<'_>) -> Result<Duration, RefusalReason> {
+fn duration_of(set: &PerformedSet<'_>) -> Result<Performed<Duration>, RefusalReason> {
     set.duration_seconds
         .map(Duration::from_seconds)
+        .map(Performed::Completed)
         .ok_or_else(|| RefusalReason::UnreadableValue {
             field: "duration_seconds",
             detail: "absent on an exercise counted in elapsed time".to_owned(),
@@ -380,8 +392,8 @@ fn metres_of(set: &PerformedSet<'_>) -> Result<Metres, RefusalReason> {
     })
 }
 
-fn distance_of(set: &PerformedSet<'_>) -> Result<Distance, RefusalReason> {
-    metres_of(set).map(|metres| Distance { metres })
+fn distance_of(set: &PerformedSet<'_>) -> Result<Performed<Distance>, RefusalReason> {
+    metres_of(set).map(|metres| Performed::Completed(Distance { metres }))
 }
 
 /// Which of a workout's groupings are supersets, and which are malformed.

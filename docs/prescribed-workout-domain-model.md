@@ -551,11 +551,17 @@ Keying on the type would file 76 completed sets as failures.
 
 This is now load-bearing rather than tidy. Under the negative gate a miss is
 what triggers a stall, so a failed attempt that the normalised layer will not
-represent is a stall the programme cannot see. **Today the domain refuses it:**
-`RefusalReason::ZeroReps`, kind `unmodelled` — the corpus's single failed
-attempt is currently sitting in `normalisation_refusal` rather than in a
-workout. That refusal has to become an outcome before the gate can be built, and
-the change is in the Hevy translator and the performed set model, not here.
+represent is a stall the programme cannot see. **The domain records it, as of
+user story 2:** the translator reads `reps == 0` into `Performed::Failed`,
+`RefusalReason::ZeroReps` is gone, and the corpus's single failed attempt is a
+set in a workout rather than a row in `normalisation_refusal`. Migration `0008`
+clears the row it used to be, and decision record `0007` argues the reversal —
+this was refused as unmodelled when `0002` shipped, which was right about zero
+not being a count and wrong about where the case goes.
+
+`RefusalKind::Unmodelled` now has no reason mapping to it. It stays in the
+vocabulary: the next thing the domain cannot hold needs it, and an operator has
+to be able to tell "refine the model" from "fix the record".
 
 A failed attempt and an absent one are **not** equivalent under this gate, which
 is the reverse of what this document said when the gate was affirmative. A miss

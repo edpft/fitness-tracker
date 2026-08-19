@@ -169,15 +169,15 @@ total moves.
 
 ### Tests first (§ 31)
 
-- [ ] T059 [P] [US2] Write US2-1 and US2-4 in `crates/infrastructure/tests/failed_attempt.rs` — the zero-rep set becomes a failed attempt, distinguishable from an absence
-- [ ] T060 [P] [US2] Write US2-2 in `crates/infrastructure/tests/failed_attempt.rs` — 77 `failure`-typed sets in the corpus, exactly one of them a failed attempt. This is the guard against keying on the set type
-- [ ] T061 [P] [US2] Write US2-3 and SC-007 in `crates/infrastructure/tests/failed_attempt.rs` as a **diff**: compute every total, count and estimate before and after the change and assert equality. A hard-coded expected total would pass even if the failure were being counted
-- [ ] T062 [P] [US2] Write US2-5 in `crates/infrastructure/tests/failed_attempt.rs` — re-derive twice over unchanged raw, assert identical
+- [X] T059 [P] [US2] Write US2-1 and US2-4 in `crates/infrastructure/tests/failed_attempt.rs` — the zero-rep set becomes a failed attempt, distinguishable from an absence
+- [X] T060 [P] [US2] Write US2-2 in `crates/infrastructure/tests/failed_attempt.rs` — 77 `failure`-typed sets in the corpus, exactly one of them a failed attempt. This is the guard against keying on the set type
+- [X] T061 [P] [US2] Write US2-3 and SC-007 in `crates/infrastructure/tests/failed_attempt.rs` as a **diff**: compute every total, count and estimate before and after the change and assert equality. A hard-coded expected total would pass even if the failure were being counted
+- [X] T062 [P] [US2] Write US2-5 in `crates/infrastructure/tests/failed_attempt.rs` — re-derive twice over unchanged raw, assert identical
 
 ### Implementation
 
-- [ ] T063 [US2] Add the zero-reps arm to `crates/infrastructure/src/hevy/translate.rs`, keyed on `reps == 0` and **not** on the `failure` set type, producing `Performed::Failed`
-- [ ] T064 [US2] Remove `RefusalReason::ZeroReps` from `crates/domain/src/gym/refusal.rs` and its arm from the translator, and update the refusal-count assertions in `crates/infrastructure/tests/normalisation.rs` and `crates/infrastructure/tests/refusals.rs` from three to two
+- [X] T063 [US2] Add the zero-reps arm to `crates/infrastructure/src/hevy/translate.rs`, keyed on `reps == 0` and **not** on the `failure` set type, producing `Performed::Failed`
+- [X] T064 [US2] Remove `RefusalReason::ZeroReps` from `crates/domain/src/gym/refusal.rs` and its arm from the translator, and update the refusal-count assertions in `crates/infrastructure/tests/normalisation.rs` and `crates/infrastructure/tests/refusals.rs` from three to two
 
 **Checkpoint**: `fitness refusals` lists two, both malformed groupings, and the
 failed attempt is in the record.

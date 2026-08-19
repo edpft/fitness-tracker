@@ -22,8 +22,8 @@ use application::{
 use domain::{
     gym::{GymWorkout, Kg, Load, NonEmpty, RepCount},
     prescription::{
-        Divergence, PrescribedExercise, PrescribedItem, PrescribedSet, SlotId, Target,
-        WorkoutShape, project, satisfies,
+        Divergence, PrescribedExercise, PrescribedItem, PrescribedSet, ProjectionGap, SlotId,
+        Target, WorkoutShape, project, satisfies,
     },
 };
 use infrastructure::{
@@ -141,10 +141,18 @@ fn every_session_projects() {
     assert_eq!(all.len(), 163, "the corpus derives 163 workouts");
     for workout in &all {
         let projection = project(workout);
+        // **Only an unassignable slot removes an item.** A measure the record
+        // cannot supply is reported against an item that is still in the shape, so
+        // counting all gaps here would conflate the two.
+        let unslotted = projection
+            .gaps
+            .iter()
+            .filter(|gap| matches!(gap, ProjectionGap::SlotUnassignable { .. }))
+            .count();
         assert_eq!(
             projection.shape.items().count(),
-            workout.items().count() - projection.gaps.len(),
-            "every item is either in the shape or accounted for as a gap: {}",
+            workout.items().count() - unslotted,
+            "every item is either in the shape or reported unslottable: {}",
             workout.started_at().wall_clock().date()
         );
         assert!(
@@ -158,6 +166,36 @@ fn every_session_projects() {
         since_june.len(),
         14,
         "fourteen sessions from 15 June to the end of the corpus"
+    );
+}
+
+/// SC-010f: the 95kg failure projects with the gap that names it.
+///
+/// **The sharpest loss in the round trip, and it is new information.** The
+/// performed record holds the load that was on the bar and nothing about the
+/// repetitions being attempted, because nothing recorded them. So the projection
+/// cannot say what the set was for, and says so rather than inventing a count —
+/// which is what told us the performed model cannot fully describe a missed set.
+#[test]
+fn a_failed_attempt_projects_a_gap() {
+    let (reader, _prescriber, _directory) = ready!();
+    let performed: GymWorkout = performance!(&reader, Date::constant(2026, 7, 3));
+    let projection = project(&performed);
+
+    let unknown: Vec<&ProjectionGap> = projection
+        .gaps
+        .iter()
+        .filter(|gap| matches!(gap, ProjectionGap::IntendedMeasureUnknown { .. }))
+        .collect();
+    assert_eq!(unknown.len(), 1, "one attempt, one gap");
+
+    let Some(ProjectionGap::IntendedMeasureUnknown { load, .. }) = unknown.first().copied() else {
+        panic!("the gap was just counted")
+    };
+    assert_eq!(
+        *load,
+        Load::Absolute(Kg::from_grams(95_000)),
+        "the load survives the projection; the count is what does not"
     );
 }
 

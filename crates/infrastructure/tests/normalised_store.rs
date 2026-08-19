@@ -160,9 +160,9 @@ fn the_stored_layer_holds_what_the_derivation_produced() {
 
     assert_eq!(workouts, 163, "workouts");
     assert_eq!(entries, 1_135, "performed exercises");
-    assert_eq!(sets, 3_778, "performed sets");
+    assert_eq!(sets, 3_779, "performed sets");
     assert_eq!(supersets, 334, "supersets");
-    assert_eq!(refusals, 3, "refusals");
+    assert_eq!(refusals, 2, "refusals");
     assert_eq!(summary.workouts_written.as_usize(), 163);
     assert!(summary.reconciles(), "{summary:?}");
 }
@@ -229,7 +229,7 @@ fn refusals_survive_the_round_trip() {
         panic!("the refusals read back")
     };
 
-    assert_eq!(report.refusals.len(), 3);
+    assert_eq!(report.refusals.len(), 2);
     assert!(
         report.derived_at.is_some(),
         "a report says when the derivation ran, so a stale list reads as stale"
@@ -239,18 +239,22 @@ fn refusals_survive_the_round_trip() {
     for refusal in &report.refusals {
         *by_reason.entry(refusal.reason.as_str()).or_insert(0) += 1;
     }
-    assert_eq!(by_reason.get("zero-reps"), Some(&1));
+    assert_eq!(
+        by_reason.get("zero-reps"),
+        None,
+        "no longer a refusal at all"
+    );
     assert_eq!(by_reason.get("non-contiguous-grouping"), Some(&1));
     assert_eq!(by_reason.get("single-member-grouping"), Some(&1));
 
-    // The exercise survives, which is what makes a refused set actionable
-    // without re-reading the payload.
+    // The locus survives the round trip, which is what makes a refusal actionable
+    // without re-reading the payload. Asserted over the groupings now that the one
+    // refused *set* has become an outcome: a grouping names its entry positions.
     assert!(
         report
             .refusals
             .iter()
-            .filter(|refusal| refusal.reason.as_str() == "zero-reps")
-            .all(|refusal| refusal.exercise.is_some()),
-        "a refused set names its exercise after a round trip"
+            .all(|refusal| !refusal.source_record_id.as_str().is_empty()),
+        "a refusal names its record after a round trip"
     );
 }

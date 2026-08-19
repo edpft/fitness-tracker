@@ -1,0 +1,16 @@
+-- The one refused set becomes a failed attempt, so its refusal row is unreadable.
+--
+-- `0002` refused a zero-repetition set as unmodelled and `0003` added the
+-- `outcome` column that lets it be recorded instead. User story 2 completes the
+-- reversal: the translator now reads `reps == 0` as `Performed::Failed`, and
+-- `RefusalReason::ZeroReps` no longer exists — so a stored row saying `zero-reps`
+-- is a reason this build cannot parse, and reading the refusal report would fail
+-- rather than merely showing something stale.
+--
+-- **Deleting from a derivation is not deleting a fact.** These tables hold a
+-- derivation, never an input: § II requires them to be identical to a full
+-- re-derivation, which is why `0002` gave them no append-only triggers. The next
+-- `normalise` replaces every row here anyway; this only stops the window between
+-- the two from being an error. The raw payload the refusal was about is untouched
+-- and is where the set comes back from.
+DELETE FROM normalisation_refusal WHERE reason = 'zero-reps';

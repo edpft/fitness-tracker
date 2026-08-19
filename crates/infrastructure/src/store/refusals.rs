@@ -102,7 +102,6 @@ fn exercise_from_row(key: &str) -> Result<Exercise, StoreError> {
 fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason, StoreError> {
     let detail = detail.unwrap_or_default();
     match reason {
-        "zero-reps" => Ok(RefusalReason::ZeroReps),
         "non-contiguous-grouping" => Ok(RefusalReason::NonContiguousGrouping),
         "single-member-grouping" => Ok(RefusalReason::SingleMemberGrouping),
         "no-sets-in-entry" => Ok(RefusalReason::NoSetsInEntry),
@@ -236,7 +235,9 @@ mod tests {
     #[test]
     fn a_reason_round_trips_through_its_key() {
         for (key, kind) in [
-            ("zero-reps", RefusalKind::Unmodelled),
+            // `zero-reps` is deliberately absent: a set of zero repetitions is a
+            // failed attempt now, so no build writes that key and this one refuses
+            // to read it. Migration `0008` clears the rows that hold it.
             ("non-contiguous-grouping", RefusalKind::WrongData),
             ("single-member-grouping", RefusalKind::WrongData),
             ("no-sets-in-entry", RefusalKind::WrongData),

@@ -44,11 +44,11 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
     assert_eq!(entries, 1_135, "every landed exercise entry translates");
     assert_eq!(supersets, 334, "every well-formed grouping is a superset");
 
-    // One set in the corpus does not translate: 95 kg for zero reps, an attempt
-    // that failed. It is a real event and it is not a set, and nothing else is
-    // refused — the model rejects exactly the thing it has no shape for.
-    assert_eq!(sets, 3_778, "of 3,779 sets translate");
-    assert_eq!(produced.refusals.len(), 3, "one set and two groupings");
+    // Every set in the corpus translates. The one that did not — 95 kg for zero
+    // reps — is a failed attempt now rather than a refusal (US2), so what is left
+    // refused is the two malformed groupings and nothing else.
+    assert_eq!(sets, 3_779, "every landed set translates");
+    assert_eq!(produced.refusals.len(), 2, "two groupings, and no set");
 }
 
 /// SC-003. Every template the corpus holds is covered, so no derivation of it
@@ -201,10 +201,13 @@ fn absence_is_absence() {
         }
     }
 
-    // 2,415 sets in the corpus record an intensity. One sits on the zero-rep
-    // attempt, which refuses, so 2,414 reach the normalised layer.
-    assert_eq!(with_intensity, 2_414, "sets carrying an intensity");
-    assert_eq!(with_intensity + without_intensity, 3_778, "sets in total");
+    // 2,415 sets in the corpus record an intensity, and all of them reach the
+    // normalised layer now: the last one to arrive sits on the zero-rep attempt,
+    // which is a failed attempt rather than a refusal (US2). Its recorded RIR is
+    // kept as the observation it is — a failure carries no *measure*, which is a
+    // different absence from carrying no effort.
+    assert_eq!(with_intensity, 2_415, "sets carrying an intensity");
+    assert_eq!(with_intensity + without_intensity, 3_779, "sets in total");
     // No positional rule reconstructs these: the corpus opens workouts with
     // heavy bridging singles tagged as warm-ups.
     assert_eq!(warmups, 361, "warm-up sets");

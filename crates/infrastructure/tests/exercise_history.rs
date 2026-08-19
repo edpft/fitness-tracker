@@ -145,9 +145,10 @@ fn the_primarys_series_is_ordered_and_complete() {
 /// The session of 2026-07-03 is the anchor's evidence: a completed single at 90,
 /// and a failed attempt at 95 above it.
 ///
-/// Until user story 2 lands the failure is still refused, so the 95 is absent
-/// here. The assertion is written to say which state it is in, so it becomes the
-/// regression test for that change rather than needing a rewrite.
+/// **Both are in the record now.** This test was written against the state before
+/// user story 2 — where the 95 was refused and therefore absent — and said so, so
+/// that it would fail loudly at the change rather than quietly keep passing. It
+/// did, and this is the other side of it.
 #[test]
 fn the_july_test_session_reads_back() {
     let (history, _directory) = history!();
@@ -171,17 +172,16 @@ fn the_july_test_session_reads_back() {
         "the completed single at 90 is in the record, found {loads:?}"
     );
 
-    let failures = july
+    let failures: Vec<String> = july
         .sets
         .iter()
         .filter(|set| set.outcome.is_failed())
-        .count();
-    // Zero today, one once the zero-rep sentinel is translated (US2). Asserting
-    // the current state rather than the desired one keeps this honest, and it is
-    // what will fail loudly at that change.
-    assert_eq!(
-        failures, 0,
-        "the failed 95 is still refused until the sentinel is read"
+        .map(|set| format!("{}", set.load))
+        .collect();
+    assert_eq!(failures.len(), 1, "the failed attempt is in the record");
+    assert!(
+        failures.iter().any(|load| load.contains("95")),
+        "and it is the 95, which is above the completed single: {failures:?}"
     );
 }
 
