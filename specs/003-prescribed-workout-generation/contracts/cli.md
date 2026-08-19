@@ -72,9 +72,9 @@ issued as prescription 12
 ```
 
 The loads above are **illustrative**, not a fixture. The primary's numbers depend on
-the ladder's span, which is not yet authored (research D8) — the 100% shown here is
-what a 92.5%→105% ladder would reach in week 6 of 8, putting the light top set at
-85% of 90kg.
+the ladder's opening, which is not yet authored (research D8) — the 100% shown here
+is what a ladder opening at 92.5% and climbing 2.5kg a week would reach in week 6
+of 8, putting the light top set at 85% of 90kg.
 
 **What the header carries and why.** The resolved date and weekday, so the default
 is visible; the role, so a wrong weekday mapping is obvious; the week and ladder
@@ -185,7 +185,7 @@ Gains a third section, beside extraction and derivation:
 prescription
   programme        3, front squat, week 6 of 8
   anchor           90kg (tested, from 2026-07-03), fixed for the block
-  ladder           at 100% of anchor; endpoint 105% in week 7
+  ladder           at 100% of anchor; opened at 92.5%, climbing 2.5kg a week
   last issued      2026-08-14 (prescription 11)
   next programmed  2026-08-17 (Monday, light)
 ```

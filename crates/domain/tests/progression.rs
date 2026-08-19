@@ -64,13 +64,14 @@ const fn completed(load: Kg) -> GatingTopSet {
     }
 }
 
-/// An eight-week block from a 90kg anchor whose ladder sits flat at 90.
+/// An eight-week block from a 90kg anchor whose ladder opens at 90.
 ///
-/// Flat on purpose: the failure mechanism is what is under test, and a ladder that
-/// climbs would make every re-issued load a different number and hide whether the
-/// hold was the hold or the plan.
+/// The failure mechanism is what is under test, so the ladder is here to be held
+/// and resumed rather than read: every assertion below is either about a
+/// re-climb — where the load comes from the failed set and not from the plan —
+/// or about the ladder being the same object afterwards.
 fn ladder_at_ninety() -> Fallible<(Ladder, Kg)> {
-    Ok((Ladder::new(pct("100%")?, pct("105%")?, 8)?, kg("90")?))
+    Ok((Ladder::new(pct("100%")?, kg("2.5")?, 8)?, kg("90")?))
 }
 
 /// The load a sequence of gating sessions leads to.
@@ -114,7 +115,7 @@ fn a_reset_never_touches_the_anchor() {
 
     // The same failure against a different anchor gives the same re-climb, which
     // is what "the drop is taken from the failed load" means observably.
-    let Ok((flat, _)) = ladder_at_ninety() else {
+    let Ok((plan, _)) = ladder_at_ninety() else {
         panic!("the ladder builds")
     };
     for anchor in ["80", "90", "140"] {
@@ -122,7 +123,7 @@ fn a_reset_never_touches_the_anchor() {
             panic!("the anchors are masses")
         };
         assert_eq!(
-            progress.heavy_top_set(flat, anchor, increment),
+            progress.heavy_top_set(plan, anchor, increment),
             Some(load),
             "the re-climb load is the same whatever the block was anchored at"
         );
@@ -300,9 +301,10 @@ fn the_worked_example_reproduces_load_for_load() {
     }
 
     // The anchor was never an input to any of it, and the ladder never changed.
-    let (Ok(ladder_again), Ok(anchor_again)) =
-        (Ladder::new(ladder.start(), ladder.end(), 8), kg("90"))
-    else {
+    let (Ok(ladder_again), Ok(anchor_again)) = (
+        Ladder::new(ladder.start(), ladder.climb_per_week(), 8),
+        kg("90"),
+    ) else {
         panic!("the ladder rebuilds")
     };
     assert_eq!(ladder, ladder_again, "the plan is untouched by any of this");

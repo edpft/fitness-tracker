@@ -8,32 +8,44 @@
 //!
 //! ```text
 //! climbing weeks = duration - 1          the last week is the test
-//! step           = (end - start) / (climbing weeks - 1)
-//! heavy(w)       = quantise(anchor × (start + step × (w - 1)))
+//! opening        = quantise(anchor × start)
+//! heavy(w)       = quantise(opening + climb × (w - 1))
 //! ```
 //!
-//! **The endpoint is authored and the step is derived**, not the other way
-//! round. An endpoint is a claim about how much can be gained in the time
-//! available, which personal history and a reference programme can both inform.
-//! A weekly step is a number with nothing behind it, and multiplying it by a
-//! duration produces an endpoint nobody chose. It also makes duration
-//! meaningful: the same endpoint over 8 or 12 weeks is two different plans,
-//! where a fixed step over two durations is one plan run for different lengths.
+//! **The climb is a rate, and the block has no authored endpoint.** An earlier
+//! model authored the endpoint and derived the weekly step from it, on the
+//! grounds that a step multiplied by a duration produces an endpoint nobody
+//! chose. That argument assumed the plan is what regulates the climb. It is
+//! not: the plan attempts a fixed increment every week, and what regulates it is
+//! the drop-and-re-climb protocol in [`super::progression`] — which is why the
+//! endpoint could be left unstated for as long as it was without anything
+//! downstream noticing. See `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
+//!
+//! That is also what separates this template from `block`. Here duration says
+//! how long the climb runs and nothing else, so an interrupted eight weeks is
+//! the same plan as an uninterrupted twelve, stopped earlier. In `block`,
+//! duration shapes the plan — it sets the rung count and the phase split — and a
+//! different duration really is a different programme.
+//!
+//! **The start is a percentage of the anchor rather than a bar weight**, so it
+//! stays meaningful when the anchor moves. The climb is a mass, because 2.5kg is
+//! the smallest plate and a rate expressed as a percentage would land between
+//! plates at some anchors and not others.
 //!
 //! **A week that repeats the previous week's load is a legitimate plan, not a
-//! defect.** Quantisation collapses two ladder positions onto one bar whenever
-//! the derived step is smaller than the plate increment, and how often that
-//! happens depends on the anchor, the span and the grid together — it is not a
-//! property of any of them alone, and no combination is more correct than
-//! another. The load sequence still only rises, which is all the plan promises.
-//! Nothing here tries to spread the steps out to avoid it.
+//! defect.** It cannot happen at a climb of one plate or more, but a smaller
+//! authored rate quantises two positions onto one bar. The load sequence still
+//! only rises, which is all the plan promises. Nothing here tries to spread the
+//! steps out to avoid it.
 //!
 //! **This module holds the plan and not the response to it failing.** A stall
 //! suspends the ladder and re-climbs from the failed load, and that is a
 //! separate mechanism that never touches the anchor: it lives in
 //! [`super::progression`]. Conflating the two is a mistake the model has already
 //! made once, which is why the two are two modules and not two halves of this
-//! one.
+//! one. The two rates are deliberately alike in kind — `climb_per_week` here and
+//! `reclimb_per_week` there — because a reset is the same climb run at a
+//! different rate off a lower start.
 
 use crate::gym::Kg;
 
@@ -52,37 +64,37 @@ pub enum InvalidLadder {
     DoesNotRise,
 }
 
-/// A block's plan: a percentage of a fixed anchor per climbing week.
+/// A block's plan: an opening share of a fixed anchor, and a weekly climb.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ladder {
     start: Percentage,
-    end: Percentage,
+    climb_per_week: Kg,
     climbing_weeks: u32,
 }
 
 impl Ladder {
-    /// Build from an authored span and a block duration.
+    /// Build from an authored opening, a weekly climb and a block duration.
     ///
     /// `duration_weeks` counts the test, so the climbing weeks are one fewer.
     ///
     /// # Errors
     ///
     /// [`InvalidLadder::NoClimbingWeeks`] if the block is too short to climb at
-    /// all, and [`InvalidLadder::DoesNotRise`] if the span does not ascend.
+    /// all, and [`InvalidLadder::DoesNotRise`] if the climb is nothing.
     pub const fn new(
         start: Percentage,
-        end: Percentage,
+        climb_per_week: Kg,
         duration_weeks: u32,
     ) -> Result<Self, InvalidLadder> {
         if duration_weeks < 2 {
             return Err(InvalidLadder::NoClimbingWeeks);
         }
-        if end.as_basis_points() <= start.as_basis_points() {
+        if climb_per_week.as_grams() == 0 {
             return Err(InvalidLadder::DoesNotRise);
         }
         Ok(Self {
             start,
-            end,
+            climb_per_week,
             climbing_weeks: duration_weeks - 1,
         })
     }
@@ -95,45 +107,19 @@ impl Ladder {
         self.start
     }
 
-    pub const fn end(self) -> Percentage {
-        self.end
-    }
-
-    /// The percentage this climbing week sits at.
-    ///
-    /// A single-climbing-week block is degenerate rather than invalid: the
-    /// ladder is one position, `start`, and there is no step to divide for.
-    /// Returns `None` for a week past the block's climbing weeks.
-    #[must_use]
-    pub fn percentage(self, week: WeekIndex) -> Option<Percentage> {
-        let offset = week.as_offset();
-        if offset >= self.climbing_weeks {
-            return None;
-        }
-        if self.climbing_weeks == 1 {
-            return Some(self.start);
-        }
-
-        let span = i64::from(self.end.as_basis_points() - self.start.as_basis_points());
-        let steps = i64::from(self.climbing_weeks - 1);
-        // Multiply before dividing, so the rounding happens once and a
-        // fractional step does not accumulate error across the block.
-        let advanced = span
-            .checked_mul(i64::from(offset))
-            .and_then(|scaled| scaled.checked_div(steps))?;
-        let points = i64::from(self.start.as_basis_points()).checked_add(advanced)?;
-
-        // `start` is non-zero and the span is positive, so every position is
-        // non-zero too. Going through the checked constructor anyway, because a
-        // narrowing conversion that "cannot fail" is exactly the kind that does.
-        Percentage::from_basis_points(i32::try_from(points).ok()?).ok()
+    pub const fn climb_per_week(self) -> Kg {
+        self.climb_per_week
     }
 
     /// The heavy session's top set for a climbing week.
     ///
     /// `None` for the block's test week, which is not a ladder position and has
-    /// no percentage — the type says so, so a caller cannot ask for a load that
-    /// does not exist.
+    /// no load — the type says so, so a caller cannot ask for a load that does
+    /// not exist.
+    ///
+    /// The opening is quantised before the climb is added, so every week's load
+    /// is a whole number of plates above the first rather than a rounding of its
+    /// own share of the anchor.
     #[must_use]
     pub fn heavy_top_set(
         self,
@@ -141,8 +127,16 @@ impl Ladder {
         week: WeekIndex,
         increment: PlateIncrement,
     ) -> Option<Kg> {
-        self.percentage(week)
-            .map(|percentage| quantise_loaded(percentage.of(anchor), increment))
+        let offset = week.as_offset();
+        if offset >= self.climbing_weeks {
+            return None;
+        }
+
+        let opening = quantise_loaded(self.start.of(anchor), increment);
+        let climbed = u64::from(offset).checked_mul(self.climb_per_week.as_grams())?;
+        let grams = opening.as_grams().checked_add(climbed)?;
+
+        Some(quantise_loaded(Kg::from_grams(grams), increment))
     }
 
     /// The light session's top set: a proportion of that week's heavy one.
@@ -159,5 +153,31 @@ impl Ladder {
     ) -> Option<Kg> {
         self.heavy_top_set(anchor, week, increment)
             .map(|heavy| quantise_loaded(light_of_heavy.of(heavy), increment))
+    }
+
+    /// Where a climbing week sits relative to the anchor, for reporting.
+    ///
+    /// **A reading of the plan, not the plan.** The load is what is prescribed;
+    /// this divides it back out so an operator can see the climb pass 100% of
+    /// the max it started from. Nothing derives a load from it.
+    ///
+    /// `None` for the test week, and for an anchor of nothing — which is not a
+    /// block anyone is running, but is a division.
+    #[must_use]
+    pub fn implied_percentage(
+        self,
+        anchor: Kg,
+        week: WeekIndex,
+        increment: PlateIncrement,
+    ) -> Option<Percentage> {
+        let load = self.heavy_top_set(anchor, week, increment)?;
+        let whole = i64::from(Percentage::WHOLE.as_basis_points());
+
+        let points = i64::try_from(load.as_grams())
+            .ok()?
+            .checked_mul(whole)?
+            .checked_div(i64::try_from(anchor.as_grams()).ok()?)?;
+
+        Percentage::from_basis_points(i32::try_from(points).ok()?).ok()
     }
 }

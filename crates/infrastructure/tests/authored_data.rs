@@ -369,7 +369,7 @@ fn an_unsettled_document_refuses_to_author() {
         Err(infrastructure::DocumentError::Unsettled { field }) => {
             assert!(
                 field.starts_with("parameters.ladder"),
-                "the ladder's span is what is unsettled, not {field}"
+                "the ladder's opening is what is unsettled, not {field}"
             );
         }
         Ok(_) => panic!("a document with a TODO must not author"),
@@ -377,7 +377,7 @@ fn an_unsettled_document_refuses_to_author() {
     }
 }
 
-/// The fixture document with a ladder span supplied.
+/// The fixture document with the ladder's opening supplied.
 ///
 /// A span, so the rest of the document can be exercised. Not the operator's:
 /// theirs is still `TODO`, and that is the point of the test above. A free
@@ -388,12 +388,12 @@ fn settled_document() -> Result<String, Box<dyn std::error::Error>> {
         "/tests/fixtures/programme.toml"
     ));
     let text = std::fs::read_to_string(path)?;
-    Ok(text
-        .replace(r#"start = "TODO""#, r#"start = "92.5%""#)
-        .replace(r#"end   = "TODO""#, r#"end   = "105%""#))
+    // Only the ladder's opening is still `TODO`; the climb is stated. See
+    // docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md.
+    Ok(text.replace(r#"start          = "TODO""#, r#"start          = "92.5%""#))
 }
 
-/// With the span supplied, the whole document converts — every fill shape, the
+/// With the opening supplied, the whole document converts — every fill shape, the
 /// anchor, the weekday mapping and the parameters.
 #[test]
 fn a_settled_document_authors() {

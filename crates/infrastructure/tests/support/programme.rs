@@ -64,7 +64,7 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
     TimeZone::get("Europe/London").map_err(invalid)
 }
 
-/// The parameters, with a **test** ladder span.
+/// The parameters, with a **test** ladder opening and climb.
 ///
 /// The back-off percentage and the warm-up ramp are the operator's own. The
 /// light-of-heavy percentage, the accessory range and the per-role repetitions are
@@ -99,9 +99,9 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
         warmup,
         back_off_of_top_set: pct("85%")?,
         light_of_heavy: pct("85%")?,
-        // A test span. See the module note.
+        // A test opening and rate. See the module note.
         ladder_start: pct("92.5%")?,
-        ladder_end: pct("105%")?,
+        ladder_climb_per_week: kg("2.5")?,
         top_set_reps: PerRole {
             light: TopSetReps::new(reps(3)?),
             heavy: TopSetReps::new(reps(1)?),

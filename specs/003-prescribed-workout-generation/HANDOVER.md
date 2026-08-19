@@ -1,12 +1,19 @@
 # Handover — prescribed workout generation
 
-Written 2026-08-18, mid-feature, for whoever picks this up next.
+Written 2026-08-18, mid-feature. **Updated 2026-08-19**, and the numbers below
+are the current ones.
 
-**Branch**: `003-prescribed-workout-generation`, 18 commits ahead of `main`,
-nothing pushed. 239 tests pass, `clippy --all-targets -- --deny warnings` is
-clean, and **the whole of `nix flake check` passes** — `typos` and `toml-fmt`
-were red when this note was first written and are fixed. 52 of 80 tasks in
-[tasks.md](./tasks.md), plus the calendar fix, which is not one of them.
+**Branch**: `003-prescribed-workout-generation`, 34 commits ahead of `main`,
+nothing pushed. 285 tests pass and **the whole of `nix flake check` passes** — all
+18 checks. **79 of 80 tasks** in [tasks.md](./tasks.md) are done; the one left is
+T080, and it needs a number from the operator rather than any code.
+
+**Read D13 in [research.md](./research.md) and
+`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md` before anything
+else.** The linear ladder no longer has an endpoint, which contradicts several
+passages further down this file that were written before that was settled. Where
+they conflict, D13 wins. The passages are left standing because *why* they were
+wrong is the most useful thing in this document.
 
 Read [spec.md](./spec.md), [plan.md](./plan.md) and [research.md](./research.md)
 before writing code. This note covers what those cannot: what changed *during*
@@ -16,13 +23,18 @@ the work, and what it cost to find out.
 
 ## The one thing to understand first
 
-**The design changed fundamentally near the end, and the code has not caught
+**The design changed fundamentally near the end, and the code has since caught
 up.**
 
-What is built is a *linear* progression for the primary lift: a percentage
-ladder climbing to an authored endpoint, with a drop-and-re-climb on failure. It
-works end to end — `fitness prescribe` issues a complete, trainable session from
-the operator's real store.
+What is built is a *linear* progression for the primary lift: a ladder opening at
+a percentage of the anchor and climbing 2.5kg a week, with a drop-and-re-climb on
+failure. It works end to end — `fitness prescribe` issues a complete, trainable
+session from the operator's real store.
+
+**Note the row below says "+2.5kg" and has since 2026-08-18.** The code said
+"climbing to an authored endpoint" for another day, because nobody read the two
+side by side. If a table in this file and the code disagree, that is a finding
+rather than a typo — see D13.
 
 What the operator actually wants, and what was settled in conversation, is
 **two** programme types selected by how many weeks the calendar allows:
@@ -338,12 +350,16 @@ block's entry anchor" was wrong and has been corrected.
 - **`PerformedWorkoutReader`** is declared and deliberately not implemented; it
   needs a whole `GymWorkout` rebuilt from five tables. Belongs with the round
   trip.
-- **User story 2 (the zero-rep sentinel) is not done.** The operator's failed
-  95kg of 2026-07-03 is still a `RefusalReason::ZeroReps`. `Performed<M>` exists
-  and the store column exists; only the translator arm and the refusal removal
-  remain.
-- **User story 3 (stall, reset, re-climb) is not done.** It belongs to `linear`.
-- **The round trip** (`project` / `satisfies`) is designed but unwritten.
+- ~~**User story 2 (the zero-rep sentinel) is not done.**~~ **Done** — a failed
+  attempt is an outcome, not a refusal; decision `0007` records the reversal.
+- ~~**User story 3 (stall, reset, re-climb) is not done.**~~ **Done** — drop back
+  and re-climb when the plan was too ambitious.
+- ~~**The round trip** (`project` / `satisfies`) is designed but unwritten.~~
+  **Done**, as attribution rather than reproduction (T058, SC-010c).
+- **The ladder's opening is the last unauthored value, and T080 is the last open
+  task.** `[parameters.ladder] start` is still `TODO` and authoring still refuses
+  the document while it is. Its companion `end` was removed rather than filled in
+  — see D13. Nothing else stands between this branch and a real workout.
 - **Two parameters remain marked `INFERRED`** in
   `crates/infrastructure/tests/fixtures/programme.toml`: the per-role top-set
   repetitions and the per-block accessory ranges. They were read off the record
@@ -417,15 +433,18 @@ block's entry anchor" was wrong and has been corrected.
 
 1. ~~**Fix the calendar**~~ — done. See "Known gaps".
 2. ~~**Research the percentage table**~~ — done, D11 and D12.
-3. ~~**Build the block template** beside the linear one~~ —
-   `domain::prescription::block::Block` is built and tested (research D11 and
-   D12). What is *not* built is everything above it: nothing in `application`,
-   the CLI or the stores selects it yet, so the anchor conversion (a 3RM entry
+3. ~~**User story 2**, user story 3, the round trip, the decision records~~ —
+   all done. `0006`, `0007` and `0008` are written.
+4. **Ask the operator where the ladder opens**, and author it in the fixture and
+   in their own programme. That is T080 and it is the whole of what is left in
+   this feature.
+5. **Wire `block` above `domain`.** `domain::prescription::block::Block` is built
+   and tested (research D11, D12) and nothing above it selects it: no
+   `application` use case, no CLI, no store. The anchor conversion (a 3RM entry
    test into the 1RM every percentage is a share of), the phase-aware second
-   session and the calendar's extra test week are all still to come.
-4. **User story 2**, so a failed attempt stops being a refusal.
-5. The rest: stall/reset for `linear`, the round trip, the decision records
-   (`0006`, `0007`) named in [plan.md](./plan.md).
+   session and the calendar's extra test week are all still to come. **This is
+   the autumn block's dependency**, per the calendar above, and it is a feature
+   of its own rather than a task in this one.
 
-The operator's deadline is **Sunday 13 September**. Steps 1 to 3 are what has to
-land by then.
+The operator's deadline is **Sunday 13 September**. Step 4 is what has to land by
+then; step 5 is what the autumn block needs.

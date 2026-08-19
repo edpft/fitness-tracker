@@ -155,7 +155,7 @@ struct ParametersSection {
 #[derive(serde::Deserialize)]
 struct LadderSection {
     start: String,
-    end: String,
+    climb_per_week: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -240,7 +240,10 @@ impl Document {
             )?,
             light_of_heavy: percentage("parameters.light_of_heavy", &p.light_of_heavy)?,
             ladder_start: percentage("parameters.ladder.start", &p.ladder.start)?,
-            ladder_end: percentage("parameters.ladder.end", &p.ladder.end)?,
+            ladder_climb_per_week: mass(
+                "parameters.ladder.climb_per_week",
+                &p.ladder.climb_per_week,
+            )?,
             top_set_reps: PerRole {
                 light: role("light")?,
                 heavy: role("heavy")?,

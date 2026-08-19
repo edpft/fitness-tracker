@@ -71,25 +71,25 @@ As the operator, when I load a bar and fail the lift, that failure is part of my
 
 ### User Story 3 - A block is planned, and failure is handled (Priority: P3)
 
-As the operator, I give the generator a number of weeks and my current 1RM and get back a block whose loads climb to a stated endpoint and finish in a test — and when the plan turns out to have been too ambitious, it drops back and re-climbs rather than stopping.
+As the operator, I give the generator a number of weeks and my current 1RM and get back a block whose loads climb at a stated rate and finish in a test — and when the plan turns out to have been too ambitious, it drops back and re-climbs rather than stopping.
 
 **Why this priority**: Without it Story 1 issues the same numbers every week, which is a working prescription and not a programme. It is last because it is the only story that needs Story 2 finished first, and because a hand-set ladder is a tolerable stopgap where a hand-computed workout is not.
 
 **The plan and the failure mechanism are separate**, and the scenarios below are grouped accordingly. Scenarios 1 to 4 are the plan: a deterministic ladder from two inputs. Scenarios 5 to 8 are what happens when it fails. Neither is derived from the other.
 
-**Independent Test**: Generate an 8-week block from a 90kg anchor and confirm the heavy top sets climb to the authored endpoint with the final week a test; then drive the same programme through the worked example in `primary-lift-progression.md` — 90kg missed twice, dropped to 80 at +5kg weekly, missed again at 90, dropped to 80 at +2.5kg weekly — and confirm the prescribed load each week matches the eleven-week table exactly.
+**Independent Test**: Generate an 8-week block from a 90kg anchor and confirm the heavy top sets climb by the authored rate with the final week a test; then drive the same programme through the worked example in `primary-lift-progression.md` — 90kg missed twice, dropped to 80 at +5kg weekly, missed again at 90, dropped to 80 at +2.5kg weekly — and confirm the prescribed load each week matches the eleven-week table exactly.
 
 **Acceptance Scenarios**:
 
 1. **Two inputs generate the block.** **Given** a duration in weeks and a starting 1RM, **When** the block is generated, **Then** every week's primary loading follows, and the final week is a test.
 2. **The anchor does not move within a block.** **Given** any sequence of completed sessions, **When** each week is issued, **Then** the anchor is the same value throughout. What changes is the ladder's percentage.
-3. **The step is derived from the endpoint.** **Given** an authored start and end percentage and a duration, **When** the ladder is built, **Then** the weekly step is the span divided by the climbing weeks — and changing the duration changes the step, not the endpoint.
+3. **The rate is authored and the endpoint is wherever the calendar stops.** **Given** an authored opening percentage, an authored weekly rate and a duration, **When** the ladder is built, **Then** each climbing week sits one rate above the last — and changing the duration changes where the block finishes, not the step. Revised 2026-08-19; see `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
 4. **Nothing performed climbs it faster.** **Given** a top set completed easily, with any effort report attached, **When** the next week is issued, **Then** the load is exactly what the ladder says. No effort report is consulted by any derivation.
 5. **A miss holds the ladder.** **Given** a gating session whose top set was a failed attempt, **When** the next week is issued, **Then** the same loads are re-issued and the ladder has not advanced.
 6. **A second miss at the same load suspends the ladder.** **Given** a second failed attempt at a load already failed, **When** the next week is issued, **Then** the load is the first reset's drop from the failed load, and the anchor is unchanged.
 7. **A completed re-climb resumes the ladder.** **Given** a reset whose re-climb has reached the load that was failed, **When** the next week is issued, **Then** the ladder resumes from the position it was suspended at.
 8. **The second stall is the slower reset.** **Given** a stall while the first reset is in play, **When** the next week is issued, **Then** the second reset's drop and rate apply.
-9. **A test replaces the anchor for the next block.** **Given** a completed test, **When** the following block is generated, **Then** its anchor is the tested value, whether that is above or below the ladder's endpoint.
+9. **A test replaces the anchor for the next block.** **Given** a completed test, **When** the following block is generated, **Then** its anchor is the tested value, whether that is above or below where the ladder got to.
 10. **Only the gating role gates.** **Given** a non-gating session in the same week, **When** its top set is missed, **Then** the ladder is unaffected.
 
 ---
@@ -97,8 +97,8 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 ### Edge Cases
 
 - **A session was never trained.** Absence is not a miss: the ladder holds, no stall accrues, and the same week re-issues. Distinguishing the two is what Story 2 delivers.
-- **A block ends mid-re-climb.** The test runs regardless. A reset costs four of the block's 7 or 11 climbing weeks, so a ladder leaving no room for one reset cannot survive a stall inside its own block — a real constraint on how ambitious an endpoint can be.
-- **The ladder's endpoint is below where the lifter already is.** Permitted and sometimes correct: a block anchored on a recent test may deliberately spend early weeks below it. It is not the generator's business to refuse an unambitious plan.
+- **A block ends mid-re-climb.** The test runs regardless. A reset costs four of the block's 7 or 11 climbing weeks, so a block leaving no room for one reset cannot survive a stall inside its own weeks — a real constraint on what a duration can deliver.
+- **The ladder runs below where the lifter already is.** Permitted and sometimes correct: a block anchored on a recent test may deliberately spend early weeks below it. It is not the generator's business to refuse an unambitious plan.
 - **A back-off percentage lands off the plate grid.** 85% of an 80kg top set is 68kg, which quantises to 67.5. An exact tie — a derived load landing halfway between two increments — resolves downward, so 68.75 quantises to 67.5 rather than 70.
 - **The programme has never issued anything.** The first workout has no previous prescription to advance from; it derives from the authored entry anchor.
 - **A slot's exercise has no performed history and no authored starting point.** The prescription cannot be derived and must say so rather than inventing a load.
@@ -128,12 +128,12 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 
 **The plan**
 
-- **FR-012**: The system MUST generate a block's whole primary loading series from two inputs — a duration in weeks and a starting 1RM — plus the authored ladder endpoint.
+- **FR-012**: The system MUST generate a block's whole primary loading series from two inputs — a duration in weeks and a starting 1RM — plus the authored ladder opening and weekly rate.
 - **FR-013**: The anchor MUST be constant for the duration of a block. No performed value may change it, and effort reports MUST NOT be an input to any derivation.
 - **FR-014**: The final week of a block MUST be a test. The ladder's climbing weeks are therefore one fewer than the duration.
 - **FR-015**: The ladder's weekly step MUST be derived from the authored start and end percentages and the number of climbing weeks, not authored directly.
 - **FR-016**: Each week's heavy top set MUST be the anchor scaled by that week's ladder percentage; the light session's top set MUST be a percentage of that week's heavy top set.
-- **FR-017**: A recorded test MUST replace the anchor for the following block, whether the tested value is above or below the ladder's endpoint.
+- **FR-017**: A recorded test MUST replace the anchor for the following block, whether the tested value is above or below where the ladder got to.
 
 **Failure handling**
 
@@ -170,7 +170,7 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 - **Generation parameters**: The values consulted when authoring a prescription — percentages, repetition counts, increments, reset rates. Only the current value is required (§ 14), because what they produced is recorded concretely in the issued workout.
 - **Programme**: A rule for generating a series of prescribed workouts, plus its authored inputs — duration, primary exercise, slot fills, gating role and entry anchor. Its purpose is to increase the primary exercise's maximum.
 - **Anchor**: The starting 1RM every primary load derives from, carrying its provenance — measured by test, derived, or asserted. **Constant for the block's duration.** Replaced only by a test, which ends a block. A stall does not touch it.
-- **Ladder**: The block's plan — a percentage of the anchor per climbing week, running from an authored start to an authored endpoint, with the weekly step derived from the span and the duration. The last week of a block is a test rather than a ladder position.
+- **Ladder**: The block's plan — a load per climbing week, opening at an authored percentage of the anchor and climbing by an authored rate. There is no endpoint: the climb runs until the calendar stops it and the reset protocol regulates it. The last week of a block is a test rather than a ladder position.
 - **Prescribed workout**: The concrete issued prescription for one date. An ordered sequence of items with grouping, each item slot-tagged, each set pinning at least one axis. The only prescribed entity stored.
 - **Prescribed set**: One instruction — a load, a target measure, an optional effort guide, and an optional rest instruction. Distinct in shape from a performed set: prescribed rest is an instruction whose absence means none was given, where performed rest is an observation whose absence means none was recorded.
 - **Workout shape**: The instructional content of a session — its items, groupings and sets — separated from the facts that make a prescription *issued*: the date, the anchor, the parameters and the programme. A generated prescription is a shape plus those facts. A projection of a performance is a shape and nothing else, which is what makes it unstorable as a prescription.
@@ -185,7 +185,7 @@ As the operator, I give the generator a number of weeks and my current 1RM and g
 - **SC-003**: Regenerating a past session from the anchor and history in force at that date and comparing it against what was actually prescribed yields a **list of divergences**, each attributable to one of: a parameter not yet stated, a change to the template since that session, or an arithmetic error made by hand. A divergence with no such attribution is a defect in generation. This is deliberately not a reproduction requirement — see SC-012 for the criterion that does assert agreement.
 - **SC-004**: The two back-off errors visible in the corpus cannot recur, because no prescribed load is arrived at by hand.
 - **SC-005**: The eleven-week worked example in `primary-lift-progression.md` is reproduced exactly, load for load.
-- **SC-011**: A block generated from a duration and a starting 1RM alone — no other operator input beyond the ladder endpoint — produces a complete primary loading series for every week, ending in a test.
+- **SC-011**: A block generated from a duration and a starting 1RM alone — no other operator input beyond the ladder's opening and rate — produces a complete primary loading series for every week, ending in a test.
 - **SC-006**: The failed 95kg attempt of 2026-07-03 appears in the training record as a failed attempt, and refusals over the landed corpus fall from three to two.
 - **SC-007**: No total, count or maximum estimate anywhere in the system changes as a result of that attempt becoming visible.
 - **SC-008**: Discarding all generated output and regenerating from the stored authored data reproduces it identically.

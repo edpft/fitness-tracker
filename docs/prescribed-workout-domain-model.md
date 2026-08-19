@@ -188,9 +188,10 @@ generator's job.
 
 - **Duration** — how many weeks the block runs for. The last is the test.
 - **An entry anchor** — the starting 1RM, with its provenance.
-- **The ladder's endpoint**, as a percentage of the anchor. Authored, because it
-  is a claim about achievable gain; the weekly step is derived from it and the
-  duration.
+- **The ladder's opening**, as a percentage of the anchor, and **the rate it
+  climbs at**. Both authored. There is no endpoint: the climb runs at its rate
+  until the calendar stops it, and the reset protocol is what regulates it. See
+  `decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
 - **The primary exercise**, and which strength slot is primary.
 - **Slot fills**, including the variations alternated across the two sessions in
   a cycle (Nordic curls one day, back extension the other).
@@ -220,9 +221,11 @@ its provenance.
 
 **The anchor is fixed for the block's duration.** It is the starting 1RM, and
 every prescribed load derives from it. What climbs across the block is the
-ladder's position — a percentage of the anchor — not the anchor itself. An
-earlier version of this section had the anchor advancing weekly, which describes
-the same load sequence from the wrong end and leaves the block with no endpoint.
+ladder's position — a load, opened as a share of the anchor — not the anchor
+itself. An earlier version of this section had the *anchor* advancing weekly,
+which is a different thing from the ladder climbing: every load is a share of the
+anchor, so an anchor that moves re-bases the warm-ups and back-offs with it and
+no two weeks are comparable.
 
 **The anchor of the block that produced the current record is 90kg, tested
 2026-07-03**, landing record 10. That session ramped to a single at 90 and then
@@ -249,13 +252,15 @@ them.
 **The programme is a linear block**: intensity ascends across the duration and
 the block ends in a test. `primary-lift-progression.md` § The plan is
 authoritative; what matters here is that it takes two inputs — a number of weeks
-and a starting 1RM — and that the endpoint is authored while the weekly step is
-derived from it and the duration.
+and a starting 1RM — and that the climb is authored as a rate, with no endpoint
+at all.
 
-That direction is deliberate. An endpoint is a claim about how much can be
-gained in the time available, and personal history and a reference programme can
-both inform it. A weekly step is a number with nothing behind it, and
-multiplying it by a duration produces an endpoint nobody chose.
+That direction was the other way round until 2026-08-19, on the reasoning that a
+rate multiplied by a duration produces an endpoint nobody chose. The operator
+settled that a linear block does not target an endpoint: it adds a fixed
+increment each week and the reset protocol regulates it. See
+`decisions/0008-the-linear-ladder-climbs-at-a-rate.md` for why the old argument
+does not hold — it assumed the plan is what has to stop the climb.
 
 **A standard template answers the total-gain question by embedding one**, which
 is why adopting a template is a real answer where deriving a rate from first
@@ -287,10 +292,11 @@ where an interruption would only ever pause a rising sequence. The distinction
 still matters, because a falling sequence is something the model has to be able
 to express.
 
-**One consequence bounds the endpoint.** A reset costs four of the block's 7 or
-11 climbing weeks, so a ladder leaving no room for a single reset cannot survive
-a stall inside the block. That is a real constraint on how ambitious an endpoint
-can be, and it is the useful half of what open question 5 was asking.
+**One consequence bounds how far a block gets.** A reset costs four of the
+block's 7 or 11 climbing weeks, so a block leaving no room for a single reset
+cannot survive a stall inside its own weeks. That is a real constraint on what a
+duration can deliver, and it is the half of open question 5 that survived that
+question being dissolved.
 
 ### Slack
 
@@ -303,15 +309,15 @@ climbs, so early weeks sit well below the real number and late weeks — past 10
 it comes, is the ladder finding the ceiling.
 
 That is not a defect to be designed out; it is how a negative gate discovers
-anything. The ladder's endpoint is an intention and the test says how much of it
-was real.
+anything. Where the ladder got to is an intention and the test says how much of
+it was real.
 
 **5/3/1 makes the same trade explicitly, and further down.** Its percentages run
 off a *training max* set at 90% of the tested 1RM, so its whole ladder is
 shifted below the real number and the slack is never spent to zero. That is a
 legitimate alternative to anchoring on the tested value and running past 100%,
 and it is worth recording as the road not taken: it buys a lower stall rate at
-the cost of a lower endpoint. What is not available is 5/3/1's *feedback* — the
+the cost of a lower finish. What is not available is 5/3/1's *feedback* — the
 AMRAP top set — which this programme rejected on resolution grounds.
 
 ### What the evidence supports
@@ -604,14 +610,14 @@ informative and a missed session is not.
    variants. A couch stretch has none. `Load::Relative(0)` is the performed
    model's answer and works, but it is an encoding rather than a fact.
 
-5. **What total gain is reasonable for a given duration.** Narrowed rather than
-   resolved. The shape is settled — the endpoint is authored as a percentage of
-   the anchor and the weekly step derives from it — and two bounds now exist: a
-   standard template embeds a rate (5/3/1 gives roughly 1.25kg per week for a
-   lower-body lift), and a ladder must leave room for one reset or it cannot
-   survive a stall inside its own block. What remains open is the number itself
-   for a specific lifter, where the best available evidence is personal history
-   and the regain-versus-new-ground boundary within it.
+5. **What total gain is reasonable for a given duration.** ~~Narrowed rather
+   than resolved.~~ **Dissolved for `linear` on 2026-08-19.** The question
+   presupposed that a block states a total gain, and it does not: it states a
+   rate, and the total is whatever the calendar and the resets leave. A block
+   still has to leave room for one reset or it cannot survive a stall inside its
+   own weeks, which bounds how far it gets rather than what it aims at. The
+   question survives for `block`, which does plan a gain — 5% of the entry 1RM,
+   from the literature; see research D11 correction 3.
 
 6. **Whether progress is expected during a nutrition deficit.** Bears directly
    on question 5, since the same duration buys different gains under different
@@ -636,16 +642,18 @@ informative and a missed session is not.
      percentage is still the right shape — an offset is a far larger relative
      drop at a 60kg anchor — but the number in it has to be chosen rather than
      solved for.
-   - **The ladder's start and end percentages** of the anchor. The weekly step
-     is
-     derived from these and the duration, not authored.
+   - **The ladder's opening percentage** of the anchor — still `TODO`, and the
+     one number the linear template asks for beyond the duration and the anchor.
+   - **The ladder's climb per week** — 2.5kg, stated by the operator on
+     2026-08-19, and the same number the second reset re-climbs at.
    - **Plate increment** — 2.5kg. The rounding rule that consumes it is code.
    - **Reset drops and re-climb rates** — −10%/+5kg and −5%/+2.5kg, from
      `primary-lift-progression.md`.
 
-   **Duration belongs to the programme, not here.** It is supplied per block,
-   and the ladder's step is the span divided by it — so it is an input rather
-   than a value to be settled once.
+   **Duration belongs to the programme, not here.** It is supplied per block —
+   so it is an input rather than a value to be settled once. Under `linear` it
+   says how long the climb runs and nothing else; under `block` it shapes the
+   plan.
 
    None of these is stored today. They are the authored inputs a generated
    workout is a function of, and the reason a programme cannot yet run is that

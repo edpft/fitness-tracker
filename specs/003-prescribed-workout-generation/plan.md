@@ -24,16 +24,19 @@ workouts already normalised:
 
 1. **The programme is a linear block: two inputs in, a ladder out.** Given a
    duration in weeks and a starting 1RM, generate the whole primary loading series
-   — percentages of a **fixed** anchor climbing to an authored endpoint, with the
-   last week a test. The endpoint is authored and the weekly step derived from it
-   and the duration, because an endpoint is a claim about achievable gain while a
-   step is a number with nothing behind it.
+   — a load per climbing week, opening at an authored percentage of a **fixed**
+   anchor and climbing by an authored rate, with the last week a test. There is no
+   endpoint: the climb runs until the calendar stops it and the reset protocol
+   regulates it.
 
-   **Revised during planning.** The first version had the anchor itself climbing
-   +2.5kg per week — the same load sequence described from the wrong end, leaving
-   the block no endpoint and nothing for a duration to be the duration *of*. The
-   ladder *position* is still derived, so FR-010 and § 7 hold exactly as before.
-   [research.md](./research.md), D2.
+   **Revised twice.** The first version had *the anchor* climbing +2.5kg per week,
+   which re-bases the warm-ups and back-offs with it so no two weeks are
+   comparable ([research.md](./research.md), D2). The second authored an endpoint
+   and derived the step from it and the duration. The operator settled on
+   2026-08-19 that a linear block does not target an endpoint at all — see
+   [research.md](./research.md) D13 and
+   `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`. The anchor stays
+   fixed through both revisions, so FR-010 and § 7 hold exactly as before.
 
    **The plan and the failure mechanism are separate**, and conflating them was the
    wrong turn. A stall suspends the ladder, drops from the *failed load*, re-climbs
@@ -381,9 +384,11 @@ recorded. Four observations from building the artifacts:
   derivation, removed a § 12 conflict this plan had been arguing around, removed
   the `anchor_per_week` parameter, and reduced D8's unknowns from a percentage
   table to a single ladder span. The design got smaller, which is the direction
-  a revision should move in.
+  a revision should move in. **It got smaller again on 2026-08-19**, when asking
+  the operator for that span established there is no span: half of what was left
+  of D8 stopped existing rather than being answered (D13).
 
-The gap design did not close: **the ladder's span remains unknown**, so
+The gap design did not close: **the ladder's opening remains unknown**, so
 SC-001 cannot be demonstrated until the operator supplies it. This
 is recorded as an authored-value gap rather than a design one (D8), and it is the
 one thing that stands between this plan and a workout.

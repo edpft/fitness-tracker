@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   back_off_bp AS \"back_off_bp!: i64\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_start_bp AS \"ladder_start_bp!: i64\",\n                   ladder_end_bp AS \"ladder_end_bp!: i64\",\n                   plate_increment_grams AS \"plate_increment_grams!: i64\",\n                   strength_low AS \"strength_low!: i64\",\n                   strength_high AS \"strength_high!: i64\",\n                   strength_sets AS \"strength_sets!: i64\",\n                   hypertrophy_low AS \"hypertrophy_low!: i64\",\n                   hypertrophy_high AS \"hypertrophy_high!: i64\",\n                   hypertrophy_sets AS \"hypertrophy_sets!: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   back_off_bp AS \"back_off_bp!: i64\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_start_bp AS \"ladder_start_bp!: i64\",\n                   ladder_climb_grams AS \"ladder_climb_grams!: i64\",\n                   plate_increment_grams AS \"plate_increment_grams!: i64\",\n                   strength_low AS \"strength_low!: i64\",\n                   strength_high AS \"strength_high!: i64\",\n                   strength_sets AS \"strength_sets!: i64\",\n                   hypertrophy_low AS \"hypertrophy_low!: i64\",\n                   hypertrophy_high AS \"hypertrophy_high!: i64\",\n                   hypertrophy_sets AS \"hypertrophy_sets!: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -48,13 +48,13 @@
         }
       },
       {
-        "name": "ladder_end_bp!: i64",
+        "name": "ladder_climb_grams!: i64",
         "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "generation_parameters",
-            "name": "ladder_end_bp"
+            "name": "ladder_climb_grams"
           }
         }
       },
@@ -214,5 +214,5 @@
       false
     ]
   },
-  "hash": "38cb0d61845457f34ecf8ae2d1933fc88d03908d9a689c5dbd0d70ec3b2317b8"
+  "hash": "bab66a2e06d680affd3e5669ffc705b680e30ef402338527c837ff0a9fb4a8fe"
 }

@@ -76,7 +76,7 @@ impl Programme {
     ///
     /// [`InconsistentProgramme`] for a gating role the programme never runs, a
     /// primary that is not counted in repetitions, a primary exercise that does
-    /// not fill the slot named as primary, or a span and duration that do not
+    /// not fill the slot named as primary, or a climb and duration that do not
     /// make a ladder.
     pub fn new(
         primary: PrimaryPattern,
@@ -95,14 +95,14 @@ impl Programme {
             calendar.weekdays(),
         )?;
 
-        // 4. And the span has to make a ladder over this duration. Checked here
+        // 4. And the climb has to make a ladder over this duration. Checked here
         //    so an unbuildable plan fails at authoring rather than at the first
         //    `prescribe`. Training weeks, not calendar ones: a block interrupted
         //    by a holiday is the same ladder run over a longer stretch of the
         //    year, not a longer ladder.
         Ladder::new(
             parameters.ladder_start,
-            parameters.ladder_end,
+            parameters.ladder_climb_per_week,
             calendar.duration_weeks(),
         )?;
 
@@ -122,15 +122,15 @@ impl Programme {
     /// Runs the three checks that depend on nothing but the programme itself and
     /// **does not re-run the ladder check**.
     ///
-    /// The ladder check asks whether a span makes a ladder over a duration, and
-    /// the span belongs to the parameters rather than to the programme. Re-running
+    /// The ladder check asks whether a climb makes a ladder over a duration, and
+    /// the climb belongs to the parameters rather than to the programme. Re-running
     /// it on read would therefore assert "this programme's duration works with the
-    /// span *currently* in force", which is not a property of the stored
-    /// programme — the span it was authored against may since have been
+    /// climb *currently* in force", which is not a property of the stored
+    /// programme — the climb it was authored against may since have been
     /// superseded.
     ///
     /// It could not fail in any case: the two ways `Ladder::new` refuses are a
-    /// duration below two and a span that does not rise, and the `programme` and
+    /// duration below two and a climb of nothing, and the `programme` and
     /// `generation_parameters` tables both carry a `CHECK` excluding them. So this
     /// is about the check meaning the wrong thing rather than about it failing.
     /// Keeping it out also keeps `ProgrammeStore` able to answer its own question
@@ -246,7 +246,7 @@ impl Programme {
     /// The block's plan.
     ///
     /// Rebuilt from the parameters in force rather than stored, so there is one
-    /// place the span becomes a ladder. `Programme::new` has already proved this
+    /// place the climb becomes a ladder. `Programme::new` has already proved this
     /// succeeds for the duration it holds.
     ///
     /// # Errors
@@ -256,7 +256,7 @@ impl Programme {
     pub const fn ladder(&self, parameters: &GenerationParameters) -> Result<Ladder, InvalidLadder> {
         Ladder::new(
             parameters.ladder_start,
-            parameters.ladder_end,
+            parameters.ladder_climb_per_week,
             self.calendar.duration_weeks(),
         )
     }

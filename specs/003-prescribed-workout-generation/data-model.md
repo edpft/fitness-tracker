@@ -284,13 +284,20 @@ impl Ladder {
 pub enum WeekKind { Climbing(WeekIndex), Test }
 ```
 
-**The step is derived, never stored**: `(end − start) / (climbing_weeks − 1)`. So
-the same endpoint over 8 or 12 weeks is two different plans, which is what makes
-duration a meaningful input rather than a label.
+**The step is authored, never derived**: each climbing week is one
+`ladder_climb_per_week` above the last, opening at `quantise(anchor × start)`.
+Revised 2026-08-19 — this said the reverse, and derived the step by dividing a
+span by `climbing_weeks − 1`. See
+`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
+
+So the same plan over 8 or 12 weeks is one plan run further, and duration says how
+long the climb runs rather than shaping it. That is the loss the decision record
+accounts for, and it is why `block` rather than `linear` is the template whose
+duration means something.
 
 **A single climbing week is representable and degenerate** — the ladder is one
-position, `start`, and `end` is unused. Worth noting because the step's divisor
-would be zero, so `heavy_top_set` handles it rather than dividing.
+position, its opening, with no week in which to climb. There is no longer a
+divisor that could be zero.
 
 ### Ladder position, and what failure does to it
 
@@ -390,9 +397,10 @@ pub struct GenerationParameters {
     pub warmup: NonEmpty<WarmupStep>,
     pub back_off_of_top_set: Percentage,
     pub top_set_reps: PerRole<TopSetReps>,
-    /// The ladder's span. The weekly step derives from these and the duration.
+    /// Where the climb opens, as a share of the anchor, and what it adds each
+    /// climbing week. There is no endpoint.
     pub ladder_start: Percentage,
-    pub ladder_end: Percentage,
+    pub ladder_climb_per_week: Kg,
     /// The light session's top set, as a percentage of that week's heavy one.
     pub light_of_heavy: Percentage,
     pub plate_increment: PlateIncrement,
@@ -403,8 +411,10 @@ pub struct GenerationParameters {
 ```
 
 **`anchor_per_week` is gone.** It was the first version's climbing increment, and
-with a fixed anchor there is nothing for it to increment. The ladder's span plus the
-duration says everything it said, and says it with an endpoint.
+it moved the *anchor* — which re-bases the warm-ups and the back-offs with it, so
+no two weeks are comparable. `ladder_climb_per_week` is the rate it was reaching
+for, applied to the ladder's position instead, with the anchor left where the test
+put it.
 
 **`light_of_heavy` replaces a per-role percentage of the anchor.** The light session
 is derived from that week's heavy top set, so the two move together by construction
@@ -495,7 +505,7 @@ scope for this feature entirely.
 
 ```text
 generation_parameters      authored_at (PK), back_off_bp, plate_increment_grams,
-                           ladder_start_bp, ladder_end_bp, light_of_heavy_bp,
+                           ladder_start_bp, ladder_climb_grams, light_of_heavy_bp,
                            reset1_drop_bp, reset1_reclimb_grams,
                            reset2_drop_bp, reset2_reclimb_grams
 generation_warmup_step     parameters_authored_at, position, of_top_set_bp, reps

@@ -6,11 +6,12 @@
 #
 # Two kinds of value here, and they are marked so they can be told apart.
 #
-#   TODO      the ladder's span — genuinely open, recorded as D8 in
-#             specs/003-prescribed-workout-generation/research.md. Authoring
-#             rejects the document while either remains rather than defaulting:
-#             a placeholder that authors successfully is worse than one that
-#             fails.
+#   TODO      where the ladder opens — genuinely open, and the last of D8 in
+#             specs/003-prescribed-workout-generation/research.md still standing:
+#             the endpoint that used to sit beside it is gone rather than
+#             answered, because the climb is a rate. Authoring rejects the
+#             document while this remains rather than defaulting: a placeholder
+#             that authors successfully is worse than one that fails.
 #
 #   INFERRED  read off the performed record rather than stated by the operator.
 #             Probably right and not confirmed. Marked because six lines that
@@ -30,10 +31,10 @@ start            = "2026-07-06"
 # Weeks, not cycles. The last one is the test, so this is 7 climbing weeks.
 #
 # An operator input per block rather than a parameter to be settled — the whole
-# point of the generator is that it takes a duration and a starting 1RM. The
-# ladder's weekly step is the span divided by this, so a different duration is a
-# different plan rather than the same plan run longer. Eight here is a fixture
-# value and nothing more.
+# point of the generator is that it takes a duration and a starting 1RM. Under
+# `linear` it says how long the climb runs and nothing else, so an interrupted
+# eight weeks is the same plan as a twelve stopped earlier; it is `block` where
+# duration shapes the plan. Eight here is a fixture value and nothing more.
 duration_weeks = 8
 
 # The weeks the block does not run, each named by a date inside it.
@@ -136,17 +137,23 @@ light_of_heavy = "85%"
 # sub-table — TOML puts a bare key under whichever table header precedes it.
 static_hold = "60s"
 
-# The ladder: where the heavy top set starts and finishes, as percentages of the
-# anchor. The weekly step is DERIVED from these and duration_weeks.
+# The ladder: where the heavy top set opens, as a percentage of the anchor, and
+# what it adds each climbing week.
 #
-# Bounds for choosing these, none of them decisive:
-#   - 5/3/1 embeds ~1.25kg/week for a lower-body lift
-#   - a classic linear block finishes near 102.5-105% of entry
-#   - a demonstrated ~99kg in Apr 2025 means ~9kg of regain before new ground
-#   - a reset costs 4 of 7 climbing weeks, so leave room for one
+# **There is no endpoint.** The climb runs at its stated rate until the calendar
+# stops it, and what regulates it is the reset protocol below rather than a
+# stated top — so a duration and a rate fix the whole series. Stated by the
+# operator on 2026-08-19; see
+# docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md.
+#
+# The rate is a mass rather than a percentage, and it is the same kind of thing
+# as the two reclimb rates below: a reset is this climb run at a different rate
+# off a lower start. 2.5kg is also the smallest plate, so the climb lands on the
+# grid at every anchor — the fault `light_of_heavy` was caught with was a ratio
+# standing in for an offset, and this is the offset stated as one.
 [parameters.ladder]
-start = "TODO"
-end   = "TODO"
+start          = "TODO"
+climb_per_week = "2.5kg"
 
 # INFERRED. The double-progression scheme each block's non-primary slots run.
 # One per block rather than one per slot: the slots within a block are prescribed

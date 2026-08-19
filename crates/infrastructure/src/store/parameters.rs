@@ -138,7 +138,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                    back_off_bp AS "back_off_bp!: i64",
                    light_of_heavy_bp AS "light_of_heavy_bp!: i64",
                    ladder_start_bp AS "ladder_start_bp!: i64",
-                   ladder_end_bp AS "ladder_end_bp!: i64",
+                   ladder_climb_grams AS "ladder_climb_grams!: i64",
                    plate_increment_grams AS "plate_increment_grams!: i64",
                    strength_low AS "strength_low!: i64",
                    strength_high AS "strength_high!: i64",
@@ -178,7 +178,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                 back_off_of_top_set: bp_from_storage(row.back_off_bp)?,
                 light_of_heavy: bp_from_storage(row.light_of_heavy_bp)?,
                 ladder_start: bp_from_storage(row.ladder_start_bp)?,
-                ladder_end: bp_from_storage(row.ladder_end_bp)?,
+                ladder_climb_per_week: grams_from_storage(row.ladder_climb_grams)?,
                 top_set_reps: PerRole { light, heavy },
                 strength: domain::prescription::AccessoryScheme {
                     low: reps_from_storage(row.strength_low)?,
@@ -225,7 +225,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let back_off = bp_for_storage(parameters.back_off_of_top_set);
         let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
         let ladder_start = bp_for_storage(parameters.ladder_start);
-        let ladder_end = bp_for_storage(parameters.ladder_end);
+        let ladder_climb = grams_for_storage(parameters.ladder_climb_per_week)?;
         let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
         let strength_low = i64::from(parameters.strength.low.as_u32());
         let strength_high = i64::from(parameters.strength.high.as_u32());
@@ -244,7 +244,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             r"
             INSERT INTO generation_parameters (
                 authored_at, back_off_bp, light_of_heavy_bp,
-                ladder_start_bp, ladder_end_bp, plate_increment_grams,
+                ladder_start_bp, ladder_climb_grams, plate_increment_grams,
                 strength_low, strength_high, strength_sets,
                 hypertrophy_low, hypertrophy_high, hypertrophy_sets,
                 static_hold_seconds,
@@ -257,7 +257,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             back_off,
             light_of_heavy,
             ladder_start,
-            ladder_end,
+            ladder_climb,
             increment,
             strength_low,
             strength_high,

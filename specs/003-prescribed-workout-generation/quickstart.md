@@ -33,8 +33,9 @@ fitness extract hevy.workouts
 fitness normalise hevy.workouts
 ```
 
-Then author the programme. **This will fail until the ladder's span is supplied**
-(research D8) — the document rejects a remaining `TODO` rather than defaulting:
+Then author the programme. **This will fail until the ladder's opening is
+supplied** (research D8, narrowed by D13) — the document rejects a remaining
+`TODO` rather than defaulting. The climb beside it is stated at 2.5kg a week:
 
 ```bash
 fitness programme author crates/infrastructure/tests/fixtures/programme.toml
@@ -156,9 +157,9 @@ tests over `Ladder`.
 | --- | --- | --- |
 | US3-1 | Weeks + 1RM produce every week's loading; last week is a test | `two_inputs_generate_the_block` |
 | US3-2 | The anchor is identical in every week of a block | `the_anchor_does_not_move_within_a_block` |
-| US3-3 | Step = span ÷ climbing weeks; changing duration changes the step | `the_step_derives_from_the_endpoint` |
+| US3-3 | Every week sits one authored rate above the last; duration changes where it finishes | `the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops` |
 | US3-4 | Any effort report → the load is exactly what the ladder says | `nothing_performed_climbs_it_faster` |
-| — | A one-climbing-week block does not divide by zero | `a_degenerate_ladder_has_one_position` |
+| — | A one-climbing-week block opens and stops | `a_single_climbing_week_opens_and_stops` |
 
 **Failure.** Fakes supplying misses.
 
@@ -168,14 +169,15 @@ tests over `Ladder`.
 | US3-6 | Second failure at the same load → reset 1 from the failed load | `a_second_miss_suspends_the_ladder` |
 | US3-7 | Re-climb reaching the failed load resumes at the suspended week | `a_completed_re_climb_resumes_the_ladder` |
 | US3-8 | A stall during reset 1 → reset 2, −5% at +2.5kg/week | `the_second_stall_is_the_slower_reset` |
-| US3-9 | A test anchors the next block, above or below the endpoint | `a_test_anchors_the_next_block` |
+| US3-9 | A test anchors the next block, above or below where the ladder got to | `a_test_anchors_the_next_block` |
 | US3-10 | A non-gating session's miss does not touch the ladder | `only_the_gating_role_gates` |
 | — | **The anchor is unchanged across every reset** | `a_reset_never_touches_the_anchor` |
 
-**US3-3 is the test that keeps the endpoint authoritative.** It generates the same
-start and end percentages over 8 weeks and over 12, and asserts the endpoints match
-while the steps differ. If someone later authors a step and derives the endpoint,
-this fails.
+**US3-3 is the test that keeps the rate authoritative.** It generates the same
+opening and rate over 8 weeks and over 12, and asserts the second week matches
+while the last weeks differ. If someone later re-derives the step from an
+endpoint, this fails. It asserted the exact inverse until 2026-08-19; see
+`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`.
 
 **The unnumbered anchor test is the one to write first.** FR-021 is the whole point
 of separating the plan from the failure mechanism, and it is the invariant most
@@ -307,12 +309,12 @@ known, the light-of-heavy percentage is evidenced against three weeks, and the
 back-off and warm-up percentages are evidenced against six and three sessions
 respectively.
 
-No test above that asserts a real primary load can be written until the span is
-stated. SC-010c's expected table and the fixture document are both written with the
-values absent so that neither compiles — a placeholder that runs green is worse than
-one that will not build.
+No test above that asserts a real primary load can be written until the ladder's
+opening is stated. SC-010c's expected table and the fixture document are both
+written with the value absent so that neither compiles — a placeholder that runs
+green is worse than one that will not build.
 
 Everything else in this guide is writable now: the plan's property tests (US3-1 to
-US3-4) hold for any span, the whole failure group is span-independent, group 2 needs
-no span at all, and group 4's structural comparison (SC-010b) is about blocks,
+US3-4) hold for any opening, the whole failure group is independent of it, group 2
+needs none at all, and group 4's structural comparison (SC-010b) is about blocks,
 order, grouping and slots rather than loads.

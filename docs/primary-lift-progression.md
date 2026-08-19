@@ -37,7 +37,7 @@ That is the whole requirement. Calendar goals, target numbers for the year, and
 what to do about a stall are all outside it.
 
 No template can guarantee the outcome. What one supplies is a structured
-overload with a defined endpoint, and a test that says whether it worked.
+overload at a defined rate, and a test that says whether it worked.
 
 ## The anchor
 
@@ -50,12 +50,12 @@ value is neither. Once a series of blocks is running the exit test of one block
 is the entry anchor of the next, so there is one source; the others are
 bootstraps, used for the first block or after a gap.
 
-**The anchor does not climb.** An earlier version of this document had it
-advancing +2.5kg per week, which describes the same load sequence from the other
-end and cost the model its endpoint: a value that climbs indefinitely has no
-block to be the plan for. What climbs is the ladder's position, expressed as a
-percentage of a fixed anchor, so the block's last climbing week is a stated
-intention rather than wherever the schedule happened to reach.
+**The anchor does not climb.** An earlier version of this document had *the
+anchor* advancing +2.5kg per week, which is a different thing from the ladder
+climbing at that rate and is still wrong: every load is a share of the anchor, so
+an anchor that moves re-bases the warm-ups and the back-offs with it and no two
+weeks are comparable. What climbs is the ladder's position, and the anchor stays
+where the test put it until another test replaces it.
 
 **Only a test replaces it**, and a test ends a block. So within a block the
 anchor is a constant, and nothing performed moves it — which is what makes the
@@ -76,30 +76,39 @@ above.
 Given a duration of `W` weeks and an anchor `A`:
 
 - The final week is the test, so there are `W - 1` climbing weeks.
-- The ladder runs from `start` to `end`, as percentages of `A`, spread evenly
-  across those climbing weeks.
-- Each week's heavy top set is `quantise(A × percentage)`.
+- The ladder opens at `quantise(A × start)` and adds `climb_per_week` to it for
+  each week after the first.
 - The light session's top set is a percentage of that week's heavy top set.
 - Warm-ups and back-off sets are percentages of their own session's top set —
   never of the anchor. See `prescribed-workout-domain-model.md`.
 
-**The endpoint is authored and the weekly step is derived**, not the other way
-round. The endpoint is a claim about how much can be gained in the time
-available, which personal history and a reference programme can both inform. A
-weekly step is a number with nothing behind it, and multiplying it by a duration
-produces an endpoint nobody chose.
+**The rate is authored and there is no endpoint.** Settled by the operator on
+2026-08-19: a linear block picks a starting point and attempts to add a fixed
+increment every week, and what regulates the climb is the reset protocol below
+rather than a stated top. See
+`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`, which records the
+argument this paragraph used to make against exactly that and why it does not
+hold — in short, it assumed the plan is what has to stop the climb, and something
+else already does.
 
-**Where the endpoint comes from.** This is the one genuinely unresolved number
-and the honest answer is that a standard template supplies it. 5/3/1 embeds
-roughly 1.25kg per week for a lower-body lift, by advancing a training max 5kg
-every four-week cycle. A classic linear block finishes around 102.5–105% of the
-entry 1RM. Choosing a template is choosing the gain, which is why "just pick a
-template" is a real answer to a question that otherwise has none.
+**Where the rate comes from.** 2.5kg is the smallest plate, so it is the
+slowest honest climb and it lands every rung on the grid at every anchor. It is
+also the rate the reset protocol below already names: the second reset re-climbs
+at +2.5kg a week, which that section calls "baseline rate off a lower start".
+The two are one number and it was stated in prose before it was a parameter.
 
-Personal history bounds it further, and the boundary that matters is **regain
-versus new ground**: ground already covered comes back fast, and ground never
-covered does not. A block whose endpoint sits below a previously demonstrated
-max is asking for regain and is the safer first block.
+**What duration does here, and what it does not.** It says how long the climb
+runs. An interrupted eight weeks is the same plan as a twelve stopped earlier,
+which is the honest description of a block broken by a holiday and is why
+`linear` is the template for a short or interrupted window. Where duration
+genuinely shapes the plan is `block`, which sets its rung count and phase split
+from it.
+
+Personal history still bounds how far a block can reasonably get, and the
+boundary that matters is **regain versus new ground**: ground already covered
+comes back fast, and ground never covered does not. A block that spends its weeks
+below a previously demonstrated max is asking for regain and is the safer first
+block.
 
 **Repetitions are constant per session role within a block.** Currently one on
 the heavy session and three on the light one. The textbook linear block descends
@@ -107,7 +116,7 @@ the reps as the intensity climbs — fives, then threes, then singles — and th
 one does not, because the record does not: the rep counts have been fixed per
 role since the July test while the load climbed. Descending reps is a legitimate
 variant and is deferred rather than rejected; it changes the ladder from a
-percentage series into a series of `(percentage, reps)` pairs and nothing else.
+series of loads into a series of `(load, reps)` pairs and nothing else.
 
 ## Stall detection
 
@@ -182,8 +191,8 @@ The test is unconditional. A block ending mid-re-climb requires no special
 handling — the test runs regardless.
 
 A test coming in below the ladder's final week is the **expected** outcome after
-stalls, not a failure signal. It confirms what the stalls already implied. The
-ladder's endpoint is an intention, and the test says how much of it was real.
+stalls, not a failure signal. It confirms what the stalls already implied. Where
+the ladder got to is an intention, and the test says how much of it was real.
 
 Because the test replaces the anchor, the stall count does not need resetting.
 Its subject no longer exists.
@@ -201,10 +210,10 @@ Its subject no longer exists.
 - **Interaction between reset cost and block runway.** A stall costs four of 7
   or 11 climbing weeks. This is a real constraint on what a maintenance block
   can achieve, and it belongs in the periodisation model rather than here. It
-  does bound the endpoint: a ladder leaving no room for one reset cannot survive
-  a stall within the block.
+  does bound how far a block gets: a block leaving no room for one reset cannot
+  survive a stall within its own weeks.
 - **Descending repetitions across the block.** The textbook linear block does
-  this; § The plan records why v1 does not.
+  this; § The plan records why `linear` does not.
 - **Fractional plates.** 2.5kg is the smallest available increment, so the climb
   rate is slowed by cadence rather than step size. 0.5kg pairs would remove that
   constraint. Not proposed.

@@ -265,9 +265,10 @@ pub fn programme_authored(
     }
     println!("anchor {}, fixed for the block", programme.anchor());
     println!(
-        "  ladder {} → {} of anchor over {} climbing weeks; week {} is the test",
+        "  ladder opens at {} of anchor and climbs {} a week over {} climbing weeks; \
+         week {} is the test",
         parameters.ladder_start,
-        parameters.ladder_end,
+        parameters.ladder_climb_per_week,
         calendar.duration_weeks().saturating_sub(1),
         calendar.duration_weeks(),
     );
@@ -293,9 +294,12 @@ pub fn programme_authored(
 
 /// The programme in force, with its ladder week by week and where it stands.
 ///
-/// **The table is the point.** A span and a duration are two numbers; what an
+/// **The table is the point.** A rate and a duration are two numbers; what an
 /// operator needs to see is the load each week asks for, and which of those weeks
 /// they are actually on — which after a miss is not the week the calendar is in.
+///
+/// The `of anchor` column is read back out of the load rather than driving it,
+/// which is what lets the climb be seen passing 100% of the max it started from.
 pub fn programme_standing(standing: &application::LadderStanding) {
     let programme = &standing.programme;
     let parameters = &standing.parameters;
@@ -331,7 +335,7 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         let Ok(index) = WeekIndex::new(week) else {
             continue;
         };
-        let Some(percentage) = ladder.percentage(index) else {
+        let Some(percentage) = ladder.implied_percentage(anchor, index, increment) else {
             println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "test");
             continue;
         };

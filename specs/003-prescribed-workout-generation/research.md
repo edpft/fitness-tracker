@@ -339,7 +339,7 @@ anchor fixed and authored, most of that dissolves.
 
 | Value | |
 | --- | --- |
-| Duration | Supplied per block. Taking a duration and a starting 1RM is the whole point of the generator, and the ladder's step is the span divided by it — so a different duration is a different plan rather than the same plan run longer |
+| Duration | Supplied per block. Taking a duration and a starting 1RM is the whole point of the generator. Under `linear` it says how long the climb runs and nothing else (D13); under `block` it sets the rung count and the phase split, and a different duration really is a different programme |
 
 **Inferred from the performed record and not confirmed.** These are marked
 `INFERRED` in the authored document. They are probably right; none of them was
@@ -360,6 +360,13 @@ stated the value, not because the method was sound.
 **What remains unknown: the ladder's start and end percentages.** One number in
 substance, since the start follows from the endpoint and the duration once a rate is
 implied.
+
+> **Half of this is answered and half is dissolved — see D13.** The end
+> percentage does not exist: a linear block climbs at a stated rate and has no
+> endpoint, so there is nothing for the bounds below to bound. The start is still
+> open and is still `TODO`. The bounds are left standing because they are what
+> the endpoint question was reasoned with, and D13 explains why that reasoning
+> was answering a question the model does not ask.
 
 This is open question 5 in the prescribed model and it is not resolvable by research
 into this repository, because it is a claim about what a specific lifter can gain in
@@ -674,7 +681,10 @@ nothing in the literature asks for.
 ### Correction 2: the ladder span is derived at both ends, and D8 closes
 
 `ladder_start` and `ladder_end` have been `TODO` since the feature began,
-because neither could be chosen without guessing. Under `block` neither is chosen:
+because neither could be chosen without guessing. (`ladder_end` has since stopped
+existing rather than been chosen — D13 — which leaves `linear` with one `TODO`
+and does not touch what this correction says about `block`.) Under `block`
+neither is chosen:
 intensification's endpoint is `rm(target)` from the table, and its start is
 where accumulation finished, which Prilepin fixes. The `TODO` stays in the
 document only for as long as the linear template does.
@@ -1027,3 +1037,63 @@ Bartolomei et al. at <https://pmc.ncbi.nlm.nih.gov/articles/PMC4637911/>,
 <https://trainkilo.com/blogs/inside-the-system/principles-of-periodization-the-foundation-of-long-term-progress>
 and <https://hevycoach.com/glossary/block-periodization/>. Prilepin's chart and
 the 105% endpoint keep the sources listed under D11.
+
+---
+
+## D13: The linear ladder climbs at a rate, and has no endpoint
+
+**Decided 2026-08-19, by the operator, and it closes the half of D8 it does not
+dissolve.** Recorded in full as
+`docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`; this entry says what
+it changes about the research above.
+
+**Scope: `linear` only.** D11 and D12 derive `block`'s whole percentage ladder
+from Prilepin's bands and a 105% exit, and nothing here touches that. The two
+templates now differ in a way that matches why each exists: `block` is shaped by
+its duration, `linear` merely runs for it.
+
+### What was asked, and what came back
+
+T080 needed `[parameters.ladder] start` and `end`, `TODO` since the feature
+began. The question put three candidate spans with their kilo-per-week
+implications. The answer was that the question was the wrong shape:
+
+> The linear progression doesn't target an exit percentage, it picks a starting
+> point and then attempts to add 2.5kg per week. The regulation comes from the
+> drop and re-climb protocol.
+
+### Why the repo had talked itself out of this
+
+`docs/primary-lift-progression.md` had rejected a weekly rate twice, and D8 above
+is written entirely inside that frame — it treats "what total gain is reasonable"
+as the open question and spends three bounds on it. The rejection assumed that if
+the arithmetic does not stop the climb, nothing does.
+
+Something else already does. The stall mechanism — a miss holds the ladder, a
+second miss at the same load suspends it and drops back, the re-climb rejoins
+where it left off — was built in Phase 5 and is exactly what the operator means
+by "the regulation comes from the drop and re-climb protocol". The endpoint was
+doing a job that was already done, which is why nothing downstream ever consumed
+it except to divide it back into a step.
+
+**This is the third time in this feature that a number was refused because the
+operator declined to invent one**, and the second time the refusal was the error
+rather than the caution. D11 correction 3 records the first: the literature had
+the block's gain all along. Here the operator had the rate all along, and three
+rounds went into deciding what belonged in a field they would have answered in
+one line if asked directly. **Ask, before reasoning about what cannot be known.**
+
+### What it costs
+
+Duration means less under `linear` than the model claimed for it: the same plan
+over 8 or 12 weeks is one plan run further, not two plans. That was the strongest
+argument for the endpoint and giving it up is a real loss — but `linear` is the
+template for the short and interrupted window, where "keep adding a plate for as
+long as we get" is the actual intent and a duration-shaped plan is a fiction.
+
+### What is still open
+
+`[parameters.ladder] start` — where the climb opens, as a percentage of the
+anchor. Still `TODO`, still refusing to author, and still the one number the
+linear template asks for beyond the duration and the anchor. It is a real
+operator input, not something to derive.
