@@ -141,7 +141,11 @@ the sequence reaches the failed load again the ladder resumes from where it left
 off. The anchor is untouched, because the anchor is a measurement of where the
 block started and a stall is not evidence about that.
 
-Worked example from a 90kg failed load:
+**A resume spends the stall.** After a re-climb returns to the failed load, the
+next miss there is a first miss again — otherwise the second stall would fire
+immediately on arriving back and the reset would have bought nothing.
+
+Worked example from a 90kg failed load, on a 2.5kg plate grid:
 
 | Week | Load | Result |
 |---|---|---|
@@ -151,11 +155,22 @@ Worked example from a 90kg failed load:
 | 4 | 85 | pass |
 | 5 | 90 | miss |
 | 6 | 90 | miss → reset 2 |
-| 7 | 80 | pass |
-| 8 | 82.5 | pass |
-| 9 | 85 | pass |
-| 10 | 87.5 | pass |
-| 11 | 90 | miss |
+| 7 | 85 | pass |
+| 8 | 87.5 | pass |
+| 9 | 90 | miss |
+
+**Corrected 2026-08-19, and the arithmetic is the reason.** This table used to run
+to eleven weeks, with the second reset dropping to 80 and re-climbing 82.5, 85,
+87.5, 90 — a 10kg drop at +2.5kg a week, which is four re-climb weeks and not the
+two the first reset costs. The stated protocol is −5%, which from 90 is 85.5 and
+lands on 85. So both resets cost two weeks, which is what "chosen as a pair so both
+cost the same" says two paragraphs above, and the old rows contradicted the table
+they were illustrating. `crates/domain/tests/progression.rs` asserts this version
+load for load.
+
+**A third stall has no protocol and therefore holds**, re-issuing the failed load
+until it goes up. That is the absence of a decision rather than a decision, and it
+is what the code does so the state stays legible.
 
 ## Blocks and testing
 

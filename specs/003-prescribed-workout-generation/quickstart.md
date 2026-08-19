@@ -52,10 +52,20 @@ cargo sqlx prepare --workspace    # after changing any query
 ```
 
 `nix flake check` enumerates the flake's `checks`, so `architecture`,
-`use-case-isolation` and `workspace-members` run without a workflow edit. Two of
-them matter especially here: `architecture` is what verifies no `toml` type reached
-`domain`, and `use-case-isolation` is what stops a store adapter calling the
-generation it is supposed to be driven by.
+`use-case-isolation`, `document-format-is-an-adapters` and `workspace-members` run
+without a workflow edit. Two of them matter especially here.
+
+**`document-format-is-an-adapters` is what keeps `toml` out of `domain`**, and it
+exists because this guide used to say `architecture` did that. It does not and
+cannot: `architecture` reads *path* dependencies, which is what makes it a ring
+check, and `toml` is a registry crate and therefore invisible to it. Verified by
+adding `toml` to `crates/domain/Cargo.toml` and watching the new check fail.
+
+**`use-case-isolation` is what stops a store adapter calling the generation it is
+supposed to be driven by.** It named `extract` and `status` only until 2026-08-19,
+so `prescribe` was unguarded for as long as it existed; it now names all four use
+cases and is scoped to `src`, because an integration test at this ring does drive a
+use case and legitimately.
 
 ---
 

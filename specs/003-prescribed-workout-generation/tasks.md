@@ -218,12 +218,12 @@ moved once.
 
 ## Phase 6: Polish
 
-- [ ] T074 [P] Write `docs/decisions/0006-prescription-reads-the-normalised-layer.md` — the § II.4 deviation, why supersession could not be deferred with matching, and what stays unresolved
-- [ ] T075 [P] Write `docs/decisions/0007-a-zero-rep-set-is-a-failed-attempt.md` — the reversal of 002's shipped behaviour, and the 77-versus-1 evidence
+- [X] T074 [P] Write `docs/decisions/0006-prescription-reads-the-normalised-layer.md` — the § II.4 deviation, why supersession could not be deferred with matching, and what stays unresolved
+- [X] T075 [P] Write `docs/decisions/0007-a-zero-rep-set-is-a-failed-attempt.md` — the reversal of 002's shipped behaviour, and the 77-versus-1 evidence
 - [X] T076 [P] Add the `prescription` section to `fitness status` in `crates/cli/src/output.rs` and `crates/cli/src/main.rs` (§ 38)
-- [ ] T077 [P] Update `docs/gym-workout-domain-model.md` — its open question 3 is resolved by `Performed<M>`, and `Set<M>` no longer holds `measure`
-- [ ] T078 Run `nix flake check` and confirm `architecture` verifies no `toml` type in `domain`, and `use-case-isolation` still passes
-- [ ] T079 Walk [quickstart.md](./quickstart.md) end to end against the real store
+- [X] T077 [P] Update `docs/gym-workout-domain-model.md` — its open question 3 is resolved by `Performed<M>`, and `Set<M>` no longer holds `measure`
+- [X] T078 Run `nix flake check` and confirm `architecture` verifies no `toml` type in `domain`, and `use-case-isolation` still passes. **Both claims were wrong and are now true.** `architecture` reads path dependencies only, so a registry crate like `toml` is invisible to it — a new `document-format-is-an-adapters` check does that job, verified by adding `toml` to `domain` and watching it fail. `use-case-isolation` named `extract` and `status` only, so `prescribe` and `normalise` were unguarded; it now names all four and is scoped to `src`, because an integration test at this ring drives a use case legitimately
+- [X] T079 Walk [quickstart.md](./quickstart.md) end to end against the real store. Walked against a **copy** of `local.db`, which was still at migration 2: `0003`–`0008` applied cleanly to real data, normalisation produced 164 workouts and 2 refusals (the zero-rep set is a failed attempt), authoring refused the `TODO` span naming the field, and with a span supplied `programme show` and `prescribe --date 2026-08-10` both issued. `programme show` put the derived rung at week 5 while the calendar was in week 6 — a real miss holding a real ladder. Extraction was not run: it would contact the source with the operator's key
 - [ ] T080 ⛔ Author the ladder span in `crates/infrastructure/tests/fixtures/programme.toml` and in the operator's own programme, then unblock T058 and issue a real workout (SC-001)
 
 ---

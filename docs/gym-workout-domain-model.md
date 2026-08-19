@@ -66,9 +66,15 @@ enum Rir {
 
 enum SetKind { Working, Warmup }
 
+/// What became of a set. A completed one carries its measure; a failed attempt
+/// carries none, so no arithmetic can take a quantity from a failure.
+enum Performed<M> { Completed(M), Failed }
+
 struct Set<M> {
     load: Load,
-    measure: M,
+    /// Not `measure: M`. The load is outside the outcome, because a failed
+    /// attempt is a load that was on the bar.
+    outcome: Performed<M>,
     intensity: Option<Rir>,
     kind: SetKind,
     rest_after: Option<Duration>,
@@ -498,9 +504,22 @@ row.
    and no duration on it, because the duration was a target rather than an
    observation. [Decision
    0005](decisions/0005-distance-over-time-was-prescription.md).
-3. **Attempts.** A rep attempted and missed is a real event and not a set. One
-   occurrence so far. Belongs with prescribed-versus-performed, since a source
-   with no prescribed side leaves nowhere to record intent that went unmet.
+3. ~~**Attempts.** A rep attempted and missed is a real event and not a set.~~
+   **Settled**: `Set<M>` holds `outcome: Performed<M>`, so a failed attempt is a
+   set with a load and no measure. It was right that this belonged with
+   prescribed-versus-performed — the negative gate in
+   `primary-lift-progression.md` detects a stall from a miss, which is what gave
+   the case something to mean — and decision
+   [0007](decisions/0007-a-zero-rep-set-is-a-failed-attempt.md) records the
+   reversal. `RepCount` stays non-zero; the zero is a sentinel read in
+   translation, and Hevy's `failure` set *type* is deliberately not the
+   discriminator: it sits on 77 sets and means "taken to failure".
+
+   **One thing this uncovered.** A failed attempt carries no *intended* count
+   either, because nothing records what was being attempted, so the round trip in
+   `prescribed-workout-domain-model.md` reports it as a gap rather than guessing.
+   The performed model still cannot fully describe a missed set, and that is a
+   smaller open question than this one was.
 4. **The grouping layer** — "all squatting volume", "all pull-up variants". A
    relation over exercises, many-to-many, added without unpicking identity. Not
    designed.
