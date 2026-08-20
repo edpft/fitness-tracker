@@ -14,7 +14,8 @@
 use domain::{
     gym::{
         AtLeastTwo, Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone,
-        PerformedExercise, RepCount, Set, SetKind, SignedKg, Superset, WorkoutItem, WorkoutStart,
+        Performed, PerformedExercise, RepCount, Set, SetKind, SignedKg, Superset, WorkoutItem,
+        WorkoutStart,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
@@ -42,14 +43,22 @@ fn intensity() -> impl Strategy<Value = Option<domain::gym::Rir>> {
 fn set_of<M: std::fmt::Debug + Clone + 'static>(
     measure: impl Strategy<Value = M>,
 ) -> impl Strategy<Value = Set<M>> {
-    (load(), measure, intensity(), kind()).prop_map(|(load, measure, intensity, kind)| Set {
-        load,
-        measure,
-        intensity,
-        kind,
-        // Always absent from this source, and the type says it may be.
-        rest_after: None,
-    })
+    // Completed and failed both, so an arbitrary set exercises the outcome
+    // partition rather than only the happy half of it.
+    (load(), measure, intensity(), kind(), any::<bool>()).prop_map(
+        |(load, measure, intensity, kind, completed)| Set {
+            load,
+            outcome: if completed {
+                Performed::Completed(measure)
+            } else {
+                Performed::Failed
+            },
+            intensity,
+            kind,
+            // Always absent from this source, and the type says it may be.
+            rest_after: None,
+        },
+    )
 }
 
 /// One to four of something, through the fallible constructor.

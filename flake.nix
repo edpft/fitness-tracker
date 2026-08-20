@@ -83,7 +83,7 @@
             ./clippy.toml
             # ./rustfmt.toml
             ./deny.toml
-            # ./taplo.toml
+            ./taplo.toml
           ];
         };
 
@@ -338,13 +338,22 @@
           # case, which would make the adapter drive the application it is
           # supposed to be driven by.
           #
-          # `application` keeps its use cases behind `extract` and `status`
-          # rather than re-exporting them at the crate root, so naming one
-          # requires naming its module. That makes this greppable, which is the
-          # only reason the module boundary is worth keeping.
+          # `application` keeps its use cases behind `extract`, `normalise`,
+          # `prescribe` and `status` rather than re-exporting them at the crate
+          # root, so naming one requires naming its module. That makes this
+          # greppable, which is the only reason the module boundary is worth
+          # keeping. **All four are named here**: the check listed two of them
+          # until 2026-08-19, so `prescribe` — added by feature 003 — was
+          # unguarded for as long as it existed.
+          #
+          # Scoped to `src`, not the whole crate. An integration test at this ring
+          # *does* drive a use case, and legitimately: the normalisation and
+          # prescription suites need the real translator and the real store, and
+          # `application` may not depend on the ring above it. So the rule is
+          # about the adapter, and `tests/` is not the adapter.
           use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
-            if grep -rn 'application::\(extract\|status\)' \
-                 ${repoSrc}/crates/infrastructure; then
+            if grep -rn 'application::\(extract\|normalise\|prescribe\|status\)' \
+                 ${repoSrc}/crates/infrastructure/src ${repoSrc}/crates/web/src; then
               echo
               echo "Constitution § 16: a driven adapter implements ports, it"
               echo "does not call the use cases. What infrastructure may name"
@@ -354,6 +363,43 @@
 
             touch "$out"
           '';
+
+          # Constitution § 21. `toml` is the document format, and a document
+          # format is an adapter's business: a `domain` type deserialised from
+          # TOML is a domain shaped by a file format, and a `cli` that parses one
+          # is a second reader to keep in step with the first.
+          #
+          # **The `architecture` check above does not catch this and cannot.** It
+          # reads path dependencies only — that is what makes it a ring check —
+          # and `toml` is a registry crate, so it is invisible there. Tasks.md
+          # claimed otherwise, which is how a guard nobody had gets relied on.
+          document-format-is-an-adapters =
+            pkgs.runCommand "document-format"
+              {
+                nativeBuildInputs = [
+                  rustToolchain
+                  pkgs.jq
+                ];
+              }
+              ''
+                export CARGO_HOME="$TMPDIR/cargo"
+
+                cargo metadata --no-deps --offline --format-version 1 \
+                  --manifest-path ${repoSrc}/Cargo.toml \
+                  | jq -r '.packages[] | .name as $crate
+                      | .dependencies[] | select(.name == "toml") | $crate' \
+                  | sort -u > readers
+
+                if grep -v '^infrastructure$' readers; then
+                  echo
+                  echo "Constitution § 21: only infrastructure reads the document"
+                  echo "format. A domain type deserialised from TOML is a domain"
+                  echo "shaped by a file format."
+                  exit 1
+                fi
+
+                touch "$out"
+              '';
 
           # Not constitutional — build hygiene. `src` lists its members
           # by hand, so a new crate can be perfectly valid to cargo while nix

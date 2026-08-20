@@ -15,6 +15,12 @@ extend-exclude = [
 Hevy = "Hevy"
 
 [default.extend-identifiers]
+# The plural of SQL's CHECK constraint, in a migration comment. Listed as an
+# identifier rather than a word because the splitter reads `CHECKs` as `CHEC`
+# plus `Ks`. The word is right, and the fix cannot be to edit the file: sqlx
+# checksums an applied migration, so rewriting one breaks the operator's store.
+"CHECKs" = "CHECKs"
+
 # Hevy's exercise template ids, quoted in the mapping. They are the source's
 # identifiers and are not ours to spell differently: `040BA2E3` reads as `BA`,
 # and the fix for a mistyped one is a failing test, not a dictionary.

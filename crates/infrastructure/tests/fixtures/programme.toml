@@ -1,0 +1,224 @@
+# The programme in force, as far as the record shows it.
+#
+# Authored intent (§ 12), not a derivation. Read once by
+# `fitness programme author`, converted into domain types at the adapter
+# boundary, and stored with the date it was authored.
+#
+# Two kinds of value here, and they are marked so they can be told apart.
+#
+#   (none)    Every value here is settled. D8 in
+#             specs/003-prescribed-workout-generation/research.md is closed: its
+#             two `TODO`s were the ladder's endpoint and its opening, and neither
+#             was answered — the endpoint stopped existing (D13) and the opening
+#             is now derived from the entry test the anchor records (D14).
+#             Authoring still rejects a `TODO` rather than defaulting, so the
+#             mechanism stands even though nothing uses it.
+#
+#   INFERRED  read off the performed record rather than stated by the operator.
+#             Probably right and not confirmed. Marked because six lines that
+#             want thirty seconds of review should not look like the ones that
+#             do not — and because fitting a parameter to the record is how the
+#             back-off error would have become a rule, had the operator not
+#             stated the back-off directly.
+#
+# Everything unmarked is the operator's own.
+
+[programme]
+template         = "linear"
+primary          = "knee_dominant"
+primary_exercise = "front-squat"
+gating_role      = "heavy"
+start            = "2026-07-06"
+# Weeks, not cycles. The last one is the test, so this is 7 climbing weeks.
+#
+# An operator input per block rather than a parameter to be settled — the whole
+# point of the generator is that it takes a duration and a starting 1RM. Under
+# `linear` it says how long the climb runs and nothing else, so an interrupted
+# eight weeks is the same plan as a twelve stopped earlier; it is `block` where
+# duration shapes the plan. Eight here is a fixture value and nothing more.
+duration_weeks = 8
+
+# The weeks the block does not run, each named by a date inside it.
+#
+# **The duration above counts training weeks.** A week away is not a week of the
+# plan: the session after it is the same rung of the ladder as the session
+# before it, and the block ends one calendar week later for each week listed
+# here. Left empty is a real state and not an unsettled one, which is why this
+# takes no `TODO` — the block the corpus was trained under ran straight through.
+interruptions = []
+
+# Which weekday is which session role. A date on no listed weekday is an error
+# naming these days, never an implicit nearest match.
+[programme.weekdays]
+monday = "light"
+friday = "heavy"
+
+# The starting 1RM. Fixed for the whole block; only the exit test replaces it,
+# and that replacement anchors the *next* block.
+#
+# 2026-07-03 ramped to a completed single at 90 and then failed 95. That failure
+# is the corpus's only zero-rep set, and it is what bounds this number.
+[programme.anchor]
+load = "90kg"
+# What the test failed above the load it completed, if it found the ceiling.
+# **This is what the block opens at**: the ladder starts here and the
+# drop-and-re-climb protocol is how the block gets back to it, at the *second*
+# reset's -5% and +2.5kg — the gentler pair, and the same rate the ladder itself
+# climbs at, so the whole block advances by one increment a week. It costs no
+# stall: the next failure still gets both resets. Omit the key for a test that
+# failed nothing, and the block opens one climb above `load` instead.
+failed     = "95kg"
+provenance = "tested"
+from       = "2026-07-03"
+
+# One exercise per slot. A slot takes a string; a slot that alternates by session
+# role takes a table keyed by role. No slot takes a list: which slots superset
+# together is the template's, not the programme's, so a pair is two slots rather
+# than one slot with two members.
+#
+# **These are what the operator intends to do, not what the record holds.** Three
+# of them — `neutral-grip-pull-up`, `bent-over-cable-chop` and the groin stretch
+# — have no Hevy exercise yet and so no history, because he has been logging a
+# nearest-thing stand-in instead. A slot filled with one of those is reported
+# underivable until it has been performed once, which is FR-011 doing its job
+# rather than a fault in the fixture.
+[fills]
+knee_dominant   = "front-squat"
+upper_push      = "chest-dip"
+upper_pull      = "neutral-grip-pull-up"
+biceps          = "preacher-curl-barbell"
+triceps         = "overhead-triceps-extension-cable"
+wrist_flexion   = "wrist-flexion-dumbbell"
+wrist_extension = "wrist-extension-dumbbell"
+core            = "bent-over-cable-chop"
+handstand_hold  = "handstand-hold"
+dead_hang       = "dead-hang"
+
+# The four stretches, each named for what it opens. Performed as one circuit.
+hip_flexor_stretch           = "couch-stretch"
+hip_external_rotator_stretch = "ninety-ninety"
+hamstring_stretch            = "standing-straddle-fold"
+groin_stretch                = "squatting-groin-stretch"
+
+# The static slots carry their whole prescription: they do not progress, so there
+# is nothing for history to say about them — and deriving them from the last
+# session would let a bad set re-issue itself.
+[fills.plyometric]
+exercise = "pogo"
+sets     = 3
+reps     = 20
+
+[fills.power]
+exercise = "box-jump"
+sets     = 3
+reps     = 5
+
+# Alternates by role. This is why the history projection is unbounded: on any
+# given session the exercise being prescribed was last performed two sessions
+# ago, not one.
+[fills.hip_dominant]
+light = "back-extension-machine"
+heavy = "nordic-hamstrings-curls"
+
+
+# Generation parameters (§ 14). Only the current value is required, because what
+# they produced is recorded concretely on the prescription that used them.
+
+[parameters]
+# The operator's own, and the record disagrees with it on three light sessions
+# before 10 August. Those are operator error, confirmed as such — not a
+# different rule, and not something generation should reproduce.
+back_off_of_top_set = "85%"
+plate_increment     = "2.5kg"
+
+# The light session's top set, as a percentage of that week's heavy top set.
+# Stated by the operator on 2026-08-18, and the first version of this number was
+# wrong in an instructive way.
+#
+# It was 88.5%, solved from three weeks of light/heavy pairs — 72.5 / 75 / 77.5
+# against 82.5 / 85 / 87.5. Every one of those pairs is a flat -10kg. The
+# percentage was a ratio fitted to an offset: it reproduces all three only
+# because quantisation rounds it back onto the plate grid, and it drifts across
+# them (87.9%, 88.2%, 88.6%) where the offset does not drift at all. Fitting a
+# parameter to the record produced a number with a decimal place and no
+# decision behind it.
+#
+# 85% is a decision. It is one plate lighter than the record's light days, it is
+# inside the 70-90% band that Starr, the Texas Method and DUP all land in, and
+# it is a percentage rather than an offset so it stays meaningful when the
+# anchor moves.
+light_of_heavy = "85%"
+
+# How long a static hold is held for. The mobility work does not progress; it is
+# held, and for the same length every time. Inside [parameters], not inside a
+# sub-table — TOML puts a bare key under whichever table header precedes it.
+static_hold = "60s"
+
+# The ladder: what the heavy top set adds each climbing week.
+#
+# **There is no endpoint and no opening.** The climb runs at its stated rate
+# until the calendar stops it, and what regulates it is the reset protocol below
+# rather than a stated top. Where it opens comes from the entry test above, not
+# from here. Both settled by the operator on 2026-08-19; see
+# docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md and
+# docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md.
+#
+# The rate is a mass rather than a percentage, and it is the same kind of thing
+# as the two reclimb rates below: a reset is this climb run at a different rate
+# off a lower start. 2.5kg is also the smallest plate, so the climb lands on the
+# grid at every anchor — the fault `light_of_heavy` was caught with was a ratio
+# standing in for an offset, and this is the offset stated as one.
+[parameters.ladder]
+climb_per_week = "2.5kg"
+
+# INFERRED. The double-progression scheme each block's non-primary slots run.
+# One per block rather than one per slot: the slots within a block are prescribed
+# alike, and the two blocks differ from each other. The ranges themselves were
+# eyeballed from pull-ups at six, curls around four to six and wrist work at six,
+# and are unconfirmed.
+[parameters.strength]
+reps = "4-6"
+sets = 3
+
+[parameters.hypertrophy]
+reps = "4-6"
+sets = 3
+
+# INFERRED. The primary's top set, per session role, read off every session
+# since the July test. Well evidenced — they have not varied within a role — and
+# still not stated.
+#
+# Constant within a block either way: descending reps across the block, fives
+# then threes then singles, is the textbook linear variant and is deferred.
+[parameters.roles.light]
+top_set_reps = 3
+
+[parameters.roles.heavy]
+top_set_reps = 1
+
+# The operator's own: 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%, all of the top set.
+[[parameters.warmup]]
+of_top_set = "40%"
+reps       = 4
+
+[[parameters.warmup]]
+of_top_set = "60%"
+reps       = 3
+
+[[parameters.warmup]]
+of_top_set = "80%"
+reps       = 2
+
+[[parameters.warmup]]
+of_top_set = "90%"
+reps       = 1
+
+# From docs/primary-lift-progression.md. The drop and the increment are chosen
+# as a pair so both land on the plate grid and both cost four weeks.
+[parameters.reset.first]
+drop             = "-10%"
+reclimb_per_week = "5kg"
+
+[parameters.reset.second]
+drop             = "-5%"
+reclimb_per_week = "2.5kg"

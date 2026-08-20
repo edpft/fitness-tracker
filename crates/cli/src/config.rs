@@ -8,7 +8,8 @@
 
 use std::{env::VarError, path::PathBuf};
 
-use domain::gym::OperatorZone;
+use domain::{gym::OperatorZone, prescription::Calendar};
+use jiff::{Timestamp, civil::Date};
 
 use crate::catalogue::KnownStream;
 
@@ -38,6 +39,12 @@ pub enum ConfigError {
 
     #[error("{value:?} is not an IANA time zone identifier")]
     UnknownTimeZone { value: String },
+
+    #[error("{value:?} is not a date: {detail}")]
+    NotADate { value: String, detail: String },
+
+    #[error("this programme has no session on or after {from}")]
+    NoSessionScheduled { from: Date },
 }
 
 /// The zone the operator declares they train in.
@@ -114,14 +121,73 @@ pub fn database(path: Option<PathBuf>) -> Result<PathBuf, ConfigError> {
     path.ok_or(ConfigError::MissingDatabase)
 }
 
+/// Which date to prescribe for: the one given, or the next session.
+///
+/// **Defaults forward rather than to today.** "The next session" is what an
+/// operator wants on a rest day and today is what they want on a training day,
+/// and the next programmed day at or after today gives both. It is printed, so
+/// the default is never silent.
+///
+/// **Composed here rather than at the call site, and `now` is a parameter.** The
+/// default is three decisions stacked — resolve the instant in the operator's
+/// zone, take the day that lands on, then walk forward to a day the programme
+/// runs and does not skip — and each of them is silently right on the machine
+/// that wrote it. A stub for the store cannot catch any of them, so the whole
+/// composition is a pure function with the clock passed in.
+///
+/// # Errors
+///
+/// [`ConfigError::NotADate`] for a `--date` that will not parse, and
+/// [`ConfigError::NoSessionScheduled`] where the block has no remaining session
+/// — which is what asking after the last week looks like.
+pub fn date(given: Option<&str>, calendar: &Calendar, now: Timestamp) -> Result<Date, ConfigError> {
+    if let Some(text) = given {
+        return text.parse::<Date>().map_err(|error| ConfigError::NotADate {
+            value: text.to_owned(),
+            detail: error.to_string(),
+        });
+    }
+
+    let today = calendar.today(now);
+    calendar
+        .next_programmed(today)
+        .ok_or(ConfigError::NoSessionScheduled { from: today })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ConfigError, SourceAccess, database};
+    use super::{ConfigError, SourceAccess, database, date};
     use crate::catalogue::{KnownStream, lookup};
+    use domain::prescription::{Calendar, SessionRole, Weekdays};
+    use jiff::{Timestamp, civil::Weekday};
     use std::{env::VarError, path::PathBuf};
 
     fn hevy() -> Option<&'static KnownStream> {
         lookup("hevy.workouts")
+    }
+
+    /// A Monday-and-Friday block of four weeks from Monday 2026-09-07, skipping
+    /// the week of the 21st, in a zone ten hours ahead of UTC.
+    ///
+    /// The zone is deliberately not the operator's: a test in `Europe/London`
+    /// agrees with UTC for half the year, which is exactly how a default that
+    /// resolves the day in the wrong zone survives a test suite.
+    fn calendar(interruptions: &[&str]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let weekdays = Weekdays::new(vec![
+            (Weekday::Monday, SessionRole::Light),
+            (Weekday::Friday, SessionRole::Heavy),
+        ])?;
+        let skipped: Vec<_> = interruptions
+            .iter()
+            .map(|week| week.parse())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Calendar::new(
+            "2026-09-07".parse()?,
+            4,
+            &skipped,
+            weekdays,
+            jiff::tz::TimeZone::get("Pacific/Auckland")?,
+        )?)
     }
 
     #[test]
@@ -147,6 +213,80 @@ mod tests {
         assert_eq!(
             database(Some(PathBuf::from("/tmp/x.db"))).unwrap(),
             PathBuf::from("/tmp/x.db")
+        );
+    }
+
+    /// An explicit `--date` is taken as given, and the clock is not consulted.
+    #[test]
+    fn a_given_date_is_the_date() {
+        let calendar = calendar(&[]).expect("a calendar");
+        let resolved = date(Some("2026-09-11"), &calendar, Timestamp::UNIX_EPOCH);
+        assert_eq!(resolved.expect("a date").to_string(), "2026-09-11");
+    }
+
+    /// On a training day the default is that day, not the next one.
+    #[test]
+    fn the_default_is_today_when_today_is_programmed() {
+        let calendar = calendar(&[]).expect("a calendar");
+        // Monday 2026-09-07, mid-morning in Auckland.
+        let now: Timestamp = "2026-09-06T22:00:00Z".parse().expect("an instant");
+        let resolved = date(None, &calendar, now);
+        assert_eq!(resolved.expect("a date").to_string(), "2026-09-07");
+    }
+
+    /// On a rest day it is the next programmed day.
+    #[test]
+    fn the_default_walks_forward_to_the_next_programmed_day() {
+        let calendar = calendar(&[]).expect("a calendar");
+        // Wednesday 2026-09-09 in Auckland; the programme runs Monday and Friday.
+        let now: Timestamp = "2026-09-08T22:00:00Z".parse().expect("an instant");
+        let resolved = date(None, &calendar, now);
+        assert_eq!(resolved.expect("a date").to_string(), "2026-09-11");
+    }
+
+    /// **The day is the operator's, not UTC's.**
+    ///
+    /// This instant is Thursday evening in UTC and Friday morning in Auckland,
+    /// and Friday is a training day. Resolving in UTC would default to a rest day
+    /// and then walk forward to the *following* Monday — a whole session skipped,
+    /// on exactly one day in seven, which is why this case is pinned rather than
+    /// left to the zone the machine happens to be in.
+    #[test]
+    fn the_default_resolves_the_day_in_the_operators_zone() {
+        let calendar = calendar(&[]).expect("a calendar");
+        let now: Timestamp = "2026-09-10T21:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            date(None, &calendar, now).expect("a date").to_string(),
+            "2026-09-11",
+            "Friday in Auckland is a training day"
+        );
+    }
+
+    /// A week the block skips is not a session, so the default steps over it.
+    #[test]
+    fn the_default_steps_over_an_interrupted_week() {
+        let calendar = calendar(&["2026-09-21"]).expect("a calendar");
+        // Saturday 2026-09-19 in Auckland: the next programmed weekday is Monday
+        // the 21st, which falls in the skipped week.
+        let now: Timestamp = "2026-09-18T22:00:00Z".parse().expect("an instant");
+        let resolved = date(None, &calendar, now);
+        assert_eq!(
+            resolved.expect("a date").to_string(),
+            "2026-09-28",
+            "a holiday is not a rest day with a session after it"
+        );
+    }
+
+    /// Past the last week there is nothing to default to, and saying so beats
+    /// answering with a date outside the block.
+    #[test]
+    fn the_default_refuses_once_the_block_is_over() {
+        let calendar = calendar(&[]).expect("a calendar");
+        let now: Timestamp = "2026-12-24T22:00:00Z".parse().expect("an instant");
+        let from = "2026-12-25".parse().expect("a date");
+        assert_eq!(
+            date(None, &calendar, now).unwrap_err(),
+            ConfigError::NoSessionScheduled { from }
         );
     }
 

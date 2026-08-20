@@ -10,6 +10,7 @@ use application::{
 use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
+    prescription::WeekIndex,
 };
 
 pub fn run_started(stream: &LandingStream) {
@@ -228,4 +229,306 @@ pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
 /// Enough of an identifier to find the record, without a full UUID per line.
 fn short(id: &str) -> String {
     id.chars().take(8).collect()
+}
+
+/// What was authored.
+pub fn programme_authored(
+    id: domain::prescription::ProgrammeId,
+    programme: &domain::prescription::Programme,
+    parameters: &domain::prescription::GenerationParameters,
+) {
+    let calendar = programme.calendar();
+    println!(
+        "authored programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
+        programme.primary_exercise(),
+        programme.primary(),
+        calendar.duration_weeks(),
+        calendar.start(),
+        programme.gating_role(),
+    );
+    let skipped: Vec<String> = calendar
+        .interruptions()
+        .iter()
+        .map(|week| week.to_string())
+        .collect();
+    if !skipped.is_empty() {
+        // Printed because the operator has to be able to see that the block
+        // knows about the holiday. The alternative — silence — looks identical
+        // to the bug this replaced, where a week away quietly cost a rung.
+        let label = if skipped.len() == 1 { "week" } else { "weeks" };
+        println!(
+            "  not running the {label} of {} — {} training weeks over {} calendar weeks",
+            skipped.join(", "),
+            calendar.duration_weeks(),
+            calendar.calendar_weeks(),
+        );
+    }
+    println!("anchor {}, fixed for the block", programme.anchor());
+    println!(
+        "  ladder climbs {}kg a week over {} climbing weeks; week {} is the test",
+        parameters.ladder_climb_per_week,
+        calendar.duration_weeks().saturating_sub(1),
+        calendar.duration_weeks(),
+    );
+    println!(
+        "  heavy top set × {}; light top set × {} at {} of the heavy load",
+        parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
+    );
+    println!(
+        "  back-off {} of top set, plate increment {}kg",
+        parameters.back_off_of_top_set, parameters.plate_increment,
+    );
+    println!(
+        "  strength slots {} × {}-{}; hypertrophy slots {} × {}-{}",
+        parameters.strength.sets,
+        parameters.strength.low,
+        parameters.strength.high,
+        parameters.hypertrophy.sets,
+        parameters.hypertrophy.low,
+        parameters.hypertrophy.high,
+    );
+    println!("  holds {}", parameters.static_hold);
+}
+
+/// The programme in force, with its ladder week by week and where it stands.
+///
+/// **The table is the point.** A rate and a duration are two numbers; what an
+/// operator needs to see is the load each week asks for, and which of those weeks
+/// they are actually on — which after a miss is not the week the calendar is in.
+///
+/// The `of anchor` column is read back out of the load rather than driving it,
+/// which is what lets the climb be seen passing 100% of the max it started from.
+pub fn programme_standing(standing: &application::LadderStanding) {
+    let programme = &standing.programme;
+    let parameters = &standing.parameters;
+    let calendar = programme.calendar();
+
+    println!(
+        "programme {} — {}, {} primary, {} training weeks from {}, gating on the {} session",
+        standing.programme_id,
+        programme.primary_exercise(),
+        programme.primary(),
+        calendar.duration_weeks(),
+        calendar.start(),
+        programme.gating_role(),
+    );
+    println!("anchor {}, fixed for the block", programme.anchor());
+    match standing.history_through {
+        Some(through) => println!("history through {through}"),
+        // § 38: an empty record and a stale one are different, and a report that
+        // printed nothing here would look the same for both.
+        None => println!("history through — nothing performed yet"),
+    }
+
+    let Ok(ladder) = programme.ladder(parameters) else {
+        println!("  no ladder: the block is too short to climb");
+        return;
+    };
+    let anchor = programme.anchor().load();
+    let increment = parameters.plate_increment;
+    let standing_week = standing.progress.week();
+
+    println!("  week  of anchor    heavy    light");
+    for week in 1..=calendar.duration_weeks() {
+        let Ok(index) = WeekIndex::new(week) else {
+            continue;
+        };
+        let Some(percentage) = ladder.implied_percentage(anchor, index, increment) else {
+            println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "test");
+            continue;
+        };
+        let heavy = ladder.heavy_top_set(index, increment);
+        let light = ladder.light_top_set(index, increment, parameters.light_of_heavy);
+        // The rung the record puts the operator on, which after a miss is behind
+        // the calendar.
+        let here = if index == standing_week { " ←" } else { "" };
+        // Formatted into strings first: a width in a format spec only applies if
+        // the `Display` impl routes through `Formatter::pad`, and these do not.
+        println!(
+            "  {week:>4}  {:>9}  {:>7}  {:>7}{here}",
+            format!("{percentage}"),
+            heavy.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
+            light.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
+        );
+    }
+
+    match standing.progress.climb_back() {
+        None => println!(
+            "  on the plan at week {standing_week} of {}",
+            ladder.climbing_weeks()
+        ),
+        Some(climb) => {
+            let load = standing
+                .progress
+                .heavy_top_set(ladder, increment)
+                .map_or_else(|| "—".to_owned(), |load| format!("{load}"));
+            // The entry climb is deliberately not called a reset: it has spent
+            // no stall, so both resets are still available to the next failure.
+            let describing = match climb {
+                domain::prescription::ClimbBack::Entry => {
+                    "the block is climbing in from its entry test".to_owned()
+                }
+                domain::prescription::ClimbBack::Reset(reset) => {
+                    format!("the {reset} reset is in play")
+                }
+            };
+            println!(
+                "  {describing}: re-climbing at {load}, and the ladder resumes at \
+                 week {standing_week}"
+            );
+        }
+    }
+}
+
+/// The prescription, as a session to train from.
+pub fn prescription(issued: &application::Prescription) {
+    let workout = &issued.workout;
+    let lead = if issued.freshly_issued {
+        "prescribing"
+    } else {
+        "already issued for"
+    };
+    let weekday = workout.issued_for().weekday();
+    println!(
+        "{lead} {} ({weekday:?}, {})",
+        workout.issued_for(),
+        workout.session_role(),
+    );
+    println!(
+        "anchor {}, {}{}",
+        workout.anchor(),
+        workout.week(),
+        issued
+            .history_through
+            .map(|through| format!(", history through {through}"))
+            .unwrap_or_default(),
+    );
+    println!();
+
+    let mut block = None;
+    for item in workout.shape().items().iter() {
+        let Some(slot) = item.slots().next() else {
+            continue;
+        };
+        if block != Some(slot.block()) {
+            block = Some(slot.block());
+            println!("  {}", slot.block());
+        }
+
+        let members: Vec<_> = item.exercises().collect();
+        let paired = members.len() > 1;
+        for (at, exercise) in members.iter().enumerate() {
+            let marker = if !paired {
+                "   "
+            } else if at == 0 {
+                " ┐ "
+            } else if at + 1 == members.len() {
+                " ┘ "
+            } else {
+                " │ "
+            };
+            println!("   {marker}{}", describe(exercise));
+        }
+    }
+
+    if !issued.underivable.is_empty() {
+        println!();
+        for slot in &issued.underivable {
+            println!(
+                "  {} ({}) — not derivable: {}",
+                slot.slot, slot.exercise, slot.reason
+            );
+        }
+    }
+
+    println!();
+    if issued.freshly_issued {
+        println!("issued as prescription {}", issued.id);
+    } else {
+        println!("already issued as prescription {}", issued.id);
+    }
+}
+
+/// One exercise's line: its name, then its sets collapsed where they repeat.
+///
+/// Written the way an operator writes a session down — `3 × 6 @ 30kg`, sets
+/// first — rather than the way the type nests.
+fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
+    use domain::prescription::PrescribedExercise;
+    let lines: Vec<String> = match exercise {
+        PrescribedExercise::ForReps { sets, .. } => sets.iter().map(set_line).collect(),
+        PrescribedExercise::ForDuration { sets, .. } => sets.iter().map(set_line).collect(),
+        PrescribedExercise::ForDistance { sets, .. } => sets.iter().map(set_line).collect(),
+    };
+
+    // Consecutive identical sets read as `3 × …`, which is how they are written
+    // down and how they are actually performed.
+    let mut collapsed: Vec<(String, usize)> = Vec::new();
+    for line in lines {
+        match collapsed.last_mut() {
+            Some((last, count)) if *last == line => *count += 1,
+            _ => collapsed.push((line, 1)),
+        }
+    }
+
+    let sets = collapsed
+        .into_iter()
+        .map(|(line, count)| {
+            if count == 1 {
+                line
+            } else {
+                format!("{count} × {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("{:<32} {sets}", exercise.exercise_key())
+}
+
+/// One set: the measure, then the load, then whatever qualifies it.
+fn set_line<M: std::fmt::Display>(set: &domain::prescription::PrescribedSet<M>) -> String {
+    use domain::prescription::Prescribed;
+    let mut line = match &set.prescription {
+        // An unloaded movement has no load worth printing. `Load` keeps
+        // absolute-zero ("no external load" — a pogo, a stretch) apart from
+        // relative-zero ("plain bodyweight" — a pull-up, where assistance and
+        // added weight are both conventional), and only the second is worth a
+        // word on the line.
+        Prescribed::Fixed { load, measure, .. } if unloaded(*load) => format!("{measure}"),
+        Prescribed::Fixed { load, measure, .. } => format!("{measure} @ {}", weight(*load)),
+        Prescribed::ToEffort { load, effort, .. } => {
+            format!("as many as @ {}, {effort} in reserve", weight(*load))
+        }
+        // A test: the load is what the day allows, so there is none to print.
+        Prescribed::Autoregulated { measure, effort } => {
+            format!("{measure} — work up, {effort} in reserve")
+        }
+    };
+    if set.warmup {
+        line.push_str(" (warm-up)");
+    }
+    line
+}
+
+/// External load that is simply absent, as against bodyweight on an axis where
+/// assistance is conventional.
+const fn unloaded(load: domain::gym::Load) -> bool {
+    matches!(load, domain::gym::Load::Absolute(mass) if mass.is_none())
+}
+
+/// A load, written the short way.
+///
+/// `Load`'s own `Display` spells out "no external load" and "bodyweight +10 kg",
+/// which is right for a diagnostic and too long for a line an operator reads in
+/// the gym.
+fn weight(load: domain::gym::Load) -> String {
+    use domain::gym::Load;
+    match load {
+        Load::Absolute(mass) if mass.is_none() => "bodyweight".to_owned(),
+        Load::Absolute(mass) => format!("{mass}kg"),
+        Load::Relative(delta) if delta.as_grams() == 0 => "bodyweight".to_owned(),
+        Load::Relative(delta) if delta.as_grams() < 0 => format!("bodyweight {delta}kg"),
+        Load::Relative(delta) => format!("bodyweight +{delta}kg"),
+    }
 }

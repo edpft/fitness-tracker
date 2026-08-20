@@ -93,6 +93,21 @@ impl<T> AtLeastTwo<T> {
         Ok(Self::of(first, second, items.collect()))
     }
 
+    /// The two that are always there.
+    ///
+    /// Infallible, for the same reason [`NonEmpty::first`] is: a caller that has
+    /// an `AtLeastTwo` should not have to handle the absence of an element the
+    /// type exists to guarantee. Without these, code mapping a superset member by
+    /// member has to reach through `iter()` and invent a branch for a case the
+    /// constructor already ruled out.
+    pub const fn first(&self) -> &T {
+        &self.first
+    }
+
+    pub const fn second(&self) -> &T {
+        &self.second
+    }
+
     pub const fn count(&self) -> usize {
         self.rest.len().saturating_add(2)
     }

@@ -7,6 +7,10 @@ publish.workspace = true
 
 [dependencies]
 domain.workspace = true
+# A data type, not machinery: prescription is placed on a calendar date, and a
+# core that cannot name one ends up passing strings across its own boundaries.
+# Allowed here for the same reason it is allowed in `domain`.
+jiff.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

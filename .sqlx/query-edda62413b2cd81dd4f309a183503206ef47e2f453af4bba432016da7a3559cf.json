@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT slot AS \"slot!: String\"\n            FROM prescribed_slot\n            WHERE workout = ? AND item_position = ?\n            ORDER BY member_position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_slot",
+            "name": "slot"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "edda62413b2cd81dd4f309a183503206ef47e2f453af4bba432016da7a3559cf"
+}

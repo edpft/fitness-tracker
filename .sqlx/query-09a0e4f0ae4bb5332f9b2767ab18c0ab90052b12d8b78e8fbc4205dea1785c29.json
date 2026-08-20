@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT slot AS \"slot!: String\", role AS \"role: String\",\n               exercise AS \"exercise!: String\",\n               static_sets AS \"static_sets: i64\", static_reps AS \"static_reps: i64\"\n        FROM programme_slot_fill\n        WHERE programme = ?\n        ORDER BY slot ASC, position ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_fill",
+            "name": "slot"
+          }
+        }
+      },
+      {
+        "name": "role: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_fill",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_fill",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "static_sets: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_fill",
+            "name": "static_sets"
+          }
+        }
+      },
+      {
+        "name": "static_reps: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_fill",
+            "name": "static_reps"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "09a0e4f0ae4bb5332f9b2767ab18c0ab90052b12d8b78e8fbc4205dea1785c29"
+}

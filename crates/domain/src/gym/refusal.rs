@@ -81,9 +81,6 @@ impl fmt::Display for RefusalKind {
 /// Why something did not translate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefusalReason {
-    /// A real event that is not a set. It needs an *attempt*, which belongs with
-    /// prescribed-versus-performed.
-    ZeroReps,
     /// Members either side of a non-member. "Back to back" is the definition, so
     /// this fails it rather than testing it.
     NonContiguousGrouping,
@@ -121,7 +118,6 @@ impl RefusalReason {
             // recorded so the record is still accounted for. It sits with wrong
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
-            Self::ZeroReps => RefusalKind::Unmodelled,
         }
     }
 
@@ -129,7 +125,6 @@ impl RefusalReason {
     /// these" is a `WHERE` clause rather than a grep over prose.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::ZeroReps => "zero-reps",
             Self::NonContiguousGrouping => "non-contiguous-grouping",
             Self::SingleMemberGrouping => "single-member-grouping",
             Self::NoSetsInEntry => "no-sets-in-entry",
@@ -157,7 +152,6 @@ impl RefusalReason {
 impl fmt::Display for RefusalReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ZeroReps => f.write_str("a set of zero reps is an attempt, not a set"),
             Self::NonContiguousGrouping => {
                 f.write_str("superset members either side of a non-member")
             }

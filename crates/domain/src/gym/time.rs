@@ -43,6 +43,15 @@ impl OperatorZone {
     pub(crate) const fn zone(&self) -> &TimeZone {
         &self.zone
     }
+
+    /// The zone itself, for a caller that has to do calendar arithmetic.
+    ///
+    /// Public where [`Self::zone`] is not, because a prescription is placed on a
+    /// calendar day and the ring that does the placing is outside this crate.
+    #[must_use]
+    pub fn as_time_zone(&self) -> TimeZone {
+        self.zone.clone()
+    }
 }
 
 impl TryFrom<String> for OperatorZone {

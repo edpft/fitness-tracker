@@ -1,0 +1,206 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   back_off_bp AS \"back_off_bp!: i64\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_climb_grams AS \"ladder_climb_grams!: i64\",\n                   plate_increment_grams AS \"plate_increment_grams!: i64\",\n                   strength_low AS \"strength_low!: i64\",\n                   strength_high AS \"strength_high!: i64\",\n                   strength_sets AS \"strength_sets!: i64\",\n                   hypertrophy_low AS \"hypertrophy_low!: i64\",\n                   hypertrophy_high AS \"hypertrophy_high!: i64\",\n                   hypertrophy_sets AS \"hypertrophy_sets!: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "authored_at"
+          }
+        }
+      },
+      {
+        "name": "back_off_bp!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "back_off_bp"
+          }
+        }
+      },
+      {
+        "name": "light_of_heavy_bp!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "light_of_heavy_bp"
+          }
+        }
+      },
+      {
+        "name": "ladder_climb_grams!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "ladder_climb_grams"
+          }
+        }
+      },
+      {
+        "name": "plate_increment_grams!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "plate_increment_grams"
+          }
+        }
+      },
+      {
+        "name": "strength_low!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_low"
+          }
+        }
+      },
+      {
+        "name": "strength_high!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_high"
+          }
+        }
+      },
+      {
+        "name": "strength_sets!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_sets"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_low!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_low"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_high!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_high"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_sets!: i64",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_sets"
+          }
+        }
+      },
+      {
+        "name": "static_hold_seconds!: i64",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "static_hold_seconds"
+          }
+        }
+      },
+      {
+        "name": "reset1_drop_bp!: i64",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset1_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "reset1_reclimb_grams!: i64",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset1_reclimb_grams"
+          }
+        }
+      },
+      {
+        "name": "reset2_drop_bp!: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset2_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "reset2_reclimb_grams!: i64",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset2_reclimb_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5fa1fd5e3d6035ba20f6145355356c56e51f0476ca1aea4e7440d78df9c8a309"
+}

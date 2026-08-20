@@ -126,3 +126,56 @@ pub enum NormalisationError {
     #[error("no operator time zone is declared, so no workout can be given a wall clock")]
     MissingTimeZone,
 }
+
+/// Why a prescription could not be issued.
+///
+/// Note what is **not** here: any variant for a slot that could not be derived.
+/// That is this feature's central distinction, and it mirrors the one
+/// [`NormalisationError`] draws. A slot with no history to progress from is
+/// reported as a value on the result, because a workout with ten good slots and
+/// one gap is worth issuing and a refusal to answer is not. Only a missing
+/// programme, a date the programme does not run, or an unavailable store stops
+/// generation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PrescriptionError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+
+    /// Nothing has been authored yet. The ordinary first-run state, and the CLI
+    /// has something helpful to say about it.
+    #[error("no programme has been authored, so there is nothing to prescribe from")]
+    NoProgramme,
+
+    /// A programme exists but the § 14 parameters it reads do not.
+    #[error("no generation parameters have been authored, so no load can be derived")]
+    NoParameters,
+
+    /// The date falls on no weekday the programme runs, before its start, or
+    /// past its end.
+    ///
+    /// Declining names what the programme *does* run. There is deliberately no
+    /// nearest-match: silently prescribing Friday's session for a Wednesday is
+    /// worse than saying no.
+    #[error(transparent)]
+    NotScheduled(#[from] domain::prescription::NotScheduled),
+
+    /// The authored programme is internally inconsistent in a way the types
+    /// could not catch. Raised at authoring rather than at the first
+    /// `prescribe`, so a bad programme never reaches the store.
+    #[error(transparent)]
+    InconsistentProgramme(#[from] domain::prescription::InconsistentProgramme),
+
+    /// Every slot failed to derive, so there is no workout to issue.
+    ///
+    /// Distinct from a slot or two being underivable, which is a value on the
+    /// result: a prescription with ten good slots and one gap is worth issuing,
+    /// and one with no slots at all is not a prescription.
+    #[error("no slot could be derived, so there is no workout to issue")]
+    NothingDerivable,
+
+    /// No operator time zone is declared. The same gap as
+    /// [`NormalisationError::MissingTimeZone`], and it bites harder here: the
+    /// zone decides which calendar day "the next session" falls on.
+    #[error("no operator time zone is declared, so no date can be placed in a block")]
+    MissingTimeZone,
+}

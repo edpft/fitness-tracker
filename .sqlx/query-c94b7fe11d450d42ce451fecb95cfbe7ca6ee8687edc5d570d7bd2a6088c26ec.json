@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO generation_parameters (\n                authored_at, back_off_bp, light_of_heavy_bp,\n                ladder_climb_grams, plate_increment_grams,\n                strength_low, strength_high, strength_sets,\n                hypertrophy_low, hypertrophy_high, hypertrophy_sets,\n                static_hold_seconds,\n                reset1_drop_bp, reset1_reclimb_grams,\n                reset2_drop_bp, reset2_reclimb_grams\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 16
+    },
+    "nullable": []
+  },
+  "hash": "c94b7fe11d450d42ce451fecb95cfbe7ca6ee8687edc5d570d7bd2a6088c26ec"
+}

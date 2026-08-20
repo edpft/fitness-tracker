@@ -52,6 +52,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 # source bytes of a sub-value, which is how a payload is stored as received
 # (FR-002) without re-serialising a parsed Value and reordering its keys.
 serde_json = { version = "1.0.151", features = ["raw_value"] }
+# The authored programme document, and nothing else. Confined to
+# `infrastructure` — § 21 exempts an interface language kept at its adapter, and
+# the exemption is only honest while no `toml` type reaches `domain`. The
+# `architecture` check verifies that by ring.
+toml = "0.9.8"
 sqlx = { version = "0.9.0", default-features = false, features = [
   "sqlite",
   "runtime-tokio",

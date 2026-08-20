@@ -14,8 +14,11 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use domain::gym::{Load, PerformedExercise, SetKind};
-use infrastructure::hevy::mapping;
+use domain::gym::{
+    Load, PerformedExercise, SetKind,
+    exercise::{DurationExercise, Exercise, RepsExercise},
+};
+use infrastructure::hevy::mapping::{self, LoadReading};
 use support::{corpus, derived};
 
 /// Scenario 1. The counts the model of record produced on paper, reproduced by
@@ -44,11 +47,11 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
     assert_eq!(entries, 1_135, "every landed exercise entry translates");
     assert_eq!(supersets, 334, "every well-formed grouping is a superset");
 
-    // One set in the corpus does not translate: 95 kg for zero reps, an attempt
-    // that failed. It is a real event and it is not a set, and nothing else is
-    // refused — the model rejects exactly the thing it has no shape for.
-    assert_eq!(sets, 3_778, "of 3,779 sets translate");
-    assert_eq!(produced.refusals.len(), 3, "one set and two groupings");
+    // Every set in the corpus translates. The one that did not — 95 kg for zero
+    // reps — is a failed attempt now rather than a refusal (US2), so what is left
+    // refused is the two malformed groupings and nothing else.
+    assert_eq!(sets, 3_779, "every landed set translates");
+    assert_eq!(produced.refusals.len(), 2, "two groupings, and no set");
 }
 
 /// SC-003. Every template the corpus holds is covered, so no derivation of it
@@ -67,6 +70,78 @@ fn every_landed_template_resolves() {
 
     assert!(unmapped.is_empty(), "unmapped templates: {unmapped:?}");
     assert_eq!(templates.len(), 134, "distinct templates in the corpus");
+}
+
+/// A stand-in template still reads as the exercise it names.
+///
+/// Four movements had no Hevy exercise until the operator created them on
+/// 2026-08-20, and until then he logged the nearest thing Hevy offered. Now that
+/// both exist, the two must not be confused: `Pull Up (Assisted)` is an assisted
+/// pull-up and not a neutral-grip one, however many neutral-grip pull-ups were
+/// recorded under it. Reading a template as the movement he *meant* would make
+/// the adapter assert something the source never said, and would silently
+/// rewrite the record; correcting those workouts is the edit overlay's job.
+///
+/// Asserted rather than reviewed, because the table is long and the mistake it
+/// catches is a one-line edit that looks like a rename.
+#[test]
+fn a_stand_in_template_still_reads_as_the_exercise_it_names() {
+    let pairs = [
+        ("2C37EC5E", Exercise::Reps(RepsExercise::PullUp)),
+        ("A2D838BD", Exercise::Reps(RepsExercise::CableTwistUpToDown)),
+        ("527DA061", Exercise::Duration(DurationExercise::Stretching)),
+    ];
+
+    for (template, expected) in pairs {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} is in the corpus and so must resolve")
+        };
+        assert_eq!(mapped.exercise, expected);
+    }
+}
+
+/// The four exercises created on 2026-08-20 resolve to themselves.
+///
+/// None is in the corpus yet, so nothing else covers them: the first session
+/// that uses one is the first time these entries are exercised, and a wrong
+/// template id would surface as a refusal on real data rather than here.
+///
+/// **Each load reading is the template's own `type`.** `Neutral Grip Pull Up` is
+/// declared `bodyweight_assisted`, so the number recorded is weight taken off
+/// and negates — the same treatment every other assisted variant gets, because
+/// assistance is a load and not a different movement.
+#[test]
+fn the_newly_created_templates_resolve() {
+    let pairs = [
+        (
+            "72f032e8-d574-4dab-9bb3-b76377b973f8",
+            Exercise::Reps(RepsExercise::NeutralGripPullUp),
+            LoadReading::RelativeNegated,
+        ),
+        (
+            "48fdc527-90a4-4713-a766-ced702d9295c",
+            Exercise::Reps(RepsExercise::BentOverCableChop),
+            LoadReading::Absolute,
+        ),
+        (
+            "19ec9b58-0556-4a00-acbc-628a081d0be7",
+            Exercise::Duration(DurationExercise::SquattingGroinStretch),
+            LoadReading::Absolute,
+        ),
+        (
+            "e459e508-356d-41be-8fac-301909a91c6c",
+            Exercise::Duration(DurationExercise::StandingStraddleFold),
+            LoadReading::Absolute,
+        ),
+    ];
+
+    for (template, exercise, load) in pairs {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} was created in Hevy and is mapped")
+        };
+        assert_eq!(mapped.exercise, exercise);
+        assert_eq!(mapped.load, load);
+    }
 }
 
 /// Scenario 2. § 7's re-derivation, three ways: twice over the same input,
@@ -201,10 +276,13 @@ fn absence_is_absence() {
         }
     }
 
-    // 2,415 sets in the corpus record an intensity. One sits on the zero-rep
-    // attempt, which refuses, so 2,414 reach the normalised layer.
-    assert_eq!(with_intensity, 2_414, "sets carrying an intensity");
-    assert_eq!(with_intensity + without_intensity, 3_778, "sets in total");
+    // 2,415 sets in the corpus record an intensity, and all of them reach the
+    // normalised layer now: the last one to arrive sits on the zero-rep attempt,
+    // which is a failed attempt rather than a refusal (US2). Its recorded RIR is
+    // kept as the observation it is — a failure carries no *measure*, which is a
+    // different absence from carrying no effort.
+    assert_eq!(with_intensity, 2_415, "sets carrying an intensity");
+    assert_eq!(with_intensity + without_intensity, 3_779, "sets in total");
     // No positional rule reconstructs these: the corpus opens workouts with
     // heavy bridging singles tagged as warm-ups.
     assert_eq!(warmups, 361, "warm-up sets");

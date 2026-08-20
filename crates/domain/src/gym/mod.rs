@@ -13,6 +13,7 @@ pub mod exercise;
 pub mod intensity;
 pub mod load;
 pub mod measure;
+pub mod outcome;
 pub mod refusal;
 pub mod run;
 pub mod sequence;
@@ -24,6 +25,7 @@ pub use exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise, U
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{InvalidLoad, Kg, Load, SignedKg};
 pub use measure::{Distance, Duration, InvalidQuantity, Metres, RepCount};
+pub use outcome::Performed;
 pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
 pub use run::{
     NormalisationFailure, NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount,

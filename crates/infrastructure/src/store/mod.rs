@@ -6,10 +6,14 @@
 //! integration tests at the port boundaries run against a temporary file
 //! inside the nix sandbox, with no service to start and no network.
 
+pub mod history;
 pub mod landing;
 pub mod normalisation_run_log;
 pub mod normalised;
+pub mod parameters;
 pub mod pool;
+pub mod prescription;
+pub mod programme;
 pub mod refusals;
 pub mod resumption;
 pub mod run_log;
@@ -17,10 +21,14 @@ pub mod run_log;
 use application::StoreError;
 use domain::{gym::NormalisationRunId, landing::RunId};
 
+pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};
+pub use parameters::SqliteGenerationParameterStore;
 pub use pool::connect;
+pub use prescription::SqlitePrescribedWorkoutStore;
+pub use programme::SqliteProgrammeStore;
 pub use refusals::SqliteRefusalStore;
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;

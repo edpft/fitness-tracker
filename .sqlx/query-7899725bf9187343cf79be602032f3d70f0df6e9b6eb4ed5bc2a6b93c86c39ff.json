@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT position AS \"position!: i64\", is_superset AS \"is_superset!: i64\"\n        FROM prescribed_item WHERE workout = ? ORDER BY position ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_item",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "is_superset!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_item",
+            "name": "is_superset"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7899725bf9187343cf79be602032f3d70f0df6e9b6eb4ed5bc2a6b93c86c39ff"
+}

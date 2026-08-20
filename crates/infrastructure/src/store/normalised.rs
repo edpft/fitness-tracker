@@ -274,9 +274,9 @@ async fn write_exercise(
         PerformedExercise::ForReps { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
                 let ordinal = count_for_storage(ordinal)?;
-                let reps = i64::from(set.measure.as_u32());
+                let reps = set.outcome.completed().map(|reps| i64::from(reps.as_u32()));
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
-                    .reps(Some(reps))
+                    .reps(reps)
                     .execute()
                     .await?;
             }
@@ -284,14 +284,18 @@ async fn write_exercise(
         PerformedExercise::ForDuration { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
                 let ordinal = count_for_storage(ordinal)?;
-                let seconds =
-                    count_for_storage(usize::try_from(set.measure.as_seconds()).map_err(
-                        |_| application::StoreError::Corrupt {
-                            detail: "a duration larger than the store can hold".to_owned(),
-                        },
-                    )?)?;
+                let seconds = match set.outcome.completed() {
+                    Some(duration) => Some(count_for_storage(
+                        usize::try_from(duration.as_seconds()).map_err(|_| {
+                            application::StoreError::Corrupt {
+                                detail: "a duration larger than the store can hold".to_owned(),
+                            }
+                        })?,
+                    )?),
+                    None => None,
+                };
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
-                    .duration(Some(seconds))
+                    .duration(seconds)
                     .execute()
                     .await?;
             }
@@ -299,9 +303,12 @@ async fn write_exercise(
         PerformedExercise::ForDistance { sets, .. } => {
             for (ordinal, set) in sets.iter().enumerate() {
                 let ordinal = count_for_storage(ordinal)?;
-                let millimetres = metres_for_storage(set.measure.metres)?;
+                let millimetres = match set.outcome.completed() {
+                    Some(distance) => Some(metres_for_storage(distance.metres)?),
+                    None => None,
+                };
                 write_set(tx, Row::new(workout, item_position, position, ordinal, set))
-                    .distance(Some(millimetres))
+                    .distance(millimetres)
                     .execute()
                     .await?;
             }
@@ -319,6 +326,9 @@ struct Row {
     position: i64,
     load_kind: &'static str,
     load_grams: i64,
+    /// `Performed<M>` projected. A failed attempt writes no measure at all,
+    /// which is what the `0003` CHECK constraints hold.
+    outcome: &'static str,
     rir: Option<String>,
     set_kind: &'static str,
     rest_after_seconds: Option<i64>,
@@ -348,6 +358,7 @@ impl Row {
             position,
             load_kind,
             load_grams,
+            outcome: set.outcome.as_str(),
             rir: set.intensity.map(|rir| rir.as_str().to_owned()),
             set_kind: match set.kind {
                 SetKind::Working => "working",
@@ -404,10 +415,11 @@ impl SetWrite<'_, '_> {
             r#"
             INSERT INTO performed_set (
                 workout, item_position, exercise_position, position,
-                load_kind, load_grams, reps, duration_seconds, distance_mm,
+                load_kind, load_grams, outcome,
+                reps, duration_seconds, distance_mm,
                 rir, set_kind, rest_after_seconds
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             row.workout,
             row.item_position,
@@ -415,6 +427,7 @@ impl SetWrite<'_, '_> {
             row.position,
             row.load_kind,
             row.load_grams,
+            row.outcome,
             self.reps,
             self.duration,
             self.distance,
