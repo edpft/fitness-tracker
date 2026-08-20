@@ -15,7 +15,6 @@ use domain::{
     gym::{
         Duration, Kg, RepCount,
         exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
-        sequence::AtLeastTwo,
     },
     prescription::{
         AccessoryScheme, Anchor, AnchorProvenance, Calendar, GenerationParameters,
@@ -358,7 +357,7 @@ impl Document {
         )?)
     }
 
-    /// The eleven fills.
+    /// Every slot's fill.
     fn fills(&self) -> Result<SlotFills, DocumentError> {
         Ok(SlotFills {
             plyometric: self.statics("plyometric")?,
@@ -367,11 +366,17 @@ impl Document {
             upper_push: self.single("upper_push")?,
             upper_pull: self.single("upper_pull")?,
             hip_dominant: self.single("hip_dominant")?,
-            arms: self.superset("arms")?,
-            forearms: self.superset("forearms")?,
+            biceps: self.single("biceps")?,
+            triceps: self.single("triceps")?,
+            wrist_flexion: self.single("wrist_flexion")?,
+            wrist_extension: self.single("wrist_extension")?,
             core: self.single("core")?,
-            mobility_hold: self.single("mobility_hold")?,
-            mobility_stretch: self.superset("mobility_stretch")?,
+            handstand_hold: self.single("handstand_hold")?,
+            dead_hang: self.single("dead_hang")?,
+            hip_flexor_stretch: self.single("hip_flexor_stretch")?,
+            hip_external_rotator_stretch: self.single("hip_external_rotator_stretch")?,
+            hamstring_stretch: self.single("hamstring_stretch")?,
+            groin_stretch: self.single("groin_stretch")?,
         })
     }
 
@@ -447,47 +452,6 @@ impl Document {
                 .and_then(toml::Value::as_str)
                 .ok_or_else(|| invalid(&field, format!("no {role} fill")))?;
             exercise(&field, key)
-        };
-        Ok(Fill::Alternating(PerRole {
-            light: by_role("light")?,
-            heavy: by_role("heavy")?,
-        }))
-    }
-
-    /// A supersetted slot: a members list, or one per role.
-    fn superset(&self, slot: &str) -> Result<Fill<AtLeastTwo<Exercise>>, DocumentError> {
-        let field = format!("fills.{slot}");
-        let value = self
-            .fills
-            .get(slot)
-            .ok_or_else(|| invalid(&field, "no fill for this slot"))?;
-        let table = value
-            .as_table()
-            .ok_or_else(|| invalid(&field, "a supersetted slot is a table"))?;
-
-        let members = |list: &toml::Value| -> Result<AtLeastTwo<Exercise>, DocumentError> {
-            let entries = list
-                .as_array()
-                .ok_or_else(|| invalid(&field, "members is a list of exercises"))?;
-            let mut built = Vec::with_capacity(entries.len());
-            for entry in entries {
-                let key = entry
-                    .as_str()
-                    .ok_or_else(|| invalid(&field, "a member is an exercise name"))?;
-                built.push(exercise(&field, key)?);
-            }
-            AtLeastTwo::new(built).map_err(|error| invalid(&field, error))
-        };
-
-        if let Some(list) = table.get("members") {
-            return Ok(Fill::Same(members(list)?));
-        }
-        let by_role = |role: &str| -> Result<AtLeastTwo<Exercise>, DocumentError> {
-            let list = table
-                .get(role)
-                .and_then(|section| section.get("members"))
-                .ok_or_else(|| invalid(&field, format!("no {role} members")))?;
-            members(list)
         };
         Ok(Fill::Alternating(PerRole {
             light: by_role("light")?,

@@ -232,7 +232,7 @@ fn every_slot_key_is_distinct_and_reads_back() {
     keys.sort_unstable();
     keys.dedup();
     assert_eq!(keys.len(), before, "slot keys must be distinct");
-    assert_eq!(before, 11, "the template has eleven slots");
+    assert_eq!(before, 17, "the template has seventeen slots");
 
     for slot in SlotId::ALL {
         let Ok(parsed) = SlotId::try_from(slot.as_str().to_owned()) else {

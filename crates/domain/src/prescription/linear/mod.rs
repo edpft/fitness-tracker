@@ -20,4 +20,4 @@ pub mod programme;
 pub mod template;
 
 pub use programme::{InconsistentProgramme, Programme};
-pub use template::{Fill, PrimaryPattern, SlotContent, SlotFills, StaticFill};
+pub use template::{Fill, Position, PrimaryPattern, STRETCHES, SlotContent, SlotFills, StaticFill};

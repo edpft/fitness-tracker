@@ -19,7 +19,7 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, GatingTopSet, GenerationParameters, PrescribedExercise, PrescribedItem,
+        Block, GatingTopSet, GenerationParameters, Position, PrescribedExercise, PrescribedItem,
         PrescribedSet, PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress,
         SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent,
         progress_after, quantise_loaded,
@@ -62,12 +62,23 @@ impl<H, P, G, S> Prescribing<H, P, G, S> {
 /// to the larger arm.
 enum Derived {
     Item(Box<PrescribedItem>),
-    Underivable(UnderivableSlot),
+    /// One or more slots the position could not deliver.
+    ///
+    /// More than one because a group is all-or-nothing: when one member of a
+    /// supersetted pair or of the stretch circuit cannot be derived, the whole
+    /// item is withheld, and every slot that went with it is owed a reason
+    /// (FR-011). Reporting only the member that failed would leave the others
+    /// missing from the session with nothing said about them.
+    Underivable(Vec<UnderivableSlot>),
 }
 
 impl Derived {
     fn item(item: PrescribedItem) -> Self {
         Self::Item(Box::new(item))
+    }
+
+    fn underivable(slot: UnderivableSlot) -> Self {
+        Self::Underivable(vec![slot])
     }
 }
 
@@ -147,7 +158,7 @@ where
         for derived in issue_slots(&programme, &parameters, role, week, progress, &history) {
             match derived {
                 Derived::Item(item) => items.push(*item),
-                Derived::Underivable(slot) => underivable.push(slot),
+                Derived::Underivable(slots) => underivable.extend(slots),
             }
         }
 
@@ -274,13 +285,11 @@ fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
     })
 }
 
-/// Every slot, in issue order.
+/// Every position the template issues, derived in order.
 ///
-/// The strength block issues the primary first, then the upper pair supersetted,
-/// then the remaining lower slot as the accessory — which is what the record
-/// shows and what the model says. Where the primary is itself one of the upper
-/// pair, the pair is not supersetted, because a slot cannot be both the session's
-/// centrepiece and half of a paired accessory.
+/// The order is [`PrimaryPattern::sequence`]'s; all this adds is which
+/// derivation each position gets — the primary its top set and back-offs, and
+/// everything else double progression, a hold, or its authored numbers.
 fn issue_slots(
     programme: &Programme,
     parameters: &GenerationParameters,
@@ -289,45 +298,29 @@ fn issue_slots(
     progress: Progress,
     history: &BTreeMap<RepsExercise, LastPerformance>,
 ) -> Vec<Derived> {
-    let mut issued = Vec::new();
-    let accessory = |slot: SlotId| accessory_slot(programme, parameters, role, history, slot);
-
-    issued.push(accessory(SlotId::Plyometric));
-    issued.push(accessory(SlotId::Power));
-
-    // The primary, then the upper pair, then the accessory lower slot.
-    let primary_slot = programme.primary().slot();
-    issued.push(primary_slot_item(
-        programme,
-        parameters,
-        role,
-        week,
-        progress,
-        primary_slot,
-    ));
-
-    let upper = [SlotId::UpperPush, SlotId::UpperPull];
-    if upper.contains(&primary_slot) {
-        // One of the pair is the primary, so the other stands alone.
-        for slot in upper.into_iter().filter(|slot| *slot != primary_slot) {
-            issued.push(accessory(slot));
-        }
-    } else {
-        issued.push(pair(programme, parameters, role, history, upper));
-    }
-
-    let lower = [SlotId::KneeDominant, SlotId::HipDominant];
-    for slot in lower.into_iter().filter(|slot| *slot != primary_slot) {
-        issued.push(accessory(slot));
-    }
-
-    issued.push(accessory(SlotId::Arms));
-    issued.push(accessory(SlotId::Forearms));
-    issued.push(accessory(SlotId::Core));
-    issued.push(accessory(SlotId::MobilityHold));
-    issued.push(accessory(SlotId::MobilityStretch));
-
-    issued
+    let primary = programme.primary();
+    primary
+        .sequence()
+        .into_iter()
+        .map(|position| match position {
+            Position::Single(slot) if slot == primary.slot() => {
+                primary_slot_item(programme, parameters, role, week, progress)
+            }
+            Position::Single(slot) => accessory_slot(programme, parameters, role, history, slot),
+            Position::Superset(first, second) => {
+                group(programme, parameters, role, history, first, second, &[])
+            }
+            Position::Circuit([first, second, third, fourth]) => group(
+                programme,
+                parameters,
+                role,
+                history,
+                first,
+                second,
+                &[third, fourth],
+            ),
+        })
+        .collect()
 }
 
 /// The primary slot: a warm-up ramp, a top set, and back-offs.
@@ -342,18 +335,11 @@ fn primary_slot_item(
     role: SessionRole,
     week: WeekKind,
     progress: Progress,
-    slot: SlotId,
 ) -> Derived {
-    let SlotContent::Single(exercise) = programme.fills().content(slot, role) else {
-        // Unreachable: the four strength slots are all single.
-        return Derived::Underivable(UnderivableSlot {
-            slot,
-            exercise: "",
-            reason: UnderivableReason::NotSingle,
-        });
-    };
+    let slot = programme.primary().slot();
+    let exercise = programme.fills().primary(programme.primary(), role);
     let Exercise::Reps(reps_exercise) = exercise else {
-        return Derived::Underivable(UnderivableSlot {
+        return Derived::underivable(UnderivableSlot {
             slot,
             exercise: exercise.as_str(),
             reason: UnderivableReason::NotCountedInReps,
@@ -370,7 +356,7 @@ fn primary_slot_item(
         // it, which is the whole of US3.
         WeekKind::Climbing(_) => {
             let Ok(ladder) = programme.ladder(parameters) else {
-                return Derived::Underivable(UnderivableSlot {
+                return Derived::underivable(UnderivableSlot {
                     slot,
                     exercise: exercise.as_str(),
                     reason: UnderivableReason::NoLadder,
@@ -426,7 +412,7 @@ fn primary_slot_item(
             ));
         }
         let Ok(single) = RepCount::new(1) else {
-            return Derived::Underivable(UnderivableSlot {
+            return Derived::underivable(UnderivableSlot {
                 slot,
                 exercise: exercise.as_str(),
                 reason: UnderivableReason::NoLadder,
@@ -439,7 +425,7 @@ fn primary_slot_item(
     }
 
     let Ok(sets) = NonEmpty::new(sets) else {
-        return Derived::Underivable(UnderivableSlot {
+        return Derived::underivable(UnderivableSlot {
             slot,
             exercise: exercise.as_str(),
             reason: UnderivableReason::NoWorkingSet,
@@ -454,47 +440,67 @@ fn primary_slot_item(
     })
 }
 
-/// Two slots issued back to back.
-fn pair(
+/// Several slots issued as one item, as the template groups them.
+///
+/// Two slots and then the rest, mirroring `AtLeastTwo`, so "a group has at least
+/// two members" is in the signature.
+///
+/// Any member failing costs the group — issuing part of a supersetted pair
+/// would be prescribing something the template does not describe — and every
+/// slot in it is then reported, the failure with its own reason and the rest as
+/// withheld.
+fn group(
     programme: &Programme,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
-    slots: [SlotId; 2],
+    first: SlotId,
+    second: SlotId,
+    rest: &[SlotId],
 ) -> Derived {
-    let mut members = Vec::new();
-    for slot in slots {
-        match accessory_slot(programme, parameters, role, history, slot) {
-            Derived::Item(item) => match *item {
-                PrescribedItem::Exercise { slot, exercise } => {
-                    members.push(SupersetMember { slot, exercise });
-                }
-                // A single slot never derives to a superset: `accessory_slot`
-                // returns an `Exercise` item for a `SlotContent::Single`, and
-                // both halves of the upper pair are single by the template.
-                PrescribedItem::Superset(_) => return Derived::Item(item),
-            },
-            // Either member failing costs the pair. Issuing one half of a
-            // supersetted pair would be prescribing something the template does
-            // not describe.
-            Derived::Underivable(reason) => return Derived::Underivable(reason),
-        }
+    let slots = [first, second].into_iter().chain(rest.iter().copied());
+    let derived: Vec<(SlotId, Result<PrescribedExercise, UnderivableSlot>)> = slots
+        .map(|slot| {
+            (
+                slot,
+                accessory_exercise(programme, parameters, role, history, slot),
+            )
+        })
+        .collect();
+
+    if derived.iter().any(|(_, member)| member.is_err()) {
+        // Every slot that went with it is owed a reason, not just the one that
+        // failed: the others are absent from the session too.
+        return Derived::Underivable(
+            derived
+                .into_iter()
+                .map(|(slot, member)| match member {
+                    Err(reason) => reason,
+                    Ok(exercise) => UnderivableSlot {
+                        slot,
+                        exercise: exercise.exercise_key(),
+                        reason: UnderivableReason::GroupWithheld,
+                    },
+                })
+                .collect(),
+        );
     }
 
-    let mut members = members.into_iter();
+    let mut members = derived.into_iter().filter_map(|(slot, member)| {
+        member
+            .ok()
+            .map(|exercise| SupersetMember { slot, exercise })
+    });
     let (Some(first), Some(second)) = (members.next(), members.next()) else {
-        return Derived::Underivable(UnderivableSlot {
-            slot: slots[0],
-            exercise: "",
-            reason: UnderivableReason::NoWorkingSet,
-        });
+        // Unreachable: two slots are named in the signature and neither failed.
+        return Derived::Underivable(Vec::new());
     };
     Derived::item(PrescribedItem::Superset(PrescribedSuperset {
-        members: AtLeastTwo::of(first, second, Vec::new()),
+        members: AtLeastTwo::of(first, second, members.collect()),
     }))
 }
 
-/// Any slot that is not the primary: double progression, or static.
+/// Any slot that is not the primary: double progression, a hold, or static.
 fn accessory_slot(
     programme: &Programme,
     parameters: &GenerationParameters,
@@ -502,43 +508,31 @@ fn accessory_slot(
     history: &BTreeMap<RepsExercise, LastPerformance>,
     slot: SlotId,
 ) -> Derived {
+    match accessory_exercise(programme, parameters, role, history, slot) {
+        Ok(exercise) => Derived::item(PrescribedItem::Exercise { slot, exercise }),
+        Err(reason) => Derived::underivable(reason),
+    }
+}
+
+/// What a non-primary slot prescribes, before it is placed in an item.
+///
+/// Separate from [`accessory_slot`] because a supersetted position needs the
+/// exercise without the item wrapped around it.
+fn accessory_exercise(
+    programme: &Programme,
+    parameters: &GenerationParameters,
+    role: SessionRole,
+    history: &BTreeMap<RepsExercise, LastPerformance>,
+    slot: SlotId,
+) -> Result<PrescribedExercise, UnderivableSlot> {
     match programme.fills().content(slot, role) {
         // Authored outright: no history is read and none is needed.
-        SlotContent::Static(fill) => match static_exercise(fill) {
-            Ok(exercise) => Derived::item(PrescribedItem::Exercise { slot, exercise }),
-            Err(reason) => Derived::Underivable(UnderivableSlot {
-                slot,
-                exercise: fill.exercise.as_str(),
-                reason,
-            }),
-        },
-        SlotContent::Single(exercise) => match one_exercise(parameters, history, *exercise, slot) {
-            Ok(exercise) => Derived::item(PrescribedItem::Exercise { slot, exercise }),
-            Err(reason) => Derived::Underivable(reason),
-        },
-        SlotContent::Superset(members) => {
-            let mut built = Vec::new();
-            for exercise in members.iter() {
-                match one_exercise(parameters, history, *exercise, slot) {
-                    Ok(prescribed) => built.push(SupersetMember {
-                        slot,
-                        exercise: prescribed,
-                    }),
-                    Err(reason) => return Derived::Underivable(reason),
-                }
-            }
-            let mut built = built.into_iter();
-            let (Some(first), Some(second)) = (built.next(), built.next()) else {
-                return Derived::Underivable(UnderivableSlot {
-                    slot,
-                    exercise: "",
-                    reason: UnderivableReason::NoWorkingSet,
-                });
-            };
-            Derived::item(PrescribedItem::Superset(PrescribedSuperset {
-                members: AtLeastTwo::of(first, second, built.collect()),
-            }))
-        }
+        SlotContent::Static(fill) => static_exercise(fill).map_err(|reason| UnderivableSlot {
+            slot,
+            exercise: fill.exercise.as_str(),
+            reason,
+        }),
+        SlotContent::Single(exercise) => one_exercise(parameters, history, *exercise, slot),
     }
 }
 

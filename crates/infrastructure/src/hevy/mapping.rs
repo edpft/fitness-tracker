@@ -54,6 +54,22 @@
 //! assistance are not comparable is a limitation declared in the model of
 //! record, not a reason to refuse the set.
 //!
+//! **A mapped template is not the same as a performed one.** Four entries here
+//! have never appeared in a workout: the operator created them in Hevy on
+//! 2026-08-20 because it had no exercise for the movements he wanted, and had
+//! been logging the nearest thing it offered instead. Both now exist and both
+//! stay distinct — `Pull Up (Assisted)` is an assisted pull-up however many
+//! neutral-grip pull-ups were recorded under it. Correcting those workouts is
+//! the edit overlay's job, not this table's, and the slots the new exercises
+//! fill are reported underivable until they have been performed (FR-011).
+//!
+//! **What he has been logging them under stays mapped to what it says.** The
+//! record holds `Pull Up (Assisted)`, `Cable Twist (Up to down)` and
+//! `Stretching` because those are the templates he picked as the nearest thing
+//! Hevy offered. Reading them as the movement he meant would be this table
+//! asserting something the source never said; the substitution is a correction
+//! to those workouts, and belongs in the edit overlay rather than here.
+//!
 //! **Where our category and the source's differ, ours wins.** One entry:
 //! `Sled Push`, which Hevy calls distance-and-duration and which records thirty
 //! seconds and a zero distance on all nine of its sets. It is a duration
@@ -162,7 +178,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             RepsExercise::StraightArmLatPulldownCable,
             LoadReading::Absolute,
         ), // Straight Arm Lat Pulldown (Cable) (51)
-        "1006DF48" => reps(RepsExercise::SeatedPalmsUpWristCurl, LoadReading::Absolute), // Seated Palms Up Wrist Curl (49)
+        "1006DF48" => reps(RepsExercise::WristFlexionDumbbell, LoadReading::Absolute), // Seated Palms Up Wrist Curl (49)
         "c6e09263-5d20-450d-a219-95ba47ee8305" => reps(RepsExercise::Pogo, LoadReading::Absolute), // Pogo (45)
         "7E3BC8B6" => reps(RepsExercise::HammerCurlDumbbell, LoadReading::Absolute), // Hammer Curl (Dumbbell) (41)
         "2F8D3067" => reps(RepsExercise::TricepsExtensionBarbell, LoadReading::Absolute), // Triceps Extension (Barbell) (38)
@@ -371,14 +387,36 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             LoadReading::Absolute,
         ), // Downward Dog To Planche Lean (2)
         "6A6C31A5" => reps(RepsExercise::LatPulldownCable, LoadReading::Absolute), // Lat Pulldown (Cable) (2)
-        "D8460FA6" => reps(
-            RepsExercise::ReverseWristCurlDumbbell,
-            LoadReading::Absolute,
-        ), // Reverse Wrist Curl (Dumbbell) (2)
+        "D8460FA6" => reps(RepsExercise::WristExtensionDumbbell, LoadReading::Absolute), // Reverse Wrist Curl (Dumbbell) (2)
         "C7AE420A" => reps(RepsExercise::ScapularPullUps, LoadReading::Absolute), // Scapular Pull Ups (1)
         "0b9db86f-666c-46fd-b567-2918c3c269cd" => {
             reps(RepsExercise::SerratusRock, LoadReading::Absolute)
         } // Serratus Rock (1)
+
+        // Created 2026-08-20 and not yet performed, so each is zero in a table
+        // otherwise ordered by how often the corpus holds it. The template the
+        // operator was using as a stand-in still reads as itself: `Pull Up
+        // (Assisted)` above is an assisted pull-up, not a neutral-grip one.
+        //
+        // Each load reading is the template's own `type` rather than a guess.
+        // `Neutral Grip Pull Up` is declared `bodyweight_assisted`, which is why
+        // it negates like every other assisted variant — the number recorded is
+        // weight taken off.
+        "72f032e8-d574-4dab-9bb3-b76377b973f8" => reps(
+            RepsExercise::NeutralGripPullUp,
+            LoadReading::RelativeNegated,
+        ), // Neutral Grip Pull Up (0)
+        "48fdc527-90a4-4713-a766-ced702d9295c" => {
+            reps(RepsExercise::BentOverCableChop, LoadReading::Absolute)
+        } // Bent Over Cable Chop (0)
+        "19ec9b58-0556-4a00-acbc-628a081d0be7" => duration(
+            DurationExercise::SquattingGroinStretch,
+            LoadReading::Absolute,
+        ), // Squatting Groin Stretch (0)
+        "e459e508-356d-41be-8fac-301909a91c6c" => duration(
+            DurationExercise::StandingStraddleFold,
+            LoadReading::Absolute,
+        ), // Standing Straddle Fold (0)
         _ => return None,
     };
     Some(mapped)

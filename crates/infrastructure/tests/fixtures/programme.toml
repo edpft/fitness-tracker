@@ -71,15 +71,34 @@ failed     = "95kg"
 provenance = "tested"
 from       = "2026-07-03"
 
-# One fill per slot. A slot taking one exercise takes a string; a slot that
-# alternates by session role takes a table keyed by role; a supersetted slot
-# takes a `members` list.
+# One exercise per slot. A slot takes a string; a slot that alternates by session
+# role takes a table keyed by role. No slot takes a list: which slots superset
+# together is the template's, not the programme's, so a pair is two slots rather
+# than one slot with two members.
+#
+# **These are what the operator intends to do, not what the record holds.** Three
+# of them — `neutral-grip-pull-up`, `bent-over-cable-chop` and the groin stretch
+# — have no Hevy exercise yet and so no history, because he has been logging a
+# nearest-thing stand-in instead. A slot filled with one of those is reported
+# underivable until it has been performed once, which is FR-011 doing its job
+# rather than a fault in the fixture.
 [fills]
-knee_dominant = "front-squat"
-upper_push    = "chest-dip"
-upper_pull    = "pull-up"
-core          = "cable-twist-up-to-down"
-mobility_hold = "handstand-hold"
+knee_dominant   = "front-squat"
+upper_push      = "chest-dip"
+upper_pull      = "neutral-grip-pull-up"
+biceps          = "preacher-curl-barbell"
+triceps         = "overhead-triceps-extension-cable"
+wrist_flexion   = "wrist-flexion-dumbbell"
+wrist_extension = "wrist-extension-dumbbell"
+core            = "bent-over-cable-chop"
+handstand_hold  = "handstand-hold"
+dead_hang       = "dead-hang"
+
+# The four stretches, each named for what it opens. Performed as one circuit.
+hip_flexor_stretch           = "couch-stretch"
+hip_external_rotator_stretch = "ninety-ninety"
+hamstring_stretch            = "standing-straddle-fold"
+groin_stretch                = "squatting-groin-stretch"
 
 # The static slots carry their whole prescription: they do not progress, so there
 # is nothing for history to say about them — and deriving them from the last
@@ -101,17 +120,6 @@ reps     = 5
 light = "back-extension-machine"
 heavy = "nordic-hamstrings-curls"
 
-[fills.arms]
-members = ["preacher-curl-barbell", "overhead-triceps-extension-cable"]
-
-[fills.forearms.light]
-members = ["seated-wrist-extension-barbell", "seated-palms-up-wrist-curl"]
-
-[fills.forearms.heavy]
-members = ["reverse-wrist-curl-dumbbell", "seated-palms-up-wrist-curl"]
-
-[fills.mobility_stretch]
-members = ["dead-hang", "couch-stretch", "ninety-ninety", "stretching"]
 
 # Generation parameters (§ 14). Only the current value is required, because what
 # they produced is recorded concretely on the prescription that used them.

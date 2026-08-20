@@ -174,7 +174,7 @@ proptest! {
         for item in shape.items().iter() {
             prop_assert!(item.slots().count() >= 1);
             prop_assert!(item.exercises().count() >= 1);
-            if item.is_superset() {
+            if matches!(item, PrescribedItem::Superset(_)) {
                 prop_assert!(item.exercises().count() >= 2);
             }
         }
@@ -187,11 +187,12 @@ proptest! {
     }
 }
 
-/// The arms superset fills one slot with two members.
+/// A superset may fill one slot with two members.
 ///
-/// The case that corrected the design: tagging the *item* with slots would make
-/// this unrepresentable, because `AtLeastTwo<SlotId>` demands two and arms is
-/// one. Slot tagging is per member for exactly this reason.
+/// Not something the template issues — every superset it pairs is two distinct
+/// slots — but what projection produces when a performed superset reaches a
+/// position the template does not pair. The shape has to be able to hold it, and
+/// `satisfies` reports the divergence.
 #[test]
 fn a_superset_may_fill_one_slot_twice() {
     let make = |exercise: RepsExercise| {
@@ -207,23 +208,23 @@ fn a_superset_may_fill_one_slot_twice() {
         PrescribedExercise::ForReps { exercise, sets }
     };
 
-    let arms = PrescribedSuperset {
+    let paired_into_one_slot = PrescribedSuperset {
         members: AtLeastTwo::of(
             SupersetMember {
-                slot: SlotId::Arms,
+                slot: SlotId::Core,
                 exercise: make(RepsExercise::PreacherCurlBarbell),
             },
             SupersetMember {
-                slot: SlotId::Arms,
+                slot: SlotId::Core,
                 exercise: make(RepsExercise::OverheadTricepsExtensionCable),
             },
             Vec::new(),
         ),
     };
-    let item = PrescribedItem::Superset(arms);
+    let item = PrescribedItem::Superset(paired_into_one_slot);
 
     let slots: Vec<SlotId> = item.slots().collect();
-    assert_eq!(slots, vec![SlotId::Arms, SlotId::Arms]);
+    assert_eq!(slots, vec![SlotId::Core, SlotId::Core]);
     assert_eq!(item.exercises().count(), 2);
 }
 

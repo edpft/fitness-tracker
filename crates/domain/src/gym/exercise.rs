@@ -105,6 +105,7 @@ vocabulary! {
         BandedScapulaProtraction => "banded-scapula-protraction",
         BehindTheBackCurlCable => "behind-the-back-curl-cable",
         BehindTheBackWristCurlBarbell => "behind-the-back-wrist-curl-barbell",
+        BentOverCableChop => "bent-over-cable-chop",
         BentOverRowBarbell => "bent-over-row-barbell",
         BicepCurlDumbbell => "bicep-curl-dumbbell",
         BirdDog => "bird-dog",
@@ -159,6 +160,7 @@ vocabulary! {
         LungeDumbbell => "lunge-dumbbell",
         LyingLegCurlMachine => "lying-leg-curl-machine",
         MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat",
+        NeutralGripPullUp => "neutral-grip-pull-up",
         NordicHamstringsCurls => "nordic-hamstrings-curls",
         OverheadPlateRaise => "overhead-plate-raise",
         OverheadPressBarbell => "overhead-press-barbell",
@@ -177,7 +179,6 @@ vocabulary! {
         PushPress => "push-press",
         PushUp => "push-up",
         RenegadeRowDumbbell => "renegade-row-dumbbell",
-        ReverseWristCurlDumbbell => "reverse-wrist-curl-dumbbell",
         RingPushups => "ring-pushups",
         RingRows => "ring-rows",
         RomanianDeadliftBarbell => "romanian-deadlift-barbell",
@@ -185,7 +186,6 @@ vocabulary! {
         SeatedCableRowVGripCable => "seated-cable-row-v-grip-cable",
         SeatedInclineCurlDumbbell => "seated-incline-curl-dumbbell",
         SeatedLegCurlMachine => "seated-leg-curl-machine",
-        SeatedPalmsUpWristCurl => "seated-palms-up-wrist-curl",
         SeatedWristExtensionBarbell => "seated-wrist-extension-barbell",
         SerratusRock => "serratus-rock",
         ShoulderInternalExternalRotation => "shoulder-internal-external-rotation",
@@ -214,6 +214,8 @@ vocabulary! {
         VUp => "v-up",
         WallClimbs => "wall-climbs",
         WeightedJumpSquat => "weighted-jump-squat",
+        WristExtensionDumbbell => "wrist-extension-dumbbell",
+        WristFlexionDumbbell => "wrist-flexion-dumbbell",
     }
 }
 
@@ -231,6 +233,8 @@ vocabulary! {
         JumpRope => "jump-rope",
         NinetyNinety => "ninety-ninety",
         SledPush => "sled-push",
+        SquattingGroinStretch => "squatting-groin-stretch",
+        StandingStraddleFold => "standing-straddle-fold",
         Stretching => "stretching",
     }
 }

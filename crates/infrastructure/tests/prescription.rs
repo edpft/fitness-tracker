@@ -7,7 +7,7 @@ mod support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
-    WorkoutNormaliser, WorkoutPrescriber as _,
+    UnderivableReason, WorkoutNormaliser, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
@@ -139,30 +139,35 @@ fn the_upper_pair_is_supersetted_and_the_primary_is_not() {
         panic!("the primary slot is issued")
     };
     assert!(
-        !primary.is_superset(),
+        matches!(primary, PrescribedItem::Exercise { .. }),
         "the primary is issued alone, never paired"
     );
 
-    let Some(push) = issued.workout.shape().item_for(SlotId::UpperPush) else {
-        panic!("the upper push slot is issued")
-    };
-    assert!(push.is_superset(), "the upper pair is supersetted");
-    let slots: Vec<SlotId> = push.slots().collect();
-    assert_eq!(slots, vec![SlotId::UpperPush, SlotId::UpperPull]);
+    // The upper pair is not issued at all: the fixture fills `upper_pull` with a
+    // movement never performed, and half a superset is not the template's item.
+    // What the pair looks like when both halves derive is the hypertrophy test
+    // below.
+    assert!(issued.workout.shape().item_for(SlotId::UpperPush).is_none());
+    assert!(issued.workout.shape().item_for(SlotId::UpperPull).is_none());
 }
 
-/// The arms superset fills one slot with two members.
+/// The hypertrophy supersets each pair two named slots, and only two.
 #[test]
-fn the_arms_superset_fills_one_slot_twice() {
+fn the_hypertrophy_supersets_pair_antagonists() {
     let (prescriber, _directory) = prescriber!();
     let issued = run!(prescriber.prescribe(monday()));
 
-    let Some(arms) = issued.workout.shape().item_for(SlotId::Arms) else {
-        panic!("the arms slot is issued")
-    };
-    let slots: Vec<SlotId> = arms.slots().collect();
-    assert_eq!(slots, vec![SlotId::Arms, SlotId::Arms]);
-    assert_eq!(arms.exercises().count(), 2);
+    for (first, second) in [
+        (SlotId::Biceps, SlotId::Triceps),
+        (SlotId::WristFlexion, SlotId::WristExtension),
+    ] {
+        let Some(item) = issued.workout.shape().item_for(first) else {
+            panic!("the {first} slot is issued")
+        };
+        let slots: Vec<SlotId> = item.slots().collect();
+        assert_eq!(slots, vec![first, second]);
+        assert_eq!(item.exercises().count(), 2);
+    }
 }
 
 /// US1-2: the primary's ramp, top set and back-offs all derive from the anchor
@@ -208,20 +213,58 @@ fn mobility_is_held_not_progressed() {
     let (prescriber, _directory) = prescriber!();
     let issued = run!(prescriber.prescribe(monday()));
 
-    assert!(
-        issued.underivable.is_empty(),
-        "every slot derives: {:?}",
-        issued.underivable
+    for slot in [
+        SlotId::HandstandHold,
+        SlotId::DeadHang,
+        SlotId::HipFlexorStretch,
+        SlotId::HipExternalRotatorStretch,
+        SlotId::HamstringStretch,
+        SlotId::GroinStretch,
+    ] {
+        let Some(hold) = issued.workout.shape().item_for(slot) else {
+            panic!("the {slot} slot is issued")
+        };
+        for exercise in hold.exercises() {
+            assert_eq!(exercise.measure(), "duration");
+            assert_eq!(exercise.set_count(), 1, "a hold is held once");
+        }
+    }
+}
+
+/// FR-011: a slot filled with something never performed is named, not guessed.
+///
+/// The fixture prescribes a neutral-grip pull-up and a bent over cable chop,
+/// both movements the operator intends and has not performed — Hevy has no
+/// exercise for either, so he has been logging a stand-in. Double progression
+/// has nothing to progress from, and the answer is to say which slot and why
+/// rather than to invent a starting load.
+#[test]
+fn a_slot_with_no_history_is_reported_rather_than_guessed() {
+    let (prescriber, _directory) = prescriber!();
+    let issued = run!(prescriber.prescribe(monday()));
+
+    let reported: Vec<(SlotId, UnderivableReason)> = issued
+        .underivable
+        .iter()
+        .map(|slot| (slot.slot, slot.reason))
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            // Derivable in itself, and absent because its partner is not. Owed a
+            // reason all the same.
+            (SlotId::UpperPush, UnderivableReason::GroupWithheld),
+            (SlotId::UpperPull, UnderivableReason::NeverPerformed),
+            (SlotId::Core, UnderivableReason::NeverPerformed),
+        ]
     );
 
-    let Some(hold) = issued.workout.shape().item_for(SlotId::MobilityHold) else {
-        panic!("the mobility hold is issued")
-    };
-    let Some(exercise) = hold.exercises().next() else {
-        panic!("the hold has an exercise")
-    };
-    assert_eq!(exercise.measure(), "duration");
-    assert_eq!(exercise.set_count(), 1, "a hold is held once");
+    for (slot, _) in reported {
+        assert!(
+            issued.workout.shape().item_for(slot).is_none(),
+            "{slot} is reported, not issued with a guessed load"
+        );
+    }
 }
 
 /// The plyometric and power slots are static: what was done last time, again.

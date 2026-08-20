@@ -42,11 +42,17 @@ pub enum SlotId {
     UpperPush,
     UpperPull,
     HipDominant,
-    Arms,
-    Forearms,
+    Biceps,
+    Triceps,
+    WristFlexion,
+    WristExtension,
     Core,
-    MobilityHold,
-    MobilityStretch,
+    HandstandHold,
+    DeadHang,
+    HipFlexorStretch,
+    HipExternalRotatorStretch,
+    HamstringStretch,
+    GroinStretch,
 }
 
 impl SlotId {
@@ -62,11 +68,17 @@ impl SlotId {
         Self::UpperPush,
         Self::UpperPull,
         Self::HipDominant,
-        Self::Arms,
-        Self::Forearms,
+        Self::Biceps,
+        Self::Triceps,
+        Self::WristFlexion,
+        Self::WristExtension,
         Self::Core,
-        Self::MobilityHold,
-        Self::MobilityStretch,
+        Self::HandstandHold,
+        Self::DeadHang,
+        Self::HipFlexorStretch,
+        Self::HipExternalRotatorStretch,
+        Self::HamstringStretch,
+        Self::GroinStretch,
     ];
 
     /// The stable key. Persisted, so it outlives a rename.
@@ -78,11 +90,17 @@ impl SlotId {
             Self::UpperPush => "upper_push",
             Self::UpperPull => "upper_pull",
             Self::HipDominant => "hip_dominant",
-            Self::Arms => "arms",
-            Self::Forearms => "forearms",
+            Self::Biceps => "biceps",
+            Self::Triceps => "triceps",
+            Self::WristFlexion => "wrist_flexion",
+            Self::WristExtension => "wrist_extension",
             Self::Core => "core",
-            Self::MobilityHold => "mobility_hold",
-            Self::MobilityStretch => "mobility_stretch",
+            Self::HandstandHold => "handstand_hold",
+            Self::DeadHang => "dead_hang",
+            Self::HipFlexorStretch => "hip_flexor_stretch",
+            Self::HipExternalRotatorStretch => "hip_external_rotator_stretch",
+            Self::HamstringStretch => "hamstring_stretch",
+            Self::GroinStretch => "groin_stretch",
         }
     }
 
@@ -95,8 +113,17 @@ impl SlotId {
             Self::KneeDominant | Self::UpperPush | Self::UpperPull | Self::HipDominant => {
                 Block::Strength
             }
-            Self::Arms | Self::Forearms | Self::Core => Block::Hypertrophy,
-            Self::MobilityHold | Self::MobilityStretch => Block::Mobility,
+            Self::Biceps
+            | Self::Triceps
+            | Self::WristFlexion
+            | Self::WristExtension
+            | Self::Core => Block::Hypertrophy,
+            Self::HandstandHold
+            | Self::DeadHang
+            | Self::HipFlexorStretch
+            | Self::HipExternalRotatorStretch
+            | Self::HamstringStretch
+            | Self::GroinStretch => Block::Mobility,
         }
     }
 }
@@ -221,12 +248,10 @@ impl fmt::Display for PrescribedExercise {
 
 /// One member of a superset, and the slot it fills.
 ///
-/// **The slot is per member, not per item**, because the two cases a superset
-/// covers are genuinely different. The upper strength pair is two slots
-/// supersetted together — push against pull. The arms superset is *one* slot with
-/// two members, biceps and triceps. Tagging the item would collapse the second
-/// case, and tagging with a list of slots would make it a list of one where
-/// `AtLeastTwo` demands two.
+/// The slot is per member rather than per item: every superset the template
+/// issues pairs two distinct slots — push against pull, biceps against triceps,
+/// wrist flexion against extension — so an item-level slot could not say which
+/// member was which.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SupersetMember {
     pub slot: SlotId,
@@ -235,8 +260,9 @@ pub struct SupersetMember {
 
 /// Exercises prescribed back to back.
 ///
-/// At least two, by construction — a superset of one is a contradiction, and the
-/// performed side already refuses the same thing on the way in.
+/// `AtLeastTwo` rather than a pair, because a shape is also what a *performed*
+/// workout projects into and the record contains supersets of three. What the
+/// template issues is always a pair; see [`super::linear::Position`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrescribedSuperset {
     pub members: AtLeastTwo<SupersetMember>,
@@ -271,10 +297,6 @@ impl PrescribedItem {
             Self::Exercise { slot, .. } => Box::new(std::iter::once(*slot)),
             Self::Superset(superset) => Box::new(superset.members.iter().map(|member| member.slot)),
         }
-    }
-
-    pub const fn is_superset(&self) -> bool {
-        matches!(self, Self::Superset { .. })
     }
 }
 

@@ -1,82 +1,116 @@
-//! What `v1` will and will not build.
+//! The session template: seventeen slots in five blocks, in two variants.
 //!
-//! Eugene Teo's hybrid bodybuilding template, minus cardio. Five blocks in
-//! fatigue order and eleven slots, and the structural facts below bound what is
-//! constructible rather than configuring it.
+//! The variants differ in one thing — whether the primary lift is knee-dominant
+//! or hip-dominant — and the other lower slot is then the accessory. Everything
+//! else is the same session both ways.
 //!
-//! - **Exactly one strength slot is primary.** [`PrimaryPattern`] is an enum, so
-//!   two primaries and zero primaries are both unrepresentable.
-//! - **The strength block requires all four patterns.** [`SlotFills`] names them
-//!   as fields, so a programme missing a hip-dominant fill does not compile.
-//! - **The upper pair is supersetted; the lower pair is not.** Not a preference,
-//!   and not authored — the antagonist pairing needs no separate expression
-//!   because the required pattern set already delivers a push against a pull.
-//! - **The hypertrophy block is two supersets and one single slot.** `core` is
-//!   typed as one exercise, so it cannot be supersetted. Fifteen consecutive
-//!   sessions have it unpaired and last in the block.
-//!
-//! **`Pattern` is not a field.** If the strength block names its four slots, the
-//! field name *is* the pattern; a `pattern:` field beside it would be a second
-//! source of truth that can disagree.
+//! The template is expressed as types rather than as validation, so what it
+//! forbids is unconstructible: [`PrimaryPattern`] has two variants so there is
+//! exactly one primary and it is a lower lift; [`SlotFills`] names every slot as
+//! a field so a programme missing one does not compile; and [`Position`] fixes
+//! which slots superset together, so a pair is always exactly two and always the
+//! same two.
 
 use std::fmt;
 
 use crate::{
-    gym::{RepCount, exercise::Exercise, sequence::AtLeastTwo},
+    gym::{RepCount, exercise::Exercise},
     prescription::{
         schedule::{PerRole, SessionRole},
         shape::SlotId,
     },
 };
 
-/// Which strength slot the programme is trying to move.
+/// Which lower slot the programme is trying to move.
 ///
-/// Everything asymmetric derives from this: the primary gets a warm-up ramp and
-/// a top-set/back-off scheme, and the other lower slot becomes accessory-style
-/// precisely because it is not primary.
+/// The programme states this for the block; it does not vary by session. The
+/// primary gets a warm-up ramp and a top-set/back-off scheme, and the other
+/// lower slot becomes accessory-style precisely because it is not primary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrimaryPattern {
     KneeDominant,
     HipDominant,
-    UpperPush,
-    UpperPull,
 }
 
 impl PrimaryPattern {
-    pub const ALL: &'static [Self] = &[
-        Self::KneeDominant,
-        Self::HipDominant,
-        Self::UpperPush,
-        Self::UpperPull,
-    ];
+    pub const ALL: &'static [Self] = &[Self::KneeDominant, Self::HipDominant];
 
     /// The stable key. Persisted.
     pub const fn as_str(self) -> &'static str {
         self.slot().as_str()
     }
 
-    /// The slot this pattern names.
     pub const fn slot(self) -> SlotId {
         match self {
             Self::KneeDominant => SlotId::KneeDominant,
             Self::HipDominant => SlotId::HipDominant,
-            Self::UpperPush => SlotId::UpperPush,
-            Self::UpperPull => SlotId::UpperPull,
         }
     }
 
-    /// The lower-body pattern this one is not.
-    ///
-    /// The accessory lower slot is *the lower pattern the primary is not*, which
-    /// is a constraint referencing another slot — inexpressible if the block held
-    /// exercises directly rather than slots. `None` when the primary is an upper
-    /// slot, where neither lower slot is the accessory by this rule.
-    pub const fn other_lower(self) -> Option<SlotId> {
+    /// The lower slot the primary is not, which is the session's accessory.
+    pub const fn accessory(self) -> SlotId {
         match self {
-            Self::KneeDominant => Some(SlotId::HipDominant),
-            Self::HipDominant => Some(SlotId::KneeDominant),
-            Self::UpperPush | Self::UpperPull => None,
+            Self::KneeDominant => SlotId::HipDominant,
+            Self::HipDominant => SlotId::KneeDominant,
         }
+    }
+
+    /// The session's items, in issued order.
+    ///
+    /// Fatigue order across blocks, and within the strength block the primary
+    /// first, then the supersetted upper pair, then the accessory lower slot.
+    /// The one source of truth for both what a session issues and what a
+    /// performed workout is projected against.
+    pub const fn sequence(self) -> [Position; 11] {
+        [
+            Position::Single(SlotId::Plyometric),
+            Position::Single(SlotId::Power),
+            Position::Single(self.slot()),
+            Position::Superset(SlotId::UpperPush, SlotId::UpperPull),
+            Position::Single(self.accessory()),
+            Position::Superset(SlotId::Biceps, SlotId::Triceps),
+            Position::Superset(SlotId::WristFlexion, SlotId::WristExtension),
+            Position::Single(SlotId::Core),
+            Position::Single(SlotId::HandstandHold),
+            Position::Single(SlotId::DeadHang),
+            Position::Circuit(STRETCHES),
+        ]
+    }
+}
+
+/// The four stretches, performed as one group.
+pub const STRETCHES: [SlotId; 4] = [
+    SlotId::HipFlexorStretch,
+    SlotId::HipExternalRotatorStretch,
+    SlotId::HamstringStretch,
+    SlotId::GroinStretch,
+];
+
+/// One position in the issued sequence.
+///
+/// A superset is a pair and not a list, because every one the template issues is
+/// an antagonist pairing of two named slots — nothing here can express three of
+/// them. The stretch circuit is a separate case rather than a widened superset
+/// for the same reason: it is one fixed group of four, not a pairing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Single(SlotId),
+    Superset(SlotId, SlotId),
+    Circuit([SlotId; 4]),
+}
+
+impl Position {
+    /// The slots this position fills, in issued order.
+    pub fn slots(self) -> impl Iterator<Item = SlotId> {
+        let (fixed, circuit) = match self {
+            Self::Single(slot) => ([Some(slot), None], None),
+            Self::Superset(first, second) => ([Some(first), Some(second)], None),
+            Self::Circuit(slots) => ([None, None], Some(slots)),
+        };
+        fixed
+            .into_iter()
+            .flatten()
+            .chain(circuit.into_iter().flatten())
     }
 }
 
@@ -153,21 +187,19 @@ impl<T> Fill<T> {
 
 /// What a slot holds once a role is chosen.
 ///
-/// Two shapes, and which one a slot has is fixed by the template rather than by
-/// the fill: `core` is always single and `arms` is always a superset.
+/// Which shape a slot has is fixed by the template: the two static slots carry
+/// their own sets and reps, and every other slot names one exercise and takes
+/// its prescription from the block's parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotContent<'a> {
     Single(&'a Exercise),
-    Superset(&'a AtLeastTwo<Exercise>),
-    /// A slot the programme prescribes outright.
     Static(&'a StaticFill),
 }
 
 /// One fill per slot, total by construction.
 ///
 /// A struct with a named field per slot, so a programme missing a fill is a
-/// compile error rather than a runtime one (§ 24) — the same mechanism as the
-/// strength block's four patterns, which is what these six fields are.
+/// compile error rather than a runtime one (§ 24).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotFills {
     pub plyometric: Fill<StaticFill>,
@@ -176,18 +208,24 @@ pub struct SlotFills {
     pub upper_push: Fill<Exercise>,
     pub upper_pull: Fill<Exercise>,
     pub hip_dominant: Fill<Exercise>,
-    pub arms: Fill<AtLeastTwo<Exercise>>,
-    pub forearms: Fill<AtLeastTwo<Exercise>>,
+    pub biceps: Fill<Exercise>,
+    pub triceps: Fill<Exercise>,
+    pub wrist_flexion: Fill<Exercise>,
+    pub wrist_extension: Fill<Exercise>,
     pub core: Fill<Exercise>,
-    pub mobility_hold: Fill<Exercise>,
-    pub mobility_stretch: Fill<AtLeastTwo<Exercise>>,
+    pub handstand_hold: Fill<Exercise>,
+    pub dead_hang: Fill<Exercise>,
+    pub hip_flexor_stretch: Fill<Exercise>,
+    pub hip_external_rotator_stretch: Fill<Exercise>,
+    pub hamstring_stretch: Fill<Exercise>,
+    pub groin_stretch: Fill<Exercise>,
 }
 
 impl SlotFills {
     /// What fills a slot for a role.
     ///
     /// Total over [`SlotId`], so adding a slot to the template is a compile error
-    /// here until it is filled — which is the point of the exhaustive match.
+    /// here until it is filled.
     pub const fn content(&self, slot: SlotId, role: SessionRole) -> SlotContent<'_> {
         match slot {
             SlotId::Plyometric => SlotContent::Static(self.plyometric.for_role(role)),
@@ -196,11 +234,31 @@ impl SlotFills {
             SlotId::UpperPush => SlotContent::Single(self.upper_push.for_role(role)),
             SlotId::UpperPull => SlotContent::Single(self.upper_pull.for_role(role)),
             SlotId::HipDominant => SlotContent::Single(self.hip_dominant.for_role(role)),
-            SlotId::Arms => SlotContent::Superset(self.arms.for_role(role)),
-            SlotId::Forearms => SlotContent::Superset(self.forearms.for_role(role)),
+            SlotId::Biceps => SlotContent::Single(self.biceps.for_role(role)),
+            SlotId::Triceps => SlotContent::Single(self.triceps.for_role(role)),
+            SlotId::WristFlexion => SlotContent::Single(self.wrist_flexion.for_role(role)),
+            SlotId::WristExtension => SlotContent::Single(self.wrist_extension.for_role(role)),
             SlotId::Core => SlotContent::Single(self.core.for_role(role)),
-            SlotId::MobilityHold => SlotContent::Single(self.mobility_hold.for_role(role)),
-            SlotId::MobilityStretch => SlotContent::Superset(self.mobility_stretch.for_role(role)),
+            SlotId::HandstandHold => SlotContent::Single(self.handstand_hold.for_role(role)),
+            SlotId::DeadHang => SlotContent::Single(self.dead_hang.for_role(role)),
+            SlotId::HipFlexorStretch => SlotContent::Single(self.hip_flexor_stretch.for_role(role)),
+            SlotId::HipExternalRotatorStretch => {
+                SlotContent::Single(self.hip_external_rotator_stretch.for_role(role))
+            }
+            SlotId::HamstringStretch => SlotContent::Single(self.hamstring_stretch.for_role(role)),
+            SlotId::GroinStretch => SlotContent::Single(self.groin_stretch.for_role(role)),
+        }
+    }
+
+    /// What fills the primary slot.
+    ///
+    /// Separate from [`Self::content`] because the primary is always one of the
+    /// two lower slots and both are single — so this is total in `Exercise`, and
+    /// the caller has no impossible case to handle.
+    pub const fn primary(&self, pattern: PrimaryPattern, role: SessionRole) -> &Exercise {
+        match pattern {
+            PrimaryPattern::KneeDominant => self.knee_dominant.for_role(role),
+            PrimaryPattern::HipDominant => self.hip_dominant.for_role(role),
         }
     }
 
@@ -219,15 +277,19 @@ impl SlotFills {
             &self.upper_push,
             &self.upper_pull,
             &self.hip_dominant,
+            &self.biceps,
+            &self.triceps,
+            &self.wrist_flexion,
+            &self.wrist_extension,
             &self.core,
-            &self.mobility_hold,
+            &self.handstand_hold,
+            &self.dead_hang,
+            &self.hip_flexor_stretch,
+            &self.hip_external_rotator_stretch,
+            &self.hamstring_stretch,
+            &self.groin_stretch,
         ] {
             exercises.extend(single.all().into_iter().copied());
-        }
-        for superset in [&self.arms, &self.forearms, &self.mobility_stretch] {
-            for members in superset.all() {
-                exercises.extend(members.iter().copied());
-            }
         }
         exercises.sort_unstable();
         exercises.dedup();

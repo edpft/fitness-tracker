@@ -96,6 +96,7 @@ use crate::gym::{
 };
 
 use super::{
+    linear::{Position, PrimaryPattern},
     shape::{
         PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,
         WorkoutShape,
@@ -158,13 +159,10 @@ pub struct Projection {
     pub gaps: Vec<ProjectionGap>,
 }
 
-/// The template's slots, grouped as it issues them.
+/// The positions the template issues, against which items are read off.
 ///
-/// **One group per item the template would issue.** The upper pair is two slots
-/// in one group because it is supersetted; every other group is one slot, which a
-/// superset may still fill twice — the arms slot is one slot with two members,
-/// biceps and triceps, and tagging that item with two slots would collapse the
-/// distinction the [`SupersetMember`] type exists to keep.
+/// [`PrimaryPattern::sequence`] itself, so the projection is walked against the
+/// same sequence generation issues rather than a second copy of it.
 ///
 /// **The primary is not distinguished here, and cannot be.** Generation issues
 /// the primary before the upper pair, so a session whose primary is hip-dominant
@@ -174,18 +172,7 @@ pub struct Projection {
 /// the sharpest edge of "slot identity is not in the performed record", it is
 /// recorded rather than papered over, and it is why [`satisfies`] reports a slot
 /// divergence rather than the projection refusing.
-pub const ISSUE_ORDER: [&[SlotId]; 10] = [
-    &[SlotId::Plyometric],
-    &[SlotId::Power],
-    &[SlotId::KneeDominant],
-    &[SlotId::UpperPush, SlotId::UpperPull],
-    &[SlotId::HipDominant],
-    &[SlotId::Arms],
-    &[SlotId::Forearms],
-    &[SlotId::Core],
-    &[SlotId::MobilityHold],
-    &[SlotId::MobilityStretch],
-];
+pub const ISSUE_ORDER: [Position; 11] = PrimaryPattern::KneeDominant.sequence();
 
 /// Read a performed workout as a prescription shape.
 ///
@@ -194,15 +181,15 @@ pub const ISSUE_ORDER: [&[SlotId]; 10] = [
 /// group, so the shape is never empty and nothing here can fail.
 #[must_use]
 pub fn project(workout: &GymWorkout) -> Projection {
-    let mut groups: VecDeque<&[SlotId]> = ISSUE_ORDER.into_iter().collect();
+    let mut positions: VecDeque<Position> = ISSUE_ORDER.into_iter().collect();
     let mut gaps = Vec::new();
 
-    // The head, separately: the first group is a single slot and a first item
+    // The head, separately: the first position is a single slot and a first item
     // always exists, so this cannot fail — which is what lets the shape be
     // `NonEmpty` with no fallback anywhere in the walk.
-    let head_slot = groups
+    let head_slot = positions
         .pop_front()
-        .and_then(|group| group.first().copied())
+        .and_then(|position| position.slots().next())
         .unwrap_or(SlotId::Plyometric);
     let head = one_slot(
         workout.items().first(),
@@ -214,7 +201,7 @@ pub fn project(workout: &GymWorkout) -> Projection {
     let mut tail = Vec::new();
     for (offset, item) in workout.items().iter().enumerate().skip(1) {
         let at = ItemPosition(offset);
-        match assign(item, &mut groups, at, &mut gaps) {
+        match assign(item, &mut positions, at, &mut gaps) {
             Some(projected) => tail.push(projected),
             None => gaps.push(ProjectionGap::SlotUnassignable { at }),
         }
@@ -226,58 +213,90 @@ pub fn project(workout: &GymWorkout) -> Projection {
     }
 }
 
-/// Give one item the next group of slots, consuming what it takes.
+/// Give one item the next position, consuming what it takes.
 ///
-/// A single exercise takes one slot and hands the rest of its group back, which
-/// is what lets the upper pair be issued unsupersetted when one of them is the
-/// primary. A superset takes a whole group where the arities match, and otherwise
-/// fills a one-slot group with every member.
+/// A single exercise against a supersetted position takes the first of the two
+/// and hands the second back as a position of its own, which is what lets a pair
+/// be read off when the operator performed it unsupersetted.
 fn assign(
     item: &WorkoutItem,
-    groups: &mut VecDeque<&'static [SlotId]>,
+    positions: &mut VecDeque<Position>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
 ) -> Option<PrescribedItem> {
-    let group = groups.pop_front()?;
-    let (first, rest) = group.split_first()?;
-    match item {
-        WorkoutItem::Exercise(_) => {
-            if !rest.is_empty() {
-                groups.push_front(rest);
+    let position = positions.pop_front()?;
+    match (item, position) {
+        (WorkoutItem::Exercise(_) | WorkoutItem::Superset(_), Position::Single(slot)) => {
+            Some(one_slot(item, slot, at, gaps))
+        }
+        (WorkoutItem::Exercise(_), Position::Superset(first, second)) => {
+            positions.push_front(Position::Single(second));
+            Some(one_slot(item, first, at, gaps))
+        }
+        (WorkoutItem::Exercise(_), Position::Circuit(slots)) => {
+            // The circuit was performed one exercise at a time. Its remaining
+            // slots go back as positions of their own, in order.
+            let (first, rest) = slots.split_first()?;
+            for slot in rest.iter().rev() {
+                positions.push_front(Position::Single(*slot));
             }
             Some(one_slot(item, *first, at, gaps))
         }
-        WorkoutItem::Superset(superset) => {
-            let members = superset.members.iter().count();
-            if members == group.len() {
-                let mut paired = Vec::with_capacity(members);
-                for (performed, slot) in superset.members.iter().zip(group) {
-                    paired.push(SupersetMember {
-                        slot: *slot,
+        (WorkoutItem::Superset(superset), Position::Circuit(slots)) => {
+            let members: Vec<_> = superset.members.iter().collect();
+            if members.len() != slots.len() {
+                // Putting the position back keeps the walk aligned for whatever
+                // follows.
+                positions.push_front(position);
+                return None;
+            }
+            let mut tagged =
+                members
+                    .into_iter()
+                    .zip(slots)
+                    .map(|(performed, slot)| SupersetMember {
+                        slot,
                         exercise: exercise(performed, at, gaps),
                     });
-                }
-                // Two or more by construction: a superset has at least two
-                // members and this arm ran only because the group has as many.
-                Some(PrescribedItem::Superset(PrescribedSuperset {
-                    members: AtLeastTwo::new(paired).ok()?,
-                }))
-            } else if group.len() == 1 {
-                Some(one_slot(item, *first, at, gaps))
-            } else {
-                // More members than the group has slots. Putting the group back
-                // keeps the walk aligned for whatever follows.
-                groups.push_front(group);
-                None
-            }
+            let (Some(one), Some(two)) = (tagged.next(), tagged.next()) else {
+                positions.push_front(position);
+                return None;
+            };
+            Some(PrescribedItem::Superset(PrescribedSuperset {
+                members: AtLeastTwo::of(one, two, tagged.collect()),
+            }))
+        }
+        (WorkoutItem::Superset(superset), Position::Superset(first, second)) => {
+            let mut members = superset.members.iter();
+            let (Some(one), Some(two), None) = (members.next(), members.next(), members.next())
+            else {
+                // More members than the pair has slots. Putting the position
+                // back keeps the walk aligned for whatever follows.
+                positions.push_front(position);
+                return None;
+            };
+            Some(PrescribedItem::Superset(PrescribedSuperset {
+                members: AtLeastTwo::of(
+                    SupersetMember {
+                        slot: first,
+                        exercise: exercise(one, at, gaps),
+                    },
+                    SupersetMember {
+                        slot: second,
+                        exercise: exercise(two, at, gaps),
+                    },
+                    Vec::new(),
+                ),
+            }))
         }
     }
 }
 
 /// One item, every part of it tagged with the same slot.
 ///
-/// Total, which is what the head of the shape relies on. A superset filling one
-/// slot is the arms case and is exactly what [`SupersetMember`] is for.
+/// Total, which is what the head of the shape relies on. A performed superset
+/// reaching a single position is work the template does not pair — every member
+/// takes that one slot, and [`satisfies`] is left to report the divergence.
 fn one_slot(
     item: &WorkoutItem,
     slot: SlotId,
@@ -548,13 +567,14 @@ pub fn satisfies(performed: &WorkoutShape, prescribed: &WorkoutShape) -> Vec<Div
         });
     }
 
+    let supersetted = |item: &PrescribedItem| matches!(item, PrescribedItem::Superset(_));
     for (offset, (performed, prescribed)) in left.iter().zip(right.iter()).enumerate() {
         let at = ItemPosition(offset);
-        if performed.is_superset() != prescribed.is_superset() {
+        if supersetted(performed) != supersetted(prescribed) {
             found.push(Divergence::Grouping {
                 at,
-                performed: performed.is_superset(),
-                prescribed: prescribed.is_superset(),
+                performed: supersetted(performed),
+                prescribed: supersetted(prescribed),
             });
         }
         compare_members(performed, prescribed, at, &mut found);

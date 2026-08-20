@@ -250,27 +250,43 @@ fn a_never_performed_exercise_is_named_not_absent() {
     assert_eq!(run!(history.newest_performance()), None);
 }
 
-/// Against the corpus, every exercise the vocabulary holds has been performed.
+/// The vocabulary holds both what the corpus taught and what it has not.
 ///
-/// Worth asserting rather than assuming: it is why the test above needs an empty
-/// layer, and it would change the moment programming introduces a movement
-/// nobody has recorded. If this fails, the mixed case has become reachable and
-/// the test above can use the corpus instead.
+/// It used to hold only the first. It now also holds movements the operator
+/// intends to perform and has not — Hevy has no exercise for them, so he has
+/// been logging a nearest-thing stand-in — and those must come back
+/// `NeverPerformed` rather than absent, because a slot with no history is
+/// prescribable-in-principle and must be told apart from one that failed to
+/// derive (FR-011).
 #[test]
-fn the_corpus_covers_every_exercise_it_taught_the_vocabulary() {
+fn the_corpus_covers_what_it_taught_and_no_more() {
     let (history, _directory) = history!();
 
-    let sample = [
+    let taught = [
         RepsExercise::FrontSquat,
         RepsExercise::SissySquat,
         RepsExercise::CableTwistUpToDown,
     ];
-    let answers = run!(history.last_performances(&sample));
+    let intended = [
+        RepsExercise::NeutralGripPullUp,
+        RepsExercise::BentOverCableChop,
+    ];
+    let asked: Vec<RepsExercise> = taught.iter().chain(&intended).copied().collect();
+    let answers = run!(history.last_performances(&asked));
 
-    for exercise in sample {
+    for exercise in taught {
         assert!(
             matches!(answers.get(&exercise), Some(LastPerformance::Performed(_))),
             "{exercise} taught the vocabulary and so is in the corpus"
+        );
+    }
+    for exercise in intended {
+        assert!(
+            matches!(
+                answers.get(&exercise),
+                Some(LastPerformance::NeverPerformed)
+            ),
+            "{exercise} is intended and not yet performed, and says so"
         );
     }
 }

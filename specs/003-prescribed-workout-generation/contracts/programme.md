@@ -10,7 +10,12 @@ and which groupings are structural rather than authored.
 
 ---
 
-## The template: eleven slots, five blocks
+## The template: seventeen slots, five blocks, two variants
+
+One template, in two variants. They differ in exactly one thing — whether the
+primary lift is knee-dominant or hip-dominant — and the other lower slot is then
+the accessory. The programme states which variant is in force for the block; it
+does not vary session to session.
 
 Order is derived from the block, never authored. Nothing carries an index.
 
@@ -22,11 +27,17 @@ Order is derived from the block, never authored. Nothing carries an index.
 | 4 | strength | `upper_push` | supersetted with `upper_pull` | double progression |
 | 5 | strength | `upper_pull` | supersetted with `upper_push` | double progression |
 | 6 | strength | `hip_dominant` | single | primary *or* double progression |
-| 7 | hypertrophy | `arms` | superset of two members | double progression |
-| 8 | hypertrophy | `forearms` | superset of two members | double progression |
-| 9 | hypertrophy | `core` | single | double progression |
-| 10 | mobility | `mobility_hold` | single | static |
-| 11 | mobility | `mobility_stretch` | superset of members | static |
+| 7 | hypertrophy | `biceps` | supersetted with `triceps` | double progression |
+| 8 | hypertrophy | `triceps` | supersetted with `biceps` | double progression |
+| 9 | hypertrophy | `wrist_flexion` | supersetted with `wrist_extension` | double progression |
+| 10 | hypertrophy | `wrist_extension` | supersetted with `wrist_flexion` | double progression |
+| 11 | hypertrophy | `core` | single | double progression |
+| 12 | mobility | `handstand_hold` | single | static |
+| 13 | mobility | `dead_hang` | single | static |
+| 14 | mobility | `hip_flexor_stretch` | the stretch circuit | static |
+| 15 | mobility | `hip_external_rotator_stretch` | the stretch circuit | static |
+| 16 | mobility | `hamstring_stretch` | the stretch circuit | static |
+| 17 | mobility | `groin_stretch` | the stretch circuit | static |
 
 **Issued order within the strength block is primary first**, then the upper pair
 together, then the remaining lower slot as the accessory. So a knee-dominant
@@ -35,34 +46,70 @@ corpus shows in all fifteen sessions since 15 June.
 
 ### What is structural and unconstructible otherwise
 
-- **Exactly one strength slot is primary.** `PrimaryPattern` is an enum, so two
-  primaries and zero primaries are both unrepresentable.
-- **The strength block requires all four patterns.** Named fields, so a block
-  missing a hip-dominant slot does not compile.
-- **The upper pair is supersetted; the lower pair is not.** Not a preference and
-  not authored. The antagonist-pairing requirement needs no separate expression
-  because the required pattern set already delivers a push against a pull.
-- **The hypertrophy block is two supersets and one single slot.** `core` is typed
-  as one exercise, so it cannot be supersetted. Fifteen consecutive sessions have
-  it unpaired and last in the block.
+- **The primary is one lower lift.** `PrimaryPattern` has two variants, so two
+  primaries, zero primaries, and an upper lift as primary are all
+  unrepresentable, and the accessory lower slot is total rather than optional.
+- **Every slot is named as a field.** A programme missing a fill does not
+  compile.
+- **A superset is exactly two named slots.** `Position::Superset` holds a pair,
+  so no slot holds a bag of members and no authored list can lengthen one. Which
+  slots pair is the template's, not the programme's: push against pull, biceps
+  against triceps, wrist flexion against extension.
+- **The four stretches are one circuit.** `Position::Circuit` is its own case
+  rather than a widened superset, because it is a fixed group of four and not an
+  antagonist pairing. The two holds stay separate items.
+- **A slot holds one exercise.** The only freedom the programme has is which
+  exercise it picks to work that slot's target — preacher curl or Bayesian curl
+  in `biceps`, not two biceps exercises and no triceps.
 - **Everything asymmetric derives from primacy.** The non-primary lower slot is
   accessory-style precisely because it is not primary; the upper pair are
   symmetric only because neither is.
 
-### What the record varies and the template does not
+### The template is intent, not a summary of the record
 
-Two variations appear in the corpus and neither becomes a template feature:
+The corpus predates this template. It records a programme run by hand whose
+composition changed while it ran, so where the two differ the template is not
+wrong — it is the thing the record is about to start conforming to. Two
+differences are known and deliberate:
 
-- **2026-08-14 grouped all five mobility exercises as one superset**, where the
-  three sessions before it grouped three and left two single. Mobility grouping is
-  a recording artefact rather than a prescription; the template issues hold, then
-  the stretch superset, then the final stretch.
-- **2026-08-14 substituted a single-arm dumbbell triceps extension** for the
-  overhead cable extension used on 3, 7 and 10 August. A one-off substitution at
-  the gym, not an alternation. The authored fill is the cable extension.
+- **Mobility grouping.** The record groups the stretches inconsistently — three
+  as a superset and one trailing single, or all five as one. The template says
+  two holds and then one circuit of four, which is what the operator intends
+  from here.
+- **The forearm slots.** The record alternates the wrist extension exercise by
+  session role. That was habit rather than plan; the settled fills are the
+  dumbbell wrist flexion and the dumbbell wrist extension, one each, both
+  sessions.
 
-Recording both here because the generative test has to be able to say "the model
-does not reproduce this, and that is correct".
+Neither is a reason to widen the template, and neither is asserted against the
+corpus. The property that matters runs forward: a session performed against a
+generated prescription projects back into one, which
+`domain/tests/projection.rs` asserts over generated sessions.
+
+### Four exercises are mapped and not yet performed
+
+Hevy had no exercise for four of the movements the template names, so the
+operator created them on 2026-08-20 and `hevy/mapping.rs` now carries all four
+template ids. Each load reading is the Hevy template's own declared `type`, not a
+judgement: `Neutral Grip Pull Up` is `bodyweight_assisted` and so negates, like
+every other assisted variant.
+
+**The stand-ins keep reading as what they say.** Three of these were being logged
+under the nearest thing Hevy offered — `Pull Up (Assisted)`, `Cable Twist (Up to
+down)`, `Stretching` — and those templates still translate to those exercises.
+Reading a template as the movement he *meant* would be the adapter asserting
+something the source never said. Correcting the workouts that used a stand-in is
+the edit overlay's job.
+`a_stand_in_template_still_reads_as_the_exercise_it_names` holds that line, and
+`the_newly_created_templates_resolve` covers the four new ids, which nothing else
+touches until the first session uses one.
+
+**Until they are performed, their slots are reported rather than guessed.**
+Double progression has no last performance to progress from, so `upper_pull` and
+`core` come back as `NeverPerformed` (FR-011), and `upper_push` comes back as
+`GroupWithheld` — it derives perfectly well and is absent only because half a
+superset is not the template's item. The two stretches are holds, which need no
+history, so they issue from the first session.
 
 ### Composition of the plyometric and power blocks
 
@@ -113,16 +160,26 @@ load       = "90kg"
 provenance = "tested"
 from       = "2026-07-03"
 
-# One fill per slot. A slot taking one exercise takes a string; a slot that
-# alternates by session role takes a table keyed by role.
+# One exercise per slot. A slot takes a string; a slot that alternates by session
+# role takes a table keyed by role. No slot takes a list — which slots superset
+# together is the template's, not the programme's.
 [fills]
-plyometric       = "pogo"
-power            = "box-jump"
-knee_dominant    = "front-squat"
-upper_push       = "chest-dip"
-upper_pull       = "pull-up"
-core             = "cable-twist-up-to-down"
-mobility_hold    = "handstand-hold"
+plyometric                   = "pogo"
+power                        = "box-jump"
+knee_dominant                = "front-squat"
+upper_push                   = "chest-dip"
+upper_pull                   = "neutral-grip-pull-up"
+biceps                       = "preacher-curl-barbell"
+triceps                      = "overhead-triceps-extension-cable"
+wrist_flexion                = "wrist-flexion-dumbbell"
+wrist_extension              = "wrist-extension-dumbbell"
+core                         = "bent-over-cable-chop"
+handstand_hold               = "handstand-hold"
+dead_hang                    = "dead-hang"
+hip_flexor_stretch           = "couch-stretch"
+hip_external_rotator_stretch = "ninety-ninety"
+hamstring_stretch            = "standing-straddle-fold"
+groin_stretch                = "squatting-groin-stretch"
 
 # Alternates. The reason the history projection is unbounded (research D4): on
 # any given session, the exercise being prescribed was last performed two
@@ -130,18 +187,6 @@ mobility_hold    = "handstand-hold"
 [fills.hip_dominant]
 light = "back-extension-machine"
 heavy = "nordic-hamstrings-curls"
-
-[fills.arms]
-members = ["preacher-curl-barbell", "overhead-triceps-extension-cable"]
-
-[fills.forearms.light]
-members = ["seated-wrist-extension-barbell", "seated-palms-up-wrist-curl"]
-
-[fills.forearms.heavy]
-members = ["reverse-wrist-curl-dumbbell", "seated-palms-up-wrist-curl"]
-
-[fills.mobility_stretch]
-members = ["dead-hang", "couch-stretch", "ninety-ninety", "stretching"]
 
 # Generation parameters (§ 14). Only the current value is required, because the
 # issued prescription records what these produced (SC-009).

@@ -322,7 +322,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 
         for (position, item) in workout.shape().items().iter().enumerate() {
             let position = ordinal_of(position)?;
-            let is_superset = i64::from(item.is_superset());
+            let is_superset = i64::from(matches!(item, PrescribedItem::Superset(_)));
             sqlx::query!(
                 r"
                 INSERT INTO prescribed_item (workout, position, is_superset)

@@ -14,8 +14,11 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use domain::gym::{Load, PerformedExercise, SetKind};
-use infrastructure::hevy::mapping;
+use domain::gym::{
+    Load, PerformedExercise, SetKind,
+    exercise::{DurationExercise, Exercise, RepsExercise},
+};
+use infrastructure::hevy::mapping::{self, LoadReading};
 use support::{corpus, derived};
 
 /// Scenario 1. The counts the model of record produced on paper, reproduced by
@@ -67,6 +70,78 @@ fn every_landed_template_resolves() {
 
     assert!(unmapped.is_empty(), "unmapped templates: {unmapped:?}");
     assert_eq!(templates.len(), 134, "distinct templates in the corpus");
+}
+
+/// A stand-in template still reads as the exercise it names.
+///
+/// Four movements had no Hevy exercise until the operator created them on
+/// 2026-08-20, and until then he logged the nearest thing Hevy offered. Now that
+/// both exist, the two must not be confused: `Pull Up (Assisted)` is an assisted
+/// pull-up and not a neutral-grip one, however many neutral-grip pull-ups were
+/// recorded under it. Reading a template as the movement he *meant* would make
+/// the adapter assert something the source never said, and would silently
+/// rewrite the record; correcting those workouts is the edit overlay's job.
+///
+/// Asserted rather than reviewed, because the table is long and the mistake it
+/// catches is a one-line edit that looks like a rename.
+#[test]
+fn a_stand_in_template_still_reads_as_the_exercise_it_names() {
+    let pairs = [
+        ("2C37EC5E", Exercise::Reps(RepsExercise::PullUp)),
+        ("A2D838BD", Exercise::Reps(RepsExercise::CableTwistUpToDown)),
+        ("527DA061", Exercise::Duration(DurationExercise::Stretching)),
+    ];
+
+    for (template, expected) in pairs {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} is in the corpus and so must resolve")
+        };
+        assert_eq!(mapped.exercise, expected);
+    }
+}
+
+/// The four exercises created on 2026-08-20 resolve to themselves.
+///
+/// None is in the corpus yet, so nothing else covers them: the first session
+/// that uses one is the first time these entries are exercised, and a wrong
+/// template id would surface as a refusal on real data rather than here.
+///
+/// **Each load reading is the template's own `type`.** `Neutral Grip Pull Up` is
+/// declared `bodyweight_assisted`, so the number recorded is weight taken off
+/// and negates — the same treatment every other assisted variant gets, because
+/// assistance is a load and not a different movement.
+#[test]
+fn the_newly_created_templates_resolve() {
+    let pairs = [
+        (
+            "72f032e8-d574-4dab-9bb3-b76377b973f8",
+            Exercise::Reps(RepsExercise::NeutralGripPullUp),
+            LoadReading::RelativeNegated,
+        ),
+        (
+            "48fdc527-90a4-4713-a766-ced702d9295c",
+            Exercise::Reps(RepsExercise::BentOverCableChop),
+            LoadReading::Absolute,
+        ),
+        (
+            "19ec9b58-0556-4a00-acbc-628a081d0be7",
+            Exercise::Duration(DurationExercise::SquattingGroinStretch),
+            LoadReading::Absolute,
+        ),
+        (
+            "e459e508-356d-41be-8fac-301909a91c6c",
+            Exercise::Duration(DurationExercise::StandingStraddleFold),
+            LoadReading::Absolute,
+        ),
+    ];
+
+    for (template, exercise, load) in pairs {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} was created in Hevy and is mapped")
+        };
+        assert_eq!(mapped.exercise, exercise);
+        assert_eq!(mapped.load, load);
+    }
 }
 
 /// Scenario 2. § 7's re-derivation, three ways: twice over the same input,

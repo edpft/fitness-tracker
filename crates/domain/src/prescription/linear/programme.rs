@@ -220,14 +220,7 @@ impl Programme {
 
         // 3. Otherwise the programme names one exercise as primary and
         //    prescribes another in the slot it named.
-        let filled = match fills.content(primary.slot(), gating_role) {
-            super::template::SlotContent::Single(exercise) => *exercise,
-            // Unreachable by construction: `PrimaryPattern::slot` returns only
-            // the four strength slots, and all four are single.
-            super::template::SlotContent::Superset(_) | super::template::SlotContent::Static(_) => {
-                primary_exercise
-            }
-        };
+        let filled = *fills.primary(primary, gating_role);
         if filled != primary_exercise {
             return Err(InconsistentProgramme::PrimaryDoesNotFillItsSlot {
                 pattern: primary,

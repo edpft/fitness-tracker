@@ -35,7 +35,8 @@ pub mod workout;
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance};
 pub use ladder::{InvalidLadder, Ladder};
 pub use linear::{
-    Fill, InconsistentProgramme, PrimaryPattern, Programme, SlotContent, SlotFills, StaticFill,
+    Fill, InconsistentProgramme, Position, PrimaryPattern, Programme, SlotContent, SlotFills,
+    StaticFill,
 };
 pub use parameters::{
     AccessoryScheme, GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage,

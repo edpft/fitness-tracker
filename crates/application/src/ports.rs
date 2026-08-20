@@ -598,9 +598,9 @@ pub enum UnderivableReason {
     /// The primary slot's fill is not counted in repetitions.
     #[error("a top set is a number of repetitions, and this exercise is not counted in them")]
     NotCountedInReps,
-    /// The primary slot resolved to a superset, which the template excludes.
-    #[error("the primary slot is not a single exercise")]
-    NotSingle,
+    /// Derivable in itself, but grouped with a slot that was not.
+    #[error("the item it is supersetted with could not be derived")]
+    GroupWithheld,
     /// The programme's span and duration do not make a ladder.
     #[error("the programme's span and duration do not make a ladder")]
     NoLadder,

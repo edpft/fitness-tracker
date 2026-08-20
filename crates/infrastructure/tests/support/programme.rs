@@ -141,10 +141,6 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
     // these literals are non-zero by inspection and a fallible fixture builder
     // would push the panic to every call site.
     let (three, five, twenty) = (reps(3)?, reps(5)?, reps(20)?);
-    let pair = |first: RepsExercise, second: RepsExercise| {
-        AtLeastTwo::of(Exercise::Reps(first), Exercise::Reps(second), Vec::new())
-    };
-
     Ok(SlotFills {
         plyometric: Fill::Same(StaticFill {
             exercise: Exercise::Reps(RepsExercise::Pogo),
@@ -158,36 +154,27 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
         }),
         knee_dominant: Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
         upper_push: Fill::Same(Exercise::Reps(RepsExercise::ChestDip)),
-        upper_pull: Fill::Same(Exercise::Reps(RepsExercise::PullUp)),
+        upper_pull: Fill::Same(Exercise::Reps(RepsExercise::NeutralGripPullUp)),
         // Alternating: the reason the history projection is unbounded.
         hip_dominant: Fill::Alternating(PerRole {
             light: Exercise::Reps(RepsExercise::BackExtensionMachine),
             heavy: Exercise::Reps(RepsExercise::NordicHamstringsCurls),
         }),
-        arms: Fill::Same(pair(
-            RepsExercise::PreacherCurlBarbell,
-            RepsExercise::OverheadTricepsExtensionCable,
+        biceps: Fill::Same(Exercise::Reps(RepsExercise::PreacherCurlBarbell)),
+        triceps: Fill::Same(Exercise::Reps(RepsExercise::OverheadTricepsExtensionCable)),
+        wrist_flexion: Fill::Same(Exercise::Reps(RepsExercise::WristFlexionDumbbell)),
+        wrist_extension: Fill::Same(Exercise::Reps(RepsExercise::WristExtensionDumbbell)),
+        core: Fill::Same(Exercise::Reps(RepsExercise::BentOverCableChop)),
+        handstand_hold: Fill::Same(Exercise::Duration(DurationExercise::HandstandHold)),
+        dead_hang: Fill::Same(Exercise::Duration(DurationExercise::DeadHang)),
+        hip_flexor_stretch: Fill::Same(Exercise::Duration(DurationExercise::CouchStretch)),
+        hip_external_rotator_stretch: Fill::Same(Exercise::Duration(
+            DurationExercise::NinetyNinety,
         )),
-        forearms: Fill::Alternating(PerRole {
-            light: pair(
-                RepsExercise::SeatedWristExtensionBarbell,
-                RepsExercise::SeatedPalmsUpWristCurl,
-            ),
-            heavy: pair(
-                RepsExercise::ReverseWristCurlDumbbell,
-                RepsExercise::SeatedPalmsUpWristCurl,
-            ),
-        }),
-        core: Fill::Same(Exercise::Reps(RepsExercise::CableTwistUpToDown)),
-        mobility_hold: Fill::Same(Exercise::Duration(DurationExercise::HandstandHold)),
-        mobility_stretch: Fill::Same(AtLeastTwo::of(
-            Exercise::Duration(DurationExercise::DeadHang),
-            Exercise::Duration(DurationExercise::CouchStretch),
-            vec![
-                Exercise::Duration(DurationExercise::NinetyNinety),
-                Exercise::Duration(DurationExercise::Stretching),
-            ],
-        )),
+        // Both created in Hevy on 2026-08-20 and not yet performed. A hold needs
+        // no history, so unlike the reps slots these still derive.
+        hamstring_stretch: Fill::Same(Exercise::Duration(DurationExercise::StandingStraddleFold)),
+        groin_stretch: Fill::Same(Exercise::Duration(DurationExercise::SquattingGroinStretch)),
     })
 }
 

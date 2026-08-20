@@ -15,11 +15,7 @@
 
 use application::{ProgrammeStore, StoreError};
 use domain::{
-    gym::{
-        Kg, OperatorZone, RepCount,
-        exercise::Exercise,
-        sequence::{AtLeastTwo, TooShort},
-    },
+    gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
         Anchor, AnchorProvenance, Calendar, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
         linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
@@ -62,8 +58,7 @@ fn weekday_of(key: &str) -> Result<Weekday, StoreError> {
 
 /// One fill row, flattened.
 ///
-/// `role` is `None` where the slot does not alternate, and `position` orders the
-/// members of a supersetted slot.
+/// `role` is `None` where the slot does not alternate.
 struct FillRow {
     slot: SlotId,
     role: Option<SessionRole>,
@@ -125,20 +120,6 @@ impl SlotRows {
         Ok(Fill::Alternating(PerRole {
             light: *light,
             heavy: *heavy,
-        }))
-    }
-
-    /// A supersetted fill.
-    fn superset(&self, slot: SlotId) -> Result<Fill<AtLeastTwo<Exercise>>, StoreError> {
-        let short = |error: TooShort| corrupt(&format!("slot {slot} is a superset and {error}"));
-        if !self.same.is_empty() {
-            return Ok(Fill::Same(
-                AtLeastTwo::new(self.same.clone()).map_err(short)?,
-            ));
-        }
-        Ok(Fill::Alternating(PerRole {
-            light: AtLeastTwo::new(self.light.clone()).map_err(short)?,
-            heavy: AtLeastTwo::new(self.heavy.clone()).map_err(short)?,
         }))
     }
 }
@@ -309,12 +290,15 @@ impl ProgrammeStore for SqliteProgrammeStore {
                 INSERT INTO programme_slot_fill (
                     programme, slot, role, position, exercise, static_sets, static_reps
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                -- `position` ordered the members of a supersetted slot. Every
+                -- slot now holds one exercise, so it is always zero; the column
+                -- stays because dropping it is a migration this change does not
+                -- need.
+                VALUES (?, ?, ?, 0, ?, ?, ?)
                 ",
                 id,
                 slot_key,
                 role_key,
-                fill.position,
                 exercise_key,
                 static_sets,
                 static_reps
@@ -331,12 +315,11 @@ impl ProgrammeStore for SqliteProgrammeStore {
     }
 }
 
-/// The eleven slot fills for one programme.
+/// Every slot fill for one programme.
 ///
 /// Split out of `current` so that function stays inside the line budget, and
-/// because "assemble the fills" is a whole job on its own: the rows are flat, the
-/// template fixes which slots are single and which are supersets, and either
-/// shape may alternate by role.
+/// because "assemble the fills" is a whole job on its own: the rows are flat, and
+/// any of them may alternate by role.
 async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, StoreError> {
     let fill_rows = sqlx::query!(
         r#"
@@ -405,11 +388,18 @@ async fn read_fills(pool: &SqlitePool, programme: i64) -> Result<SlotFills, Stor
         upper_push: rows_for(SlotId::UpperPush)?.single(SlotId::UpperPush)?,
         upper_pull: rows_for(SlotId::UpperPull)?.single(SlotId::UpperPull)?,
         hip_dominant: rows_for(SlotId::HipDominant)?.single(SlotId::HipDominant)?,
-        arms: rows_for(SlotId::Arms)?.superset(SlotId::Arms)?,
-        forearms: rows_for(SlotId::Forearms)?.superset(SlotId::Forearms)?,
+        biceps: rows_for(SlotId::Biceps)?.single(SlotId::Biceps)?,
+        triceps: rows_for(SlotId::Triceps)?.single(SlotId::Triceps)?,
+        wrist_flexion: rows_for(SlotId::WristFlexion)?.single(SlotId::WristFlexion)?,
+        wrist_extension: rows_for(SlotId::WristExtension)?.single(SlotId::WristExtension)?,
         core: rows_for(SlotId::Core)?.single(SlotId::Core)?,
-        mobility_hold: rows_for(SlotId::MobilityHold)?.single(SlotId::MobilityHold)?,
-        mobility_stretch: rows_for(SlotId::MobilityStretch)?.superset(SlotId::MobilityStretch)?,
+        handstand_hold: rows_for(SlotId::HandstandHold)?.single(SlotId::HandstandHold)?,
+        dead_hang: rows_for(SlotId::DeadHang)?.single(SlotId::DeadHang)?,
+        hip_flexor_stretch: rows_for(SlotId::HipFlexorStretch)?.single(SlotId::HipFlexorStretch)?,
+        hip_external_rotator_stretch: rows_for(SlotId::HipExternalRotatorStretch)?
+            .single(SlotId::HipExternalRotatorStretch)?,
+        hamstring_stretch: rows_for(SlotId::HamstringStretch)?.single(SlotId::HamstringStretch)?,
+        groin_stretch: rows_for(SlotId::GroinStretch)?.single(SlotId::GroinStretch)?,
     })
 }
 
@@ -543,7 +533,6 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
             rows.push(FlatFill {
                 slot,
                 role,
-                position: 0,
                 exercise: fixed.exercise,
                 statics: Some((fixed.sets, fixed.reps)),
             });
@@ -564,7 +553,6 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
             rows.push(FlatFill {
                 slot,
                 role,
-                position: 0,
                 exercise,
                 statics: None,
             });
@@ -581,32 +569,20 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
     single(SlotId::UpperPush, &fills.upper_push);
     single(SlotId::UpperPull, &fills.upper_pull);
     single(SlotId::HipDominant, &fills.hip_dominant);
+    single(SlotId::Biceps, &fills.biceps);
+    single(SlotId::Triceps, &fills.triceps);
+    single(SlotId::WristFlexion, &fills.wrist_flexion);
+    single(SlotId::WristExtension, &fills.wrist_extension);
     single(SlotId::Core, &fills.core);
-    single(SlotId::MobilityHold, &fills.mobility_hold);
-
-    let mut superset = |slot: SlotId, fill: &Fill<AtLeastTwo<Exercise>>| {
-        let mut push = |role, members: &AtLeastTwo<Exercise>| {
-            for (position, exercise) in members.iter().enumerate() {
-                rows.push(FlatFill {
-                    slot,
-                    role,
-                    position: position_of(position),
-                    exercise: *exercise,
-                    statics: None,
-                });
-            }
-        };
-        match fill {
-            Fill::Same(members) => push(None, members),
-            Fill::Alternating(per_role) => {
-                push(Some(SessionRole::Light), &per_role.light);
-                push(Some(SessionRole::Heavy), &per_role.heavy);
-            }
-        }
-    };
-    superset(SlotId::Arms, &fills.arms);
-    superset(SlotId::Forearms, &fills.forearms);
-    superset(SlotId::MobilityStretch, &fills.mobility_stretch);
+    single(SlotId::HandstandHold, &fills.handstand_hold);
+    single(SlotId::DeadHang, &fills.dead_hang);
+    single(SlotId::HipFlexorStretch, &fills.hip_flexor_stretch);
+    single(
+        SlotId::HipExternalRotatorStretch,
+        &fills.hip_external_rotator_stretch,
+    );
+    single(SlotId::HamstringStretch, &fills.hamstring_stretch);
+    single(SlotId::GroinStretch, &fills.groin_stretch);
 
     rows
 }
@@ -615,7 +591,6 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
 struct FlatFill {
     slot: SlotId,
     role: Option<SessionRole>,
-    position: i64,
     exercise: Exercise,
     statics: Option<(RepCount, RepCount)>,
 }
@@ -624,12 +599,4 @@ struct FlatFill {
 fn count_of(value: i64) -> Result<RepCount, StoreError> {
     let count = u32::try_from(value).map_err(|_| corrupt(&"a count the domain cannot hold"))?;
     RepCount::new(count).map_err(|error| corrupt(&error))
-}
-
-/// A member position on its way into the store.
-///
-/// Saturating rather than checked: a superset with more members than an `i64` can
-/// index is not a case worth an error path.
-fn position_of(position: usize) -> i64 {
-    i64::try_from(position).unwrap_or(i64::MAX)
 }
