@@ -453,3 +453,171 @@ fn a_block_opens_on_the_plan() {
     assert_eq!(progress.reset(), None);
     assert_eq!(progress.week(), WeekIndex::FIRST);
 }
+
+/// What the block's test is an attempt at, in the operator's three cases.
+///
+/// Stated on 2026-08-21 as three sketches over one seven-week block opening at
+/// 85 and climbing 2.5 a week, so the rungs are 85, 87.5, 90, 92.5, 95, 97.5.
+/// They are one rule, and the third is the one that is not obvious.
+mod test_target {
+    use super::{Fallible, grid, kg, protocols};
+    use domain::prescription::{
+        Anchor, AnchorProvenance, GatingTopSet, Ladder, LoadSteps, Opening, Progress,
+        progress_after,
+    };
+
+    /// The seven-week block the sketches are drawn over. Seven weeks is six
+    /// climbing and a test, and the opening is declared so the rungs are exactly
+    /// the numbers the operator wrote.
+    fn block() -> Fallible<(Ladder, LoadSteps)> {
+        let steps = grid()?;
+        let ladder = Ladder::new(Opening::Declared(kg("85")?), kg("2.5")?, 7, &steps)?;
+        Ok((ladder, steps))
+    }
+
+    fn made(load: &str) -> Fallible<GatingTopSet> {
+        Ok(GatingTopSet {
+            load: kg(load)?,
+            completed: true,
+        })
+    }
+
+    fn missed(load: &str) -> Fallible<GatingTopSet> {
+        Ok(GatingTopSet {
+            load: kg(load)?,
+            completed: false,
+        })
+    }
+
+    /// Every rung made: the position runs past the ladder, so the test is for
+    /// one climb beyond the last rung. 97.5 was the last, so 100.
+    #[test]
+    fn every_rung_made_tests_one_climb_past_the_last() {
+        let Ok(((ladder, steps), (first, second))) = (|| Fallible::Ok((block()?, protocols()?)))()
+        else {
+            panic!("the fixture is valid")
+        };
+        let Ok(performed) = ["85", "87.5", "90", "92.5", "95", "97.5"]
+            .iter()
+            .map(|load| made(load))
+            .collect::<Fallible<Vec<_>>>()
+        else {
+            panic!("the loads are masses")
+        };
+
+        let progress = progress_after(&performed, first, second, &steps);
+        let Ok(expected) = kg("100") else {
+            panic!("100 is a mass")
+        };
+        assert_eq!(progress.test_target(ladder, &steps), expected);
+    }
+
+    /// One miss holds, so the position is still that rung and the test is for
+    /// it. Missing 97.5 in week six means testing 97.5.
+    #[test]
+    fn a_rung_missed_once_tests_that_rung() {
+        let Ok(((ladder, steps), (first, second))) = (|| Fallible::Ok((block()?, protocols()?)))()
+        else {
+            panic!("the fixture is valid")
+        };
+        let Ok(mut performed) = ["85", "87.5", "90", "92.5", "95"]
+            .iter()
+            .map(|load| made(load))
+            .collect::<Fallible<Vec<_>>>()
+        else {
+            panic!("the loads are masses")
+        };
+        let Ok(miss) = missed("97.5") else {
+            panic!("97.5 is a mass")
+        };
+        performed.push(miss);
+
+        let progress = progress_after(&performed, first, second, &steps);
+        let Ok(expected) = kg("97.5") else {
+            panic!("97.5 is a mass")
+        };
+        assert_eq!(progress.test_target(ladder, &steps), expected);
+    }
+
+    /// **The one worth stating.** A stall drops below what was failed and
+    /// re-climbs; the test asks whether the *failed* load goes up now, not
+    /// whether the drop does. Two misses at 95 stall to 85 (−10%), and the test
+    /// is still for 95.
+    #[test]
+    fn a_stall_tests_the_load_it_is_climbing_back_to() {
+        let Ok(((ladder, steps), (first, second))) = (|| Fallible::Ok((block()?, protocols()?)))()
+        else {
+            panic!("the fixture is valid")
+        };
+        let Ok(mut performed) = ["85", "87.5", "90", "92.5"]
+            .iter()
+            .map(|load| made(load))
+            .collect::<Fallible<Vec<_>>>()
+        else {
+            panic!("the loads are masses")
+        };
+        let Ok(misses) = ["95", "95"]
+            .iter()
+            .map(|load| missed(load))
+            .collect::<Fallible<Vec<_>>>()
+        else {
+            panic!("95 is a mass")
+        };
+        performed.extend(misses);
+
+        let progress = progress_after(&performed, first, second, &steps);
+        let (Ok(dropped), Ok(target)) = (kg("85"), kg("95")) else {
+            panic!("the loads are masses")
+        };
+        assert!(
+            matches!(progress, Progress::ReClimbing { load, .. } if load == dropped),
+            "two misses at 95 stall to 85"
+        );
+        assert_eq!(
+            progress.test_target(ladder, &steps),
+            target,
+            "the test is for what was failed, not for the drop"
+        );
+    }
+
+    /// The anchor is not the target, which is what the ramp used to be built on.
+    ///
+    /// A block anchored at 90 that has climbed to 95 warms up toward 95. Ramping
+    /// off the anchor had the operator working up to a number they passed three
+    /// weeks earlier.
+    #[test]
+    fn the_target_is_not_the_anchor() {
+        let Ok(((ladder, steps), (first, second))) = (|| Fallible::Ok((block()?, protocols()?)))()
+        else {
+            panic!("the fixture is valid")
+        };
+        let (Ok(anchor), Ok(performed)) = (
+            (|| {
+                Fallible::Ok(Anchor::new(
+                    kg("90")?,
+                    Some(kg("95")?),
+                    AnchorProvenance::Tested,
+                    jiff::civil::Date::new(2026, 7, 3)?,
+                )?)
+            })(),
+            ["85", "87.5", "90", "92.5"]
+                .iter()
+                .map(|load| made(load))
+                .collect::<Fallible<Vec<_>>>(),
+        ) else {
+            panic!("the fixture is valid")
+        };
+
+        let progress = progress_after(&performed, first, second, &steps);
+        let target = progress.test_target(ladder, &steps);
+        assert_ne!(
+            target,
+            anchor.load(),
+            "the target has moved past the anchor"
+        );
+        let Ok(expected) = kg("95") else {
+            panic!("95 is a mass")
+        };
+        assert_eq!(target, expected);
+    }
+}

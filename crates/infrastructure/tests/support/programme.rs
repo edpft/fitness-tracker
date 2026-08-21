@@ -27,7 +27,7 @@ use domain::{
     },
     prescription::{
         Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, LoadSteps,
-        PerRole, Percentage, Programme, ResetProtocol, Scales, SessionRole, Step, TopSetReps,
+        PerRole, Percentage, Programme, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps,
         WarmupStep, Weekdays,
         linear::{Fill, SlotFills, StaticFill},
     },
@@ -268,7 +268,7 @@ pub fn calendar() -> Result<Calendar, ProgrammeFixtureError> {
 /// outside the block.
 pub fn calendar_running(
     weekdays: Weekdays,
-    skipping: &[Date],
+    skipping: &[Skip],
 ) -> Result<Calendar, ProgrammeFixtureError> {
     let start = Date::new(2026, 7, 6).map_err(invalid)?;
     Calendar::new(start, 8, skipping, weekdays, zone()?).map_err(invalid)
@@ -301,13 +301,13 @@ pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
     programme_skipping(&[])
 }
 
-/// The same programme, with named weeks it does not run.
+/// The same programme, with sessions it does not run.
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the programme is inconsistent, or if a named
-/// week falls outside the block.
-pub fn programme_skipping(weeks: &[Date]) -> Result<Programme, ProgrammeFixtureError> {
+/// [`ProgrammeFixtureError`] if the programme is inconsistent, or if a skip
+/// falls outside the block.
+pub fn programme_skipping(skips: &[Skip]) -> Result<Programme, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Programme::new(
         domain::prescription::PrimaryPattern::KneeDominant,
@@ -316,7 +316,7 @@ pub fn programme_skipping(weeks: &[Date]) -> Result<Programme, ProgrammeFixtureE
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
         SessionRole::Heavy,
-        calendar_running(weekdays()?, weeks)?,
+        calendar_running(weekdays()?, skips)?,
         &parameters,
     )
     .map_err(invalid)

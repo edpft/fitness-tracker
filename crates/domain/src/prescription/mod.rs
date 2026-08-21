@@ -47,7 +47,7 @@ pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, 
 pub use repmax::rep_max;
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
-    SessionRole, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
+    SessionRole, Skip, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
 };
 pub use shape::{
     Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,

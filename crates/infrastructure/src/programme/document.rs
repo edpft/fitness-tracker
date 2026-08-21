@@ -9,7 +9,7 @@
 //! A document rather than thirty command-line flags, because the programme's
 //! only reason to be readable is that a person edits it and checks it over.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     gym::{
@@ -19,7 +19,7 @@ use domain::{
     prescription::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
         InconsistentProgramme, InvalidCalendar, LoadSteps, PerRole, Percentage, Programme,
-        ResetProtocol, Scales, SessionRole, Step, TopSetReps, WarmupStep, Weekdays,
+        ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
         linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -151,7 +151,7 @@ struct ProgrammeSection {
     /// is a real state and not an unsettled one — unlike a `TODO`, which is a
     /// decision nobody has taken yet.
     #[serde(default)]
-    interruptions: Vec<String>,
+    interruptions: Vec<SkipSection>,
     weekdays: BTreeMap<String, String>,
     anchor: AnchorSection,
     /// Where the ladder opens, stated rather than derived.
@@ -162,6 +162,19 @@ struct ProgrammeSection {
     /// evidence any more. Not a `TODO` candidate: absent is a real state.
     #[serde(default)]
     opening: Option<String>,
+}
+
+/// A skip, as a bare date or as a run of days.
+///
+/// Untagged: `"2026-09-04"` and `{ start = "...", days = 5 }` are already
+/// distinguishable by shape, and a tag would be noise in a document a person
+/// edits. Both normalise to one `Skip` on the way in, so the domain never sees
+/// two spellings of one fact.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SkipSection {
+    Day(String),
+    Run { start: String, days: u8 },
 }
 
 #[derive(serde::Deserialize)]
@@ -411,13 +424,22 @@ impl Document {
         .map_err(|error| invalid("programme.anchor", error))?;
 
         let mut interruptions = Vec::with_capacity(section.interruptions.len());
-        for (at, week) in section.interruptions.iter().enumerate() {
+        for (at, skip) in section.interruptions.iter().enumerate() {
             let field = format!("programme.interruptions[{at}]");
-            interruptions.push(
-                settled(&field, week)?
+            let day = |value: &str| -> Result<Date, DocumentError> {
+                settled(&field, value)?
                     .parse::<Date>()
-                    .map_err(|error| invalid(&field, error))?,
-            );
+                    .map_err(|error| invalid(&field, error))
+            };
+            interruptions.push(match skip {
+                SkipSection::Day(value) => Skip::day(day(value)?),
+                SkipSection::Run { start, days } => Skip::new(
+                    day(start)?,
+                    NonZeroU8::new(*days).ok_or_else(|| {
+                        invalid(&field, "a skip of no days does not skip anything")
+                    })?,
+                ),
+            });
         }
 
         let calendar = Calendar::new(

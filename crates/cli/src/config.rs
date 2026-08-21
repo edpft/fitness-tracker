@@ -173,18 +173,38 @@ mod tests {
     /// agrees with UTC for half the year, which is exactly how a default that
     /// resolves the day in the wrong zone survives a test suite.
     fn calendar(interruptions: &[&str]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let skipped: Vec<_> = interruptions
+            .iter()
+            .map(|day| day.parse().map(domain::prescription::Skip::day))
+            .collect::<Result<Vec<_>, _>>()?;
+        build(&skipped)
+    }
+
+    /// The same block, with whole weeks away rather than single days.
+    fn calendar_skipping_weeks(mondays: &[&str]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let seven = std::num::NonZeroU8::new(7).ok_or("seven is not zero")?;
+        let skipped: Vec<_> = mondays
+            .iter()
+            .map(|monday| {
+                monday
+                    .parse()
+                    .map(|start| domain::prescription::Skip::new(start, seven))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        build(&skipped)
+    }
+
+    fn build(
+        skipped: &[domain::prescription::Skip],
+    ) -> Result<Calendar, Box<dyn std::error::Error>> {
         let weekdays = Weekdays::new(vec![
             (Weekday::Monday, SessionRole::Light),
             (Weekday::Friday, SessionRole::Heavy),
         ])?;
-        let skipped: Vec<_> = interruptions
-            .iter()
-            .map(|week| week.parse())
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(Calendar::new(
             "2026-09-07".parse()?,
             4,
-            &skipped,
+            skipped,
             weekdays,
             jiff::tz::TimeZone::get("Pacific/Auckland")?,
         )?)
@@ -262,12 +282,30 @@ mod tests {
         );
     }
 
-    /// A week the block skips is not a session, so the default steps over it.
+    /// A skipped session is not a session, so the default steps over it.
+    ///
+    /// **And stops at the next one in the same week.** Skipping the Monday
+    /// leaves the Friday, which is the whole point of skips being sessions
+    /// rather than weeks: this used to answer with the following Monday because
+    /// naming a day took its whole week with it.
     #[test]
-    fn the_default_steps_over_an_interrupted_week() {
+    fn the_default_steps_over_a_skipped_session() {
         let calendar = calendar(&["2026-09-21"]).expect("a calendar");
         // Saturday 2026-09-19 in Auckland: the next programmed weekday is Monday
-        // the 21st, which falls in the skipped week.
+        // the 21st, which is skipped.
+        let now: Timestamp = "2026-09-18T22:00:00Z".parse().expect("an instant");
+        let resolved = date(None, &calendar, now);
+        assert_eq!(
+            resolved.expect("a date").to_string(),
+            "2026-09-25",
+            "the Friday of the same week still runs"
+        );
+    }
+
+    /// A week with nothing left in it is stepped over entirely.
+    #[test]
+    fn the_default_steps_over_a_week_with_no_sessions_left() {
+        let calendar = calendar_skipping_weeks(&["2026-09-21"]).expect("a calendar");
         let now: Timestamp = "2026-09-18T22:00:00Z".parse().expect("an instant");
         let resolved = date(None, &calendar, now);
         assert_eq!(

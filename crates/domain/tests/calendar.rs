@@ -10,8 +10,10 @@
 //! The dates here are the operator's autumn block: eleven weeks from Monday
 //! 2026-09-14, Monday light and Friday heavy.
 
+use std::num::NonZeroU8;
+
 use domain::prescription::{
-    Calendar, InvalidCalendar, NotScheduled, SessionRole, WeekKind, Weekdays,
+    Calendar, InvalidCalendar, NotScheduled, SessionRole, Skip, WeekKind, Weekdays,
 };
 use jiff::{
     civil::{Date, Weekday},
@@ -33,8 +35,8 @@ fn monday_light_friday_heavy() -> Result<Weekdays, Box<dyn std::error::Error>> {
     ])?)
 }
 
-/// Eleven training weeks from 2026-09-14, skipping the weeks named.
-fn autumn(skipping: &[Date]) -> Result<Calendar, Box<dyn std::error::Error>> {
+/// Eleven training weeks from 2026-09-14, skipping what it is given.
+fn autumn(skipping: &[Skip]) -> Result<Calendar, Box<dyn std::error::Error>> {
     Ok(Calendar::new(
         date(2026, 9, 14)?,
         11,
@@ -42,6 +44,18 @@ fn autumn(skipping: &[Date]) -> Result<Calendar, Box<dyn std::error::Error>> {
         monday_light_friday_heavy()?,
         TimeZone::UTC,
     )?)
+}
+
+/// A whole week away, as a seven-day skip from the Monday named.
+///
+/// The old model took a single date and skipped its whole week. That is now one
+/// case of a range rather than the only thing expressible, and these tests say
+/// so explicitly.
+fn week_from(monday: Date) -> Result<Skip, Box<dyn std::error::Error>> {
+    Ok(Skip::new(
+        monday,
+        NonZeroU8::new(7).ok_or("seven is not zero")?,
+    ))
 }
 
 /// The training week a date falls in, one-based, with the test week as its
@@ -69,7 +83,10 @@ fn a_holiday_does_not_advance_the_ladder() {
     ) else {
         panic!("the block and its dates are all valid")
     };
-    let Ok(interrupted) = autumn(&[away]) else {
+    let Ok(week) = week_from(away) else {
+        panic!("seven days is a skip")
+    };
+    let Ok(interrupted) = autumn(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
@@ -100,15 +117,18 @@ fn an_interrupted_week_issues_nothing() {
     let (Ok(away), Ok(friday)) = (date(2026, 10, 12), date(2026, 10, 16)) else {
         panic!("the dates are valid")
     };
-    let Ok(calendar) = autumn(&[away]) else {
+    let Ok(week) = week_from(away) else {
+        panic!("seven days is a skip")
+    };
+    let Ok(calendar) = autumn(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
     for day in [away, friday] {
         match calendar.place(day) {
-            Err(NotScheduled::Interrupted { date, week }) => {
+            Err(NotScheduled::Interrupted { date, skip }) => {
                 assert_eq!(date, day);
-                assert_eq!(week, away, "the refusal names the week as authored");
+                assert_eq!(skip.start(), away, "the refusal names the skip as authored");
             }
             other => panic!("{day} is in a skipped week, got {other:?}"),
         }
@@ -127,7 +147,10 @@ fn an_interruption_moves_the_test_week_out_rather_than_dropping_it() {
     ) else {
         panic!("the dates are valid")
     };
-    let Ok(calendar) = autumn(&[away]) else {
+    let Ok(week) = week_from(away) else {
+        panic!("seven days is a skip")
+    };
+    let Ok(calendar) = autumn(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
@@ -164,7 +187,10 @@ fn the_next_session_steps_over_a_holiday() {
     else {
         panic!("the dates are valid")
     };
-    let Ok(calendar) = autumn(&[away]) else {
+    let Ok(week) = week_from(away) else {
+        panic!("seven days is a skip")
+    };
+    let Ok(calendar) = autumn(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
@@ -184,23 +210,52 @@ fn the_next_session_steps_over_a_holiday() {
     );
 }
 
-/// Two dates in one week are one interruption, not two.
+/// A week that loses some of its sessions is still a training week.
 ///
-/// The operator names a week by a date inside it, and a holiday spanning a
-/// weekend is easy to name twice. Counting it twice would take a rung off the
-/// block.
+/// **This test used to assert the opposite**, because an interruption named a
+/// whole week: two dates inside one week were deduped to one, and that week ran
+/// nothing. Skipping the Monday now leaves the Friday, so the week is a week of
+/// the block, the ladder advances through it, and the calendar is no longer
+/// one week longer. That is the operator's rule from 2026-08-21 — a week is a
+/// training week if at least one of its sessions survives — and it is what lets
+/// "away Friday, back for Monday" be said at all.
 #[test]
-fn two_dates_in_one_week_name_one_interruption() {
-    let (Ok(monday), Ok(thursday), Ok(after)) =
-        (date(2026, 10, 12), date(2026, 10, 15), date(2026, 10, 19))
+fn a_week_that_keeps_one_session_is_still_a_training_week() {
+    let (Ok(monday), Ok(friday), Ok(after)) =
+        (date(2026, 10, 12), date(2026, 10, 16), date(2026, 10, 19))
     else {
         panic!("the dates are valid")
     };
-    let Ok(calendar) = autumn(&[monday, thursday]) else {
-        panic!("both dates are inside the block")
+    let Ok(calendar) = autumn(&[Skip::day(monday)]) else {
+        panic!("one day inside the block can be skipped")
     };
 
     assert_eq!(calendar.interruptions().len(), 1);
+    assert_eq!(
+        calendar.calendar_weeks(),
+        11,
+        "the block is not extended, because the week still ran"
+    );
+    assert_eq!(week_of(&calendar, friday), Some(5), "the Friday still runs");
+    assert_eq!(week_of(&calendar, after), Some(6));
+}
+
+/// A week that loses every session is not a training week, and extends the block.
+///
+/// The old whole-week behaviour, now a consequence rather than the only thing
+/// expressible.
+#[test]
+fn a_week_that_keeps_no_session_extends_the_block() {
+    let (Ok(monday), Ok(after)) = (date(2026, 10, 12), date(2026, 10, 19)) else {
+        panic!("the dates are valid")
+    };
+    let Ok(week) = week_from(monday) else {
+        panic!("seven days is a skip")
+    };
+    let Ok(calendar) = autumn(&[week]) else {
+        panic!("a week inside the block can be skipped")
+    };
+
     assert_eq!(calendar.calendar_weeks(), 12);
     assert_eq!(week_of(&calendar, after), Some(5));
 }
@@ -222,16 +277,16 @@ fn an_interruption_outside_the_block_is_refused() {
     ) else {
         panic!("the fixture is valid")
     };
-    let block = |weeks: &[Date]| {
-        Calendar::new(start, 11, weeks, weekdays.clone(), TimeZone::UTC).map(|_| ())
+    let block = |skips: &[Skip]| {
+        Calendar::new(start, 11, skips, weekdays.clone(), TimeZone::UTC).map(|_| ())
     };
 
     assert!(matches!(
-        block(&[before]),
+        block(&[Skip::day(before)]),
         Err(InvalidCalendar::InterruptionBeforeStart { .. })
     ));
     assert!(matches!(
-        block(&[after]),
+        block(&[Skip::day(after)]),
         Err(InvalidCalendar::InterruptionPastEnd { .. })
     ));
 }
@@ -255,11 +310,13 @@ fn a_date() -> impl Strategy<Value = Date> {
         })
 }
 
-/// An arbitrary block, with up to three of its own weeks skipped.
+/// An arbitrary block, with up to three of its own weeks skipped whole.
 ///
-/// The skipped weeks are drawn from inside the duration, which is where a week
-/// the block skips can be: past that, the block has already finished (§ 28 —
-/// the generator builds through the real constructor and never around it).
+/// Whole weeks rather than single days, because the properties below are about
+/// how a block absorbs a week away. Skips drawn from inside the duration, which
+/// is where a week the block skips can be: past that, the block has already
+/// finished (§ 28 — the generator builds through the real constructor and never
+/// around it).
 fn a_calendar() -> impl Strategy<Value = Calendar> {
     (a_date(), 1_u32..=20)
         .prop_flat_map(|(start, duration)| {
@@ -270,12 +327,14 @@ fn a_calendar() -> impl Strategy<Value = Calendar> {
             )
         })
         .prop_filter_map("a block its own rules accept", |(start, duration, away)| {
-            let weeks: Vec<Date> = away
+            let seven = NonZeroU8::new(7)?;
+            let weeks: Vec<Skip> = away
                 .iter()
                 .filter_map(|offset| {
                     start
                         .checked_add(jiff::Span::new().weeks(i64::from(*offset)))
                         .ok()
+                        .map(|monday| Skip::new(monday, seven))
                 })
                 .collect();
             Calendar::new(
@@ -319,19 +378,18 @@ proptest! {
         prop_assert_eq!(weeks, expected);
     }
 
-    /// A day in a skipped week is never a session, and every other placeable day
-    /// carries a week the ladder has.
+    /// A skipped day is never a session, whatever else the week holds.
     #[test]
     fn a_skipped_week_holds_no_session(calendar in a_calendar()) {
-        for week in calendar.interruptions().iter() {
-            for day in 0..7_i64 {
-                let Ok(date) = week.checked_add(jiff::Span::new().days(day)) else {
+        for skip in calendar.interruptions().iter() {
+            for day in 0..i64::from(skip.days().get()) {
+                let Ok(date) = skip.start().checked_add(jiff::Span::new().days(day)) else {
                     continue;
                 };
                 prop_assert!(
                     matches!(calendar.place(date), Err(NotScheduled::Interrupted { .. }))
                         || matches!(calendar.place(date), Err(NotScheduled::NotAProgrammedDay { .. })),
-                    "{date} is in a skipped week and cannot be a session"
+                    "{date} is skipped and cannot be a session"
                 );
             }
         }

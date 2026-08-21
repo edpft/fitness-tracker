@@ -136,6 +136,32 @@ impl Progress {
             .map(|heavy| steps.quantise_loaded(light_of_heavy.of(heavy)))
     }
 
+    /// What the block's test is an attempt at.
+    ///
+    /// **The load the progression stands at, and while re-climbing the load it
+    /// is climbing back to.** The operator settled the three cases on
+    /// 2026-08-21 and they are one rule:
+    ///
+    /// ```text
+    /// every rung made      the position runs past the ladder   last rung + one climb
+    /// a rung missed once   a miss holds, so the position is it the rung's own load
+    /// a stall, re-climbing the drop is where you are, not what  the load climbed toward
+    ///                      you are testing
+    /// ```
+    ///
+    /// The third is the one worth stating: a re-climb is at a load below what
+    /// was failed, and the test asks whether the failed load goes up now — not
+    /// whether the drop does.
+    #[must_use]
+    pub fn test_target(self, ladder: Ladder, steps: &LoadSteps) -> Kg {
+        match self {
+            Self::Climbing { week } => ladder
+                .heavy_top_set(week, steps)
+                .unwrap_or_else(|| ladder.beyond(steps)),
+            Self::ReClimbing { toward, .. } => toward,
+        }
+    }
+
     /// Which climbing week the plan is at, or would resume at.
     #[must_use]
     pub const fn week(self) -> WeekIndex {

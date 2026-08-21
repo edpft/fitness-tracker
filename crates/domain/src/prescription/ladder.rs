@@ -220,6 +220,20 @@ impl Ladder {
             .map(|heavy| steps.quantise_loaded(light_of_heavy.of(heavy)))
     }
 
+    /// One climb past the last rung.
+    ///
+    /// What the next climbing week would have asked for, had the block had one.
+    /// A block whose every rung went up has nothing left to prescribe and a test
+    /// to do, and this is the load that test is for — derived from the rate that
+    /// was authored rather than chosen separately.
+    #[must_use]
+    pub fn beyond(self, steps: &LoadSteps) -> Kg {
+        let climbed = u64::from(self.climbing_weeks).saturating_mul(self.climb_per_week.as_grams());
+        steps.quantise_loaded(Kg::from_grams(
+            self.opening.as_grams().saturating_add(climbed),
+        ))
+    }
+
     /// Where a climbing week sits relative to the anchor, for reporting.
     ///
     /// **A reading of the plan, not the plan.** The load is what is prescribed;

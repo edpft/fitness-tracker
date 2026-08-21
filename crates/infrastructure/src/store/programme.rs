@@ -13,12 +13,14 @@
 //! answer without reading another one, so a programme can still be shown when the
 //! parameters are what is broken.
 
+use std::num::NonZeroU8;
+
 use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
         Anchor, AnchorProvenance, Calendar, Entry, PerRole, Programme, ProgrammeId, SessionRole,
-        SlotId,
+        Skip, SlotId,
         linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -432,15 +434,17 @@ async fn write_calendar(
     programme: i64,
     calendar: &domain::prescription::Calendar,
 ) -> Result<(), StoreError> {
-    for week in calendar.interruptions().iter() {
-        let week = week.to_string();
+    for skip in calendar.interruptions().iter() {
+        let start = skip.start().to_string();
+        let days = i64::from(skip.days().get());
         sqlx::query!(
             r"
-            INSERT INTO programme_interruption (programme, week)
-            VALUES (?, ?)
+            INSERT INTO programme_interruption (programme, start_date, days)
+            VALUES (?, ?, ?)
             ",
             programme,
-            week
+            start,
+            days
         )
         .execute(&mut **tx)
         .await
@@ -470,13 +474,13 @@ async fn write_calendar(
 ///
 /// Ordered by the stored date so a rebuilt programme reads back the same
 /// calendar it was authored with, whatever order the rows were written in.
-async fn read_interruptions(pool: &SqlitePool, programme: i64) -> Result<Vec<Date>, StoreError> {
+async fn read_interruptions(pool: &SqlitePool, programme: i64) -> Result<Vec<Skip>, StoreError> {
     let rows = sqlx::query!(
         r#"
-        SELECT week AS "week!: String"
+        SELECT start_date AS "start_date!: String", days AS "days!: i64"
         FROM programme_interruption
         WHERE programme = ?
-        ORDER BY week ASC
+        ORDER BY start_date ASC
         "#,
         programme
     )
@@ -484,15 +488,19 @@ async fn read_interruptions(pool: &SqlitePool, programme: i64) -> Result<Vec<Dat
     .await
     .map_err(|error| store_error(&error))?;
 
-    let mut weeks = Vec::with_capacity(rows.len());
+    let mut skips = Vec::with_capacity(rows.len());
     for row in rows {
-        weeks.push(
-            row.week
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"an interrupted week that is not a date"))?,
-        );
+        let start = row
+            .start_date
+            .parse::<Date>()
+            .map_err(|_| corrupt(&"an interruption that does not start on a date"))?;
+        let days = u8::try_from(row.days)
+            .ok()
+            .and_then(NonZeroU8::new)
+            .ok_or_else(|| corrupt(&"an interruption of no days, which skips nothing"))?;
+        skips.push(Skip::new(start, days));
     }
-    Ok(weeks)
+    Ok(skips)
 }
 
 /// Which weekdays the programme runs, and as what.

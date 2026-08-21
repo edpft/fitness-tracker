@@ -420,12 +420,21 @@ fn primary_slot_item(
             ));
         }
     } else {
-        // A test week. Ramp against the anchor, since there is no top set to take
-        // a percentage of, then work up.
-        let anchor = programme.anchor().load();
+        // A test week. It has no rung, but it is an attempt at a load all the
+        // same — the one the progression stands at — so the ramp is a share of
+        // *that*, not of the anchor. Ramping off the anchor had the operator
+        // warming up toward a number they had passed three weeks earlier.
+        let Ok(ladder) = programme.ladder(parameters) else {
+            return Derived::underivable(UnderivableSlot {
+                slot,
+                exercise: exercise.as_str(),
+                reason: UnderivableReason::NoLadder,
+            });
+        };
+        let target = progress.test_target(ladder, steps);
         for step in parameters.warmup.iter() {
             sets.push(PrescribedSet::warmup(
-                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(anchor))),
+                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(target))),
                 Target::Exactly(step.reps),
             ));
         }
@@ -436,6 +445,10 @@ fn primary_slot_item(
                 reason: UnderivableReason::NoLadder,
             });
         };
+        // Autoregulated still: a test is open at the top, because the point is
+        // to find the ceiling rather than to hit a number. The target is what
+        // the ramp is built toward and what the report names; going past it is
+        // the outcome the block exists to produce.
         sets.push(PrescribedSet::autoregulated(
             Target::Exactly(single),
             domain::gym::Rir::Zero,
