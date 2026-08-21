@@ -17,7 +17,8 @@ use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
-        Anchor, AnchorProvenance, Calendar, PerRole, Programme, ProgrammeId, SessionRole, SlotId,
+        Anchor, AnchorProvenance, Calendar, Entry, PerRole, Programme, ProgrammeId, SessionRole,
+        SlotId,
         linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -154,6 +155,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
                    anchor_provenance AS "anchor_provenance!: String",
                    anchor_from AS "anchor_from!: String",
                    anchor_failed_grams AS "anchor_failed_grams: i64",
+                   opening_grams AS "opening_grams: i64",
                    gating_role AS "gating_role!: String",
                    start_date AS "start_date!: String",
                    duration_weeks AS "duration_weeks!: i64"
@@ -193,6 +195,15 @@ impl ProgrammeStore for SqliteProgrammeStore {
         )
         .map_err(|error| corrupt(&error))?;
 
+        let declared_opening = row
+            .opening_grams
+            .map(|grams| {
+                u64::try_from(grams)
+                    .map(Kg::from_grams)
+                    .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
+            })
+            .transpose()?;
+
         let duration = u32::try_from(row.duration_weeks)
             .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
 
@@ -211,7 +222,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             PrimaryPattern::try_from(row.primary_pattern).map_err(|error| corrupt(&error))?,
             exercise_of(&row.primary_exercise)?,
             fills,
-            anchor,
+            Entry::new(anchor, declared_opening),
             SessionRole::try_from(row.gating_role).map_err(|error| corrupt(&error))?,
             calendar,
             row.authored_at
@@ -245,6 +256,13 @@ impl ProgrammeStore for SqliteProgrammeStore {
                     .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
             })
             .transpose()?;
+        let declared_opening = programme
+            .declared_opening()
+            .map(|opening| {
+                i64::try_from(opening.as_grams())
+                    .map_err(|_| corrupt(&"an opening larger than the store can hold"))
+            })
+            .transpose()?;
         let gating = programme.gating_role().as_str();
         let start = programme.calendar().start().to_string();
         let duration = i64::from(programme.calendar().duration_weeks());
@@ -254,9 +272,9 @@ impl ProgrammeStore for SqliteProgrammeStore {
             INSERT INTO programme (
                 authored_at, template, primary_pattern, primary_exercise,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
-                gating_role, start_date, duration_weeks
+                opening_grams, gating_role, start_date, duration_weeks
             )
-            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
             authored_at,
@@ -266,6 +284,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             provenance,
             anchor_from,
             anchor_failed,
+            declared_opening,
             gating,
             start,
             duration

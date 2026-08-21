@@ -16,8 +16,22 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
 ## Way of working
 
-- **Spec Kit.** `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` →
-  `/speckit-implement`. No implementation before a spec and plan exist.
+- **Agree the types, then build to something runnable.** Spec Kit was the way
+  of working until 2026-08-20 and is retired. It was heavy, and the two things
+  that actually moved the work were neither of its artefacts: iterating on the
+  data types before writing them, and running the thing against the real store
+  and the real record. A spec document described the calendar's interruptions in
+  prose and got them wrong; one list of four dates from the operator showed the
+  type was wrong, which no amount of specifying would have.
+
+  So: settle the shape of the types first, out loud, because that is where the
+  disagreements are. Then work toward a deliverable the operator can run and
+  give feedback on — a command with an expected output, not a milestone. State
+  the acceptance lines before building, so "done" is checkable rather than
+  claimed.
+
+  The `speckit-*` skills still exist and `specs/` still holds 001 to 003. Read
+  them as history; do not add to them.
 - **Branch, then pull request.** Human sign-off before merge (§ 40). Do not
   merge your own work. Dependency bumps are exempt and merge on green.
 - **Conventional Commits.** release-please derives versions and changelogs from

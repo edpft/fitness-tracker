@@ -12,10 +12,29 @@
 //! so a shared variant vocabulary makes illegal pairs constructible. Grouping
 //! arrives later as a relation over these, which only asserts what is true.
 //!
-//! Implement and laterality are not fields either. A trap bar is a deadlift
-//! variant and a suitcase carry is the single-arm farmer's carry; naming
-//! absorbs both, and an attribute schema would not have absorbed the safety bar
-//! or the Zercher case.
+//! **Laterality is not a field.** A suitcase carry is the single-arm farmer's
+//! carry; naming absorbs it, and an attribute schema would not have absorbed
+//! the safety bar or the Zercher case.
+//!
+//! **The implement is a field, and it was not always.** It carried no weight
+//! while nothing consumed it, and the argument then was that naming absorbs it
+//! too. That argument was false and the vocabulary shows it: seventy of the
+//! keys below name no implement at all, so `front-squat` being a barbell and
+//! `chest-dip` being bodyweight was nowhere written down. What made it matter
+//! is that the loading increment is a property of the implement — a dumbbell
+//! rack does not move in 2.5kg steps — so a prescription that progresses a
+//! dumbbell by a barbell's plate lands on a weight that does not exist.
+//!
+//! It is declared per exercise on the same line as the key, so it cannot drift,
+//! and it is a total function *over* identity rather than an axis *of* it. That
+//! distinction is what keeps the objection above intact: were identity a
+//! `(movement, implement)` pair, `pull-up × barbell` and `pogo × machine` would
+//! be constructible. Here nothing exists that was not declared. Grouping the
+//! implements of one movement — a barbell and a dumbbell preacher curl — is
+//! still the relation this note has always said it was, and is not yet needed.
+//! When it arrives it asserts "same movement" and nothing more: § 8 makes
+//! assistance a property of a pull-up because assisted and unassisted share a
+//! load axis, and a 30kg barbell curl and a 30kg dumbbell curl do not.
 //!
 //! **What is here is what has been needed so far, not what exists.** 128
 //! exercises cover the 134 templates one source has served; a second source, or
@@ -47,13 +66,92 @@ impl UnknownExercise {
     }
 }
 
+/// What an exercise is loaded with.
+///
+/// The vocabulary of equipment, not of movements. Its reason to exist is that
+/// the loading increment is a fact about equipment (§ 14): a barbell moves in
+/// plates, a dumbbell rack in whole kilos, and a prescription that confuses
+/// them asks for a weight the gym does not have.
+///
+/// `Bodyweight` is a member rather than an absence. A dip and a pull-up are
+/// loaded — by the lifter — and both take added or assisting load on the same
+/// axis, which is § 8's rule and the reason there is no `None` here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Implement {
+    Barbell,
+    Dumbbell,
+    Kettlebell,
+    Cable,
+    Machine,
+    Band,
+    Plate,
+    Sled,
+    Bodyweight,
+}
+
+impl Implement {
+    /// Every member, in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Barbell,
+        Self::Dumbbell,
+        Self::Kettlebell,
+        Self::Cable,
+        Self::Machine,
+        Self::Band,
+        Self::Plate,
+        Self::Sled,
+        Self::Bodyweight,
+    ];
+
+    /// The stable key. Persisted and authored.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Barbell => "barbell",
+            Self::Dumbbell => "dumbbell",
+            Self::Kettlebell => "kettlebell",
+            Self::Cable => "cable",
+            Self::Machine => "machine",
+            Self::Band => "band",
+            Self::Plate => "plate",
+            Self::Sled => "sled",
+            Self::Bodyweight => "bodyweight",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{value:?} does not name an implement")]
+pub struct UnknownImplement {
+    value: String,
+}
+
+impl TryFrom<String> for Implement {
+    type Error = UnknownImplement;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::ALL
+            .iter()
+            .find(|implement| implement.as_str() == value)
+            .copied()
+            .ok_or(UnknownImplement { value })
+    }
+}
+
+impl fmt::Display for Implement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+crate::newtype::from_str_via_string!(Implement, UnknownImplement);
+
 /// Declare one vocabulary.
 ///
 /// The variant and its key are written once, on one line, so the two cannot
 /// drift apart — which they would if `as_str` and `TryFrom` were two match
 /// blocks of 119 arms each.
 macro_rules! vocabulary {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident => $key:literal,)+ }) => {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident => $key:literal, $implement:ident,)+ }) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum $name {
@@ -69,6 +167,18 @@ macro_rules! vocabulary {
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $key,)+
+                }
+            }
+
+            /// What this exercise is loaded with.
+            ///
+            /// Total, and declared on the same line as the key so the two
+            /// cannot drift. Adding an exercise without naming its implement
+            /// is a compile error, which is the point: the name does not carry
+            /// it — seventy of the keys here mention no implement at all.
+            pub const fn implement(self) -> Implement {
+                match self {
+                    $(Self::$variant => Implement::$implement,)+
                 }
             }
         }
@@ -97,125 +207,125 @@ macro_rules! vocabulary {
 vocabulary! {
     /// Exercises counted in repetitions. Most of them.
     RepsExercise {
-        AboveAndBelowTheKneePauseSnatch => "above-and-below-the-knee-pause-snatch",
-        BackExtensionHyperextension => "back-extension-hyperextension",
-        BackExtensionMachine => "back-extension-machine",
-        BackSquatWithSnatchPushPress => "back-squat-with-snatch-push-press",
-        BandPullaparts => "band-pullaparts",
-        BandedScapulaProtraction => "banded-scapula-protraction",
-        BehindTheBackCurlCable => "behind-the-back-curl-cable",
-        BehindTheBackWristCurlBarbell => "behind-the-back-wrist-curl-barbell",
-        BentOverCableChop => "bent-over-cable-chop",
-        BentOverRowBarbell => "bent-over-row-barbell",
-        BicepCurlDumbbell => "bicep-curl-dumbbell",
-        BirdDog => "bird-dog",
-        BoxJump => "box-jump",
-        BulgarianSplitSquat => "bulgarian-split-squat",
-        Burpee => "burpee",
-        BurpeeOverTheBar => "burpee-over-the-bar",
-        ButterflyPecDeck => "butterfly-pec-deck",
-        CableTwistUpToDown => "cable-twist-up-to-down",
-        ChestDip => "chest-dip",
-        ChestPressMachine => "chest-press-machine",
-        ChestSupportedInclineRowDumbbell => "chest-supported-incline-row-dumbbell",
-        ChestSupportedYRaiseDumbbell => "chest-supported-y-raise-dumbbell",
-        ChinUp => "chin-up",
-        CleanAndPress => "clean-and-press",
-        Crunch => "crunch",
-        DeadBug => "dead-bug",
-        DeadliftBarbell => "deadlift-barbell",
-        DeadliftDumbbell => "deadlift-dumbbell",
-        DeclineCrunch => "decline-crunch",
-        DeficitPushups => "deficit-pushups",
-        DownwardDogToPlancheLean => "downward-dog-to-planche-lean",
-        DropSnatch => "drop-snatch",
-        DumbbellSnatch => "dumbbell-snatch",
-        FloorPressDumbbell => "floor-press-dumbbell",
-        FrontLeverRaise => "front-lever-raise",
-        FrontRaiseBand => "front-raise-band",
-        FrontSquat => "front-squat",
-        GobletSquat => "goblet-squat",
-        GoodMorningBarbell => "good-morning-barbell",
-        HammerCurlCable => "hammer-curl-cable",
-        HammerCurlDumbbell => "hammer-curl-dumbbell",
-        HammerTwists => "hammer-twists",
-        HangHighPull => "hang-high-pull",
-        HangSnatch => "hang-snatch",
-        HangingKneeRaise => "hanging-knee-raise",
-        HipSnatch => "hip-snatch",
-        InclineBenchPressBarbell => "incline-bench-press-barbell",
-        InclineBenchPressDumbbell => "incline-bench-press-dumbbell",
-        InvertedRow => "inverted-row",
-        KettlebellClean => "kettlebell-clean",
-        KettlebellCleanAndPress => "kettlebell-clean-and-press",
-        KettlebellSwing => "kettlebell-swing",
-        LatPulldownCable => "lat-pulldown-cable",
-        LatPulldownCloseGripCable => "lat-pulldown-close-grip-cable",
-        LateralRaiseBand => "lateral-raise-band",
-        LateralRaiseCable => "lateral-raise-cable",
-        LateralRaiseDumbbell => "lateral-raise-dumbbell",
-        LegExtensionMachine => "leg-extension-machine",
-        LegPressMachine => "leg-press-machine",
-        LowRowSuspension => "low-row-suspension",
-        LungeDumbbell => "lunge-dumbbell",
-        LyingLegCurlMachine => "lying-leg-curl-machine",
-        MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat",
-        NeutralGripPullUp => "neutral-grip-pull-up",
-        NordicHamstringsCurls => "nordic-hamstrings-curls",
-        OverheadPlateRaise => "overhead-plate-raise",
-        OverheadPressBarbell => "overhead-press-barbell",
-        OverheadPressDumbbell => "overhead-press-dumbbell",
-        OverheadSquat => "overhead-squat",
-        OverheadTricepsExtensionCable => "overhead-triceps-extension-cable",
-        PendlayRowBarbell => "pendlay-row-barbell",
-        PikePullThrough => "pike-pull-through",
-        PlankPushup => "plank-pushup",
-        Pogo => "pogo",
-        PowerClean => "power-clean",
-        PowerMuscleSnatch => "power-muscle-snatch",
-        PreacherCurlBarbell => "preacher-curl-barbell",
-        PreacherCurlDumbbell => "preacher-curl-dumbbell",
-        PullUp => "pull-up",
-        PushPress => "push-press",
-        PushUp => "push-up",
-        RenegadeRowDumbbell => "renegade-row-dumbbell",
-        RingPushups => "ring-pushups",
-        RingRows => "ring-rows",
-        RomanianDeadliftBarbell => "romanian-deadlift-barbell",
-        ScapularPullUps => "scapular-pull-ups",
-        SeatedCableRowVGripCable => "seated-cable-row-v-grip-cable",
-        SeatedInclineCurlDumbbell => "seated-incline-curl-dumbbell",
-        SeatedLegCurlMachine => "seated-leg-curl-machine",
-        SeatedWristExtensionBarbell => "seated-wrist-extension-barbell",
-        SerratusRock => "serratus-rock",
-        ShoulderInternalExternalRotation => "shoulder-internal-external-rotation",
-        ShrugDumbbell => "shrug-dumbbell",
-        SingleArmCableRow => "single-arm-cable-row",
-        SingleArmLateralRaiseCable => "single-arm-lateral-raise-cable",
-        SingleArmTricepExtensionDumbbell => "single-arm-tricep-extension-dumbbell",
-        SingleLegExtensions => "single-leg-extensions",
-        SingleLegRomanianDeadliftBarbell => "single-leg-romanian-deadlift-barbell",
-        SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell",
-        SissySquat => "sissy-squat",
-        SitUp => "sit-up",
-        SleeperStretch => "sleeper-stretch",
-        Snatch => "snatch",
-        SnatchBalance => "snatch-balance",
-        SnatchGripBehindTheNeckPress => "snatch-grip-behind-the-neck-press",
-        SplitSquatDumbbell => "split-squat-dumbbell",
-        SquatBarbell => "squat-barbell",
-        StraightArmLatPulldownCable => "straight-arm-lat-pulldown-cable",
-        ThrusterBarbell => "thruster-barbell",
-        ThrusterKettlebell => "thruster-kettlebell",
-        ToeTouch => "toe-touch",
-        ToesToBar => "toes-to-bar",
-        TricepsExtensionBarbell => "triceps-extension-barbell",
-        TricepsExtensionCable => "triceps-extension-cable",
-        VUp => "v-up",
-        WallClimbs => "wall-climbs",
-        WeightedJumpSquat => "weighted-jump-squat",
-        WristExtensionDumbbell => "wrist-extension-dumbbell",
-        WristFlexionDumbbell => "wrist-flexion-dumbbell",
+        AboveAndBelowTheKneePauseSnatch => "above-and-below-the-knee-pause-snatch", Barbell,
+        BackExtensionHyperextension => "back-extension-hyperextension", Bodyweight,
+        BackExtensionMachine => "back-extension-machine", Machine,
+        BackSquatWithSnatchPushPress => "back-squat-with-snatch-push-press", Barbell,
+        BandPullaparts => "band-pullaparts", Band,
+        BandedScapulaProtraction => "banded-scapula-protraction", Band,
+        BehindTheBackCurlCable => "behind-the-back-curl-cable", Cable,
+        BehindTheBackWristCurlBarbell => "behind-the-back-wrist-curl-barbell", Barbell,
+        BentOverCableChop => "bent-over-cable-chop", Cable,
+        BentOverRowBarbell => "bent-over-row-barbell", Barbell,
+        BicepCurlDumbbell => "bicep-curl-dumbbell", Dumbbell,
+        BirdDog => "bird-dog", Bodyweight,
+        BoxJump => "box-jump", Bodyweight,
+        BulgarianSplitSquat => "bulgarian-split-squat", Bodyweight,
+        Burpee => "burpee", Bodyweight,
+        BurpeeOverTheBar => "burpee-over-the-bar", Bodyweight,
+        ButterflyPecDeck => "butterfly-pec-deck", Machine,
+        CableTwistUpToDown => "cable-twist-up-to-down", Cable,
+        ChestDip => "chest-dip", Bodyweight,
+        ChestPressMachine => "chest-press-machine", Machine,
+        ChestSupportedInclineRowDumbbell => "chest-supported-incline-row-dumbbell", Dumbbell,
+        ChestSupportedYRaiseDumbbell => "chest-supported-y-raise-dumbbell", Dumbbell,
+        ChinUp => "chin-up", Bodyweight,
+        CleanAndPress => "clean-and-press", Barbell,
+        Crunch => "crunch", Bodyweight,
+        DeadBug => "dead-bug", Bodyweight,
+        DeadliftBarbell => "deadlift-barbell", Barbell,
+        DeadliftDumbbell => "deadlift-dumbbell", Dumbbell,
+        DeclineCrunch => "decline-crunch", Bodyweight,
+        DeficitPushups => "deficit-pushups", Bodyweight,
+        DownwardDogToPlancheLean => "downward-dog-to-planche-lean", Bodyweight,
+        DropSnatch => "drop-snatch", Barbell,
+        DumbbellSnatch => "dumbbell-snatch", Dumbbell,
+        FloorPressDumbbell => "floor-press-dumbbell", Dumbbell,
+        FrontLeverRaise => "front-lever-raise", Bodyweight,
+        FrontRaiseBand => "front-raise-band", Band,
+        FrontSquat => "front-squat", Barbell,
+        GobletSquat => "goblet-squat", Dumbbell,
+        GoodMorningBarbell => "good-morning-barbell", Barbell,
+        HammerCurlCable => "hammer-curl-cable", Cable,
+        HammerCurlDumbbell => "hammer-curl-dumbbell", Dumbbell,
+        HammerTwists => "hammer-twists", Bodyweight,
+        HangHighPull => "hang-high-pull", Barbell,
+        HangSnatch => "hang-snatch", Barbell,
+        HangingKneeRaise => "hanging-knee-raise", Bodyweight,
+        HipSnatch => "hip-snatch", Barbell,
+        InclineBenchPressBarbell => "incline-bench-press-barbell", Barbell,
+        InclineBenchPressDumbbell => "incline-bench-press-dumbbell", Dumbbell,
+        InvertedRow => "inverted-row", Bodyweight,
+        KettlebellClean => "kettlebell-clean", Kettlebell,
+        KettlebellCleanAndPress => "kettlebell-clean-and-press", Kettlebell,
+        KettlebellSwing => "kettlebell-swing", Kettlebell,
+        LatPulldownCable => "lat-pulldown-cable", Cable,
+        LatPulldownCloseGripCable => "lat-pulldown-close-grip-cable", Cable,
+        LateralRaiseBand => "lateral-raise-band", Band,
+        LateralRaiseCable => "lateral-raise-cable", Cable,
+        LateralRaiseDumbbell => "lateral-raise-dumbbell", Dumbbell,
+        LegExtensionMachine => "leg-extension-machine", Machine,
+        LegPressMachine => "leg-press-machine", Machine,
+        LowRowSuspension => "low-row-suspension", Bodyweight,
+        LungeDumbbell => "lunge-dumbbell", Dumbbell,
+        LyingLegCurlMachine => "lying-leg-curl-machine", Machine,
+        MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat", Barbell,
+        NeutralGripPullUp => "neutral-grip-pull-up", Bodyweight,
+        NordicHamstringsCurls => "nordic-hamstrings-curls", Bodyweight,
+        OverheadPlateRaise => "overhead-plate-raise", Plate,
+        OverheadPressBarbell => "overhead-press-barbell", Barbell,
+        OverheadPressDumbbell => "overhead-press-dumbbell", Dumbbell,
+        OverheadSquat => "overhead-squat", Barbell,
+        OverheadTricepsExtensionCable => "overhead-triceps-extension-cable", Cable,
+        PendlayRowBarbell => "pendlay-row-barbell", Barbell,
+        PikePullThrough => "pike-pull-through", Bodyweight,
+        PlankPushup => "plank-pushup", Bodyweight,
+        Pogo => "pogo", Bodyweight,
+        PowerClean => "power-clean", Barbell,
+        PowerMuscleSnatch => "power-muscle-snatch", Barbell,
+        PreacherCurlBarbell => "preacher-curl-barbell", Barbell,
+        PreacherCurlDumbbell => "preacher-curl-dumbbell", Dumbbell,
+        PullUp => "pull-up", Bodyweight,
+        PushPress => "push-press", Barbell,
+        PushUp => "push-up", Bodyweight,
+        RenegadeRowDumbbell => "renegade-row-dumbbell", Dumbbell,
+        RingPushups => "ring-pushups", Bodyweight,
+        RingRows => "ring-rows", Bodyweight,
+        RomanianDeadliftBarbell => "romanian-deadlift-barbell", Barbell,
+        ScapularPullUps => "scapular-pull-ups", Bodyweight,
+        SeatedCableRowVGripCable => "seated-cable-row-v-grip-cable", Cable,
+        SeatedInclineCurlDumbbell => "seated-incline-curl-dumbbell", Dumbbell,
+        SeatedLegCurlMachine => "seated-leg-curl-machine", Machine,
+        SeatedWristExtensionBarbell => "seated-wrist-extension-barbell", Barbell,
+        SerratusRock => "serratus-rock", Bodyweight,
+        ShoulderInternalExternalRotation => "shoulder-internal-external-rotation", Band,
+        ShrugDumbbell => "shrug-dumbbell", Dumbbell,
+        SingleArmCableRow => "single-arm-cable-row", Cable,
+        SingleArmLateralRaiseCable => "single-arm-lateral-raise-cable", Cable,
+        SingleArmTricepExtensionDumbbell => "single-arm-tricep-extension-dumbbell", Dumbbell,
+        SingleLegExtensions => "single-leg-extensions", Machine,
+        SingleLegRomanianDeadliftBarbell => "single-leg-romanian-deadlift-barbell", Barbell,
+        SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell", Dumbbell,
+        SissySquat => "sissy-squat", Bodyweight,
+        SitUp => "sit-up", Bodyweight,
+        SleeperStretch => "sleeper-stretch", Bodyweight,
+        Snatch => "snatch", Barbell,
+        SnatchBalance => "snatch-balance", Barbell,
+        SnatchGripBehindTheNeckPress => "snatch-grip-behind-the-neck-press", Barbell,
+        SplitSquatDumbbell => "split-squat-dumbbell", Dumbbell,
+        SquatBarbell => "squat-barbell", Barbell,
+        StraightArmLatPulldownCable => "straight-arm-lat-pulldown-cable", Cable,
+        ThrusterBarbell => "thruster-barbell", Barbell,
+        ThrusterKettlebell => "thruster-kettlebell", Kettlebell,
+        ToeTouch => "toe-touch", Bodyweight,
+        ToesToBar => "toes-to-bar", Bodyweight,
+        TricepsExtensionBarbell => "triceps-extension-barbell", Barbell,
+        TricepsExtensionCable => "triceps-extension-cable", Cable,
+        VUp => "v-up", Bodyweight,
+        WallClimbs => "wall-climbs", Bodyweight,
+        WeightedJumpSquat => "weighted-jump-squat", Dumbbell,
+        WristExtensionDumbbell => "wrist-extension-dumbbell", Dumbbell,
+        WristFlexionDumbbell => "wrist-flexion-dumbbell", Dumbbell,
     }
 }
 
@@ -226,16 +336,16 @@ vocabulary! {
     /// distance-and-duration, and what it holds is thirty seconds and a zero
     /// distance on every one of its nine sets.
     DurationExercise {
-        AirBike => "air-bike",
-        CouchStretch => "couch-stretch",
-        DeadHang => "dead-hang",
-        HandstandHold => "handstand-hold",
-        JumpRope => "jump-rope",
-        NinetyNinety => "ninety-ninety",
-        SledPush => "sled-push",
-        SquattingGroinStretch => "squatting-groin-stretch",
-        StandingStraddleFold => "standing-straddle-fold",
-        Stretching => "stretching",
+        AirBike => "air-bike", Machine,
+        CouchStretch => "couch-stretch", Bodyweight,
+        DeadHang => "dead-hang", Bodyweight,
+        HandstandHold => "handstand-hold", Bodyweight,
+        JumpRope => "jump-rope", Bodyweight,
+        NinetyNinety => "ninety-ninety", Bodyweight,
+        SledPush => "sled-push", Sled,
+        SquattingGroinStretch => "squatting-groin-stretch", Bodyweight,
+        StandingStraddleFold => "standing-straddle-fold", Bodyweight,
+        Stretching => "stretching", Bodyweight,
     }
 }
 
@@ -247,9 +357,9 @@ vocabulary! {
     /// repeating one identical distance and time across all its sets, which is an
     /// interval target rather than anything that was measured.
     DistanceExercise {
-        FarmersWalk => "farmers-walk",
-        Running => "running",
-        WalkingLungeDumbbell => "walking-lunge-dumbbell",
+        FarmersWalk => "farmers-walk", Dumbbell,
+        Running => "running", Bodyweight,
+        WalkingLungeDumbbell => "walking-lunge-dumbbell", Dumbbell,
     }
 }
 
@@ -271,6 +381,15 @@ impl Exercise {
             Self::Reps(exercise) => exercise.as_str(),
             Self::Duration(exercise) => exercise.as_str(),
             Self::Distance(exercise) => exercise.as_str(),
+        }
+    }
+
+    /// What this exercise is loaded with, whichever vocabulary it came from.
+    pub const fn implement(self) -> Implement {
+        match self {
+            Self::Reps(exercise) => exercise.implement(),
+            Self::Duration(exercise) => exercise.implement(),
+            Self::Distance(exercise) => exercise.implement(),
         }
     }
 

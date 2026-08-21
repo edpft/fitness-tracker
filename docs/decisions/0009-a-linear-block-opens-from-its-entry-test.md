@@ -129,3 +129,37 @@ tested by injecting a `TODO`, because the next authored value will need it.
   `crates/domain/tests/progression.rs`, where it always was.
 - Migration `0010` adds `anchor_failed_grams` to `programme` and
   `prescribed_workout` and drops `ladder_start_bp`.
+
+## Amended 2026-08-20
+
+Two changes. The heading still holds — a block opens from its entry test — but
+both halves of *how* were wrong.
+
+**The drop is the opening, not a climb-in to it.** This decision had the ladder
+open at the failed load and reach it by drop-and-re-climb at the second reset's
+−5%, so `ClimbBack::Entry` existed to keep that climb from spending a stall.
+Week one was therefore heavier than the anchor, which `primary-lift-progression.md`
+described as "ambitious" and defended. The operator overturned it: the ladder
+opens at the failed load dropped by an authored `entry_drop` of −10% and climbs
+back *through* it. `ClimbBack` is gone, because every re-climb inside a block is
+now a stall and there is nothing left to tell apart.
+
+**And the derivation can be overridden.** The block starting 3 August is why.
+Its entry test is dated 3 July, with a hand-run block and a fortnight's holiday
+in between, so nothing derived from that test is evidence about where this block
+should open. The tell is that two different rules reproduce the operator's
+stated 85 exactly — −10% off the failed 95 is 85.5, and −5% off the completed 90
+is also 85.5, and the 2.5kg grid takes both to 85. Two rules agreeing on one
+observation means the observation evidences neither.
+
+So `programme.opening` states the load and the anchor's failed load feeds
+nothing. This is not a fallback for an unauthored parameter, which is what the
+original decision was written to eliminate: it is the answer where the
+derivation has no standing. The operator's words were that we "always need the
+escape hatch of a declared entry point" — always available, never conditionally
+required, so nothing asks how old a test is.
+
+The derivation remains the default and is what the block starting 21 September
+will use, since that one follows its own test directly. Nothing in the 3 August
+block exercises it, so `crates/domain/tests/ladder.rs` pins it at an anchor
+where the two candidate rules disagree.

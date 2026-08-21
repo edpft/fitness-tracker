@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT implement AS \"implement!: String\",\n               from_grams AS \"from_grams!: i64\",\n               size_grams AS \"size_grams!: i64\"\n        FROM generation_load_scale\n        WHERE parameters_authored_at = ?\n        ORDER BY implement, band\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "implement!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "generation_load_scale",
+            "name": "implement"
+          }
+        }
+      },
+      {
+        "name": "from_grams!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_load_scale",
+            "name": "from_grams"
+          }
+        }
+      },
+      {
+        "name": "size_grams!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_load_scale",
+            "name": "size_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6ac94e224ea4a1ab2f93f4d3dca39d38972a3437d76307d37f276af3464d0d3f"
+}

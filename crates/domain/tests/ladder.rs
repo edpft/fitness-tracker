@@ -7,7 +7,7 @@
 
 use domain::gym::Kg;
 use domain::prescription::{
-    Anchor, AnchorProvenance, Ladder, Percentage, PlateIncrement, WeekIndex,
+    Anchor, AnchorProvenance, Ladder, LoadSteps, Opening, Percentage, WeekIndex,
 };
 use proptest::prelude::*;
 
@@ -32,8 +32,20 @@ fn unbeaten(completed: &str) -> Result<Anchor, Box<dyn std::error::Error>> {
     )?)
 }
 
-fn grid() -> Result<PlateIncrement, Box<dyn std::error::Error>> {
-    Ok(PlateIncrement::new(Kg::try_from("2.5".to_owned())?)?)
+fn grid() -> Result<LoadSteps, Box<dyn std::error::Error>> {
+    Ok(LoadSteps::uniform(Kg::try_from("2.5".to_owned())?)?)
+}
+
+/// The block's opening, derived from its entry test at the authored drop.
+///
+/// -10% is what the operator settled on 2026-08-20. It is passed here rather
+/// than reached for, because the drop is a parameter of the derivation and not
+/// a property of the anchor.
+fn from_test(anchor: Anchor) -> Result<Opening, Box<dyn std::error::Error>> {
+    Ok(Opening::FromAnchor {
+        anchor,
+        drop: pct("-10%")?,
+    })
 }
 
 fn pct(value: &str) -> Result<Percentage, Box<dyn std::error::Error>> {
@@ -54,8 +66,11 @@ fn a_duration_and_an_anchor_generate_every_week() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
     // Seven weeks: six climbing, then the test.
-    let Ok(ladder) = Ladder::new(anchor, climb, 7, increment) else {
+    let Ok(ladder) = Ladder::new(opening, climb, 7, &increment) else {
         panic!("a rising climb over seven weeks is a ladder")
     };
 
@@ -66,7 +81,7 @@ fn a_duration_and_an_anchor_generate_every_week() {
             panic!("weeks are one-based")
         };
         assert!(
-            ladder.heavy_top_set(w, increment).is_some(),
+            ladder.heavy_top_set(w, &increment).is_some(),
             "week {index} is a climbing week and has a load"
         );
     }
@@ -76,36 +91,42 @@ fn a_duration_and_an_anchor_generate_every_week() {
     let Ok(past_the_climb) = week(7) else {
         panic!("weeks are one-based")
     };
-    assert!(ladder.heavy_top_set(past_the_climb, increment).is_none());
+    assert!(ladder.heavy_top_set(past_the_climb, &increment).is_none());
     assert!(
         ladder
-            .implied_percentage(anchor.load(), past_the_climb, increment)
+            .implied_percentage(anchor.load(), past_the_climb, &increment)
             .is_none()
     );
 }
 
 /// One worked ladder, load for load.
 ///
-/// **The block opens at the load the entry test failed.** 90 went up and 95 did
-/// not, so 95 is where the plan starts — the block reaches it through the
-/// drop-and-re-climb protocol, which is [`domain::prescription::progress_after`]'s
-/// job and not this module's. Every rung after it is one plate on.
+/// **The block opens below the load the entry test failed.** 90 went up and 95
+/// did not, so 95 is the ceiling and the block opens at -10% of it — 85.5,
+/// which is 85 on the grid — and climbs back through it. Every rung after the
+/// first is one plate on.
+///
+/// It used to open *at* 95 and climb in to it, which made week one heavier than
+/// the anchor. The operator overturned that on 2026-08-20.
 #[test]
 fn the_worked_ladder_reproduces_its_table() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
-    let Ok(ladder) = Ladder::new(anchor, climb, 7, increment) else {
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+    let Ok(ladder) = Ladder::new(opening, climb, 7, &increment) else {
         panic!("a rising climb over seven weeks is a ladder")
     };
 
-    let expected = ["95", "97.5", "100", "102.5", "105", "107.5"];
+    let expected = ["85", "87.5", "90", "92.5", "95", "97.5"];
     for (offset, want) in expected.iter().enumerate() {
         let index = u32::try_from(offset).unwrap_or(0) + 1;
         let (Ok(w), Ok(want_kg)) = (week(index), kg(want)) else {
             panic!("week {index} and {want} are both valid")
         };
-        let Some(got) = ladder.heavy_top_set(w, increment) else {
+        let Some(got) = ladder.heavy_top_set(w, &increment) else {
             panic!("week {index} is a climbing week")
         };
         assert_eq!(got, want_kg, "week {index}");
@@ -115,57 +136,70 @@ fn the_worked_ladder_reproduces_its_table() {
 /// A test that failed nothing opens one climb above what it reached.
 ///
 /// **It did not find the ceiling**, so the completed load is a floor rather than
-/// a maximum and the block starts by beating it. Note this opens *lower* than
-/// the failing case above and yet finishes higher, because no weeks are spent
-/// climbing back in — which is the honest consequence of the two states being
-/// different, not a defect to be smoothed out.
+/// a maximum and the block starts by beating it. Note this opens *higher* than
+/// the failing case above: a test that found a ceiling knows where the limit is
+/// and drops below it, and one that did not has no limit to drop from.
 #[test]
 fn a_test_that_failed_nothing_opens_one_climb_above_it() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), unbeaten("90")) else {
         panic!("the fixture values are all valid")
     };
-    let (Ok(ladder), Ok(first), Ok(opening)) = (
-        Ladder::new(anchor, climb, 7, increment),
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+    let (Ok(ladder), Ok(first), Ok(expected)) = (
+        Ladder::new(opening, climb, 7, &increment),
         week(1),
         kg("92.5"),
     ) else {
         panic!("the ladder and its first week are valid")
     };
 
-    assert_eq!(ladder.opening(), opening);
-    assert_eq!(ladder.heavy_top_set(first, increment), Some(opening));
+    assert_eq!(ladder.opening(), expected);
+    assert_eq!(ladder.heavy_top_set(first, &increment), Some(expected));
 }
 
 /// The climb passes the anchor, and the report says so.
 ///
-/// A block opening on a failed 95 against a completed 90 is already above the
-/// tested max in its first week. Nothing prescribes from this number — it is
-/// read back out of the load — but an operator seeing 105.5% is seeing what the
-/// block is actually asking for.
+/// A block opening at -10% off a failed 95, against a completed 90, starts
+/// *below* the tested max and climbs through it. Nothing prescribes from this
+/// number — it is read back out of the load — but an operator watching it cross
+/// 100% is watching the block do the one thing it exists to do.
+///
+/// The old model opened above the anchor and this test asserted so. That is the
+/// change the operator made on 2026-08-20, and the direction of the inequality
+/// is the whole of it.
 #[test]
 fn the_implied_percentage_reads_the_climb_past_the_anchor() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
     let (Ok(ladder), Ok(first), Ok(last)) =
-        (Ladder::new(anchor, climb, 7, increment), week(1), week(6))
+        (Ladder::new(opening, climb, 7, &increment), week(1), week(6))
     else {
         panic!("the ladder and its weeks are valid")
     };
 
     let (Some(opened), Some(finished)) = (
-        ladder.implied_percentage(anchor.load(), first, increment),
-        ladder.implied_percentage(anchor.load(), last, increment),
+        ladder.implied_percentage(anchor.load(), first, &increment),
+        ladder.implied_percentage(anchor.load(), last, &increment),
     ) else {
         panic!("weeks one and six both climb")
     };
 
-    // 95/90 and 107.5/90.
-    assert_eq!(opened.as_basis_points(), 10555);
-    assert_eq!(finished.as_basis_points(), 11944);
+    // 85/90 and 97.5/90.
+    assert_eq!(opened.as_basis_points(), 9444);
+    assert_eq!(finished.as_basis_points(), 10833);
     assert!(
-        opened > Percentage::WHOLE,
-        "the block opens above the anchor"
+        opened < Percentage::WHOLE,
+        "the block opens below the anchor and climbs through it"
+    );
+    assert!(
+        finished > Percentage::WHOLE,
+        "and finishes above it, which is what the block is for"
     );
     assert!(finished > opened);
 }
@@ -187,18 +221,21 @@ fn the_light_session_tracks_the_heavy_one() {
     else {
         panic!("the fixture values are all valid")
     };
-    let Ok(ladder) = Ladder::new(anchor, climb, 7, increment) else {
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+    let Ok(ladder) = Ladder::new(opening, climb, 7, &increment) else {
         panic!("a rising climb over seven weeks is a ladder")
     };
 
-    // 85% of the heavy weeks 95, 97.5 and 100, on the 2.5kg grid.
-    let expected = ["80", "82.5", "85"];
+    // 85% of the heavy weeks 85, 87.5 and 90, on the 2.5kg grid.
+    let expected = ["72.5", "75", "77.5"];
     for (offset, want) in expected.iter().enumerate() {
         let index = u32::try_from(offset).unwrap_or(0) + 1;
         let (Ok(w), Ok(want_kg)) = (week(index), kg(want)) else {
             panic!("week {index} and {want} are both valid")
         };
-        let Some(got) = ladder.light_top_set(w, increment, light_of_heavy) else {
+        let Some(got) = ladder.light_top_set(w, &increment, light_of_heavy) else {
             panic!("light week {index} is a climbing week")
         };
         assert_eq!(got, want_kg, "light week {index}");
@@ -219,9 +256,12 @@ fn the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
     let (Ok(short), Ok(long)) = (
-        Ladder::new(anchor, climb, 7, increment),
-        Ladder::new(anchor, climb, 13, increment),
+        Ladder::new(opening, climb, 7, &increment),
+        Ladder::new(opening, climb, 13, &increment),
     ) else {
         panic!("both durations make a ladder")
     };
@@ -232,8 +272,8 @@ fn the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops() {
         panic!("weeks are one-based")
     };
     assert_eq!(
-        short.heavy_top_set(second, increment),
-        long.heavy_top_set(second, increment),
+        short.heavy_top_set(second, &increment),
+        long.heavy_top_set(second, &increment),
         "the step does not depend on how long the block runs"
     );
 
@@ -242,8 +282,8 @@ fn the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops() {
         panic!("weeks are one-based")
     };
     let (Some(short_end), Some(long_end)) = (
-        short.heavy_top_set(short_last, increment),
-        long.heavy_top_set(long_last, increment),
+        short.heavy_top_set(short_last, &increment),
+        long.heavy_top_set(long_last, &increment),
     ) else {
         panic!("both blocks climb to their last week")
     };
@@ -260,16 +300,20 @@ fn a_single_climbing_week_opens_and_stops() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
     // Two weeks: one climbing, then the test.
-    let Ok(ladder) = Ladder::new(anchor, climb, 2, increment) else {
+    let Ok(ladder) = Ladder::new(opening, climb, 2, &increment) else {
         panic!("two weeks is the shortest block")
     };
     assert_eq!(ladder.climbing_weeks(), 1);
 
-    let (Ok(only), Ok(opening)) = (week(1), kg("95")) else {
+    // -10% off the failed 95 is 85.5, which is 85 on the grid.
+    let (Ok(only), Ok(expected)) = (week(1), kg("85")) else {
         panic!("the week and the opening load are valid")
     };
-    assert_eq!(ladder.heavy_top_set(only, increment), Some(opening));
+    assert_eq!(ladder.heavy_top_set(only, &increment), Some(expected));
 }
 
 #[test]
@@ -277,8 +321,11 @@ fn a_block_too_short_to_climb_is_refused() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
-    assert!(Ladder::new(anchor, climb, 1, increment).is_err());
-    assert!(Ladder::new(anchor, climb, 0, increment).is_err());
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+    assert!(Ladder::new(opening, climb, 1, &increment).is_err());
+    assert!(Ladder::new(opening, climb, 0, &increment).is_err());
 }
 
 /// A rate of nothing is not a plan to increase anything.
@@ -291,7 +338,10 @@ fn a_ladder_that_does_not_rise_is_refused() {
     let (Ok(increment), Ok(anchor)) = (grid(), ceiling("90", "95")) else {
         panic!("the grid and anchor are valid")
     };
-    assert!(Ladder::new(anchor, Kg::from_grams(0), 8, increment).is_err());
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+    assert!(Ladder::new(opening, Kg::from_grams(0), 8, &increment).is_err());
 }
 
 proptest! {
@@ -317,7 +367,10 @@ proptest! {
         ) else {
             panic!("a positive load is an anchor")
         };
-        let Ok(ladder) = Ladder::new(anchor, climb, duration, increment) else {
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+        let Ok(ladder) = Ladder::new(opening, climb, duration, &increment) else {
             panic!("a rising climb over two or more weeks is a ladder")
         };
 
@@ -329,8 +382,8 @@ proptest! {
             let Ok(w) = WeekIndex::new(index) else {
                 panic!("weeks are one-based")
             };
-            let first = ladder.heavy_top_set(w, increment);
-            let again = ladder.heavy_top_set(w, increment);
+            let first = ladder.heavy_top_set(w, &increment);
+            let again = ladder.heavy_top_set(w, &increment);
             prop_assert_eq!(first, again);
         }
     }
@@ -359,7 +412,10 @@ proptest! {
         ) else {
             panic!("a positive load is an anchor")
         };
-        let Ok(ladder) = Ladder::new(anchor, climb, duration, increment) else {
+    let Ok(opening) = from_test(anchor) else {
+        panic!("-10% is a percentage")
+    };
+        let Ok(ladder) = Ladder::new(opening, climb, duration, &increment) else {
             panic!("a rising climb is a ladder")
         };
 
@@ -368,10 +424,13 @@ proptest! {
             let Ok(w) = WeekIndex::new(index) else {
                 panic!("weeks are one-based")
             };
-            let Some(load) = ladder.heavy_top_set(w, increment) else {
+            let Some(load) = ladder.heavy_top_set(w, &increment) else {
                 panic!("week {index} of {} climbs", ladder.climbing_weeks())
             };
-            prop_assert_eq!(load.as_grams() % increment.as_kg().as_grams(), 0);
+            // On the grid, stated as the grid states it: quantising a load
+            // that is already loadable changes nothing. The old form divided by
+            // "the increment", which a banded scale does not have.
+            prop_assert_eq!(increment.quantise(load), load);
             if let Some(previous) = previous {
                 prop_assert_eq!(
                     load.as_grams() - previous.as_grams(),

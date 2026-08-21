@@ -165,6 +165,12 @@ pub enum PrescriptionError {
     #[error(transparent)]
     InconsistentProgramme(#[from] domain::prescription::InconsistentProgramme),
 
+    /// The programme's plan cannot be built from the parameters in force —
+    /// most often because no load scale has been authored for the implement the
+    /// primary is lifted on.
+    #[error(transparent)]
+    NoLadder(#[from] domain::prescription::InvalidLadder),
+
     /// Every slot failed to derive, so there is no workout to issue.
     ///
     /// Distinct from a slot or two being underivable, which is a value on the

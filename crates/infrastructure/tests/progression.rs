@@ -83,7 +83,7 @@ macro_rules! run {
 /// The primary's top set in an issued session.
 macro_rules! top_set {
     ($prescriber:expr, $date:expr) => {{
-        let issued = run!($prescriber.prescribe($date));
+        let issued = run!($prescriber.prescribe($date, application::Reissue::No));
         let Some(PrescribedItem::Exercise { exercise, .. }) =
             issued.workout.shape().item_for(SlotId::KneeDominant)
         else {
@@ -103,18 +103,19 @@ macro_rules! top_set {
     }};
 }
 
-/// The block opens climbing in from its entry test, through the real store.
+/// The block opens below what its entry test failed, through the real store.
 ///
 /// **The sharp assertion.** The entry test of 3 July completed 90 and failed 95,
-/// so the block opens by dropping the second reset's 5% from that failed 95 —
-/// 90.25, which the plate grid takes to 90 — and climbing back to it at 2.5kg a
-/// week. What is prescribed for the block's first gating Friday is therefore 90,
-/// not the ladder's own first rung of 95.
+/// so the block opens at −10% of that failed 95 — 85.5, which the plate grid
+/// takes to 85 — and climbs back through it. What is prescribed for the block's
+/// first gating Friday is the ladder's own first rung, because since 2026-08-20
+/// the drop *is* the opening rather than a climb-in before it.
 ///
-/// The two numbers being different is the whole point: it is what tells "opened
-/// from the test" apart from "opened on the plan".
+/// The load being *below* the anchor of 90 is the whole point: it is what tells
+/// this model apart from the one it replaced, which opened at 95 and made week
+/// one heavier than the tested maximum.
 #[test]
-fn the_block_opens_climbing_in_from_its_entry_test() {
+fn the_block_opens_below_what_its_entry_test_failed() {
     let (prescriber, _directory) = ready!();
     let (issued, load) = top_set!(&prescriber, Date::constant(2026, 7, 10));
 
@@ -131,24 +132,25 @@ fn the_block_opens_climbing_in_from_its_entry_test() {
     let Ok(programme) = programme::programme_from(BLOCK_START) else {
         panic!("the programme builds")
     };
-    let Ok(ladder) = programme.ladder(&parameters) else {
+    let (Ok(ladder), Ok(steps)) = (programme.ladder(&parameters), programme.steps(&parameters))
+    else {
         panic!("the ladder builds")
     };
 
-    let Ok(climbing_in) = "90".to_owned().try_into().map(domain::gym::Load::Absolute) else {
-        panic!("90 is a mass")
+    let Ok(opening) = "85".to_owned().try_into().map(domain::gym::Load::Absolute) else {
+        panic!("85 is a mass")
     };
     assert_eq!(
         load,
-        Some(climbing_in),
-        "the block climbs in from the load its entry test failed"
+        Some(opening),
+        "the block opens at the failed load dropped by the entry drop"
     );
-    assert_ne!(
+    assert_eq!(
         load,
         ladder
-            .heavy_top_set(WeekIndex::FIRST, parameters.plate_increment)
+            .heavy_top_set(WeekIndex::FIRST, steps)
             .map(domain::gym::Load::Absolute),
-        "and that is not the ladder's own first rung, which is the failed load itself"
+        "and that is the ladder's own first rung: the drop is the opening"
     );
 }
 
@@ -158,14 +160,14 @@ fn the_block_opens_climbing_in_from_its_entry_test() {
 /// opens climbing in at 90 toward the 95 its entry test failed. By Monday
 /// 2026-07-13 it has had one Friday — 10 July, completed — so the climb has
 /// advanced once, at the second reset's +2.5kg, to 92.5. The light session's top
-/// set is 85% of that, which the grid puts at 77.5.
+/// set is 85% of that, which the grid puts at 75.
 ///
 /// It has also had a Monday, 6 July, trained and completed. **If the light
-/// session gated too the climb would have advanced twice**, reaching 95, arriving
-/// at the ladder's first rung and prescribing 85% of 95 — which is 80. Asserting
-/// 77.5 rather than 80 is the assertion that only the gating role gates, and it
-/// is checked through the load actually prescribed rather than through the
-/// mechanism's own state.
+/// session gated too the climb would have advanced twice**, reaching the third
+/// rung at 90 and prescribing 85% of it — which is 77.5. Asserting 75 rather
+/// than 77.5 is the assertion that only the gating role gates, and it is checked
+/// through the load actually prescribed rather than through the mechanism's own
+/// state.
 #[test]
 fn only_the_gating_role_gates() {
     let (prescriber, _directory) = ready!();
@@ -173,11 +175,11 @@ fn only_the_gating_role_gates() {
     assert_eq!(issued.workout.session_role(), SessionRole::Light);
 
     let (Ok(gated), Ok(ungated)) = (
+        "75".to_owned().try_into().map(domain::gym::Load::Absolute),
         "77.5"
             .to_owned()
             .try_into()
             .map(domain::gym::Load::Absolute),
-        "80".to_owned().try_into().map(domain::gym::Load::Absolute),
     ) else {
         panic!("both are masses")
     };

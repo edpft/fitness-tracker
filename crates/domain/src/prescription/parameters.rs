@@ -12,9 +12,14 @@
 //!
 //! [`Kg`]: crate::gym::Kg
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
-use crate::gym::{Duration, Kg, RepCount};
+use crate::gym::{
+    Duration, Kg, RepCount,
+    exercise::{Exercise, Implement},
+};
+
+use super::steps::LoadSteps;
 
 /// Why a percentage could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -178,37 +183,43 @@ impl fmt::Display for Percentage {
     }
 }
 
-/// The smallest load step the equipment allows.
+/// Every implement's load scale, as one authored set.
 ///
-/// A fact about the gym rather than about the programme, which is why it is
-/// data where the rounding rule that consumes it is code (§ 9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PlateIncrement(Kg);
+/// A fact about this gym's equipment (§ 14) rather than about the programme,
+/// which is why it is data where the rounding rule that consumes it is code
+/// (§ 9).
+///
+/// **An implement with no scale makes the exercise underivable, never
+/// defaulted.** Borrowing the barbell's steps for a sled would produce a
+/// prescription indistinguishable from one derived from a real rack, and a
+/// placeholder that authors successfully is worse than one that fails.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Scales(BTreeMap<Implement, LoadSteps>);
 
-impl PlateIncrement {
-    /// # Errors
-    ///
-    /// [`InvalidIncrement`] for zero, which would make every load land on
-    /// itself and the quantiser divide by nothing.
-    pub const fn new(step: Kg) -> Result<Self, InvalidIncrement> {
-        if step.as_grams() == 0 {
-            return Err(InvalidIncrement);
-        }
-        Ok(Self(step))
+impl Scales {
+    pub const fn new(scales: BTreeMap<Implement, LoadSteps>) -> Self {
+        Self(scales)
     }
 
-    pub const fn as_kg(self) -> Kg {
-        self.0
+    /// The scale in force for an implement, if one has been authored.
+    #[must_use]
+    pub fn for_implement(&self, implement: Implement) -> Option<&LoadSteps> {
+        self.0.get(&implement)
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a plate increment of zero is not a step")]
-pub struct InvalidIncrement;
+    /// The scale an exercise is loaded on.
+    #[must_use]
+    pub fn for_exercise(&self, exercise: Exercise) -> Option<&LoadSteps> {
+        self.for_implement(exercise.implement())
+    }
 
-impl fmt::Display for PlateIncrement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+    pub fn iter(&self) -> impl Iterator<Item = (&Implement, &LoadSteps)> {
+        self.0.iter()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -255,6 +266,26 @@ pub struct ResetProtocol {
     pub reclimb_per_week: Kg,
 }
 
+/// The primary's back-off sets, for one session role.
+///
+/// **Its own numbers, per role.** These used to be read off the strength
+/// block's [`AccessoryScheme`] on the grounds that the primary is a strength
+/// slot and nobody had stated otherwise — which issued the light session's
+/// three sets of six on the heavy day. The operator stated it on 2026-08-20:
+/// heavy is `1 @ x, 2 × 4`, light is `3 @ x, 3 × 6`, and the record agrees on
+/// every session since the July test.
+///
+/// The percentage lives here rather than beside it because that is how the two
+/// patterns were stated — as patterns, each complete. Both are 85% today and
+/// nothing requires them to stay equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackOff {
+    pub sets: RepCount,
+    pub reps: RepCount,
+    /// Of this session's own top set, never of the anchor.
+    pub of_top_set: Percentage,
+}
+
 /// The double-progression scheme one block's slots run.
 ///
 /// Work the range, and when the top of it is reached at every working set, add an
@@ -276,7 +307,8 @@ pub struct AccessoryScheme {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationParameters {
     pub warmup: crate::gym::NonEmpty<WarmupStep>,
-    pub back_off_of_top_set: Percentage,
+    /// The primary's back-off sets. Per role, because the two roles differ.
+    pub back_off: super::schedule::PerRole<BackOff>,
     /// The light session's top set, as a proportion of that week's heavy one.
     /// Deriving it from the heavy load rather than from the anchor is what makes
     /// the two roles move together by construction.
@@ -291,6 +323,14 @@ pub struct GenerationParameters {
     /// derived from the entry test the anchor records, not authored — see
     /// `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
     pub ladder_climb_per_week: Kg,
+    /// Negative. What a block's opening drops off the load its entry test
+    /// failed, where the opening is derived rather than declared.
+    ///
+    /// **Authored, not borrowed from a reset.** It lands on the same −10% the
+    /// first reset drops by, and it is stated separately anyway: the two agree
+    /// today by decision rather than by derivation, and a composed default that
+    /// nothing pins is exactly the class of fault that produced `/v1/v1`.
+    pub entry_drop: Percentage,
     pub top_set_reps: super::schedule::PerRole<TopSetReps>,
     /// Every non-primary strength slot.
     pub strength: AccessoryScheme,
@@ -302,7 +342,9 @@ pub struct GenerationParameters {
     /// every time — so its prescription comes from here rather than from
     /// history. One duration for every static slot.
     pub static_hold: Duration,
-    pub plate_increment: PlateIncrement,
+    /// What each implement can hold. Consulted wherever a derived load has to
+    /// land on something the gym owns.
+    pub scales: Scales,
     pub first_reset: ResetProtocol,
     pub second_reset: ResetProtocol,
 }

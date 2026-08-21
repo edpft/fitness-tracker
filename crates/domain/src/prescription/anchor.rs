@@ -164,3 +164,55 @@ impl fmt::Display for Anchor {
         }
     }
 }
+
+/// What a block's loads start from.
+///
+/// **The test that anchors it, and the opening where the block states one.**
+/// These travel together because they answer one question between them — where
+/// does this block's ladder begin — and because the answer is either/or: a
+/// declared opening means the anchor's failed load feeds nothing.
+///
+/// Bundling them is not only tidiness. `Programme::new` and `Programme::rehydrate`
+/// both take this, and passing an anchor without saying whether an opening
+/// overrides it is the mistake the pair exists to prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Entry {
+    anchor: Anchor,
+    declared_opening: Option<Kg>,
+}
+
+impl Entry {
+    /// Derive the opening from the test.
+    pub const fn derived(anchor: Anchor) -> Self {
+        Self {
+            anchor,
+            declared_opening: None,
+        }
+    }
+
+    /// State the opening, leaving the test as evidence and nothing more.
+    pub const fn declaring(anchor: Anchor, opening: Kg) -> Self {
+        Self {
+            anchor,
+            declared_opening: Some(opening),
+        }
+    }
+
+    /// Build from a stored pair, where the opening is a nullable column.
+    pub const fn new(anchor: Anchor, declared_opening: Option<Kg>) -> Self {
+        Self {
+            anchor,
+            declared_opening,
+        }
+    }
+
+    pub const fn anchor(self) -> Anchor {
+        self.anchor
+    }
+
+    /// The opening as authored, if it was authored at all. For reporting and
+    /// for the store; the derivation goes through [`Self::opening`].
+    pub const fn declared_opening(self) -> Option<Kg> {
+        self.declared_opening
+    }
+}

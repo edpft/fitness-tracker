@@ -78,6 +78,7 @@ pub async fn prescribe(
     database: &Path,
     zone: &OperatorZone,
     date: Option<&str>,
+    reissue: application::Reissue,
 ) -> Result<(), Failure> {
     let pool = connect(database)
         .await
@@ -93,7 +94,7 @@ pub async fn prescribe(
 
     let date = resolve(&programmes, date).await?;
     let issued = prescriber
-        .prescribe(date)
+        .prescribe(date, reissue)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 

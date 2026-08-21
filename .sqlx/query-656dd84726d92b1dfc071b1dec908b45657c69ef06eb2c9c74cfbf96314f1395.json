@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT role AS \"role!: String\",\n               top_set_reps AS \"top_set_reps!: i64\",\n               back_off_sets AS \"back_off_sets!: i64\",\n               back_off_reps AS \"back_off_reps!: i64\",\n               back_off_bp AS \"back_off_bp!: i64\"\n        FROM generation_role_reps\n        WHERE parameters_authored_at = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "role!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "name": "top_set_reps!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "top_set_reps"
+          }
+        }
+      },
+      {
+        "name": "back_off_sets!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "back_off_sets"
+          }
+        }
+      },
+      {
+        "name": "back_off_reps!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "back_off_reps"
+          }
+        }
+      },
+      {
+        "name": "back_off_bp!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_role_reps",
+            "name": "back_off_bp"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "656dd84726d92b1dfc071b1dec908b45657c69ef06eb2c9c74cfbf96314f1395"
+}

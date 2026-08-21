@@ -9,12 +9,14 @@
 //! clause rather than a mutable flag. Same reasoning as the normalised layer
 //! having no `is_current` column.
 
+use std::collections::BTreeMap;
+
 use application::{GenerationParameterStore, StoreError};
 use domain::{
-    gym::{Kg, NonEmpty, RepCount},
+    gym::{Kg, NonEmpty, RepCount, exercise::Implement},
     prescription::{
-        GenerationParameters, PerRole, Percentage, PlateIncrement, ResetProtocol, SessionRole,
-        TopSetReps, WarmupStep,
+        BackOff, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol, Scales,
+        SessionRole, Step, TopSetReps, WarmupStep,
     },
 };
 use jiff::Timestamp;
@@ -85,13 +87,24 @@ async fn read_warmup(
 /// Both or nothing. `PerRole` is a struct precisely so a missing role is
 /// unrepresentable in Rust, which makes this boundary the only place a row deleted
 /// by hand can be caught — and it is reported rather than defaulted.
+/// What one session role is prescribed: its top set, and its back-off pattern.
+///
+/// Read together because they are stored together, and stored together because
+/// both are per role. Splitting them would be two queries answering one
+/// question.
+type RoleParameters = (TopSetReps, BackOff);
+
 async fn read_role_reps(
     pool: &SqlitePool,
     authored_at: &str,
-) -> Result<(TopSetReps, TopSetReps), StoreError> {
+) -> Result<(RoleParameters, RoleParameters), StoreError> {
     let rows = sqlx::query!(
         r#"
-        SELECT role AS "role!: String", top_set_reps AS "top_set_reps!: i64"
+        SELECT role AS "role!: String",
+               top_set_reps AS "top_set_reps!: i64",
+               back_off_sets AS "back_off_sets!: i64",
+               back_off_reps AS "back_off_reps!: i64",
+               back_off_bp AS "back_off_bp!: i64"
         FROM generation_role_reps
         WHERE parameters_authored_at = ?
         "#,
@@ -104,10 +117,17 @@ async fn read_role_reps(
     let mut light = None;
     let mut heavy = None;
     for row in rows {
-        let reps = TopSetReps::new(reps_from_storage(row.top_set_reps)?);
+        let read = (
+            TopSetReps::new(reps_from_storage(row.top_set_reps)?),
+            BackOff {
+                sets: reps_from_storage(row.back_off_sets)?,
+                reps: reps_from_storage(row.back_off_reps)?,
+                of_top_set: bp_from_storage(row.back_off_bp)?,
+            },
+        );
         match SessionRole::try_from(row.role.clone()) {
-            Ok(SessionRole::Light) => light = Some(reps),
-            Ok(SessionRole::Heavy) => heavy = Some(reps),
+            Ok(SessionRole::Light) => light = Some(read),
+            Ok(SessionRole::Heavy) => heavy = Some(read),
             Err(error) => return Err(corrupt(&error)),
         }
     }
@@ -117,6 +137,125 @@ async fn read_role_reps(
         ));
     };
     Ok((light, heavy))
+}
+
+/// Every implement's scale, as authored against one parameter set.
+///
+/// Ordered by band, which is what makes the domain's "bands ascend" check a
+/// statement about the data rather than about the order rows came back in.
+async fn read_scales(pool: &SqlitePool, authored_at: &str) -> Result<Scales, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT implement AS "implement!: String",
+               from_grams AS "from_grams!: i64",
+               size_grams AS "size_grams!: i64"
+        FROM generation_load_scale
+        WHERE parameters_authored_at = ?
+        ORDER BY implement, band
+        "#,
+        authored_at
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut bands: BTreeMap<Implement, Vec<Step>> = BTreeMap::new();
+    for row in rows {
+        let implement =
+            Implement::try_from(row.implement.clone()).map_err(|error| corrupt(&error))?;
+        bands.entry(implement).or_default().push(Step {
+            from: grams_from_storage(row.from_grams)?,
+            size: grams_from_storage(row.size_grams)?,
+        });
+    }
+
+    let mut scales = BTreeMap::new();
+    for (implement, bands) in bands {
+        scales.insert(
+            implement,
+            LoadSteps::new(bands).map_err(|error| corrupt(&error))?,
+        );
+    }
+    Ok(Scales::new(scales))
+}
+
+/// One row per session role: its top set, and its back-off pattern.
+///
+/// Lifted out of `author` because the three writes it makes are three
+/// independent shapes and reading them interleaved is what pushed that function
+/// past the length the gate allows.
+async fn write_role_reps(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    stamp: &str,
+    parameters: &GenerationParameters,
+) -> Result<(), StoreError> {
+    for role in SessionRole::ALL {
+        let key = role.as_str();
+        let reps = i64::from(parameters.top_set_reps.get(*role).as_rep_count().as_u32());
+        let back_off = parameters.back_off.get(*role);
+        let back_off_sets = i64::from(back_off.sets.as_u32());
+        let back_off_reps = i64::from(back_off.reps.as_u32());
+        let back_off_bp = bp_for_storage(back_off.of_top_set);
+        sqlx::query!(
+            r"
+            INSERT INTO generation_role_reps (
+                parameters_authored_at, role, top_set_reps,
+                back_off_sets, back_off_reps, back_off_bp
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ",
+            stamp,
+            key,
+            reps,
+            back_off_sets,
+            back_off_reps,
+            back_off_bp
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+
+    Ok(())
+}
+
+/// One row per band of each implement's scale.
+///
+/// Nothing is written for an implement with no scale, which is the state that
+/// makes an exercise loaded on it report as underivable rather than borrowing
+/// the barbell's steps.
+async fn write_scales(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    stamp: &str,
+    parameters: &GenerationParameters,
+) -> Result<(), StoreError> {
+    for (implement, steps) in parameters.scales.iter() {
+        let key = implement.as_str();
+        for (band, step) in steps.bands().iter().enumerate() {
+            let band = i64::try_from(band)
+                .map_err(|_| corrupt(&"a scale with more bands than the store can hold"))?;
+            let from = grams_for_storage(step.from)?;
+            let size = grams_for_storage(step.size)?;
+            sqlx::query!(
+                r"
+                INSERT INTO generation_load_scale (
+                    parameters_authored_at, implement, band, from_grams, size_grams
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ",
+                stamp,
+                key,
+                band,
+                from,
+                size
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -135,10 +274,9 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let Some(row) = sqlx::query!(
             r#"
             SELECT authored_at AS "authored_at!: String",
-                   back_off_bp AS "back_off_bp!: i64",
                    light_of_heavy_bp AS "light_of_heavy_bp!: i64",
                    ladder_climb_grams AS "ladder_climb_grams!: i64",
-                   plate_increment_grams AS "plate_increment_grams!: i64",
+                   entry_drop_bp AS "entry_drop_bp!: i64",
                    strength_low AS "strength_low!: i64",
                    strength_high AS "strength_high!: i64",
                    strength_sets AS "strength_sets!: i64",
@@ -168,16 +306,25 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             .map_err(|_| corrupt(&"an authoring date that is not an instant"))?;
 
         let warmup = read_warmup(&self.pool, &row.authored_at).await?;
-        let (light, heavy) = read_role_reps(&self.pool, &row.authored_at).await?;
+        let ((light_reps, light_back_off), (heavy_reps, heavy_back_off)) =
+            read_role_reps(&self.pool, &row.authored_at).await?;
+        let scales = read_scales(&self.pool, &row.authored_at).await?;
 
         Ok(Some((
             authored_at,
             GenerationParameters {
                 warmup,
-                back_off_of_top_set: bp_from_storage(row.back_off_bp)?,
+                back_off: PerRole {
+                    light: light_back_off,
+                    heavy: heavy_back_off,
+                },
                 light_of_heavy: bp_from_storage(row.light_of_heavy_bp)?,
                 ladder_climb_per_week: grams_from_storage(row.ladder_climb_grams)?,
-                top_set_reps: PerRole { light, heavy },
+                entry_drop: bp_from_storage(row.entry_drop_bp)?,
+                top_set_reps: PerRole {
+                    light: light_reps,
+                    heavy: heavy_reps,
+                },
                 strength: domain::prescription::AccessoryScheme {
                     low: reps_from_storage(row.strength_low)?,
                     high: reps_from_storage(row.strength_high)?,
@@ -192,10 +339,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                     u64::try_from(row.static_hold_seconds)
                         .map_err(|_| corrupt(&"a negative static hold"))?,
                 ),
-                plate_increment: PlateIncrement::new(grams_from_storage(
-                    row.plate_increment_grams,
-                )?)
-                .map_err(|error| corrupt(&error))?,
+                scales,
                 first_reset: ResetProtocol {
                     drop: bp_from_storage(row.reset1_drop_bp)?,
                     reclimb_per_week: grams_from_storage(row.reset1_reclimb_grams)?,
@@ -220,10 +364,9 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             .map_err(|error| store_error(&error))?;
 
         let stamp = authored_at.to_string();
-        let back_off = bp_for_storage(parameters.back_off_of_top_set);
         let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
         let ladder_climb = grams_for_storage(parameters.ladder_climb_per_week)?;
-        let increment = grams_for_storage(parameters.plate_increment.as_kg())?;
+        let entry_drop = bp_for_storage(parameters.entry_drop);
         let strength_low = i64::from(parameters.strength.low.as_u32());
         let strength_high = i64::from(parameters.strength.high.as_u32());
         let strength_sets = i64::from(parameters.strength.sets.as_u32());
@@ -240,21 +383,20 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         sqlx::query!(
             r"
             INSERT INTO generation_parameters (
-                authored_at, back_off_bp, light_of_heavy_bp,
-                ladder_climb_grams, plate_increment_grams,
+                authored_at, light_of_heavy_bp,
+                ladder_climb_grams, entry_drop_bp,
                 strength_low, strength_high, strength_sets,
                 hypertrophy_low, hypertrophy_high, hypertrophy_sets,
                 static_hold_seconds,
                 reset1_drop_bp, reset1_reclimb_grams,
                 reset2_drop_bp, reset2_reclimb_grams
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
             stamp,
-            back_off,
             light_of_heavy,
             ladder_climb,
-            increment,
+            entry_drop,
             strength_low,
             strength_high,
             strength_sets,
@@ -293,24 +435,8 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             .map_err(|error| store_error(&error))?;
         }
 
-        for role in SessionRole::ALL {
-            let key = role.as_str();
-            let reps = i64::from(parameters.top_set_reps.get(*role).as_rep_count().as_u32());
-            sqlx::query!(
-                r"
-                INSERT INTO generation_role_reps (
-                    parameters_authored_at, role, top_set_reps
-                )
-                VALUES (?, ?, ?)
-                ",
-                stamp,
-                key,
-                reps
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
+        write_role_reps(&mut tx, &stamp, parameters).await?;
+        write_scales(&mut tx, &stamp, parameters).await?;
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(())

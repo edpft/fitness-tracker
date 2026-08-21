@@ -7,7 +7,7 @@
 
 use domain::gym::{Kg, RepCount};
 use domain::prescription::{
-    Anchor, AnchorProvenance, PerRole, Percentage, PlateIncrement, SessionRole, SlotId, Target,
+    Anchor, AnchorProvenance, LoadSteps, PerRole, Percentage, SessionRole, SlotId, Target,
     TopSetReps, WeekIndex, WeekKind,
 };
 use jiff::civil::Date;
@@ -85,19 +85,29 @@ proptest! {
         prop_assert!(gain.of(mass) < mass);
     }
 
-    /// A plate increment is never zero, so nothing that divides by one can
-    /// divide by nothing.
+    /// A step is never zero, so nothing that divides by one can divide by
+    /// nothing — and every load has a step, so `step_at` needs no fallback.
     #[test]
-    fn an_increment_is_never_zero(grams in 1_u64..50_000) {
-        let Ok(increment) = PlateIncrement::new(Kg::from_grams(grams)) else {
-            panic!("a non-zero step is an increment")
+    fn a_step_is_never_zero(grams in 1_u64..50_000, at in 0_u64..500_000) {
+        let Ok(steps) = LoadSteps::uniform(Kg::from_grams(grams)) else {
+            panic!("a non-zero step is a scale")
         };
-        prop_assert!(increment.as_kg().as_grams() > 0);
+        prop_assert!(steps.step_at(Kg::from_grams(at)).as_grams() > 0);
     }
 
     #[test]
-    fn a_zero_increment_is_refused(_ in 0_u8..1) {
-        prop_assert!(PlateIncrement::new(Kg::NONE).is_err());
+    fn a_zero_step_is_refused(_ in 0_u8..1) {
+        prop_assert!(LoadSteps::uniform(Kg::NONE).is_err());
+    }
+
+    /// Quantising lands on the grid, and landing there again changes nothing.
+    #[test]
+    fn quantising_is_idempotent(grams in 1_u64..20_000, at in 0_u64..500_000) {
+        let Ok(steps) = LoadSteps::uniform(Kg::from_grams(grams)) else {
+            panic!("a non-zero step is a scale")
+        };
+        let once = steps.quantise(Kg::from_grams(at));
+        prop_assert_eq!(steps.quantise(once), once);
     }
 
     /// An anchor always carries a load, its provenance and its date.

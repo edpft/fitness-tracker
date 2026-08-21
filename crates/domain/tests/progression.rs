@@ -18,8 +18,8 @@
 
 use domain::gym::Kg;
 use domain::prescription::{
-    Anchor, AnchorProvenance, ClimbBack, GatingTopSet, Ladder, Percentage, PlateIncrement,
-    Progress, Reset, ResetProtocol, WeekIndex, progress_after,
+    Anchor, AnchorProvenance, GatingTopSet, Ladder, LoadSteps, Opening, Percentage, Progress,
+    Reset, ResetProtocol, WeekIndex, progress_after,
 };
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
@@ -32,8 +32,8 @@ fn pct(text: &str) -> Fallible<Percentage> {
     Ok(Percentage::try_from(text.to_owned())?)
 }
 
-fn grid() -> Fallible<PlateIncrement> {
-    Ok(PlateIncrement::new(kg("2.5")?)?)
+fn grid() -> Fallible<LoadSteps> {
+    Ok(LoadSteps::uniform(kg("2.5")?)?)
 }
 
 /// The two protocols as `docs/primary-lift-progression.md` states them.
@@ -83,7 +83,11 @@ fn ladder_at_ninety() -> Fallible<(Ladder, Kg)> {
         AnchorProvenance::Tested,
         jiff::civil::Date::new(2026, 7, 3)?,
     )?;
-    Ok((Ladder::new(anchor, kg("2.5")?, 8, grid()?)?, kg("87.5")?))
+    let opening = Opening::FromAnchor {
+        anchor,
+        drop: pct("-10%")?,
+    };
+    Ok((Ladder::new(opening, kg("2.5")?, 8, &grid()?)?, kg("87.5")?))
 }
 
 /// The load a sequence of gating sessions leads to.
@@ -91,8 +95,8 @@ fn next_load(sets: &[GatingTopSet]) -> Fallible<(Progress, Option<Kg>)> {
     let (first, second) = protocols()?;
     let (ladder, anchor) = ladder_at_ninety()?;
     let _ = anchor;
-    let progress = progress_after(sets, None, first, second, grid()?);
-    Ok((progress, progress.heavy_top_set(ladder, grid()?)))
+    let progress = progress_after(sets, first, second, &grid()?);
+    Ok((progress, progress.heavy_top_set(ladder, &grid()?)))
 }
 
 /// FR-021, and the first test written because it is the invariant an
@@ -110,7 +114,7 @@ fn a_reset_never_touches_the_anchor() {
         panic!("the fixtures build")
     };
     let sets = [missed(ninety), missed(ninety)];
-    let progress = progress_after(&sets, None, first, second, increment);
+    let progress = progress_after(&sets, first, second, &increment);
 
     let Progress::ReClimbing { load, toward, .. } = progress else {
         panic!("two misses at one load suspend the ladder, got {progress:?}")
@@ -138,11 +142,15 @@ fn a_reset_never_touches_the_anchor() {
         ) else {
             panic!("a positive load is an anchor")
         };
-        let Ok(plan) = Ladder::new(anchor, rate, 8, increment) else {
+        let Ok(drop) = pct("-10%") else {
+            panic!("-10% is a percentage")
+        };
+        let Ok(plan) = Ladder::new(Opening::FromAnchor { anchor, drop }, rate, 8, &increment)
+        else {
             panic!("the ladder builds")
         };
         assert_eq!(
-            progress.heavy_top_set(plan, increment),
+            progress.heavy_top_set(plan, &increment),
             Some(load),
             "the re-climb load is the same whatever the block was anchored at"
         );
@@ -301,8 +309,8 @@ fn the_worked_example_reproduces_load_for_load() {
 
     let mut performed: Vec<GatingTopSet> = Vec::new();
     for (week, (load, went_up)) in expected.into_iter().enumerate() {
-        let progress = progress_after(&performed, None, first, second, increment);
-        let issued = progress.heavy_top_set(ladder, increment);
+        let progress = progress_after(&performed, first, second, &increment);
+        let issued = progress.heavy_top_set(ladder, &increment);
         assert_eq!(
             issued,
             kg(load).ok(),
@@ -381,97 +389,67 @@ fn an_untrained_block_is_at_its_first_week() {
     );
 }
 
-/// A block whose entry test found a ceiling opens climbing back to it.
+/// The first stall of a block is the first reset, and the second is still there.
 ///
-/// The test completed 90 and failed 95, so the block opens at 95 and gets there
-/// the way any re-climb does: a drop from the failed load, then a climb back.
-/// **The second reset's protocol, not the first** — the gentler pair, because an
-/// entry has lost no ground and because its rate is the ladder's own, so there is
-/// no seam where the climb becomes the plan. Nothing has been performed yet, so
-/// this is the state the very first session of the block is issued from.
+/// **A resume spends the stall, and only a stall spends one.** This used to be
+/// framed around the entry climb — a block opened by climbing in to what its
+/// test failed, and the whole reason `ClimbBack` existed was to stop that climb
+/// counting as a reset. Since 2026-08-20 a block opens at a load the ladder
+/// simply starts at, so there is no entry climb to miscount and the question
+/// reduces to the plain one: two stalls, in order.
 #[test]
-fn an_entry_test_that_found_a_ceiling_opens_climbing_back_to_it() {
-    let (Ok((first, second)), Ok(increment), Ok(failed)) = (protocols(), grid(), kg("95")) else {
+fn the_first_stall_is_the_first_reset() {
+    let (Ok((first, second)), Ok(increment), Ok(load)) = (protocols(), grid(), kg("95")) else {
         panic!("the fixture values are all valid")
     };
 
-    let progress = progress_after(&[], Some(failed), first, second, increment);
-
-    // −5% of 95 is 90.25, and the plate grid takes it to 90.
-    let Ok(opening) = kg("90") else {
-        panic!("90 is a mass")
-    };
-    assert_eq!(progress.climb_back(), Some(ClimbBack::Entry));
-    assert_eq!(
-        progress.reset(),
-        None,
-        "the entry is not a reset and must not report as one"
-    );
-    match progress {
-        Progress::ReClimbing { load, toward, .. } => {
-            assert_eq!(load, opening);
-            assert_eq!(toward, failed, "it climbs back to what the test failed");
-        }
-        Progress::Climbing { .. } => panic!("a ceiling opens re-climbing"),
-    }
-}
-
-/// US3-11: the entry climb spends no stall, so the next failure still gets both.
-///
-/// **This is the whole reason [`ClimbBack`] exists.** Settled by the operator on
-/// 2026-08-19: opening a block from a failed test is not a stall, so a stall
-/// later in the block is the *first* reset and a second is still available. If
-/// the entry were counted, the sequence below would escalate straight to the
-/// second reset and the block would have one protocol left instead of two.
-#[test]
-fn the_entry_climb_spends_no_stall() {
-    let (Ok((first, second)), Ok(increment), Ok(failed)) = (protocols(), grid(), kg("95")) else {
-        panic!("the fixture values are all valid")
-    };
-
-    // Climb in from the entry (90, 92.5), reach 95, then stall there twice.
-    let Ok((ninety, ninety_two_five)) =
-        (|| Ok::<_, Box<dyn std::error::Error>>((kg("90")?, kg("92.5")?)))()
-    else {
-        panic!("the loads are masses")
-    };
     let performed = [
         GatingTopSet {
-            load: ninety,
-            completed: true,
-        },
-        GatingTopSet {
-            load: ninety_two_five,
-            completed: true,
-        },
-        GatingTopSet {
-            load: failed,
+            load,
             completed: false,
         },
         GatingTopSet {
-            load: failed,
+            load,
             completed: false,
         },
     ];
 
-    let progress = progress_after(&performed, Some(failed), first, second, increment);
+    let progress = progress_after(&performed, first, second, &increment);
 
     assert_eq!(
         progress.reset(),
         Some(Reset::First),
         "the first stall of the block is the first reset, not the second"
     );
+    match progress {
+        Progress::ReClimbing {
+            load: dropped,
+            toward,
+            ..
+        } => {
+            // −10% of 95 is 85.5, and the plate grid takes it to 85.
+            let Ok(expected) = kg("85") else {
+                panic!("85 is a mass")
+            };
+            assert_eq!(dropped, expected);
+            assert_eq!(toward, load, "it climbs back to what was failed");
+        }
+        Progress::Climbing { .. } => panic!("a stall suspends the ladder"),
+    }
 }
 
-/// A test that failed nothing opens on the plan, with no climb back at all.
+/// A block opens on the plan, at week one, whatever its entry test found.
+///
+/// Where the ladder opens is `Opening`'s business and not this module's, so
+/// nothing here has an anchor to read or a load to climb in to.
 #[test]
-fn an_entry_test_that_failed_nothing_opens_on_the_plan() {
+fn a_block_opens_on_the_plan() {
     let (Ok((first, second)), Ok(increment)) = (protocols(), grid()) else {
         panic!("the fixture values are all valid")
     };
 
-    let progress = progress_after(&[], None, first, second, increment);
+    let progress = progress_after(&[], first, second, &increment);
 
-    assert_eq!(progress.climb_back(), None);
+    assert_eq!(progress.reset(), None);
     assert_eq!(progress.week(), WeekIndex::FIRST);
 }

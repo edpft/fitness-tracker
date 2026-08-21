@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO generation_load_scale (\n                    parameters_authored_at, implement, band, from_grams, size_grams\n                )\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "7ff9312e8af601d38cf0d6b5b96fabf3f8cf4995afae55720c8de534397fa90e"
+}

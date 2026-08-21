@@ -8,17 +8,21 @@
 //!
 //! ```text
 //! climbing weeks = duration - 1          the last week is the test
-//! opening        = the entry test's failed load, or its completed load + climb
+//! opening        = declared, or the entry test's failed load dropped
 //! heavy(w)       = quantise(opening + climb × (w - 1))
 //! ```
 //!
-//! **The opening is derived from the entry test, not authored.** A test that
-//! found the ceiling failed a load, and that failed load is where the block
-//! opens — the block gets back to it through the drop-and-re-climb protocol,
-//! which is also what regulates every later failure. A test that failed nothing
-//! did not find the ceiling, so the block opens one increment above what it did
-//! reach. Either way nobody chooses a percentage. See
-//! `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+//! **The opening is derived from the entry test, or declared.** A test that
+//! found the ceiling failed a load; the block opens *below* it by the entry drop
+//! and climbs back through it. A test that failed nothing did not find the
+//! ceiling, so the block opens one climb above what it did reach.
+//!
+//! The declaration is not a fallback for an unauthored parameter — it is the
+//! answer where the derivation has nothing to work from. A block picked up
+//! mid-flight, or one starting far enough after its test that nothing off that
+//! test is evidence any more, states its opening and the anchor's failed load
+//! feeds nothing. See `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`,
+//! amended 2026-08-20.
 //!
 //! **So the anchor seeds the ladder and then does nothing else.** Warm-ups and
 //! back-offs are shares of their own session's top set, and the light session is
@@ -50,7 +54,10 @@
 //! **This module holds the plan and not the response to it failing.** A stall
 //! suspends the ladder and re-climbs from the failed load, and that is a
 //! separate mechanism that never touches the anchor: it lives in
-//! [`super::progression`]. Conflating the two is a mistake the model has already
+//! [`super::progression`]. Since the opening became a dropped load rather than
+//! the failed one, that mechanism is *only* about stalls — a block no longer
+//! opens by climbing in, so `ClimbBack` is gone and a re-climb is always a
+//! reset. Conflating the two is a mistake the model has already
 //! made once, which is why the two are two modules and not two halves of this
 //! one. The two rates are deliberately alike in kind — `climb_per_week` here and
 //! `reclimb_per_week` there — because a reset is the same climb run at a
@@ -58,33 +65,61 @@
 
 use crate::gym::Kg;
 
-use super::{
-    anchor::Anchor,
-    parameters::{Percentage, PlateIncrement},
-    quantise::quantise_loaded,
-    schedule::WeekIndex,
-};
+use super::{anchor::Anchor, parameters::Percentage, schedule::WeekIndex, steps::LoadSteps};
 
-/// Where a block opens, from the test that anchors it.
+/// Where a block opens.
 ///
-/// **The failed load, if the test found the ceiling.** The block does not open
-/// *below* it and work up as a plan — it opens there, and the drop-and-re-climb
-/// protocol is how it gets back, which is [`super::progression`]'s job rather
-/// than this one's.
+/// **Declared or derived, and the type says which.** The derivation reads the
+/// entry test the anchor records; the declaration is what rescues a block whose
+/// opening the derivation cannot reach — one picked up mid-flight, or one whose
+/// test is far enough behind it that nothing off that test is evidence any
+/// more. The operator settled on 2026-08-20 that the escape hatch is always
+/// available rather than conditionally required, so nothing here asks how old a
+/// test is.
 ///
-/// **Otherwise one climb above what was completed.** A test that failed nothing
-/// did not find a ceiling, so its completed load is a floor and the block starts
-/// by beating it.
-fn opening(anchor: Anchor, climb_per_week: Kg, increment: PlateIncrement) -> Kg {
-    let load = anchor.failed().unwrap_or_else(|| {
-        Kg::from_grams(
-            anchor
-                .load()
-                .as_grams()
-                .saturating_add(climb_per_week.as_grams()),
-        )
-    });
-    quantise_loaded(load, increment)
+/// The drop travels inside the derived variant rather than beside the enum, so
+/// "declared, and also dropped by 10%" is unwritable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opening {
+    /// Stated on the programme. Used as authored, on the grid.
+    Declared(Kg),
+    /// Derived from the test that anchors the block.
+    FromAnchor {
+        anchor: Anchor,
+        /// Negative. Taken off the load the test failed.
+        drop: Percentage,
+    },
+}
+
+impl Opening {
+    /// The load the first climbing week asks for.
+    ///
+    /// **From the failed load, dropped.** A test that failed a load located the
+    /// ceiling, and the block opens below it and climbs back through it. An
+    /// earlier model opened *at* the failed load and reached it by a separate
+    /// climb-in mechanism — `ClimbBack::Entry`, now gone — which made week one
+    /// heavier than the anchor and made the plan, in the model of record's own
+    /// words, "ambitious". The operator overturned that on 2026-08-20.
+    ///
+    /// **A test that failed nothing did not find the ceiling**, so its completed
+    /// load is a floor and the block starts by beating it.
+    fn load(self, climb_per_week: Kg, steps: &LoadSteps) -> Kg {
+        let load = match self {
+            Self::Declared(load) => load,
+            Self::FromAnchor { anchor, drop } => anchor.failed().map_or_else(
+                || {
+                    Kg::from_grams(
+                        anchor
+                            .load()
+                            .as_grams()
+                            .saturating_add(climb_per_week.as_grams()),
+                    )
+                },
+                |failed| drop.applied_to(failed),
+            ),
+        };
+        steps.quantise_loaded(load)
+    }
 }
 
 /// Why a ladder could not be built.
@@ -94,6 +129,11 @@ pub enum InvalidLadder {
     NoClimbingWeeks,
     #[error("a ladder that does not rise is not a plan")]
     DoesNotRise,
+    #[error(
+        "no load scale has been authored for {implement}, so nothing on it can \
+         be put on a bar"
+    )]
+    NoScale { implement: &'static str },
 }
 
 /// A block's plan: where it opens, and what it adds each week.
@@ -116,10 +156,10 @@ impl Ladder {
     /// [`InvalidLadder::NoClimbingWeeks`] if the block is too short to climb at
     /// all, and [`InvalidLadder::DoesNotRise`] if the climb is nothing.
     pub fn new(
-        anchor: Anchor,
+        opening: Opening,
         climb_per_week: Kg,
         duration_weeks: u32,
-        increment: PlateIncrement,
+        steps: &LoadSteps,
     ) -> Result<Self, InvalidLadder> {
         if duration_weeks < 2 {
             return Err(InvalidLadder::NoClimbingWeeks);
@@ -128,7 +168,7 @@ impl Ladder {
             return Err(InvalidLadder::DoesNotRise);
         }
         Ok(Self {
-            opening: opening(anchor, climb_per_week, increment),
+            opening: opening.load(climb_per_week, steps),
             climb_per_week,
             climbing_weeks: duration_weeks - 1,
         })
@@ -153,7 +193,7 @@ impl Ladder {
     /// no load — the type says so, so a caller cannot ask for a load that does
     /// not exist.
     #[must_use]
-    pub fn heavy_top_set(self, week: WeekIndex, increment: PlateIncrement) -> Option<Kg> {
+    pub fn heavy_top_set(self, week: WeekIndex, steps: &LoadSteps) -> Option<Kg> {
         let offset = week.as_offset();
         if offset >= self.climbing_weeks {
             return None;
@@ -162,7 +202,7 @@ impl Ladder {
         let climbed = u64::from(offset).checked_mul(self.climb_per_week.as_grams())?;
         let grams = self.opening.as_grams().checked_add(climbed)?;
 
-        Some(quantise_loaded(Kg::from_grams(grams), increment))
+        Some(steps.quantise_loaded(Kg::from_grams(grams)))
     }
 
     /// The light session's top set: a proportion of that week's heavy one.
@@ -173,11 +213,11 @@ impl Ladder {
     pub fn light_top_set(
         self,
         week: WeekIndex,
-        increment: PlateIncrement,
+        steps: &LoadSteps,
         light_of_heavy: Percentage,
     ) -> Option<Kg> {
-        self.heavy_top_set(week, increment)
-            .map(|heavy| quantise_loaded(light_of_heavy.of(heavy), increment))
+        self.heavy_top_set(week, steps)
+            .map(|heavy| steps.quantise_loaded(light_of_heavy.of(heavy)))
     }
 
     /// Where a climbing week sits relative to the anchor, for reporting.
@@ -193,9 +233,9 @@ impl Ladder {
         self,
         anchor: Kg,
         week: WeekIndex,
-        increment: PlateIncrement,
+        steps: &LoadSteps,
     ) -> Option<Percentage> {
-        let load = self.heavy_top_set(week, increment)?;
+        let load = self.heavy_top_set(week, steps)?;
         let whole = i64::from(Percentage::WHOLE.as_basis_points());
 
         let points = i64::try_from(load.as_grams())

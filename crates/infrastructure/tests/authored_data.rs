@@ -101,7 +101,7 @@ fn authoring_supersedes_and_retains() {
         panic!("80% is a percentage")
     };
     let second = domain::prescription::GenerationParameters {
-        back_off_of_top_set: changed,
+        light_of_heavy: changed,
         ..first.clone()
     };
 
@@ -117,7 +117,7 @@ fn authoring_supersedes_and_retains() {
         panic!("something is in force")
     };
     assert_eq!(in_force_at, later, "the later version is in force");
-    assert_eq!(in_force.back_off_of_top_set, changed);
+    assert_eq!(in_force.light_of_heavy, changed);
 
     // And the earlier row survives. Read directly, because no port exposes a
     // superseded version — nothing should consult one, which is exactly why the
@@ -420,8 +420,12 @@ fn a_settled_document_authors() {
         panic!("the fixture parameters are valid")
     };
     assert_eq!(
-        parameters.back_off_of_top_set, expected.back_off_of_top_set,
-        "the document and the Rust fixture agree"
+        parameters.back_off, expected.back_off,
+        "the document and the Rust fixture agree on the back-off, per role"
+    );
+    assert_eq!(
+        parameters.scales, expected.scales,
+        "and on what each implement can hold"
     );
     assert_eq!(parameters.static_hold, expected.static_hold);
     let Ok(expected_fills) = programme::fills() else {

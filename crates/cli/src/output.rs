@@ -264,6 +264,16 @@ pub fn programme_authored(
         );
     }
     println!("anchor {}, fixed for the block", programme.anchor());
+    // Where the opening came from, because "85kg" alone does not say whether
+    // anybody chose it. A declared opening means the anchor's failed load fed
+    // nothing, and that is worth seeing on the report that shows the ladder.
+    match programme.declared_opening() {
+        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
+        None => println!(
+            "opening derived: {} off the anchor's failed load",
+            parameters.entry_drop
+        ),
+    }
     println!(
         "  ladder climbs {}kg a week over {} climbing weeks; week {} is the test",
         parameters.ladder_climb_per_week,
@@ -275,9 +285,21 @@ pub fn programme_authored(
         parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
     );
     println!(
-        "  back-off {} of top set, plate increment {}kg",
-        parameters.back_off_of_top_set, parameters.plate_increment,
+        "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
+        parameters.back_off.heavy.sets,
+        parameters.back_off.heavy.reps,
+        parameters.back_off.heavy.of_top_set,
+        parameters.back_off.light.sets,
+        parameters.back_off.light.reps,
+        parameters.back_off.light.of_top_set,
     );
+    println!(
+        "  opening drops {} off a failed entry test",
+        parameters.entry_drop
+    );
+    for (implement, steps) in parameters.scales.iter() {
+        println!("  {implement} loads in {steps}");
+    }
     println!(
         "  strength slots {} × {}-{}; hypertrophy slots {} × {}-{}",
         parameters.strength.sets,
@@ -313,6 +335,16 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         programme.gating_role(),
     );
     println!("anchor {}, fixed for the block", programme.anchor());
+    // Where the opening came from, because "85kg" alone does not say whether
+    // anybody chose it. A declared opening means the anchor's failed load fed
+    // nothing, and that is worth seeing on the report that shows the ladder.
+    match programme.declared_opening() {
+        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
+        None => println!(
+            "opening derived: {} off the anchor's failed load",
+            parameters.entry_drop
+        ),
+    }
     match standing.history_through {
         Some(through) => println!("history through {through}"),
         // § 38: an empty record and a stale one are different, and a report that
@@ -325,7 +357,10 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         return;
     };
     let anchor = programme.anchor().load();
-    let increment = parameters.plate_increment;
+    let Ok(steps) = programme.steps(parameters) else {
+        println!("  no ladder: no load scale is authored for the primary's implement");
+        return;
+    };
     let standing_week = standing.progress.week();
 
     println!("  week  of anchor    heavy    light");
@@ -333,12 +368,12 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         let Ok(index) = WeekIndex::new(week) else {
             continue;
         };
-        let Some(percentage) = ladder.implied_percentage(anchor, index, increment) else {
+        let Some(percentage) = ladder.implied_percentage(anchor, index, steps) else {
             println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "test");
             continue;
         };
-        let heavy = ladder.heavy_top_set(index, increment);
-        let light = ladder.light_top_set(index, increment, parameters.light_of_heavy);
+        let heavy = ladder.heavy_top_set(index, steps);
+        let light = ladder.light_top_set(index, steps, parameters.light_of_heavy);
         // The rung the record puts the operator on, which after a miss is behind
         // the calendar.
         let here = if index == standing_week { " ←" } else { "" };
@@ -352,29 +387,19 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         );
     }
 
-    match standing.progress.climb_back() {
+    match standing.progress.reset() {
         None => println!(
             "  on the plan at week {standing_week} of {}",
             ladder.climbing_weeks()
         ),
-        Some(climb) => {
+        Some(reset) => {
             let load = standing
                 .progress
-                .heavy_top_set(ladder, increment)
+                .heavy_top_set(ladder, steps)
                 .map_or_else(|| "—".to_owned(), |load| format!("{load}"));
-            // The entry climb is deliberately not called a reset: it has spent
-            // no stall, so both resets are still available to the next failure.
-            let describing = match climb {
-                domain::prescription::ClimbBack::Entry => {
-                    "the block is climbing in from its entry test".to_owned()
-                }
-                domain::prescription::ClimbBack::Reset(reset) => {
-                    format!("the {reset} reset is in play")
-                }
-            };
             println!(
-                "  {describing}: re-climbing at {load}, and the ladder resumes at \
-                 week {standing_week}"
+                "  the {reset} reset is in play: re-climbing at {load}, and the \
+                 ladder resumes at week {standing_week}"
             );
         }
     }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", programme AS \"programme!: i64\",\n                   session_role AS \"session_role!: String\",\n                   week_kind AS \"week_kind!: String\", week_index AS \"week_index: i64\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   parameters_authored_at AS \"parameters_authored_at!: String\",\n                   issued_at AS \"issued_at!: String\"\n            FROM prescribed_workout\n            WHERE issued_for = ?\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\", programme AS \"programme!: i64\",\n                   session_role AS \"session_role!: String\",\n                   week_kind AS \"week_kind!: String\", week_index AS \"week_index: i64\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   parameters_authored_at AS \"parameters_authored_at!: String\",\n                   issued_at AS \"issued_at!: String\"\n            FROM prescribed_workout\n            WHERE issued_for = ?\n            -- The latest issue is the one in force. A date may be prescribed\n            -- more than once and a correction supersedes rather than\n            -- overwrites, so the superseded rows are still here and still\n            -- exactly as they were issued.\n            ORDER BY issued_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -142,5 +142,5 @@
       false
     ]
   },
-  "hash": "7e1bd9ca21cc6d5b0fdf650d25a73367866e5f3e9b96532ef197604410685dd6"
+  "hash": "68d02e406e20d9c097db09286b31410617dd85639736930989b7b6da03eaabac"
 }
