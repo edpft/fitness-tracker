@@ -104,7 +104,7 @@ const fn monday() -> Date {
 #[test]
 fn a_workout_is_issued_in_fatigue_order() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     assert!(issued.freshly_issued);
     assert_eq!(issued.workout.session_role(), SessionRole::Light);
@@ -133,7 +133,7 @@ fn a_workout_is_issued_in_fatigue_order() {
 #[test]
 fn the_upper_pair_is_supersetted_and_the_primary_is_not() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     let Some(primary) = issued.workout.shape().item_for(SlotId::KneeDominant) else {
         panic!("the primary slot is issued")
@@ -155,7 +155,7 @@ fn the_upper_pair_is_supersetted_and_the_primary_is_not() {
 #[test]
 fn the_hypertrophy_supersets_pair_antagonists() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     for (first, second) in [
         (SlotId::Biceps, SlotId::Triceps),
@@ -175,7 +175,7 @@ fn the_hypertrophy_supersets_pair_antagonists() {
 #[test]
 fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     let Some(PrescribedItem::Exercise { exercise, .. }) =
         issued.workout.shape().item_for(SlotId::KneeDominant)
@@ -211,7 +211,7 @@ fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
 #[test]
 fn mobility_is_held_not_progressed() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     for slot in [
         SlotId::HandstandHold,
@@ -238,10 +238,21 @@ fn mobility_is_held_not_progressed() {
 /// exercise for either, so he has been logging a stand-in. Double progression
 /// has nothing to progress from, and the answer is to say which slot and why
 /// rather than to invent a starting load.
+///
+/// **The chest dip reports for a different reason, and that is the second half
+/// of the same principle.** It has history and has reached the top of its
+/// range, so it is due a step up — but it is loaded on `bodyweight`, and the
+/// fixture authors no scale for that because nobody has stated what a weighted
+/// dip adds. Guessing 2.5kg would produce a prescription indistinguishable from
+/// one derived from the operator's real equipment, so the slot says so instead.
+///
+/// Note this leaves `GroupWithheld` with no case in this fixture: the pair now
+/// fails at both members rather than one. Authoring a bodyweight scale restores
+/// it, which is the right time to write that test.
 #[test]
 fn a_slot_with_no_history_is_reported_rather_than_guessed() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     let reported: Vec<(SlotId, UnderivableReason)> = issued
         .underivable
@@ -251,9 +262,8 @@ fn a_slot_with_no_history_is_reported_rather_than_guessed() {
     assert_eq!(
         reported,
         vec![
-            // Derivable in itself, and absent because its partner is not. Owed a
-            // reason all the same.
-            (SlotId::UpperPush, UnderivableReason::GroupWithheld),
+            // Due a step up, on an implement whose scale nobody has authored.
+            (SlotId::UpperPush, UnderivableReason::NoLoadScale),
             (SlotId::UpperPull, UnderivableReason::NeverPerformed),
             (SlotId::Core, UnderivableReason::NeverPerformed),
         ]
@@ -271,7 +281,7 @@ fn a_slot_with_no_history_is_reported_rather_than_guessed() {
 #[test]
 fn the_static_slots_re_issue_the_last_performance() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     let Some(plyometric) = issued.workout.shape().item_for(SlotId::Plyometric) else {
         panic!("the plyometric slot is issued")
@@ -289,8 +299,8 @@ fn the_static_slots_re_issue_the_last_performance() {
 fn asking_twice_issues_once() {
     let (prescriber, _directory) = prescriber!();
 
-    let first = run!(prescriber.prescribe(monday()));
-    let second = run!(prescriber.prescribe(monday()));
+    let first = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let second = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     assert!(first.freshly_issued);
     assert!(!second.freshly_issued, "the second read is not a new issue");
@@ -306,7 +316,7 @@ fn asking_twice_issues_once() {
 #[test]
 fn the_prescription_reports_its_history_horizon() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday()));
+    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
     let Some(through) = issued.history_through else {
         panic!("the corpus is not empty")
@@ -320,7 +330,7 @@ fn a_wednesday_is_declined() {
     let (prescriber, _directory) = prescriber!();
     let wednesday = Date::constant(2026, 8, 12);
 
-    match corpus::block_on(prescriber.prescribe(wednesday)) {
+    match corpus::block_on(prescriber.prescribe(wednesday, application::Reissue::No)) {
         Ok(Err(application::PrescriptionError::NotScheduled(reason))) => {
             let message = reason.to_string();
             assert!(
@@ -339,8 +349,8 @@ fn a_wednesday_is_declined() {
 fn the_heavy_session_is_heavier_than_the_light_one() {
     let (prescriber, _directory) = prescriber!();
 
-    let light = run!(prescriber.prescribe(Date::constant(2026, 8, 10)));
-    let heavy = run!(prescriber.prescribe(Date::constant(2026, 8, 14)));
+    let light = run!(prescriber.prescribe(Date::constant(2026, 8, 10), application::Reissue::No));
+    let heavy = run!(prescriber.prescribe(Date::constant(2026, 8, 14), application::Reissue::No));
 
     let top_set = |issued: &application::Prescription| -> u64 {
         let Some(PrescribedItem::Exercise { exercise, .. }) =

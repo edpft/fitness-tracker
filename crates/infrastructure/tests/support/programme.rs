@@ -17,15 +17,18 @@
 //! The duration is neither — it is an input the operator supplies per block.
 
 use application::StoreError;
+use std::collections::BTreeMap;
+
 use domain::{
     gym::{
         Kg, RepCount,
-        exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
+        exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
         sequence::{AtLeastTwo, NonEmpty},
     },
     prescription::{
-        Anchor, AnchorProvenance, Calendar, GenerationParameters, PerRole, Percentage,
-        PlateIncrement, Programme, ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
+        Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, LoadSteps,
+        PerRole, Percentage, Programme, ResetProtocol, Scales, SessionRole, Step, TopSetReps,
+        WarmupStep, Weekdays,
         linear::{Fill, SlotFills, StaticFill},
     },
 };
@@ -97,15 +100,60 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
 
     Ok(GenerationParameters {
         warmup,
-        back_off_of_top_set: pct("85%")?,
+        // The primary's back-off, per role: heavy is 2 x 4 and light is 3 x 6.
+        // These used to be read off `strength` below, which issued the light
+        // session's pattern on the heavy day.
+        back_off: PerRole {
+            light: BackOff {
+                sets: reps(3)?,
+                reps: reps(6)?,
+                of_top_set: pct("85%")?,
+            },
+            heavy: BackOff {
+                sets: reps(2)?,
+                reps: reps(4)?,
+                of_top_set: pct("85%")?,
+            },
+        },
         light_of_heavy: pct("85%")?,
         // A test rate. See the module note.
         ladder_climb_per_week: kg("2.5")?,
+        entry_drop: pct("-10%")?,
         top_set_reps: PerRole {
             light: TopSetReps::new(reps(3)?),
             heavy: TopSetReps::new(reps(1)?),
         },
-        plate_increment: PlateIncrement::new(kg("2.5")?).map_err(invalid)?,
+        // The bar, and the rack the wrist work is done on. A banded scale is
+        // what the single increment could not express: 10kg leaves on a 2kg
+        // step and 7kg on a 1kg one.
+        scales: Scales::new(BTreeMap::from([
+            (
+                Implement::Barbell,
+                LoadSteps::uniform(kg("2.5")?).map_err(invalid)?,
+            ),
+            (
+                Implement::Cable,
+                LoadSteps::uniform(kg("2.5")?).map_err(invalid)?,
+            ),
+            (
+                Implement::Machine,
+                LoadSteps::uniform(kg("2.5")?).map_err(invalid)?,
+            ),
+            (
+                Implement::Dumbbell,
+                LoadSteps::new(vec![
+                    Step {
+                        from: Kg::NONE,
+                        size: kg("1")?,
+                    },
+                    Step {
+                        from: kg("10")?,
+                        size: kg("2")?,
+                    },
+                ])
+                .map_err(invalid)?,
+            ),
+        ])),
         strength: domain::prescription::AccessoryScheme {
             low: reps(4)?,
             high: reps(6)?,
@@ -265,7 +313,8 @@ pub fn programme_skipping(weeks: &[Date]) -> Result<Programme, ProgrammeFixtureE
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
         fills()?,
-        anchor()?,
+        // These fixtures derive their opening from the anchor's entry test.
+        Entry::derived(anchor()?),
         SessionRole::Heavy,
         calendar_running(weekdays()?, weeks)?,
         &parameters,
@@ -285,7 +334,8 @@ pub fn programme_from(start: Date) -> Result<Programme, ProgrammeFixtureError> {
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
         fills()?,
-        anchor()?,
+        // These fixtures derive their opening from the anchor's entry test.
+        Entry::derived(anchor()?),
         SessionRole::Heavy,
         calendar_from(start, weekdays()?)?,
         &parameters,
@@ -312,7 +362,8 @@ pub fn gating_on_a_role_it_never_runs()
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::FrontSquat),
         fills()?,
-        anchor()?,
+        // These fixtures derive their opening from the anchor's entry test.
+        Entry::derived(anchor()?),
         SessionRole::Heavy,
         calendar_running(monday_only, &[])?,
         &parameters,
@@ -331,7 +382,8 @@ pub fn primary_not_counted_in_reps()
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Distance(DistanceExercise::Running),
         fills()?,
-        anchor()?,
+        // These fixtures derive their opening from the anchor's entry test.
+        Entry::derived(anchor()?),
         SessionRole::Heavy,
         calendar()?,
         &parameters,
@@ -352,7 +404,8 @@ pub fn primary_does_not_fill_its_slot()
         domain::prescription::PrimaryPattern::KneeDominant,
         Exercise::Reps(RepsExercise::DeadliftBarbell),
         fills()?,
-        anchor()?,
+        // These fixtures derive their opening from the anchor's entry test.
+        Entry::derived(anchor()?),
         SessionRole::Heavy,
         calendar()?,
         &parameters,

@@ -141,6 +141,16 @@ fn prescribe_command() -> ClapCommand {
             "The session to prescribe for, as YYYY-MM-DD. \
                      Defaults to the next programmed day at or after today",
         ))
+        .arg(
+            Arg::new("reissue")
+                .long("reissue")
+                .action(clap::ArgAction::SetTrue)
+                .help(
+                    "Derive the session again and supersede what was already \
+                     issued for the date. The superseded prescription is kept, \
+                     and stops being the one in force",
+                ),
+        )
 }
 
 /// Author the programme.
@@ -340,7 +350,12 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         "prescribe" => {
             let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
             let date = sub.get_one::<String>("date").map(String::as_str);
-            return prescribing::prescribe(&database, &zone, date).await;
+            let reissue = if sub.get_flag("reissue") {
+                application::Reissue::Yes
+            } else {
+                application::Reissue::No
+            };
+            return prescribing::prescribe(&database, &zone, date, reissue).await;
         }
         "programme" => {
             let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;

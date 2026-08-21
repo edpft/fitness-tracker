@@ -11,12 +11,13 @@
 use jiff::Timestamp;
 
 use crate::{
-    gym::exercise::Exercise,
+    gym::{Kg, exercise::Exercise},
     prescription::{
-        anchor::Anchor,
-        ladder::{InvalidLadder, Ladder},
+        anchor::{Anchor, Entry},
+        ladder::{InvalidLadder, Ladder, Opening},
         parameters::GenerationParameters,
         schedule::{Calendar, SessionRole, Weekdays},
+        steps::LoadSteps,
     },
 };
 
@@ -62,6 +63,32 @@ pub enum InconsistentProgramme {
     },
 }
 
+/// Where a block opens, from what the programme declares and what it anchors on.
+///
+/// One place, so the check `Programme::new` runs and the ladder `prescribe`
+/// builds cannot disagree about which opening is in force.
+fn opening_of(entry: Entry, parameters: &GenerationParameters) -> Opening {
+    entry.declared_opening().map_or_else(
+        || Opening::FromAnchor {
+            anchor: entry.anchor(),
+            drop: parameters.entry_drop,
+        },
+        Opening::Declared,
+    )
+}
+
+fn steps_for(
+    exercise: Exercise,
+    parameters: &GenerationParameters,
+) -> Result<&LoadSteps, InvalidLadder> {
+    parameters
+        .scales
+        .for_exercise(exercise)
+        .ok_or_else(|| InvalidLadder::NoScale {
+            implement: exercise.implement().as_str(),
+        })
+}
+
 /// A rule for generating a series of prescribed workouts, plus its inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Programme {
@@ -70,7 +97,9 @@ pub struct Programme {
     fills: SlotFills,
     /// The starting 1RM. Fixed for this block; only its exit test replaces it,
     /// and that replacement anchors the *next* block.
-    anchor: Anchor,
+    /// The test that anchors the block, and the opening where the block states
+    /// one rather than deriving it from that test.
+    entry: Entry,
     gating_role: SessionRole,
     calendar: Calendar,
     authored_at: Timestamp,
@@ -89,7 +118,7 @@ impl Programme {
         primary: PrimaryPattern,
         primary_exercise: Exercise,
         fills: SlotFills,
-        anchor: Anchor,
+        entry: Entry,
         gating_role: SessionRole,
         calendar: Calendar,
         parameters: &GenerationParameters,
@@ -110,10 +139,10 @@ impl Programme {
         //    failure counted twice, once as the block's opening and once as a
         //    miss inside it. Refusing here is what makes the opening derivation
         //    safe. See `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
-        if anchor.from() >= calendar.start() {
+        if entry.anchor().from() >= calendar.start() {
             return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
-                tested: anchor.from(),
+                tested: entry.anchor().from(),
             });
         }
 
@@ -123,17 +152,17 @@ impl Programme {
         //    by a holiday is the same ladder run over a longer stretch of the
         //    year, not a longer ladder.
         Ladder::new(
-            anchor,
+            opening_of(entry, parameters),
             parameters.ladder_climb_per_week,
             calendar.duration_weeks(),
-            parameters.plate_increment,
+            steps_for(primary_exercise, parameters)?,
         )?;
 
         Ok(Self {
             primary,
             primary_exercise,
             fills,
-            anchor,
+            entry,
             gating_role,
             calendar,
             authored_at: Timestamp::now(),
@@ -171,7 +200,7 @@ impl Programme {
         primary: PrimaryPattern,
         primary_exercise: Exercise,
         fills: SlotFills,
-        anchor: Anchor,
+        entry: Entry,
         gating_role: SessionRole,
         calendar: Calendar,
         authored_at: Timestamp,
@@ -187,7 +216,7 @@ impl Programme {
             primary,
             primary_exercise,
             fills,
-            anchor,
+            entry,
             gating_role,
             calendar,
             authored_at,
@@ -244,7 +273,7 @@ impl Programme {
     }
 
     pub const fn anchor(&self) -> Anchor {
-        self.anchor
+        self.entry.anchor()
     }
 
     pub const fn gating_role(&self) -> SessionRole {
@@ -271,11 +300,36 @@ impl Programme {
     /// the programme was authored against.
     pub fn ladder(&self, parameters: &GenerationParameters) -> Result<Ladder, InvalidLadder> {
         Ladder::new(
-            self.anchor,
+            self.opening(parameters),
             parameters.ladder_climb_per_week,
             self.calendar.duration_weeks(),
-            parameters.plate_increment,
+            self.steps(parameters)?,
         )
+    }
+
+    /// Where this block's ladder opens — declared if it was, derived otherwise.
+    #[must_use]
+    pub fn opening(&self, parameters: &GenerationParameters) -> Opening {
+        opening_of(self.entry, parameters)
+    }
+
+    /// The opening as authored, if it was authored at all. For reporting.
+    #[must_use]
+    pub const fn declared_opening(&self) -> Option<Kg> {
+        self.entry.declared_opening()
+    }
+
+    /// The scale the primary is loaded on.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidLadder::NoScale`] where no scale has been authored for the
+    /// primary's implement, which makes every load in the block underivable.
+    pub fn steps<'a>(
+        &self,
+        parameters: &'a GenerationParameters,
+    ) -> Result<&'a LoadSteps, InvalidLadder> {
+        steps_for(self.primary_exercise, parameters)
     }
 
     /// Whether this slot is the primary one.

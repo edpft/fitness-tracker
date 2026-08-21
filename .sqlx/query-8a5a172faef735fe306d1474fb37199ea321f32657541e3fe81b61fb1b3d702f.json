@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", authored_at AS \"authored_at!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   gating_role AS \"gating_role!: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\"\n            FROM programme\n            ORDER BY authored_at DESC, id DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\", authored_at AS \"authored_at!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role!: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\"\n            FROM programme\n            ORDER BY authored_at DESC, id DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -92,8 +92,19 @@
         }
       },
       {
-        "name": "gating_role!: String",
+        "name": "opening_grams: i64",
         "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "opening_grams"
+          }
+        }
+      },
+      {
+        "name": "gating_role!: String",
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "start_date!: String",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -115,7 +126,7 @@
       },
       {
         "name": "duration_weeks!: i64",
-        "ordinal": 10,
+        "ordinal": 11,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,10 +148,11 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "ecf7f3c5eada49254d2e73c403f729b1de56ec1a5ee71b317ac0cc3426ab408a"
+  "hash": "8a5a172faef735fe306d1474fb37199ea321f32657541e3fe81b61fb1b3d702f"
 }

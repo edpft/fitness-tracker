@@ -604,6 +604,13 @@ pub enum UnderivableReason {
     /// The programme's span and duration do not make a ladder.
     #[error("the programme's span and duration do not make a ladder")]
     NoLadder,
+    /// No scale has been authored for the implement this exercise is loaded on.
+    ///
+    /// Reported rather than defaulted to the barbell's steps: a prescription
+    /// derived from an invented grid looks exactly like one derived from the
+    /// gym's real equipment.
+    #[error("no load scale has been authored for the implement this is loaded on")]
+    NoLoadScale,
 }
 
 /// The projection of the performed record that prescription reads.
@@ -823,7 +830,7 @@ pub trait WorkoutPrescriber {
         on: Date,
     ) -> impl Future<Output = Result<LadderStanding, PrescriptionError>> + Send;
 
-    /// The date is the only argument.
+    /// The date, and whether an existing prescription is to be superseded.
     ///
     /// The session role, the week and the ladder position are all derived — the
     /// role from the programme's calendar, the position from the performed
@@ -832,6 +839,9 @@ pub trait WorkoutPrescriber {
     /// extraction side, and would let a caller prescribe a heavy session on a
     /// light day.
     ///
+    /// [`Reissue`] is not derived and cannot be: a prescription that should be
+    /// replaced looks exactly like one that should stand.
+    ///
     /// # Errors
     ///
     /// [`PrescriptionError`] for no programme, no parameters, a date the
@@ -839,7 +849,24 @@ pub trait WorkoutPrescriber {
     fn prescribe(
         &self,
         date: Date,
+        reissue: Reissue,
     ) -> impl Future<Output = Result<Prescription, PrescriptionError>> + Send;
+}
+
+/// Whether to supersede a prescription already issued for the date.
+///
+/// A two-valued enum rather than a `bool`, because `prescribe(date, true)` at a
+/// call site says nothing about what is true — and this is the argument that
+/// decides whether the operator's session is replaced under them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reissue {
+    /// Return what was already issued. The ordinary case: asking twice for one
+    /// date is a question, not an instruction.
+    #[default]
+    No,
+    /// Derive again and supersede. The superseded prescription is kept — § 12
+    /// authored data keeps its history — and stops being the one in force.
+    Yes,
 }
 
 /// Store an authored programme and its parameters.

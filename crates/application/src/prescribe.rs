@@ -22,7 +22,7 @@ use domain::{
         Block, GatingTopSet, GenerationParameters, Position, PrescribedExercise, PrescribedItem,
         PrescribedSet, PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress,
         SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent,
-        progress_after, quantise_loaded,
+        progress_after,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -31,8 +31,8 @@ use crate::{
     error::PrescriptionError,
     ports::{
         ExerciseHistory, GenerationParameterStore, LadderStanding, LastPerformance, Performance,
-        PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore, UnderivableReason,
-        UnderivableSlot, WorkoutPrescriber,
+        PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore, Reissue,
+        UnderivableReason, UnderivableSlot, WorkoutPrescriber,
     },
 };
 
@@ -106,12 +106,25 @@ where
         })
     }
 
-    async fn prescribe(&self, date: Date) -> Result<Prescription, PrescriptionError> {
+    async fn prescribe(
+        &self,
+        date: Date,
+        reissue: Reissue,
+    ) -> Result<Prescription, PrescriptionError> {
         // Read what was issued before doing any work. Asking twice for one date
         // returns what was already issued rather than a second prescription, and
         // the derived ladder position means there is no counter that could have
         // advanced in between either.
-        if let Some((id, workout)) = self.ports.prescriptions.issued_for(date).await? {
+        //
+        // **Unless reissuing was asked for**, which is the answer to a
+        // prescription derived from a programme that has since been corrected.
+        // It is asked for rather than inferred: "the programme changed" cannot
+        // be told from "the parameters changed" or from nothing having changed,
+        // and silently re-deriving a session the operator may already be
+        // halfway through is worse than making them say so.
+        if reissue == Reissue::No
+            && let Some((id, workout)) = self.ports.prescriptions.issued_for(date).await?
+        {
             return Ok(Prescription {
                 id,
                 workout,
@@ -243,10 +256,9 @@ where
 
         Ok(progress_after(
             &gating,
-            programme.anchor().failed(),
             parameters.first_reset,
             parameters.second_reset,
-            parameters.plate_increment,
+            programme.steps(parameters)?,
         ))
     }
 }
@@ -346,7 +358,13 @@ fn primary_slot_item(
         });
     };
 
-    let increment = parameters.plate_increment;
+    let Some(steps) = parameters.scales.for_exercise(*exercise) else {
+        return Derived::underivable(UnderivableSlot {
+            slot,
+            exercise: exercise.as_str(),
+            reason: UnderivableReason::NoLoadScale,
+        });
+    };
     let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
 
     let top_set = match week {
@@ -363,9 +381,9 @@ fn primary_slot_item(
                 });
             };
             match role {
-                SessionRole::Heavy => progress.heavy_top_set(ladder, increment),
+                SessionRole::Heavy => progress.heavy_top_set(ladder, steps),
                 SessionRole::Light => {
-                    progress.light_top_set(ladder, increment, parameters.light_of_heavy)
+                    progress.light_top_set(ladder, steps, parameters.light_of_heavy)
                 }
             }
         }
@@ -378,7 +396,7 @@ fn primary_slot_item(
         // percentage of the top set and never of the anchor.
         for step in parameters.warmup.iter() {
             sets.push(PrescribedSet::warmup(
-                Load::Absolute(quantise_loaded(step.of_top_set.of(load), increment)),
+                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(load))),
                 Target::Exactly(step.reps),
             ));
         }
@@ -388,17 +406,17 @@ fn primary_slot_item(
             Target::Exactly(reps),
         ));
 
-        // The back-offs run the strength block's scheme, the primary being a
-        // strength slot. Their own sets and repetitions are not separately
-        // authored — the record shows the two roles differing, which is a
-        // distinction nobody has stated.
-        let back_off = quantise_loaded(parameters.back_off_of_top_set.of(load), increment);
-        let scheme = scheme_for(parameters, Block::Strength);
-        let back_off_reps = scheme.high;
-        for _ in 0..scheme.sets.as_u32() {
+        // The back-offs are the role's own pattern — heavy `2 × 4`, light
+        // `3 × 6` — and not the strength block's accessory scheme. Borrowing
+        // that scheme is what issued the light session's three sets of six on
+        // the heavy day; the operator stated the two patterns on 2026-08-20 and
+        // the record agrees on every session since the July test.
+        let pattern = parameters.back_off.get(role);
+        let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
+        for _ in 0..pattern.sets.as_u32() {
             sets.push(PrescribedSet::fixed(
                 Load::Absolute(back_off),
-                Target::Exactly(back_off_reps),
+                Target::Exactly(pattern.reps),
             ));
         }
     } else {
@@ -407,7 +425,7 @@ fn primary_slot_item(
         let anchor = programme.anchor().load();
         for step in parameters.warmup.iter() {
             sets.push(PrescribedSet::warmup(
-                Load::Absolute(quantise_loaded(step.of_top_set.of(anchor), increment)),
+                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(anchor))),
                 Target::Exactly(step.reps),
             ));
         }
@@ -632,8 +650,7 @@ fn one_exercise(
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
     let scheme = scheme_for(parameters, slot.block());
-    let load = progressed_load(parameters, scheme, last)
-        .ok_or_else(|| underivable(UnderivableReason::NoWorkingSet))?;
+    let load = progressed_load(parameters, exercise, scheme, last).map_err(underivable)?;
     let target = Target::range(scheme.low, scheme.high)
         .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
     let sets: Vec<_> = (0..scheme.sets.as_u32())
@@ -653,12 +670,20 @@ fn one_exercise(
 /// A failed attempt is not the top of the range, so a session that failed
 /// re-issues rather than advancing — which is the same rule the primary's gate
 /// runs, arrived at from the other direction.
+///
+/// **The scale is read only when the load actually moves.** A slot working its
+/// way up a range re-issues what it last did, and re-issuing a weight that was
+/// on the bar last week needs no opinion about what else the equipment can
+/// hold. So an implement with no authored scale costs a slot nothing until the
+/// week it would have stepped up — which is the week somebody has to state the
+/// scale anyway.
 fn progressed_load(
     parameters: &GenerationParameters,
+    exercise: Exercise,
     scheme: &domain::prescription::AccessoryScheme,
     last: &Performance,
-) -> Option<Load> {
-    let heaviest = last.sets.last()?;
+) -> Result<Load, UnderivableReason> {
+    let heaviest = last.sets.last().ok_or(UnderivableReason::NoWorkingSet)?;
     let reached_top = last.sets.iter().all(|set| {
         set.outcome
             .completed()
@@ -666,17 +691,30 @@ fn progressed_load(
     });
 
     if !reached_top {
-        return Some(heaviest.load);
+        return Ok(heaviest.load);
     }
+
+    let steps = parameters
+        .scales
+        .for_exercise(exercise)
+        .ok_or(UnderivableReason::NoLoadScale)?;
     match heaviest.load {
-        Load::Absolute(mass) => Some(Load::Absolute(Kg::from_grams(
-            mass.as_grams() + parameters.plate_increment.as_kg().as_grams(),
-        ))),
-        // A relative load progresses the same way, on the axis it runs on.
-        Load::Relative(delta) => Some(Load::Relative(domain::gym::SignedKg::from_grams(
-            delta.as_grams()
-                + i64::try_from(parameters.plate_increment.as_kg().as_grams()).unwrap_or(0),
-        ))),
+        // The step is read at the load being left, so a dumbbell leaving 10kg
+        // adds the 2kg that applies from 10kg rather than the 1kg that got it
+        // there.
+        Load::Absolute(mass) => Ok(Load::Absolute(steps.next_above(mass))),
+        // A relative load progresses the same way, on the axis it runs on. The
+        // step is read at the magnitude, because an implement's scale is about
+        // what it can hold and not which direction the load points.
+        Load::Relative(delta) => {
+            let magnitude = Kg::from_grams(delta.as_grams().unsigned_abs());
+            let step = steps.step_at(magnitude).as_grams();
+            Ok(Load::Relative(domain::gym::SignedKg::from_grams(
+                delta
+                    .as_grams()
+                    .saturating_add(i64::try_from(step).unwrap_or(i64::MAX)),
+            )))
+        }
     }
 }
 

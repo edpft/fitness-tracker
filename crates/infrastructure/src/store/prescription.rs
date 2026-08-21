@@ -5,7 +5,10 @@
 //! true: a superseded percentage answers no question because what it produced is
 //! here.
 //!
-//! `issued_for` is a unique key, so one date holds one prescription. FR-010's
+//! `(issued_for, issued_at)` is the unique key, so a date may be prescribed
+//! more than once and the greatest `issued_at` is the one in force — the same
+//! rule `generation_parameters` uses, and for the same reason: an issued
+//! prescription is authored data (§ 12) and keeps its history. FR-010's
 //! idempotence is therefore the schema's rather than a caller's to remember.
 
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
@@ -381,6 +384,12 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                    issued_at AS "issued_at!: String"
             FROM prescribed_workout
             WHERE issued_for = ?
+            -- The latest issue is the one in force. A date may be prescribed
+            -- more than once and a correction supersedes rather than
+            -- overwrites, so the superseded rows are still here and still
+            -- exactly as they were issued.
+            ORDER BY issued_at DESC
+            LIMIT 1
             "#,
             key
         )

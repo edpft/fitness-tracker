@@ -25,26 +25,25 @@ pub mod parameters;
 pub mod prilepin;
 pub mod progression;
 pub mod project;
-pub mod quantise;
 pub mod repmax;
 pub mod schedule;
 pub mod shape;
+pub mod steps;
 pub mod target;
 pub mod workout;
 
-pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance};
-pub use ladder::{InvalidLadder, Ladder};
+pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
+pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, InconsistentProgramme, Position, PrimaryPattern, Programme, SlotContent, SlotFills,
     StaticFill,
 };
 pub use parameters::{
-    AccessoryScheme, GenerationParameters, InvalidIncrement, InvalidPercentage, Percentage,
-    PlateIncrement, ResetProtocol, TopSetReps, WarmupStep,
+    AccessoryScheme, BackOff, GenerationParameters, InvalidPercentage, Percentage, ResetProtocol,
+    Scales, TopSetReps, WarmupStep,
 };
-pub use progression::{ClimbBack, GatingTopSet, Progress, Reset, progress_after};
+pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
-pub use quantise::{quantise, quantise_loaded};
 pub use repmax::rep_max;
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
@@ -54,5 +53,6 @@ pub use shape::{
     Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,
     UnknownSlot, WorkoutShape,
 };
+pub use steps::{InvalidLoadSteps, LoadSteps, Step};
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
 pub use workout::{PrescribedWorkout, ProgrammeId};

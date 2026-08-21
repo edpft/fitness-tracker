@@ -61,12 +61,12 @@ friday = "heavy"
 [programme.anchor]
 load = "90kg"
 # What the test failed above the load it completed, if it found the ceiling.
-# **This is what the block opens at**: the ladder starts here and the
-# drop-and-re-climb protocol is how the block gets back to it, at the *second*
-# reset's -5% and +2.5kg — the gentler pair, and the same rate the ladder itself
-# climbs at, so the whole block advances by one increment a week. It costs no
-# stall: the next failure still gets both resets. Omit the key for a test that
-# failed nothing, and the block opens one climb above `load` instead.
+# **This is what the block opens below**: the ladder starts at this load dropped
+# by `parameters.ladder.entry_drop` and climbs back through it. Omit the key for
+# a test that failed nothing, and the block opens one climb above `load`.
+#
+# A block may also state its opening outright, with `programme.opening`, which
+# this fixture does not — it derives.
 failed     = "95kg"
 provenance = "tested"
 from       = "2026-07-03"
@@ -125,11 +125,8 @@ heavy = "nordic-hamstrings-curls"
 # they produced is recorded concretely on the prescription that used them.
 
 [parameters]
-# The operator's own, and the record disagrees with it on three light sessions
-# before 10 August. Those are operator error, confirmed as such — not a
-# different rule, and not something generation should reproduce.
-back_off_of_top_set = "85%"
-plate_increment     = "2.5kg"
+# (bare keys only above the first sub-table header — TOML puts a bare key under
+# whichever table header precedes it.)
 
 # The light session's top set, as a percentage of that week's heavy top set.
 # Stated by the operator on 2026-08-18, and the first version of this number was
@@ -168,8 +165,45 @@ static_hold = "60s"
 # off a lower start. 2.5kg is also the smallest plate, so the climb lands on the
 # grid at every anchor — the fault `light_of_heavy` was caught with was a ratio
 # standing in for an offset, and this is the offset stated as one.
+# The primary's back-off sets, per session role.
+#
+# **Its own pattern per role, not the strength block's accessory scheme.** They
+# used to be read off `[parameters.strength]`, which issued the light session's
+# three sets of six on the heavy day. Stated by the operator on 2026-08-20; the
+# record agrees on every session since the July test.
+[parameters.back_off.heavy]
+sets       = 2
+reps       = 4
+of_top_set = "85%"
+
+[parameters.back_off.light]
+sets       = 3
+reps       = 6
+of_top_set = "85%"
+
+# What each implement can hold.
+#
+# **A scale, not an increment.** One increment for everything prescribed a
+# dumbbell at 12.5kg and another at 9.5kg. A bare step is uniform; a list is
+# banded, lightest first, and the first band must start at 0kg.
+#
+# **`bodyweight` is deliberately absent.** Nobody has stated what a weighted dip
+# adds, so a slot loaded that way re-issues what it last did and reports as
+# underivable on the week it would have stepped up. That is the design working:
+# the alternative is a prescription derived from a grid this fixture invented.
+[parameters.scales]
+barbell  = "2.5kg"
+machine  = "2.5kg"
+cable    = "2.5kg"
+dumbbell = [{ from = "0kg", size = "1kg" }, { from = "10kg", size = "2kg" }]
+
 [parameters.ladder]
 climb_per_week = "2.5kg"
+
+# What a derived opening drops off the load the entry test failed. Authored
+# rather than read off `reset.first.drop`, which it happens to equal: two values
+# agreeing by decision is not one value used twice.
+entry_drop = "-10%"
 
 # INFERRED. The double-progression scheme each block's non-primary slots run.
 # One per block rather than one per slot: the slots within a block are prescribed

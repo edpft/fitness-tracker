@@ -30,8 +30,8 @@ pub use ports::{
     LandingRecordReader, LandingStore, LastPerformance, NormalisationRunLog, NormalisationSummary,
     NormalisedWorkoutStore, Performance, PerformedSetSummary, PerformedWorkoutReader,
     PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore,
-    RefusalReport, RefusalReporter, RefusalStore, ResumptionPointResetter, ResumptionPointStore,
-    RunLock, RunSummary, SourceEvent, StreamStatus, Translation, UnderivableReason,
-    UnderivableSlot, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
-    WorkoutTranslator,
+    RefusalReport, RefusalReporter, RefusalStore, Reissue, ResumptionPointResetter,
+    ResumptionPointStore, RunLock, RunSummary, SourceEvent, StreamStatus, Translation,
+    UnderivableReason, UnderivableSlot, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
+    WorkoutPrescriber, WorkoutTranslator,
 };

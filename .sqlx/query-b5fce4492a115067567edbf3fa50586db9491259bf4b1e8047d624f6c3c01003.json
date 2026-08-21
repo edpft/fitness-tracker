@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO generation_role_reps (\n                parameters_authored_at, role, top_set_reps,\n                back_off_sets, back_off_reps, back_off_bp\n            )\n            VALUES (?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "b5fce4492a115067567edbf3fa50586db9491259bf4b1e8047d624f6c3c01003"
+}

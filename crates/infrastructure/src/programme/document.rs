@@ -14,12 +14,12 @@ use std::collections::BTreeMap;
 use domain::{
     gym::{
         Duration, Kg, RepCount,
-        exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
+        exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     },
     prescription::{
-        AccessoryScheme, Anchor, AnchorProvenance, Calendar, GenerationParameters,
-        InconsistentProgramme, InvalidCalendar, PerRole, Percentage, PlateIncrement, Programme,
-        ResetProtocol, SessionRole, TopSetReps, WarmupStep, Weekdays,
+        AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
+        InconsistentProgramme, InvalidCalendar, LoadSteps, PerRole, Percentage, Programme,
+        ResetProtocol, Scales, SessionRole, Step, TopSetReps, WarmupStep, Weekdays,
         linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -84,6 +84,32 @@ fn reps(field: &str, value: u32) -> Result<RepCount, DocumentError> {
     RepCount::new(value).map_err(|error| invalid(field, error))
 }
 
+/// Every implement's scale, from the document's table.
+fn scales(authored: &BTreeMap<String, ScaleSection>) -> Result<Scales, DocumentError> {
+    let mut scales = BTreeMap::new();
+    for (name, section) in authored {
+        let field = format!("parameters.scales.{name}");
+        let implement = Implement::try_from(name.clone())
+            .map_err(|error| invalid("parameters.scales", error))?;
+        let steps = match section {
+            ScaleSection::Uniform(size) => LoadSteps::uniform(mass(&field, size)?),
+            ScaleSection::Banded(bands) => {
+                let mut read = Vec::with_capacity(bands.len());
+                for (at, band) in bands.iter().enumerate() {
+                    read.push(Step {
+                        from: mass(&format!("{field}[{at}].from"), &band.from)?,
+                        size: mass(&format!("{field}[{at}].size"), &band.size)?,
+                    });
+                }
+                LoadSteps::new(read)
+            }
+        }
+        .map_err(|error| invalid(&field, error))?;
+        scales.insert(implement, steps);
+    }
+    Ok(Scales::new(scales))
+}
+
 /// Our vocabulary, from a key in the document.
 fn exercise(field: &str, key: &str) -> Result<Exercise, DocumentError> {
     if let Ok(reps) = RepsExercise::try_from(key.to_owned()) {
@@ -128,6 +154,14 @@ struct ProgrammeSection {
     interruptions: Vec<String>,
     weekdays: BTreeMap<String, String>,
     anchor: AnchorSection,
+    /// Where the ladder opens, stated rather than derived.
+    ///
+    /// Absent derives it from the anchor's entry test. Present is the answer
+    /// for a block the derivation cannot reach — one picked up mid-flight, or
+    /// one starting far enough after its test that nothing off that test is
+    /// evidence any more. Not a `TODO` candidate: absent is a real state.
+    #[serde(default)]
+    opening: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -143,8 +177,13 @@ struct AnchorSection {
 
 #[derive(serde::Deserialize)]
 struct ParametersSection {
-    back_off_of_top_set: String,
-    plate_increment: String,
+    back_off: BTreeMap<String, BackOffSection>,
+    /// One load scale per implement, keyed by the implement's stable name.
+    ///
+    /// An implement absent from here is not defaulted to the barbell's steps:
+    /// anything loaded on it reports as underivable, and the rest of the
+    /// session still issues.
+    scales: BTreeMap<String, ScaleSection>,
     light_of_heavy: String,
     static_hold: String,
     ladder: LadderSection,
@@ -158,6 +197,36 @@ struct ParametersSection {
 #[derive(serde::Deserialize)]
 struct LadderSection {
     climb_per_week: String,
+    /// Negative. What a derived opening drops off the load the entry test
+    /// failed. Authored rather than borrowed from the first reset's drop, so
+    /// the two agreeing is a decision and not a coincidence nothing pins.
+    entry_drop: String,
+}
+
+#[derive(serde::Deserialize)]
+struct BackOffSection {
+    sets: u32,
+    reps: u32,
+    of_top_set: String,
+}
+
+/// One implement's scale: a bare step, or bands of one.
+///
+/// Untagged, because `"2.5kg"` and a list of bands are already distinguishable
+/// by shape and a tag would be noise in a document a person edits.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum ScaleSection {
+    /// One step, forever. What a barbell is.
+    Uniform(String),
+    /// Bands, lightest first. The first must start at nothing.
+    Banded(Vec<BandSection>),
+}
+
+#[derive(serde::Deserialize)]
+struct BandSection {
+    from: String,
+    size: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -234,17 +303,33 @@ impl Document {
             )?))
         };
 
+        let back_off = |name: &str| -> Result<BackOff, DocumentError> {
+            let field = format!("parameters.back_off.{name}");
+            let section = p.back_off.get(name).ok_or_else(|| {
+                invalid(
+                    "parameters.back_off",
+                    format!("no {name} session's back-off is described"),
+                )
+            })?;
+            Ok(BackOff {
+                sets: reps(&format!("{field}.sets"), section.sets)?,
+                reps: reps(&format!("{field}.reps"), section.reps)?,
+                of_top_set: percentage(&format!("{field}.of_top_set"), &section.of_top_set)?,
+            })
+        };
+
         Ok(GenerationParameters {
             warmup,
-            back_off_of_top_set: percentage(
-                "parameters.back_off_of_top_set",
-                &p.back_off_of_top_set,
-            )?,
+            back_off: PerRole {
+                light: back_off("light")?,
+                heavy: back_off("heavy")?,
+            },
             light_of_heavy: percentage("parameters.light_of_heavy", &p.light_of_heavy)?,
             ladder_climb_per_week: mass(
                 "parameters.ladder.climb_per_week",
                 &p.ladder.climb_per_week,
             )?,
+            entry_drop: percentage("parameters.ladder.entry_drop", &p.ladder.entry_drop)?,
             top_set_reps: PerRole {
                 light: role("light")?,
                 heavy: role("heavy")?,
@@ -252,11 +337,7 @@ impl Document {
             strength: scheme("parameters.strength", &p.strength)?,
             hypertrophy: scheme("parameters.hypertrophy", &p.hypertrophy)?,
             static_hold: seconds("parameters.static_hold", &p.static_hold)?,
-            plate_increment: PlateIncrement::new(mass(
-                "parameters.plate_increment",
-                &p.plate_increment,
-            )?)
-            .map_err(|error| invalid("parameters.plate_increment", error))?,
+            scales: scales(&p.scales)?,
             first_reset: ResetProtocol {
                 drop: percentage("parameters.reset.first.drop", &p.reset.first.drop)?,
                 reclimb_per_week: mass(
@@ -286,6 +367,11 @@ impl Document {
         zone: TimeZone,
     ) -> Result<Programme, DocumentError> {
         let section = &self.programme;
+        let declared_opening = section
+            .opening
+            .as_deref()
+            .map(|load| mass("programme.opening", load))
+            .transpose()?;
         if section.template != "linear" {
             return Err(invalid(
                 "programme.template",
@@ -349,7 +435,7 @@ impl Document {
                 .map_err(|error| invalid("programme.primary", error))?,
             exercise("programme.primary_exercise", &section.primary_exercise)?,
             self.fills()?,
-            anchor,
+            Entry::new(anchor, declared_opening),
             SessionRole::try_from(section.gating_role.clone())
                 .map_err(|error| invalid("programme.gating_role", error))?,
             calendar,

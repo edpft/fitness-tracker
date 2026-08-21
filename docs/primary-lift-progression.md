@@ -84,14 +84,13 @@ above.
 Given a duration of `W` weeks and an anchor `A`:
 
 - The final week is the test, so there are `W - 1` climbing weeks.
-- The ladder opens at the load the entry test failed, or one `climb_per_week`
-  above what it completed if it failed nothing, and adds `climb_per_week` for
-  each week after the first.
-- A block whose test failed something **climbs in** to that load first, by the
-  drop-and-re-climb protocol below at the **second** reset's −5% and +2.5kg —
-  the gentler pair, because an entry has lost no ground and because that rate is
-  the ladder's own, so the whole block advances by one increment a week. Those
-  weeks are not ladder positions and they cost no stall.
+- The ladder opens at the load the entry test failed **dropped by
+  `entry_drop`**, or one `climb_per_week` above what it completed if it failed
+  nothing, and adds `climb_per_week` for each week after the first.
+- **Or the block states its opening outright.** A declared opening wins and the
+  anchor's failed load then feeds nothing.
+- There is no climb-in. The drop *is* the opening, so every re-climb inside a
+  block is a stall.
 - The light session's top set is a percentage of that week's heavy top set.
 - Warm-ups and back-off sets are percentages of their own session's top set —
   never of the anchor. See `prescribed-workout-domain-model.md`.
@@ -111,13 +110,26 @@ also the rate the reset protocol below already names: the second reset re-climbs
 at +2.5kg a week, which that section calls "baseline rate off a lower start".
 The two are one number and it was stated in prose before it was a parameter.
 
-**Where the opening comes from — the test, and nothing else.** A test that failed
-a load located the ceiling, and the block's job is to reach it and go past; a
-test that failed nothing established only a floor, and the block starts by
-beating it. Neither branch asks anyone for a percentage, which is what closed the
-last unauthored value in the model. **The plan this produces is ambitious**: a
-block opening on a failed load starts above its own anchor, and it is the reset
-protocol rather than the plan that finds the real ceiling.
+**Where the opening comes from — the test, or the operator.** A test that failed
+a load located the ceiling; the block opens *below* it by `entry_drop` and
+climbs back through it. A test that failed nothing established only a floor, and
+the block starts by beating it.
+
+**Amended 2026-08-20, and the old version is the interesting part.** The ladder
+used to open *at* the failed load and reach it by a separate climb-in, which
+made week one heavier than the anchor — this document called that "ambitious"
+and treated it as a feature. The operator overturned it: a block that spends its
+weeks below a previously demonstrated max is asking for regain, which the
+paragraph below already called the safer first block, and opening above the
+anchor contradicted it.
+
+**And a block may declare its opening.** The derivation reads a test, and a test
+far enough behind the block is not evidence about it whatever number it
+produces. The block starting 3 August is the case: its test is dated 3 July,
+with a hand-run block and a holiday in between, and −10% off the failed 95 *and*
+−5% off the completed 90 both quantise to 85 — two rules agreeing on one
+observation, so neither is evidenced by it. The opening is stated instead. See
+`docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
 
 **What duration does here, and what it does not.** It says how long the climb
 runs. An interrupted eight weeks is the same plan as a twelve stopped earlier,
@@ -131,6 +143,13 @@ boundary that matters is **regain versus new ground**: ground already covered
 comes back fast, and ground never covered does not. A block that spends its weeks
 below a previously demonstrated max is asking for regain and is the safer first
 block.
+
+**Back-off sets are per session role.** Heavy is `1 @ x, 2 × 4 @ 85%`; light is
+`3 @ x, 3 × 6 @ 85%`. They used to be read off the strength block's accessory
+scheme on the grounds that the primary is a strength slot and nobody had stated
+otherwise, which issued the light session's pattern on the heavy day. Stated by
+the operator on 2026-08-20; the record agrees on every session since the July
+test.
 
 **Repetitions are constant per session role within a block.** Currently one on
 the heavy session and three on the light one. The textbook linear block descends
