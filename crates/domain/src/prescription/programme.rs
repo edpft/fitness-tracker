@@ -127,6 +127,49 @@ impl Programme {
         }
     }
 
+    /// The maximum this programme leaves behind it, if it leaves one.
+    ///
+    /// **What a block asks of the programme before it** (decision 0013). A block
+    /// opens from a measured maximum in its own lift, and there are exactly two
+    /// things that produce one:
+    ///
+    /// ```text
+    /// test      the lift it tested — that is the whole of what it is for
+    /// block     its primary, measured by the exit test it always ends on
+    /// linear    nothing, ever: a linear programme never includes a test
+    /// ```
+    ///
+    /// The operator's six compositions fall out of comparing this against the
+    /// next block's primary, and so do 0013's own six examples. A linear
+    /// programme answers `None` even in the same lift, which is the row that
+    /// most invites a wrong guess: its last heavy single feels like a test and is
+    /// not one, because nothing peaked for it and nothing recorded it as a
+    /// maximum.
+    ///
+    /// It says what the programme *plans* to measure, not what the record holds:
+    /// a block abandoned in week three planned an exit test it never took. The
+    /// recency rule beside it is what keeps that from anchoring anything, since
+    /// an abandoned block's successor is not the week after its exit test.
+    #[must_use]
+    pub const fn produces_maximum(&self) -> Option<Exercise> {
+        match self {
+            Self::Test(test) => Some(test.primary_exercise()),
+            Self::Periodisation(Periodisation::Block(block)) => Some(block.primary_exercise()),
+            Self::Periodisation(Periodisation::Linear(_)) => None,
+        }
+    }
+
+    /// Whether this programme needs a test week of its own to open from.
+    ///
+    /// Only a block ever does, and only where it has not been handed one.
+    #[must_use]
+    pub const fn needs_an_entry_test(&self) -> bool {
+        match self {
+            Self::Periodisation(Periodisation::Block(block)) => block.entry_test().is_none(),
+            Self::Periodisation(Periodisation::Linear(_)) | Self::Test(_) => false,
+        }
+    }
+
     /// Which session's top set advances the plan, where anything does.
     ///
     /// A test gates nothing: it has no ladder to advance and its own session is

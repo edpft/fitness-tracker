@@ -62,7 +62,10 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
-pub use succession::{InvalidProgrammeName, ProgrammeName, ProgrammeWindow};
+pub use succession::{
+    InvalidProgrammeName, ProgrammeName, ProgrammeWindow, RECENT_WEEKS, is_recent_enough,
+    weeks_between,
+};
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
 pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};

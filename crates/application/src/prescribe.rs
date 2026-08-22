@@ -21,9 +21,9 @@ use domain::{
     prescription::{
         Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
         Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, SessionRole,
-        SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan, WorkoutShape,
-        linear::SlotContent, progress_after, rep_max,
+        PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, RECENT_WEEKS,
+        SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
+        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -1067,6 +1067,92 @@ impl<P, G> Authoring<P, G> {
     }
 }
 
+impl<P, G> Authoring<P, G>
+where
+    P: ProgrammeStore + Sync,
+    G: Sync,
+{
+    /// Whether this programme opens from a maximum that exists.
+    ///
+    /// **The operator's six compositions, as one comparison.** A block needs an
+    /// entry test of its own unless the programme immediately before it produces
+    /// a maximum in the same lift, and recently enough to still speak for it:
+    ///
+    /// ```text
+    /// test A   → block B   produces A ≠ B          needs its own
+    /// test B   → block B   produces B              uses it
+    /// linear A → block B   produces nothing        needs its own
+    /// linear B → block B   produces nothing        needs its own — 0013
+    /// block A  → block B   produces A ≠ B          needs its own
+    /// block B  → block B   produces B, its exit    uses it
+    /// ```
+    ///
+    /// Row four is the one that invites a wrong guess. A linear programme for the
+    /// same lift never tests it, so its last heavy single is not a maximum
+    /// however heavy it was — and writing `provenance = "tested"` beside that
+    /// date is exactly the mistake this refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] if the store is unavailable, if nothing before this
+    /// block produced a maximum in its lift, or if the one that did is too old to
+    /// anchor it.
+    async fn entry_is_answered(&self, programme: &Programme) -> Result<(), PrescriptionError> {
+        if !programme.needs_an_entry_test() {
+            return Ok(());
+        }
+        let start = programme.calendar().start();
+        let wanted = programme.primary_exercise();
+
+        let predecessor = self.programmes.preceding(start).await?;
+        let Some((_, before)) = predecessor else {
+            return Err(PrescriptionError::NoMaximumToOpenFrom {
+                programme: programme.name().clone(),
+                primary: wanted.as_str(),
+                predecessor: None,
+            });
+        };
+        if before.produces_maximum() != Some(wanted) {
+            return Err(PrescriptionError::NoMaximumToOpenFrom {
+                programme: programme.name().clone(),
+                primary: wanted.as_str(),
+                predecessor: Some(before.name().clone()),
+            });
+        }
+
+        // **And the maximum has to be the one that programme measured, recently.**
+        // Two conditions rather than one, because either alone lets a number in
+        // from nowhere: a date inside the predecessor with no bound on age would
+        // accept a maximum from a block that finished in June, and a recent date
+        // with no bound on origin would accept one the operator simply wrote down
+        // last week.
+        //
+        // Read off the anchor's own date, because what is being asked is when the
+        // number was measured. The window is the predecessor's whole span and the
+        // recency rule is the operator's: the week before the programme, or the
+        // week before that.
+        let Some(anchor) = programme.anchor() else {
+            return Ok(());
+        };
+        if !before.window().covers(anchor.from()) {
+            return Err(PrescriptionError::MaximumIsNotTheOneBefore {
+                programme: programme.name().clone(),
+                tested: anchor.from(),
+                predecessor: before.name().clone(),
+            });
+        }
+        if !is_recent_enough(anchor.from(), start) {
+            return Err(PrescriptionError::MaximumIsStale {
+                programme: programme.name().clone(),
+                tested: anchor.from(),
+                start,
+                weeks: RECENT_WEEKS,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl<P, G> ProgrammeAuthor for Authoring<P, G>
 where
     P: ProgrammeStore + Sync,
@@ -1093,6 +1179,13 @@ where
                 return Err(PrescriptionError::OverlappingProgramme { proposed, existing });
             }
         }
+
+        // **And a block that does not test its own entry has to have been handed
+        // one** (decision 0013). This is the only rule in the system that reads
+        // another programme in order to refuse this one, and it has to: whether a
+        // maximum exists is a fact about what came before, not a claim the
+        // document can settle about itself.
+        self.entry_is_answered(programme).await?;
 
         // Parameters first: a programme names the version it was authored
         // against, and one stored without them would reference nothing.

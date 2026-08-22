@@ -122,6 +122,22 @@ up. The distinction is that fills are intent and the target is read off the
 performed record — one is inherited from another document, the other from
 history.
 
+## Where the rule lives
+
+**In `Authoring`, not in `Periodised::check`.** Whether a maximum exists is a
+fact about what came before, so this is the one check in the system that refuses
+one programme by reading another — and a domain type cannot ask that question
+without the store the hexagon keeps it away from. `Programme::produces_maximum`
+and the recency helper are the domain's half: the vocabulary and the arithmetic,
+with the lookup left outside.
+
+**Counted between Mondays.** `Calendar`'s own offset divides a day span by seven
+and Rust truncates toward zero, so a test on Friday 18 September against a Monday
+21 September start reads as `0` — the same week as the start — and Friday 11
+September reads as `−1` where the rule wants `−2`. 0013 flagged this and it is
+why `weeks_between` buckets both dates first: reusing `offset_of` would pass a
+happy-path test and be wrong in the middle of every week.
+
 ## What it costs
 
 **`PrescribedWorkout` no longer records an anchor.** It records a `DerivedFrom`:
@@ -157,14 +173,13 @@ block gets its anchor.
 
 ## What is not decided here
 
-**The recency rule.** 0013 requires an inherited test to fall in the week before
-a programme or the week before that, and records that the existing `offset_of`
-helper cannot answer it — Rust truncates toward zero, so a Friday test against a
-Monday start reads as the same week. Nothing here buckets weeks to their Monday,
-and `Programme::new` does not yet check recency. What is enforced is 0009's
-weaker half: the entry test must precede the programme.
-
 **Deriving an anchor from a performed test.** A block's anchor is still authored,
-with `provenance = "tested"` and the test's date. Reading the standalone test's
-result out of the record and handing it to the next programme is the other half
-of inheritance and is not built.
+with `provenance = "tested"` and the test's date. What the composition check
+proves is that a test of that lift was *scheduled* immediately before and that
+the anchor is dated inside it — not that the number is what was lifted. Reading
+the result out of the performed record is the other half of inheritance and is
+not built.
+
+That is also why `AnchorProvenance` stays load-bearing rather than going back to
+merely recording. The predecessor check proves the test happened; the provenance
+proves the operator knows which number they are writing down.
