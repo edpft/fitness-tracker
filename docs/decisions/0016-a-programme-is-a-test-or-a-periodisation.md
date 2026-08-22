@@ -55,18 +55,34 @@ gone: the count belongs to the test that establishes the number, and by the time
 the phases read that number it is an `Anchor` and already a one-rep maximum. The
 check that the maximum table can convert it followed the count.
 
-**3. A block that does not test its own entry requires
-`AnchorProvenance::Tested`; one that does may open from any provenance, and
-linear accepts any.** This is what makes 0013's table a rule rather than advice.
-Rows three and six say a lift change into a block needs a test, and if an
-asserted anchor satisfied the entry requirement the operator could skip that test
-by stating a number.
+**3. A block's anchor comes from one of three places, and the document says
+which.**
 
-A block that runs its own entry test is that case answered rather than evaded:
-its anchor is what the operator *expects* to lift, week one is where they find
-out, and a result that differs is answered by re-authoring — which 0012 makes a
-supersession rather than a second programme. Requiring `Tested` there would be
-requiring a test before the test.
+```text
+a previous test      provenance = "tested", and no entry test of its own
+its own entry test   what the operator expects; week one measures it, and a
+                     result that differs is answered by re-authoring — which
+                     0012 makes a supersession rather than a second programme
+declared             provenance = "asserted" or "estimated": a number, and it
+                     says so
+```
+
+**Only the first says anything about the past, so only the first can be wrong.**
+That makes `AnchorProvenance` a selector among the three rather than a gate on
+one of them — a narrower use than 0013 proposed and a better use of a field that
+until then only recorded.
+
+It was written twice before it was right, and the operator corrected each in turn
+before either merged: first "a block requires `AnchorProvenance::Tested`", then
+"unless nothing precedes it". Both were too strict. A block with nothing to
+inherit is free to run its own entry test *or* to declare a number; what it may
+not do is say a measurement happened when none did. The refusal is of a claim,
+not of a choice.
+
+**Blocks only.** A linear programme's anchor may be superseded by a declared
+opening — the summer block's tested anchor is a month old and deliberately feeds
+nothing — so the same rule there would need a carve-out for exactly the case it
+exists to allow. A block has no opening: every load is a share of the anchor.
 
 **4. A test's fills are resolved when the document is read.** A test document
 names the lift being tested and any fill moving with it; every slot it omits
@@ -161,6 +177,46 @@ come apart.
 **`programme show` gains `--date`.** With one programme ever in force "the
 programme" was unambiguous. With three in the store it is a question about a day.
 
+**6. A block that claims to open from an earlier test must be right about that:
+the test must have happened, in the same lift, recently enough to still speak for
+it.** The operator's ten compositions, and they reduce to one comparison:
+
+```text
+what the programme before produces
+  test      the lift it tested — that is the whole of what it is for
+  block     its primary, measured by the exit test it always ends on
+  linear    nothing, ever (decision 0013)
+
+test a   → block b   produces a ≠ b            no such test
+test b   → block b   produces b                opens from it
+linear a → block b   produces nothing          no such test
+linear b → block b   produces nothing          no such test
+block a  → block b   produces a ≠ b            no such test
+block b  → block b   produces b, its exit      opens from it
+
+test b  → block b               adjacent       opens from it
+test b  → 1 blank week → block b               opens from it
+test b  → 2 blank weeks → block b              too old
+block b → 1 blank week → block b               opens from it
+block b → 2 blank weeks → block b              too old
+```
+
+A row reading "no such test" is not an instruction to test. It says the claim
+cannot stand, and the block's other two ways of arriving at an anchor are both
+still open.
+
+Row four is the one that invites a wrong guess, and the operator named it
+directly: a linear programme for the *same* lift still leaves no maximum, because
+it never tests. Its last heavy single feels like one and is not.
+
+**Three conditions, and each closes a different hole.** The programme before must
+produce a maximum in this lift; the anchor must be dated to a day that programme
+ran, so the number is that programme's result rather than one written beside its
+name; and that date must fall in the week before this programme or the week
+before that. A date inside the predecessor with no bound on age would accept a
+maximum from a block that finished in June; a recent date with no bound on origin
+would accept one written down last week.
+
 ## What each is for
 
 ```text
@@ -173,13 +229,17 @@ block gets its anchor.
 
 ## What is not decided here
 
-**Deriving an anchor from a performed test.** A block's anchor is still authored,
-with `provenance = "tested"` and the test's date. What the composition check
-proves is that a test of that lift was *scheduled* immediately before and that
-the anchor is dated inside it — not that the number is what was lifted. Reading
-the result out of the performed record is the other half of inheritance and is
-not built.
+**Deriving an anchor from a performed test.** A block's anchor is still typed in,
+with `provenance = "tested"` and the test's date. What the check proves is that a
+test of that lift was *scheduled* immediately before and that the anchor is dated
+inside it — not that the number is what was lifted.
 
-That is also why `AnchorProvenance` stays load-bearing rather than going back to
-merely recording. The predecessor check proves the test happened; the provenance
-proves the operator knows which number they are writing down.
+The operator's objection to that is recorded: determining whether the previous
+programme *contained* a test is not really the point, because what gates
+beginning a block is a test that happened. Reading the result out of the performed
+record and using it as the anchor is the next piece of work.
+
+It subsumes a second gap. An `Anchor` carries no exercise — it is a maximum of
+nothing — so `Periodised` cannot state 0013's "a test in the wrong lift is not a
+test" and only `Authoring`, holding the store, can. A maximum looked up from the
+record *by* exercise cannot be the wrong lift at all.
