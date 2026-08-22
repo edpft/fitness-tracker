@@ -142,7 +142,19 @@ pub struct Document {
     /// changing nothing but the primary needs no section at all.
     #[serde(default)]
     fills: BTreeMap<String, toml::Value>,
-    parameters: ParametersSection,
+    /// **Absent means the set in force.**
+    ///
+    /// § 14 requires only the current value of a generation parameter, and what
+    /// each prescription was generated against is recorded concretely on the
+    /// prescription itself — so a document that has nothing to say about them
+    /// need not restate them. Which matters most for a test: it is two sessions,
+    /// and requiring it to repeat every warm-up step and load scale to say so
+    /// would be the whole-programme authoring decision 0013 exists to avoid.
+    ///
+    /// Stating them is how they are *changed*, and a linear programme or a block
+    /// authored without them is authored against whatever is already stored.
+    #[serde(default)]
+    parameters: Option<ParametersSection>,
 }
 
 #[derive(serde::Deserialize)]
@@ -328,8 +340,10 @@ impl Document {
     /// # Errors
     ///
     /// [`DocumentError`] for an unsettled or invalid value.
-    pub fn parameters(&self) -> Result<GenerationParameters, DocumentError> {
-        let p = &self.parameters;
+    pub fn parameters(&self) -> Result<Option<GenerationParameters>, DocumentError> {
+        let Some(p) = &self.parameters else {
+            return Ok(None);
+        };
 
         let mut warmup = Vec::with_capacity(p.warmup.len());
         for (at, step) in p.warmup.iter().enumerate() {
@@ -372,7 +386,7 @@ impl Document {
             })
         };
 
-        Ok(GenerationParameters {
+        Ok(Some(GenerationParameters {
             warmup,
             back_off: PerRole {
                 light: back_off("light")?,
@@ -406,7 +420,7 @@ impl Document {
                     &p.reset.second.reclimb_per_week,
                 )?,
             },
-        })
+        }))
     }
 
     /// Whether this document takes its unstated fills from the programme before

@@ -422,7 +422,7 @@ fn a_settled_document_authors() {
     let Ok(document) = toml::from_str::<infrastructure::Document>(&settled) else {
         panic!("the settled document is valid TOML")
     };
-    let Ok(parameters) = document.parameters() else {
+    let Ok(Some(parameters)) = document.parameters() else {
         panic!("a settled document's parameters convert")
     };
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
@@ -481,7 +481,7 @@ fn a_document_can_name_the_sessions_the_block_does_not_run() {
     let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
         panic!("the amended document is valid TOML")
     };
-    let (Ok(parameters), Ok(zone)) = (
+    let (Ok(Some(parameters)), Ok(zone)) = (
         document.parameters(),
         jiff::tz::TimeZone::get("Europe/London"),
     ) else {
@@ -545,7 +545,7 @@ fn a_document_naming_a_week_outside_the_block_does_not_author() {
     let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
         panic!("the amended document is valid TOML")
     };
-    let Ok(parameters) = document.parameters() else {
+    let Ok(Some(parameters)) = document.parameters() else {
         panic!("the parameters convert")
     };
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {

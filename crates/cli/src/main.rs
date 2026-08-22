@@ -171,10 +171,18 @@ fn programme_command() -> ClapCommand {
                         .help("The document to read"),
                 ),
         )
-        .subcommand(ClapCommand::new("show").about(
-            "Report the programme in force, its ladder week by week, and which \
-                 rung the record puts you on",
-        ))
+        .subcommand(
+            ClapCommand::new("show")
+                .about(
+                    "Report the programme in force on a date, its plan week by \
+                     week, and which rung the record puts you on",
+                )
+                .arg(Arg::new("date").long("date").value_name("date").help(
+                    "The day to report on, as YYYY-MM-DD. Defaults to today — \
+                     programmes succeed one another, so which one answers \
+                     depends on the date",
+                )),
+        )
 }
 
 /// The zone the operator trains in.
@@ -366,7 +374,14 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
                     };
                     prescribing::author(&database, &zone, path).await
                 }
-                Some(("show", _)) => prescribing::standing(&database, &zone).await,
+                Some(("show", sub)) => {
+                    prescribing::standing(
+                        &database,
+                        &zone,
+                        sub.get_one::<String>("date").map(String::as_str),
+                    )
+                    .await
+                }
                 _ => Err(Failure::message("no programme command given", exit::USAGE)),
             };
         }
@@ -434,7 +449,7 @@ async fn prescription_status(database: &Path, declared: Option<&str>) -> Result<
         );
         return Ok(());
     };
-    match prescribing::standing(database, &zone).await {
+    match prescribing::standing(database, &zone, None).await {
         Ok(()) => Ok(()),
         // An unauthored programme is a legitimate state for a store that only
         // extracts, so it is reported rather than made an exit code.

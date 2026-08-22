@@ -5,6 +5,19 @@
 **Does not extend**: `0008-the-linear-ladder-climbs-at-a-rate.md`. That decision
 removed the *linear* ladder's endpoint, and this records that it stops there.
 
+## Amended by 0016
+
+**Week 1 is no longer an entry test.** This decision described a block as
+carrying its entry test as its first week, with `total_weeks` one longer than the
+duration. Decision 0013 made a test a programme in its own right and said a block
+"requires a preceding one as input", which leaves the block's own weeks as its
+phase weeks and nothing else. 0016 carries that out: `total_weeks` is gone,
+`WeekPlan::EntryTest` is gone, and `entry_reps` moved to the test that produced
+the anchor.
+
+Everything else here stands. The endpoint is still 105% of the entry one-rep
+maximum, the split is still one rule, and the block still ends on its exit test.
+
 ## What was decided
 
 **A periodised block plans toward a specific endpoint. A linear programme does
