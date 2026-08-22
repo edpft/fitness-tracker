@@ -13,7 +13,7 @@
 //!
 //! **That is also why no in-block miss is asserted here.** It is the corpus's only
 //! failure, and since 2026-08-19 a block opens *from* its entry test rather than
-//! containing it — `Programme::new` refuses one that does not, because a block
+//! containing it — `Linear::new` refuses one that does not, because a block
 //! holding its own entry test would read that failure twice. So the block starts
 //! the Monday after, the record has no missed gating set inside it, and US3-5
 //! stays where its arithmetic is: the domain suite.

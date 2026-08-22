@@ -19,10 +19,10 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, GatingTopSet, GenerationParameters, Position, PrescribedExercise, PrescribedItem,
-        PrescribedSet, PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress,
-        SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent,
-        progress_after,
+        Block, GatingTopSet, GenerationParameters, Linear, Position, PrescribedExercise,
+        PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout, ProgrammeId,
+        Progress, SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape,
+        linear::SlotContent, progress_after,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -224,7 +224,7 @@ where
     /// operator could not have been given at the time.
     async fn progress(
         &self,
-        programme: &Programme,
+        programme: &Linear,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Progress, PrescriptionError> {
@@ -303,7 +303,7 @@ fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
 /// derivation each position gets — the primary its top set and back-offs, and
 /// everything else double progression, a hold, or its authored numbers.
 fn issue_slots(
-    programme: &Programme,
+    programme: &Linear,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -342,7 +342,7 @@ fn issue_slots(
 /// variant was for. It had been recorded as reachable but unreached; the test
 /// week is what reaches it.
 fn primary_slot_item(
-    programme: &Programme,
+    programme: &Linear,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -481,7 +481,7 @@ fn primary_slot_item(
 /// slot in it is then reported, the failure with its own reason and the rest as
 /// withheld.
 fn group(
-    programme: &Programme,
+    programme: &Linear,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -533,7 +533,7 @@ fn group(
 
 /// Any slot that is not the primary: double progression, a hold, or static.
 fn accessory_slot(
-    programme: &Programme,
+    programme: &Linear,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -550,7 +550,7 @@ fn accessory_slot(
 /// Separate from [`accessory_slot`] because a supersetted position needs the
 /// exercise without the item wrapped around it.
 fn accessory_exercise(
-    programme: &Programme,
+    programme: &Linear,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -753,7 +753,7 @@ where
 {
     async fn author(
         &self,
-        programme: &Programme,
+        programme: &Linear,
         parameters: &GenerationParameters,
     ) -> Result<(ProgrammeId, Authored), PrescriptionError> {
         // Refused before anything is written. Two programmes covering one day

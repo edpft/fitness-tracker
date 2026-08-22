@@ -24,8 +24,7 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeWindow, Progress,
-    SlotId,
+    GenerationParameters, Linear, PrescribedWorkout, ProgrammeId, ProgrammeWindow, Progress, SlotId,
 };
 
 use crate::error::{
@@ -732,7 +731,7 @@ pub trait ProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(ProgrammeId, Linear)>, StoreError>> + Send;
 
     /// Every programme's name and the days it occupies, oldest first.
     ///
@@ -750,7 +749,7 @@ pub trait ProgrammeStore {
     /// [`StoreError`] if the store is unavailable.
     fn author(
         &self,
-        programme: &Programme,
+        programme: &Linear,
     ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
 }
 
@@ -825,7 +824,7 @@ pub struct Prescription {
 #[derive(Debug, Clone)]
 pub struct LadderStanding {
     pub programme_id: ProgrammeId,
-    pub programme: Programme,
+    pub programme: Linear,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.
     pub progress: Progress,
@@ -918,7 +917,7 @@ pub trait ProgrammeAuthor {
     /// inconsistent in a way the types could not catch.
     fn author(
         &self,
-        programme: &Programme,
+        programme: &Linear,
         parameters: &GenerationParameters,
     ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
 }

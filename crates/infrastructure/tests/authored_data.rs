@@ -312,7 +312,7 @@ fn the_weekday_mapping_round_trips() {
 
 /// Authoring supersedes by date, and the earlier programme is kept.
 ///
-/// **Two constructions rather than one authored twice.** A `Programme` stamps
+/// **Two constructions rather than one authored twice.** A `Linear` stamps
 /// its own `authored_at`, so re-authoring the same value would be one version
 /// claiming two rows — which `UNIQUE (name, authored_at)` refuses. Building the
 /// fixture again is what re-authoring a document actually does.

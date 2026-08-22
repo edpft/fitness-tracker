@@ -18,7 +18,7 @@ use domain::{
     },
     prescription::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
-        InconsistentProgramme, InvalidCalendar, LoadSteps, PerRole, Percentage, Programme,
+        InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole, Percentage,
         ProgrammeName, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
         Weekdays,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
@@ -387,7 +387,7 @@ impl Document {
         &self,
         parameters: &GenerationParameters,
         zone: TimeZone,
-    ) -> Result<Programme, DocumentError> {
+    ) -> Result<Linear, DocumentError> {
         let section = &self.programme;
         let declared_opening = section
             .opening
@@ -461,7 +461,7 @@ impl Document {
             zone,
         )?;
 
-        Ok(Programme::new(
+        Ok(Linear::new(
             ProgrammeName::try_from(settled("programme.name", &section.name)?.to_owned())
                 .map_err(|error| invalid("programme.name", error))?,
             Primary::new(

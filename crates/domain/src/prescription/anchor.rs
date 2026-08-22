@@ -172,7 +172,7 @@ impl fmt::Display for Anchor {
 /// does this block's ladder begin — and because the answer is either/or: a
 /// declared opening means the anchor's failed load feeds nothing.
 ///
-/// Bundling them is not only tidiness. `Programme::new` and `Programme::rehydrate`
+/// Bundling them is not only tidiness. `Linear::new` and `Linear::rehydrate`
 /// both take this, and passing an anchor without saying whether an opening
 /// overrides it is the mistake the pair exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

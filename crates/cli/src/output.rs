@@ -235,7 +235,7 @@ fn short(id: &str) -> String {
 pub fn programme_authored(
     id: domain::prescription::ProgrammeId,
     authored: application::Authored,
-    programme: &domain::prescription::Programme,
+    programme: &domain::prescription::Linear,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();

@@ -31,7 +31,7 @@ pub async fn derived_and_authored() -> Fallible<(tempfile::TempDir, SqlitePool)>
 
 /// The same, with a programme the caller chose.
 pub async fn with_programme(
-    programme: domain::prescription::Programme,
+    programme: domain::prescription::Linear,
 ) -> Fallible<(tempfile::TempDir, SqlitePool)> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;

@@ -4,7 +4,7 @@
 //! beside it. A programme is a record of intent, so nothing regenerates it and
 //! nothing replaces it wholesale.
 //!
-//! **Reading uses `Programme::rehydrate`, not `Programme::new`.** The three
+//! **Reading uses `Linear::rehydrate`, not `Linear::new`.** The three
 //! consistency checks that depend on nothing but the programme are re-run,
 //! because a row edited by hand should be caught. The ladder check is not: its
 //! span comes from the parameters, so on read it would be asserting that this
@@ -19,7 +19,7 @@ use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, PerRole, Programme, ProgrammeId, ProgrammeName,
+        Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, ProgrammeId, ProgrammeName,
         ProgrammeWindow, SessionRole, Skip, SlotId,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -154,7 +154,7 @@ impl SqliteProgrammeStore {
 /// can find it. The domain is asked instead, which costs one rehydration per
 /// programme and is the only answer that agrees with the calendar.
 impl SqliteProgrammeStore {
-    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Programme)>, StoreError> {
+    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Linear)>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", name AS "name!: String",
@@ -230,7 +230,7 @@ impl SqliteProgrammeStore {
             )
             .map_err(|error| corrupt(&error))?;
 
-            let programme = Programme::rehydrate(
+            let programme = Linear::rehydrate(
                 ProgrammeName::try_from(row.name).map_err(|error| corrupt(&error))?,
                 Primary::new(
                     PrimaryPattern::try_from(row.primary_pattern)
@@ -254,7 +254,7 @@ impl SqliteProgrammeStore {
 }
 
 impl ProgrammeStore for SqliteProgrammeStore {
-    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
+    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Linear)>, StoreError> {
         Ok(self
             .latest_of_each()
             .await?
@@ -271,7 +271,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .collect())
     }
 
-    async fn author(&self, programme: &Programme) -> Result<ProgrammeId, StoreError> {
+    async fn author(&self, programme: &Linear) -> Result<ProgrammeId, StoreError> {
         let mut tx = self
             .pool
             .begin()

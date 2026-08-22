@@ -26,8 +26,8 @@ use domain::{
         sequence::{AtLeastTwo, NonEmpty},
     },
     prescription::{
-        Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, LoadSteps,
-        PerRole, Percentage, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole, Skip,
+        Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, Linear,
+        LoadSteps, PerRole, Percentage, ProgrammeName, ResetProtocol, Scales, SessionRole, Skip,
         Step, TopSetReps, WarmupStep, Weekdays,
         linear::{Fill, Primary, SlotFills, StaticFill},
     },
@@ -311,7 +311,7 @@ pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
     ProgrammeName::try_from(text.to_owned()).map_err(invalid)
 }
 
-pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
+pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
     programme_skipping(&[])
 }
 
@@ -321,9 +321,9 @@ pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
 ///
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, or if a skip
 /// falls outside the block.
-pub fn programme_skipping(skips: &[Skip]) -> Result<Programme, ProgrammeFixtureError> {
+pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    Programme::new(
+    Linear::new(
         name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
@@ -345,7 +345,7 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Programme, ProgrammeFixtureE
 ///
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
-pub fn programme_from(start: Date) -> Result<Programme, ProgrammeFixtureError> {
+pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
     programme_named_from(FIXTURE_NAME, start)
 }
 
@@ -355,9 +355,9 @@ pub fn programme_from(start: Date) -> Result<Programme, ProgrammeFixtureError> {
 ///
 /// [`ProgrammeFixtureError`] if the name is unusable or the programme is
 /// inconsistent.
-pub fn programme_named_from(called: &str, start: Date) -> Result<Programme, ProgrammeFixtureError> {
+pub fn programme_named_from(called: &str, start: Date) -> Result<Linear, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    Programme::new(
+    Linear::new(
         name(called)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
@@ -383,12 +383,12 @@ pub fn programme_named_from(called: &str, start: Date) -> Result<Programme, Prog
 /// [`ProgrammeFixtureError`] only if a literal here is invalid; the programme
 /// itself is expected to be refused, which the caller asserts.
 pub fn gating_on_a_role_it_never_runs()
--> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     // Monday only, and Monday is light — so a heavy gate never fires.
     let monday_only =
         Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)]).map_err(invalid)?;
-    Ok(Programme::new(
+    Ok(Linear::new(
         name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
@@ -409,9 +409,9 @@ pub fn gating_on_a_role_it_never_runs()
 ///
 /// [`ProgrammeFixtureError`] only if a literal here is invalid.
 pub fn primary_not_counted_in_reps()
--> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    Ok(Programme::new(
+    Ok(Linear::new(
         name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
@@ -432,9 +432,9 @@ pub fn primary_not_counted_in_reps()
 ///
 /// [`ProgrammeFixtureError`] only if a literal here is invalid.
 pub fn primary_does_not_fill_its_slot()
--> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
-    Ok(Programme::new(
+    Ok(Linear::new(
         name(FIXTURE_NAME)?,
         // Names the knee-dominant slot as primary, but the primary exercise is a
         // deadlift, and the knee-dominant fill is a front squat.
