@@ -390,12 +390,9 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         let Ok(index) = WeekIndex::new(week) else {
             continue;
         };
+        // Every week of a linear block is a rung (decision 0013), so this
+        // only skips a week the ladder cannot price at all.
         let Some(percentage) = ladder.implied_percentage(anchor, index, steps) else {
-            // The test week is not a rung and carries no planned load. What it
-            // will be an attempt at depends on how far the progression gets,
-            // which is a fact about the record rather than about the plan — so
-            // it is reported below the table, not inside it.
-            println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "—");
             continue;
         };
         let heavy = ladder.heavy_top_set(index, steps);
@@ -412,14 +409,6 @@ pub fn programme_standing(standing: &application::LadderStanding) {
             light.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
         );
     }
-
-    // What the block's test would be an attempt at, as things stand. It moves as
-    // the progression does — every rung that goes up raises it — so it is stated
-    // as of the record rather than printed in the plan above as though settled.
-    println!(
-        "  the test is for {} as the record stands",
-        standing.progress.test_target(ladder, steps)
-    );
 
     match standing.progress.reset() {
         None => println!(

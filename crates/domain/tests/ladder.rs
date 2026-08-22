@@ -60,7 +60,12 @@ fn week(index: u32) -> Result<WeekIndex, Box<dyn std::error::Error>> {
     Ok(WeekIndex::new(index)?)
 }
 
-/// US3-1: two inputs generate the block, and the last week is the test.
+/// US3-1: two inputs generate the block, and every week of it climbs.
+///
+/// **No test week** (decision 0013). A linear programme's duration used to be
+/// its climbing weeks plus a test, so seven weeks meant six rungs. A test is a
+/// programme in its own right now, so seven weeks means seven rungs and the
+/// eighth week is simply past the end.
 #[test]
 fn a_duration_and_an_anchor_generate_every_week() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
@@ -69,14 +74,14 @@ fn a_duration_and_an_anchor_generate_every_week() {
     let Ok(opening) = from_test(anchor) else {
         panic!("-10% is a percentage")
     };
-    // Seven weeks: six climbing, then the test.
+    // Seven weeks, all of them climbing.
     let Ok(ladder) = Ladder::new(opening, climb, 7, &increment) else {
         panic!("a rising climb over seven weeks is a ladder")
     };
 
-    assert_eq!(ladder.climbing_weeks(), 6);
+    assert_eq!(ladder.climbing_weeks(), 7);
 
-    for index in 1..=6 {
+    for index in 1..=7 {
         let Ok(w) = week(index) else {
             panic!("weeks are one-based")
         };
@@ -86,9 +91,9 @@ fn a_duration_and_an_anchor_generate_every_week() {
         );
     }
 
-    // The seventh week is the test. It is not a ladder position and has no
-    // load, which the type says rather than a caller remembering.
-    let Ok(past_the_climb) = week(7) else {
+    // The eighth week is past the ladder. It is not a position and has no load,
+    // which the type says rather than a caller remembering.
+    let Ok(past_the_climb) = week(8) else {
         panic!("weeks are one-based")
     };
     assert!(ladder.heavy_top_set(past_the_climb, &increment).is_none());
@@ -293,21 +298,24 @@ fn the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops() {
     );
 }
 
-/// A block with one climbing week is degenerate, not invalid — and opens where
-/// the ladder opens, having had no week in which to climb.
+/// The shortest block opens where the ladder opens and climbs once.
+///
+/// Two weeks is the shortest the store will hold — `CHECK (duration_weeks >= 2)`
+/// — and under decision 0013 both of them climb, where the second used to be a
+/// test. The first week is still the opening, having had no week in which to
+/// climb to it.
 #[test]
-fn a_single_climbing_week_opens_and_stops() {
+fn the_shortest_block_opens_and_climbs_once() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
     let Ok(opening) = from_test(anchor) else {
         panic!("-10% is a percentage")
     };
-    // Two weeks: one climbing, then the test.
     let Ok(ladder) = Ladder::new(opening, climb, 2, &increment) else {
         panic!("two weeks is the shortest block")
     };
-    assert_eq!(ladder.climbing_weeks(), 1);
+    assert_eq!(ladder.climbing_weeks(), 2);
 
     // -10% off the failed 95 is 85.5, which is 85 on the grid.
     let (Ok(only), Ok(expected)) = (week(1), kg("85")) else {
