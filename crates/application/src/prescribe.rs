@@ -19,11 +19,11 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps, Periodisation,
-        Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
+        Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
+        Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, SessionRole,
         SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan, WorkoutShape,
-        linear::SlotContent, progress_after,
+        linear::SlotContent, progress_after, rep_max,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -174,11 +174,13 @@ where
         // for a programme that climbs, which has neither question to ask.
         let inheritance = self.inheritance(&programme, &parameters, date).await?;
 
-        // The week a block is in is the block's business rather than the
-        // calendar's: `Calendar::place` reports every week as a climbing one
-        // since decision 0013, and which of them is the exit test is decided by
-        // the phase plan.
-        let week = week_of(&programme, week);
+        // **The derivation gets the calendar's week and the record gets the
+        // programme's.** `Calendar::place` reports every week as a climbing one
+        // since decision 0013 — which of them is a test is the block's business,
+        // decided by its phase plan and by whether it measures its own entry. So
+        // the index the derivation needs survives, and what is stored is what
+        // the week actually was.
+        let recorded = week_of(&programme, week);
 
         let mut items = Vec::new();
         let mut underivable = Vec::new();
@@ -202,7 +204,7 @@ where
             WorkoutShape::new(items),
             date,
             role,
-            week,
+            recorded,
             derived_from(&programme, inheritance)?,
             parameters,
             parameters_at,
@@ -448,6 +450,12 @@ fn issue_slots(
         .collect()
 }
 
+/// The session a block's entry test is taken on.
+///
+/// Heavy, and for the same reason a standalone test's is: it is the week's whole
+/// purpose, and the other session is whatever the block states for it.
+const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
+
 /// Which week this session belongs to, in the vocabulary the store speaks.
 ///
 /// **The calendar cannot answer for a block.** Since decision 0013 a calendar
@@ -461,10 +469,10 @@ fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
         Programme::Test(_) => WeekKind::Test,
         Programme::Periodisation(Periodisation::Linear(_)) => placed,
         Programme::Periodisation(Periodisation::Block(block)) => {
-            let (Ok(plan), WeekKind::Climbing(index)) = (block.plan(), placed) else {
+            let WeekKind::Climbing(index) = placed else {
                 return placed;
             };
-            plan.kind(index).unwrap_or(placed)
+            block.kind(index).unwrap_or(placed)
         }
     }
 }
@@ -564,7 +572,9 @@ fn primary_slot_item(
         Programme::Periodisation(Periodisation::Linear(linear)) => {
             linear_load(linear, parameters, role, week, progress, steps)
         }
-        Programme::Periodisation(Periodisation::Block(block)) => block_load(block, week, steps),
+        Programme::Periodisation(Periodisation::Block(block)) => {
+            block_load(block, role, week, steps)
+        }
         Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {
@@ -688,21 +698,51 @@ fn linear_load(
 /// there is no ladder position to hold.
 fn block_load(
     block: &Periodised,
+    role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
 ) -> Result<PrimaryLoad, UnderivableReason> {
-    let Ok(plan) = block.plan() else {
-        return Err(UnderivableReason::NoLadder);
-    };
-    // The calendar reports every week as a climbing one; which of them is the
-    // exit test is the block's business, not the calendar's.
+    // The calendar reports every week as a climbing one; which of them is a test
+    // is the block's business, not the calendar's.
     let WeekKind::Climbing(index) = week else {
         return Err(UnderivableReason::NoLadder);
     };
-    let Some(planned) = plan.week(index) else {
+    let Some(planned) = block.week(index) else {
         return Err(UnderivableReason::NoLadder);
     };
     let anchor = block.entry().anchor().load();
+    let planned = match planned {
+        // **The week the block measures what it is about to plan from.** The ramp
+        // builds toward the anchor the block was authored with, expressed at the
+        // repetition count the attempt is performed at — so a triple works up to
+        // the 3RM the operator expects rather than to a one-rep maximum nobody
+        // is attempting. Nothing here reads another programme: what this block
+        // expects is the block's own statement, and the week is where it finds
+        // out whether it was right.
+        BlockWeek::Entry(test) => {
+            if role == BLOCK_ENTRY_TEST_ROLE {
+                let Some(share) = rep_max(test.reps()) else {
+                    return Err(UnderivableReason::NoLadder);
+                };
+                return Ok(PrimaryLoad::Attempt {
+                    toward: steps.quantise_loaded(share.of(anchor)),
+                    reps: test.reps(),
+                });
+            }
+            // The other session of that week, at the load the block states for
+            // it. Absent means the operator does not run it: there is no honest
+            // derivation for a light session of a lift whose maximum this week
+            // is about to measure.
+            let Some(load) = test.light() else {
+                return Err(UnderivableReason::NoEntryTestLightLoad);
+            };
+            return Ok(PrimaryLoad::TopSet {
+                load: steps.quantise_loaded(load),
+                reps: test.reps(),
+            });
+        }
+        BlockWeek::Planned(planned) => planned,
+    };
     match planned {
         WeekPlan::Working {
             sets, reps, load, ..

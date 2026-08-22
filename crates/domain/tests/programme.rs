@@ -18,9 +18,9 @@ use domain::{
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, Fill, InconsistentProgramme, PerRole,
-        Periodisation, Periodised, Primary, PrimaryPattern, Programme, ProgrammeName, SessionRole,
-        Skip, SlotFills, StaticFill, Test, TestTarget, Tested, Weekdays,
+        Anchor, AnchorProvenance, BlockWeek, Entry, EntryTest, Fill, InconsistentProgramme,
+        PerRole, Periodisation, Periodised, Primary, PrimaryPattern, Programme, ProgrammeName,
+        SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex, Weekdays,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -98,10 +98,25 @@ fn anchor(provenance: AnchorProvenance) -> Result<Anchor, Invalid> {
 }
 
 /// A ten-week block opening on 21 September, three days after its entry test.
-fn block(provenance: AnchorProvenance) -> Result<Periodised, Invalid> {
-    let calendar =
-        Calendar::new(date(2026, 9, 21)?, 10, &[], weekdays()?, TimeZone::UTC).map_err(invalid)?;
-    Periodised::new(
+///
+/// **Two shapes, and the provenance rule is the whole difference.** A block
+/// handed a test taken before it opens from a measured maximum; a block that
+/// runs its own opens from what the operator expects, and its first week finds
+/// out.
+fn block(
+    provenance: AnchorProvenance,
+    entry_test: Option<EntryTest>,
+) -> Result<Result<Periodised, InconsistentProgramme>, Invalid> {
+    let calendar = Periodised::weeks(
+        date(2026, 9, 21)?,
+        10,
+        entry_test.is_some(),
+        &[] as &[Skip],
+        weekdays()?,
+        TimeZone::UTC,
+    )
+    .map_err(invalid)?;
+    Ok(Periodised::new(
         name("autumn")?,
         Primary::new(
             PrimaryPattern::KneeDominant,
@@ -110,9 +125,14 @@ fn block(provenance: AnchorProvenance) -> Result<Periodised, Invalid> {
         ),
         fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)))?,
         Entry::derived(anchor(provenance)?),
+        entry_test,
         calendar,
-    )
-    .map_err(invalid)
+    ))
+}
+
+/// A three-repetition entry test, with no light session.
+fn entry_test() -> Result<EntryTest, Invalid> {
+    EntryTest::new(reps(3)?, None).map_err(invalid)
 }
 
 /// A test on the week of 14 September: Monday light, Friday the test itself.
@@ -260,22 +280,92 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
 #[test]
 fn a_block_refuses_an_anchor_that_was_not_tested() {
     for provenance in [AnchorProvenance::Asserted, AnchorProvenance::Estimated] {
-        let refused = block(provenance);
+        let Ok(refused) = block(provenance, None) else {
+            panic!("the fixture builds")
+        };
         assert!(
-            refused.is_err(),
-            "a block may not open from an anchor that was {provenance}"
+            matches!(
+                refused,
+                Err(InconsistentProgramme::BlockAnchorIsNotTested { .. })
+            ),
+            "a block with no entry test may not open from an anchor that was {provenance}"
         );
     }
+    let Ok(accepted) = block(AnchorProvenance::Tested, None) else {
+        panic!("the fixture builds")
+    };
     assert!(
-        block(AnchorProvenance::Tested).is_ok(),
+        accepted.is_ok(),
         "and a tested one is exactly what it wants"
+    );
+}
+
+/// A block that runs its own entry test opens from an expectation.
+///
+/// **The rule above is what this one answers.** Requiring a tested anchor of a
+/// block that is about to take the test would be requiring a test before the
+/// test; the anchor here is what the operator expects to lift, and week one is
+/// where they find out.
+#[test]
+fn a_block_that_tests_its_own_entry_needs_no_tested_anchor() {
+    let (Ok(test), Ok(built)) = (entry_test(), block(AnchorProvenance::Asserted, None)) else {
+        panic!("the fixture builds")
+    };
+    assert!(
+        built.is_err(),
+        "the same anchor without an entry test is refused"
+    );
+    let Ok(built) = block(AnchorProvenance::Asserted, Some(test)) else {
+        panic!("the fixture builds")
+    };
+    assert!(
+        built.is_ok(),
+        "and with one it is the number the week is about to check"
+    );
+}
+
+/// The entry test takes a week in front of the phases, and counts for none.
+#[test]
+fn an_entry_test_adds_a_week_and_shifts_the_phases() {
+    let (Ok(test), Ok(Ok(without))) = (entry_test(), block(AnchorProvenance::Tested, None)) else {
+        panic!("the fixture builds")
+    };
+    let Ok(Ok(with)) = block(AnchorProvenance::Tested, Some(test)) else {
+        panic!("the fixture builds")
+    };
+
+    assert_eq!(without.phase_weeks(), 10);
+    assert_eq!(
+        with.phase_weeks(),
+        10,
+        "the phases are the same ten weeks either way"
+    );
+    assert_eq!(
+        with.calendar().duration_weeks(),
+        11,
+        "and the week in front"
+    );
+
+    let Ok(first) = WeekIndex::new(1) else {
+        panic!("one is a week index")
+    };
+    assert!(
+        matches!(with.week(first), Some(BlockWeek::Entry(_))),
+        "week one is the measurement"
+    );
+    assert_eq!(
+        without
+            .week(first)
+            .map(|week| matches!(week, BlockWeek::Entry(_))),
+        Some(false),
+        "and without an entry test week one is already a phase"
     );
 }
 
 /// A block's weeks are its phase weeks, with no entry test among them.
 #[test]
 fn a_block_plans_exactly_the_weeks_its_calendar_holds() {
-    let Ok(block) = block(AnchorProvenance::Tested) else {
+    let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
         panic!("a tested anchor makes a block")
     };
     let Ok(plan) = block.plan() else {
@@ -311,7 +401,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     );
     assert_eq!(programme.gating_role(), None, "and gates nothing");
 
-    let Ok(block) = block(AnchorProvenance::Tested) else {
+    let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
         panic!("a tested anchor makes a block")
     };
     let programme = Programme::Periodisation(Periodisation::Block(block));

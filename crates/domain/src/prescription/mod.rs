@@ -40,7 +40,7 @@ pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenan
 // holds that name at the crate root, and the two are different things — a group
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
-pub use block::{InvalidBlock, Periodised, Phase, WeekPlan};
+pub use block::{BlockWeek, EntryTest, InvalidBlock, Periodised, Phase, WeekPlan};
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,

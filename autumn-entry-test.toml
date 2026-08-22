@@ -1,10 +1,19 @@
-# The standalone test on Friday 18 September.
+# A standalone test on Friday 18 September.
 #
 # Authored intent (§ 12), like `programme.toml` beside it — and a programme in
-# its own right, belonging to neither neighbour (decision 0013). The summer block
-# ends on Sunday 13 September and the autumn block opens on Monday 21; this is
-# the week between them, and what it produces is the maximum the autumn block
-# anchors on.
+# its own right, belonging to neither neighbour (decision 0013).
+#
+# **This is one of two ways to arrive at a maximum, and probably not the one the
+# autumn block will use.** Decision 0016 gives a block an optional entry test of
+# its own, because a test session has to run the lower slots the way the
+# programme it anchors runs them — so the pattern, the primary and the accessory
+# fill have to agree between the test and the block. Held in the block they
+# cannot disagree; held here they are three facts nothing checks.
+#
+# What this template is still for is a test between two *linear* programmes, or
+# one with nothing after it. If the autumn block is authored with
+# `[programme.entry_test]`, this document is superseded by it and should be
+# deleted rather than left to compete for the same week.
 #
 # **Nearly everything here is absent, and that is the point.** A test is two
 # sessions. Re-authoring seventeen slots, a warm-up ramp and six load scales to
@@ -42,7 +51,7 @@ primary_exercise = "front-squat"
 # Nothing here is peaking anything, so this measures the lift the way the summer
 # block has been climbing it.
 #
-# Stated by the operator. Change it to 3 the day the autumn block goes in.
+# Stated by the operator.
 reps             = 1
 
 # Monday 14 September. The week runs to Sunday 20, and the autumn block opens

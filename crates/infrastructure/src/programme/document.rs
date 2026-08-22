@@ -21,6 +21,7 @@ use domain::{
         InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole, Percentage,
         Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole,
         Skip, Step, Test, TestTarget, Tested, TopSetReps, WarmupStep, Weekdays,
+        block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -215,6 +216,36 @@ struct ProgrammeSection {
     /// number written here does not move when the record does.
     #[serde(default)]
     target: Option<String>,
+    /// The week a block spends measuring the maximum it plans from.
+    ///
+    /// **Absent means the block opens from a test that already happened**, and
+    /// its anchor must then say `provenance = "tested"`. Present means the block
+    /// measures its own: the anchor becomes what the operator expects, this week
+    /// finds out, and a result that differs is answered by re-authoring.
+    ///
+    /// It never changes what `duration_weeks` means. That number counts phase
+    /// weeks whether this is here or not, and the calendar carries one more when
+    /// it is — which is the fork decision 0013 removed from the linear template,
+    /// kept out of this one.
+    #[serde(default)]
+    entry_test: Option<EntryTestSection>,
+}
+
+/// A block's entry-test week.
+#[derive(serde::Deserialize)]
+struct EntryTestSection {
+    /// What the attempt is performed at. A triple, by convention: a cold maximal
+    /// single measures technique as much as strength, and a peaked one is what
+    /// the block's realisation weeks prepare for.
+    reps: u32,
+    /// What the week's other session runs its primary at.
+    ///
+    /// **Absent means it is not run.** There is no derivation available here —
+    /// the lift's maximum is what this week is about to measure — so a number is
+    /// stated or the session does not happen. Anything else would be a load
+    /// fitted to a record that has not been made yet.
+    #[serde(default)]
+    light: Option<String>,
 }
 
 /// A skip, as a bare date or as a run of days.
@@ -658,10 +689,27 @@ impl Document {
                 ("programme.target", section.target.is_some()),
             ],
         )?;
-        let calendar = Calendar::new(start, duration, interruptions, weekdays, zone)?;
+        let entry_test = section
+            .entry_test
+            .as_ref()
+            .map(|test| {
+                let light = test
+                    .light
+                    .as_deref()
+                    .map(|load| mass("programme.entry_test.light", load))
+                    .transpose()?;
+                EntryTest::new(reps("programme.entry_test.reps", test.reps)?, light)
+                    .map_err(|error| invalid("programme.entry_test", error))
+            })
+            .transpose()?;
         let fills = self.fills()?;
 
         if template == "linear" {
+            // A linear programme has neither an entry test nor an exit one
+            // (decision 0013), so a document naming one has the wrong template
+            // rather than a spare field.
+            Self::refuse_unused("linear", &[("programme.entry_test", entry_test.is_some())])?;
+            let calendar = Calendar::new(start, duration, interruptions, weekdays, zone)?;
             Ok(Programme::Periodisation(Periodisation::Linear(
                 Linear::new(
                     name,
@@ -676,8 +724,26 @@ impl Document {
             // A block's loads are shares of its anchor, so there is no
             // opening for a document to declare and none to derive.
             Self::refuse_unused("block", &[("programme.opening", section.opening.is_some())])?;
+            // `duration_weeks` counts phase weeks; an entry test adds a week in
+            // front of them, which is why the calendar is built rather than
+            // taken from that number directly.
+            let calendar = Periodised::weeks(
+                start,
+                duration,
+                entry_test.is_some(),
+                interruptions,
+                weekdays,
+                zone,
+            )?;
             Ok(Programme::Periodisation(Periodisation::Block(
-                Periodised::new(name, primary, fills, Entry::derived(anchor), calendar)?,
+                Periodised::new(
+                    name,
+                    primary,
+                    fills,
+                    Entry::derived(anchor),
+                    entry_test,
+                    calendar,
+                )?,
             )))
         }
     }

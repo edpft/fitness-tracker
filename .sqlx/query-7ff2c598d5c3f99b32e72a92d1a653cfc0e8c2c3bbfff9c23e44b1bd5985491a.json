@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO programme (\n                name, authored_at, template, primary_pattern, primary_exercise,\n                anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,\n                opening_grams, gating_role, start_date, duration_weeks,\n                test_reps, test_target_grams, entry_test_reps, entry_test_light_grams\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 17
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ff2c598d5c3f99b32e72a92d1a653cfc0e8c2c3bbfff9c23e44b1bd5985491a"
+}

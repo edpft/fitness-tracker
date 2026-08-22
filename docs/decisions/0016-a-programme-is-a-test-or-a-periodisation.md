@@ -4,7 +4,7 @@
 **Implements**: `0013-a-test-belongs-to-one-programme-or-to-none.md`, whose
 consequences this settles in types.
 **Amends**: `0014-block-periodisation-keeps-its-endpoint.md`, whose entry-test
-week is removed here. See its own amendment.
+week becomes optional here rather than mandatory. See its own amendment.
 
 ## What was decided
 
@@ -27,37 +27,67 @@ two near-identical names one module apart is a misreading waiting to happen.
 
 Five things follow, each settled by the operator on 2026-08-22.
 
-**1. A block no longer contains its own entry test.** `total_weeks` was
-`duration_weeks + 1` and week 1 was an entry test, which made a duration mean two
-things in exactly the way linear's did before 0013. 0013's table says a block
-"requires a preceding one as input", and its own worked example puts the
-standalone test on 18 September with the block opening on 21. So the entry test
-is the standalone test before it, or the previous block's exit test, and a
-block's weeks are its phase weeks.
+**1. A block may run its own entry test, as an optional week in front of its
+phases.** This was first settled the other way — the entry test moved out of the
+block entirely, as it had moved out of the linear template — and the operator
+overturned it the same day, before any of it merged.
 
-**2. A test carries the repetition count it is performed at.** `block.rs` enters
-a block on a triple deliberately — a cold maximal single measures technique as
-much as strength — and exits on a single. Once the entry test is a programme of
-its own, that count has to live on the test. `Block::entry_reps` is therefore
-gone: by the time a block reads the number it is an `Anchor` and already a
-one-rep maximum, and the check that the maximum table can convert it followed the
-number to `Test`.
+The reason is that a test session has to run the lower slots the way the
+programme it anchors runs them: testing the front squat makes the hip-dominant
+slot that day's accessory. So the pattern, the primary exercise and the accessory
+fill have to agree between the test and the block. Three facts that must agree
+across two documents, with nothing checking them, is worse than the duplication
+it looks like — small enough to seem harmless, load-bearing enough that
+disagreeing breaks the session.
 
-**3. A block requires `AnchorProvenance::Tested`; linear accepts any.** This is
-what makes 0013's table a rule rather than advice. Rows three and six say a lift
-change into a block needs a standalone test, and if an asserted anchor satisfied
-the entry requirement the operator could skip that test by stating a number.
-Linear accepts any provenance because a linear programme may declare its opening
-outright.
+`duration_weeks` still counts phase weeks and only phase weeks. The fork 0013
+refused for the linear template came from the test being its *last* week, folded
+into the count, so `5` meant either five climbing weeks or four and a test. A
+week prepended and flagged forks nothing: the calendar carries one more when the
+entry test is there, and the number the operator's table states never changes
+meaning.
+
+**2. A test carries the repetition count it is performed at, whichever kind of
+test it is.** `block.rs` enters a block on a triple deliberately — a cold maximal
+single measures technique as much as strength, and a peaked one is what the
+realisation weeks prepare for — and exits on a single. `Block::entry_reps` is
+gone: the count belongs to the test that establishes the number, and by the time
+the phases read that number it is an `Anchor` and already a one-rep maximum. The
+check that the maximum table can convert it followed the count.
+
+**3. A block that does not test its own entry requires
+`AnchorProvenance::Tested`; one that does may open from any provenance, and
+linear accepts any.** This is what makes 0013's table a rule rather than advice.
+Rows three and six say a lift change into a block needs a test, and if an
+asserted anchor satisfied the entry requirement the operator could skip that test
+by stating a number.
+
+A block that runs its own entry test is that case answered rather than evaded:
+its anchor is what the operator *expects* to lift, week one is where they find
+out, and a result that differs is answered by re-authoring — which 0012 makes a
+supersession rather than a second programme. Requiring `Tested` there would be
+requiring a test before the test.
 
 **4. A test's fills are resolved when the document is read.** A test document
 names the lift being tested and any fill moving with it; every slot it omits
 comes from the programme before it. That resolution happens at authoring, so what
 is stored is a complete `SlotFills` exactly as a linear programme's is.
 
-**5. The test week's other session is the predecessor's.** The heavy session is
-the test; the light one runs the predecessor's primary at the load its
-progression stands at.
+**5. What the other session of a test week runs depends on whose week it is.**
+The heavy session is always the test. For a standalone test the light session is
+the predecessor's, at the load its progression stands at. For a block's entry
+test it is the block's own, at a load the block *states*: the lift's maximum is
+what that week is about to measure, so there is nothing to take a share of, and a
+load inherited from a programme that may have trained a different lift would be a
+number fitted to the record with no decision behind it. Absent means the session
+is not run.
+
+**And a block's entry test needs no target at all.** The ramp builds toward the
+block's own authored anchor, expressed at the test's repetition count through
+`rep_max` — so a triple works up to the 3RM the operator expects rather than to a
+one-rep maximum nobody is attempting. No other programme is consulted, which is
+the difference between this and the standalone test: what a block expects is the
+block's own statement.
 
 ## Why
 
@@ -68,9 +98,14 @@ categories actually are, and the code got shorter for it: `Periodisation` has on
 `anchor`, one `gating_role`, one `entry`, and `Programme` has neither.
 
 **Because the operator will not author a whole programme for two sessions.**
-That was the stated objection and it shaped 4 and 5 between them. A test document
-is nineteen lines of settled values; everything else — seventeen slot fills, the
-warm-up ramp, six load scales — is inherited.
+That was the stated objection and it shaped 4 and 5 between them. A standalone
+test document is eleven lines of settled values; everything else — seventeen slot
+fills, the warm-up ramp, six load scales — is inherited.
+
+**And the same objection, pushed, is why a block owns its entry test.** If the
+test has to state the coming block's pattern, primary and accessory anyway, then
+authoring the test is authoring part of the block — so it should be authored
+once, in the block, where nothing can disagree with it.
 
 **Resolved at authoring rather than at derivation**, so that re-authoring the
 summer block in October cannot silently move what the September test prescribed.
@@ -109,6 +144,16 @@ come apart.
 
 **`programme show` gains `--date`.** With one programme ever in force "the
 programme" was unambiguous. With three in the store it is a question about a day.
+
+## What each is for
+
+```text
+standalone test   between two linear programmes, or with nothing after it
+block entry test  before a block, which is what a block is entered on
+```
+
+A standalone test remains useful and is not superseded, but it is no longer how a
+block gets its anchor.
 
 ## What is not decided here
 

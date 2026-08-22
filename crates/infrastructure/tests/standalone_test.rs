@@ -60,6 +60,66 @@ monday = "light"
 friday = "heavy"
 "#;
 
+/// A block that measures its own entry, in the week after the fixture block.
+///
+/// **Ten phase weeks, and eleven calendar weeks.** `duration_weeks` counts
+/// phases whether or not there is an entry test; the week in front is added by
+/// the presence of the `[programme.entry_test]` table and by nothing else.
+const BLOCK_DOCUMENT: &str = r#"
+[programme]
+name             = "autumn"
+template         = "block"
+primary          = "knee_dominant"
+primary_exercise = "front-squat"
+gating_role      = "heavy"
+start            = "2026-08-31"
+duration_weeks   = 10
+
+[programme.weekdays]
+monday = "light"
+friday = "heavy"
+
+# What the operator expects to lift. Week one finds out; a result that differs is
+# answered by re-authoring, which decision 0012 makes a supersession.
+[programme.anchor]
+load       = "90kg"
+provenance = "asserted"
+from       = "2026-07-03"
+
+[programme.entry_test]
+reps  = 3
+light = "60kg"
+
+# A block states every slot itself. Only a test inherits, and only because a test
+# is two sessions rather than a programme.
+[fills]
+knee_dominant                = "front-squat"
+upper_push                   = "chest-dip"
+upper_pull                   = "neutral-grip-pull-up"
+hip_dominant                 = "nordic-hamstrings-curls"
+biceps                       = "preacher-curl-barbell"
+triceps                      = "overhead-triceps-extension-cable"
+wrist_flexion                = "wrist-flexion-dumbbell"
+wrist_extension              = "wrist-extension-dumbbell"
+core                         = "bent-over-cable-chop"
+handstand_hold               = "handstand-hold"
+dead_hang                    = "dead-hang"
+hip_flexor_stretch           = "couch-stretch"
+hip_external_rotator_stretch = "ninety-ninety"
+hamstring_stretch            = "standing-straddle-fold"
+groin_stretch                = "squatting-groin-stretch"
+
+[fills.plyometric]
+exercise = "pogo"
+sets     = 3
+reps     = 20
+
+[fills.power]
+exercise = "box-jump"
+sets     = 3
+reps     = 5
+"#;
+
 /// A store holding the corpus, derived, with the fixture programme authored and
 /// a standalone test in the week after it.
 ///
@@ -67,6 +127,41 @@ friday = "heavy"
 /// 30 August and this week is adjacent rather than overlapping — which the
 /// overlap rule would otherwise refuse.
 async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
+    let (parameters, directory, pool) = corpus_store().await?;
+
+    // The test inherits the fills of the programme it follows, resolved here,
+    // against what the store already holds.
+    let test = test_programme(&pool, &parameters).await?;
+    Authoring::new(
+        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(&test, &parameters)
+    .await?;
+
+    Ok((
+        Prescribing::new(PrescriptionPorts {
+            history: SqliteExerciseHistory::new(pool.clone()),
+            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            parameters: SqliteGenerationParameterStore::new(pool.clone()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+        }),
+        directory,
+    ))
+}
+
+/// The corpus, landed and derived, with the fixture linear programme authored.
+///
+/// Shared by both halves of this file: what succeeds the fixture block differs,
+/// and everything before that does not.
+async fn corpus_store() -> Result<
+    (
+        domain::prescription::GenerationParameters,
+        tempfile::TempDir,
+        SqlitePool,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
 
@@ -105,25 +200,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     )
     .await?;
 
-    // The test inherits the fills of the programme it follows, resolved here,
-    // against what the store already holds.
-    let test = test_programme(&pool, &parameters).await?;
-    Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&test, &parameters)
-    .await?;
-
-    Ok((
-        Prescribing::new(PrescriptionPorts {
-            history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
-            parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
-        }),
-        directory,
-    ))
+    Ok((parameters, directory, pool))
 }
 
 /// The test document, read over the fills the store already holds.
@@ -312,4 +389,126 @@ fn a_test_that_names_a_gating_role_is_refused() {
         Ok(_) => panic!("a test with a gating role must not author"),
         Err(other) => panic!("the refusal names the field, got {other}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// A block that measures its own entry (decision 0016, as amended).
+
+/// A store with the fixture block, and an autumn block that tests its own entry.
+async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
+    let (_, directory, pool) = corpus_store().await?;
+    let parameters = programme::parameters()?;
+    let document: Document = toml::from_str(BLOCK_DOCUMENT)?;
+    let block = document.programme(&parameters, corpus::zone()?.as_time_zone(), None)?;
+    Authoring::new(
+        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(&block, &parameters)
+    .await?;
+
+    Ok((
+        Prescribing::new(PrescriptionPorts {
+            history: SqliteExerciseHistory::new(pool.clone()),
+            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            parameters: SqliteGenerationParameterStore::new(pool.clone()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+        }),
+        directory,
+    ))
+}
+
+macro_rules! blocked {
+    () => {
+        match corpus::block_on(with_block()) {
+            Ok(Ok(ready)) => ready,
+            Ok(Err(error)) => panic!("the corpus lands, derives and authors: {error}"),
+            Err(error) => panic!("a runtime is available: {error}"),
+        }
+    };
+}
+
+/// The block's first week is its entry test, ramped toward what it expects.
+///
+/// **Toward the anchor at the test's repetition count, and nothing else is
+/// read.** A triple works up to the 3RM the operator expects rather than to a
+/// one-rep maximum nobody is attempting, and no other programme is consulted:
+/// what the block expects is the block's own statement.
+#[test]
+fn a_blocks_entry_test_ramps_toward_what_it_expects() {
+    let (prescriber, _directory) = blocked!();
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 4), Reissue::No));
+
+    assert_eq!(issued.workout.week(), WeekKind::Test);
+    let Some(PrescribedItem::Exercise { exercise, .. }) =
+        issued.workout.shape().item_for(SlotId::KneeDominant)
+    else {
+        panic!("the tested lift is a single exercise")
+    };
+    let domain::prescription::PrescribedExercise::ForReps { sets, .. } = exercise else {
+        panic!("the front squat is counted in repetitions")
+    };
+    let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
+    assert_eq!(working.len(), 1, "one attempt, and nothing after it");
+    assert!(
+        working[0].prescription.load().is_none(),
+        "the attempt is autoregulated"
+    );
+}
+
+/// The other session of that week runs the load the block states for it.
+///
+/// Authored rather than derived, because the lift's maximum is what the week is
+/// about to measure — so there is nothing to take a share of.
+#[test]
+fn the_entry_test_weeks_other_session_runs_the_authored_load() {
+    let (prescriber, _directory) = blocked!();
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 8, 31), Reissue::No));
+
+    let Some(PrescribedItem::Exercise { exercise, .. }) =
+        issued.workout.shape().item_for(SlotId::KneeDominant)
+    else {
+        panic!("the primary is a single exercise")
+    };
+    let domain::prescription::PrescribedExercise::ForReps { sets, .. } = exercise else {
+        panic!("the front squat is counted in repetitions")
+    };
+    let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
+    let Some(first) = working.first() else {
+        panic!("the session has a working set")
+    };
+    assert_eq!(
+        first.prescription.load(),
+        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
+            60_000
+        ))),
+        "the 60kg the document states, not a share of anything"
+    );
+}
+
+/// The phases start the week after the entry test.
+#[test]
+fn the_phases_start_behind_the_entry_test() {
+    let (prescriber, _directory) = blocked!();
+    // The Friday of week two: the first week of accumulation, which runs sets
+    // across rather than one attempt.
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 11), Reissue::No));
+
+    assert!(
+        matches!(issued.workout.week(), WeekKind::Climbing(_)),
+        "week two is a working week, not a second test"
+    );
+    let Some(PrescribedItem::Exercise { exercise, .. }) =
+        issued.workout.shape().item_for(SlotId::KneeDominant)
+    else {
+        panic!("the primary is a single exercise")
+    };
+    let domain::prescription::PrescribedExercise::ForReps { sets, .. } = exercise else {
+        panic!("the front squat is counted in repetitions")
+    };
+    let working = sets.iter().filter(|set| !set.warmup).count();
+    assert!(
+        working > 1,
+        "accumulation runs sets across, got {working} working sets"
+    );
 }

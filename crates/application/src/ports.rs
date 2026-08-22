@@ -625,6 +625,13 @@ pub enum UnderivableReason {
         "the other session of a test week is the previous programme's, and          there is no previous programme"
     )]
     NoPredecessor,
+    /// A block's entry-test week states no load for its other session, which is
+    /// how the operator says they do not run it.
+    #[error(
+        "this block's entry-test week states no load for its other session, so \
+         it runs only the test"
+    )]
+    NoEntryTestLightLoad,
 }
 
 /// The projection of the performed record that prescription reads.

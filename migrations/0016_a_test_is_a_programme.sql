@@ -22,11 +22,14 @@
 -- a stored number would be stale the first time a session goes up. It is
 -- recorded only where there is nothing to inherit from.
 --
--- **A block's anchor must have been tested.** Decision 0013 makes provenance
--- load-bearing there and nowhere else: if an asserted anchor satisfied a block's
--- entry requirement, switching lifts could skip the standalone test by stating a
--- number. The domain refuses it and so does this, because a rule that only one
--- of the two enforces is a rule that drifts.
+-- **A block that does not test its own entry must have been handed one.**
+-- Decision 0013 makes provenance load-bearing there and nowhere else: if an
+-- asserted anchor satisfied a block's entry requirement, switching lifts could
+-- skip the measurement by stating a number. A block that runs its own entry test
+-- is that case answered rather than evaded, so it is exempt — requiring `tested`
+-- there would be requiring a test before the test. The domain enforces both
+-- halves and so does this, because a rule that only one of the two holds is a
+-- rule that drifts.
 --
 -- **`prescribed_workout` follows.** It records the anchor by value, and a
 -- session issued from a test programme has none. It gains the target by value
@@ -91,6 +94,20 @@ CREATE TABLE programme (
     test_target_grams    INTEGER CHECK (test_target_grams IS NULL
                                         OR test_target_grams > 0),
 
+    -- A block's entry test: the week it spends measuring what it plans from.
+    --
+    -- Null is a block that opens from a test which already happened, and its
+    -- anchor must then say 'tested'. Non-null is a block that measures its own,
+    -- so the anchor is what the operator expects and the week finds out.
+    --
+    -- `entry_test_light_grams` is what the week's other session runs its primary
+    -- at, and null means it is not run: the lift's maximum is what the week is
+    -- about to measure, so there is nothing to derive a light load from and the
+    -- operator states one or trains once that week.
+    entry_test_reps      INTEGER CHECK (entry_test_reps IS NULL OR entry_test_reps > 0),
+    entry_test_light_grams INTEGER CHECK (entry_test_light_grams IS NULL
+                                          OR entry_test_light_grams > 0),
+
     -- A test has no anchor, no opening and no gate; every other template has an
     -- anchor and a gate, and may have an opening.
     CHECK ((template = 'test') = (anchor_grams IS NULL)),
@@ -108,8 +125,18 @@ CREATE TABLE programme (
     CHECK (CASE template WHEN 'test' THEN duration_weeks = 1
                          ELSE duration_weeks >= 2 END),
 
-    -- A block opens from a measured maximum, and only from one (decision 0013).
-    CHECK (template != 'block' OR anchor_provenance = 'tested'),
+    -- Only a block has an entry test, and a light load without one is a load
+    -- for a session that does not exist.
+    CHECK (template = 'block' OR entry_test_reps IS NULL),
+    CHECK (entry_test_reps IS NOT NULL OR entry_test_light_grams IS NULL),
+
+    -- **A block that does not test must open from one that did** (decision
+    -- 0013). A block that runs its own entry test is the case that rule guards
+    -- against, answered rather than evaded: requiring `tested` there would be
+    -- requiring a test before the test.
+    CHECK (template != 'block'
+           OR entry_test_reps IS NOT NULL
+           OR anchor_provenance = 'tested'),
 
     -- One authoring of one programme.
     UNIQUE (name, authored_at)
@@ -270,8 +297,8 @@ CREATE TABLE prescribed_set (
 
 -- Every existing row is a linear programme, so the new columns are null and the
 -- old ones carry over untouched.
-INSERT INTO programme (id, name, authored_at, template, primary_pattern, primary_exercise, anchor_grams, anchor_provenance, anchor_from, opening_grams, anchor_failed_grams, gating_role, start_date, duration_weeks, test_reps, test_target_grams)
-SELECT id, name, authored_at, template, primary_pattern, primary_exercise, anchor_grams, anchor_provenance, anchor_from, opening_grams, anchor_failed_grams, gating_role, start_date, duration_weeks, NULL, NULL
+INSERT INTO programme (id, name, authored_at, template, primary_pattern, primary_exercise, anchor_grams, anchor_provenance, anchor_from, opening_grams, anchor_failed_grams, gating_role, start_date, duration_weeks, test_reps, test_target_grams, entry_test_reps, entry_test_light_grams)
+SELECT id, name, authored_at, template, primary_pattern, primary_exercise, anchor_grams, anchor_provenance, anchor_from, opening_grams, anchor_failed_grams, gating_role, start_date, duration_weeks, NULL, NULL, NULL, NULL
 FROM programme_old;
 
 INSERT INTO programme_interruption (programme, start_date, days)

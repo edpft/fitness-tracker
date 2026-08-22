@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   template AS \"template!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams: i64\",\n                   anchor_provenance AS \"anchor_provenance: String\",\n                   anchor_from AS \"anchor_from: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\",\n                   test_reps AS \"test_reps: i64\",\n                   test_target_grams AS \"test_target_grams: i64\"\n            FROM programme AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name\n            )\n            ORDER BY start_date ASC, id ASC\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   template AS \"template!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams: i64\",\n                   anchor_provenance AS \"anchor_provenance: String\",\n                   anchor_from AS \"anchor_from: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\",\n                   test_reps AS \"test_reps: i64\",\n                   test_target_grams AS \"test_target_grams: i64\",\n                   entry_test_reps AS \"entry_test_reps: i64\",\n                   entry_test_light_grams AS \"entry_test_light_grams: i64\"\n            FROM programme AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name\n            )\n            ORDER BY start_date ASC, id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -178,6 +178,28 @@
             "name": "test_target_grams"
           }
         }
+      },
+      {
+        "name": "entry_test_reps: i64",
+        "ordinal": 16,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "entry_test_reps"
+          }
+        }
+      },
+      {
+        "name": "entry_test_light_grams: i64",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "entry_test_light_grams"
+          }
+        }
       }
     ],
     "parameters": {
@@ -199,8 +221,10 @@
       false,
       false,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "e4d6e1e5dee8df38c3675351de333081c7fad5221a9928ea7753e9b951ea2997"
+  "hash": "e5a406d00e6ddf9130f0f60c7c676eeb0eed650c68f46838663420b5c15f92b4"
 }

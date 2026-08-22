@@ -294,6 +294,17 @@ pub fn programme_authored(
             calendar.calendar_weeks(),
         );
     }
+    authored_plan(programme, parameters);
+    authored_parameters(parameters);
+}
+
+/// What this programme's template makes of its anchor.
+///
+/// Split out because it is three unrelated reports sharing a `match`, and
+/// because what the parameters say is a separate question from what the
+/// programme does with them.
+fn authored_plan(programme: &Programme, parameters: &domain::prescription::GenerationParameters) {
+    let calendar = programme.calendar();
     match programme {
         Programme::Test(test) => {
             println!(
@@ -333,10 +344,17 @@ pub fn programme_authored(
             );
         }
         Programme::Periodisation(Periodisation::Block(block)) => {
-            println!(
-                "  anchor {}, its entry test — taken before the block, not in it",
-                block.entry().anchor()
-            );
+            match block.entry_test() {
+                Some(test) => println!(
+                    "  anchor {}, expected — week one measures it at {}",
+                    block.entry().anchor(),
+                    test.reps()
+                ),
+                None => println!(
+                    "  anchor {}, its entry test — taken before the block, not in it",
+                    block.entry().anchor()
+                ),
+            }
             match block.plan() {
                 Ok(plan) => println!(
                     "  {} weeks of accumulation, {} of intensification, {} of \
@@ -349,7 +367,6 @@ pub fn programme_authored(
             }
         }
     }
-    authored_parameters(parameters);
 }
 
 /// The parameters the programme was authored against.
@@ -553,10 +570,17 @@ fn linear_standing(
 /// nothing for the record to place. That is the difference between the two
 /// models, and printing an arrow here would hide it.
 fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
-    println!(
-        "anchor {}, fixed for the block — its entry test, taken before it",
-        block.entry().anchor()
-    );
+    match block.entry_test() {
+        Some(test) => println!(
+            "anchor {}, expected — week one measures it at {}",
+            block.entry().anchor(),
+            test.reps()
+        ),
+        None => println!(
+            "anchor {}, measured — its entry test was taken before this block",
+            block.entry().anchor()
+        ),
+    }
     let Ok(plan) = block.plan() else {
         println!("  no plan: this duration does not hold three phases");
         return;
@@ -568,8 +592,22 @@ fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
     let anchor = block.entry().anchor().load();
 
     println!("  week  phase              sets × reps   of anchor      load");
-    for (offset, week) in plan.weeks().into_iter().enumerate() {
-        let number = offset + 1;
+    // The entry test is week one where there is one, so the phases below start
+    // at two. It carries no share of the anchor: it is what establishes it.
+    let mut number = 0;
+    if let Some(test) = block.entry_test() {
+        number += 1;
+        println!(
+            "  {number:>4}  {:<17}  {:>11}   {:>9}  {:>8}",
+            "entry test",
+            format!("1 × {}", test.reps().as_u32()),
+            "—",
+            test.light()
+                .map_or_else(|| "—".to_owned(), |load| format!("{load} light")),
+        );
+    }
+    for week in plan.weeks() {
+        number += 1;
         match week {
             WeekPlan::Working {
                 phase,
@@ -593,6 +631,12 @@ fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
         }
     }
     println!("  the block plans to finish at 105% of the maximum it entered on");
+    if block
+        .entry_test()
+        .is_some_and(|test| test.light().is_none())
+    {
+        println!("  its entry-test week runs the test only");
+    }
 }
 
 /// The prescription, as a session to train from.

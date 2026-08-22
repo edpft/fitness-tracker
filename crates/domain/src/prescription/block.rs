@@ -96,9 +96,9 @@
 //!
 //! [`Anchor`]: crate::prescription::Anchor
 
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date, tz::TimeZone};
 
-use crate::gym::{RepCount, exercise::Exercise};
+use crate::gym::{Kg, RepCount, exercise::Exercise};
 
 use crate::prescription::{
     anchor::{AnchorProvenance, Entry},
@@ -107,7 +107,7 @@ use crate::prescription::{
     prilepin,
     programme::{InconsistentProgramme, check_primary},
     repmax::{PER_REPETITION, rep_max},
-    schedule::{Calendar, SessionRole, WeekIndex, WeekKind},
+    schedule::{Calendar, InvalidCalendar, SessionRole, Skip, WeekIndex, WeekKind, Weekdays},
     succession::{ProgrammeName, ProgrammeWindow},
 };
 
@@ -125,6 +125,12 @@ pub enum InvalidBlock {
          its own repetition count, so it is too long for one block"
     )]
     TooLong { weeks: u32 },
+    #[error(
+        "an entry test at {reps} repetitions is too many for the \
+         repetition-maximum table to convert into the maximum this block's \
+         percentages are shares of"
+    )]
+    EntryTestTooLong { reps: u32 },
 }
 
 /// Which phase of the block a week belongs to.
@@ -432,6 +438,83 @@ impl Block {
     }
 }
 
+/// The week a block spends measuring what it is about to plan from.
+///
+/// **Optional, and prepended rather than counted.** Decision 0013 refused an
+/// optional test for the linear template because the test was its *last* week,
+/// folded into `duration_weeks` — so `5` meant either five climbing weeks or four
+/// and a test. A week put in front of a block forks nothing: `duration_weeks`
+/// goes on counting phase weeks whether this is present or not, and the calendar
+/// carries one more when it is.
+///
+/// **The block owns it because the block is what it is for.** A test session has
+/// to run the lower slots the way the programme it anchors runs them — testing
+/// the front squat makes the hip-dominant slot that day's accessory — so the
+/// pattern, the primary and the two lower fills have to agree between the test
+/// and the block. Held in one place they cannot disagree; held in two documents
+/// they are three facts nothing checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryTest {
+    reps: RepCount,
+    light: Option<Kg>,
+}
+
+impl EntryTest {
+    /// # Errors
+    ///
+    /// [`InvalidBlock::EntryTestTooLong`] for a repetition count the
+    /// repetition-maximum table cannot convert into the one-rep maximum the
+    /// block's percentages are shares of.
+    pub fn new(reps: RepCount, light: Option<Kg>) -> Result<Self, InvalidBlock> {
+        if rep_max(reps).is_none() {
+            return Err(InvalidBlock::EntryTestTooLong {
+                reps: reps.as_u32(),
+            });
+        }
+        Ok(Self { reps, light })
+    }
+
+    /// What the attempt is performed at.
+    ///
+    /// **A triple, by convention.** `block.rs` enters a block on one
+    /// deliberately: a cold maximal single measures technique as much as
+    /// strength, and a peaked one is what the realisation weeks prepare for. The
+    /// block exits on a single whatever it entered on.
+    pub const fn reps(self) -> RepCount {
+        self.reps
+    }
+
+    /// What the week's other session runs its primary at.
+    ///
+    /// **Authored, and `None` means the session is not run.** There is no honest
+    /// derivation here: the lift's maximum is what Friday is about to measure, so
+    /// a load taken from the programme before would be a share of a maximum in
+    /// possibly a different lift — a number fitted to the record with no decision
+    /// behind it. Stated, the way `opening` is stated when the derivation has
+    /// nothing to work from.
+    pub const fn light(self) -> Option<Kg> {
+        self.light
+    }
+}
+
+/// What one week of a block is, entry test included.
+///
+/// [`Block`] plans phase weeks and knows nothing about an entry test; this is the
+/// programme's view, where week one may be the measurement the rest is a share
+/// of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockWeek {
+    Entry(EntryTest),
+    Planned(WeekPlan),
+}
+
+/// Weeks of phases: every week the calendar holds, less the entry test's.
+const fn phase_weeks_of(calendar: &Calendar, entry_test: Option<EntryTest>) -> u32 {
+    calendar
+        .duration_weeks()
+        .saturating_sub(if entry_test.is_some() { 1 } else { 0 })
+}
+
 /// A programme written against the periodised block.
 ///
 /// **The plan above is not a programme.** [`Block`] is a pure function of a
@@ -449,11 +532,24 @@ pub struct Periodised {
     name: ProgrammeName,
     primary: Primary,
     fills: SlotFills,
-    /// The entry test, taken before this block and not inside it (decision
-    /// 0013), and the opening where the block declares one rather than deriving
-    /// it. A block's own loads are shares of the anchor, so the opening feeds
-    /// nothing here — it is carried because [`Entry`] travels whole.
+    /// The maximum every load in this block is a share of.
+    ///
+    /// **An expectation where the block tests, a measurement where it does
+    /// not.** A block that runs its own entry test is authored before the number
+    /// is known: the anchor says what the operator expects to lift, the test
+    /// week confirms it, and a result that differs is answered by re-authoring
+    /// the block — which decision 0012 makes a supersession rather than a second
+    /// programme. A block *without* an entry test has no such opportunity, so
+    /// its anchor must already have been tested.
+    ///
+    /// The opening feeds nothing here: a block's loads are shares of the anchor
+    /// rather than rungs off an opening. It is carried because [`Entry`] travels
+    /// whole.
     entry: Entry,
+    /// The week in front of the phases, where this block measures its own anchor.
+    entry_test: Option<EntryTest>,
+    /// **Every week the block occupies**, the entry test's included. What the
+    /// operator's table counts is [`Self::phase_weeks`].
     calendar: Calendar,
     authored_at: Timestamp,
 }
@@ -472,21 +568,43 @@ impl Periodised {
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
+        entry_test: Option<EntryTest>,
         calendar: Calendar,
     ) -> Result<Self, InconsistentProgramme> {
-        Self::check(primary, &fills, entry, &calendar)?;
-        // The plan has to be buildable over this duration, checked here so an
-        // unplannable block fails at authoring rather than at the first
-        // `prescribe`.
-        Block::new(calendar.duration_weeks())?;
+        Self::check(primary, &fills, entry, entry_test, &calendar)?;
         Ok(Self {
             name,
             primary,
             fills,
             entry,
+            entry_test,
             calendar,
             authored_at: Timestamp::now(),
         })
+    }
+
+    /// The calendar a block occupies, from the weeks its phases take.
+    ///
+    /// **`phase_weeks` is what the operator's table counts** — 8 as 3-3-2, 9 as
+    /// 4-3-2 — and an entry test adds one in front. Built here so a document
+    /// states one number and cannot state the other: a `duration_weeks` that
+    /// sometimes included the test is the fork decision 0013 removed from the
+    /// linear template, and it is not coming back through this door.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidCalendar`] for a block of no weeks, or for an interruption
+    /// outside it.
+    pub fn weeks(
+        start: Date,
+        phase_weeks: u32,
+        entry_test: bool,
+        interruptions: &[Skip],
+        weekdays: Weekdays,
+        zone: TimeZone,
+    ) -> Result<Calendar, InvalidCalendar> {
+        let weeks = phase_weeks.saturating_add(u32::from(entry_test));
+        Calendar::new(start, weeks, interruptions, weekdays, zone)
     }
 
     /// Rebuild a block that was already authored.
@@ -504,16 +622,17 @@ impl Periodised {
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
+        entry_test: Option<EntryTest>,
         calendar: Calendar,
         authored_at: Timestamp,
     ) -> Result<Self, InconsistentProgramme> {
-        Self::check(primary, &fills, entry, &calendar)?;
-        Block::new(calendar.duration_weeks())?;
+        Self::check(primary, &fills, entry, entry_test, &calendar)?;
         Ok(Self {
             name,
             primary,
             fills,
             entry,
+            entry_test,
             calendar,
             authored_at,
         })
@@ -523,6 +642,7 @@ impl Periodised {
         primary: Primary,
         fills: &SlotFills,
         entry: Entry,
+        entry_test: Option<EntryTest>,
         calendar: &Calendar,
     ) -> Result<(), InconsistentProgramme> {
         if !calendar.weekdays().runs(primary.gating_role()) {
@@ -546,17 +666,25 @@ impl Periodised {
             });
         }
 
-        // **And it has to have been a test.** Decision 0013 makes provenance
-        // load-bearing here and nowhere else: if an asserted anchor satisfied a
-        // block's entry requirement, switching lifts could skip the test by
-        // stating a number, and 0013's table says it cannot. Linear accepts any
-        // provenance, because a linear programme may declare its opening
-        // outright.
-        if entry.anchor().provenance() != AnchorProvenance::Tested {
+        // **A block that does not test must open from one that did.** Decision
+        // 0013 makes provenance load-bearing here and nowhere else: if an
+        // asserted anchor satisfied a block's entry requirement, switching lifts
+        // could skip the measurement by stating a number.
+        //
+        // A block that runs its own entry test is the case that rule was
+        // guarding against, answered rather than evaded: its anchor is what the
+        // operator expects and the first week is where it finds out. Requiring
+        // `Tested` there would be requiring a test before the test.
+        if entry_test.is_none() && entry.anchor().provenance() != AnchorProvenance::Tested {
             return Err(InconsistentProgramme::BlockAnchorIsNotTested {
                 provenance: entry.anchor().provenance(),
             });
         }
+
+        // And the phases have to make a block over what is left of the calendar
+        // once the entry test has taken its week. Checked here so an unplannable
+        // block fails at authoring rather than at the first `prescribe`.
+        Block::new(phase_weeks_of(calendar, entry_test))?;
         Ok(())
     }
 
@@ -567,7 +695,53 @@ impl Periodised {
     /// [`InvalidBlock`] never, in practice: both constructors have already
     /// proved it succeeds for the duration this calendar holds.
     pub fn plan(&self) -> Result<Block, InvalidBlock> {
-        Block::new(self.calendar.duration_weeks())
+        Block::new(self.phase_weeks())
+    }
+
+    /// Weeks of phases: what the operator's table counts.
+    #[must_use]
+    pub const fn phase_weeks(&self) -> u32 {
+        phase_weeks_of(&self.calendar, self.entry_test)
+    }
+
+    /// The week in front of the phases, where there is one.
+    pub const fn entry_test(&self) -> Option<EntryTest> {
+        self.entry_test
+    }
+
+    /// What one week of this block is.
+    ///
+    /// **The entry test takes week one and the phases shift behind it**, which
+    /// is why this exists rather than callers asking [`Block`] directly: `Block`
+    /// plans phase weeks and has no idea a measurement week might sit in front
+    /// of them.
+    #[must_use]
+    pub fn week(&self, week: WeekIndex) -> Option<BlockWeek> {
+        let offset = match self.entry_test {
+            Some(test) => {
+                if week.as_u32() == 1 {
+                    return Some(BlockWeek::Entry(test));
+                }
+                1
+            }
+            None => 0,
+        };
+        let rung = WeekIndex::new(week.as_u32().checked_sub(offset)?).ok()?;
+        self.plan().ok()?.week(rung).map(BlockWeek::Planned)
+    }
+
+    /// Which kind of week this is, in the vocabulary the calendar and the store
+    /// already speak.
+    #[must_use]
+    pub fn kind(&self, week: WeekIndex) -> Option<WeekKind> {
+        match self.week(week)? {
+            // Both tests, and both recorded as such: the week the block measures
+            // its anchor and the week it spends it.
+            BlockWeek::Entry(_) | BlockWeek::Planned(WeekPlan::ExitTest { .. }) => {
+                Some(WeekKind::Test)
+            }
+            BlockWeek::Planned(WeekPlan::Working { .. }) => Some(WeekKind::Climbing(week)),
+        }
     }
 
     pub const fn name(&self) -> &ProgrammeName {

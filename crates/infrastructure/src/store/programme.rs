@@ -30,6 +30,7 @@ use domain::{
         Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, Periodisation, Periodised,
         Programme, ProgrammeId, ProgrammeName, ProgrammeWindow, SessionRole, Skip, SlotId, Test,
         TestTarget, Tested,
+        block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -171,7 +172,9 @@ impl SqliteProgrammeStore {
                    start_date AS "start_date!: String",
                    duration_weeks AS "duration_weeks!: i64",
                    test_reps AS "test_reps: i64",
-                   test_target_grams AS "test_target_grams: i64"
+                   test_target_grams AS "test_target_grams: i64",
+                   entry_test_reps AS "entry_test_reps: i64",
+                   entry_test_light_grams AS "entry_test_light_grams: i64"
             FROM programme AS p
             WHERE p.authored_at = (
                 SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name
@@ -232,6 +235,7 @@ impl SqliteProgrammeStore {
                         row.opening_grams,
                     )?,
                     row.gating_role,
+                    read_entry_test(row.entry_test_reps, row.entry_test_light_grams)?,
                 )?,
                 other => {
                     return Err(corrupt(&format!(
@@ -261,10 +265,23 @@ struct Columns {
     gating: Option<&'static str>,
     test_reps: Option<i64>,
     test_target: Option<i64>,
+    entry_test_reps: Option<i64>,
+    entry_test_light: Option<i64>,
 }
 
 fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
     let anchor = programme.anchor();
+    let entry_test = match programme {
+        Programme::Periodisation(Periodisation::Block(block)) => block.entry_test(),
+        Programme::Periodisation(Periodisation::Linear(_)) | Programme::Test(_) => None,
+    };
+    let entry_test_light = entry_test
+        .and_then(EntryTest::light)
+        .map(|load| {
+            i64::try_from(load.as_grams())
+                .map_err(|_| corrupt(&"a light load larger than the store can hold"))
+        })
+        .transpose()?;
     let (test_reps, test_target) = match programme {
         Programme::Test(test) => (
             Some(i64::from(test.reps().as_u32())),
@@ -308,6 +325,8 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
         gating: programme.gating_role().map(SessionRole::as_str),
         test_reps,
         test_target,
+        entry_test_reps: entry_test.map(|test| i64::from(test.reps().as_u32())),
+        entry_test_light,
     })
 }
 
@@ -365,6 +384,7 @@ fn rehydrate_periodisation(
     template: &str,
     entry: Entry,
     gating_role: Option<String>,
+    entry_test: Option<EntryTest>,
 ) -> Result<Programme, StoreError> {
     let gating =
         gating_role.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
@@ -392,12 +412,41 @@ fn rehydrate_periodisation(
                 primary,
                 common.fills,
                 entry,
+                entry_test,
                 common.calendar,
                 common.authored_at,
             )
             .map_err(|error| corrupt(&error))?,
         )
     }))
+}
+
+/// A block's entry-test week, where it has one.
+///
+/// The light load is null for a week that runs only its test, which is a real
+/// state rather than a missing value: there is nothing to derive a light load
+/// from when the lift's maximum is what the week is about to measure.
+fn read_entry_test(
+    reps: Option<i64>,
+    light_grams: Option<i64>,
+) -> Result<Option<EntryTest>, StoreError> {
+    let Some(reps) = reps else {
+        return Ok(None);
+    };
+    let reps = u32::try_from(reps)
+        .ok()
+        .and_then(|count| RepCount::new(count).ok())
+        .ok_or_else(|| corrupt(&"an entry test at no repetitions"))?;
+    let light = light_grams
+        .map(|grams| {
+            u64::try_from(grams)
+                .map(Kg::from_grams)
+                .map_err(|_| corrupt(&"a light load stored as a negative mass"))
+        })
+        .transpose()?;
+    Ok(Some(
+        EntryTest::new(reps, light).map_err(|error| corrupt(&error))?,
+    ))
 }
 
 /// The anchor and its opening, from the columns a programme that climbs must
@@ -499,6 +548,8 @@ impl ProgrammeStore for SqliteProgrammeStore {
             gating,
             test_reps,
             test_target,
+            entry_test_reps,
+            entry_test_light,
         } = columns_of(programme)?;
 
         let id = sqlx::query!(
@@ -507,9 +558,9 @@ impl ProgrammeStore for SqliteProgrammeStore {
                 name, authored_at, template, primary_pattern, primary_exercise,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 opening_grams, gating_role, start_date, duration_weeks,
-                test_reps, test_target_grams
+                test_reps, test_target_grams, entry_test_reps, entry_test_light_grams
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
             name,
@@ -526,7 +577,9 @@ impl ProgrammeStore for SqliteProgrammeStore {
             start,
             duration,
             test_reps,
-            test_target
+            test_target,
+            entry_test_reps,
+            entry_test_light
         )
         .fetch_one(&mut *tx)
         .await
