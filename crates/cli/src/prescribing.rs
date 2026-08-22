@@ -7,10 +7,10 @@
 use std::path::Path;
 
 use application::{
-    ProgrammeAuthor as _, WorkoutPrescriber as _,
+    ProgrammeAuthor as _, ProgrammeStore as _, WorkoutPrescriber as _,
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::gym::OperatorZone;
+use domain::{gym::OperatorZone, prescription::Programme};
 use infrastructure::{
     Document, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
     SqliteProgrammeStore, connect,
@@ -25,20 +25,39 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
     let parameters = document
         .parameters()
         .map_err(|error| Failure::usage(&error))?;
-    let programme = document
-        .programme(&parameters, zone.as_time_zone())
-        .map_err(|error| Failure::usage(&error))?;
 
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let (id, authored) = Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), zone.clone()),
-        SqliteGenerationParameterStore::new(pool),
-    )
-    .author(&programme, &parameters)
-    .await
-    .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+
+    // **A test's fills are resolved here, against the store, once.** The
+    // document names what changes and the programme before it supplies the rest
+    // (decision 0013), and doing that at authoring rather than at derivation is
+    // what keeps the stored test complete on its own — so correcting the
+    // predecessor later cannot silently move what this test prescribes.
+    let inherited = if document.inherits() {
+        let start = document.start().map_err(|error| Failure::usage(&error))?;
+        programmes
+            .preceding(start)
+            .await
+            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+            .map(|(_, programme)| programme)
+    } else {
+        None
+    };
+    let programme = document
+        .programme(
+            &parameters,
+            zone.as_time_zone(),
+            inherited.as_ref().map(Programme::fills),
+        )
+        .map_err(|error| Failure::usage(&error))?;
+
+    let (id, authored) = Authoring::new(programmes, SqliteGenerationParameterStore::new(pool))
+        .author(&programme, &parameters)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     output::programme_authored(id, authored, &programme, &parameters);
     Ok(())

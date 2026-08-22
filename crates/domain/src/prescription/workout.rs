@@ -18,6 +18,8 @@ use std::fmt;
 
 use jiff::{Timestamp, civil::Date};
 
+use crate::gym::Kg;
+
 use super::{
     anchor::Anchor,
     parameters::GenerationParameters,
@@ -45,11 +47,50 @@ impl fmt::Display for ProgrammeId {
     }
 }
 
+/// What a session's primary loads were derived from.
+///
+/// **A sum rather than two nullable fields.** A session issued from a programme
+/// that climbs derives every primary load from a fixed anchor; a session issued
+/// from a standalone test derives them from the target the record put it at
+/// (decision 0011), and that programme has no anchor at all. Both are recorded
+/// by value for the same reason — what was issued has to stay readable as
+/// issued — and exactly one of them is ever the answer, which two `Option`s
+/// would let a caller get wrong in both directions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DerivedFrom {
+    /// The starting 1RM the programme is anchored on.
+    Anchor(Anchor),
+    /// What the test was an attempt at. Recorded because it is a function of
+    /// where the record stood when the session was issued, so nothing can
+    /// recompute afterwards what it was at the time.
+    Target(Kg),
+}
+
+impl DerivedFrom {
+    /// The anchor, where the session had one.
+    #[must_use]
+    pub const fn anchor(self) -> Option<Anchor> {
+        match self {
+            Self::Anchor(anchor) => Some(anchor),
+            Self::Target(_) => None,
+        }
+    }
+
+    /// The target, where the session was a standalone test.
+    #[must_use]
+    pub const fn target(self) -> Option<Kg> {
+        match self {
+            Self::Target(load) => Some(load),
+            Self::Anchor(_) => None,
+        }
+    }
+}
+
 /// A prescription that was issued.
 ///
 /// Every field is a constructor argument, so a prescription that exists is one
-/// that knows its date, its ladder position, the anchor it derived from and the
-/// parameters in force when it did. There is no setter and no partial form.
+/// that knows its date, its ladder position, what it derived its loads from and
+/// the parameters in force when it did. There is no setter and no partial form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrescribedWorkout {
     shape: WorkoutShape,
@@ -59,7 +100,7 @@ pub struct PrescribedWorkout {
     issued_for: Date,
     session_role: SessionRole,
     week: WeekKind,
-    anchor: Anchor,
+    derived_from: DerivedFrom,
     parameters: GenerationParameters,
     /// Which authored version those parameters came from.
     ///
@@ -85,7 +126,7 @@ impl PrescribedWorkout {
         issued_for: Date,
         session_role: SessionRole,
         week: WeekKind,
-        anchor: Anchor,
+        derived_from: DerivedFrom,
         parameters: GenerationParameters,
         parameters_authored_at: Timestamp,
         programme: ProgrammeId,
@@ -96,7 +137,7 @@ impl PrescribedWorkout {
             issued_for,
             session_role,
             week,
-            anchor,
+            derived_from,
             parameters,
             parameters_authored_at,
             programme,
@@ -120,8 +161,14 @@ impl PrescribedWorkout {
         self.week
     }
 
-    pub const fn anchor(&self) -> Anchor {
-        self.anchor
+    /// What the primary loads were derived from.
+    pub const fn derived_from(&self) -> DerivedFrom {
+        self.derived_from
+    }
+
+    /// The anchor, where this session had one.
+    pub const fn anchor(&self) -> Option<Anchor> {
+        self.derived_from.anchor()
     }
 
     pub const fn parameters(&self) -> &GenerationParameters {

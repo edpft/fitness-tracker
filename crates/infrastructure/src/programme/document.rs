@@ -19,8 +19,8 @@ use domain::{
     prescription::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
         InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole, Percentage,
-        ProgrammeName, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
-        Weekdays,
+        Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole,
+        Skip, Step, Test, TestTarget, Tested, TopSetReps, WarmupStep, Weekdays,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -133,6 +133,14 @@ fn exercise(field: &str, key: &str) -> Result<Exercise, DocumentError> {
 #[derive(serde::Deserialize)]
 pub struct Document {
     programme: ProgrammeSection,
+    /// **Partial for a test, total for anything else.**
+    ///
+    /// A test week is two sessions and the operator does not re-author
+    /// seventeen slots for it (decision 0013): the document names the lift being
+    /// tested and any accessory variant moving with it, and every slot it leaves
+    /// out is taken from the programme this one follows. Defaulted so a test
+    /// changing nothing but the primary needs no section at all.
+    #[serde(default)]
     fills: BTreeMap<String, toml::Value>,
     parameters: ParametersSection,
 }
@@ -151,9 +159,17 @@ struct ProgrammeSection {
     #[serde(rename = "primary")]
     primary_pattern: String,
     primary_exercise: String,
-    gating_role: String,
+    /// Which session's top set advances the plan.
+    ///
+    /// Absent for a test, which advances nothing: it has no ladder to gate and
+    /// its own session is the heavy one by definition.
+    #[serde(default)]
+    gating_role: Option<String>,
     start: String,
-    duration_weeks: u32,
+    /// Absent for a test, which is one week by definition and has nowhere to put
+    /// a duration that could disagree with that.
+    #[serde(default)]
+    duration_weeks: Option<u32>,
     /// The weeks the block does not run, each named by a date inside it.
     ///
     /// Defaulted rather than required, because a block with nothing in its way
@@ -162,7 +178,10 @@ struct ProgrammeSection {
     #[serde(default)]
     interruptions: Vec<SkipSection>,
     weekdays: BTreeMap<String, String>,
-    anchor: AnchorSection,
+    /// The starting 1RM. Absent for a test, which produces one rather than
+    /// reading one — that being the whole of what a test does.
+    #[serde(default)]
+    anchor: Option<AnchorSection>,
     /// Where the ladder opens, stated rather than derived.
     ///
     /// Absent derives it from the anchor's entry test. Present is the answer
@@ -171,6 +190,19 @@ struct ProgrammeSection {
     /// evidence any more. Not a `TODO` candidate: absent is a real state.
     #[serde(default)]
     opening: Option<String>,
+    /// What a test is performed at: a single before a linear programme, a triple
+    /// before a block. Absent for anything that is not a test.
+    #[serde(default)]
+    reps: Option<u32>,
+    /// What a test is an attempt at, where it cannot be inherited.
+    ///
+    /// **Absent is the ordinary case**, and means the target comes from the
+    /// programme before it as the record stands (decision 0011). Stating one is
+    /// for a test with nothing before it in the same lift — a front squat
+    /// maximum is not evidence about an RDL — and not a default, because a
+    /// number written here does not move when the record does.
+    #[serde(default)]
+    target: Option<String>,
 }
 
 /// A skip, as a bare date or as a run of days.
@@ -377,33 +409,54 @@ impl Document {
         })
     }
 
-    /// The programme, in domain terms, validated.
+    /// Whether this document takes its unstated fills from the programme before
+    /// it.
+    ///
+    /// Only a test does. A linear programme and a block state every slot
+    /// themselves, and an omission in one of those is a document with a hole in
+    /// it rather than an inheritance.
+    #[must_use]
+    pub fn inherits(&self) -> bool {
+        self.programme.template == "test"
+    }
+
+    /// The day this programme starts, before anything else about it is read.
+    ///
+    /// Wanted by the caller ahead of [`Self::programme`], because finding the
+    /// programme to inherit from is a question about a date and the store is the
+    /// only thing that can answer it.
     ///
     /// # Errors
     ///
-    /// [`DocumentError`] for an unsettled value, an unknown exercise, or a
-    /// programme the three consistency checks refuse.
+    /// [`DocumentError`] if the start is unsettled or is not a date.
+    pub fn start(&self) -> Result<Date, DocumentError> {
+        settled("programme.start", &self.programme.start)?
+            .parse::<Date>()
+            .map_err(|error| invalid("programme.start", error))
+    }
+
+    /// The programme, in domain terms, validated.
+    ///
+    /// **`inherited` is the fills of the programme this one follows**, where the
+    /// store holds one. A test resolves its own fills over them here, when the
+    /// document is read — not when a session is derived. That keeps the stored
+    /// test complete on its own, so re-authoring the predecessor later cannot
+    /// retroactively move what this test prescribes, and it keeps the domain
+    /// ignorant of inheritance entirely (§ 12, § 14). Nothing else reads it: a
+    /// linear programme and a block state every slot themselves.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError`] for an unsettled value, an unknown exercise, a field a
+    /// template has no use for or one it cannot do without, or a programme the
+    /// consistency checks refuse.
     pub fn programme(
         &self,
         parameters: &GenerationParameters,
         zone: TimeZone,
-    ) -> Result<Linear, DocumentError> {
+        inherited: Option<&SlotFills>,
+    ) -> Result<Programme, DocumentError> {
         let section = &self.programme;
-        let declared_opening = section
-            .opening
-            .as_deref()
-            .map(|load| mass("programme.opening", load))
-            .transpose()?;
-        if section.template != "linear" {
-            return Err(invalid(
-                "programme.template",
-                format!(
-                    "{:?} is not a template this build can read; it reads \
-                     \"linear\", which was called \"v1\" until 2026-08-18",
-                    section.template
-                ),
-            ));
-        }
 
         let mut days = Vec::with_capacity(section.weekdays.len());
         for (day, role) in &section.weekdays {
@@ -414,23 +467,6 @@ impl Document {
             ));
         }
         let weekdays = Weekdays::new(days).map_err(|error| invalid("programme.weekdays", error))?;
-
-        let failed = section
-            .anchor
-            .failed
-            .as_deref()
-            .map(|value| mass("programme.anchor.failed", value))
-            .transpose()?;
-        let anchor = Anchor::new(
-            mass("programme.anchor.load", &section.anchor.load)?,
-            failed,
-            AnchorProvenance::try_from(section.anchor.provenance.clone())
-                .map_err(|error| invalid("programme.anchor.provenance", error))?,
-            settled("programme.anchor.from", &section.anchor.from)?
-                .parse::<Date>()
-                .map_err(|error| invalid("programme.anchor.from", error))?,
-        )
-        .map_err(|error| invalid("programme.anchor", error))?;
 
         let mut interruptions = Vec::with_capacity(section.interruptions.len());
         for (at, skip) in section.interruptions.iter().enumerate() {
@@ -451,54 +487,271 @@ impl Document {
             });
         }
 
-        let calendar = Calendar::new(
-            settled("programme.start", &section.start)?
-                .parse::<Date>()
-                .map_err(|error| invalid("programme.start", error))?,
-            section.duration_weeks,
-            &interruptions,
-            weekdays,
-            zone,
-        )?;
+        let start = settled("programme.start", &section.start)?
+            .parse::<Date>()
+            .map_err(|error| invalid("programme.start", error))?;
+        let name = ProgrammeName::try_from(settled("programme.name", &section.name)?.to_owned())
+            .map_err(|error| invalid("programme.name", error))?;
+        let pattern = PrimaryPattern::try_from(section.primary_pattern.clone())
+            .map_err(|error| invalid("programme.primary", error))?;
+        let primary_exercise = exercise("programme.primary_exercise", &section.primary_exercise)?;
 
-        Ok(Linear::new(
-            ProgrammeName::try_from(settled("programme.name", &section.name)?.to_owned())
-                .map_err(|error| invalid("programme.name", error))?,
-            Primary::new(
-                PrimaryPattern::try_from(section.primary_pattern.clone())
-                    .map_err(|error| invalid("programme.primary", error))?,
-                exercise("programme.primary_exercise", &section.primary_exercise)?,
-                SessionRole::try_from(section.gating_role.clone())
-                    .map_err(|error| invalid("programme.gating_role", error))?,
+        match section.template.as_str() {
+            "test" => self.test(
+                pattern,
+                primary_exercise,
+                name,
+                start,
+                &interruptions,
+                weekdays,
+                zone,
+                inherited,
             ),
-            self.fills()?,
-            Entry::new(anchor, declared_opening),
-            calendar,
-            parameters,
-        )?)
+            template @ ("linear" | "block") => self.climbing(
+                template,
+                pattern,
+                primary_exercise,
+                name,
+                start,
+                &interruptions,
+                weekdays,
+                zone,
+                parameters,
+            ),
+            other => Err(invalid(
+                "programme.template",
+                format!(
+                    "{other:?} is not a template this build can read; it reads \
+                     \"linear\" and \"block\", which were \"v1\" and \"v2\" until \
+                     2026-08-18, and \"test\""
+                ),
+            )),
+        }
     }
 
-    /// Every slot's fill.
+    /// A standalone test, over the fills of the programme it follows.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the caller has already parsed each of these out of the \
+                  document, and grouping them into a struct would introduce a \
+                  type whose only purpose is to be taken apart again one line \
+                  later"
+    )]
+    fn test(
+        &self,
+        pattern: PrimaryPattern,
+        primary_exercise: Exercise,
+        name: ProgrammeName,
+        start: Date,
+        interruptions: &[Skip],
+        weekdays: Weekdays,
+        zone: TimeZone,
+        inherited: Option<&SlotFills>,
+    ) -> Result<Programme, DocumentError> {
+        let section = &self.programme;
+        let count = section
+            .reps
+            .ok_or_else(|| invalid("programme.reps", "a test says what it is performed at"))?;
+        let target = match section.target.as_deref() {
+            None => TestTarget::Inherited,
+            Some(load) => TestTarget::Declared(mass("programme.target", load)?),
+        };
+        Self::refuse_unused(
+            "test",
+            &[
+                ("programme.anchor", section.anchor.is_some()),
+                ("programme.opening", section.opening.is_some()),
+                ("programme.gating_role", section.gating_role.is_some()),
+                ("programme.duration_weeks", section.duration_weeks.is_some()),
+            ],
+        )?;
+        let calendar = Test::week(start, interruptions, weekdays, zone)?;
+        Ok(Programme::Test(Test::new(
+            name,
+            Tested::new(pattern, primary_exercise, reps("programme.reps", count)?),
+            self.fills_over(inherited)?,
+            calendar,
+            target,
+        )?))
+    }
+
+    /// A programme that climbs: linear or block.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "as `Self::test`, and for the same reason"
+    )]
+    fn climbing(
+        &self,
+        template: &str,
+        pattern: PrimaryPattern,
+        primary_exercise: Exercise,
+        name: ProgrammeName,
+        start: Date,
+        interruptions: &[Skip],
+        weekdays: Weekdays,
+        zone: TimeZone,
+        parameters: &GenerationParameters,
+    ) -> Result<Programme, DocumentError> {
+        let section = &self.programme;
+        let anchor_section = section.anchor.as_ref().ok_or_else(|| {
+            invalid(
+                "programme.anchor",
+                "a programme that climbs opens from a maximum",
+            )
+        })?;
+        let failed = anchor_section
+            .failed
+            .as_deref()
+            .map(|value| mass("programme.anchor.failed", value))
+            .transpose()?;
+        let anchor = Anchor::new(
+            mass("programme.anchor.load", &anchor_section.load)?,
+            failed,
+            AnchorProvenance::try_from(anchor_section.provenance.clone())
+                .map_err(|error| invalid("programme.anchor.provenance", error))?,
+            settled("programme.anchor.from", &anchor_section.from)?
+                .parse::<Date>()
+                .map_err(|error| invalid("programme.anchor.from", error))?,
+        )
+        .map_err(|error| invalid("programme.anchor", error))?;
+        let declared_opening = section
+            .opening
+            .as_deref()
+            .map(|load| mass("programme.opening", load))
+            .transpose()?;
+        let gating = section.gating_role.as_ref().ok_or_else(|| {
+            invalid(
+                "programme.gating_role",
+                "a programme that climbs says which session advances it",
+            )
+        })?;
+        let primary = Primary::new(
+            pattern,
+            primary_exercise,
+            SessionRole::try_from(gating.clone())
+                .map_err(|error| invalid("programme.gating_role", error))?,
+        );
+        let duration = section.duration_weeks.ok_or_else(|| {
+            invalid(
+                "programme.duration_weeks",
+                "a programme that climbs says for how long",
+            )
+        })?;
+        Self::refuse_unused(
+            template,
+            &[
+                ("programme.reps", section.reps.is_some()),
+                ("programme.target", section.target.is_some()),
+            ],
+        )?;
+        let calendar = Calendar::new(start, duration, interruptions, weekdays, zone)?;
+        let fills = self.fills()?;
+
+        if template == "linear" {
+            Ok(Programme::Periodisation(Periodisation::Linear(
+                Linear::new(
+                    name,
+                    primary,
+                    fills,
+                    Entry::new(anchor, declared_opening),
+                    calendar,
+                    parameters,
+                )?,
+            )))
+        } else {
+            // A block's loads are shares of its anchor, so there is no
+            // opening for a document to declare and none to derive.
+            Self::refuse_unused("block", &[("programme.opening", section.opening.is_some())])?;
+            Ok(Programme::Periodisation(Periodisation::Block(
+                Periodised::new(name, primary, fills, Entry::derived(anchor), calendar)?,
+            )))
+        }
+    }
+
+    /// Refuse a field this template has no use for.
+    ///
+    /// **Refused rather than ignored.** A `gating_role` on a test is not a
+    /// harmless extra line: it is the operator believing something about this
+    /// programme that is not true of it, and reading past it silently is how a
+    /// document and what it authors drift apart.
+    fn refuse_unused(template: &str, fields: &[(&str, bool)]) -> Result<(), DocumentError> {
+        for (field, present) in fields {
+            if *present {
+                return Err(invalid(
+                    field,
+                    format!("a {template} programme has no use for this"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Every slot's fill, stated in full.
     fn fills(&self) -> Result<SlotFills, DocumentError> {
+        self.fills_over(None)
+    }
+
+    /// Every slot's fill, over whatever the previous programme filled it with.
+    ///
+    /// **The result is total either way.** `SlotFills` has a field per slot and
+    /// no way to be partial, which is the point: what a test inherits is
+    /// resolved here and nothing downstream ever sees a gap. A slot the document
+    /// states wins; a slot it omits falls back; a slot neither answers is the
+    /// same error it has always been.
+    fn fills_over(&self, inherited: Option<&SlotFills>) -> Result<SlotFills, DocumentError> {
         Ok(SlotFills {
-            plyometric: self.statics("plyometric")?,
-            power: self.statics("power")?,
-            knee_dominant: self.single("knee_dominant")?,
-            upper_push: self.single("upper_push")?,
-            upper_pull: self.single("upper_pull")?,
-            hip_dominant: self.single("hip_dominant")?,
-            biceps: self.single("biceps")?,
-            triceps: self.single("triceps")?,
-            wrist_flexion: self.single("wrist_flexion")?,
-            wrist_extension: self.single("wrist_extension")?,
-            core: self.single("core")?,
-            handstand_hold: self.single("handstand_hold")?,
-            dead_hang: self.single("dead_hang")?,
-            hip_flexor_stretch: self.single("hip_flexor_stretch")?,
-            hip_external_rotator_stretch: self.single("hip_external_rotator_stretch")?,
-            hamstring_stretch: self.single("hamstring_stretch")?,
-            groin_stretch: self.single("groin_stretch")?,
+            plyometric: self.statics_over("plyometric", inherited.map(|f| &f.plyometric))?,
+            power: self.statics_over("power", inherited.map(|f| &f.power))?,
+            knee_dominant: self
+                .single_over("knee_dominant", inherited.map(|f| &f.knee_dominant))?,
+            upper_push: self.single_over("upper_push", inherited.map(|f| &f.upper_push))?,
+            upper_pull: self.single_over("upper_pull", inherited.map(|f| &f.upper_pull))?,
+            hip_dominant: self.single_over("hip_dominant", inherited.map(|f| &f.hip_dominant))?,
+            biceps: self.single_over("biceps", inherited.map(|f| &f.biceps))?,
+            triceps: self.single_over("triceps", inherited.map(|f| &f.triceps))?,
+            wrist_flexion: self
+                .single_over("wrist_flexion", inherited.map(|f| &f.wrist_flexion))?,
+            wrist_extension: self
+                .single_over("wrist_extension", inherited.map(|f| &f.wrist_extension))?,
+            core: self.single_over("core", inherited.map(|f| &f.core))?,
+            handstand_hold: self
+                .single_over("handstand_hold", inherited.map(|f| &f.handstand_hold))?,
+            dead_hang: self.single_over("dead_hang", inherited.map(|f| &f.dead_hang))?,
+            hip_flexor_stretch: self.single_over(
+                "hip_flexor_stretch",
+                inherited.map(|f| &f.hip_flexor_stretch),
+            )?,
+            hip_external_rotator_stretch: self.single_over(
+                "hip_external_rotator_stretch",
+                inherited.map(|f| &f.hip_external_rotator_stretch),
+            )?,
+            hamstring_stretch: self
+                .single_over("hamstring_stretch", inherited.map(|f| &f.hamstring_stretch))?,
+            groin_stretch: self
+                .single_over("groin_stretch", inherited.map(|f| &f.groin_stretch))?,
         })
+    }
+
+    fn statics_over(
+        &self,
+        slot: &str,
+        inherited: Option<&Fill<StaticFill>>,
+    ) -> Result<Fill<StaticFill>, DocumentError> {
+        match inherited {
+            Some(fill) if !self.fills.contains_key(slot) => Ok(fill.clone()),
+            _ => self.statics(slot),
+        }
+    }
+
+    fn single_over(
+        &self,
+        slot: &str,
+        inherited: Option<&Fill<Exercise>>,
+    ) -> Result<Fill<Exercise>, DocumentError> {
+        match inherited {
+            Some(fill) if !self.fills.contains_key(slot) => Ok(fill.clone()),
+            _ => self.single(slot),
+        }
     }
 
     /// A statically prescribed slot: an exercise plus its sets and repetitions.

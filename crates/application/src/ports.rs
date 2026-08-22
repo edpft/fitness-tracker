@@ -24,7 +24,8 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, Linear, PrescribedWorkout, ProgrammeId, ProgrammeWindow, Progress, SlotId,
+    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeWindow, Progress,
+    SlotId,
 };
 
 use crate::error::{
@@ -611,6 +612,19 @@ pub enum UnderivableReason {
     /// gym's real equipment.
     #[error("no load scale has been authored for the implement this is loaded on")]
     NoLoadScale,
+    /// A test whose target is inherited, with no programme before it to inherit
+    /// from — or one whose predecessor trained a different lift, whose maximum
+    /// says nothing about this one (decision 0013).
+    #[error(
+        "this test takes its target from the programme before it, and there is          none to take it from"
+    )]
+    NoTarget,
+    /// The light session of a test week runs the predecessor's session, and
+    /// there is no predecessor whose progression could say at what load.
+    #[error(
+        "the other session of a test week is the previous programme's, and          there is no previous programme"
+    )]
+    NoPredecessor,
 }
 
 /// The projection of the performed record that prescription reads.
@@ -731,7 +745,28 @@ pub trait ProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Linear)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+
+    /// The programme immediately before a date, if there is one.
+    ///
+    /// **What a standalone test inherits from** (decision 0013). A test's target
+    /// is where the predecessor's progression stands, and its light session is
+    /// the predecessor's session — so deriving a test week needs the programme
+    /// that finished before it, which [`Self::on`] by definition does not
+    /// return.
+    ///
+    /// The latest one to have *finished* by the date, so a programme still
+    /// running is not it. `None` is a test with nothing before it, which is why
+    /// [`TestTarget::Declared`](domain::prescription::TestTarget::Declared)
+    /// exists.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn preceding(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
 
     /// Every programme's name and the days it occupies, oldest first.
     ///
@@ -749,7 +784,7 @@ pub trait ProgrammeStore {
     /// [`StoreError`] if the store is unavailable.
     fn author(
         &self,
-        programme: &Linear,
+        programme: &Programme,
     ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
 }
 
@@ -824,10 +859,20 @@ pub struct Prescription {
 #[derive(Debug, Clone)]
 pub struct LadderStanding {
     pub programme_id: ProgrammeId,
-    pub programme: Linear,
+    pub programme: Programme,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.
-    pub progress: Progress,
+    /// Where the record puts the programme, for the one template that has a
+    /// position to be at. `None` for a block, whose loads are shares of its
+    /// anchor, and for a test, which has no ladder at all.
+    pub progress: Option<Progress>,
+    /// What a standalone test in force is an attempt at, as the record stands.
+    ///
+    /// Reported rather than stored, because it moves: every rung the predecessor
+    /// makes raises it (decision 0011), so the number here is true of the moment
+    /// it was asked for and of nothing else. `None` for any programme that is not
+    /// a test, and for a test whose predecessor cannot supply one.
+    pub target: Option<domain::gym::Kg>,
     /// The newest performance the derivation could see. `None` for an empty
     /// record — which is not the same as a stale one.
     pub history_through: Option<Date>,
@@ -917,7 +962,7 @@ pub trait ProgrammeAuthor {
     /// inconsistent in a way the types could not catch.
     fn author(
         &self,
-        programme: &Linear,
+        programme: &Programme,
         parameters: &GenerationParameters,
     ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
 }

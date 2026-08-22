@@ -208,7 +208,7 @@ fn a_programme_round_trips_with_every_fill_shape() {
         panic!("the fixture programme is consistent")
     };
 
-    let id = run!(store.author(&authored));
+    let id = run!(store.author(&programme::as_programme(authored.clone())));
 
     let Some((read_id, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
@@ -225,10 +225,10 @@ fn a_programme_round_trips_with_every_fill_shape() {
 
     assert_eq!(read_back.primary(), authored.primary());
     assert_eq!(read_back.primary_exercise(), authored.primary_exercise());
-    assert_eq!(read_back.gating_role(), authored.gating_role());
+    assert_eq!(read_back.gating_role(), Some(authored.gating_role()));
     assert_eq!(
         read_back.anchor(),
-        authored.anchor(),
+        Some(authored.anchor()),
         "the anchor round trips"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn the_interrupted_weeks_round_trip() {
         panic!("a week inside the block can be skipped")
     };
 
-    let _id = run!(store.author(&authored));
+    let _id = run!(store.author(&programme::as_programme(authored.clone())));
     let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
@@ -297,7 +297,7 @@ fn the_weekday_mapping_round_trips() {
     let Ok(authored) = programme::programme() else {
         panic!("the fixture programme is consistent")
     };
-    run!(store.author(&authored));
+    run!(store.author(&programme::as_programme(authored.clone())));
 
     let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
@@ -323,8 +323,8 @@ fn authoring_a_programme_supersedes_and_retains() {
         panic!("the fixture programme is consistent")
     };
 
-    let first_id = run!(store.author(&first));
-    let second_id = run!(store.author(&again));
+    let first_id = run!(store.author(&programme::as_programme(first)));
+    let second_id = run!(store.author(&programme::as_programme(again)));
     assert_ne!(first_id, second_id, "each authoring gets its own identity");
 
     let count = run!(async {
@@ -428,7 +428,7 @@ fn a_settled_document_authors() {
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
         panic!("Europe/London is a zone")
     };
-    let programme = match document.programme(&parameters, zone) {
+    let programme = match document.programme(&parameters, zone, None) {
         Ok(programme) => programme,
         Err(error) => panic!("the document describes a consistent programme: {error}"),
     };
@@ -487,7 +487,7 @@ fn a_document_can_name_the_sessions_the_block_does_not_run() {
     ) else {
         panic!("the parameters convert and Europe/London is a zone")
     };
-    let programme = match document.programme(&parameters, zone) {
+    let programme = match document.programme(&parameters, zone, None) {
         Ok(programme) => programme,
         Err(error) => panic!("the document describes a consistent programme: {error}"),
     };
@@ -551,7 +551,7 @@ fn a_document_naming_a_week_outside_the_block_does_not_author() {
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
         panic!("Europe/London is a zone")
     };
-    match document.programme(&parameters, zone) {
+    match document.programme(&parameters, zone, None) {
         Err(infrastructure::DocumentError::Uncalendarable(error)) => {
             assert!(
                 matches!(
@@ -583,8 +583,8 @@ fn two_programmes_succeed_one_another_and_the_date_chooses() {
         panic!("the fixtures are consistent")
     };
 
-    let summer_id = run!(store.author(&summer));
-    let autumn_id = run!(store.author(&autumn));
+    let summer_id = run!(store.author(&programme::as_programme(summer)));
+    let autumn_id = run!(store.author(&programme::as_programme(autumn)));
 
     let in_summer = run!(store.on(jiff::civil::Date::constant(2026, 7, 20)));
     let in_autumn = run!(store.on(jiff::civil::Date::constant(2026, 9, 14)));
@@ -608,7 +608,7 @@ fn a_day_between_programmes_belongs_to_neither() {
     else {
         panic!("the fixture is consistent")
     };
-    run!(store.author(&summer));
+    run!(store.author(&programme::as_programme(summer)));
 
     // Eight weeks from 6 July is over on 31 August.
     assert_eq!(
@@ -634,9 +634,9 @@ fn windows_report_one_entry_per_programme() {
     ) else {
         panic!("the fixtures are consistent")
     };
-    run!(store.author(&summer));
-    run!(store.author(&again));
-    run!(store.author(&autumn));
+    run!(store.author(&programme::as_programme(summer)));
+    run!(store.author(&programme::as_programme(again)));
+    run!(store.author(&programme::as_programme(autumn)));
 
     let windows = run!(store.windows());
     let names: Vec<String> = windows

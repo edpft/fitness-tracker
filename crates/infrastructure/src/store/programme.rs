@@ -4,14 +4,22 @@
 //! beside it. A programme is a record of intent, so nothing regenerates it and
 //! nothing replaces it wholesale.
 //!
-//! **Reading uses `Linear::rehydrate`, not `Linear::new`.** The three
-//! consistency checks that depend on nothing but the programme are re-run,
-//! because a row edited by hand should be caught. The ladder check is not: its
-//! span comes from the parameters, so on read it would be asserting that this
-//! programme's duration works with whatever span is in force *now* — not a
-//! property of the stored programme. Leaving it out is also what lets this store
-//! answer without reading another one, so a programme can still be shown when the
-//! parameters are what is broken.
+//! **Reading uses `rehydrate`, not `new`.** The consistency checks that depend
+//! on nothing but the programme are re-run, because a row edited by hand should
+//! be caught. Linear's ladder check is not: its span comes from the parameters,
+//! so on read it would be asserting that this programme's duration works with
+//! whatever span is in force *now* — not a property of the stored programme.
+//! Leaving it out is also what lets this store answer without reading another
+//! one, so a programme can still be shown when the parameters are what is
+//! broken.
+//!
+//! **One table, three templates, and the row shape is conditional.** A test has
+//! no anchor and no gating role and does have a repetition count; migration 0016
+//! makes each column's presence a `CHECK` on the template rather than leaving
+//! them all nullable, so a half-formed row cannot be written and this module
+//! reads what the template promises. Where it does not find it, the row is
+//! corrupt rather than merely unexpected, which is the same verdict a failed
+//! consistency check gets.
 
 use std::num::NonZeroU8;
 
@@ -19,8 +27,9 @@ use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, ProgrammeId, ProgrammeName,
-        ProgrammeWindow, SessionRole, Skip, SlotId,
+        Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, Periodisation, Periodised,
+        Programme, ProgrammeId, ProgrammeName, ProgrammeWindow, SessionRole, Skip, SlotId, Test,
+        TestTarget, Tested,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
@@ -144,31 +153,25 @@ impl SqliteProgrammeStore {
     pub const fn new(pool: SqlitePool, zone: OperatorZone) -> Self {
         Self { pool, zone }
     }
-}
 
-/// Every programme's latest authoring, oldest block first.
-///
-/// **Read whole rather than filtered in SQL.** Which days a programme occupies
-/// is `Calendar::calendar_weeks`, which walks the weekday map against the skips
-/// — so the span is not `start_date + duration_weeks * 7` and no `WHERE` clause
-/// can find it. The domain is asked instead, which costs one rehydration per
-/// programme and is the only answer that agrees with the calendar.
-impl SqliteProgrammeStore {
-    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Linear)>, StoreError> {
+    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Programme)>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", name AS "name!: String",
                    authored_at AS "authored_at!: String",
+                   template AS "template!: String",
                    primary_pattern AS "primary_pattern!: String",
                    primary_exercise AS "primary_exercise!: String",
-                   anchor_grams AS "anchor_grams!: i64",
-                   anchor_provenance AS "anchor_provenance!: String",
-                   anchor_from AS "anchor_from!: String",
+                   anchor_grams AS "anchor_grams: i64",
+                   anchor_provenance AS "anchor_provenance: String",
+                   anchor_from AS "anchor_from: String",
                    anchor_failed_grams AS "anchor_failed_grams: i64",
                    opening_grams AS "opening_grams: i64",
-                   gating_role AS "gating_role!: String",
+                   gating_role AS "gating_role: String",
                    start_date AS "start_date!: String",
-                   duration_weeks AS "duration_weeks!: i64"
+                   duration_weeks AS "duration_weeks!: i64",
+                   test_reps AS "test_reps: i64",
+                   test_target_grams AS "test_target_grams: i64"
             FROM programme AS p
             WHERE p.authored_at = (
                 SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name
@@ -186,39 +189,8 @@ impl SqliteProgrammeStore {
             let weekdays = read_weekdays(&self.pool, row.id).await?;
             let interruptions = read_interruptions(&self.pool, row.id).await?;
 
-            let anchor_grams = u64::try_from(row.anchor_grams)
-                .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
-            let anchor_failed = row
-                .anchor_failed_grams
-                .map(|grams| {
-                    u64::try_from(grams)
-                        .map(Kg::from_grams)
-                        .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
-                })
-                .transpose()?;
-            let anchor = Anchor::new(
-                Kg::from_grams(anchor_grams),
-                anchor_failed,
-                AnchorProvenance::try_from(row.anchor_provenance)
-                    .map_err(|error| corrupt(&error))?,
-                row.anchor_from
-                    .parse::<Date>()
-                    .map_err(|_| corrupt(&"an anchor date that is not a date"))?,
-            )
-            .map_err(|error| corrupt(&error))?;
-
-            let declared_opening = row
-                .opening_grams
-                .map(|grams| {
-                    u64::try_from(grams)
-                        .map(Kg::from_grams)
-                        .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
-                })
-                .transpose()?;
-
             let duration = u32::try_from(row.duration_weeks)
                 .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
-
             let calendar = Calendar::new(
                 row.start_date
                     .parse::<Date>()
@@ -230,22 +202,43 @@ impl SqliteProgrammeStore {
             )
             .map_err(|error| corrupt(&error))?;
 
-            let programme = Linear::rehydrate(
-                ProgrammeName::try_from(row.name).map_err(|error| corrupt(&error))?,
-                Primary::new(
-                    PrimaryPattern::try_from(row.primary_pattern)
-                        .map_err(|error| corrupt(&error))?,
-                    exercise_of(&row.primary_exercise)?,
-                    SessionRole::try_from(row.gating_role).map_err(|error| corrupt(&error))?,
-                ),
+            let name = ProgrammeName::try_from(row.name).map_err(|error| corrupt(&error))?;
+            let pattern =
+                PrimaryPattern::try_from(row.primary_pattern).map_err(|error| corrupt(&error))?;
+            let exercise = exercise_of(&row.primary_exercise)?;
+            let authored_at = row
+                .authored_at
+                .parse()
+                .map_err(|_| corrupt(&"an authoring date that is not an instant"))?;
+
+            let common = Common {
+                name,
+                pattern,
+                exercise,
                 fills,
-                Entry::new(anchor, declared_opening),
                 calendar,
-                row.authored_at
-                    .parse()
-                    .map_err(|_| corrupt(&"an authoring date that is not an instant"))?,
-            )
-            .map_err(|error| corrupt(&error))?;
+                authored_at,
+            };
+            let programme = match row.template.as_str() {
+                "test" => rehydrate_test(common, row.test_reps, row.test_target_grams)?,
+                template @ ("linear" | "block") => rehydrate_periodisation(
+                    common,
+                    template,
+                    read_entry(
+                        row.anchor_grams,
+                        row.anchor_failed_grams,
+                        row.anchor_provenance,
+                        row.anchor_from,
+                        row.opening_grams,
+                    )?,
+                    row.gating_role,
+                )?,
+                other => {
+                    return Err(corrupt(&format!(
+                        "{other:?} is not a template this build can read"
+                    )));
+                }
+            };
 
             programmes.push((ProgrammeId::new(row.id), programme));
         }
@@ -253,13 +246,225 @@ impl SqliteProgrammeStore {
     }
 }
 
+/// The columns whose presence depends on the template.
+///
+/// **Every `None` here is an absence, not a default.** Migration 0016 says the
+/// same thing from the other side: what a row must carry is decided by what kind
+/// of programme it is, so a test with an anchor and a linear programme without
+/// one are both refused by the database as well as unrepresentable here.
+struct Columns {
+    anchor_grams: Option<i64>,
+    provenance: Option<&'static str>,
+    anchor_from: Option<String>,
+    anchor_failed: Option<i64>,
+    declared_opening: Option<i64>,
+    gating: Option<&'static str>,
+    test_reps: Option<i64>,
+    test_target: Option<i64>,
+}
+
+fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
+    let anchor = programme.anchor();
+    let (test_reps, test_target) = match programme {
+        Programme::Test(test) => (
+            Some(i64::from(test.reps().as_u32())),
+            match test.target() {
+                TestTarget::Inherited => None,
+                TestTarget::Declared(load) => Some(
+                    i64::try_from(load.as_grams())
+                        .map_err(|_| corrupt(&"a target larger than the store can hold"))?,
+                ),
+            },
+        ),
+        Programme::Periodisation(_) => (None, None),
+    };
+    Ok(Columns {
+        anchor_grams: anchor
+            .map(|anchor| {
+                i64::try_from(anchor.load().as_grams())
+                    .map_err(|_| corrupt(&"an anchor larger than the store can hold"))
+            })
+            .transpose()?,
+        provenance: anchor.map(|anchor| anchor.provenance().as_str()),
+        anchor_from: anchor.map(|anchor| anchor.from().to_string()),
+        anchor_failed: anchor
+            .and_then(Anchor::failed)
+            .map(|failed| {
+                i64::try_from(failed.as_grams())
+                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
+            })
+            .transpose()?,
+        // Only a linear programme may declare one: a block's loads are shares of
+        // its anchor, and a test has no ladder to open.
+        declared_opening: match programme {
+            Programme::Periodisation(Periodisation::Linear(linear)) => linear.declared_opening(),
+            Programme::Periodisation(Periodisation::Block(_)) | Programme::Test(_) => None,
+        }
+        .map(|opening| {
+            i64::try_from(opening.as_grams())
+                .map_err(|_| corrupt(&"an opening larger than the store can hold"))
+        })
+        .transpose()?,
+        gating: programme.gating_role().map(SessionRole::as_str),
+        test_reps,
+        test_target,
+    })
+}
+
+/// What every template's row carries, once parsed.
+///
+/// A struct rather than seven arguments: the two rehydrations below take all of
+/// it and differ only in what they take *besides* it.
+struct Common {
+    name: ProgrammeName,
+    pattern: PrimaryPattern,
+    exercise: Exercise,
+    fills: SlotFills,
+    calendar: Calendar,
+    authored_at: jiff::Timestamp,
+}
+
+/// A test, from the two columns only a test carries.
+fn rehydrate_test(
+    common: Common,
+    test_reps: Option<i64>,
+    test_target_grams: Option<i64>,
+) -> Result<Programme, StoreError> {
+    let reps = test_reps.ok_or_else(|| corrupt(&"a test with no repetition count"))?;
+    let reps = u32::try_from(reps)
+        .ok()
+        .and_then(|count| RepCount::new(count).ok())
+        .ok_or_else(|| corrupt(&"a test at no repetitions"))?;
+    // Null is the ordinary case and means inherited: the target moves as the
+    // record does (decision 0011), so storing one is what a test with nothing to
+    // inherit from does.
+    let target = match test_target_grams {
+        None => TestTarget::Inherited,
+        Some(grams) => TestTarget::Declared(
+            u64::try_from(grams)
+                .map(Kg::from_grams)
+                .map_err(|_| corrupt(&"a target stored as a negative mass"))?,
+        ),
+    };
+    Ok(Programme::Test(
+        Test::rehydrate(
+            common.name,
+            Tested::new(common.pattern, common.exercise, reps),
+            common.fills,
+            common.calendar,
+            target,
+            common.authored_at,
+        )
+        .map_err(|error| corrupt(&error))?,
+    ))
+}
+
+/// A programme that climbs, by whichever of the two models.
+fn rehydrate_periodisation(
+    common: Common,
+    template: &str,
+    entry: Entry,
+    gating_role: Option<String>,
+) -> Result<Programme, StoreError> {
+    let gating =
+        gating_role.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
+    let primary = Primary::new(
+        common.pattern,
+        common.exercise,
+        SessionRole::try_from(gating).map_err(|error| corrupt(&error))?,
+    );
+    Ok(Programme::Periodisation(if template == "linear" {
+        Periodisation::Linear(
+            Linear::rehydrate(
+                common.name,
+                primary,
+                common.fills,
+                entry,
+                common.calendar,
+                common.authored_at,
+            )
+            .map_err(|error| corrupt(&error))?,
+        )
+    } else {
+        Periodisation::Block(
+            Periodised::rehydrate(
+                common.name,
+                primary,
+                common.fills,
+                entry,
+                common.calendar,
+                common.authored_at,
+            )
+            .map_err(|error| corrupt(&error))?,
+        )
+    }))
+}
+
+/// The anchor and its opening, from the columns a programme that climbs must
+/// carry.
+///
+/// Every one of them is nullable in the schema and non-null by `CHECK` for these
+/// templates, so a `None` here is a row that got past the database — corrupt,
+/// and reported as such rather than defaulted.
+fn read_entry(
+    grams: Option<i64>,
+    failed_grams: Option<i64>,
+    provenance: Option<String>,
+    from: Option<String>,
+    opening_grams: Option<i64>,
+) -> Result<Entry, StoreError> {
+    let grams = grams.ok_or_else(|| corrupt(&"a programme that climbs from no anchor"))?;
+    let load = u64::try_from(grams)
+        .map(Kg::from_grams)
+        .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
+    let failed = failed_grams
+        .map(|grams| {
+            u64::try_from(grams)
+                .map(Kg::from_grams)
+                .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
+        })
+        .transpose()?;
+    let provenance = provenance.ok_or_else(|| corrupt(&"an anchor from nowhere"))?;
+    let from = from
+        .ok_or_else(|| corrupt(&"an anchor with no date"))?
+        .parse::<Date>()
+        .map_err(|_| corrupt(&"an anchor date that is not a date"))?;
+    let anchor = Anchor::new(
+        load,
+        failed,
+        AnchorProvenance::try_from(provenance).map_err(|error| corrupt(&error))?,
+        from,
+    )
+    .map_err(|error| corrupt(&error))?;
+
+    let declared_opening = opening_grams
+        .map(|grams| {
+            u64::try_from(grams)
+                .map(Kg::from_grams)
+                .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
+        })
+        .transpose()?;
+    Ok(Entry::new(anchor, declared_opening))
+}
+
 impl ProgrammeStore for SqliteProgrammeStore {
-    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Linear)>, StoreError> {
+    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
         Ok(self
             .latest_of_each()
             .await?
             .into_iter()
             .find(|(_, programme)| programme.window().covers(date)))
+    }
+
+    async fn preceding(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
+        // The latest programme that has finished by this date. `latest_of_each`
+        // is ordered by start, so the last one whose window ends at or before
+        // the date is the one immediately before it.
+        Ok(self
+            .latest_of_each()
+            .await?
+            .into_iter()
+            .rfind(|(_, programme)| programme.window().end() <= date))
     }
 
     async fn windows(&self) -> Result<Vec<ProgrammeWindow>, StoreError> {
@@ -271,7 +476,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .collect())
     }
 
-    async fn author(&self, programme: &Linear) -> Result<ProgrammeId, StoreError> {
+    async fn author(&self, programme: &Programme) -> Result<ProgrammeId, StoreError> {
         let mut tx = self
             .pool
             .begin()
@@ -280,43 +485,36 @@ impl ProgrammeStore for SqliteProgrammeStore {
 
         let name = programme.name().to_string();
         let authored_at = programme.authored_at().to_string();
+        let template = programme.template();
         let pattern = programme.primary().as_str();
         let primary = programme.primary_exercise().as_str();
-        let anchor_grams = i64::try_from(programme.anchor().load().as_grams())
-            .map_err(|_| corrupt(&"an anchor larger than the store can hold"))?;
-        let provenance = programme.anchor().provenance().as_str();
-        let anchor_from = programme.anchor().from().to_string();
-        let anchor_failed = programme
-            .anchor()
-            .failed()
-            .map(|failed| {
-                i64::try_from(failed.as_grams())
-                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
-            })
-            .transpose()?;
-        let declared_opening = programme
-            .declared_opening()
-            .map(|opening| {
-                i64::try_from(opening.as_grams())
-                    .map_err(|_| corrupt(&"an opening larger than the store can hold"))
-            })
-            .transpose()?;
-        let gating = programme.gating_role().as_str();
         let start = programme.calendar().start().to_string();
         let duration = i64::from(programme.calendar().duration_weeks());
+        let Columns {
+            anchor_grams,
+            provenance,
+            anchor_from,
+            anchor_failed,
+            declared_opening,
+            gating,
+            test_reps,
+            test_target,
+        } = columns_of(programme)?;
 
         let id = sqlx::query!(
             r"
             INSERT INTO programme (
                 name, authored_at, template, primary_pattern, primary_exercise,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
-                opening_grams, gating_role, start_date, duration_weeks
+                opening_grams, gating_role, start_date, duration_weeks,
+                test_reps, test_target_grams
             )
-            VALUES (?, ?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
             name,
             authored_at,
+            template,
             pattern,
             primary,
             anchor_grams,
@@ -326,7 +524,9 @@ impl ProgrammeStore for SqliteProgrammeStore {
             declared_opening,
             gating,
             start,
-            duration
+            duration,
+            test_reps,
+            test_target
         )
         .fetch_one(&mut *tx)
         .await

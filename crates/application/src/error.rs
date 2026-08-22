@@ -194,6 +194,17 @@ pub enum PrescriptionError {
     /// and one with no slots at all is not a prescription.
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
+    /// A test whose target is inherited, with nothing before it to inherit from.
+    ///
+    /// Refused rather than issued with one slot missing. A test week's whole
+    /// purpose is the attempt, and a session that cannot say what the attempt is
+    /// at is not a diminished test but a week that does not answer.
+    #[error(
+        "the test {programme} takes its target from the programme before it,          and there is no such programme in the same lift"
+    )]
+    NoTarget {
+        programme: domain::prescription::ProgrammeName,
+    },
 
     /// No operator time zone is declared. The same gap as
     /// [`NormalisationError::MissingTimeZone`], and it bites harder here: the

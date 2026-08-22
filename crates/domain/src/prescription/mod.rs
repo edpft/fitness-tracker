@@ -65,4 +65,4 @@ pub use steps::{InvalidLoadSteps, LoadSteps, Step};
 pub use succession::{InvalidProgrammeName, ProgrammeName, ProgrammeWindow};
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
-pub use workout::{PrescribedWorkout, ProgrammeId};
+pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};

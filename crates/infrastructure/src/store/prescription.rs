@@ -19,9 +19,10 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Anchor, AnchorProvenance, GenerationParameters, Prescribed, PrescribedExercise,
-        PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout, ProgrammeId,
-        SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
+        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, Prescribed,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
+        ProgrammeId, SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind,
+        WorkoutShape,
     },
 };
 use jiff::civil::Date;
@@ -124,6 +125,97 @@ fn distance_target(target: Target<Distance>) -> Result<TargetColumns, StoreError
             low: mm(low)?,
             high: Some(mm(high)?),
         },
+    })
+}
+
+/// The columns recording what a session's primary loads came from.
+///
+/// **One of the two, never both.** A session issued from a programme that climbs
+/// derives its loads from an anchor; one issued from a standalone test derives
+/// them from the target the record put it at, and that programme has no anchor.
+/// Migration 0016's `CHECK` says the same thing from the other side.
+struct Origin {
+    anchor_grams: Option<i64>,
+    provenance: Option<&'static str>,
+    anchor_from: Option<String>,
+    anchor_failed: Option<i64>,
+    target_grams: Option<i64>,
+}
+
+/// What a stored session derived from, from the columns that recorded it.
+///
+/// **Neither or both is corrupt, not a default.** The schema refuses either, so
+/// a row reaching here with both set got past the database and saying so is more
+/// use than picking one.
+///
+/// The provenance travels separately because it is a stored string on the way in
+/// and a `&'static str` on the way out.
+fn read_origin(origin: Origin, provenance: Option<String>) -> Result<DerivedFrom, StoreError> {
+    match (origin.anchor_grams, origin.target_grams) {
+        (Some(grams), None) => {
+            let failed = origin
+                .anchor_failed
+                .map(|grams| {
+                    u64::try_from(grams)
+                        .map(Kg::from_grams)
+                        .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
+                })
+                .transpose()?;
+            let provenance = provenance.ok_or_else(|| corrupt(&"an anchor from nowhere"))?;
+            let from = origin
+                .anchor_from
+                .ok_or_else(|| corrupt(&"an anchor with no date"))?
+                .parse::<Date>()
+                .map_err(|_| corrupt(&"an anchor date that is not a date"))?;
+            Ok(DerivedFrom::Anchor(
+                Anchor::new(
+                    u64::try_from(grams)
+                        .map(Kg::from_grams)
+                        .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?,
+                    failed,
+                    AnchorProvenance::try_from(provenance).map_err(|error| corrupt(&error))?,
+                    from,
+                )
+                .map_err(|error| corrupt(&error))?,
+            ))
+        }
+        (None, Some(grams)) => Ok(DerivedFrom::Target(
+            u64::try_from(grams)
+                .map(Kg::from_grams)
+                .map_err(|_| corrupt(&"a target stored as a negative mass"))?,
+        )),
+        (Some(_), Some(_)) => Err(corrupt(
+            &"a prescription derived from both an anchor and a target",
+        )),
+        (None, None) => Err(corrupt(&"a prescription derived from nothing")),
+    }
+}
+
+fn origin_of(derived_from: DerivedFrom) -> Result<Origin, StoreError> {
+    let anchor = derived_from.anchor();
+    Ok(Origin {
+        anchor_grams: anchor
+            .map(|anchor| {
+                i64::try_from(anchor.load().as_grams())
+                    .map_err(|_| corrupt(&"an anchor larger than the store can hold"))
+            })
+            .transpose()?,
+        provenance: anchor.map(|anchor| anchor.provenance().as_str()),
+        anchor_from: anchor.map(|anchor| anchor.from().to_string()),
+        anchor_failed: anchor
+            .and_then(Anchor::failed)
+            .map(|failed| {
+                i64::try_from(failed.as_grams())
+                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
+            })
+            .transpose()?,
+        target_grams: derived_from
+            .target()
+            .map(|target| {
+                i64::try_from(target.as_grams())
+                    .map_err(|_| corrupt(&"a target larger than the store can hold"))
+            })
+            .transpose()?,
     })
 }
 
@@ -276,18 +368,13 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             .week()
             .index()
             .map(|index| i64::from(index.as_u32()));
-        let anchor_grams = i64::try_from(workout.anchor().load().as_grams())
-            .map_err(|_| corrupt(&"an anchor larger than the store can hold"))?;
-        let provenance = workout.anchor().provenance().as_str();
-        let anchor_from = workout.anchor().from().to_string();
-        let anchor_failed = workout
-            .anchor()
-            .failed()
-            .map(|failed| {
-                i64::try_from(failed.as_grams())
-                    .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
-            })
-            .transpose()?;
+        let Origin {
+            anchor_grams,
+            provenance,
+            anchor_from,
+            anchor_failed,
+            target_grams,
+        } = origin_of(workout.derived_from())?;
         // The version the parameters came from — the join back to the authored
         // set. The values themselves are on the row too, which is what § 14
         // rests on; this is what tells two versions apart.
@@ -300,9 +387,9 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                 programme, issued_for, zone, session_role,
                 week_kind, week_index,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
-                parameters_authored_at, issued_at
+                target_grams, parameters_authored_at, issued_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             programme,
@@ -315,6 +402,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             provenance,
             anchor_from,
             anchor_failed,
+            target_grams,
             parameters_at,
             issued_at
         )
@@ -376,10 +464,11 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             SELECT id AS "id!: i64", programme AS "programme!: i64",
                    session_role AS "session_role!: String",
                    week_kind AS "week_kind!: String", week_index AS "week_index: i64",
-                   anchor_grams AS "anchor_grams!: i64",
-                   anchor_provenance AS "anchor_provenance!: String",
-                   anchor_from AS "anchor_from!: String",
+                   anchor_grams AS "anchor_grams: i64",
+                   anchor_provenance AS "anchor_provenance: String",
+                   anchor_from AS "anchor_from: String",
                    anchor_failed_grams AS "anchor_failed_grams: i64",
+                   target_grams AS "target_grams: i64",
                    parameters_authored_at AS "parameters_authored_at!: String",
                    issued_at AS "issued_at!: String"
             FROM prescribed_workout
@@ -402,25 +491,16 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 
         let shape = read_shape(&self.pool, row.id).await?;
 
-        let anchor_grams = u64::try_from(row.anchor_grams)
-            .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
-        let anchor_failed = row
-            .anchor_failed_grams
-            .map(|grams| {
-                u64::try_from(grams)
-                    .map(Kg::from_grams)
-                    .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
-            })
-            .transpose()?;
-        let anchor = Anchor::new(
-            Kg::from_grams(anchor_grams),
-            anchor_failed,
-            AnchorProvenance::try_from(row.anchor_provenance).map_err(|error| corrupt(&error))?,
-            row.anchor_from
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"an anchor date that is not a date"))?,
-        )
-        .map_err(|error| corrupt(&error))?;
+        let derived_from = read_origin(
+            Origin {
+                anchor_grams: row.anchor_grams,
+                provenance: None,
+                anchor_from: row.anchor_from,
+                anchor_failed: row.anchor_failed_grams,
+                target_grams: row.target_grams,
+            },
+            row.anchor_provenance,
+        )?;
 
         let week = match row.week_kind.as_str() {
             "test" => WeekKind::Test,
@@ -448,7 +528,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             date,
             SessionRole::try_from(row.session_role).map_err(|error| corrupt(&error))?,
             week,
-            anchor,
+            derived_from,
             parameters,
             parameters_at,
             ProgrammeId::new(row.programme),

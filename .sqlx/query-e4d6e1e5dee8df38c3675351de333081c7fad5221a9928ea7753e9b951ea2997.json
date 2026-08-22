@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams!: i64\",\n                   anchor_provenance AS \"anchor_provenance!: String\",\n                   anchor_from AS \"anchor_from!: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role!: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\"\n            FROM programme AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name\n            )\n            ORDER BY start_date ASC, id ASC\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   template AS \"template!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams: i64\",\n                   anchor_provenance AS \"anchor_provenance: String\",\n                   anchor_from AS \"anchor_from: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\",\n                   test_reps AS \"test_reps: i64\",\n                   test_target_grams AS \"test_target_grams: i64\"\n            FROM programme AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name\n            )\n            ORDER BY start_date ASC, id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "primary_pattern!: String",
+        "name": "template!: String",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "template"
+          }
+        }
+      },
+      {
+        "name": "primary_pattern!: String",
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "primary_exercise!: String",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,8 +70,8 @@
         }
       },
       {
-        "name": "anchor_grams!: i64",
-        "ordinal": 5,
+        "name": "anchor_grams: i64",
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -70,8 +81,8 @@
         }
       },
       {
-        "name": "anchor_provenance!: String",
-        "ordinal": 6,
+        "name": "anchor_provenance: String",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -81,8 +92,8 @@
         }
       },
       {
-        "name": "anchor_from!: String",
-        "ordinal": 7,
+        "name": "anchor_from: String",
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "anchor_failed_grams: i64",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "opening_grams: i64",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -114,8 +125,8 @@
         }
       },
       {
-        "name": "gating_role!: String",
-        "ordinal": 10,
+        "name": "gating_role: String",
+        "ordinal": 11,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -126,7 +137,7 @@
       },
       {
         "name": "start_date!: String",
-        "ordinal": 11,
+        "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -137,12 +148,34 @@
       },
       {
         "name": "duration_weeks!: i64",
-        "ordinal": 12,
+        "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "programme",
             "name": "duration_weeks"
+          }
+        }
+      },
+      {
+        "name": "test_reps: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "test_reps"
+          }
+        }
+      },
+      {
+        "name": "test_target_grams: i64",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "test_target_grams"
           }
         }
       }
@@ -157,14 +190,17 @@
       false,
       false,
       false,
-      false,
-      false,
+      true,
+      true,
+      true,
+      true,
       true,
       true,
       false,
       false,
-      false
+      true,
+      true
     ]
   },
-  "hash": "63430f52bcf34b0cfc65fb8c714e4e52dd7825b057e80859d6341b54be34e591"
+  "hash": "e4d6e1e5dee8df38c3675351de333081c7fad5221a9928ea7753e9b951ea2997"
 }

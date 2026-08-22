@@ -64,7 +64,10 @@ pub async fn with_programme(
         SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(&programme, &programme::parameters()?)
+    .author(
+        &programme::as_programme(programme),
+        &programme::parameters()?,
+    )
     .await?;
 
     Ok((directory, pool))

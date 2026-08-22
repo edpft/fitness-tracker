@@ -27,8 +27,8 @@ use domain::{
     },
     prescription::{
         Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, Linear,
-        LoadSteps, PerRole, Percentage, ProgrammeName, ResetProtocol, Scales, SessionRole, Skip,
-        Step, TopSetReps, WarmupStep, Weekdays,
+        LoadSteps, PerRole, Percentage, Periodisation, Programme, ProgrammeName, ResetProtocol,
+        Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
         linear::{Fill, Primary, SlotFills, StaticFill},
     },
 };
@@ -309,6 +309,15 @@ pub const FIXTURE_NAME: &str = "fixture";
 /// [`ProgrammeFixtureError`] if the text is not a usable programme name.
 pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
     ProgrammeName::try_from(text.to_owned()).map_err(invalid)
+}
+
+/// A linear programme, as one of the three things a programme can be.
+///
+/// The fixtures below build a `Linear` because that is what they are about;
+/// every port takes a `Programme`, so this is the one line between them.
+#[must_use]
+pub const fn as_programme(linear: Linear) -> Programme {
+    Programme::Periodisation(Periodisation::Linear(linear))
 }
 
 pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
