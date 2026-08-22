@@ -234,12 +234,28 @@ fn short(id: &str) -> String {
 /// What was authored.
 pub fn programme_authored(
     id: domain::prescription::ProgrammeId,
+    authored: application::Authored,
     programme: &domain::prescription::Programme,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
+    // Which of the two it was, first and in plain words. A name the store has
+    // not seen starts a programme; one it has corrects that programme — and a
+    // typo in the name is a new programme, so the operator has to be able to see
+    // that happen rather than infer it later from two blocks where one was meant.
+    match authored {
+        application::Authored::Created => {
+            println!("created programme \"{}\"", programme.name());
+        }
+        application::Authored::Modified => {
+            println!(
+                "modified programme \"{}\" — its previous version stays as history",
+                programme.name()
+            );
+        }
+    }
     println!(
-        "authored programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
+        "  programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
@@ -330,7 +346,9 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     let calendar = programme.calendar();
 
     println!(
-        "programme {} — {}, {} primary, {} training weeks from {}, gating on the {} session",
+        "programme \"{}\" ({}) — {}, {} primary, {} training weeks from {}, \
+         gating on the {} session",
+        programme.name(),
         standing.programme_id,
         programme.primary_exercise(),
         programme.primary(),
@@ -372,12 +390,9 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         let Ok(index) = WeekIndex::new(week) else {
             continue;
         };
+        // Every week of a linear block is a rung (decision 0013), so this
+        // only skips a week the ladder cannot price at all.
         let Some(percentage) = ladder.implied_percentage(anchor, index, steps) else {
-            // The test week is not a rung and carries no planned load. What it
-            // will be an attempt at depends on how far the progression gets,
-            // which is a fact about the record rather than about the plan — so
-            // it is reported below the table, not inside it.
-            println!("  {week:>4}  {:>9}  {:>7}  {:>7}", "—", "test", "—");
             continue;
         };
         let heavy = ladder.heavy_top_set(index, steps);
@@ -394,14 +409,6 @@ pub fn programme_standing(standing: &application::LadderStanding) {
             light.map_or_else(|| "—".to_owned(), |load| format!("{load}")),
         );
     }
-
-    // What the block's test would be an attempt at, as things stand. It moves as
-    // the progression does — every rung that goes up raises it — so it is stated
-    // as of the record rather than printed in the plan above as though settled.
-    println!(
-        "  the test is for {} as the record stands",
-        standing.progress.test_target(ladder, steps)
-    );
 
     match standing.progress.reset() {
         None => println!(

@@ -137,9 +137,14 @@ fn an_interrupted_week_issues_nothing() {
 
 /// The block still ends after its eleventh *training* week, one calendar week
 /// later than it would have.
+///
+/// **Every week of it climbs** (decision 0013). This used to assert that the
+/// last week was a test and that an interruption pushed that test out; a linear
+/// programme has no test now, so what moves is the last *climbing* week. The
+/// claim is unchanged — an interruption costs a calendar week and not a rung.
 #[test]
-fn an_interruption_moves_the_test_week_out_rather_than_dropping_it() {
-    let (Ok(away), Ok(was_the_test), Ok(is_the_test), Ok(past_the_end)) = (
+fn an_interruption_moves_the_last_week_out_rather_than_dropping_it() {
+    let (Ok(away), Ok(tenth), Ok(eleventh), Ok(past_the_end)) = (
         date(2026, 10, 12),
         date(2026, 11, 23),
         date(2026, 11, 30),
@@ -150,27 +155,33 @@ fn an_interruption_moves_the_test_week_out_rather_than_dropping_it() {
     let Ok(week) = week_from(away) else {
         panic!("seven days is a skip")
     };
-    let Ok(calendar) = autumn(&[week]) else {
+    let (Ok(interrupted), Ok(uninterrupted)) = (autumn(&[week]), autumn(&[])) else {
         panic!("a week inside the block can be skipped")
     };
 
-    assert_eq!(calendar.duration_weeks(), 11, "eleven weeks of training");
+    assert_eq!(interrupted.duration_weeks(), 11, "eleven weeks of training");
     assert_eq!(
-        calendar.calendar_weeks(),
+        interrupted.calendar_weeks(),
         12,
         "over twelve weeks of calendar"
     );
 
-    assert!(
-        matches!(calendar.place(was_the_test), Ok((WeekKind::Climbing(_), _))),
-        "what would have been the test is now the last climbing week"
-    );
+    // The claim is about the difference: uninterrupted, the block is over by
+    // the 30th; interrupted, that week is its eleventh and last.
+    assert_eq!(week_of(&uninterrupted, tenth), Some(11));
     assert!(matches!(
-        calendar.place(is_the_test),
-        Ok((WeekKind::Test, SessionRole::Light))
+        uninterrupted.place(eleventh),
+        Err(NotScheduled::PastEnd { .. })
     ));
+
+    assert_eq!(
+        week_of(&interrupted, tenth),
+        Some(10),
+        "the week away cost a calendar week, not a rung"
+    );
+    assert_eq!(week_of(&interrupted, eleventh), Some(11));
     assert!(matches!(
-        calendar.place(past_the_end),
+        interrupted.place(past_the_end),
         Err(NotScheduled::PastEnd { .. })
     ));
 }

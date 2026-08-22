@@ -575,12 +575,16 @@ impl Calendar {
             });
         }
 
-        // The last week of a block is its test, and is not a ladder position.
-        let kind = if week == self.duration_weeks {
-            WeekKind::Test
-        } else {
-            WeekKind::Climbing(WeekIndex::new(week).unwrap_or(WeekIndex(1)))
-        };
+        // **Every week of a linear block climbs** (decision 0013). The last
+        // week used to be its test, which made `duration_weeks` mean "climbing
+        // weeks and a test" and left the programme describing a session that
+        // was not its own. A test is a programme in its own right now, so this
+        // calendar has none to place.
+        //
+        // `WeekKind::Test` stays for the templates that do own their test: a
+        // periodised block always ends in one, and a standalone test programme
+        // is nothing else.
+        let kind = WeekKind::Climbing(WeekIndex::new(week).unwrap_or(WeekIndex(1)));
         Ok((kind, role))
     }
 

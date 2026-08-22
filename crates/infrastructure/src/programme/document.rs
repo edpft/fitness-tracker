@@ -19,8 +19,9 @@ use domain::{
     prescription::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
         InconsistentProgramme, InvalidCalendar, LoadSteps, PerRole, Percentage, Programme,
-        ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
-        linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
+        ProgrammeName, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
+        Weekdays,
+        linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -138,6 +139,14 @@ pub struct Document {
 
 #[derive(serde::Deserialize)]
 struct ProgrammeSection {
+    /// What identifies this programme across re-authorings (decision 0012).
+    ///
+    /// In the document rather than on the command line, because § 12 makes the
+    /// authored record a primary input: it has to be reproducible from the
+    /// document alone, and `--amend` is invocation state no document remembers.
+    /// Re-authoring under the same name corrects that programme; a new name
+    /// starts a new one, and `programme author` says which it is doing.
+    name: String,
     template: String,
     #[serde(rename = "primary")]
     primary_pattern: String,
@@ -453,13 +462,17 @@ impl Document {
         )?;
 
         Ok(Programme::new(
-            PrimaryPattern::try_from(section.primary_pattern.clone())
-                .map_err(|error| invalid("programme.primary", error))?,
-            exercise("programme.primary_exercise", &section.primary_exercise)?,
+            ProgrammeName::try_from(settled("programme.name", &section.name)?.to_owned())
+                .map_err(|error| invalid("programme.name", error))?,
+            Primary::new(
+                PrimaryPattern::try_from(section.primary_pattern.clone())
+                    .map_err(|error| invalid("programme.primary", error))?,
+                exercise("programme.primary_exercise", &section.primary_exercise)?,
+                SessionRole::try_from(section.gating_role.clone())
+                    .map_err(|error| invalid("programme.gating_role", error))?,
+            ),
             self.fills()?,
             Entry::new(anchor, declared_opening),
-            SessionRole::try_from(section.gating_role.clone())
-                .map_err(|error| invalid("programme.gating_role", error))?,
             calendar,
             parameters,
         )?)

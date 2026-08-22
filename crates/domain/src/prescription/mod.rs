@@ -29,14 +29,15 @@ pub mod repmax;
 pub mod schedule;
 pub mod shape;
 pub mod steps;
+pub mod succession;
 pub mod target;
 pub mod workout;
 
 pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
-    Fill, InconsistentProgramme, Position, PrimaryPattern, Programme, SlotContent, SlotFills,
-    StaticFill,
+    Fill, InconsistentProgramme, Position, Primary, PrimaryPattern, Programme, SlotContent,
+    SlotFills, StaticFill,
 };
 pub use parameters::{
     AccessoryScheme, BackOff, GenerationParameters, InvalidPercentage, Percentage, ResetProtocol,
@@ -54,5 +55,6 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
+pub use succession::{InvalidProgrammeName, ProgrammeName, ProgrammeWindow};
 pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
 pub use workout::{PrescribedWorkout, ProgrammeId};

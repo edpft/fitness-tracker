@@ -27,9 +27,9 @@ use domain::{
     },
     prescription::{
         Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, LoadSteps,
-        PerRole, Percentage, Programme, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps,
-        WarmupStep, Weekdays,
-        linear::{Fill, SlotFills, StaticFill},
+        PerRole, Percentage, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole, Skip,
+        Step, TopSetReps, WarmupStep, Weekdays,
+        linear::{Fill, Primary, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -297,6 +297,20 @@ pub fn calendar_from(start: Date, weekdays: Weekdays) -> Result<Calendar, Progra
 ///
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
+/// What the fixtures call themselves.
+///
+/// One name across the fixtures, so two of them authored into one store are
+/// versions of one programme rather than rivals for the same days — which is
+/// what most of these tests want. A test about succession names its own.
+pub const FIXTURE_NAME: &str = "fixture";
+
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the text is not a usable programme name.
+pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
+    ProgrammeName::try_from(text.to_owned()).map_err(invalid)
+}
+
 pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
     programme_skipping(&[])
 }
@@ -310,12 +324,15 @@ pub fn programme() -> Result<Programme, ProgrammeFixtureError> {
 pub fn programme_skipping(skips: &[Skip]) -> Result<Programme, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Programme::new(
-        domain::prescription::PrimaryPattern::KneeDominant,
-        Exercise::Reps(RepsExercise::FrontSquat),
+        name(FIXTURE_NAME)?,
+        Primary::new(
+            domain::prescription::PrimaryPattern::KneeDominant,
+            Exercise::Reps(RepsExercise::FrontSquat),
+            SessionRole::Heavy,
+        ),
         fills()?,
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
-        SessionRole::Heavy,
         calendar_running(weekdays()?, skips)?,
         &parameters,
     )
@@ -329,14 +346,27 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Programme, ProgrammeFixtureE
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
 pub fn programme_from(start: Date) -> Result<Programme, ProgrammeFixtureError> {
+    programme_named_from(FIXTURE_NAME, start)
+}
+
+/// A programme with its own name and start, for succeeding another one.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the name is unusable or the programme is
+/// inconsistent.
+pub fn programme_named_from(called: &str, start: Date) -> Result<Programme, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Programme::new(
-        domain::prescription::PrimaryPattern::KneeDominant,
-        Exercise::Reps(RepsExercise::FrontSquat),
+        name(called)?,
+        Primary::new(
+            domain::prescription::PrimaryPattern::KneeDominant,
+            Exercise::Reps(RepsExercise::FrontSquat),
+            SessionRole::Heavy,
+        ),
         fills()?,
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
-        SessionRole::Heavy,
         calendar_from(start, weekdays()?)?,
         &parameters,
     )
@@ -359,12 +389,15 @@ pub fn gating_on_a_role_it_never_runs()
     let monday_only =
         Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)]).map_err(invalid)?;
     Ok(Programme::new(
-        domain::prescription::PrimaryPattern::KneeDominant,
-        Exercise::Reps(RepsExercise::FrontSquat),
+        name(FIXTURE_NAME)?,
+        Primary::new(
+            domain::prescription::PrimaryPattern::KneeDominant,
+            Exercise::Reps(RepsExercise::FrontSquat),
+            SessionRole::Heavy,
+        ),
         fills()?,
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
-        SessionRole::Heavy,
         calendar_running(monday_only, &[])?,
         &parameters,
     ))
@@ -379,12 +412,15 @@ pub fn primary_not_counted_in_reps()
 -> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Programme::new(
-        domain::prescription::PrimaryPattern::KneeDominant,
-        Exercise::Distance(DistanceExercise::Running),
+        name(FIXTURE_NAME)?,
+        Primary::new(
+            domain::prescription::PrimaryPattern::KneeDominant,
+            Exercise::Distance(DistanceExercise::Running),
+            SessionRole::Heavy,
+        ),
         fills()?,
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
-        SessionRole::Heavy,
         calendar()?,
         &parameters,
     ))
@@ -399,14 +435,17 @@ pub fn primary_does_not_fill_its_slot()
 -> Result<Result<Programme, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Programme::new(
+        name(FIXTURE_NAME)?,
         // Names the knee-dominant slot as primary, but the primary exercise is a
         // deadlift, and the knee-dominant fill is a front squat.
-        domain::prescription::PrimaryPattern::KneeDominant,
-        Exercise::Reps(RepsExercise::DeadliftBarbell),
+        Primary::new(
+            domain::prescription::PrimaryPattern::KneeDominant,
+            Exercise::Reps(RepsExercise::DeadliftBarbell),
+            SessionRole::Heavy,
+        ),
         fills()?,
         // These fixtures derive their opening from the anchor's entry test.
         Entry::derived(anchor()?),
-        SessionRole::Heavy,
         calendar()?,
         &parameters,
     ))

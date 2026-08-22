@@ -32,7 +32,7 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let id = Authoring::new(
+    let (id, authored) = Authoring::new(
         SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         SqliteGenerationParameterStore::new(pool),
     )
@@ -40,7 +40,7 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
     .await
     .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    output::programme_authored(id, &programme, &parameters);
+    output::programme_authored(id, authored, &programme, &parameters);
     Ok(())
 }
 
@@ -92,7 +92,7 @@ pub async fn prescribe(
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
     });
 
-    let date = resolve(&programmes, date).await?;
+    let date = resolve(&programmes, zone, date).await?;
     let issued = prescriber
         .prescribe(date, reissue)
         .await
@@ -106,20 +106,34 @@ pub async fn prescribe(
 ///
 /// **The defaulting itself is [`config::date`]**, which takes the calendar and
 /// the clock and is unit-tested. What is left here is the part that needs the
-/// store: a default is relative to the programme in force, so the programme has
-/// to be read before the date can be worked out.
-async fn resolve(programmes: &SqliteProgrammeStore, given: Option<&str>) -> Result<Date, Failure> {
-    let current = application::ProgrammeStore::current(programmes)
+/// store.
+///
+/// **A named date needs no programme.** Programmes succeed one another, so
+/// which one covers that date is settled when the prescription is derived —
+/// and asking the store first would refuse a perfectly good date merely because
+/// nothing is planned for *today*.
+async fn resolve(
+    programmes: &SqliteProgrammeStore,
+    zone: &OperatorZone,
+    given: Option<&str>,
+) -> Result<Date, Failure> {
+    if let Some(text) = given {
+        return config::named_date(text).map_err(|error| Failure::usage(&error));
+    }
+
+    let now = jiff::Timestamp::now();
+    let today = now.to_zoned(zone.as_time_zone()).date();
+    let covering = application::ProgrammeStore::on(programmes, today)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let Some((_, programme)) = current else {
+    let Some((_, programme)) = covering else {
         return Err(Failure::message(
-            application::PrescriptionError::NoProgramme.to_string(),
+            application::PrescriptionError::NoProgramme { date: today }.to_string(),
             exit::STORE,
         ));
     };
 
-    config::date(given, programme.calendar(), jiff::Timestamp::now()).map_err(|error| match error {
+    config::date(None, programme.calendar(), now).map_err(|error| match error {
         // A date that will not parse is the operator's typing; a block with no
         // session left is the store's state. They exit differently.
         ConfigError::NotADate { .. } => Failure::usage(&error),

@@ -7,7 +7,7 @@
 //! the tested 1RM at the end higher than it was at the start.
 //!
 //! ```text
-//! climbing weeks = duration - 1          the last week is the test
+//! climbing weeks = duration              a linear block never tests (0013)
 //! opening        = declared, or the entry test's failed load dropped
 //! heavy(w)       = quantise(opening + climb × (w - 1))
 //! ```
@@ -170,7 +170,7 @@ impl Ladder {
         Ok(Self {
             opening: opening.load(climb_per_week, steps),
             climb_per_week,
-            climbing_weeks: duration_weeks - 1,
+            climbing_weeks: duration_weeks,
         })
     }
 
