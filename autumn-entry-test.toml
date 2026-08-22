@@ -1,0 +1,92 @@
+# A standalone test on Friday 18 September.
+#
+# Authored intent (§ 12), like `programme.toml` beside it — and a programme in
+# its own right, belonging to neither neighbour (decision 0013).
+#
+# **This is one of two ways to arrive at a maximum, and probably not the one the
+# autumn block will use.** Decision 0016 gives a block an optional entry test of
+# its own, because a test session has to run the lower slots the way the
+# programme it anchors runs them — so the pattern, the primary and the accessory
+# fill have to agree between the test and the block. Held in the block they
+# cannot disagree; held here they are three facts nothing checks.
+#
+# What this template is still for is a test between two *linear* programmes, or
+# one with nothing after it. If the autumn block is authored with
+# `[programme.entry_test]`, this document is superseded by it and should be
+# deleted rather than left to compete for the same week.
+#
+# **Nearly everything here is absent, and that is the point.** A test is two
+# sessions. Re-authoring seventeen slots, a warm-up ramp and six load scales to
+# say so would be the whole-programme authoring 0013 exists to avoid, so what a
+# test document states is only what *changes*:
+#
+#   the lift being tested, and what the attempt is performed at
+#   the week it occupies, and which days it runs
+#   any slot whose fill moves with it — none, here
+#
+# Everything unstated is inherited when this document is read: the fills come
+# from the programme this one follows, and the parameters from the set in force.
+# Both are resolved at authoring rather than at derivation, so correcting the
+# summer block later cannot silently move what this test prescribes.
+
+[programme]
+# A programme, so it names itself and competes for its days like one. A
+# different name from the summer block, because it is a different programme
+# rather than a re-authoring of that one.
+name             = "autumn-2026-entry-test"
+template         = "test"
+
+# The lift being tested, which is the *next* programme's primary rather than the
+# summer block's. Both are the front squat here, so the week's two sessions run
+# the same lift — the light one as the summer block's session, the heavy one as
+# the test.
+primary          = "knee_dominant"
+primary_exercise = "front-squat"
+
+# A single, and not a triple.
+#
+# **Because what follows it is a linear programme rather than a block.** A block
+# enters on a triple deliberately: a cold maximal single measures technique as
+# much as strength, and a peaked one is what its realisation weeks prepare for.
+# Nothing here is peaking anything, so this measures the lift the way the summer
+# block has been climbing it.
+#
+# Stated by the operator.
+reps             = 1
+
+# Monday 14 September. The week runs to Sunday 20, and the autumn block opens
+# the Monday after — adjacent, not overlapping.
+start            = "2026-09-14"
+
+# Which weekday is which session. Both run:
+#
+#   Monday 14   the summer block's light session, at the load its progression
+#               stands at
+#   Friday 18   the test
+#
+# Monday used to be a summer-block interruption and is not any more: it falls in
+# this week, which is not that programme.
+[programme.weekdays]
+monday = "light"
+friday = "heavy"
+
+# No `anchor`: a test produces one rather than reading one, and that is the whole
+# of what it does. No `gating_role`: there is no ladder to gate, and the test is
+# taken on the heavy session by definition. No `duration_weeks`: a test is one
+# week and has nowhere to put a number that could disagree. No `opening`, no
+# `target`. Stating any of them is refused rather than ignored — a field on a
+# document is the operator believing something about this programme, and one that
+# is not true of it should not read as harmless.
+#
+# `target` is the one worth explaining. Absent means the test is for the load the
+# summer block's progression stands at, read from the record every time it is
+# asked (decision 0011) — so every rung that goes up raises it. It would be
+# stated only for a test with nothing before it in the same lift, where there is
+# nothing to inherit.
+#
+# No `[fills]`: nothing in the session changes. Every slot comes from the summer
+# block. A test that switched the primary to a different lift would name that
+# slot here and leave the other sixteen alone.
+#
+# No `[parameters]`: the set in force applies. Stating them is how they are
+# changed, not a condition of authoring (§ 14).

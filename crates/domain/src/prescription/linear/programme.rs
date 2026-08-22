@@ -1,4 +1,4 @@
-//! A programme written against `v1`.
+//! A programme that climbs a top-set ladder: one of the two ways of periodising.
 //!
 //! **Its purpose is to increase the primary exercise's 1RM**, and its whole
 //! primary loading series is a function of two authored values: a duration in
@@ -7,6 +7,13 @@
 //!
 //! Fills are inputs rather than choices the programme makes. Generation produces
 //! the loading series, never the exercise selection.
+//!
+//! **It was called `Programme` until 2026-08-22**, when a test became a
+//! programme in its own right (decision 0013) and the name had to go to the
+//! thing that is either. This is now [`Periodisation::Linear`], and it never
+//! includes a test: every week it holds is a climbing week.
+//!
+//! [`Periodisation::Linear`]: crate::prescription::Periodisation::Linear
 
 use jiff::Timestamp;
 
@@ -16,6 +23,7 @@ use crate::{
         anchor::{Anchor, Entry},
         ladder::{InvalidLadder, Ladder, Opening},
         parameters::GenerationParameters,
+        programme::{InconsistentProgramme, check_primary},
         schedule::{Calendar, SessionRole, Weekdays},
         steps::LoadSteps,
         succession::{ProgrammeName, ProgrammeWindow},
@@ -24,49 +32,9 @@ use crate::{
 
 use super::template::{PrimaryPattern, SlotFills};
 
-/// What the types could not catch.
-///
-/// Most of a programme's validity is structural — [`SlotFills`] is total,
-/// `PerRole` has both roles, a range must span. These three are not, and each is
-/// a way to author a programme that compiles and then cannot work.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InconsistentProgramme {
-    #[error(
-        "this programme gates on the {gating} session but never runs one, \
-         so its ladder would never advance"
-    )]
-    GatingRoleNeverRuns { gating: SessionRole },
-    #[error(
-        "the primary exercise {primary} is counted in {measure}, and a top set \
-         needs repetitions"
-    )]
-    PrimaryIsNotCountedInReps {
-        primary: &'static str,
-        measure: &'static str,
-    },
-    #[error(
-        "this programme names {pattern} as primary but fills that slot with \
-         {fill} rather than the primary exercise {primary}"
-    )]
-    PrimaryDoesNotFillItsSlot {
-        pattern: PrimaryPattern,
-        primary: &'static str,
-        fill: &'static str,
-    },
-    #[error("the ladder is not a plan: {0}")]
-    Ladder(#[from] InvalidLadder),
-    #[error(
-        "this programme starts on {start} but its entry test is dated {tested},          which is not before it"
-    )]
-    EntryTestIsNotBeforeTheBlock {
-        start: jiff::civil::Date,
-        tested: jiff::civil::Date,
-    },
-}
-
 /// Where a block opens, from what the programme declares and what it anchors on.
 ///
-/// One place, so the check `Programme::new` runs and the ladder `prescribe`
+/// One place, so the check `Linear::new` runs and the ladder `prescribe`
 /// builds cannot disagree about which opening is in force.
 fn opening_of(entry: Entry, parameters: &GenerationParameters) -> Opening {
     entry.declared_opening().map_or_else(
@@ -94,7 +62,7 @@ fn steps_for(
 ///
 /// **One argument because they are one decision.** The pattern names a slot,
 /// the exercise fills it, and the gating role says which session's top set the
-/// ladder reads — and `Programme::check` already validates the three together,
+/// ladder reads — and `Linear::check` already validates the three together,
 /// because a primary that does not fill its own slot and a gate on a role the
 /// programme never runs are the same kind of mistake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,11 +84,23 @@ impl Primary {
             gating_role,
         }
     }
+
+    pub const fn pattern(self) -> PrimaryPattern {
+        self.pattern
+    }
+
+    pub const fn exercise(self) -> Exercise {
+        self.exercise
+    }
+
+    pub const fn gating_role(self) -> SessionRole {
+        self.gating_role
+    }
 }
 
 /// A rule for generating a series of prescribed workouts, plus its inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Programme {
+pub struct Linear {
     /// What identifies this programme across re-authorings (decision 0012).
     /// Two programmes sharing a name are one programme's versions; two that do
     /// not are rivals for the days they cover, and may not overlap.
@@ -136,7 +116,7 @@ pub struct Programme {
     authored_at: Timestamp,
 }
 
-impl Programme {
+impl Linear {
     /// Build, running the three checks the type system cannot.
     ///
     /// # Errors
@@ -250,7 +230,7 @@ impl Programme {
         })
     }
 
-    /// The three checks that need nothing but the programme.
+    /// The checks that need nothing but the programme.
     fn check(
         primary: PrimaryPattern,
         primary_exercise: Exercise,
@@ -258,33 +238,15 @@ impl Programme {
         gating_role: SessionRole,
         weekdays: &Weekdays,
     ) -> Result<(), InconsistentProgramme> {
-        // 1. A programme gating on a role it never runs would never advance.
+        // A programme gating on a role it never runs would never advance.
         if !weekdays.runs(gating_role) {
             return Err(InconsistentProgramme::GatingRoleNeverRuns {
                 gating: gating_role,
             });
         }
-
-        // 2. A top set is a number of repetitions, so a duration or distance
-        //    exercise cannot be the primary.
-        if !matches!(primary_exercise, Exercise::Reps(_)) {
-            return Err(InconsistentProgramme::PrimaryIsNotCountedInReps {
-                primary: primary_exercise.as_str(),
-                measure: primary_exercise.measure(),
-            });
-        }
-
-        // 3. Otherwise the programme names one exercise as primary and
-        //    prescribes another in the slot it named.
-        let filled = *fills.primary(primary, gating_role);
-        if filled != primary_exercise {
-            return Err(InconsistentProgramme::PrimaryDoesNotFillItsSlot {
-                pattern: primary,
-                primary: primary_exercise.as_str(),
-                fill: filled.as_str(),
-            });
-        }
-        Ok(())
+        // The other two are the template's rather than this model's, and a block
+        // asks them in the same words.
+        check_primary(primary, primary_exercise, fills, gating_role)
     }
 
     pub const fn primary(&self) -> PrimaryPattern {
@@ -301,6 +263,14 @@ impl Programme {
 
     pub const fn anchor(&self) -> Anchor {
         self.entry.anchor()
+    }
+
+    /// The entry test and the opening it may be overridden by, together.
+    ///
+    /// The pair rather than either half: `Periodisation` asks both models for
+    /// this, and splitting it is the mistake `Entry` exists to prevent.
+    pub const fn entry(&self) -> Entry {
+        self.entry
     }
 
     pub const fn gating_role(&self) -> SessionRole {
@@ -337,7 +307,7 @@ impl Programme {
     /// The block's plan.
     ///
     /// Rebuilt from the parameters in force rather than stored, so there is one
-    /// place the climb becomes a ladder. `Programme::new` has already proved this
+    /// place the climb becomes a ladder. `Linear::new` has already proved this
     /// succeeds for the duration it holds.
     ///
     /// # Errors

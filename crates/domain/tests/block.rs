@@ -1,9 +1,13 @@
 //! The periodised block (research D11 and D12).
 //!
-//! Three inputs — a duration in phase weeks, the repetition count of the entry
-//! test, and the entry test itself — and every load in the block comes out of
-//! them. So these are table and property tests: no performed record is involved,
-//! and none should be.
+//! Two inputs — a duration in phase weeks and the entry test itself — and every
+//! load in the block comes out of them. So these are table and property tests: no
+//! performed record is involved, and none should be.
+//!
+//! **The entry test is not one of the block's weeks** (decision 0013). It is the
+//! standalone test the week before, or the previous block's exit test, so the
+//! tables below start at the first accumulation week and the repetition count it
+//! was taken at belongs to `Test` rather than here.
 //!
 //! **The numbers here are the ones in D12**, and they are asserted rather than
 //! recomputed. A test that re-derives the derivation it is testing proves only
@@ -13,7 +17,6 @@
 //! percentage-based plan states percentages, and the accumulation loads below are
 //! pinned by Prilepin's repetitions-per-set column rather than by a reserve.
 
-use domain::gym::RepCount;
 use domain::prescription::{
     Percentage,
     block::{Block, InvalidBlock, Phase, WeekPlan},
@@ -23,20 +26,16 @@ use proptest::prelude::*;
 // Helpers are free functions, so the test exemptions do not reach them and they
 // may not panic.
 
-fn reps(count: u32) -> Result<RepCount, Box<dyn std::error::Error>> {
-    Ok(RepCount::new(count)?)
-}
-
-fn block(weeks: u32, entry_reps: u32) -> Result<Block, Box<dyn std::error::Error>> {
-    Ok(Block::new(weeks, reps(entry_reps)?)?)
+fn block(weeks: u32) -> Result<Block, Box<dyn std::error::Error>> {
+    Ok(Block::new(weeks)?)
 }
 
 /// A week as `(sets, reps, percentage in basis points)`, for comparing a whole
 /// block in one assertion.
 const fn row(plan: WeekPlan) -> (u32, u32, Option<i32>) {
     match plan {
-        // A test carries no load, and both of them are a test.
-        WeekPlan::EntryTest { reps } | WeekPlan::ExitTest { reps, .. } => (0, reps.as_u32(), None),
+        // A test carries no load.
+        WeekPlan::ExitTest { reps, .. } => (0, reps.as_u32(), None),
         WeekPlan::Working {
             sets, reps, load, ..
         } => (sets.as_u32(), reps.as_u32(), Some(load.as_basis_points())),
@@ -59,7 +58,7 @@ fn the_split_reproduces_the_stated_table() {
         (12, (5, 4, 3)),
     ];
     for (weeks, split) in expected {
-        let Ok(block) = block(weeks, 3) else {
+        let Ok(block) = block(weeks) else {
             panic!("{weeks} weeks is plannable")
         };
         assert_eq!(
@@ -77,26 +76,25 @@ fn the_split_reproduces_the_stated_table() {
             "the split spends the duration"
         );
         assert_eq!(
-            block.total_weeks(),
-            weeks + 1,
-            "and the entry test is the week the calendar carries on top"
+            block.weeks().len(),
+            weeks as usize,
+            "and the block occupies exactly the weeks it plans"
         );
     }
 }
 
 /// The ten-week block, load for load.
 ///
-/// The operator's autumn window: a 3RM entry test the week before, then ten weeks
-/// of phases as four, four and two. Every number below comes from the duration
-/// and the three literature constants.
+/// The operator's autumn window: a 3RM entry test the week before — a programme
+/// of its own — then ten weeks of phases as four, four and two. Every number
+/// below comes from the duration and the three literature constants.
 #[test]
 fn the_ten_week_block_reproduces_its_table() {
-    let Ok(block) = block(10, 3) else {
+    let Ok(block) = block(10) else {
         panic!("ten weeks is long enough for a block")
     };
 
     let expected = [
-        (0, 3, None),        // entry test, the week before the block opens
         (4, 5, Some(7_250)), // accumulation — four sets, not five: Prilepin's
         (5, 4, Some(7_500)), //                band caps the total lifts
         (5, 3, Some(7_750)),
@@ -118,12 +116,11 @@ fn the_ten_week_block_reproduces_its_table() {
 /// finishes, so the endpoint below is the ten-week block's endpoint exactly.
 #[test]
 fn the_shortest_block_climbs_the_same_span_in_fewer_rungs() {
-    let (Ok(short), Ok(long)) = (block(8, 3), block(10, 3)) else {
+    let (Ok(short), Ok(long)) = (block(8), block(10)) else {
         panic!("both durations are plannable")
     };
 
     let expected = [
-        (0, 3, None),        // entry test
         (5, 4, Some(7_500)), // accumulation, three rungs rather than four
         (5, 3, Some(7_750)),
         (5, 2, Some(8_000)),
@@ -151,7 +148,7 @@ fn the_shortest_block_climbs_the_same_span_in_fewer_rungs() {
 /// at 100.0 and the whole point of the phase would be gone.
 #[test]
 fn every_top_set_week_implies_a_bigger_maximum_than_the_last() {
-    let Ok(block) = block(10, 3) else {
+    let Ok(block) = block(10) else {
         panic!("ten weeks is long enough for a block")
     };
 
@@ -181,7 +178,7 @@ fn every_top_set_week_implies_a_bigger_maximum_than_the_last() {
                     "the exit test is asked for 105% of the entry one-rep maximum"
                 );
             }
-            WeekPlan::EntryTest { .. } | WeekPlan::Working { .. } => {}
+            WeekPlan::Working { .. } => {}
         }
     }
 
@@ -206,7 +203,7 @@ fn every_top_set_week_implies_a_bigger_maximum_than_the_last() {
 #[test]
 fn every_accumulation_week_falls_in_its_prilepin_band() {
     for weeks in 8..=15 {
-        let Ok(block) = block(weeks, 3) else {
+        let Ok(block) = block(weeks) else {
             panic!("{weeks} weeks is plannable")
         };
         assert_in_band(block);
@@ -242,14 +239,8 @@ fn assert_in_band(block: Block) {
 /// of realisation.
 #[test]
 fn a_block_shorter_than_eight_weeks_is_refused() {
-    let Ok(entry) = reps(3) else {
-        panic!("three is a repetition count")
-    };
-    assert_eq!(
-        Block::new(7, entry),
-        Err(InvalidBlock::TooShort { weeks: 7 })
-    );
-    assert!(Block::new(8, entry).is_ok());
+    assert_eq!(Block::new(7), Err(InvalidBlock::TooShort { weeks: 7 }));
+    assert!(Block::new(8).is_ok());
 }
 
 /// And sixteen weeks is too long, for a reason nobody authored.
@@ -261,31 +252,13 @@ fn a_block_shorter_than_eight_weeks_is_refused() {
 /// impossible one. The bound falls out of the table.
 #[test]
 fn a_block_whose_top_set_could_not_be_lifted_is_refused() {
-    let Ok(entry) = reps(3) else {
-        panic!("three is a repetition count")
-    };
-    assert!(Block::new(15, entry).is_ok());
-    assert_eq!(
-        Block::new(16, entry),
-        Err(InvalidBlock::TooLong { weeks: 16 })
-    );
-}
-
-/// An entry test at a repetition count the table cannot convert is refused.
-#[test]
-fn an_entry_test_off_the_table_is_refused() {
-    let Ok(entry) = reps(41) else {
-        panic!("forty-one is a repetition count, just not a useful one")
-    };
-    assert_eq!(
-        Block::new(10, entry),
-        Err(InvalidBlock::EntryTestTooLong { reps: 41 })
-    );
+    assert!(Block::new(15).is_ok());
+    assert_eq!(Block::new(16), Err(InvalidBlock::TooLong { weeks: 16 }));
 }
 
 fn a_block() -> impl Strategy<Value = Block> {
-    (8_u32..=15, 1_u32..=8).prop_filter_map("a block its own rules accept", |(weeks, entry)| {
-        Block::new(weeks, RepCount::new(entry).ok()?).ok()
+    (8_u32..=15).prop_filter_map("a block its own rules accept", |weeks| {
+        Block::new(weeks).ok()
     })
 }
 
@@ -299,7 +272,7 @@ const fn working(plan: WeekPlan) -> Option<(bool, u32, i32)> {
             reps.as_u32(),
             load.as_basis_points(),
         )),
-        WeekPlan::EntryTest { .. } | WeekPlan::ExitTest { .. } => None,
+        WeekPlan::ExitTest { .. } => None,
     }
 }
 
@@ -332,20 +305,27 @@ proptest! {
         }
     }
 
-    /// The block opens on a test at the entry repetition count and closes on a
-    /// single, whatever it opened on.
+    /// The block opens on accumulation and closes on a single.
+    ///
+    /// It used to open on its own entry test; decision 0013 moved that test out
+    /// into a programme of its own, so week one is now the phase the block
+    /// starts with and the only test it holds is the one it ends on.
     #[test]
-    fn a_block_opens_on_its_entry_test_and_closes_on_a_single(block in a_block()) {
+    fn a_block_opens_on_accumulation_and_closes_on_a_single(block in a_block()) {
         let weeks = block.weeks();
         let (Some(first), Some(last)) = (weeks.first(), weeks.last()) else {
             panic!("a block has weeks")
         };
-        prop_assert_eq!(*first, WeekPlan::EntryTest { reps: block.entry_reps() });
+        let opens_on_accumulation = matches!(
+            first,
+            WeekPlan::Working { phase: Phase::Accumulation, .. }
+        );
+        prop_assert!(opens_on_accumulation);
         let exits_on_a_single = matches!(last, WeekPlan::ExitTest { reps, .. } if reps.as_u32() == 1);
         prop_assert!(exits_on_a_single);
         prop_assert_eq!(
             u32::try_from(weeks.len()).unwrap_or(u32::MAX),
-            block.total_weeks()
+            block.duration_weeks()
         );
     }
 
@@ -357,9 +337,9 @@ proptest! {
     /// opens at, so a change here moves the second half of the block too.
     #[test]
     fn accumulation_always_exits_at_prilepins_floor_for_a_double(block in a_block()) {
-        // The entry test takes the first week, so accumulation's last week is the
-        // one at its own count plus one.
-        let last = usize::try_from(block.accumulation_weeks()).unwrap_or(0);
+        // Accumulation now starts at week one, so its last week is the entry at
+        // its own count less one.
+        let last = usize::try_from(block.accumulation_weeks()).unwrap_or(1).saturating_sub(1);
         let Some(WeekPlan::Working { reps, load, .. }) = block.weeks().get(last).copied() else {
             panic!("accumulation has a last week")
         };

@@ -10,7 +10,10 @@ use application::{
 use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
-    prescription::WeekIndex,
+    prescription::{
+        GenerationParameters, Linear, Periodisation, Periodised, Programme, TestTarget, WeekIndex,
+        WeekPlan,
+    },
 };
 
 pub fn run_started(stream: &LandingStream) {
@@ -235,7 +238,7 @@ fn short(id: &str) -> String {
 pub fn programme_authored(
     id: domain::prescription::ProgrammeId,
     authored: application::Authored,
-    programme: &domain::prescription::Programme,
+    programme: &Programme,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
@@ -255,13 +258,21 @@ pub fn programme_authored(
         }
     }
     println!(
-        "  programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
+        "  programme {id} ({}) — {}, {} primary, {} {} from {}",
+        programme.template(),
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
+        if calendar.duration_weeks() == 1 {
+            "week"
+        } else {
+            "weeks"
+        },
         calendar.start(),
-        programme.gating_role(),
     );
+    if let Some(gating) = programme.gating_role() {
+        println!("  gating on the {gating} session");
+    }
     let skipped: Vec<String> = calendar
         .interruptions()
         .iter()
@@ -283,23 +294,87 @@ pub fn programme_authored(
             calendar.calendar_weeks(),
         );
     }
-    println!("anchor {}, fixed for the block", programme.anchor());
-    // Where the opening came from, because "85kg" alone does not say whether
-    // anybody chose it. A declared opening means the anchor's failed load fed
-    // nothing, and that is worth seeing on the report that shows the ladder.
-    match programme.declared_opening() {
-        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
-        None => println!(
-            "opening derived: {} off the anchor's failed load",
-            parameters.entry_drop
-        ),
+    authored_plan(programme, parameters);
+    authored_parameters(parameters);
+}
+
+/// What this programme's template makes of its anchor.
+///
+/// Split out because it is three unrelated reports sharing a `match`, and
+/// because what the parameters say is a separate question from what the
+/// programme does with them.
+fn authored_plan(programme: &Programme, parameters: &domain::prescription::GenerationParameters) {
+    let calendar = programme.calendar();
+    match programme {
+        Programme::Test(test) => {
+            println!(
+                "  a test at {} — no anchor, because producing one is what it does",
+                test.reps()
+            );
+            match test.target() {
+                TestTarget::Declared(target) => println!(
+                    "  for {target}, declared — nothing before it in this lift to \
+                     take a target from"
+                ),
+                TestTarget::Inherited => println!(
+                    "  its target comes from the programme before it, as the \
+                     record stands"
+                ),
+            }
+        }
+        Programme::Periodisation(Periodisation::Linear(linear)) => {
+            println!("  anchor {}, fixed for the block", linear.anchor());
+            // Where the opening came from, because "85kg" alone does not say
+            // whether anybody chose it. A declared opening means the anchor's
+            // failed load fed nothing, and that is worth seeing here.
+            match linear.declared_opening() {
+                Some(opening) => {
+                    println!("  opening {opening}kg, declared — not derived from the anchor");
+                }
+                None => println!(
+                    "  opening derived: {} off the anchor's failed load",
+                    parameters.entry_drop
+                ),
+            }
+            println!(
+                "  ladder climbs {}kg a week over {} climbing weeks, and none of \
+                 them is a test",
+                parameters.ladder_climb_per_week,
+                calendar.duration_weeks(),
+            );
+        }
+        Programme::Periodisation(Periodisation::Block(block)) => {
+            match block.entry_test() {
+                Some(test) => println!(
+                    "  anchor {}, expected — week one measures it at {}",
+                    block.entry().anchor(),
+                    test.reps()
+                ),
+                None => println!(
+                    "  anchor {}, its entry test — taken before the block, not in it",
+                    block.entry().anchor()
+                ),
+            }
+            match block.plan() {
+                Ok(plan) => println!(
+                    "  {} weeks of accumulation, {} of intensification, {} of \
+                     realisation; the last is the exit test",
+                    plan.accumulation_weeks(),
+                    plan.intensification_weeks(),
+                    plan.realisation_weeks(),
+                ),
+                Err(error) => println!("  no plan: {error}"),
+            }
+        }
     }
-    println!(
-        "  ladder climbs {}kg a week over {} climbing weeks; week {} is the test",
-        parameters.ladder_climb_per_week,
-        calendar.duration_weeks().saturating_sub(1),
-        calendar.duration_weeks(),
-    );
+}
+
+/// The parameters the programme was authored against.
+///
+/// **Split out because they are not about the programme.** They are the values
+/// in force when it was authored, recorded with it (§ 14), and they read the
+/// same whichever template was being authored.
+fn authored_parameters(parameters: &domain::prescription::GenerationParameters) {
     println!(
         "  heavy top set × {}; light top set × {} at {} of the heavy load",
         parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
@@ -346,26 +421,21 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     let calendar = programme.calendar();
 
     println!(
-        "programme \"{}\" ({}) — {}, {} primary, {} training weeks from {}, \
-         gating on the {} session",
+        "programme \"{}\" ({}) — {}, {} primary, {} {} from {}",
         programme.name(),
         standing.programme_id,
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
+        if calendar.duration_weeks() == 1 {
+            "week"
+        } else {
+            "training weeks"
+        },
         calendar.start(),
-        programme.gating_role(),
     );
-    println!("anchor {}, fixed for the block", programme.anchor());
-    // Where the opening came from, because "85kg" alone does not say whether
-    // anybody chose it. A declared opening means the anchor's failed load fed
-    // nothing, and that is worth seeing on the report that shows the ladder.
-    match programme.declared_opening() {
-        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
-        None => println!(
-            "opening derived: {} off the anchor's failed load",
-            parameters.entry_drop
-        ),
+    if let Some(gating) = programme.gating_role() {
+        println!("gating on the {gating} session");
     }
     match standing.history_through {
         Some(through) => println!("history through {through}"),
@@ -374,19 +444,84 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         None => println!("history through — nothing performed yet"),
     }
 
-    let Ok(ladder) = programme.ladder(parameters) else {
+    match programme {
+        Programme::Test(test) => test_standing(test, standing),
+        Programme::Periodisation(Periodisation::Linear(linear)) => {
+            linear_standing(linear, standing, parameters);
+        }
+        Programme::Periodisation(Periodisation::Block(block)) => {
+            block_standing(block, parameters);
+        }
+    }
+}
+
+/// A standalone test: what it is an attempt at, and which session takes it.
+fn test_standing(test: &domain::prescription::Test, standing: &application::LadderStanding) {
+    let reps = test.reps().as_u32();
+    let unit = if reps == 1 { "single" } else { "attempt" };
+    match standing.target {
+        Some(target) => println!(
+            "the test is for {target} at {reps} \
+             ({unit}, autoregulated — going past it is the point)"
+        ),
+        None => println!(
+            "no target: this test takes one from the programme before it, and \
+             there is none in the same lift"
+        ),
+    }
+    match test.target() {
+        TestTarget::Declared(_) => println!(
+            "  declared, not inherited — nothing before it in this lift to \
+             take a target from"
+        ),
+        TestTarget::Inherited => {
+            println!("  inherited from the programme before it, as the record stands");
+        }
+    }
+    println!(
+        "  the {} session is the test; the other is the previous programme's",
+        domain::prescription::Test::ROLE
+    );
+}
+
+/// A linear programme: its ladder, week by week, and where the record puts it.
+///
+/// The `of anchor` column is read back out of the load rather than driving it,
+/// which is what lets the climb be seen passing 100% of the max it started from.
+fn linear_standing(
+    linear: &Linear,
+    standing: &application::LadderStanding,
+    parameters: &GenerationParameters,
+) {
+    println!("anchor {}, fixed for the block", linear.anchor());
+    // Where the opening came from, because "85kg" alone does not say whether
+    // anybody chose it. A declared opening means the anchor's failed load fed
+    // nothing, and that is worth seeing on the report that shows the ladder.
+    match linear.declared_opening() {
+        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
+        None => println!(
+            "opening derived: {} off the anchor's failed load",
+            parameters.entry_drop
+        ),
+    }
+
+    let Ok(ladder) = linear.ladder(parameters) else {
         println!("  no ladder: the block is too short to climb");
         return;
     };
-    let anchor = programme.anchor().load();
-    let Ok(steps) = programme.steps(parameters) else {
+    let anchor = linear.anchor().load();
+    let Ok(steps) = linear.steps(parameters) else {
         println!("  no ladder: no load scale is authored for the primary's implement");
         return;
     };
-    let standing_week = standing.progress.week();
+    let Some(progress) = standing.progress else {
+        println!("  no position: nothing in the record places this ladder");
+        return;
+    };
+    let standing_week = progress.week();
 
     println!("  week  of anchor    heavy    light");
-    for week in 1..=calendar.duration_weeks() {
+    for week in 1..=linear.calendar().duration_weeks() {
         let Ok(index) = WeekIndex::new(week) else {
             continue;
         };
@@ -410,14 +545,13 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         );
     }
 
-    match standing.progress.reset() {
+    match progress.reset() {
         None => println!(
             "  on the plan at week {standing_week} of {}",
             ladder.climbing_weeks()
         ),
         Some(reset) => {
-            let load = standing
-                .progress
+            let load = progress
                 .heavy_top_set(ladder, steps)
                 .map_or_else(|| "—".to_owned(), |load| format!("{load}"));
             println!(
@@ -425,6 +559,83 @@ pub fn programme_standing(standing: &application::LadderStanding) {
                  ladder resumes at week {standing_week}"
             );
         }
+    }
+}
+
+/// A periodised block: its phases, week by week.
+///
+/// **No position marker and no reset line.** A block reads nothing from the
+/// record — every load is a share of the anchor decided by the duration and
+/// three literature constants — so there is no rung a miss could hold and
+/// nothing for the record to place. That is the difference between the two
+/// models, and printing an arrow here would hide it.
+fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
+    match block.entry_test() {
+        Some(test) => println!(
+            "anchor {}, expected — week one measures it at {}",
+            block.entry().anchor(),
+            test.reps()
+        ),
+        None => println!(
+            "anchor {}, measured — its entry test was taken before this block",
+            block.entry().anchor()
+        ),
+    }
+    let Ok(plan) = block.plan() else {
+        println!("  no plan: this duration does not hold three phases");
+        return;
+    };
+    let Some(steps) = parameters.scales.for_exercise(block.primary_exercise()) else {
+        println!("  no plan: no load scale is authored for the primary's implement");
+        return;
+    };
+    let anchor = block.entry().anchor().load();
+
+    println!("  week  phase              sets × reps   of anchor      load");
+    // The entry test is week one where there is one, so the phases below start
+    // at two. It carries no share of the anchor: it is what establishes it.
+    let mut number = 0;
+    if let Some(test) = block.entry_test() {
+        number += 1;
+        println!(
+            "  {number:>4}  {:<17}  {:>11}   {:>9}  {:>8}",
+            "entry test",
+            format!("1 × {}", test.reps().as_u32()),
+            "—",
+            test.light()
+                .map_or_else(|| "—".to_owned(), |load| format!("{load} light")),
+        );
+    }
+    for week in plan.weeks() {
+        number += 1;
+        match week {
+            WeekPlan::Working {
+                phase,
+                sets,
+                reps,
+                load,
+            } => println!(
+                "  {number:>4}  {:<17}  {:>11}   {:>9}  {:>8}",
+                format!("{phase}"),
+                format!("{} × {}", sets.as_u32(), reps.as_u32()),
+                format!("{load}"),
+                format!("{}", steps.quantise_loaded(load.of(anchor))),
+            ),
+            WeekPlan::ExitTest { reps, expected } => println!(
+                "  {number:>4}  {:<17}  {:>11}   {:>9}  {:>8}  ←  the exit test",
+                "exit test",
+                format!("1 × {}", reps.as_u32()),
+                format!("{expected}"),
+                format!("{}", steps.quantise_loaded(expected.of(anchor))),
+            ),
+        }
+    }
+    println!("  the block plans to finish at 105% of the maximum it entered on");
+    if block
+        .entry_test()
+        .is_some_and(|test| test.light().is_none())
+    {
+        println!("  its entry-test week runs the test only");
     }
 }
 
@@ -443,8 +654,13 @@ pub fn prescription(issued: &application::Prescription) {
         workout.session_role(),
     );
     println!(
-        "anchor {}, {}{}",
-        workout.anchor(),
+        "{}, {}{}",
+        match workout.derived_from() {
+            domain::prescription::DerivedFrom::Anchor(anchor) => format!("anchor {anchor}"),
+            // A test session has no anchor: what it derived from is what the
+            // record put it at, and that is the number worth naming here.
+            domain::prescription::DerivedFrom::Target(target) => format!("for {target}"),
+        },
         workout.week(),
         issued
             .history_through

@@ -176,8 +176,30 @@ families arrive the hierarchy becomes a consistency check rather than a rewrite.
 
 ## The programme
 
-A programme generates a series of prescribed workouts. Its purpose is always to
-increase the primary exercise's 1RM.
+A programme generates a series of prescribed workouts. Two questions decide which
+kind it is, and only the second is about periodisation:
+
+```text
+Programme  ─┬─ Test                    one week, no ladder, a maximum
+            └─ Periodisation ─┬─ Linear   a top-set ladder at a rate
+                              └─ Block    phases to a planned endpoint
+```
+
+**A test measures; the other two increase.** A programme that periodises exists
+to increase the primary exercise's 1RM, and everything in the rest of this
+section is about one of those. A test exists to find out what that number is, so
+it has no anchor, no gating role and nothing that climbs — and it is a programme
+rather than a week of one because it belongs to neither neighbour. See
+`decisions/0013-a-test-belongs-to-one-programme-or-to-none.md` and
+`decisions/0016-a-programme-is-a-test-or-a-periodisation.md`.
+
+**What a block opens from is a question about what came before it.** A block
+needs an entry test of its own unless the programme immediately before it
+produces a maximum in the same lift, recently enough to still speak for it — the
+week before, or the week before that. A test produces one in the lift it tested; a
+block produces one through the exit test it always ends on; a linear programme
+never produces one, whatever lift it trained. 0016 has the ten compositions that
+rule reproduces.
 
 ### Inputs
 
@@ -186,7 +208,9 @@ whole loading series is a function of duration and entry anchor, which is what
 makes "a number of weeks and a starting 1RM" a complete statement of the
 generator's job.
 
-- **Duration** — how many weeks the block runs for. The last is the test.
+- **Duration** — how many weeks the block runs for. Every one of them climbs:
+  decision 0013 moved the test out into a programme of its own, so a duration of
+  five means five rungs rather than four and a test.
 - **An entry anchor** — the test that precedes the block, with its provenance:
   the heaviest single completed, and the load failed above it if the test found
   one. The block opens from the second where there is one.
