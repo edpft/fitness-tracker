@@ -194,15 +194,16 @@ pub enum PrescriptionError {
     /// and one with no slots at all is not a prescription.
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
-    /// A block with no entry test of its own, and nothing before it that
-    /// measured a maximum in its lift.
+    /// A block claiming to open from an earlier test of its lift, where no such
+    /// test ran.
     ///
-    /// **The rule that makes decision 0013's table a rule.** Without it the
-    /// operator could open a block on a lift they have never tested by writing
-    /// `provenance = "tested"` beside a number — which is the evasion 0013 named
-    /// and, until this check, only described.
+    /// **What makes decision 0013's table a rule.** Without it the operator could
+    /// open a block on a lift they have never tested by writing `provenance =
+    /// "tested"` beside a number — the evasion 0013 named and, until this check,
+    /// only described. It refuses the claim rather than the choice: a block with
+    /// nothing to inherit may run its own entry test or declare a number.
     #[error(
-        "the block {programme} opens on {primary} without testing it, and \
+        "the block {programme} opens from a tested {primary} maximum, and \
          {} produced no {primary} maximum for it to open from",
         predecessor.as_ref().map_or_else(
             || "nothing before it".to_owned(),

@@ -4,9 +4,13 @@
 //! and 0016). Six are about what the programme before produced; four are about
 //! how long ago it produced it. They are one rule between them:
 //!
-//! > A block needs an entry test of its own unless the programme immediately
-//! > before it produces a maximum in the same lift, and does so recently enough
-//! > to still speak for it.
+//! > A block that says it opens from an earlier test must be right about that:
+//! > the test must have happened, in the same lift, recently enough to still
+//! > speak for it.
+//!
+//! **It refuses a claim, not a choice.** A block's anchor is a previous test, an
+//! entry test of its own, or a declared number, and the operator picks. Only the
+//! first says anything about the past, so only the first can be wrong.
 //!
 //! **At the adapter's ring, because the rule reads the store.** Whether a
 //! maximum exists is a fact about what came before, not a claim a document can
@@ -186,8 +190,11 @@ fn predecessor(
 }
 
 /// A block for exercise b with no entry test, starting `gap` blank weeks after
-/// the predecessor ends.
-fn block_without_a_test(gap: i64) -> Result<Programme, Box<dyn std::error::Error>> {
+/// the predecessor ends, and saying how it arrived at its anchor.
+fn block_opening_from(
+    gap: i64,
+    provenance: AnchorProvenance,
+) -> Result<Programme, Box<dyn std::error::Error>> {
     let start = ADJACENT.checked_add(jiff::Span::new().days(gap * 7))?;
     Ok(Programme::Periodisation(Periodisation::Block(
         Periodised::new(
@@ -196,7 +203,7 @@ fn block_without_a_test(gap: i64) -> Result<Programme, Box<dyn std::error::Error
             fills(B)?,
             // Dated to the predecessor's test day, and labelled as measured —
             // which is what the operator writes when opening from one.
-            Entry::derived(anchor(AnchorProvenance::Tested)?),
+            Entry::derived(anchor(provenance)?),
             None,
             Periodised::weeks(
                 start,
@@ -213,12 +220,20 @@ fn block_without_a_test(gap: i64) -> Result<Programme, Box<dyn std::error::Error
 /// Author the predecessor and then the block, and report whether the block was
 /// accepted.
 async fn composes(before: Before, gap: i64) -> Result<bool, Box<dyn std::error::Error>> {
+    composes_with(before, gap, AnchorProvenance::Tested).await
+}
+
+async fn composes_with(
+    before: Before,
+    gap: i64,
+    provenance: AnchorProvenance,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     let parameters = programme::parameters()?;
 
     let before_this = predecessor(before, &parameters)?;
-    let under_test = block_without_a_test(gap)?;
+    let under_test = block_opening_from(gap, provenance)?;
     let zone = corpus::zone()?;
 
     let (_, _): (_, Authored) = Authoring::new(
@@ -228,16 +243,23 @@ async fn composes(before: Before, gap: i64) -> Result<bool, Box<dyn std::error::
     .author(&before_this, &parameters)
     .await?;
 
-    match Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), zone),
-        SqliteGenerationParameterStore::new(pool),
+    accepted(
+        Authoring::new(
+            SqliteProgrammeStore::new(pool.clone(), zone),
+            SqliteGenerationParameterStore::new(pool),
+        )
+        .author(&under_test, &parameters)
+        .await,
     )
-    .author(&under_test, &parameters)
-    .await
-    {
+}
+
+/// Whether the block was accepted, refusing to read any other failure as one.
+///
+/// Only the refusals this file is about count as "needs a test of its own".
+/// Anything else is a broken fixture and must not read as a passing row.
+fn accepted<T>(authored: Result<T, PrescriptionError>) -> Result<bool, Box<dyn std::error::Error>> {
+    match authored {
         Ok(_) => Ok(true),
-        // Only the two refusals this file is about count as "needs its own test".
-        // Anything else is a broken fixture and should not read as a passing row.
         Err(
             PrescriptionError::NoMaximumToOpenFrom { .. }
             | PrescriptionError::MaximumIsStale { .. },
@@ -256,22 +278,24 @@ macro_rules! run {
     };
 }
 
-/// What the programme before produced decides whether the block must test.
+/// What the programme before produced decides whether the claim can stand.
 ///
 /// ```text
-/// test a   → block b   produces a ≠ b     needs its own
-/// test b   → block b   produces b         uses it
-/// linear a → block b   produces nothing   needs its own
-/// linear b → block b   produces nothing   needs its own
-/// block a  → block b   produces a ≠ b     needs its own
-/// block b  → block b   produces b, its exit test   uses it
+/// test a   → block b   produces a ≠ b            no such test
+/// test b   → block b   produces b                opens from it
+/// linear a → block b   produces nothing          no such test
+/// linear b → block b   produces nothing          no such test
+/// block a  → block b   produces a ≠ b            no such test
+/// block b  → block b   produces b, its exit test opens from it
 /// ```
 ///
-/// Row four is the one that invites a wrong guess. A linear programme for the
-/// same lift never tests it (decision 0013), so its last heavy single is not a
-/// maximum however heavy it was.
+/// Every block here says `provenance = "tested"`, which is the operator claiming
+/// the first of the three ways to arrive at an anchor. Row four is the one that
+/// invites a wrong guess: a linear programme for the same lift never tests it
+/// (decision 0013), so its last heavy single is not a maximum however heavy it
+/// was.
 #[test]
-fn what_came_before_decides_whether_a_block_must_test() {
+fn what_came_before_decides_whether_the_claim_stands() {
     let rows = [
         (Before::Test(A), false),
         (Before::Test(B), true),
@@ -285,12 +309,12 @@ fn what_came_before_decides_whether_a_block_must_test() {
         assert_eq!(
             got,
             opens_without_testing,
-            "{} → block for exercise b: expected it to {}",
+            "{} → block for exercise b claiming a tested anchor: expected it to {}",
             before.label(),
             if opens_without_testing {
                 "open from that maximum"
             } else {
-                "need an entry test of its own"
+                "find no such test"
             }
         );
     }
@@ -299,11 +323,11 @@ fn what_came_before_decides_whether_a_block_must_test() {
 /// And how long ago decides it too.
 ///
 /// ```text
-/// test b  → block b   adjacent    uses it
-/// test b  → 1 week  → block b     uses it
-/// test b  → 2 weeks → block b     needs its own
-/// block b → 1 week  → block b     uses it
-/// block b → 2 weeks → block b     needs its own
+/// test b  → block b   adjacent    opens from it
+/// test b  → 1 week  → block b     opens from it
+/// test b  → 2 weeks → block b     too old
+/// block b → 1 week  → block b     opens from it
+/// block b → 2 weeks → block b     too old
 /// ```
 ///
 /// The operator's rule is the week before the programme or the week before that,
@@ -324,4 +348,60 @@ fn how_long_ago_decides_it_too() {
             );
         }
     }
+}
+
+/// Declaring is one of the three ways to arrive at an anchor, always.
+///
+/// **A block's anchor is a previous test, an entry test of its own, or a
+/// declared number** (decision 0016), and the operator picks. What the store
+/// checks is only the first, because it is the only one that says something
+/// about the past. So a block that could have inherited a maximum and instead
+/// says "this is a number I am asserting" is authored — the provenance records
+/// honestly which of the three it was.
+#[test]
+fn a_declared_anchor_is_never_refused() {
+    // With a test of the same lift in the week before, which the block could
+    // have opened from.
+    let accepted = run!(composes_with(
+        Before::Test(B),
+        0,
+        AnchorProvenance::Asserted
+    ));
+    assert!(
+        accepted,
+        "declaring is a statement about a number, not a claim about a test"
+    );
+
+    // And with nothing before it at all.
+    let alone = run!(authors_alone(AnchorProvenance::Asserted));
+    assert!(alone, "and needs nothing before it to be legitimate");
+}
+
+/// But claiming a test that did not happen is refused.
+///
+/// The claim and the choice are different things: a block with nothing to
+/// inherit may run its own entry test or declare a number, and may not say a
+/// measurement happened when none did.
+#[test]
+fn claiming_a_test_that_did_not_happen_is_refused() {
+    let alone = run!(authors_alone(AnchorProvenance::Tested));
+    assert!(
+        !alone,
+        "with nothing before it, there is no test for a tested anchor to be"
+    );
+}
+
+/// Author the block alone, with no predecessor at all.
+async fn authors_alone(provenance: AnchorProvenance) -> Result<bool, Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
+    let parameters = programme::parameters()?;
+    let under_test = block_opening_from(0, provenance)?;
+    let authored = Authoring::new(
+        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool),
+    )
+    .author(&under_test, &parameters)
+    .await;
+    accepted(authored)
 }

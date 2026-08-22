@@ -22,14 +22,11 @@
 -- a stored number would be stale the first time a session goes up. It is
 -- recorded only where there is nothing to inherit from.
 --
--- **A block that does not test its own entry must have been handed one.**
--- Decision 0013 makes provenance load-bearing there and nowhere else: if an
--- asserted anchor satisfied a block's entry requirement, switching lifts could
--- skip the measurement by stating a number. A block that runs its own entry test
--- is that case answered rather than evaded, so it is exempt — requiring `tested`
--- there would be requiring a test before the test. The domain enforces both
--- halves and so does this, because a rule that only one of the two holds is a
--- rule that drifts.
+-- **What a block's anchor had to be is not a rule this schema can hold.** A
+-- block opens from a test where one precedes it, runs its own entry test where
+-- none is usable, and states a number outright only where nothing precedes it at
+-- all. Which of the three applies is a fact about the programme before it, and no
+-- `CHECK` can reach another row's succession, so the rule lives in `Authoring`.
 --
 -- **`prescribed_workout` follows.** It records the anchor by value, and a
 -- session issued from a test programme has none. It gains the target by value
@@ -130,13 +127,12 @@ CREATE TABLE programme (
     CHECK (template = 'block' OR entry_test_reps IS NULL),
     CHECK (entry_test_reps IS NOT NULL OR entry_test_light_grams IS NULL),
 
-    -- **A block that does not test must open from one that did** (decision
-    -- 0013). A block that runs its own entry test is the case that rule guards
-    -- against, answered rather than evaded: requiring `tested` there would be
-    -- requiring a test before the test.
-    CHECK (template != 'block'
-           OR entry_test_reps IS NOT NULL
-           OR anchor_provenance = 'tested'),
+    -- **Nothing here says a block's anchor must have been measured**, and that
+    -- is deliberate. Whether it had to be depends on what precedes the block —
+    -- nothing at all, a test in the wrong lift, or a measurement it should have
+    -- opened from — and no `CHECK` can see another row's programme, let alone
+    -- decide which of them is the one immediately before. The rule lives in
+    -- `Authoring`, which can ask.
 
     -- One authoring of one programme.
     UNIQUE (name, authored_at)

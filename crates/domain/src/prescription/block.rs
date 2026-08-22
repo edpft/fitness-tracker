@@ -101,7 +101,7 @@ use jiff::{Timestamp, civil::Date, tz::TimeZone};
 use crate::gym::{Kg, RepCount, exercise::Exercise};
 
 use crate::prescription::{
-    anchor::{AnchorProvenance, Entry},
+    anchor::Entry,
     linear::{Primary, PrimaryPattern, SlotFills},
     parameters::Percentage,
     prilepin,
@@ -666,22 +666,14 @@ impl Periodised {
             });
         }
 
-        // **A block that does not test must open from one that did.** Decision
-        // 0013 makes provenance load-bearing here and nowhere else: if an
-        // asserted anchor satisfied a block's entry requirement, switching lifts
-        // could skip the measurement by stating a number.
-        //
-        // A block that runs its own entry test is the case that rule was
-        // guarding against, answered rather than evaded: its anchor is what the
-        // operator expects and the first week is where it finds out. Requiring
-        // `Tested` there would be requiring a test before the test.
-        if entry_test.is_none() && entry.anchor().provenance() != AnchorProvenance::Tested {
-            return Err(InconsistentProgramme::BlockAnchorIsNotTested {
-                provenance: entry.anchor().provenance(),
-            });
-        }
+        // **Whether this anchor had to be measured is not a question this type
+        // can answer.** A block opens from a test where one precedes it, runs
+        // its own where none is usable, and may state a number outright only
+        // where nothing precedes it at all — and which of those is the case is a
+        // fact about the store. So the rule lives in `Authoring`, and what is
+        // left here is everything decidable from the programme alone.
 
-        // And the phases have to make a block over what is left of the calendar
+        // The phases have to make a block over what is left of the calendar
         // once the entry test has taken its week. Checked here so an unplannable
         // block fails at authoring rather than at the first `prescribe`.
         Block::new(phase_weeks_of(calendar, entry_test))?;

@@ -1072,68 +1072,72 @@ where
     P: ProgrammeStore + Sync,
     G: Sync,
 {
-    /// Whether this programme opens from a maximum that exists.
+    /// Whether a claimed earlier maximum is one that exists.
     ///
-    /// **The operator's six compositions, as one comparison.** A block needs an
-    /// entry test of its own unless the programme immediately before it produces
-    /// a maximum in the same lift, and recently enough to still speak for it:
+    /// **A block's anchor comes from one of three places** (decision 0016): a
+    /// previous test, an entry test of its own, or a declared number. Only the
+    /// first says something about the past, so only the first is checked here —
+    /// and it can only be checked here, because whether such a test happened is a
+    /// fact about the store rather than a claim the document can settle about
+    /// itself.
+    ///
+    /// The operator's ten compositions are what a claimed test has to survive:
     ///
     /// ```text
-    /// test A   → block B   produces A ≠ B          needs its own
-    /// test B   → block B   produces B              uses it
-    /// linear A → block B   produces nothing        needs its own
-    /// linear B → block B   produces nothing        needs its own — 0013
-    /// block A  → block B   produces A ≠ B          needs its own
-    /// block B  → block B   produces B, its exit    uses it
+    /// test a   → block b   produces a ≠ b            no such test
+    /// test b   → block b   produces b                opens from it
+    /// linear a → block b   produces nothing          no such test
+    /// linear b → block b   produces nothing          no such test
+    /// block a  → block b   produces a ≠ b            no such test
+    /// block b  → block b   produces b, its exit      opens from it
+    ///
+    /// test b  → block b                adjacent      opens from it
+    /// test b  → 1 blank week → block b               opens from it
+    /// test b  → 2 blank weeks → block b              too old
+    /// block b → 1 blank week → block b               opens from it
+    /// block b → 2 blank weeks → block b              too old
     /// ```
     ///
-    /// Row four is the one that invites a wrong guess. A linear programme for the
-    /// same lift never tests it, so its last heavy single is not a maximum
-    /// however heavy it was — and writing `provenance = "tested"` beside that
-    /// date is exactly the mistake this refuses.
+    /// Row four is the one that invites a wrong guess, and it is why the
+    /// predicate is worth having: a linear programme for the *same* lift still
+    /// leaves no maximum, because it never tests. Its last heavy single feels
+    /// like one and is not — and `provenance = "tested"` beside that date is
+    /// exactly what this refuses.
+    ///
+    /// **It refuses a claim, not a choice.** A block that has no test to inherit
+    /// is free to run its own entry test or to declare a number; what it may not
+    /// do is say a measurement happened when none did.
     ///
     /// # Errors
     ///
-    /// [`PrescriptionError`] if the store is unavailable, if nothing before this
-    /// block produced a maximum in its lift, or if the one that did is too old to
-    /// anchor it.
-    async fn entry_is_answered(&self, programme: &Programme) -> Result<(), PrescriptionError> {
-        if !programme.needs_an_entry_test() {
+    /// [`PrescriptionError`] if the store is unavailable, if no test of this lift
+    /// ran before this block, if the anchor is not dated to it, or if it is too
+    /// old to still speak.
+    async fn claimed_maximum_exists(&self, programme: &Programme) -> Result<(), PrescriptionError> {
+        if !programme.claims_an_earlier_maximum() {
             return Ok(());
         }
         let start = programme.calendar().start();
         let wanted = programme.primary_exercise();
-
-        let predecessor = self.programmes.preceding(start).await?;
-        let Some((_, before)) = predecessor else {
-            return Err(PrescriptionError::NoMaximumToOpenFrom {
-                programme: programme.name().clone(),
-                primary: wanted.as_str(),
-                predecessor: None,
-            });
-        };
-        if before.produces_maximum() != Some(wanted) {
-            return Err(PrescriptionError::NoMaximumToOpenFrom {
-                programme: programme.name().clone(),
-                primary: wanted.as_str(),
-                predecessor: Some(before.name().clone()),
-            });
-        }
-
-        // **And the maximum has to be the one that programme measured, recently.**
-        // Two conditions rather than one, because either alone lets a number in
-        // from nowhere: a date inside the predecessor with no bound on age would
-        // accept a maximum from a block that finished in June, and a recent date
-        // with no bound on origin would accept one the operator simply wrote down
-        // last week.
-        //
-        // Read off the anchor's own date, because what is being asked is when the
-        // number was measured. The window is the predecessor's whole span and the
-        // recency rule is the operator's: the week before the programme, or the
-        // week before that.
         let Some(anchor) = programme.anchor() else {
             return Ok(());
         };
+
+        let before = match self.programmes.preceding(start).await? {
+            Some((_, before)) if before.produces_maximum() == Some(wanted) => before,
+            found => {
+                return Err(PrescriptionError::NoMaximumToOpenFrom {
+                    programme: programme.name().clone(),
+                    primary: wanted.as_str(),
+                    predecessor: found.map(|(_, before)| before.name().clone()),
+                });
+            }
+        };
+
+        // **Dated to that test, and recent.** Either alone lets a number in from
+        // nowhere: a date inside the predecessor with no bound on age would
+        // accept a maximum from a block that finished in June, and a recent date
+        // with no bound on origin would accept one written down last week.
         if !before.window().covers(anchor.from()) {
             return Err(PrescriptionError::MaximumIsNotTheOneBefore {
                 programme: programme.name().clone(),
@@ -1180,12 +1184,12 @@ where
             }
         }
 
-        // **And a block that does not test its own entry has to have been handed
-        // one** (decision 0013). This is the only rule in the system that reads
-        // another programme in order to refuse this one, and it has to: whether a
-        // maximum exists is a fact about what came before, not a claim the
-        // document can settle about itself.
-        self.entry_is_answered(programme).await?;
+        // **And a block claiming to open from an earlier test has to be right
+        // about that** (decision 0016). This is the only rule in the system that
+        // reads another programme in order to refuse this one, and it has to:
+        // whether a measurement happened is a fact about what came before, not
+        // something the document can settle about itself.
+        self.claimed_maximum_exists(programme).await?;
 
         // Parameters first: a programme names the version it was authored
         // against, and one stored without them would reference nothing.

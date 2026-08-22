@@ -271,57 +271,29 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
     ));
 }
 
-/// A block opens from a measured maximum, and only from one.
+/// A block does not decide for itself whether its anchor had to be measured.
 ///
-/// This is what makes 0013's table work. Rows three and six say a lift change
-/// into a block requires a standalone test; if an asserted anchor satisfied the
-/// entry requirement, the operator could skip that test by stating a number and
-/// the rule would be advisory.
+/// **The rule left this type on 2026-08-22.** Whether a block may state a number
+/// outright depends on what precedes it — nothing, an unusable test, or a
+/// measurement it should have opened from — and that is a fact about the store.
+/// `Periodised` sees one programme, so it accepts all three provenances and
+/// `Authoring` refuses the one that is wrong; `tests/composition.rs` at the
+/// adapter's ring is where that rule is asserted.
 #[test]
-fn a_block_refuses_an_anchor_that_was_not_tested() {
-    for provenance in [AnchorProvenance::Asserted, AnchorProvenance::Estimated] {
-        let Ok(refused) = block(provenance, None) else {
+fn a_block_accepts_any_provenance_on_its_own() {
+    for provenance in [
+        AnchorProvenance::Asserted,
+        AnchorProvenance::Estimated,
+        AnchorProvenance::Tested,
+    ] {
+        let Ok(built) = block(provenance, None) else {
             panic!("the fixture builds")
         };
         assert!(
-            matches!(
-                refused,
-                Err(InconsistentProgramme::BlockAnchorIsNotTested { .. })
-            ),
-            "a block with no entry test may not open from an anchor that was {provenance}"
+            built.is_ok(),
+            "a {provenance} anchor is not a programme this type can refuse"
         );
     }
-    let Ok(accepted) = block(AnchorProvenance::Tested, None) else {
-        panic!("the fixture builds")
-    };
-    assert!(
-        accepted.is_ok(),
-        "and a tested one is exactly what it wants"
-    );
-}
-
-/// A block that runs its own entry test opens from an expectation.
-///
-/// **The rule above is what this one answers.** Requiring a tested anchor of a
-/// block that is about to take the test would be requiring a test before the
-/// test; the anchor here is what the operator expects to lift, and week one is
-/// where they find out.
-#[test]
-fn a_block_that_tests_its_own_entry_needs_no_tested_anchor() {
-    let (Ok(test), Ok(built)) = (entry_test(), block(AnchorProvenance::Asserted, None)) else {
-        panic!("the fixture builds")
-    };
-    assert!(
-        built.is_err(),
-        "the same anchor without an entry test is refused"
-    );
-    let Ok(built) = block(AnchorProvenance::Asserted, Some(test)) else {
-        panic!("the fixture builds")
-    };
-    assert!(
-        built.is_ok(),
-        "and with one it is the number the week is about to check"
-    );
 }
 
 /// The entry test takes a week in front of the phases, and counts for none.

@@ -159,13 +159,40 @@ impl Programme {
         }
     }
 
-    /// Whether this programme needs a test week of its own to open from.
+    /// Whether this programme's anchor is a claim about a test that already
+    /// happened.
     ///
-    /// Only a block ever does, and only where it has not been handed one.
+    /// **A block's anchor comes from one of three places, and the document says
+    /// which:**
+    ///
+    /// ```text
+    /// a previous test    provenance = "tested", and no entry test of its own
+    /// its own entry test the anchor is what the operator expects; week one
+    ///                    measures it
+    /// declared           provenance = "asserted" or "estimated": a number, and
+    ///                    it says so
+    /// ```
+    ///
+    /// Only the first is a claim about the past, so only the first is checkable
+    /// — and it is the one the store has to be asked about. The other two are
+    /// complete statements on their own: an entry test measures its own anchor,
+    /// and a declared one is honest about being a number.
+    ///
+    /// **Blocks only.** A linear programme's anchor may be superseded by a
+    /// declared opening — the summer block's tested anchor is a month old and
+    /// deliberately feeds nothing — so the same rule there would need a carve-out
+    /// for exactly the case it exists to allow. A block has no opening: every
+    /// load is a share of the anchor.
     #[must_use]
-    pub const fn needs_an_entry_test(&self) -> bool {
+    pub const fn claims_an_earlier_maximum(&self) -> bool {
         match self {
-            Self::Periodisation(Periodisation::Block(block)) => block.entry_test().is_none(),
+            Self::Periodisation(Periodisation::Block(block)) => {
+                block.entry_test().is_none()
+                    && matches!(
+                        block.entry().anchor().provenance(),
+                        crate::prescription::AnchorProvenance::Tested
+                    )
+            }
             Self::Periodisation(Periodisation::Linear(_)) | Self::Test(_) => false,
         }
     }
@@ -291,13 +318,6 @@ pub enum InconsistentProgramme {
          table to convert into the maximum a programme after it would anchor on"
     )]
     TestRepsTooMany { reps: u32 },
-    #[error(
-        "a block opens from a measured maximum and this one is {provenance}; \
-         a number that was asserted rather than tested is not an entry test"
-    )]
-    BlockAnchorIsNotTested {
-        provenance: crate::prescription::anchor::AnchorProvenance,
-    },
     #[error(
         "the primary exercise {primary} is counted in {measure}, and a top set \
          needs repetitions"
