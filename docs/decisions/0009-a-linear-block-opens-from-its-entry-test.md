@@ -163,3 +163,22 @@ The derivation remains the default and is what the block starting 21 September
 will use, since that one follows its own test directly. Nothing in the 3 August
 block exercises it, so `crates/domain/tests/ladder.rs` pins it at an anchor
 where the two candidate rules disagree.
+
+## Amended 2026-08-22
+
+**The recency judgement became a rule.** The amendment above argued that the 3
+July test had no standing over a block starting 3 August — a month and a hand-run
+block in between — and left "how old is too old" to the operator, with a declared
+opening as the escape hatch.
+
+`0013-a-test-belongs-to-one-programme-or-to-none.md` states the threshold: a
+preceding test is usable as input when it is **the same exercise** and falls in
+**the week before the programme or the week before that**. The 3 July test fails
+that by four weeks, so the declared opening stops being an escape hatch and
+becomes the only correct answer — same outcome, no discretion.
+
+Two consequences for this decision. `EntryTestIsNotBeforeTheBlock` is now the
+weaker half of the check: the test must precede the programme *and* be recent.
+And the exercise is part of what makes a test inheritable at all, which this
+decision never said — there is no relationship between a front squat maximum and
+an RDL one, so a test in the wrong lift is not a stale input but no input.

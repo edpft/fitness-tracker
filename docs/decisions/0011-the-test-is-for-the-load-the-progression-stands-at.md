@@ -95,3 +95,27 @@ prescribe a test that belongs to neither block on either side of it.
 Worth settling before the autumn block is authored, not now. "The exit test of
 the summer block" is a true description of 18 September, and a true description
 is enough to prescribe from.
+
+## Amended 2026-08-22
+
+**The rule stands; the week it applied to does not.**
+`0013-a-test-belongs-to-one-programme-or-to-none.md` settles that a linear
+programme never includes a test, so there is no longer a linear test week for
+this decision to describe.
+
+What survives unchanged is the rule itself — the test is an attempt at the load
+the progression stands at, in the three cases above — and both the things built
+for it, `Progress::test_target` and `Ladder::beyond`. What changes is who asks
+and who answers: the target is computed from the progression of the *preceding*
+linear programme and consumed by a **standalone test programme** that follows it.
+One programme's record, another programme's prescription.
+
+**The open question above is closed by the same decision**, and the answer was
+that the question was malformed. 18 September does not belong to neither block:
+under 0013 it is a standalone test programme in its own right, which is exactly
+the thing that "belongs to neither neighbour" was groping for. It needs no
+special case, because a test is a programme.
+
+**And the ramp still follows the target rather than the anchor.** That was the
+substantive half of this decision and nothing about it depends on which programme
+the test week sits in.
