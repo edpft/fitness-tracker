@@ -1,7 +1,7 @@
 # 0014 — Block periodisation keeps its endpoint
 
 **Date**: 2026-08-22
-**Status**: Accepted, with one question left open
+**Status**: Accepted
 **Does not extend**: `0008-the-linear-ladder-climbs-at-a-rate.md`. That decision
 removed the *linear* ladder's endpoint, and this records that it stops there.
 
@@ -42,32 +42,44 @@ have to be checked as it is wired rather than assumed to have survived:
 - it predates 0011, so nothing in it knows what its exit test is an attempt at
   beyond the endpoint it planned.
 
-## What is still open
+## What a failure does: it exits the block
 
-**What a periodised block does when a lift is missed.** Nothing was decided, and
-nothing should be invented.
+**A missed lift ends the periodised block.** Not a retaken week, not a drop and
+re-climb, and not an autoregulated ceiling. The block stops, and what it has
+produced is the information that it stopped.
 
-The literature gives phase structure, deloads and tapers; it does not hand over a
-per-miss protocol. Loads in accumulation are deliberately submaximal — volume is
-the stimulus, not proximity to failure — so the classical assumption is that
-misses do not happen, and the operator's instinct matches it. The modern patch is
-autoregulation: an RPE or RIR cap, or a velocity cut-off, turning the planned
-percentage into a ceiling adjusted to the day.
+**Because a block is a declared number of weeks aimed at a declared endpoint.**
+That is the whole difference from linear, and it is the operator's argument on
+2026-08-22: retaking a failed week, or dropping back and re-climbing, pushes the
+endpoint out and changes the shape of the plan — a knock-on that a linear
+programme does not have, because a linear programme has no declared target and no
+exit test to arrive at. Linear can absorb a stall by spending weeks it never
+promised. A block cannot spend a week without becoming a different block.
 
-**The proposal on the table is diagnosis rather than adjustment.** A miss in
-accumulation is not evidence that the week was too heavy; it is evidence that the
-*entry test* was too high. So the block plans what it plans, and repeated misses
-are reported as "the entry test looks too high" rather than silently corrected.
-That needs no invented number, and the block already ends in a test that measures
-the truth.
+**And a failure inside a block is evidence about its inputs, not about its
+week.** Either the entry test was wrong or the progression schema is too steep.
+Both are settled before the block begins, so neither is reachable from inside it,
+and there is nothing to autoregulate toward: the plan's percentages come from the
+entry maximum, so a top set that fails says the maximum was overstated.
 
-Two things would have to be settled to accept it: whether diagnosis is the right
-response at all, or whether the top set should be autoregulated — which changes a
-prescription from an instruction into an advisory — and how many misses count as
-repeated. The second is a number, so it is the operator's.
+Three consequences follow, and none of them needs a number:
 
-Until it is settled, a periodised block prescribes its plan and records what
-happened, which is what it does today.
+- **The exit test does not happen.** A block that failed did not reach
+  realisation, so there is no peak to measure. The failure is the outcome.
+- **A failed block yields no entry test for what comes next.** A missed working
+  set is not a test, so under
+  `0013-a-test-belongs-to-one-programme-or-to-none.md` a block following a failed
+  block needs a standalone test, and a linear programme following one declares
+  its opening.
+- **Nothing further is prescribed from that programme.** Its remaining scheduled
+  days belong to no programme, which 0012 already makes a real state rather than
+  an error.
+
+**One detail left to settle in the building, not here**: what counts as the
+failure. The reading that matches linear is the gating session's top set, since
+that is already the only performed set the progression reads — a missed accessory
+is not evidence about a front squat maximum. If the operator means something
+wider, it is a change to this decision rather than an implementation choice.
 
 ## Consequences
 
