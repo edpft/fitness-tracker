@@ -25,7 +25,7 @@ pub use error::{
     StoreError,
 };
 pub use ports::{
-    Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExerciseHistory,
+    Authored, Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExerciseHistory,
     ExtractionRunLog, ExtractionStatusReporter, GenerationParameterStore, LadderStanding,
     LandingRecordReader, LandingStore, LastPerformance, NormalisationRunLog, NormalisationSummary,
     NormalisedWorkoutStore, Performance, PerformedSetSummary, PerformedWorkoutReader,

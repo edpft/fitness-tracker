@@ -30,9 +30,9 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::PrescriptionError,
     ports::{
-        ExerciseHistory, GenerationParameterStore, LadderStanding, LastPerformance, Performance,
-        PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore, Reissue,
-        UnderivableReason, UnderivableSlot, WorkoutPrescriber,
+        Authored, ExerciseHistory, GenerationParameterStore, LadderStanding, LastPerformance,
+        Performance, PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore,
+        Reissue, UnderivableReason, UnderivableSlot, WorkoutPrescriber,
     },
 };
 
@@ -90,8 +90,8 @@ where
     S: PrescribedWorkoutStore + Sync,
 {
     async fn standing(&self, on: Date) -> Result<LadderStanding, PrescriptionError> {
-        let Some((programme_id, programme)) = self.ports.programmes.current().await? else {
-            return Err(PrescriptionError::NoProgramme);
+        let Some((programme_id, programme)) = self.ports.programmes.on(on).await? else {
+            return Err(PrescriptionError::NoProgramme { date: on });
         };
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
@@ -134,8 +134,8 @@ where
             });
         }
 
-        let Some((programme_id, programme)) = self.ports.programmes.current().await? else {
-            return Err(PrescriptionError::NoProgramme);
+        let Some((programme_id, programme)) = self.ports.programmes.on(date).await? else {
+            return Err(PrescriptionError::NoProgramme { date });
         };
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
@@ -755,12 +755,29 @@ where
         &self,
         programme: &Programme,
         parameters: &GenerationParameters,
-    ) -> Result<ProgrammeId, PrescriptionError> {
+    ) -> Result<(ProgrammeId, Authored), PrescriptionError> {
+        // Refused before anything is written. Two programmes covering one day
+        // would make which of them answers depend on the order rows came back
+        // in, which is the silent ambiguity § 12's discipline exists to stop.
+        // Versions of one programme never conflict — `overlaps` knows that a
+        // shared name means a re-authoring rather than a rival.
+        let proposed = programme.window();
+        let mut authored = Authored::Created;
+        for existing in self.programmes.windows().await? {
+            if existing.name() == proposed.name() {
+                authored = Authored::Modified;
+                continue;
+            }
+            if proposed.overlaps(&existing) {
+                return Err(PrescriptionError::OverlappingProgramme { proposed, existing });
+            }
+        }
+
         // Parameters first: a programme names the version it was authored
         // against, and one stored without them would reference nothing.
         self.parameters
             .author(programme.authored_at(), parameters)
             .await?;
-        Ok(self.programmes.author(programme).await?)
+        Ok((self.programmes.author(programme).await?, authored))
     }
 }

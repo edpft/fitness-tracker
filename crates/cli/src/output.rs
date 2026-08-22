@@ -234,12 +234,28 @@ fn short(id: &str) -> String {
 /// What was authored.
 pub fn programme_authored(
     id: domain::prescription::ProgrammeId,
+    authored: application::Authored,
     programme: &domain::prescription::Programme,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
+    // Which of the two it was, first and in plain words. A name the store has
+    // not seen starts a programme; one it has corrects that programme — and a
+    // typo in the name is a new programme, so the operator has to be able to see
+    // that happen rather than infer it later from two blocks where one was meant.
+    match authored {
+        application::Authored::Created => {
+            println!("created programme \"{}\"", programme.name());
+        }
+        application::Authored::Modified => {
+            println!(
+                "modified programme \"{}\" — its previous version stays as history",
+                programme.name()
+            );
+        }
+    }
     println!(
-        "authored programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
+        "  programme {id} — {}, {} primary, {} weeks from {}, gating on the {} session",
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
@@ -330,7 +346,9 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     let calendar = programme.calendar();
 
     println!(
-        "programme {} — {}, {} primary, {} training weeks from {}, gating on the {} session",
+        "programme \"{}\" ({}) — {}, {} primary, {} training weeks from {}, \
+         gating on the {} session",
+        programme.name(),
         standing.programme_id,
         programme.primary_exercise(),
         programme.primary(),

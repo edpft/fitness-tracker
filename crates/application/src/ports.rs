@@ -24,7 +24,8 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, Progress, SlotId,
+    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeWindow, Progress,
+    SlotId,
 };
 
 use crate::error::{
@@ -714,14 +715,35 @@ pub trait GenerationParameterStore {
 
 /// The authored programme.
 pub trait ProgrammeStore {
-    /// The programme in force, with the identity the store gave it.
+    /// The programme that answers for a date, with the identity the store gave
+    /// it.
+    ///
+    /// **By date rather than by recency** (decision 0012). Programmes succeed
+    /// one another, so "the latest authored" is the wrong question: it would
+    /// answer a September date from the block authored for October. Two
+    /// programmes never cover one day, so at most one can match.
+    ///
+    /// `None` is a date no programme covers — between two blocks, or before the
+    /// first. A real state, not a fault.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn current(
+    fn on(
         &self,
+        date: Date,
     ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+
+    /// Every programme's name and the days it occupies, oldest first.
+    ///
+    /// What the overlap rule reads. It is here rather than inside [`Self::author`]
+    /// because refusing an overlapping programme is a rule about authored data,
+    /// and the core owns it — the store only reports what it holds.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn windows(&self) -> impl Future<Output = Result<Vec<ProgrammeWindow>, StoreError>> + Send;
 
     /// # Errors
     ///
@@ -870,6 +892,20 @@ pub enum Reissue {
 }
 
 /// Store an authored programme and its parameters.
+/// Which of the two things authoring did (decision 0012).
+///
+/// Reported rather than inferred by the operator from a changed row count: a
+/// typo in the name would otherwise create a phantom programme silently, and
+/// the difference between correcting a block and starting one is exactly what
+/// they need to see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Authored {
+    /// The name was not in the store. A new programme.
+    Created,
+    /// The name was, so this supersedes that programme's previous version.
+    Modified,
+}
+
 pub trait ProgrammeAuthor {
     /// Takes `domain` types.
     ///
@@ -884,5 +920,5 @@ pub trait ProgrammeAuthor {
         &self,
         programme: &Programme,
         parameters: &GenerationParameters,
-    ) -> impl Future<Output = Result<ProgrammeId, PrescriptionError>> + Send;
+    ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
 }

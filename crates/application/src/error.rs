@@ -6,6 +6,8 @@
 //! letting a technology choice ripple in.
 
 use domain::landing::FailureReason;
+use domain::prescription::ProgrammeWindow;
+use jiff::civil::Date;
 
 /// A source did not give us what we asked for.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -141,10 +143,24 @@ pub enum PrescriptionError {
     #[error(transparent)]
     Store(#[from] StoreError),
 
-    /// Nothing has been authored yet. The ordinary first-run state, and the CLI
-    /// has something helpful to say about it.
-    #[error("no programme has been authored, so there is nothing to prescribe from")]
-    NoProgramme,
+    /// No programme covers this date.
+    ///
+    /// Two states wear one variant, and the message tells them apart: nothing
+    /// authored at all — the ordinary first-run case — and a date that falls
+    /// between two programmes or before the first. Neither is a fault, and the
+    /// CLI has something helpful to say about both.
+    #[error("no programme covers {date}, so there is nothing to prescribe for it")]
+    NoProgramme { date: Date },
+
+    /// Two programmes would answer for the same day.
+    ///
+    /// Refused at authoring, because which of them answered would otherwise
+    /// depend on the order rows came back in.
+    #[error("{proposed} overlaps {existing}, and two programmes may not answer for one day")]
+    OverlappingProgramme {
+        proposed: ProgrammeWindow,
+        existing: ProgrammeWindow,
+    },
 
     /// A programme exists but the § 14 parameters it reads do not.
     #[error("no generation parameters have been authored, so no load can be derived")]

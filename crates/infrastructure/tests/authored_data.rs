@@ -180,10 +180,19 @@ macro_rules! programmes {
     };
 }
 
+/// A day the fixture block covers.
+///
+/// The store is read by date now that programmes succeed one another, so every
+/// round-trip test has to name one. The fixture opens on 2026-07-06 and runs
+/// eight weeks, so its first Monday does.
+const fn inside_the_block() -> jiff::civil::Date {
+    jiff::civil::Date::constant(2026, 7, 6)
+}
+
 #[test]
 fn an_unauthored_store_has_no_programme() {
     let (store, _pool, _directory) = programmes!();
-    assert_eq!(run!(store.current()), None);
+    assert_eq!(run!(store.on(inside_the_block())), None);
 }
 
 /// The eleven fills survive the round trip, in all four shapes.
@@ -201,7 +210,7 @@ fn a_programme_round_trips_with_every_fill_shape() {
 
     let id = run!(store.author(&authored));
 
-    let Some((read_id, read_back)) = run!(store.current()) else {
+    let Some((read_id, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
     assert_eq!(read_id, id);
@@ -257,7 +266,7 @@ fn the_interrupted_weeks_round_trip() {
     };
 
     let _id = run!(store.author(&authored));
-    let Some((_, read_back)) = run!(store.current()) else {
+    let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
 
@@ -290,7 +299,7 @@ fn the_weekday_mapping_round_trips() {
     };
     run!(store.author(&authored));
 
-    let Some((_, read_back)) = run!(store.current()) else {
+    let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
 
@@ -302,15 +311,20 @@ fn the_weekday_mapping_round_trips() {
 }
 
 /// Authoring supersedes by date, and the earlier programme is kept.
+///
+/// **Two constructions rather than one authored twice.** A `Programme` stamps
+/// its own `authored_at`, so re-authoring the same value would be one version
+/// claiming two rows — which `UNIQUE (name, authored_at)` refuses. Building the
+/// fixture again is what re-authoring a document actually does.
 #[test]
 fn authoring_a_programme_supersedes_and_retains() {
     let (store, pool, _directory) = programmes!();
-    let Ok(first) = programme::programme() else {
+    let (Ok(first), Ok(again)) = (programme::programme(), programme::programme()) else {
         panic!("the fixture programme is consistent")
     };
 
     let first_id = run!(store.author(&first));
-    let second_id = run!(store.author(&first));
+    let second_id = run!(store.author(&again));
     assert_ne!(first_id, second_id, "each authoring gets its own identity");
 
     let count = run!(async {
@@ -550,4 +564,88 @@ fn a_document_naming_a_week_outside_the_block_does_not_author() {
         Ok(_) => panic!("a week outside the block must not author"),
         Err(other) => panic!("the refusal names the calendar, got {other}"),
     }
+}
+
+/// Two programmes over different weeks are both real, and the date decides.
+///
+/// **What succession is for** (decision 0012). Before this, the store answered
+/// with whatever was authored last, so the second programme would have taken
+/// over the first one's dates as well as its own.
+#[test]
+fn two_programmes_succeed_one_another_and_the_date_chooses() {
+    let (store, _pool, _directory) = programmes!();
+    let (Ok(summer), Ok(autumn)) = (
+        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
+        // Eight weeks from 6 July ends on 31 August, so the autumn block opens
+        // the Monday after and the two are adjacent rather than overlapping.
+        programme::programme_named_from("autumn", jiff::civil::Date::constant(2026, 8, 31)),
+    ) else {
+        panic!("the fixtures are consistent")
+    };
+
+    let summer_id = run!(store.author(&summer));
+    let autumn_id = run!(store.author(&autumn));
+
+    let in_summer = run!(store.on(jiff::civil::Date::constant(2026, 7, 20)));
+    let in_autumn = run!(store.on(jiff::civil::Date::constant(2026, 9, 14)));
+    let (Some((first, _)), Some((second, _))) = (in_summer, in_autumn) else {
+        panic!("both programmes answer for their own weeks")
+    };
+
+    assert_eq!(first, summer_id, "July belongs to the summer block");
+    assert_eq!(
+        second, autumn_id,
+        "September belongs to the autumn block, which was authored last"
+    );
+}
+
+/// A day no programme covers is nothing, not the nearest programme.
+#[test]
+fn a_day_between_programmes_belongs_to_neither() {
+    let (store, _pool, _directory) = programmes!();
+    let Ok(summer) =
+        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6))
+    else {
+        panic!("the fixture is consistent")
+    };
+    run!(store.author(&summer));
+
+    // Eight weeks from 6 July is over on 31 August.
+    assert_eq!(
+        run!(store.on(jiff::civil::Date::constant(2026, 9, 7))),
+        None,
+        "a date past the block belongs to no programme"
+    );
+    assert_eq!(
+        run!(store.on(jiff::civil::Date::constant(2026, 6, 29))),
+        None,
+        "and so does one before it"
+    );
+}
+
+/// Every programme's window comes back, and versions of one collapse to one.
+#[test]
+fn windows_report_one_entry_per_programme() {
+    let (store, _pool, _directory) = programmes!();
+    let (Ok(summer), Ok(again), Ok(autumn)) = (
+        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
+        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
+        programme::programme_named_from("autumn", jiff::civil::Date::constant(2026, 8, 31)),
+    ) else {
+        panic!("the fixtures are consistent")
+    };
+    run!(store.author(&summer));
+    run!(store.author(&again));
+    run!(store.author(&autumn));
+
+    let windows = run!(store.windows());
+    let names: Vec<String> = windows
+        .iter()
+        .map(|window| window.name().to_string())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["summer".to_owned(), "autumn".to_owned()],
+        "three authorings of two programmes are two windows, oldest block first"
+    );
 }

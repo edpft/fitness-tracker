@@ -47,6 +47,23 @@ pub enum ConfigError {
     NoSessionScheduled { from: Date },
 }
 
+/// A date the operator typed.
+///
+/// Split out because a named date needs no calendar: since programmes succeed
+/// one another (decision 0012), which programme covers that date is a question
+/// for the store, and there may be no programme covering *today* to default
+/// from at all.
+///
+/// # Errors
+///
+/// [`ConfigError::NotADate`] if it is not a civil date.
+pub fn named_date(text: &str) -> Result<Date, ConfigError> {
+    text.parse::<Date>().map_err(|error| ConfigError::NotADate {
+        value: text.to_owned(),
+        detail: error.to_string(),
+    })
+}
+
 /// The zone the operator declares they train in.
 ///
 /// § II.3 takes it from configuration, and § 34 forbids an environment
@@ -142,10 +159,7 @@ pub fn database(path: Option<PathBuf>) -> Result<PathBuf, ConfigError> {
 /// — which is what asking after the last week looks like.
 pub fn date(given: Option<&str>, calendar: &Calendar, now: Timestamp) -> Result<Date, ConfigError> {
     if let Some(text) = given {
-        return text.parse::<Date>().map_err(|error| ConfigError::NotADate {
-            value: text.to_owned(),
-            detail: error.to_string(),
-        });
+        return named_date(text);
     }
 
     let today = calendar.today(now);

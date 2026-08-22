@@ -24,6 +24,8 @@
 # Everything unmarked is the operator's own.
 
 [programme]
+# What identifies this programme across re-authorings (decision 0012).
+name             = "fixture"
 template         = "linear"
 primary          = "knee_dominant"
 primary_exercise = "front-squat"

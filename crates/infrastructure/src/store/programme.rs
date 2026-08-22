@@ -19,9 +19,9 @@ use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, PerRole, Programme, ProgrammeId, SessionRole,
-        Skip, SlotId,
-        linear::{Fill, PrimaryPattern, SlotFills, StaticFill},
+        Anchor, AnchorProvenance, Calendar, Entry, PerRole, Programme, ProgrammeId, ProgrammeName,
+        ProgrammeWindow, SessionRole, Skip, SlotId,
+        linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -146,11 +146,19 @@ impl SqliteProgrammeStore {
     }
 }
 
-impl ProgrammeStore for SqliteProgrammeStore {
-    async fn current(&self) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
-        let Some(row) = sqlx::query!(
+/// Every programme's latest authoring, oldest block first.
+///
+/// **Read whole rather than filtered in SQL.** Which days a programme occupies
+/// is `Calendar::calendar_weeks`, which walks the weekday map against the skips
+/// — so the span is not `start_date + duration_weeks * 7` and no `WHERE` clause
+/// can find it. The domain is asked instead, which costs one rehydration per
+/// programme and is the only answer that agrees with the calendar.
+impl SqliteProgrammeStore {
+    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Programme)>, StoreError> {
+        let rows = sqlx::query!(
             r#"
-            SELECT id AS "id!: i64", authored_at AS "authored_at!: String",
+            SELECT id AS "id!: i64", name AS "name!: String",
+                   authored_at AS "authored_at!: String",
                    primary_pattern AS "primary_pattern!: String",
                    primary_exercise AS "primary_exercise!: String",
                    anchor_grams AS "anchor_grams!: i64",
@@ -161,79 +169,106 @@ impl ProgrammeStore for SqliteProgrammeStore {
                    gating_role AS "gating_role!: String",
                    start_date AS "start_date!: String",
                    duration_weeks AS "duration_weeks!: i64"
-            FROM programme
-            ORDER BY authored_at DESC, id DESC
-            LIMIT 1
+            FROM programme AS p
+            WHERE p.authored_at = (
+                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name
+            )
+            ORDER BY start_date ASC, id ASC
             "#
         )
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await
-        .map_err(|error| store_error(&error))?
-        else {
-            return Ok(None);
-        };
+        .map_err(|error| store_error(&error))?;
 
-        let fills = read_fills(&self.pool, row.id).await?;
-        let weekdays = read_weekdays(&self.pool, row.id).await?;
-        let interruptions = read_interruptions(&self.pool, row.id).await?;
+        let mut programmes = Vec::with_capacity(rows.len());
+        for row in rows {
+            let fills = read_fills(&self.pool, row.id).await?;
+            let weekdays = read_weekdays(&self.pool, row.id).await?;
+            let interruptions = read_interruptions(&self.pool, row.id).await?;
 
-        let anchor_grams = u64::try_from(row.anchor_grams)
-            .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
-        let anchor_failed = row
-            .anchor_failed_grams
-            .map(|grams| {
-                u64::try_from(grams)
-                    .map(Kg::from_grams)
-                    .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
-            })
-            .transpose()?;
-        let anchor = Anchor::new(
-            Kg::from_grams(anchor_grams),
-            anchor_failed,
-            AnchorProvenance::try_from(row.anchor_provenance).map_err(|error| corrupt(&error))?,
-            row.anchor_from
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"an anchor date that is not a date"))?,
-        )
-        .map_err(|error| corrupt(&error))?;
+            let anchor_grams = u64::try_from(row.anchor_grams)
+                .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
+            let anchor_failed = row
+                .anchor_failed_grams
+                .map(|grams| {
+                    u64::try_from(grams)
+                        .map(Kg::from_grams)
+                        .map_err(|_| corrupt(&"a failed load stored as a negative mass"))
+                })
+                .transpose()?;
+            let anchor = Anchor::new(
+                Kg::from_grams(anchor_grams),
+                anchor_failed,
+                AnchorProvenance::try_from(row.anchor_provenance)
+                    .map_err(|error| corrupt(&error))?,
+                row.anchor_from
+                    .parse::<Date>()
+                    .map_err(|_| corrupt(&"an anchor date that is not a date"))?,
+            )
+            .map_err(|error| corrupt(&error))?;
 
-        let declared_opening = row
-            .opening_grams
-            .map(|grams| {
-                u64::try_from(grams)
-                    .map(Kg::from_grams)
-                    .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
-            })
-            .transpose()?;
+            let declared_opening = row
+                .opening_grams
+                .map(|grams| {
+                    u64::try_from(grams)
+                        .map(Kg::from_grams)
+                        .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
+                })
+                .transpose()?;
 
-        let duration = u32::try_from(row.duration_weeks)
-            .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
+            let duration = u32::try_from(row.duration_weeks)
+                .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
 
-        let calendar = Calendar::new(
-            row.start_date
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"a start date that is not a date"))?,
-            duration,
-            &interruptions,
-            weekdays,
-            self.zone.as_time_zone(),
-        )
-        .map_err(|error| corrupt(&error))?;
+            let calendar = Calendar::new(
+                row.start_date
+                    .parse::<Date>()
+                    .map_err(|_| corrupt(&"a start date that is not a date"))?,
+                duration,
+                &interruptions,
+                weekdays,
+                self.zone.as_time_zone(),
+            )
+            .map_err(|error| corrupt(&error))?;
 
-        let programme = Programme::rehydrate(
-            PrimaryPattern::try_from(row.primary_pattern).map_err(|error| corrupt(&error))?,
-            exercise_of(&row.primary_exercise)?,
-            fills,
-            Entry::new(anchor, declared_opening),
-            SessionRole::try_from(row.gating_role).map_err(|error| corrupt(&error))?,
-            calendar,
-            row.authored_at
-                .parse()
-                .map_err(|_| corrupt(&"an authoring date that is not an instant"))?,
-        )
-        .map_err(|error| corrupt(&error))?;
+            let programme = Programme::rehydrate(
+                ProgrammeName::try_from(row.name).map_err(|error| corrupt(&error))?,
+                Primary::new(
+                    PrimaryPattern::try_from(row.primary_pattern)
+                        .map_err(|error| corrupt(&error))?,
+                    exercise_of(&row.primary_exercise)?,
+                    SessionRole::try_from(row.gating_role).map_err(|error| corrupt(&error))?,
+                ),
+                fills,
+                Entry::new(anchor, declared_opening),
+                calendar,
+                row.authored_at
+                    .parse()
+                    .map_err(|_| corrupt(&"an authoring date that is not an instant"))?,
+            )
+            .map_err(|error| corrupt(&error))?;
 
-        Ok(Some((ProgrammeId::new(row.id), programme)))
+            programmes.push((ProgrammeId::new(row.id), programme));
+        }
+        Ok(programmes)
+    }
+}
+
+impl ProgrammeStore for SqliteProgrammeStore {
+    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
+        Ok(self
+            .latest_of_each()
+            .await?
+            .into_iter()
+            .find(|(_, programme)| programme.window().covers(date)))
+    }
+
+    async fn windows(&self) -> Result<Vec<ProgrammeWindow>, StoreError> {
+        Ok(self
+            .latest_of_each()
+            .await?
+            .iter()
+            .map(|(_, programme)| programme.window())
+            .collect())
     }
 
     async fn author(&self, programme: &Programme) -> Result<ProgrammeId, StoreError> {
@@ -243,6 +278,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .await
             .map_err(|error| store_error(&error))?;
 
+        let name = programme.name().to_string();
         let authored_at = programme.authored_at().to_string();
         let pattern = programme.primary().as_str();
         let primary = programme.primary_exercise().as_str();
@@ -272,13 +308,14 @@ impl ProgrammeStore for SqliteProgrammeStore {
         let id = sqlx::query!(
             r"
             INSERT INTO programme (
-                authored_at, template, primary_pattern, primary_exercise,
+                name, authored_at, template, primary_pattern, primary_exercise,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 opening_grams, gating_role, start_date, duration_weeks
             )
-            VALUES (?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'linear', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             ",
+            name,
             authored_at,
             pattern,
             primary,

@@ -18,6 +18,7 @@ use crate::{
         parameters::GenerationParameters,
         schedule::{Calendar, SessionRole, Weekdays},
         steps::LoadSteps,
+        succession::{ProgrammeName, ProgrammeWindow},
     },
 };
 
@@ -89,18 +90,48 @@ fn steps_for(
         })
 }
 
+/// What the programme trains, and which session decides its progression.
+///
+/// **One argument because they are one decision.** The pattern names a slot,
+/// the exercise fills it, and the gating role says which session's top set the
+/// ladder reads — and `Programme::check` already validates the three together,
+/// because a primary that does not fill its own slot and a gate on a role the
+/// programme never runs are the same kind of mistake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Primary {
+    pattern: PrimaryPattern,
+    exercise: Exercise,
+    gating_role: SessionRole,
+}
+
+impl Primary {
+    pub const fn new(
+        pattern: PrimaryPattern,
+        exercise: Exercise,
+        gating_role: SessionRole,
+    ) -> Self {
+        Self {
+            pattern,
+            exercise,
+            gating_role,
+        }
+    }
+}
+
 /// A rule for generating a series of prescribed workouts, plus its inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Programme {
-    primary: PrimaryPattern,
-    primary_exercise: Exercise,
+    /// What identifies this programme across re-authorings (decision 0012).
+    /// Two programmes sharing a name are one programme's versions; two that do
+    /// not are rivals for the days they cover, and may not overlap.
+    name: ProgrammeName,
+    primary: Primary,
     fills: SlotFills,
     /// The starting 1RM. Fixed for this block; only its exit test replaces it,
     /// and that replacement anchors the *next* block.
     /// The test that anchors the block, and the opening where the block states
     /// one rather than deriving it from that test.
     entry: Entry,
-    gating_role: SessionRole,
     calendar: Calendar,
     authored_at: Timestamp,
 }
@@ -115,19 +146,18 @@ impl Programme {
     /// not fill the slot named as primary, or a climb and duration that do not
     /// make a ladder.
     pub fn new(
-        primary: PrimaryPattern,
-        primary_exercise: Exercise,
+        name: ProgrammeName,
+        primary: Primary,
         fills: SlotFills,
         entry: Entry,
-        gating_role: SessionRole,
         calendar: Calendar,
         parameters: &GenerationParameters,
     ) -> Result<Self, InconsistentProgramme> {
         Self::check(
-            primary,
-            primary_exercise,
+            primary.pattern,
+            primary.exercise,
             &fills,
-            gating_role,
+            primary.gating_role,
             calendar.weekdays(),
         )?;
 
@@ -155,15 +185,14 @@ impl Programme {
             opening_of(entry, parameters),
             parameters.ladder_climb_per_week,
             calendar.duration_weeks(),
-            steps_for(primary_exercise, parameters)?,
+            steps_for(primary.exercise, parameters)?,
         )?;
 
         Ok(Self {
+            name,
             primary,
-            primary_exercise,
             fills,
             entry,
-            gating_role,
             calendar,
             authored_at: Timestamp::now(),
         })
@@ -197,27 +226,25 @@ impl Programme {
     /// [`InconsistentProgramme`] for any of the three parameter-independent
     /// checks.
     pub fn rehydrate(
-        primary: PrimaryPattern,
-        primary_exercise: Exercise,
+        name: ProgrammeName,
+        primary: Primary,
         fills: SlotFills,
         entry: Entry,
-        gating_role: SessionRole,
         calendar: Calendar,
         authored_at: Timestamp,
     ) -> Result<Self, InconsistentProgramme> {
         Self::check(
-            primary,
-            primary_exercise,
+            primary.pattern,
+            primary.exercise,
             &fills,
-            gating_role,
+            primary.gating_role,
             calendar.weekdays(),
         )?;
         Ok(Self {
+            name,
             primary,
-            primary_exercise,
             fills,
             entry,
-            gating_role,
             calendar,
             authored_at,
         })
@@ -261,11 +288,11 @@ impl Programme {
     }
 
     pub const fn primary(&self) -> PrimaryPattern {
-        self.primary
+        self.primary.pattern
     }
 
     pub const fn primary_exercise(&self) -> Exercise {
-        self.primary_exercise
+        self.primary.exercise
     }
 
     pub const fn fills(&self) -> &SlotFills {
@@ -277,7 +304,7 @@ impl Programme {
     }
 
     pub const fn gating_role(&self) -> SessionRole {
-        self.gating_role
+        self.primary.gating_role
     }
 
     pub const fn calendar(&self) -> &Calendar {
@@ -286,6 +313,25 @@ impl Programme {
 
     pub const fn authored_at(&self) -> Timestamp {
         self.authored_at
+    }
+
+    pub const fn name(&self) -> &ProgrammeName {
+        &self.name
+    }
+
+    /// The days this programme occupies, for the rule that two programmes may
+    /// not compete for one of them.
+    ///
+    /// Calendar weeks rather than training weeks: a block interrupted for a
+    /// fortnight still occupies those days, and a programme starting inside
+    /// them would be answering for the same dates.
+    #[must_use]
+    pub fn window(&self) -> ProgrammeWindow {
+        ProgrammeWindow::new(
+            self.name.clone(),
+            self.calendar.start(),
+            self.calendar.calendar_weeks(),
+        )
     }
 
     /// The block's plan.
@@ -329,7 +375,7 @@ impl Programme {
         &self,
         parameters: &'a GenerationParameters,
     ) -> Result<&'a LoadSteps, InvalidLadder> {
-        steps_for(self.primary_exercise, parameters)
+        steps_for(self.primary.exercise, parameters)
     }
 
     /// Whether this slot is the primary one.
@@ -338,6 +384,6 @@ impl Programme {
     /// ramp, a top set from the ladder, and back-offs. Every other slot reads its
     /// own history instead.
     pub fn is_primary(&self, slot: crate::prescription::shape::SlotId) -> bool {
-        self.primary.slot() == slot
+        self.primary.pattern.slot() == slot
     }
 }
