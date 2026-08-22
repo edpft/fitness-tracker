@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT start_date AS \"start_date!: String\", days AS \"days!: i64\"\n        FROM programme_interruption\n        WHERE programme = ?\n        ORDER BY start_date ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "start_date!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_interruption",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "name": "days!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_interruption",
+            "name": "days"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "456b240c1f67c380f69fc5fd9536d354f21f67994d57588e95a1679a41d2a89e"
+}

@@ -524,8 +524,6 @@
             # an agent that cannot open the PR leaves the work on a pushed
             # branch nobody has been asked to review.
             gh
-            # For spec-kit
-            uv
             # agent
             claude-code
           ];

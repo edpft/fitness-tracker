@@ -17,6 +17,12 @@
 *.db-shm
 *.db-wal
 
+# The authored programme. Same privacy guard as the databases above: it names
+# the operator's block, their anchor and the dates they are away, and it is
+# personal to whoever runs the tool. The fixture the tests author from lives in
+# `crates/infrastructure/tests/fixtures/` and is tracked there.
+/programme.toml
+
 # Extraction run locks, named `.<source>.<entity>.lock`.
 #
 # `.*.lock` rather than `*.lock`, which would swallow Cargo.lock.

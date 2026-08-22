@@ -248,7 +248,11 @@ fn the_interrupted_weeks_round_trip() {
     ) else {
         panic!("the dates are valid")
     };
-    let Ok(authored) = programme::programme_skipping(&[away]) else {
+    let Some(seven) = std::num::NonZeroU8::new(7) else {
+        panic!("seven is not zero")
+    };
+    let week = domain::prescription::Skip::new(away, seven);
+    let Ok(authored) = programme::programme_skipping(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
@@ -263,8 +267,8 @@ fn the_interrupted_weeks_round_trip() {
             .interruptions()
             .iter()
             .collect::<Vec<_>>(),
-        vec![away],
-        "the week the operator named comes back as they named it"
+        vec![week],
+        "the skip the operator named comes back as they named it, days and all"
     );
     assert!(
         read_back.calendar().place(away).is_err(),
@@ -439,18 +443,25 @@ fn a_settled_document_authors() {
     );
 }
 
-/// A document naming a week away authors a block that skips it.
+/// A document naming days away authors a block that skips them.
 ///
 /// The key is optional, so this is also the assertion that it is read at all: a
 /// document whose `interruptions` went unparsed would author a programme that
 /// looks exactly like the one above.
+///
+/// **Both spellings, because the document accepts both.** A bare date is one
+/// day; a table is a run of them. They normalise to the same type, so the
+/// domain never sees two ways of saying one thing.
 #[test]
-fn a_document_can_name_the_weeks_the_block_does_not_run() {
+fn a_document_can_name_the_sessions_the_block_does_not_run() {
     let Ok(settled) = settled_document() else {
         panic!("the fixture document is readable")
     };
     // Inside the block, which starts 2026-07-06 and runs eight training weeks.
-    let named = settled.replace("interruptions = []", r#"interruptions = ["2026-07-20"]"#);
+    let named = settled.replace(
+        "interruptions = []",
+        r#"interruptions = ["2026-07-20", { start = "2026-07-24", days = 3 }]"#,
+    );
     assert_ne!(named, settled, "the fixture carries the key to replace");
 
     let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
@@ -467,11 +478,15 @@ fn a_document_can_name_the_weeks_the_block_does_not_run() {
         Err(error) => panic!("the document describes a consistent programme: {error}"),
     };
 
-    let (Ok(away), Ok(after)) = (
+    let (Ok(monday), Ok(friday), Ok(after)) = (
         jiff::civil::Date::new(2026, 7, 20),
+        jiff::civil::Date::new(2026, 7, 24),
         jiff::civil::Date::new(2026, 7, 27),
     ) else {
         panic!("the dates are valid")
+    };
+    let Some(three) = std::num::NonZeroU8::new(3) else {
+        panic!("three is not zero")
     };
     assert_eq!(
         programme
@@ -479,15 +494,23 @@ fn a_document_can_name_the_weeks_the_block_does_not_run() {
             .interruptions()
             .iter()
             .collect::<Vec<_>>(),
-        vec![away]
+        vec![
+            domain::prescription::Skip::day(monday),
+            domain::prescription::Skip::new(friday, three),
+        ],
+        "both spellings read back as skips"
     );
     assert_eq!(
         programme.calendar().duration_weeks(),
         8,
         "the duration counts training weeks, so a holiday does not shorten it"
     );
+    // The week of the 20th loses both its sessions — Monday named outright, and
+    // Friday the 24th inside the three-day run — so nothing survives in it and
+    // the block reaches one calendar week further.
     assert_eq!(programme.calendar().calendar_weeks(), 9);
-    assert!(programme.calendar().place(away).is_err());
+    assert!(programme.calendar().place(monday).is_err());
+    assert!(programme.calendar().place(friday).is_err());
     match programme.calendar().place(after) {
         Ok((domain::prescription::WeekKind::Climbing(week), _)) => {
             assert_eq!(week.as_u32(), 3, "the week after the holiday is week three");
