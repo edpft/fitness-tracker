@@ -56,7 +56,7 @@ serde_json = { version = "1.0.151", features = ["raw_value"] }
 # `infrastructure` — § 21 exempts an interface language kept at its adapter, and
 # the exemption is only honest while no `toml` type reaches `domain`. The
 # `architecture` check verifies that by ring.
-toml = "0.9.8"
+toml = "1.1.4"
 sqlx = { version = "0.9.0", default-features = false, features = [
   "sqlite",
   "runtime-tokio",
