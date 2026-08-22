@@ -47,10 +47,16 @@ the starting 1RM, and the load failed above it if the test found one. Both are
 evidence and the block reads both — see
 `decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
 
-**The test precedes the block it anchors, and a block may not contain its own
-entry test.** The test session is in the performed record, so a block holding it
-would read that failure twice: once as the opening it derived from, once as a
-missed gating set inside itself. Authoring refuses it.
+**The test precedes the block it anchors.** The test session is in the performed
+record, so a *linear* programme holding it would read that failure twice: once as
+the opening it derived from, once as a missed gating set inside itself. Authoring
+refuses it, and since decision 0013 a linear programme has no test week at all.
+
+A periodised block is the exception, and decision 0016 records why: it may carry
+an optional entry test as a week in front of its phases, because a test session
+has to run the lower slots the way the programme it anchors runs them. Its loads
+are shares of a fixed anchor rather than rungs off an opening, so there is no
+opening to derive twice and the hazard above does not arise.
 
 It carries its provenance, because the four ways of arriving at it are not
 equally good: a **test** is measured, an **e1RM** is derived, an **asserted**

@@ -19,10 +19,11 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, GatingTopSet, GenerationParameters, Position, PrescribedExercise, PrescribedItem,
-        PrescribedSet, PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress,
-        SessionRole, SlotId, SupersetMember, Target, WeekKind, WorkoutShape, linear::SlotContent,
-        progress_after,
+        Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
+        Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
+        PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, RECENT_WEEKS,
+        SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
+        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -96,8 +97,10 @@ where
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
-        let progress = self.progress(&programme, &parameters, on).await?;
+        let progress = self.progress_of(&programme, &parameters, on).await?;
+        let target = self.inheritance(&programme, &parameters, on).await?.target;
         Ok(LadderStanding {
+            target,
             programme_id,
             programme,
             parameters,
@@ -164,11 +167,32 @@ where
         // miss holds the ladder and a stall suspends it. So the position is walked
         // out of the gating sessions performed so far (US3) and is derived on every
         // read — there is no stored counter to advance twice.
-        let progress = self.progress(&programme, &parameters, date).await?;
+        let progress = self.progress_of(&programme, &parameters, date).await?;
+
+        // What a test week takes from the programme before it: the target it is
+        // an attempt at, and the load its other session runs at. Both are empty
+        // for a programme that climbs, which has neither question to ask.
+        let inheritance = self.inheritance(&programme, &parameters, date).await?;
+
+        // **The derivation gets the calendar's week and the record gets the
+        // programme's.** `Calendar::place` reports every week as a climbing one
+        // since decision 0013 — which of them is a test is the block's business,
+        // decided by its phase plan and by whether it measures its own entry. So
+        // the index the derivation needs survives, and what is stored is what
+        // the week actually was.
+        let recorded = week_of(&programme, week);
 
         let mut items = Vec::new();
         let mut underivable = Vec::new();
-        for derived in issue_slots(&programme, &parameters, role, week, progress, &history) {
+        for derived in issue_slots(
+            &programme,
+            &parameters,
+            role,
+            week,
+            progress,
+            inheritance,
+            &history,
+        ) {
             match derived {
                 Derived::Item(item) => items.push(*item),
                 Derived::Underivable(slots) => underivable.extend(slots),
@@ -180,8 +204,8 @@ where
             WorkoutShape::new(items),
             date,
             role,
-            week,
-            programme.anchor(),
+            recorded,
+            derived_from(&programme, inheritance)?,
             parameters,
             parameters_at,
             programme_id,
@@ -222,9 +246,99 @@ where
     /// not evidence about what to do that day — and issuing for a past date would
     /// otherwise read forward through the record and answer with a rung the
     /// operator could not have been given at the time.
-    async fn progress(
+    /// Where the record puts a programme, for the one template that has a
+    /// position to be at.
+    ///
+    /// **`None` is not "at the start".** A block's loads are shares of its
+    /// anchor and a test has no ladder at all, so neither has a rung a miss
+    /// could hold — and reporting them as climbing week one would be a number
+    /// with no meaning behind it rather than an absence.
+    async fn progress_of(
         &self,
         programme: &Programme,
+        parameters: &GenerationParameters,
+        before: Date,
+    ) -> Result<Option<Progress>, PrescriptionError> {
+        match programme {
+            Programme::Periodisation(Periodisation::Linear(linear)) => {
+                Ok(Some(self.progress(linear, parameters, before).await?))
+            }
+            Programme::Periodisation(Periodisation::Block(_)) | Programme::Test(_) => Ok(None),
+        }
+    }
+
+    /// What a test week takes from the programme before it (decision 0013).
+    ///
+    /// Two questions of one predecessor, so it is read once. The target is what
+    /// the heavy session is an attempt at, and the light load is what the other
+    /// session runs the predecessor's primary at.
+    ///
+    /// **The target is refused across a change of lift.** A front squat maximum
+    /// is not evidence about an RDL, so a predecessor training a different lift
+    /// answers the first question with nothing — which is exactly the case
+    /// [`TestTarget::Declared`] exists for. It still answers the second: the
+    /// light session is the predecessor's session whatever it was training.
+    async fn inheritance(
+        &self,
+        programme: &Programme,
+        parameters: &GenerationParameters,
+        date: Date,
+    ) -> Result<Inheritance, PrescriptionError> {
+        let Programme::Test(test) = programme else {
+            return Ok(Inheritance {
+                target: None,
+                light: None,
+            });
+        };
+
+        let declared = match test.target() {
+            TestTarget::Declared(load) => Some(load),
+            TestTarget::Inherited => None,
+        };
+
+        let predecessor = self
+            .ports
+            .programmes
+            .preceding(test.calendar().start())
+            .await?;
+        let Some((_, Programme::Periodisation(Periodisation::Linear(before)))) = predecessor else {
+            // Nothing before it, or a predecessor with no ladder to read a
+            // position off. A block's exit test anchors what follows through its
+            // own result rather than through a target, so a test after one has
+            // nothing to inherit either.
+            return Ok(Inheritance {
+                target: declared,
+                light: None,
+            });
+        };
+
+        let progress = self.progress(&before, parameters, date).await?;
+        let Ok(ladder) = before.ladder(parameters) else {
+            return Ok(Inheritance {
+                target: declared,
+                light: None,
+            });
+        };
+        let Ok(steps) = before.steps(parameters) else {
+            return Ok(Inheritance {
+                target: declared,
+                light: None,
+            });
+        };
+
+        let inherited = (before.primary_exercise() == test.primary_exercise())
+            .then(|| progress.test_target(ladder, steps));
+        Ok(Inheritance {
+            // A declared target wins: it is the operator saying what this test
+            // is for, and inheritance is the default rather than an override.
+            target: declared.or(inherited),
+            light: progress.light_top_set(ladder, steps, parameters.light_of_heavy),
+        })
+    }
+
+    async fn progress(
+        &self,
+        programme: &Linear,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Progress, PrescriptionError> {
@@ -307,7 +421,8 @@ fn issue_slots(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
-    progress: Progress,
+    progress: Option<Progress>,
+    inheritance: Inheritance,
     history: &BTreeMap<RepsExercise, LastPerformance>,
 ) -> Vec<Derived> {
     let primary = programme.primary();
@@ -316,7 +431,7 @@ fn issue_slots(
         .into_iter()
         .map(|position| match position {
             Position::Single(slot) if slot == primary.slot() => {
-                primary_slot_item(programme, parameters, role, week, progress)
+                primary_slot_item(programme, parameters, role, week, progress, inheritance)
             }
             Position::Single(slot) => accessory_slot(programme, parameters, role, history, slot),
             Position::Superset(first, second) => {
@@ -335,21 +450,108 @@ fn issue_slots(
         .collect()
 }
 
-/// The primary slot: a warm-up ramp, a top set, and back-offs.
+/// The session a block's entry test is taken on.
 ///
-/// On a test week the top set is `Autoregulated` — load open, one repetition,
-/// nothing in reserve — which is exactly what a test is and exactly what that
-/// variant was for. It had been recorded as reachable but unreached; the test
-/// week is what reaches it.
+/// Heavy, and for the same reason a standalone test's is: it is the week's whole
+/// purpose, and the other session is whatever the block states for it.
+const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
+
+/// Which week this session belongs to, in the vocabulary the store speaks.
+///
+/// **The calendar cannot answer for a block.** Since decision 0013 a calendar
+/// emits nothing but climbing weeks — a linear programme has no test and a
+/// block's entry test is not one of its weeks — so which week is a block's exit
+/// test is decided by the phase plan and nothing else. A standalone test week is
+/// a test week on both its sessions: the week is what it is, and which session
+/// is the attempt is the role's business.
+fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
+    match programme {
+        Programme::Test(_) => WeekKind::Test,
+        Programme::Periodisation(Periodisation::Linear(_)) => placed,
+        Programme::Periodisation(Periodisation::Block(block)) => {
+            let WeekKind::Climbing(index) = placed else {
+                return placed;
+            };
+            block.kind(index).unwrap_or(placed)
+        }
+    }
+}
+
+/// What this session's primary loads were derived from, recorded by value.
+///
+/// # Errors
+///
+/// [`PrescriptionError::NoTarget`] for a test whose target is inherited and
+/// whose predecessor cannot supply one. A test week with no target is not a
+/// session with one slot missing — it is a week whose whole purpose is
+/// unanswerable, so it is refused rather than issued incomplete.
+fn derived_from(
+    programme: &Programme,
+    inheritance: Inheritance,
+) -> Result<DerivedFrom, PrescriptionError> {
+    match programme {
+        Programme::Periodisation(periodisation) => Ok(DerivedFrom::Anchor(periodisation.anchor())),
+        Programme::Test(test) => {
+            inheritance
+                .target
+                .map(DerivedFrom::Target)
+                .ok_or_else(|| PrescriptionError::NoTarget {
+                    programme: test.name().clone(),
+                })
+        }
+    }
+}
+
+/// What this session's primary slot is loaded from.
+///
+/// **Computed once, before any slot is derived.** The three templates answer the
+/// question in three different places — a linear rung comes from the record, a
+/// block's week from its own phase plan, and a test's from the programme before
+/// it — and only the last of those needs another programme read out of the
+/// store. Resolving it up front keeps the derivation below synchronous and keeps
+/// the store read out of a loop over seventeen slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Inheritance {
+    /// What a standalone test is an attempt at (decision 0011).
+    target: Option<Kg>,
+    /// What the light session of a test week runs its primary at: the load the
+    /// predecessor's progression stands at, which is what makes the week the
+    /// predecessor's session and a test rather than two tests.
+    light: Option<Kg>,
+}
+
+/// How the primary slot's sets are built, once a load is known.
+enum PrimaryLoad {
+    /// A ramp, one top set, and the role's back-offs. The linear rung, and the
+    /// light session of a test week, which is a linear session by inheritance.
+    TopSet { load: Kg, reps: RepCount },
+    /// A ramp and then sets across, all at one load. Block accumulation, where
+    /// no set can be a maximum because there are five of them.
+    Across {
+        load: Kg,
+        sets: RepCount,
+        reps: RepCount,
+    },
+    /// A ramp toward a load, then one autoregulated attempt at it.
+    ///
+    /// **Open at the top, always.** Going past the number is the outcome the
+    /// week exists to produce, so nothing caps it: the target is what the ramp
+    /// is built toward and what the report names, not a ceiling.
+    Attempt { toward: Kg, reps: RepCount },
+}
+
+/// The primary slot: a warm-up ramp, and then whatever this template asks for.
 fn primary_slot_item(
     programme: &Programme,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
-    progress: Progress,
+    progress: Option<Progress>,
+    inheritance: Inheritance,
 ) -> Derived {
-    let slot = programme.primary().slot();
-    let exercise = programme.fills().primary(programme.primary(), role);
+    let pattern = programme.primary();
+    let slot = pattern.slot();
+    let exercise = programme.fills().primary(pattern, role);
     let Exercise::Reps(reps_exercise) = exercise else {
         return Derived::underivable(UnderivableSlot {
             slot,
@@ -365,94 +567,77 @@ fn primary_slot_item(
             reason: UnderivableReason::NoLoadScale,
         });
     };
-    let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
 
-    let top_set = match week {
-        // **The calendar says whether, and the record says which.** A climbing week
-        // takes its load from where the progression has got to, not from the week
-        // the date falls in — those agree until the first miss and diverge after
-        // it, which is the whole of US3.
-        WeekKind::Climbing(_) => {
-            let Ok(ladder) = programme.ladder(parameters) else {
-                return Derived::underivable(UnderivableSlot {
-                    slot,
-                    exercise: exercise.as_str(),
-                    reason: UnderivableReason::NoLadder,
-                });
-            };
-            match role {
-                SessionRole::Heavy => progress.heavy_top_set(ladder, steps),
-                SessionRole::Light => {
-                    progress.light_top_set(ladder, steps, parameters.light_of_heavy)
-                }
-            }
+    let plan = match programme {
+        Programme::Periodisation(Periodisation::Linear(linear)) => {
+            linear_load(linear, parameters, role, week, progress, steps)
         }
-        // A test has no ladder position; its load is what the day allows.
-        WeekKind::Test => None,
+        Programme::Periodisation(Periodisation::Block(block)) => {
+            block_load(block, role, week, steps)
+        }
+        Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
+    };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(reason) => {
+            return Derived::underivable(UnderivableSlot {
+                slot,
+                exercise: exercise.as_str(),
+                reason,
+            });
+        }
     };
 
-    if let Some(load) = top_set {
-        // The ramp, then the top set, then the back-offs. Every step is a
-        // percentage of the top set and never of the anchor.
-        for step in parameters.warmup.iter() {
-            sets.push(PrescribedSet::warmup(
-                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(load))),
-                Target::Exactly(step.reps),
-            ));
-        }
-        let reps = parameters.top_set_reps.get(role).as_rep_count();
-        sets.push(PrescribedSet::fixed(
-            Load::Absolute(load),
-            Target::Exactly(reps),
+    let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
+    // The ramp is a share of what the session is working toward, whatever that
+    // is — never of the anchor. Ramping off the anchor had the operator warming
+    // up toward a number they had passed three weeks earlier (decision 0011).
+    let toward = match plan {
+        PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
+        PrimaryLoad::Attempt { toward, .. } => toward,
+    };
+    for step in parameters.warmup.iter() {
+        sets.push(PrescribedSet::warmup(
+            Load::Absolute(steps.quantise_loaded(step.of_top_set.of(toward))),
+            Target::Exactly(step.reps),
         ));
+    }
 
-        // The back-offs are the role's own pattern — heavy `2 × 4`, light
-        // `3 × 6` — and not the strength block's accessory scheme. Borrowing
-        // that scheme is what issued the light session's three sets of six on
-        // the heavy day; the operator stated the two patterns on 2026-08-20 and
-        // the record agrees on every session since the July test.
-        let pattern = parameters.back_off.get(role);
-        let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
-        for _ in 0..pattern.sets.as_u32() {
+    match plan {
+        PrimaryLoad::TopSet { load, reps } => {
             sets.push(PrescribedSet::fixed(
-                Load::Absolute(back_off),
-                Target::Exactly(pattern.reps),
+                Load::Absolute(load),
+                Target::Exactly(reps),
+            ));
+            // The back-offs are the role's own pattern — heavy `2 × 4`, light
+            // `3 × 6` — and not the strength block's accessory scheme.
+            let pattern = parameters.back_off.get(role);
+            let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
+            for _ in 0..pattern.sets.as_u32() {
+                sets.push(PrescribedSet::fixed(
+                    Load::Absolute(back_off),
+                    Target::Exactly(pattern.reps),
+                ));
+            }
+        }
+        PrimaryLoad::Across {
+            load,
+            sets: across,
+            reps,
+        } => {
+            for _ in 0..across.as_u32() {
+                sets.push(PrescribedSet::fixed(
+                    Load::Absolute(load),
+                    Target::Exactly(reps),
+                ));
+            }
+        }
+        PrimaryLoad::Attempt { reps, .. } => {
+            sets.push(PrescribedSet::autoregulated(
+                Target::Exactly(reps),
+                domain::gym::Rir::Zero,
             ));
         }
-    } else {
-        // A test week. It has no rung, but it is an attempt at a load all the
-        // same — the one the progression stands at — so the ramp is a share of
-        // *that*, not of the anchor. Ramping off the anchor had the operator
-        // warming up toward a number they had passed three weeks earlier.
-        let Ok(ladder) = programme.ladder(parameters) else {
-            return Derived::underivable(UnderivableSlot {
-                slot,
-                exercise: exercise.as_str(),
-                reason: UnderivableReason::NoLadder,
-            });
-        };
-        let target = progress.test_target(ladder, steps);
-        for step in parameters.warmup.iter() {
-            sets.push(PrescribedSet::warmup(
-                Load::Absolute(steps.quantise_loaded(step.of_top_set.of(target))),
-                Target::Exactly(step.reps),
-            ));
-        }
-        let Ok(single) = RepCount::new(1) else {
-            return Derived::underivable(UnderivableSlot {
-                slot,
-                exercise: exercise.as_str(),
-                reason: UnderivableReason::NoLadder,
-            });
-        };
-        // Autoregulated still: a test is open at the top, because the point is
-        // to find the ceiling rather than to hit a number. The target is what
-        // the ramp is built toward and what the report names; going past it is
-        // the outcome the block exists to produce.
-        sets.push(PrescribedSet::autoregulated(
-            Target::Exactly(single),
-            domain::gym::Rir::Zero,
-        ));
     }
 
     let Ok(sets) = NonEmpty::new(sets) else {
@@ -468,6 +653,142 @@ fn primary_slot_item(
             exercise: *reps_exercise,
             sets,
         },
+    })
+}
+
+/// A linear programme's rung.
+///
+/// **The calendar says whether, and the record says which.** A climbing week
+/// takes its load from where the progression has got to, not from the week the
+/// date falls in — those agree until the first miss and diverge after it.
+///
+/// A linear calendar emits nothing but climbing weeks since decision 0013, so
+/// the test arm below is the type system's edge rather than a state to reach.
+fn linear_load(
+    linear: &Linear,
+    parameters: &GenerationParameters,
+    role: SessionRole,
+    week: WeekKind,
+    progress: Option<Progress>,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
+    let (Some(progress), Ok(ladder)) = (progress, linear.ladder(parameters)) else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let WeekKind::Climbing(_) = week else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let load = match role {
+        SessionRole::Heavy => progress.heavy_top_set(ladder, steps),
+        SessionRole::Light => progress.light_top_set(ladder, steps, parameters.light_of_heavy),
+    };
+    load.map_or(Err(UnderivableReason::NoLadder), |load| {
+        Ok(PrimaryLoad::TopSet {
+            load,
+            reps: parameters.top_set_reps.get(role).as_rep_count(),
+        })
+    })
+}
+
+/// A block's week, as its own phase plan states it.
+///
+/// **Nothing here reads the record.** Every load in a block is a share of the
+/// anchor decided by the duration and three literature constants, which is what
+/// makes the whole block computable in advance. A miss does not hold it, because
+/// there is no ladder position to hold.
+fn block_load(
+    block: &Periodised,
+    role: SessionRole,
+    week: WeekKind,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
+    // The calendar reports every week as a climbing one; which of them is a test
+    // is the block's business, not the calendar's.
+    let WeekKind::Climbing(index) = week else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let Some(planned) = block.week(index) else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let anchor = block.entry().anchor().load();
+    let planned = match planned {
+        // **The week the block measures what it is about to plan from.** The ramp
+        // builds toward the anchor the block was authored with, expressed at the
+        // repetition count the attempt is performed at — so a triple works up to
+        // the 3RM the operator expects rather than to a one-rep maximum nobody
+        // is attempting. Nothing here reads another programme: what this block
+        // expects is the block's own statement, and the week is where it finds
+        // out whether it was right.
+        BlockWeek::Entry(test) => {
+            if role == BLOCK_ENTRY_TEST_ROLE {
+                let Some(share) = rep_max(test.reps()) else {
+                    return Err(UnderivableReason::NoLadder);
+                };
+                return Ok(PrimaryLoad::Attempt {
+                    toward: steps.quantise_loaded(share.of(anchor)),
+                    reps: test.reps(),
+                });
+            }
+            // The other session of that week, at the load the block states for
+            // it. Absent means the operator does not run it: there is no honest
+            // derivation for a light session of a lift whose maximum this week
+            // is about to measure.
+            let Some(load) = test.light() else {
+                return Err(UnderivableReason::NoEntryTestLightLoad);
+            };
+            return Ok(PrimaryLoad::TopSet {
+                load: steps.quantise_loaded(load),
+                reps: test.reps(),
+            });
+        }
+        BlockWeek::Planned(planned) => planned,
+    };
+    match planned {
+        WeekPlan::Working {
+            sets, reps, load, ..
+        } => {
+            let load = steps.quantise_loaded(load.of(anchor));
+            if sets.as_u32() == 1 {
+                Ok(PrimaryLoad::TopSet { load, reps })
+            } else {
+                Ok(PrimaryLoad::Across { load, sets, reps })
+            }
+        }
+        WeekPlan::ExitTest { reps, expected } => Ok(PrimaryLoad::Attempt {
+            toward: steps.quantise_loaded(expected.of(anchor)),
+            reps,
+        }),
+    }
+}
+
+/// A standalone test's week: the attempt on the heavy session, and the
+/// predecessor's session on the light one.
+fn test_load(
+    test: &Test,
+    parameters: &GenerationParameters,
+    role: SessionRole,
+    inheritance: Inheritance,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
+    if role == Test::ROLE {
+        let Some(target) = inheritance.target else {
+            return Err(UnderivableReason::NoTarget);
+        };
+        return Ok(PrimaryLoad::Attempt {
+            toward: steps.quantise_loaded(target),
+            reps: test.reps(),
+        });
+    }
+    // Not the test: the week's other session is the predecessor's, run at the
+    // load its progression stands at. A test with nothing before it has no such
+    // load, which is why a test that runs a second session needs a predecessor
+    // even where its target was declared.
+    let Some(load) = inheritance.light else {
+        return Err(UnderivableReason::NoPredecessor);
+    };
+    Ok(PrimaryLoad::TopSet {
+        load: steps.quantise_loaded(load),
+        reps: parameters.top_set_reps.get(role).as_rep_count(),
     })
 }
 
@@ -746,6 +1067,96 @@ impl<P, G> Authoring<P, G> {
     }
 }
 
+impl<P, G> Authoring<P, G>
+where
+    P: ProgrammeStore + Sync,
+    G: Sync,
+{
+    /// Whether a claimed earlier maximum is one that exists.
+    ///
+    /// **A block's anchor comes from one of three places** (decision 0016): a
+    /// previous test, an entry test of its own, or a declared number. Only the
+    /// first says something about the past, so only the first is checked here —
+    /// and it can only be checked here, because whether such a test happened is a
+    /// fact about the store rather than a claim the document can settle about
+    /// itself.
+    ///
+    /// The operator's ten compositions are what a claimed test has to survive:
+    ///
+    /// ```text
+    /// test a   → block b   produces a ≠ b            no such test
+    /// test b   → block b   produces b                opens from it
+    /// linear a → block b   produces nothing          no such test
+    /// linear b → block b   produces nothing          no such test
+    /// block a  → block b   produces a ≠ b            no such test
+    /// block b  → block b   produces b, its exit      opens from it
+    ///
+    /// test b  → block b                adjacent      opens from it
+    /// test b  → 1 blank week → block b               opens from it
+    /// test b  → 2 blank weeks → block b              too old
+    /// block b → 1 blank week → block b               opens from it
+    /// block b → 2 blank weeks → block b              too old
+    /// ```
+    ///
+    /// Row four is the one that invites a wrong guess, and it is why the
+    /// predicate is worth having: a linear programme for the *same* lift still
+    /// leaves no maximum, because it never tests. Its last heavy single feels
+    /// like one and is not — and `provenance = "tested"` beside that date is
+    /// exactly what this refuses.
+    ///
+    /// **It refuses a claim, not a choice.** A block that has no test to inherit
+    /// is free to run its own entry test or to declare a number; what it may not
+    /// do is say a measurement happened when none did.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] if the store is unavailable, if no test of this lift
+    /// ran before this block, if the anchor is not dated to it, or if it is too
+    /// old to still speak.
+    async fn claimed_maximum_exists(&self, programme: &Programme) -> Result<(), PrescriptionError> {
+        if !programme.claims_an_earlier_maximum() {
+            return Ok(());
+        }
+        let start = programme.calendar().start();
+        let wanted = programme.primary_exercise();
+        let Some(anchor) = programme.anchor() else {
+            return Ok(());
+        };
+
+        let before = match self.programmes.preceding(start).await? {
+            Some((_, before)) if before.produces_maximum() == Some(wanted) => before,
+            found => {
+                return Err(PrescriptionError::NoMaximumToOpenFrom {
+                    programme: programme.name().clone(),
+                    primary: wanted.as_str(),
+                    predecessor: found.map(|(_, before)| before.name().clone()),
+                });
+            }
+        };
+
+        // **Dated to that test, and recent.** Either alone lets a number in from
+        // nowhere: a date inside the predecessor with no bound on age would
+        // accept a maximum from a block that finished in June, and a recent date
+        // with no bound on origin would accept one written down last week.
+        if !before.window().covers(anchor.from()) {
+            return Err(PrescriptionError::MaximumIsNotTheOneBefore {
+                programme: programme.name().clone(),
+                tested: anchor.from(),
+                predecessor: before.name().clone(),
+            });
+        }
+        if !is_recent_enough(anchor.from(), start) {
+            return Err(PrescriptionError::MaximumIsStale {
+                programme: programme.name().clone(),
+                tested: anchor.from(),
+                start,
+                weeks: RECENT_WEEKS,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl<P, G> ProgrammeAuthor for Authoring<P, G>
 where
     P: ProgrammeStore + Sync,
@@ -772,6 +1183,13 @@ where
                 return Err(PrescriptionError::OverlappingProgramme { proposed, existing });
             }
         }
+
+        // **And a block claiming to open from an earlier test has to be right
+        // about that** (decision 0016). This is the only rule in the system that
+        // reads another programme in order to refuse this one, and it has to:
+        // whether a measurement happened is a fact about what came before, not
+        // something the document can settle about itself.
+        self.claimed_maximum_exists(programme).await?;
 
         // Parameters first: a programme names the version it was authored
         // against, and one stored without them would reference nothing.

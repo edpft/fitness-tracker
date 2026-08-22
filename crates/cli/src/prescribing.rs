@@ -7,10 +7,11 @@
 use std::path::Path;
 
 use application::{
-    ProgrammeAuthor as _, WorkoutPrescriber as _,
+    GenerationParameterStore as _, ProgrammeAuthor as _, ProgrammeStore as _,
+    WorkoutPrescriber as _,
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::gym::OperatorZone;
+use domain::{gym::OperatorZone, prescription::Programme};
 use infrastructure::{
     Document, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
     SqliteProgrammeStore, connect,
@@ -22,23 +23,64 @@ use crate::{Failure, config, config::ConfigError, exit, output};
 /// Read a document and store the programme it describes.
 pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
     let document = Document::read(path).map_err(|error| Failure::usage(&error))?;
-    let parameters = document
+    let stated = document
         .parameters()
-        .map_err(|error| Failure::usage(&error))?;
-    let programme = document
-        .programme(&parameters, zone.as_time_zone())
         .map_err(|error| Failure::usage(&error))?;
 
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let (id, authored) = Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), zone.clone()),
-        SqliteGenerationParameterStore::new(pool),
-    )
-    .author(&programme, &parameters)
-    .await
-    .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let parameter_store = SqliteGenerationParameterStore::new(pool.clone());
+
+    // **A document without a `[parameters]` section is authored against the set
+    // in force.** § 14 asks only for the current value of a generation
+    // parameter, and what each prescription was generated against is recorded on
+    // the prescription — so restating them is how they are changed, not a
+    // condition of authoring. A test is two sessions and has nothing to say
+    // about a warm-up ramp.
+    let parameters = match stated {
+        Some(parameters) => parameters,
+        None => parameter_store
+            .current()
+            .await
+            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+            .map(|(_, parameters)| parameters)
+            .ok_or_else(|| {
+                Failure::usage(
+                    &"this document states no parameters and none are stored: \
+                      the first programme authored has to carry them",
+                )
+            })?,
+    };
+
+    // **A test's fills are resolved here, against the store, once.** The
+    // document names what changes and the programme before it supplies the rest
+    // (decision 0013), and doing that at authoring rather than at derivation is
+    // what keeps the stored test complete on its own — so correcting the
+    // predecessor later cannot silently move what this test prescribes.
+    let inherited = if document.inherits() {
+        let start = document.start().map_err(|error| Failure::usage(&error))?;
+        programmes
+            .preceding(start)
+            .await
+            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+            .map(|(_, programme)| programme)
+    } else {
+        None
+    };
+    let programme = document
+        .programme(
+            &parameters,
+            zone.as_time_zone(),
+            inherited.as_ref().map(Programme::fills),
+        )
+        .map_err(|error| Failure::usage(&error))?;
+
+    let (id, authored) = Authoring::new(programmes, parameter_store)
+        .author(&programme, &parameters)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     output::programme_authored(id, authored, &programme, &parameters);
     Ok(())
@@ -49,7 +91,11 @@ pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result
 /// **Reads and prints, and issues nothing.** Asking where the ladder is should not
 /// put a prescription in the store — a report that changed what it reports on is
 /// worse than no report.
-pub async fn standing(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
+pub async fn standing(
+    database: &Path,
+    zone: &OperatorZone,
+    on: Option<&str>,
+) -> Result<(), Failure> {
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -61,11 +107,21 @@ pub async fn standing(database: &Path, zone: &OperatorZone) -> Result<(), Failur
         prescriptions: SqlitePrescribedWorkoutStore::new(pool, zone.id().to_owned()),
     });
 
-    // Today in the operator's zone, because "where the ladder stands" is a
-    // question about now and the answer moves at local midnight.
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
+    // **A date, because programmes succeed one another** (decision 0012). With
+    // one programme ever in force "the programme" was unambiguous; with three in
+    // the store it is a question about a day, and the operator authoring next
+    // month's block wants to look at it before it starts.
+    //
+    // Today in the operator's zone by default, because that is the question
+    // being asked nine times in ten — and the answer moves at local midnight.
+    let on = match on {
+        Some(date) => date
+            .parse::<Date>()
+            .map_err(|error| Failure::usage(&error))?,
+        None => jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date(),
+    };
     let standing = prescriber
-        .standing(today)
+        .standing(on)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 

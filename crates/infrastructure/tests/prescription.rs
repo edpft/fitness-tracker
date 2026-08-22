@@ -61,7 +61,10 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     let programmes = SqliteProgrammeStore::new(pool.clone(), corpus::zone()?);
     let parameters = SqliteGenerationParameterStore::new(pool.clone());
     Authoring::new(programmes, parameters)
-        .author(&programme::programme()?, &programme::parameters()?)
+        .author(
+            &programme::as_programme(programme::programme()?),
+            &programme::parameters()?,
+        )
         .await?;
 
     Ok((

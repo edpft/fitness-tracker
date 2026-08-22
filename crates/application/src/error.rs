@@ -194,6 +194,63 @@ pub enum PrescriptionError {
     /// and one with no slots at all is not a prescription.
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
+    /// A block claiming to open from an earlier test of its lift, where no such
+    /// test ran.
+    ///
+    /// **What makes decision 0013's table a rule.** Without it the operator could
+    /// open a block on a lift they have never tested by writing `provenance =
+    /// "tested"` beside a number — the evasion 0013 named and, until this check,
+    /// only described. It refuses the claim rather than the choice: a block with
+    /// nothing to inherit may run its own entry test or declare a number.
+    #[error(
+        "the block {programme} opens from a tested {primary} maximum, and \
+         {} produced no {primary} maximum for it to open from",
+        predecessor.as_ref().map_or_else(
+            || "nothing before it".to_owned(),
+            |name| format!("the programme before it, {name},")
+        )
+    )]
+    NoMaximumToOpenFrom {
+        programme: domain::prescription::ProgrammeName,
+        primary: &'static str,
+        predecessor: Option<domain::prescription::ProgrammeName>,
+    },
+    /// The maximum exists in the right lift, and the anchor is not dated to it.
+    ///
+    /// **The other half of "opens from a maximum that exists".** A date inside
+    /// the predecessor is what makes the number that programme's result rather
+    /// than one the operator wrote down beside its name.
+    #[error(
+        "the block {programme} opens from a maximum dated {tested}, which is \
+         not a day {predecessor} ran — so it is not that programme's result"
+    )]
+    MaximumIsNotTheOneBefore {
+        programme: domain::prescription::ProgrammeName,
+        tested: jiff::civil::Date,
+        predecessor: domain::prescription::ProgrammeName,
+    },
+    /// The maximum exists, and is too old to speak for this programme.
+    #[error(
+        "the block {programme} opens from a maximum measured on {tested}, and a \
+         block starting {start} takes one from the {weeks} weeks before it"
+    )]
+    MaximumIsStale {
+        programme: domain::prescription::ProgrammeName,
+        tested: jiff::civil::Date,
+        start: jiff::civil::Date,
+        weeks: i64,
+    },
+    /// A test whose target is inherited, with nothing before it to inherit from.
+    ///
+    /// Refused rather than issued with one slot missing. A test week's whole
+    /// purpose is the attempt, and a session that cannot say what the attempt is
+    /// at is not a diminished test but a week that does not answer.
+    #[error(
+        "the test {programme} takes its target from the programme before it,          and there is no such programme in the same lift"
+    )]
+    NoTarget {
+        programme: domain::prescription::ProgrammeName,
+    },
 
     /// No operator time zone is declared. The same gap as
     /// [`NormalisationError::MissingTimeZone`], and it bites harder here: the
