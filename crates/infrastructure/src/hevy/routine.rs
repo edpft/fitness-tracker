@@ -215,9 +215,11 @@ fn render_exercise(
                 {
                     annotations.push(annotation);
                 }
-                if rest_seconds.is_none() {
-                    rest_seconds = rest;
-                }
+                // **The longest, not the first.** The primary's ramp rests
+                // into its working set at the bottom of the range and between
+                // working sets across the whole of it, so taking the first rest
+                // found would put the warm-up's number on the exercise.
+                rest_seconds = rest_seconds.max(rest);
                 match groups.last_mut() {
                     // Consecutive sets on one template stay one entry; a change
                     // of sign opens a new one.

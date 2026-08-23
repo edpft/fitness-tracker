@@ -17,10 +17,11 @@ use domain::{
         exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     },
     prescription::{
-        AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
-        InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole, Percentage,
-        Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole,
-        Skip, Step, Target, Test, TestTarget, Tested, TopSetReps, WarmupStep, Weekdays,
+        AccessoryScheme, Anchor, AnchorProvenance, BackOff, BlockRest, Calendar, Entry,
+        GenerationParameters, InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole,
+        Percentage, Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, RestScheme,
+        Scales, SessionRole, Skip, Step, Target, Test, TestTarget, Tested, TopSetReps, WarmupStep,
+        Weekdays,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -80,6 +81,55 @@ fn seconds(field: &str, value: &str) -> Result<Duration, DocumentError> {
     text.parse::<u64>()
         .map(Duration::from_seconds)
         .map_err(|error| invalid(field, error))
+}
+
+/// Every block's rest, from the document's tables.
+///
+/// A block missing from the document is named rather than defaulted: there is no
+/// sensible rest to invent for work nobody has said how to pace, and a silent
+/// zero would instruct straight-through training.
+fn rest_scheme(authored: &BTreeMap<String, RestSection>) -> Result<RestScheme, DocumentError> {
+    let block = |name: &str| -> Result<BlockRest, DocumentError> {
+        let field = format!("parameters.rest.{name}");
+        let section = authored.get(name).ok_or_else(|| {
+            invalid(
+                "parameters.rest",
+                format!("no rest is described for the {name} block"),
+            )
+        })?;
+        Ok(BlockRest {
+            between_sets: rest_target(&format!("{field}.between_sets"), &section.between_sets)?,
+            after_superset: section
+                .after_superset
+                .as_deref()
+                .map(|stated| rest_target(&format!("{field}.after_superset"), stated))
+                .transpose()?,
+        })
+    };
+
+    Ok(RestScheme {
+        plyometric: block("plyometric")?,
+        power: block("power")?,
+        strength: block("strength")?,
+        hypertrophy: block("hypertrophy")?,
+        mobility: block("mobility")?,
+    })
+}
+
+/// A rest instruction: one duration, or two separated by a dash.
+///
+/// **The document names bounds and the domain holds a span**, so this is the
+/// boundary where `"180s-120s"` is refused. The type behind it cannot express
+/// that mistake, which is exactly why the check belongs here and nowhere
+/// further in.
+fn rest_target(field: &str, value: &str) -> Result<Target<Duration>, DocumentError> {
+    let text = settled(field, value)?;
+    let Some((low, high)) = text.split_once('-') else {
+        return Ok(Target::Exactly(seconds(field, text)?));
+    };
+
+    Target::between(seconds(field, low)?, seconds(field, high)?)
+        .ok_or_else(|| invalid(field, "a rest range runs low-high and must span"))
 }
 
 fn reps(field: &str, value: u32) -> Result<RepCount, DocumentError> {
@@ -289,6 +339,21 @@ struct ParametersSection {
     roles: BTreeMap<String, RoleSection>,
     warmup: Vec<WarmupSection>,
     reset: ResetSection,
+    /// How long to rest, block by block. Keyed by the block's stable name, so a
+    /// block the document forgets is named in the error rather than defaulted.
+    rest: BTreeMap<String, RestSection>,
+}
+
+/// One block's rest, as the document states it.
+///
+/// `between_sets` is required and `after_superset` is not: a block that rests
+/// the same however its work is grouped says so by leaving it out. Both are
+/// written the way a duration is written everywhere else here — `"90s"` for one
+/// number, `"120s-180s"` for a range.
+#[derive(serde::Deserialize)]
+struct RestSection {
+    between_sets: String,
+    after_superset: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -418,6 +483,7 @@ impl Document {
         };
 
         Ok(Some(GenerationParameters {
+            rest: rest_scheme(&p.rest)?,
             warmup,
             back_off: PerRole {
                 light: back_off("light")?,

@@ -226,6 +226,10 @@ struct SetColumns {
     load_grams: Option<i64>,
     target: Option<TargetColumns>,
     effort: Option<String>,
+    /// The rest instruction, as its two columns. `high` absent is an exact rest;
+    /// both absent is no instruction at all, which is a different fact from a
+    /// rest of zero — a superset instructs zero, and a warm-up instructs nothing.
+    rest: Option<(i64, Option<i64>)>,
     warmup: i64,
 }
 
@@ -247,14 +251,34 @@ where
         Some(measure) => Some(target_of(*measure)?),
         None => None,
     };
+    let rest = match set.rest_after {
+        Some(rest) => Some(rest_bounds(rest)?),
+        None => None,
+    };
+
     Ok(SetColumns {
         variant: set.prescription.as_str(),
         load_kind,
         load_grams,
         target,
         effort: set.prescription.effort().map(|rir| rir.as_str().to_owned()),
+        rest,
         warmup: i64::from(set.warmup),
     })
+}
+
+/// A rest as its two columns. `None` for the top of an exact rest.
+fn rest_bounds(rest: Target<Duration>) -> Result<(i64, Option<i64>), StoreError> {
+    let seconds = |value: Duration| {
+        i64::try_from(value.as_seconds())
+            .map_err(|_| corrupt(&"a rest longer than the store can hold"))
+    };
+    match rest {
+        Target::Exactly(value) => Ok((seconds(value)?, None)),
+        range @ Target::Range { .. } => {
+            Ok((seconds(range.minimum())?, Some(seconds(range.maximum())?)))
+        }
+    }
 }
 
 async fn write_set(
@@ -271,6 +295,9 @@ async fn write_set(
         .map_or((None, None, None), |target| {
             (Some(target.kind), Some(target.low), target.high)
         });
+    let (rest_low, rest_high) = columns
+        .rest
+        .map_or((None, None), |(low, high)| (Some(low), high));
     sqlx::query!(
         r"
         INSERT INTO prescribed_set (
@@ -279,7 +306,7 @@ async fn write_set(
             target_kind, target_low, target_high,
             effort, rest_low_seconds, rest_high_seconds, warmup
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         workout,
         item,
@@ -292,6 +319,8 @@ async fn write_set(
         target_low,
         target_high,
         columns.effort,
+        rest_low,
+        rest_high,
         columns.warmup
     )
     .execute(&mut **tx)
@@ -645,6 +674,8 @@ async fn read_exercises(
             SELECT variant AS "variant!: String", load_kind AS "load_kind: String",
                    load_grams AS "load_grams: i64", target_low AS "target_low: i64",
                    target_high AS "target_high: i64", effort AS "effort: String",
+                   rest_low_seconds AS "rest_low_seconds: i64",
+                   rest_high_seconds AS "rest_high_seconds: i64",
                    warmup AS "warmup!: i64"
             FROM prescribed_set
             WHERE workout = ? AND item_position = ? AND exercise_position = ?
@@ -667,6 +698,8 @@ async fn read_exercises(
                 target_low: set.target_low,
                 target_high: set.target_high,
                 effort: set.effort,
+                rest_low_seconds: set.rest_low_seconds,
+                rest_high_seconds: set.rest_high_seconds,
                 warmup: set.warmup,
             })
             .collect();
@@ -819,11 +852,33 @@ fn rebuild<M: Spans>(
         other => return Err(corrupt(&format!("{other:?} is not a prescription variant"))),
     };
 
+    // Both columns absent is no instruction; `low` alone is an exact rest,
+    // including a rest of zero. The two are different facts and the schema keeps
+    // them apart, so nothing here defaults one into the other.
+    let rest_after = match row.rest_low_seconds {
+        Some(low) => Some(rest_from_storage(low, row.rest_high_seconds)?),
+        None => None,
+    };
+
     Ok(PrescribedSet {
         prescription,
-        rest_after: None,
+        rest_after,
         warmup: row.warmup != 0,
     })
+}
+
+/// A stored rest, as the span the domain holds.
+fn rest_from_storage(low: i64, high: Option<i64>) -> Result<Target<Duration>, StoreError> {
+    let seconds = |value: i64| {
+        u64::try_from(value)
+            .map(Duration::from_seconds)
+            .map_err(|_| corrupt(&"a negative rest"))
+    };
+    match high {
+        Some(high) => Target::between(seconds(low)?, seconds(high)?)
+            .ok_or_else(|| corrupt(&"a stored rest range that does not span")),
+        None => Ok(Target::Exactly(seconds(low)?)),
+    }
 }
 
 /// The columns `rebuild` needs, lifted out of the anonymous record sqlx returns.
@@ -834,5 +889,7 @@ struct SetRow {
     target_low: Option<i64>,
     target_high: Option<i64>,
     effort: Option<String>,
+    rest_low_seconds: Option<i64>,
+    rest_high_seconds: Option<i64>,
     warmup: i64,
 }

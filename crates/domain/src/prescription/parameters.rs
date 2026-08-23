@@ -339,6 +339,12 @@ pub struct GenerationParameters {
     pub strength: AccessoryScheme,
     /// Every hypertrophy slot.
     pub hypertrophy: AccessoryScheme,
+    /// How long to rest, block by block.
+    ///
+    /// § 14 like everything else here: only the current value is required,
+    /// because what it produced is written onto the sets of the prescription
+    /// that used it.
+    pub rest: super::rest::RestScheme,
     /// How long a static hold is held for.
     ///
     /// The mobility work does not progress — it is held, and the same length

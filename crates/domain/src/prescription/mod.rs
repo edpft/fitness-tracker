@@ -28,6 +28,7 @@ pub mod programme;
 pub mod progression;
 pub mod project;
 pub mod repmax;
+pub mod rest;
 pub mod schedule;
 pub mod shape;
 pub mod steps;
@@ -55,6 +56,7 @@ pub use programme::{InconsistentProgramme, Periodisation, Programme, check_prima
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
+pub use rest::{BlockRest, RestScheme, rested};
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
     SessionRole, Skip, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,

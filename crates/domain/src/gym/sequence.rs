@@ -58,6 +58,25 @@ impl<T> NonEmpty<T> {
         self.tail.len().saturating_add(1)
     }
 
+    /// Map every element, keeping the guarantee.
+    ///
+    /// **Not `iter().map().collect()` back through `new`.** That round trip
+    /// makes an infallible operation fallible: mapping cannot empty a sequence,
+    /// so a caller should not be handed an error it would have to invent a
+    /// response to. The index comes along because position is meaningful here —
+    /// the last set of a group rests differently from the ones before it.
+    pub fn map_indexed<U>(&self, mut f: impl FnMut(usize, &T) -> U) -> NonEmpty<U> {
+        NonEmpty {
+            head: f(0, &self.head),
+            tail: self
+                .tail
+                .iter()
+                .enumerate()
+                .map(|(index, item)| f(index + 1, item))
+                .collect(),
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         iter::once(&self.head).chain(self.tail.iter())
     }
@@ -110,6 +129,21 @@ impl<T> AtLeastTwo<T> {
 
     pub const fn count(&self) -> usize {
         self.rest.len().saturating_add(2)
+    }
+
+    /// Map every element, keeping the guarantee. [`NonEmpty::map_indexed`]'s
+    /// reasoning: mapping cannot shorten a sequence, so nothing here can fail.
+    pub fn map_indexed<U>(&self, mut f: impl FnMut(usize, &T) -> U) -> AtLeastTwo<U> {
+        AtLeastTwo {
+            first: f(0, &self.first),
+            second: f(1, &self.second),
+            rest: self
+                .rest
+                .iter()
+                .enumerate()
+                .map(|(index, item)| f(index.saturating_add(2), item))
+                .collect(),
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {

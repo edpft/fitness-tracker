@@ -23,7 +23,7 @@ use domain::{
         Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, RECENT_WEEKS,
         SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
-        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
+        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max, rested,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -200,8 +200,16 @@ where
         }
 
         let items = NonEmpty::new(items).map_err(|_| PrescriptionError::NothingDerivable)?;
+
+        // **Rest is filled in over the assembled session, not slot by slot.**
+        // What a set rests for depends on which block it is in and on whether
+        // another member of its item follows it, and the second of those is not
+        // known while a slot is still being derived — the grouping happens
+        // above.
+        let shape = rested(&WorkoutShape::new(items), &parameters.rest);
+
         let workout = PrescribedWorkout::new(
-            WorkoutShape::new(items),
+            shape,
             date,
             role,
             recorded,
