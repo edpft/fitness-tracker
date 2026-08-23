@@ -28,6 +28,13 @@ fn fitness(
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("HEVY_API_BASE_URL")
+        // **No test may reach the operator's own store.** With a default
+        // location, a run that passes no `--database` writes somewhere real —
+        // so the base directories are unset here and a test that wants them
+        // supplies its own home.
+        .env_remove("HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
         .args(arguments);
 
     if let Some(path) = database {
@@ -54,12 +61,70 @@ fn stderr(output: &Output) -> String {
 
 // --- Configuration ----------------------------------------------------------
 
+/// The binary run with a home of its own puts its store where the
+/// specification says, and creates the directory on the way.
+fn fitness_at_home(arguments: &[&str], home: &Path) -> std::io::Result<Output> {
+    let mut command = Command::new(BINARY);
+    command
+        .env_remove("HEVY_API_KEY")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("HEVY_API_BASE_URL")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home)
+        .args(arguments);
+    command.output()
+}
+
+/// **The store defaults to the specification's data directory**, and the
+/// directory is created rather than assumed: SQLite makes the file and not the
+/// path to it, so a first run on a fresh machine would otherwise fail with an
+/// error about a database.
 #[test]
-fn a_missing_database_path_is_a_usage_error() {
+fn the_store_defaults_to_the_data_directory() {
+    let home = TempDir::new().expect("a temporary home");
+    let output =
+        fitness_at_home(&["status", "hevy.workouts"], home.path()).expect("the binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        home.path()
+            .join(".local/share/fitness-tracker/store.db")
+            .exists(),
+        "the store is where the specification says"
+    );
+}
+
+/// The settings file is read from the specification's config directory, and a
+/// value stated there answers for every invocation.
+#[test]
+fn the_settings_file_is_read_from_the_config_directory() {
+    let home = TempDir::new().expect("a temporary home");
+    let config = home.path().join(".config/fitness-tracker");
+    std::fs::create_dir_all(&config).expect("a config directory");
+    std::fs::write(config.join("config.toml"), "timezone = \"Europe/London\"\n")
+        .expect("a settings file");
+
+    let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
+
+    // No programme is authored, so it gets that far and no further — which is
+    // exactly what proves the zone was found without being passed.
+    assert!(
+        stderr(&output).contains("no programme covers"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// With no home and no flag there is nowhere to put a store, and that is
+/// reported rather than guessed at.
+#[test]
+fn nowhere_to_keep_a_store_is_a_usage_error() {
     let output = fitness(&["status", "hevy.workouts"], None, None).expect("the binary runs");
     assert_eq!(code(&output), 4);
     assert!(
-        stderr(&output).contains("--database"),
+        stderr(&output).contains("XDG_DATA_HOME"),
         "{}",
         stderr(&output)
     );

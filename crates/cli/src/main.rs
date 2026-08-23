@@ -8,6 +8,7 @@
 mod catalogue;
 mod config;
 mod output;
+mod paths;
 mod prescribing;
 mod wiring;
 
@@ -371,18 +372,85 @@ fn run(matches: &ArgMatches) -> Result<(), Failure> {
     runtime.block_on(dispatch(matches))
 }
 
+/// Where this invocation keeps things.
+///
+/// Its own function rather than the top of [`dispatch`], because working out
+/// where the store and the settings live is a different question from which
+/// command was asked for, and only one of the two is about the operator's
+/// intent.
+struct Locations {
+    settings: infrastructure::Settings,
+    /// Named even where it could not be resolved, so a message can say what to
+    /// create.
+    settings_path: PathBuf,
+    database: PathBuf,
+}
+
+/// Resolve them, in the order a value earns precedence: what this invocation
+/// passed, then what the operator stated once, then the specification's default.
+///
+/// # Errors
+///
+/// [`Failure`] if the settings file exists but will not parse, or if a store
+/// path is needed and no base directory can be worked out.
+fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
+    // **Settings are read once, and a machine that cannot say where they live
+    // simply has none.** Failing here would refuse to run for want of a file
+    // that may hold nothing an invocation needs — every value in it can be
+    // passed explicitly.
+    let environment = paths::SystemEnvironment;
+    let resolved = paths::settings(&environment).ok();
+    let settings = match resolved.as_deref() {
+        Some(path) => infrastructure::Settings::read(path).map_err(config::ConfigError::from)?,
+        None => infrastructure::Settings::default(),
+    };
+
+    // The default store is resolved only if nothing else supplied one, so a
+    // machine with no home directory still works when the path is passed.
+    let database =
+        match config::database(matches.get_one::<PathBuf>("database").cloned(), &settings) {
+            Some(path) => path,
+            None => paths::store(&environment).map_err(config::ConfigError::from)?,
+        };
+
+    // **The store creates itself; its directory does not.** SQLite will make the
+    // file but not the path to it, so a first run on a fresh machine would fail
+    // with an error about a database rather than about a missing directory.
+    paths::ensure_parent(&database).map_err(|error| {
+        Failure::message(
+            format!(
+                "cannot create the directory for {}: {error}",
+                database.display()
+            ),
+            exit::STORE,
+        )
+    })?;
+
+    Ok(Locations {
+        settings,
+        settings_path: resolved.unwrap_or_else(|| PathBuf::from("the settings file")),
+        database,
+    })
+}
+
 async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     let Some((name, sub)) = matches.subcommand() else {
         return Err(Failure::message("no command given", exit::USAGE));
     };
 
-    // Prescription is not a stream. The catalogue is one entry per thing this
-    // build can *collect*, and generation collects nothing — so these two are
-    // dispatched before any stream is looked up.
-    let database = config::database(matches.get_one::<PathBuf>("database").cloned())?;
+    let Locations {
+        settings,
+        settings_path,
+        database,
+    } = locations(matches)?;
+
     match name {
         "prescribe" => {
-            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let zone = config::timezone(
+                sub.get_one::<String>("timezone").map(String::as_str),
+                &settings,
+                &settings_path,
+            )?;
             let date = sub.get_one::<String>("date").map(String::as_str);
             let reissue = if sub.get_flag("reissue") {
                 application::Reissue::Yes
@@ -392,12 +460,20 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             return prescribing::prescribe(&database, &zone, date, reissue).await;
         }
         "deliver" => {
-            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let zone = config::timezone(
+                sub.get_one::<String>("timezone").map(String::as_str),
+                &settings,
+                &settings_path,
+            )?;
             let date = sub.get_one::<String>("date").map(String::as_str);
             return prescribing::deliver(&database, &zone, date, sub.get_flag("preview")).await;
         }
         "programme" => {
-            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let zone = config::timezone(
+                sub.get_one::<String>("timezone").map(String::as_str),
+                &settings,
+                &settings_path,
+            )?;
             return match sub.subcommand() {
                 Some(("author", author)) => {
                     let Some(path) = author.get_one::<PathBuf>("path") else {
@@ -432,7 +508,11 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             Command::Extract(source_access(known, sub)?)
         }
         "normalise" => {
-            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let zone = config::timezone(
+                sub.get_one::<String>("timezone").map(String::as_str),
+                &settings,
+                &settings_path,
+            )?;
             // Printed before the run begins, so a long first derivation says
             // what it is doing.
             output::derivation_started(&stream);
@@ -460,6 +540,8 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         prescription_status(
             &database,
             sub.get_one::<String>("timezone").map(String::as_str),
+            &settings,
+            &settings_path,
         )
         .await?;
     }
@@ -467,11 +549,16 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
 }
 
 /// The prescription section of `status`, and why it may be absent.
-async fn prescription_status(database: &Path, declared: Option<&str>) -> Result<(), Failure> {
+async fn prescription_status(
+    database: &Path,
+    declared: Option<&str>,
+    settings: &infrastructure::Settings,
+    settings_path: &Path,
+) -> Result<(), Failure> {
     // A blank line, so the prescribed side reads as its own section rather than as
     // more of the derivation's.
     println!();
-    let Ok(zone) = config::timezone(declared) else {
+    let Ok(zone) = config::timezone(declared, settings, settings_path) else {
         // Not a failure: the stream half of the report is what an operator reaches
         // for when ingestion looks broken, and it must not stop working because a
         // zone is unset. Saying so beats printing nothing.

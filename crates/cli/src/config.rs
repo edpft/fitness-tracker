@@ -6,10 +6,15 @@
 //! [`crate::catalogue`], which derives them from whichever source an
 //! invocation names.
 
-use std::{env::VarError, path::PathBuf};
+use std::{
+    env::VarError,
+    path::{Path, PathBuf},
+};
 
 use domain::{gym::OperatorZone, prescription::Calendar};
 use jiff::{Timestamp, civil::Date};
+
+use infrastructure::Settings;
 
 use crate::catalogue::KnownSource;
 
@@ -27,15 +32,19 @@ pub enum ConfigError {
     #[error("{variable} is set but is not valid text")]
     UnreadableApiKey { variable: String },
 
-    #[error("no database path: pass --database or set FITNESS_TRACKER_DATABASE")]
-    MissingDatabase,
+    #[error(transparent)]
+    Settings(#[from] infrastructure::SettingsError),
+
+    #[error(transparent)]
+    NoBaseDirectory(#[from] crate::paths::NoBaseDirectory),
 
     #[error(
-        "no time zone: pass --timezone or set FITNESS_TRACKER_TIMEZONE to an IANA identifier \
-         such as Europe/London. Nothing is compiled in, because a default would be an \
-         assumption about where you train — silently right here and silently wrong elsewhere"
+        "no time zone: pass --timezone, set FITNESS_TRACKER_TIMEZONE, or put \
+         `timezone = \"Europe/London\"` in {path}. Nothing is compiled in, because a default \
+         would be an assumption about where you train — silently right here and silently \
+         wrong elsewhere"
     )]
-    MissingTimeZone,
+    MissingTimeZone { path: String },
 
     #[error("{value:?} is not an IANA time zone identifier")]
     UnknownTimeZone { value: String },
@@ -78,10 +87,32 @@ pub fn named_date(text: &str) -> Result<Date, ConfigError> {
 /// # Errors
 ///
 /// [`ConfigError`] if it is unset or is not an identifier the database knows.
-pub fn timezone(declared: Option<&str>) -> Result<OperatorZone, ConfigError> {
-    let value = match declared {
-        Some(value) if !value.trim().is_empty() => value.to_owned(),
-        _ => return Err(ConfigError::MissingTimeZone),
+pub fn timezone(
+    declared: Option<&str>,
+    settings: &Settings,
+    settings_path: &Path,
+) -> Result<OperatorZone, ConfigError> {
+    // Flag or variable first — clap has already collapsed those two — then what
+    // the operator stated once. A value passed for this invocation beats a value
+    // stated for every invocation, which is the only ordering that lets a single
+    // run be done from somewhere else.
+    let stated = declared
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            settings
+                .timezone
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        });
+
+    let Some(value) = stated else {
+        return Err(ConfigError::MissingTimeZone {
+            path: settings_path.display().to_string(),
+        });
     };
 
     OperatorZone::try_from(value.as_str()).map_err(|_| ConfigError::UnknownTimeZone { value })
@@ -129,13 +160,14 @@ impl SourceAccess {
     }
 }
 
-/// # Errors
+/// Where the store lives, if anything has said.
 ///
-/// [`ConfigError::MissingDatabase`] if no path was given. There is no default:
-/// a store that appears wherever the command was run is worse than one that
-/// has to be named.
-pub fn database(path: Option<PathBuf>) -> Result<PathBuf, ConfigError> {
-    path.ok_or(ConfigError::MissingDatabase)
+/// **Returns `None` rather than resolving a default here**, so the fallback is
+/// worked out only when it is actually needed. A machine that passes the path
+/// explicitly should not have to have a home directory for the sake of a value
+/// nothing reads.
+pub fn database(stated: Option<PathBuf>, settings: &Settings) -> Option<PathBuf> {
+    stated.or_else(|| settings.database.clone())
 }
 
 /// Which date to prescribe for: the one given, or the next session.
@@ -170,7 +202,7 @@ pub fn date(given: Option<&str>, calendar: &Calendar, now: Timestamp) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigError, SourceAccess, database, date};
+    use super::{ConfigError, Settings, SourceAccess, database, date, timezone};
     use crate::catalogue::{KnownSource, source};
     use domain::prescription::{Calendar, SessionRole, Weekdays};
     use jiff::{Timestamp, civil::Weekday};
@@ -241,13 +273,58 @@ mod tests {
         );
     }
 
+    /// **A value passed for this invocation beats one stated for every
+    /// invocation**, and nothing stated at all leaves the caller to work out the
+    /// default — which is what keeps it from being resolved on a machine that
+    /// never needed it.
     #[test]
-    fn the_database_path_is_required() {
-        assert_eq!(database(None).unwrap_err(), ConfigError::MissingDatabase);
+    fn the_stated_path_wins_and_silence_defers() {
+        let stated = Settings {
+            timezone: None,
+            database: Some(PathBuf::from("/stated/store.db")),
+        };
+
         assert_eq!(
-            database(Some(PathBuf::from("/tmp/x.db"))).unwrap(),
-            PathBuf::from("/tmp/x.db")
+            database(Some(PathBuf::from("/passed/store.db")), &stated),
+            Some(PathBuf::from("/passed/store.db")),
+            "the flag beats the file"
         );
+        assert_eq!(
+            database(None, &stated),
+            Some(PathBuf::from("/stated/store.db")),
+            "the file answers when the flag does not"
+        );
+        assert_eq!(
+            database(None, &Settings::default()),
+            None,
+            "and silence defers to the caller's default"
+        );
+    }
+
+    /// The same ordering for the zone, plus the case that reports rather than
+    /// guesses.
+    #[test]
+    fn the_zone_prefers_the_invocation_then_the_file() {
+        let stated = Settings {
+            timezone: Some("Europe/London".to_owned()),
+            database: None,
+        };
+        let path = PathBuf::from("/config/fitness-tracker/config.toml");
+
+        let from_file = timezone(None, &stated, &path).expect("the file states a zone");
+        assert_eq!(from_file.id(), "Europe/London");
+
+        let from_flag =
+            timezone(Some("Pacific/Auckland"), &stated, &path).expect("the flag states a zone");
+        assert_eq!(from_flag.id(), "Pacific/Auckland");
+
+        let refused = timezone(None, &Settings::default(), &path);
+        match refused {
+            Err(ConfigError::MissingTimeZone { path: named }) => {
+                assert!(named.contains("config.toml"), "{named}");
+            }
+            other => panic!("nothing stated is refused with the path: {other:?}"),
+        }
     }
 
     /// An explicit `--date` is taken as given, and the clock is not consulted.
