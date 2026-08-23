@@ -9,6 +9,7 @@
 pub mod hevy;
 pub mod lock;
 pub mod programme;
+pub mod settings;
 pub mod store;
 
 pub use hevy::{
@@ -17,6 +18,7 @@ pub use hevy::{
 };
 pub use lock::FileRunLock;
 pub use programme::{Document, DocumentError};
+pub use settings::{Settings, SettingsError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
