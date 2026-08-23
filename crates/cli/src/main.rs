@@ -10,6 +10,7 @@ mod config;
 mod output;
 mod paths;
 mod prescribing;
+mod setup;
 mod wiring;
 
 use std::{
@@ -117,6 +118,7 @@ fn command() -> ClapCommand {
                 // what it could not read, rather than refusing to report at all.
                 .arg(timezone_argument().required(false)),
         )
+        .subcommand(init_command())
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(programme_command())
@@ -156,6 +158,32 @@ fn prescribe_command() -> ClapCommand {
 }
 
 /// Author the programme.
+/// Prepare a machine.
+///
+/// **First in the list because it is first in the order.** An operator who has
+/// just installed the binary should find the command that gets them started
+/// before the ones that need a store to already exist.
+fn init_command() -> ClapCommand {
+    ClapCommand::new("init")
+        .about("Create the store and the settings file, and report what is still needed")
+        .arg(
+            Arg::new("timezone")
+                .long("timezone")
+                .value_name("iana")
+                .env("FITNESS_TRACKER_TIMEZONE")
+                .help(
+                    "The IANA time zone trained in, such as Europe/London. Asked for at a \
+                     terminal if it is not given",
+                ),
+        )
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .action(ArgAction::SetTrue)
+                .help("Replace an existing settings file. It is hand-edited, so this refuses by default"),
+        )
+}
+
 /// Put an issued session where the operator trains from.
 ///
 /// A command of its own rather than a flag on `prescribe`, because the two fail
@@ -433,6 +461,105 @@ fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
     })
 }
 
+/// The commands that need no stream.
+///
+/// **Prescription is not a stream.** The catalogue is one entry per thing this
+/// build can *collect*, and neither generating a session nor preparing a machine
+/// collects anything — so these are answered before a stream is looked up, and
+/// `None` means the name was not one of theirs.
+async fn authored_command(
+    name: &str,
+    sub: &ArgMatches,
+    settings: &infrastructure::Settings,
+    settings_path: &Path,
+    database: &Path,
+) -> Option<Result<(), Failure>> {
+    // Every one of these needs the zone, and asking for it here would refuse
+    // `init` — which is the command whose whole job is to obtain one.
+    let zone = |sub: &ArgMatches| {
+        config::timezone(
+            sub.get_one::<String>("timezone").map(String::as_str),
+            settings,
+            settings_path,
+        )
+    };
+
+    match name {
+        "init" => {
+            let prepared = match setup::init(
+                settings_path,
+                database,
+                sub.get_one::<String>("timezone").map(String::as_str),
+                sub.get_flag("force"),
+            )
+            .await
+            {
+                Ok(prepared) => prepared,
+                Err(failure) => return Some(Err(failure)),
+            };
+            output::prepared(&prepared);
+            Some(Ok(()))
+        }
+        "prescribe" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            let reissue = if sub.get_flag("reissue") {
+                application::Reissue::Yes
+            } else {
+                application::Reissue::No
+            };
+            Some(
+                prescribing::prescribe(
+                    database,
+                    &zone,
+                    sub.get_one::<String>("date").map(String::as_str),
+                    reissue,
+                )
+                .await,
+            )
+        }
+        "deliver" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            Some(
+                prescribing::deliver(
+                    database,
+                    &zone,
+                    sub.get_one::<String>("date").map(String::as_str),
+                    sub.get_flag("preview"),
+                )
+                .await,
+            )
+        }
+        "programme" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            Some(match sub.subcommand() {
+                Some(("author", author)) => match author.get_one::<PathBuf>("path") {
+                    Some(path) => prescribing::author(database, &zone, path).await,
+                    None => Err(Failure::message("no document given", exit::USAGE)),
+                },
+                Some(("show", show)) => {
+                    prescribing::standing(
+                        database,
+                        &zone,
+                        show.get_one::<String>("date").map(String::as_str),
+                    )
+                    .await
+                }
+                _ => Err(Failure::message("no programme command given", exit::USAGE)),
+            })
+        }
+        _ => None,
+    }
+}
+
 async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     let Some((name, sub)) = matches.subcommand() else {
         return Err(Failure::message("no command given", exit::USAGE));
@@ -444,55 +571,8 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         database,
     } = locations(matches)?;
 
-    match name {
-        "prescribe" => {
-            let zone = config::timezone(
-                sub.get_one::<String>("timezone").map(String::as_str),
-                &settings,
-                &settings_path,
-            )?;
-            let date = sub.get_one::<String>("date").map(String::as_str);
-            let reissue = if sub.get_flag("reissue") {
-                application::Reissue::Yes
-            } else {
-                application::Reissue::No
-            };
-            return prescribing::prescribe(&database, &zone, date, reissue).await;
-        }
-        "deliver" => {
-            let zone = config::timezone(
-                sub.get_one::<String>("timezone").map(String::as_str),
-                &settings,
-                &settings_path,
-            )?;
-            let date = sub.get_one::<String>("date").map(String::as_str);
-            return prescribing::deliver(&database, &zone, date, sub.get_flag("preview")).await;
-        }
-        "programme" => {
-            let zone = config::timezone(
-                sub.get_one::<String>("timezone").map(String::as_str),
-                &settings,
-                &settings_path,
-            )?;
-            return match sub.subcommand() {
-                Some(("author", author)) => {
-                    let Some(path) = author.get_one::<PathBuf>("path") else {
-                        return Err(Failure::message("no document given", exit::USAGE));
-                    };
-                    prescribing::author(&database, &zone, path).await
-                }
-                Some(("show", sub)) => {
-                    prescribing::standing(
-                        &database,
-                        &zone,
-                        sub.get_one::<String>("date").map(String::as_str),
-                    )
-                    .await
-                }
-                _ => Err(Failure::message("no programme command given", exit::USAGE)),
-            };
-        }
-        _ => {}
+    if let Some(outcome) = authored_command(name, sub, &settings, &settings_path, &database).await {
+        return outcome;
     }
 
     let known = named_stream(sub)?;

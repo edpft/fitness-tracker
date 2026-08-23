@@ -841,3 +841,33 @@ fn unexpressed(unexpressed: &[application::Unexpressed]) {
         println!("  {} — {}", item.exercise, item.reason);
     }
 }
+
+/// What `init` made, and what is left to do.
+///
+/// **The remaining steps are the point.** A setup command that says only
+/// "done" leaves an operator to discover the credential and the programme by
+/// running something else and failing.
+pub fn prepared(prepared: &crate::setup::Prepared) {
+    println!("ready to use");
+    println!("  settings  {}", prepared.settings_path.display());
+    println!("  store     {}", prepared.database.display());
+    println!("  time zone {}", prepared.zone);
+    println!();
+
+    let mut outstanding = Vec::new();
+    if !prepared.credential_set {
+        for source in &crate::catalogue::SOURCES {
+            outstanding.push(format!(
+                "set {} — get one from {}",
+                source.api_key_variable(),
+                source.credential_url()
+            ));
+        }
+    }
+    outstanding.push("author a programme: fitness programme author <document>".to_owned());
+
+    println!("still to do:");
+    for step in outstanding {
+        println!("  {step}");
+    }
+}

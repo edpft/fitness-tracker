@@ -26,6 +26,9 @@ pub enum SettingsError {
 
     #[error("{path} is not valid TOML: {detail}")]
     Malformed { path: String, detail: String },
+
+    #[error("{path} could not be written: {detail}")]
+    Unwritable { path: String, detail: String },
 }
 
 /// What the settings file says, as it says it.
@@ -33,7 +36,7 @@ pub enum SettingsError {
 /// Values are unparsed on purpose. A zone that will not resolve should be
 /// reported the same way whether it came from a flag, the environment or here,
 /// and that means one place doing the parsing rather than three.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     /// The IANA identifier the operator trains in.
@@ -74,6 +77,59 @@ impl Settings {
             path: path.display().to_string(),
             detail: error.to_string(),
         })
+    }
+}
+
+/// What the written file says about itself.
+///
+/// **A generated file that cannot be hand-edited is a worse file.** This is
+/// meant to be opened, changed and kept with an operator's dotfiles, so it
+/// carries the two things a reader needs: what each value is for, and the fact
+/// that no credential belongs here.
+const PREAMBLE: &str = "\
+# fitness-tracker settings.
+#
+# What the operator states once rather than on every invocation. Anything here
+# is overridden by a flag or by the matching environment variable, so a single
+# run can be done from somewhere else without editing this.
+#
+# `timezone` is the IANA identifier trained in — not an offset, which records
+# the rule that applied at one instant rather than across an interval.
+#
+# `database` is optional. Left out, the store lives under the XDG data
+# directory.
+#
+# No credential goes here. The Hevy key is read from HEVY_API_KEY, so that a
+# secret is not in a file that gets committed with a dotfiles repository.
+
+";
+
+impl Settings {
+    /// Write the file, creating its directory.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Unwritable`] if the directory or the file cannot be
+    /// created, and [`SettingsError::Malformed`] if the values will not
+    /// serialise — which would be a defect here rather than anything the
+    /// operator did.
+    pub fn write(&self, path: &Path) -> Result<(), SettingsError> {
+        let unwritable = |detail: String| SettingsError::Unwritable {
+            path: path.display().to_string(),
+            detail,
+        };
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| unwritable(error.to_string()))?;
+        }
+
+        let body = toml::to_string(self).map_err(|error| SettingsError::Malformed {
+            path: path.display().to_string(),
+            detail: error.to_string(),
+        })?;
+
+        std::fs::write(path, format!("{PREAMBLE}{body}"))
+            .map_err(|error| unwritable(error.to_string()))
     }
 }
 
@@ -120,6 +176,31 @@ mod tests {
         };
 
         assert_eq!(Settings::read(&path), Ok(Settings::default()));
+    }
+
+    /// **What is written reads back.** The preamble is comments, so the file an
+    /// operator opens and the values the tool reads are the same thing.
+    #[test]
+    fn what_is_written_reads_back() {
+        let directory = match tempfile::tempdir() {
+            Ok(directory) => directory,
+            Err(error) => panic!("a temporary directory: {error}"),
+        };
+        let path = directory.path().join("nested/config.toml");
+
+        let stated = Settings {
+            timezone: Some("Europe/London".to_owned()),
+            database: None,
+        };
+        stated.write(&path).expect("the file writes");
+
+        assert_eq!(Settings::read(&path), Ok(stated));
+
+        let text = std::fs::read_to_string(&path).expect("the file reads");
+        assert!(
+            text.contains("HEVY_API_KEY"),
+            "the preamble says where the key goes"
+        );
     }
 
     /// **A misspelled key is refused, not ignored.** A setting that silently
