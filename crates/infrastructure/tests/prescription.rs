@@ -265,9 +265,10 @@ fn a_slot_with_no_history_is_reported_rather_than_guessed() {
     assert_eq!(
         reported,
         vec![
+            // Reported in issued order, which leads with the pull.
+            (SlotId::UpperPull, UnderivableReason::NeverPerformed),
             // Due a step up, on an implement whose scale nobody has authored.
             (SlotId::UpperPush, UnderivableReason::NoLoadScale),
-            (SlotId::UpperPull, UnderivableReason::NeverPerformed),
             (SlotId::Core, UnderivableReason::NeverPerformed),
         ]
     );

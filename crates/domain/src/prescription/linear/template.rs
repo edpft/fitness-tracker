@@ -61,18 +61,27 @@ impl PrimaryPattern {
     /// first, then the supersetted upper pair, then the accessory lower slot.
     /// The one source of truth for both what a session issues and what a
     /// performed workout is projected against.
-    pub const fn sequence(self) -> [Position; 11] {
+    ///
+    /// **The upper pair leads with the pull.** Stated by the operator on
+    /// 2026-08-23. It is an antagonist pairing either way, so nothing in the
+    /// pairing decides the order — what decides it is which of the two the
+    /// operator wants fresh.
+    ///
+    /// **The two holds are one superset.** They were two singles, which is not
+    /// how they are performed: a handstand hold and a dead hang share nothing
+    /// and rest each other, so they run back to back like every other pairing
+    /// here.
+    pub const fn sequence(self) -> [Position; 10] {
         [
             Position::Single(SlotId::Plyometric),
             Position::Single(SlotId::Power),
             Position::Single(self.slot()),
-            Position::Superset(SlotId::UpperPush, SlotId::UpperPull),
+            Position::Superset(SlotId::UpperPull, SlotId::UpperPush),
             Position::Single(self.accessory()),
             Position::Superset(SlotId::Biceps, SlotId::Triceps),
             Position::Superset(SlotId::WristFlexion, SlotId::WristExtension),
             Position::Single(SlotId::Core),
-            Position::Single(SlotId::HandstandHold),
-            Position::Single(SlotId::DeadHang),
+            Position::Superset(SlotId::HandstandHold, SlotId::DeadHang),
             Position::Circuit(STRETCHES),
         ]
     }

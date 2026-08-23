@@ -172,7 +172,7 @@ pub struct Projection {
 /// the sharpest edge of "slot identity is not in the performed record", it is
 /// recorded rather than papered over, and it is why [`satisfies`] reports a slot
 /// divergence rather than the projection refusing.
-pub const ISSUE_ORDER: [Position; 11] = PrimaryPattern::KneeDominant.sequence();
+pub const ISSUE_ORDER: [Position; 10] = PrimaryPattern::KneeDominant.sequence();
 
 /// Read a performed workout as a prescription shape.
 ///
