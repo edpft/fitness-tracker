@@ -11,7 +11,7 @@ use std::{env::VarError, path::PathBuf};
 use domain::{gym::OperatorZone, prescription::Calendar};
 use jiff::{Timestamp, civil::Date};
 
-use crate::catalogue::KnownStream;
+use crate::catalogue::KnownSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
@@ -106,7 +106,7 @@ impl SourceAccess {
     ///
     /// [`ConfigError`] if the credential is absent or unreadable.
     pub fn resolve(
-        known: &KnownStream,
+        known: &KnownSource,
         base_url: String,
         api_key: Result<String, VarError>,
     ) -> Result<Self, ConfigError> {
@@ -171,13 +171,13 @@ pub fn date(given: Option<&str>, calendar: &Calendar, now: Timestamp) -> Result<
 #[cfg(test)]
 mod tests {
     use super::{ConfigError, SourceAccess, database, date};
-    use crate::catalogue::{KnownStream, lookup};
+    use crate::catalogue::{KnownSource, source};
     use domain::prescription::{Calendar, SessionRole, Weekdays};
     use jiff::{Timestamp, civil::Weekday};
     use std::{env::VarError, path::PathBuf};
 
-    fn hevy() -> Option<&'static KnownStream> {
-        lookup("hevy.workouts")
+    fn hevy() -> Option<&'static KnownSource> {
+        source("hevy")
     }
 
     /// A Monday-and-Friday block of four weeks from Monday 2026-09-07, skipping

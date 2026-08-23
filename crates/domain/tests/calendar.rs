@@ -406,3 +406,71 @@ proptest! {
         }
     }
 }
+
+/// The ordinal counts sessions, so a week running two contributes two and the
+/// numbers are a total order over everything the block prescribes.
+///
+/// Monday light is the first session, Friday heavy the second, and the Monday
+/// after is the third — which is what an ordered list of routines needs and what
+/// a week index, repeating itself twice a week, cannot give.
+#[test]
+fn the_ordinal_counts_every_session_from_the_first() {
+    let calendar = autumn(&[]).expect("an uninterrupted autumn block");
+
+    let ordinal = |y, m, d| {
+        calendar
+            .ordinal(date(y, m, d).expect("a real date"))
+            .map(domain::prescription::SessionOrdinal::as_u32)
+    };
+
+    assert_eq!(ordinal(2026, 9, 14), Some(1), "the first Monday");
+    assert_eq!(ordinal(2026, 9, 18), Some(2), "the Friday of week one");
+    assert_eq!(ordinal(2026, 9, 21), Some(3), "the Monday of week two");
+    assert_eq!(ordinal(2026, 9, 25), Some(4), "the Friday of week two");
+}
+
+/// A date the block does not run has no ordinal — the same answer `place` gives,
+/// and for the same reason: nothing was prescribed, so there is nothing to
+/// number.
+#[test]
+fn an_unprogrammed_day_has_no_ordinal() {
+    let calendar = autumn(&[]).expect("an uninterrupted autumn block");
+
+    assert_eq!(
+        calendar.ordinal(date(2026, 9, 16).expect("a real Wednesday")),
+        None,
+        "Wednesday is not a programmed day"
+    );
+    assert_eq!(
+        calendar.ordinal(date(2026, 9, 7).expect("a real date")),
+        None,
+        "the week before the block started"
+    );
+}
+
+/// **An interruption takes its sessions out of the count entirely.** A week the
+/// operator was away prescribes nothing, so the session after it is the next
+/// number rather than one two higher — which is what keeps the ordinal counting
+/// sessions rather than dates.
+#[test]
+fn an_interrupted_week_contributes_no_ordinals() {
+    let week_two = Skip::new(
+        date(2026, 9, 21).expect("a real Monday"),
+        NonZeroU8::new(7).expect("seven is not zero"),
+    );
+    let calendar = autumn(&[week_two]).expect("an autumn block missing its second week");
+
+    let ordinal = |y, m, d| {
+        calendar
+            .ordinal(date(y, m, d).expect("a real date"))
+            .map(domain::prescription::SessionOrdinal::as_u32)
+    };
+
+    assert_eq!(ordinal(2026, 9, 18), Some(2), "the Friday before the skip");
+    assert_eq!(ordinal(2026, 9, 21), None, "inside the skip");
+    assert_eq!(
+        ordinal(2026, 9, 28),
+        Some(3),
+        "the session after the skip is the third, not the fifth"
+    );
+}

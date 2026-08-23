@@ -691,11 +691,14 @@ informative and a missed session is not.
 
 ## Not modelled here
 
-- The Hevy adapter, and how any of this renders into a routine. Routine
+- The Hevy adapter, and how any of this renders into a routine. ~~Routine
   proliferation — whether one routine is rewritten in place or one issued per
   prescribed workout — is not purely an adapter tidiness question, because
   rewrite-in-place is what destroys the routine id's discriminating power in
-  open question 1.
+  open question 1.~~ **Settled on 2026-08-23 by decision 0017**: one delivery
+  per issued prescription, created and never updated, which follows from § 12
+  rather than from anything the source imposes. The routine id therefore names
+  one session, and open question 1 gains a key where it had only evidence.
 - Cycling and nutrition phases, which a full programme should coordinate with.
   These are calendar-driven where strength progression is evidence-driven, so
   they sit above this model rather than inside it.

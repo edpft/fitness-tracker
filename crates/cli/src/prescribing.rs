@@ -7,18 +7,20 @@
 use std::path::Path;
 
 use application::{
-    GenerationParameterStore as _, ProgrammeAuthor as _, ProgrammeStore as _,
-    WorkoutPrescriber as _,
+    GenerationParameterStore as _, PrescriptionDeliverer as _, ProgrammeAuthor as _,
+    ProgrammeStore as _, WorkoutPrescriber as _,
+    deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::{gym::OperatorZone, prescription::Programme};
 use infrastructure::{
-    Document, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
+    Document, HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory,
+    SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
     SqliteProgrammeStore, connect,
 };
 use jiff::civil::Date;
 
-use crate::{Failure, config, config::ConfigError, exit, output};
+use crate::{Failure, catalogue, config, config::ConfigError, exit, output};
 
 /// Read a document and store the programme it describes.
 pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
@@ -195,4 +197,119 @@ async fn resolve(
         ConfigError::NotADate { .. } => Failure::usage(&error),
         _ => Failure::message(error.to_string(), exit::STORE),
     })
+}
+
+/// Put the prescription for a date where the operator trains from.
+///
+/// **Delivery does not issue.** It reads what `prescribe` already put in the
+/// store, so a destination being unreachable costs a retry rather than a ladder
+/// position, and nothing here can advance a programme.
+pub async fn deliver(
+    database: &Path,
+    zone: &OperatorZone,
+    date: Option<&str>,
+    preview: bool,
+) -> Result<(), Failure> {
+    let pool = connect(database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let date = resolve(&programmes, zone, date).await?;
+
+    let prescriptions = SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned());
+    if preview {
+        return preview_delivery(
+            prescriptions,
+            SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+            date,
+        )
+        .await;
+    }
+
+    let known = catalogue::source("hevy")
+        .ok_or_else(|| Failure::message("this build has no hevy destination wired", exit::USAGE))?;
+    let base_url = std::env::var(known.base_url_variable())
+        .unwrap_or_else(|_| known.default_base_url().to_owned());
+    let access =
+        config::SourceAccess::resolve(known, base_url, std::env::var(known.api_key_variable()))
+            .map_err(|error| Failure::usage(&error))?;
+
+    let destination = HevyRoutines::new(access.base_url, access.api_key)
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let delivering = Delivering::new(DeliveryPorts {
+        prescriptions,
+        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+        destination,
+    });
+
+    let delivered = delivering
+        .deliver(date)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::delivery(&delivered);
+    Ok(())
+}
+
+/// The whole path except the two irreversible steps.
+///
+/// **The store it writes to is thrown away**, so a preview cannot leave a record
+/// claiming a session was delivered — which would make the real delivery a
+/// no-op and lose the session entirely. The rendering is the real one.
+async fn preview_delivery(
+    prescriptions: SqlitePrescribedWorkoutStore,
+    programmes: SqliteProgrammeStore,
+    date: Date,
+) -> Result<(), Failure> {
+    let destination = HevyRoutinePreview::new()
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let delivering = Delivering::new(DeliveryPorts {
+        prescriptions,
+        programmes,
+        deliveries: ForgetfulDeliveries,
+        destination: &destination,
+    });
+
+    let delivered = delivering
+        .deliver(date)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let Some(body) = destination.body() else {
+        return Err(Failure::message("nothing was rendered", exit::STORE));
+    };
+
+    output::preview(&delivered, &body);
+    Ok(())
+}
+
+/// A delivery store that remembers nothing.
+///
+/// Not a test double: it is what makes a preview safe to run against the real
+/// store, because the one thing a preview must not do is record a delivery that
+/// never happened.
+struct ForgetfulDeliveries;
+
+impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
+    async fn reference_for(
+        &self,
+        _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+    ) -> Result<Option<application::DeliveryReference>, application::StoreError> {
+        Ok(None)
+    }
+
+    async fn record(
+        &self,
+        _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+        _reference: &application::DeliveryReference,
+        _at: jiff::Timestamp,
+    ) -> Result<(), application::StoreError> {
+        Ok(())
+    }
 }

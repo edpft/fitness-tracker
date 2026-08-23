@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reference AS \"reference!: String\"\n            FROM prescription_delivery\n            WHERE prescription = ? AND destination = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "reference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9d596e89d31bd30927ac926fd544fde2cb4be75f3a3112efca7e4d1e6dc7f2b1"
+}

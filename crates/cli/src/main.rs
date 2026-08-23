@@ -17,7 +17,7 @@ use std::{
 };
 
 use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
-use clap::{Arg, ArgMatches, Command as ClapCommand, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
 use catalogue::KnownStream;
@@ -117,6 +117,7 @@ fn command() -> ClapCommand {
                 .arg(timezone_argument().required(false)),
         )
         .subcommand(prescribe_command())
+        .subcommand(deliver_command())
         .subcommand(programme_command())
         .subcommand(
             ClapCommand::new("reset")
@@ -154,6 +155,31 @@ fn prescribe_command() -> ClapCommand {
 }
 
 /// Author the programme.
+/// Put an issued session where the operator trains from.
+///
+/// A command of its own rather than a flag on `prescribe`, because the two fail
+/// for unrelated reasons: § 36 wants a destination being unreachable to leave a
+/// perfectly good prescription in the store, and folding them together would
+/// make one exit code answer for both.
+fn deliver_command() -> ClapCommand {
+    ClapCommand::new("deliver")
+        .about("Put the session issued for a date where the operator trains from")
+        .arg(Arg::new("date").long("date").value_name("date").help(
+            "The session to deliver, as YYYY-MM-DD. Defaults to the next \
+                     programmed day at or after today",
+        ))
+        .arg(
+            Arg::new("preview")
+                .long("preview")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Render the session and print what would be sent, without \
+                     sending it or recording anything",
+                ),
+        )
+        .arg(timezone_argument())
+}
+
 fn programme_command() -> ClapCommand {
     ClapCommand::new("programme")
         .about("Author the programme, or report the one in force")
@@ -365,6 +391,11 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             };
             return prescribing::prescribe(&database, &zone, date, reissue).await;
         }
+        "deliver" => {
+            let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
+            let date = sub.get_one::<String>("date").map(String::as_str);
+            return prescribing::deliver(&database, &zone, date, sub.get_flag("preview")).await;
+        }
         "programme" => {
             let zone = config::timezone(sub.get_one::<String>("timezone").map(String::as_str))?;
             return match sub.subcommand() {
@@ -491,7 +522,7 @@ fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, 
         .unwrap_or_else(|| known.default_base_url().to_owned());
 
     Ok(SourceAccess::resolve(
-        known,
+        known.source(),
         base_url,
         std::env::var(known.api_key_variable()),
     )?)

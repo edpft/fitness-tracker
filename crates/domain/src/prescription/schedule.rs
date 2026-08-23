@@ -21,6 +21,8 @@ use std::{fmt, num::NonZeroU8};
 
 use jiff::{Zoned, civil::Date, tz::TimeZone};
 
+use super::delivery::SessionOrdinal;
+
 /// Which session within a week.
 ///
 /// An ordering rather than state: the two differ in fill and in the primary's
@@ -608,6 +610,36 @@ impl Calendar {
             let candidate = from.checked_add(jiff::Span::new().days(offset)).ok()?;
             self.place(candidate).ok().map(|_| candidate)
         })
+    }
+
+    /// Which session of the block this date is, counting from the first.
+    ///
+    /// **Counts sessions, not days and not weeks.** A week the block skipped
+    /// contributes nothing, and a week running two sessions contributes two — so
+    /// the number is a total order over everything the block prescribes, which
+    /// is what an ordered list of them needs and what a week index cannot give.
+    ///
+    /// `None` for a date the block does not run, which is the same answer
+    /// [`Self::place`] gives and for the same reason.
+    pub fn ordinal(&self, date: Date) -> Option<SessionOrdinal> {
+        if self.place(date).is_err() {
+            return None;
+        }
+
+        // Walk the programmed days from the start rather than deriving from the
+        // week index: interruptions are runs of days rather than whole weeks
+        // (decision 0010), so a week can lose one of its two sessions and
+        // arithmetic over weeks would count it anyway.
+        let mut counted: u32 = 0;
+        let mut cursor = self.start;
+        while cursor <= date {
+            if self.place(cursor).is_ok() {
+                counted = counted.saturating_add(1);
+            }
+            cursor = cursor.tomorrow().ok()?;
+        }
+
+        SessionOrdinal::new(counted).ok()
     }
 
     /// How many calendar weeks before this one had no session at all.
