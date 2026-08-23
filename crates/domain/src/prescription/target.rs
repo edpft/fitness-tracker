@@ -14,38 +14,74 @@
 
 use std::fmt;
 
-use crate::gym::{Duration, Load, Rir};
-
-/// Why a target could not be built.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a range must span: its low bound is not below its high one")]
-pub struct EmptyRange;
+use crate::gym::{Duration, Load, Rir, Spans};
 
 /// How much of the measure to do.
+///
+/// **A range is a minimum and an extent, never two endpoints.** Two endpoints
+/// are two independent values and nothing structural stops the second falling
+/// below the first, so a pair can only *reject* an inversion at construction —
+/// which § 24 says is the wrong place for it. A minimum with a strictly positive
+/// extent cannot describe an inverted or empty range at all, so building one is
+/// infallible and the error that used to guard it does not exist.
+///
+/// The extent's type comes from [`Spans`], because only some measures exclude
+/// zero on their own: a rep count is already non-zero and is its own extent,
+/// while a duration may legitimately be zero — a superset instructs exactly that
+/// — and so has a positive counterpart standing beside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target<M> {
+pub enum Target<M: Spans> {
     Exactly(M),
-    Range { low: M, high: M },
+    /// From `minimum`, spanning `extent`. The top is derived, never stored, so
+    /// there are not two numbers here that could disagree.
+    Range {
+        minimum: M,
+        extent: M::Extent,
+    },
 }
 
-impl<M: PartialOrd> Target<M> {
-    /// A range, which must span.
+impl<M: Spans> Target<M> {
+    /// A range opening at `minimum` and spanning `extent`.
     ///
-    /// Equal bounds are [`Target::Exactly`] and there is no third state, so a
-    /// caller cannot build a "range" that is secretly a point and then have two
-    /// representations of one instruction to compare.
-    ///
-    /// # Errors
-    ///
-    /// [`EmptyRange`] if `low` is not below `high`.
-    pub fn range(low: M, high: M) -> Result<Self, EmptyRange> {
-        if low < high {
-            Ok(Self::Range { low, high })
-        } else {
-            Err(EmptyRange)
+    /// Infallible, which is the whole point: there is no argument to this that
+    /// produces an empty range.
+    pub const fn spanning(minimum: M, extent: M::Extent) -> Self {
+        Self::Range { minimum, extent }
+    }
+
+    /// The least the target accepts.
+    pub const fn minimum(self) -> M {
+        match self {
+            Self::Exactly(measure) => measure,
+            Self::Range { minimum, .. } => minimum,
         }
     }
 
+    /// The most the target accepts. Equal to the minimum for an exact target,
+    /// which is what makes "the longest rest this instructs" one question rather
+    /// than two.
+    pub fn maximum(self) -> M {
+        match self {
+            Self::Exactly(measure) => measure,
+            Self::Range { minimum, extent } => minimum.spanning(extent),
+        }
+    }
+
+    /// Rebuild from a pair of bounds.
+    ///
+    /// **The only fallible way in, and it exists for reading back what
+    /// something outside the domain wrote down** — a store holding two columns,
+    /// a document naming two numbers. Inside the domain nothing needs it:
+    /// [`Self::spanning`] cannot fail. `None` where the pair is not a range.
+    pub fn between(low: M, high: M) -> Option<Self> {
+        M::extent_between(low, high).map(|extent| Self::Range {
+            minimum: low,
+            extent,
+        })
+    }
+}
+
+impl<M: Spans + PartialOrd> Target<M> {
     /// Does this performed measure satisfy the target?
     ///
     /// Asymmetric on purpose: a performed six satisfies a prescribed four-to-six
@@ -53,18 +89,22 @@ impl<M: PartialOrd> Target<M> {
     /// only one of the two is an instruction. The round trip in
     /// [`super::project`] depends on this being a relation rather than equality.
     pub fn satisfied_by(&self, measure: &M) -> bool {
-        match self {
-            Self::Exactly(target) => measure == target,
-            Self::Range { low, high } => low <= measure && measure <= high,
+        match *self {
+            Self::Exactly(target) => *measure == target,
+            Self::Range { minimum, extent } => {
+                minimum <= *measure && *measure <= minimum.spanning(extent)
+            }
         }
     }
 }
 
-impl<M: fmt::Display> fmt::Display for Target<M> {
+impl<M: Spans + fmt::Display> fmt::Display for Target<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Self::Exactly(measure) => write!(f, "{measure}"),
-            Self::Range { low, high } => write!(f, "{low}-{high}"),
+            Self::Range { minimum, extent } => {
+                write!(f, "{minimum}-{}", minimum.spanning(extent))
+            }
         }
     }
 }
@@ -75,7 +115,7 @@ impl<M: fmt::Display> fmt::Display for Target<M> {
 /// the lifter is meant to resolve on the day, and a set with none of them open
 /// is a set with nothing to discover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Prescribed<M> {
+pub enum Prescribed<M: Spans> {
     /// Load and measure pinned; effort is guidance. Warm-ups, back-offs, the
     /// primary's top set, and the first two sets of a double-progression slot.
     Fixed {
@@ -102,7 +142,7 @@ pub enum Prescribed<M> {
     Autoregulated { measure: Target<M>, effort: Rir },
 }
 
-impl<M> Prescribed<M> {
+impl<M: Spans> Prescribed<M> {
     /// The load, where the prescription pins one.
     pub const fn load(&self) -> Option<Load> {
         match self {
@@ -139,7 +179,7 @@ impl<M> Prescribed<M> {
 
 /// A prescribed set: the instruction, plus the density axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrescribedSet<M> {
+pub struct PrescribedSet<M: Spans> {
     pub prescription: Prescribed<M>,
     /// The instruction, naturally a range. Absent means none was given — not
     /// that the rest is unknown, which is what the performed side's absence
@@ -148,7 +188,7 @@ pub struct PrescribedSet<M> {
     pub warmup: bool,
 }
 
-impl<M> PrescribedSet<M> {
+impl<M: Spans> PrescribedSet<M> {
     /// A working set with load and measure pinned and no effort guidance. The
     /// primary's top set, and the shape most of a session is.
     pub const fn fixed(load: Load, measure: Target<M>) -> Self {
@@ -203,7 +243,7 @@ impl<M> PrescribedSet<M> {
     }
 }
 
-impl<M: fmt::Display> fmt::Display for PrescribedSet<M> {
+impl<M: Spans + fmt::Display> fmt::Display for PrescribedSet<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.prescription {
             Prescribed::Fixed {

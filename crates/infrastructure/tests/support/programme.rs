@@ -155,13 +155,11 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             ),
         ])),
         strength: domain::prescription::AccessoryScheme {
-            low: reps(4)?,
-            high: reps(6)?,
+            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
             sets: reps(3)?,
         },
         hypertrophy: domain::prescription::AccessoryScheme {
-            low: reps(4)?,
-            high: reps(6)?,
+            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
             sets: reps(3)?,
         },
         static_hold: domain::gym::Duration::from_seconds(60),

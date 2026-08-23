@@ -16,7 +16,7 @@ use domain::{
     gym::{Kg, NonEmpty, RepCount, exercise::Implement},
     prescription::{
         BackOff, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol, Scales,
-        SessionRole, Step, TopSetReps, WarmupStep,
+        SessionRole, Step, Target, TopSetReps, WarmupStep,
     },
 };
 use jiff::Timestamp;
@@ -46,6 +46,19 @@ fn grams_from_storage(grams: i64) -> Result<Kg, StoreError> {
     let unsigned = u64::try_from(grams)
         .map_err(|_| corrupt(&"a mass stored as a negative number of grams"))?;
     Ok(Kg::from_grams(unsigned))
+}
+
+/// The stored pair of bounds, back as the span the domain holds.
+///
+/// **Two columns, one type.** The schema keeps `low` and `high` because that is
+/// what a range is queried by, and the domain keeps a minimum and an extent
+/// because that is what cannot be written down wrong. This is the boundary
+/// between them, and it is the one place the pair can fail to be a range — the
+/// column check should already have refused it, so reaching the error arm means
+/// the row is corrupt.
+fn scheme_reps(low: i64, high: i64) -> Result<Target<RepCount>, StoreError> {
+    Target::between(reps_from_storage(low)?, reps_from_storage(high)?)
+        .ok_or_else(|| corrupt(&"a stored rep range that does not span"))
 }
 
 fn reps_from_storage(reps: i64) -> Result<RepCount, StoreError> {
@@ -326,13 +339,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                     heavy: heavy_reps,
                 },
                 strength: domain::prescription::AccessoryScheme {
-                    low: reps_from_storage(row.strength_low)?,
-                    high: reps_from_storage(row.strength_high)?,
+                    reps: scheme_reps(row.strength_low, row.strength_high)?,
                     sets: reps_from_storage(row.strength_sets)?,
                 },
                 hypertrophy: domain::prescription::AccessoryScheme {
-                    low: reps_from_storage(row.hypertrophy_low)?,
-                    high: reps_from_storage(row.hypertrophy_high)?,
+                    reps: scheme_reps(row.hypertrophy_low, row.hypertrophy_high)?,
                     sets: reps_from_storage(row.hypertrophy_sets)?,
                 },
                 static_hold: domain::gym::Duration::from_seconds(
@@ -367,11 +378,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
         let ladder_climb = grams_for_storage(parameters.ladder_climb_per_week)?;
         let entry_drop = bp_for_storage(parameters.entry_drop);
-        let strength_low = i64::from(parameters.strength.low.as_u32());
-        let strength_high = i64::from(parameters.strength.high.as_u32());
+        let strength_low = i64::from(parameters.strength.reps.minimum().as_u32());
+        let strength_high = i64::from(parameters.strength.reps.maximum().as_u32());
         let strength_sets = i64::from(parameters.strength.sets.as_u32());
-        let hypertrophy_low = i64::from(parameters.hypertrophy.low.as_u32());
-        let hypertrophy_high = i64::from(parameters.hypertrophy.high.as_u32());
+        let hypertrophy_low = i64::from(parameters.hypertrophy.reps.minimum().as_u32());
+        let hypertrophy_high = i64::from(parameters.hypertrophy.reps.maximum().as_u32());
         let hypertrophy_sets = i64::from(parameters.hypertrophy.sets.as_u32());
         let static_hold = i64::try_from(parameters.static_hold.as_seconds())
             .map_err(|_| corrupt(&"a static hold longer than the store can hold"))?;

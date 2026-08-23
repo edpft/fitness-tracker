@@ -20,7 +20,7 @@ use domain::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters,
         InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole, Percentage,
         Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, Scales, SessionRole,
-        Skip, Step, Test, TestTarget, Tested, TopSetReps, WarmupStep, Weekdays,
+        Skip, Step, Target, Test, TestTarget, Tested, TopSetReps, WarmupStep, Weekdays,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -927,9 +927,14 @@ fn scheme(field: &str, section: &AccessorySection) -> Result<AccessoryScheme, Do
             .map_err(|error| invalid(field, error))
             .and_then(|parsed| reps(field, parsed))
     };
+    // **The document names two bounds and the domain holds a span.** A stated
+    // range is exactly the place an inversion gets written down, so this is the
+    // boundary where `4-6` is checked and `6-4` is refused — the type behind it
+    // cannot express either mistake.
+    let reps_target = Target::between(count(low)?, count(high)?)
+        .ok_or_else(|| invalid(field, "a range runs low-high and must span"))?;
     Ok(AccessoryScheme {
-        low: count(low)?,
-        high: count(high)?,
+        reps: reps_target,
         sets: reps(field, section.sets)?,
     })
 }

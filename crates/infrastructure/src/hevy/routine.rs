@@ -33,9 +33,11 @@
 //! makes the case where it does not a correct routine instead of a silent
 //! coercion.
 
+use std::fmt;
+
 use application::{Deliverable, Unexpressed};
 use domain::{
-    gym::{Exercise, Kg, Load, Rir},
+    gym::{Exercise, Kg, Load, Rir, Spans},
     prescription::{
         Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, SessionRole, Target,
         WeekKind,
@@ -285,14 +287,48 @@ const fn kind(warmup: bool) -> &'static str {
     if warmup { "warmup" } else { "normal" }
 }
 
-fn rest_of<M>(set: &PrescribedSet<M>) -> Option<u64> {
-    set.rest_after.as_ref().map(|rest| match rest {
-        Target::Exactly(duration) | Target::Range { low: duration, .. } => duration.as_seconds(),
-    })
+/// The rest a set instructs, at its longest.
+///
+/// **The top of the range, not the bottom.** The source takes one number per
+/// exercise where we prescribe one per set, so something has to be chosen, and
+/// the operator's instruction is to take the longest — a rest cut short is a
+/// worse error than one overrun, and the range itself survives in the notes.
+fn rest_of<M: Spans>(set: &PrescribedSet<M>) -> Option<u64> {
+    set.rest_after.map(|rest| rest.maximum().as_seconds())
+}
+
+/// Everything about a set the source has no field for, as one phrase.
+///
+/// **This is the graceful-degradation path**, and it is deliberately the only
+/// one: a routine set has no effort field, no per-set rest, and no range for a
+/// hold or a carry — so each of those becomes words rather than being dropped.
+/// An empty result means the source could state the set in full.
+fn note_of<M: fmt::Display + Spans>(
+    set: &PrescribedSet<M>,
+    ranged: Option<String>,
+) -> Option<String> {
+    let parts: Vec<String> = [annotate(&set.prescription), ranged, rest_note(set)]
+        .into_iter()
+        .flatten()
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
+/// The rest instruction as words, where it says more than one number can.
+fn rest_note(set: &PrescribedSet<impl Spans>) -> Option<String> {
+    match set.rest_after? {
+        Target::Exactly(_) => None,
+        range @ Target::Range { .. } => Some(format!("rest {range}")),
+    }
 }
 
 /// The effort target, and anything else the source cannot state, in words.
-fn annotate<M: std::fmt::Display>(prescription: &Prescribed<M>) -> Option<String> {
+fn annotate<M: std::fmt::Display + Spans>(prescription: &Prescribed<M>) -> Option<String> {
     match prescription {
         Prescribed::Fixed { effort, .. } => {
             effort.map(|effort| format!("{} in reserve", Rir::as_str(effort)))
@@ -318,11 +354,11 @@ fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> S
 
     let (reps, rep_range) = match set.prescription.measure() {
         Some(Target::Exactly(count)) => (Some(count.as_u32()), None),
-        Some(Target::Range { low, high }) => (
+        Some(range @ Target::Range { .. }) => (
             None,
             Some(RepRange {
-                start: low.as_u32(),
-                end: high.as_u32(),
+                start: range.minimum().as_u32(),
+                end: range.maximum().as_u32(),
             }),
         ),
         None => (None, None),
@@ -338,7 +374,7 @@ fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> S
             distance_meters: None,
             duration_seconds: None,
         },
-        annotation: annotate(&set.prescription),
+        annotation: note_of(set, None),
         rest: rest_of(set),
     }
 }
@@ -353,17 +389,10 @@ fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) 
     // to the notes — stated rather than rounded away.
     let (seconds, ranged) = match set.prescription.measure() {
         Some(Target::Exactly(duration)) => (Some(duration.as_seconds()), None),
-        Some(Target::Range { low, high }) => {
-            (Some(low.as_seconds()), Some(format!("{low}-{high}")))
+        Some(range @ Target::Range { .. }) => {
+            (Some(range.minimum().as_seconds()), Some(format!("{range}")))
         }
         None => (None, None),
-    };
-
-    let annotation = match (annotate(&set.prescription), ranged) {
-        (Some(effort), Some(range)) => Some(format!("{range}; {effort}")),
-        (Some(effort), None) => Some(effort),
-        (None, Some(range)) => Some(range),
-        (None, None) => None,
     };
 
     SetOutcome::Written {
@@ -376,7 +405,7 @@ fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) 
             distance_meters: None,
             duration_seconds: seconds,
         },
-        annotation,
+        annotation: note_of(set, ranged),
         rest: rest_of(set),
     }
 }
@@ -391,15 +420,10 @@ fn distance_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Distance>) 
 
     let (distance, ranged) = match set.prescription.measure() {
         Some(Target::Exactly(target)) => (Some(metres(target)), None),
-        Some(Target::Range { low, high }) => (Some(metres(low)), Some(format!("{low}-{high}"))),
+        Some(range @ Target::Range { .. }) => {
+            (Some(metres(&range.minimum())), Some(format!("{range}")))
+        }
         None => (None, None),
-    };
-
-    let annotation = match (annotate(&set.prescription), ranged) {
-        (Some(effort), Some(range)) => Some(format!("{range}; {effort}")),
-        (Some(effort), None) => Some(effort),
-        (None, Some(range)) => Some(range),
-        (None, None) => None,
     };
 
     SetOutcome::Written {
@@ -412,7 +436,7 @@ fn distance_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Distance>) 
             distance_meters: distance,
             duration_seconds: None,
         },
-        annotation,
+        annotation: note_of(set, ranged),
         rest: rest_of(set),
     }
 }

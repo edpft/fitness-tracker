@@ -135,11 +135,14 @@ fn satisfaction_is_direction_aware() {
     let (Ok(four), Ok(six)) = (reps(4), reps(6)) else {
         panic!("both are repetition counts")
     };
-    let (Ok(exact), Ok(span)) = (shape_of(Target::Exactly(six)), Target::range(four, six)) else {
-        panic!("an exact six and a four-to-six range both build")
+    let Ok(two) = reps(2) else {
+        panic!("two is a repetition count")
     };
-    let Ok(range) = shape_of(span) else {
-        panic!("a shape is built from the range")
+    let Ok(exact) = shape_of(Target::Exactly(six)) else {
+        panic!("an exact six builds")
+    };
+    let Ok(range) = shape_of(Target::spanning(four, two)) else {
+        panic!("a shape is built from the four-to-six range")
     };
 
     assert_eq!(

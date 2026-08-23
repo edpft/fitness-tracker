@@ -91,7 +91,7 @@ use std::collections::VecDeque;
 use std::fmt;
 
 use crate::gym::{
-    GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, WorkoutItem,
+    GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, Spans, WorkoutItem,
     sequence::{AtLeastTwo, NonEmpty},
 };
 
@@ -357,7 +357,7 @@ fn exercise(
 ///
 /// Head and tail separately because [`NonEmpty`] guarantees the head, so this
 /// needs no fallible reassembly.
-fn sets_of<M: Copy>(
+fn sets_of<M: Copy + Spans>(
     sets: &NonEmpty<Set<M>>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
@@ -376,7 +376,7 @@ fn sets_of<M: Copy>(
 /// observation and stays one. A failed attempt pins the load, leaves the measure
 /// open and reports the gap, because what was being attempted is recorded
 /// nowhere.
-fn set_of<M: Copy>(
+fn set_of<M: Copy + Spans>(
     set: &Set<M>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
@@ -645,7 +645,7 @@ fn compare_exercises(
     }
 }
 
-fn compare_sets<M: fmt::Display + PartialEq + PartialOrd>(
+fn compare_sets<M: fmt::Display + PartialEq + PartialOrd + Spans>(
     performed: &NonEmpty<PrescribedSet<M>>,
     prescribed: &NonEmpty<PrescribedSet<M>>,
     at: ItemPosition,

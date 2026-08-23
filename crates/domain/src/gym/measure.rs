@@ -6,7 +6,10 @@
 //! An exercise's measure is fixed by which vocabulary it belongs to, so a set
 //! and its exercise cannot disagree and nothing needs validating.
 
-use std::{fmt, num::NonZeroU32};
+use std::{
+    fmt,
+    num::{NonZeroU32, NonZeroU64},
+};
 
 /// Why a quantity could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -17,6 +20,8 @@ pub enum InvalidQuantity {
     Negative { unit: &'static str, value: String },
     #[error("a set of zero reps is not a set")]
     ZeroReps,
+    #[error("a range spans a positive amount, and zero is not one")]
+    ZeroExtent,
 }
 
 /// How many times the movement was performed.
@@ -197,3 +202,132 @@ impl fmt::Display for Distance {
 crate::newtype::from_str_via_string!(RepCount, InvalidQuantity);
 crate::newtype::from_str_via_string!(Duration, InvalidQuantity);
 crate::newtype::from_str_via_string!(Metres, InvalidQuantity);
+
+/// A strictly positive length of time.
+///
+/// **Not a [`Duration`], and the difference is the point.** A duration may be
+/// zero — a superset instructs exactly that, "go straight on" — so a duration
+/// cannot stand for the *width* of a range without letting a range of no width
+/// be written down. This can only be positive, which is what makes an empty
+/// range unrepresentable rather than merely rejected (§ 24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PositiveDuration(NonZeroU64);
+
+impl PositiveDuration {
+    /// # Errors
+    ///
+    /// [`InvalidQuantity::ZeroExtent`] for a zero, which spans nothing.
+    pub const fn from_seconds(seconds: u64) -> Result<Self, InvalidQuantity> {
+        match NonZeroU64::new(seconds) {
+            Some(seconds) => Ok(Self(seconds)),
+            None => Err(InvalidQuantity::ZeroExtent),
+        }
+    }
+
+    pub const fn as_seconds(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl fmt::Display for PositiveDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}s", self.0)
+    }
+}
+
+/// A strictly positive amount of ground. [`PositiveDuration`]'s reasoning, for
+/// distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PositiveDistance(NonZeroU64);
+
+impl PositiveDistance {
+    /// # Errors
+    ///
+    /// [`InvalidQuantity::ZeroExtent`] for a zero, which spans nothing.
+    pub const fn from_millimetres(millimetres: u64) -> Result<Self, InvalidQuantity> {
+        match NonZeroU64::new(millimetres) {
+            Some(millimetres) => Ok(Self(millimetres)),
+            None => Err(InvalidQuantity::ZeroExtent),
+        }
+    }
+
+    pub const fn as_millimetres(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl fmt::Display for PositiveDistance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Metres(self.0.get()))
+    }
+}
+
+/// A measure a range can be built over.
+///
+/// **A range is a minimum and an extent, never two endpoints.** Two endpoints
+/// are two independent values, and nothing in the type stops the second being
+/// below the first — the best a pair can do is reject the inversion at
+/// construction, which § 24 says is the wrong place. A minimum and a strictly
+/// positive extent cannot describe an empty or inverted range at all, so the
+/// check disappears rather than moving.
+///
+/// The extent is an associated type rather than `Self` because only some of
+/// these measures exclude zero. [`RepCount`] already does, so it is its own
+/// extent; a duration and a distance do not, so they have positive counterparts.
+pub trait Spans: Copy {
+    /// A strictly positive amount of the same quantity.
+    type Extent: Copy + fmt::Debug + fmt::Display + PartialEq + Eq;
+
+    /// The top of a range that opens at `self` and spans `extent`.
+    ///
+    /// Saturating, because a range whose top overflows is a range that reached
+    /// the largest value the measure has — which is the answer, not a failure.
+    #[must_use]
+    fn spanning(self, extent: Self::Extent) -> Self;
+
+    /// The extent between two bounds, where they are a range at all.
+    ///
+    /// The one fallible direction, and it exists for reading back a pair of
+    /// bounds that something outside the domain wrote down.
+    fn extent_between(low: Self, high: Self) -> Option<Self::Extent>;
+}
+
+impl Spans for RepCount {
+    /// Its own extent: a rep count is already non-zero, so it cannot span
+    /// nothing.
+    type Extent = Self;
+
+    fn spanning(self, extent: Self) -> Self {
+        Self(self.0.saturating_add(extent.0.get()))
+    }
+
+    fn extent_between(low: Self, high: Self) -> Option<Self> {
+        NonZeroU32::new(high.0.get().checked_sub(low.0.get())?).map(Self)
+    }
+}
+
+impl Spans for Duration {
+    type Extent = PositiveDuration;
+
+    fn spanning(self, extent: PositiveDuration) -> Self {
+        Self(self.0.saturating_add(extent.as_seconds()))
+    }
+
+    fn extent_between(low: Self, high: Self) -> Option<PositiveDuration> {
+        PositiveDuration::from_seconds(high.0.checked_sub(low.0)?).ok()
+    }
+}
+
+impl Spans for Distance {
+    type Extent = PositiveDistance;
+
+    fn spanning(self, extent: PositiveDistance) -> Self {
+        Self {
+            metres: Metres(self.metres.0.saturating_add(extent.as_millimetres())),
+        }
+    }
+
+    fn extent_between(low: Self, high: Self) -> Option<PositiveDistance> {
+        PositiveDistance::from_millimetres(high.metres.0.checked_sub(low.metres.0)?).ok()
+    }
+}

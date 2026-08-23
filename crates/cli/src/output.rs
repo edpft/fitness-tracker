@@ -396,13 +396,11 @@ fn authored_parameters(parameters: &domain::prescription::GenerationParameters) 
         println!("  {implement} loads in {steps}");
     }
     println!(
-        "  strength slots {} × {}-{}; hypertrophy slots {} × {}-{}",
+        "  strength slots {} × {}; hypertrophy slots {} × {}",
         parameters.strength.sets,
-        parameters.strength.low,
-        parameters.strength.high,
+        parameters.strength.reps,
         parameters.hypertrophy.sets,
-        parameters.hypertrophy.low,
-        parameters.hypertrophy.high,
+        parameters.hypertrophy.reps,
     );
     println!("  holds {}", parameters.static_hold);
 }
@@ -751,7 +749,9 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
-fn set_line<M: std::fmt::Display>(set: &domain::prescription::PrescribedSet<M>) -> String {
+fn set_line<M: std::fmt::Display + domain::gym::Spans>(
+    set: &domain::prescription::PrescribedSet<M>,
+) -> String {
     use domain::prescription::Prescribed;
     let mut line = match &set.prescription {
         // An unloaded movement has no load worth printing. `Load` keeps

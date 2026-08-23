@@ -68,6 +68,6 @@ pub use succession::{
     InvalidProgrammeName, ProgrammeName, ProgrammeWindow, RECENT_WEEKS, is_recent_enough,
     weeks_between,
 };
-pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
+pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
 pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};

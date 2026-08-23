@@ -14,7 +14,7 @@
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
 use domain::{
     gym::{
-        Distance, Duration, Kg, Load, Metres, NonEmpty, RepCount, Rir, SignedKg,
+        Distance, Duration, Kg, Load, Metres, NonEmpty, RepCount, Rir, SignedKg, Spans,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
         sequence::AtLeastTwo,
     },
@@ -82,10 +82,10 @@ fn reps_target(target: Target<RepCount>) -> TargetColumns {
             low: i64::from(reps.as_u32()),
             high: None,
         },
-        Target::Range { low, high } => TargetColumns {
+        range @ Target::Range { .. } => TargetColumns {
             kind: "reps",
-            low: i64::from(low.as_u32()),
-            high: Some(i64::from(high.as_u32())),
+            low: i64::from(range.minimum().as_u32()),
+            high: Some(i64::from(range.maximum().as_u32())),
         },
     }
 }
@@ -101,10 +101,10 @@ fn duration_target(target: Target<Duration>) -> Result<TargetColumns, StoreError
             low: seconds(value)?,
             high: None,
         },
-        Target::Range { low, high } => TargetColumns {
+        range @ Target::Range { .. } => TargetColumns {
             kind: "duration",
-            low: seconds(low)?,
-            high: Some(seconds(high)?),
+            low: seconds(range.minimum())?,
+            high: Some(seconds(range.maximum())?),
         },
     })
 }
@@ -120,10 +120,10 @@ fn distance_target(target: Target<Distance>) -> Result<TargetColumns, StoreError
             low: mm(value)?,
             high: None,
         },
-        Target::Range { low, high } => TargetColumns {
+        range @ Target::Range { .. } => TargetColumns {
             kind: "distance",
-            low: mm(low)?,
-            high: Some(mm(high)?),
+            low: mm(range.minimum())?,
+            high: Some(mm(range.maximum())?),
         },
     })
 }
@@ -234,7 +234,7 @@ fn set_columns<M>(
     target_of: impl Fn(Target<M>) -> Result<TargetColumns, StoreError>,
 ) -> Result<SetColumns, StoreError>
 where
-    M: Copy,
+    M: Copy + Spans,
 {
     let (load_kind, load_grams) = match set.prescription.load() {
         Some(load) => {
@@ -747,13 +747,20 @@ fn rebuild_exercise(
 }
 
 /// A `Target<M>` from its two columns. `high` absent means `Exactly`.
-fn span<M: PartialOrd>(
+///
+/// **The schema stores bounds and the domain holds a span**, so this is a
+/// boundary rather than a translation: `Target::between` is the only fallible
+/// way to build a range, and it exists for exactly this — reading back a pair
+/// that something outside the domain wrote down. The column check should have
+/// refused a non-spanning pair already, so the error arm means a corrupt row.
+fn span<M: Spans>(
     low: i64,
     high: Option<i64>,
     of: impl Fn(i64) -> Result<M, StoreError>,
 ) -> Result<Target<M>, StoreError> {
     match high {
-        Some(high) => Target::range(of(low)?, of(high)?).map_err(|error| corrupt(&error)),
+        Some(high) => Target::between(of(low)?, of(high)?)
+            .ok_or_else(|| corrupt(&"a stored range that does not span")),
         None => Ok(Target::Exactly(of(low)?)),
     }
 }
@@ -763,7 +770,7 @@ fn span<M: PartialOrd>(
 /// The variant decides which columns mean anything, which is the same rule the
 /// schema's `CHECK` constraints hold. Reading it back through the variant rather
 /// than "whichever column is filled" is what keeps the two in agreement.
-fn rebuild<M>(
+fn rebuild<M: Spans>(
     row: &SetRow,
     target_of: impl Fn(i64, Option<i64>) -> Result<Target<M>, StoreError>,
 ) -> Result<PrescribedSet<M>, StoreError> {

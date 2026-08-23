@@ -39,7 +39,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         exercise: RepsExercise::ChestDip,
         sets: NonEmpty::new(vec![PrescribedSet::fixed(
             Load::Relative(SignedKg::from_grams(-7_000)),
-            Target::range(RepCount::new(4)?, RepCount::new(6)?)?,
+            Target::spanning(RepCount::new(4)?, RepCount::new(2)?),
         )])?,
     };
 
@@ -47,7 +47,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         exercise: RepsExercise::NeutralGripPullUp,
         sets: NonEmpty::new(vec![PrescribedSet::fixed(
             Load::BODYWEIGHT,
-            Target::range(RepCount::new(4)?, RepCount::new(6)?)?,
+            Target::spanning(RepCount::new(4)?, RepCount::new(2)?),
         )])?,
     };
 

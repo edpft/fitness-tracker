@@ -985,10 +985,8 @@ fn one_exercise(
     };
     let scheme = scheme_for(parameters, slot.block());
     let load = progressed_load(parameters, exercise, scheme, last).map_err(underivable)?;
-    let target = Target::range(scheme.low, scheme.high)
-        .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
     let sets: Vec<_> = (0..scheme.sets.as_u32())
-        .map(|_| PrescribedSet::fixed(load, target))
+        .map(|_| PrescribedSet::fixed(load, scheme.reps))
         .collect();
 
     let sets = NonEmpty::new(sets).map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
@@ -1021,7 +1019,7 @@ fn progressed_load(
     let reached_top = last.sets.iter().all(|set| {
         set.outcome
             .completed()
-            .is_some_and(|reps| *reps >= scheme.high)
+            .is_some_and(|reps| *reps >= scheme.reps.maximum())
     });
 
     if !reached_top {
