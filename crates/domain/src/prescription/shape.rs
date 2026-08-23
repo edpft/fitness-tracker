@@ -56,11 +56,14 @@ pub enum SlotId {
 }
 
 impl SlotId {
-    /// Every slot, in the order a session issues them.
+    /// Every slot, for enumerating the vocabulary.
     ///
-    /// Fatigue order across blocks, and within the strength block the primary
-    /// first, then the supersetted upper pair, then the remaining lower slot as
-    /// the accessory.
+    /// **Not the issued order**, though it reads close to one. What a session
+    /// issues, and in what groupings, is
+    /// [`super::linear::PrimaryPattern::sequence`] and only that — it depends on
+    /// which slot the programme makes primary, which nothing here knows. A
+    /// second ordering that claimed to be the issued one would be a rule stated
+    /// twice, and the copy here is the one that would drift.
     pub const ALL: &'static [Self] = &[
         Self::Plyometric,
         Self::Power,

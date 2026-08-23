@@ -24,13 +24,13 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeWindow, Progress,
-    SlotId,
+    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeName,
+    ProgrammeWindow, Progress, SlotId,
 };
 
 use crate::error::{
-    ExtractionError, NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError,
-    StoreError,
+    DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
+    SourceError, StatusError, StoreError,
 };
 
 // --- Driven ports -----------------------------------------------------------
@@ -972,4 +972,160 @@ pub trait ProgrammeAuthor {
         programme: &Programme,
         parameters: &GenerationParameters,
     ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
+}
+
+// --- Delivery ---------------------------------------------------------------
+//
+// **A destination is a renderer that returns a receipt.** Printing a session to
+// a terminal and putting it in the app the operator trains from are the same
+// act; the only asymmetry is that the second keeps what it was given, under an
+// identity of its own. That identity is the whole of what crosses back over the
+// port, and everything else about how a session is rendered — titles, folders,
+// which of the source's templates an exercise is written to, what its notes say
+// — is the adapter's and appears nowhere here.
+
+// Re-exported so that every ring above reaches them through the port surface,
+// as it does the rest of the vocabulary a port speaks.
+pub use domain::prescription::{DeliveryReference, DestinationName, SessionOrdinal};
+
+/// Everything a rendering needs that the prescription does not itself carry.
+///
+/// The prescription knows its date, role and week; it does not know its
+/// programme's *name* or which session of that programme it is, because both are
+/// facts about the calendar rather than about what was issued. Deriving them
+/// here and handing them over keeps the destination from reading a store.
+#[derive(Debug, Clone)]
+pub struct Deliverable {
+    pub workout: PrescribedWorkout,
+    pub programme: ProgrammeName,
+    /// Which session of the programme this is. What an ordered list of them is
+    /// ordered by; how it is rendered is the destination's business.
+    pub ordinal: SessionOrdinal,
+}
+
+/// Something the destination has no way to state.
+///
+/// A value rather than an error, for the reason [`UnderivableSlot`] is one: the
+/// rest of the session is still worth delivering, and the operator needs to know
+/// which part of it did not arrive. What is *not* here is anything the
+/// destination renders differently rather than loses — an effort target that
+/// becomes a note is expressed, not omitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unexpressed {
+    pub exercise: domain::gym::Exercise,
+    pub reason: String,
+}
+
+/// What a destination did with a session.
+#[derive(Debug, Clone)]
+pub struct Delivered {
+    /// What the destination called it. Opaque: see
+    /// [`domain::prescription::delivery`].
+    pub reference: DeliveryReference,
+    pub unexpressed: Vec<Unexpressed>,
+}
+
+/// Where a prescription goes to be acted on.
+///
+/// The mirror of [`WorkoutEventSource`]: that one is where observations come
+/// from, this is where intentions go. Named for the thing rather than the act,
+/// so the adapter is a destination and `deliver` is what you do to it.
+pub trait PrescriptionDestination {
+    /// What this destination is called, bound at construction. The use case
+    /// reads it from here rather than taking it as an argument, so a delivery
+    /// cannot be recorded against a destination it did not go to.
+    fn name(&self) -> &DestinationName;
+
+    /// # Errors
+    ///
+    /// [`DeliveryError`] if the destination is unreachable or refuses the
+    /// session. An exercise it cannot state is not an error: it comes back in
+    /// [`Delivered::unexpressed`].
+    fn deliver(
+        &self,
+        session: &Deliverable,
+    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send;
+}
+
+/// **Borrowed destinations are destinations.** A caller that needs to keep hold
+/// of its destination — to ask a preview what it rendered — should not have to
+/// choose between that and handing it to the use case.
+impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
+    fn name(&self) -> &DestinationName {
+        (*self).name()
+    }
+
+    fn deliver(
+        &self,
+        session: &Deliverable,
+    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send {
+        (*self).deliver(session)
+    }
+}
+
+/// What has already been delivered, and where.
+///
+/// One table across destinations rather than one per destination — the opposite
+/// of [`LandingStore`], and for a reason that is not an inconsistency: a landing
+/// table is *shaped* by its stream, and a delivery record is the same three
+/// columns whatever received it. So the destination is a key here rather than a
+/// binding, and the use case supplies it from the destination it holds.
+pub trait PrescriptionDeliveryStore {
+    /// What this prescription was delivered as, if it has been.
+    ///
+    /// Read before delivering, so asking twice produces one routine rather than
+    /// two. A reissue is a different prescription and so has no record here,
+    /// which is what makes "one delivery per issued prescription" fall out of
+    /// § 12 rather than out of anything the destination imposes.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn reference_for(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+    ) -> impl Future<Output = Result<Option<DeliveryReference>, StoreError>> + Send;
+
+    /// Record a delivery. Written once and never rewritten (§ 12).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reference: &DeliveryReference,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// What a delivery amounted to.
+#[derive(Debug, Clone)]
+pub struct Delivery {
+    pub reference: DeliveryReference,
+    pub destination: DestinationName,
+    pub ordinal: SessionOrdinal,
+    /// False when the prescription had already been delivered and this is that
+    /// delivery. The output side of the same idempotence
+    /// [`PrescribedWorkoutStore::issued_for`] gives issuing.
+    pub freshly_delivered: bool,
+    /// Empty on a session the destination could state in full.
+    pub unexpressed: Vec<Unexpressed>,
+}
+
+/// Put the prescription for a date where the operator trains from.
+pub trait PrescriptionDeliverer {
+    /// Deliver what was issued for `date`.
+    ///
+    /// Takes no prescription: what is in force for a date is derived, exactly as
+    /// it is for [`WorkoutPrescriber::prescribe`], and passing one would let a
+    /// caller deliver a superseded session.
+    ///
+    /// # Errors
+    ///
+    /// [`DeliveryError`] if nothing is issued for the date, the destination is
+    /// unreachable, or the store is unavailable.
+    fn deliver(&self, date: Date) -> impl Future<Output = Result<Delivery, DeliveryError>> + Send;
 }

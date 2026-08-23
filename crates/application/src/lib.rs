@@ -13,6 +13,7 @@
 //! a driven adapter from quietly calling the application it is supposed to be
 //! driven by.
 
+pub mod deliver;
 pub mod error;
 pub mod extract;
 pub mod normalise;
@@ -21,17 +22,19 @@ pub mod prescribe;
 pub mod status;
 
 pub use error::{
-    ExtractionError, NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError,
-    StoreError,
+    DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
+    SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    Authored, Clock, DerivationStatus, DerivationStatusReporter, EventBatch, ExerciseHistory,
-    ExtractionRunLog, ExtractionStatusReporter, GenerationParameterStore, LadderStanding,
-    LandingRecordReader, LandingStore, LastPerformance, NormalisationRunLog, NormalisationSummary,
+    Authored, Clock, Deliverable, Delivered, Delivery, DeliveryReference, DerivationStatus,
+    DerivationStatusReporter, DestinationName, EventBatch, ExerciseHistory, ExtractionRunLog,
+    ExtractionStatusReporter, GenerationParameterStore, LadderStanding, LandingRecordReader,
+    LandingStore, LastPerformance, NormalisationRunLog, NormalisationSummary,
     NormalisedWorkoutStore, Performance, PerformedSetSummary, PerformedWorkoutReader,
-    PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore,
+    PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
+    PrescriptionDeliveryStore, PrescriptionDestination, ProgrammeAuthor, ProgrammeStore,
     RefusalReport, RefusalReporter, RefusalStore, Reissue, ResumptionPointResetter,
-    ResumptionPointStore, RunLock, RunSummary, SourceEvent, StreamStatus, Translation,
-    UnderivableReason, UnderivableSlot, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
-    WorkoutPrescriber, WorkoutTranslator,
+    ResumptionPointStore, RunLock, RunSummary, SessionOrdinal, SourceEvent, StreamStatus,
+    Translation, UnderivableReason, UnderivableSlot, Unexpressed, WorkoutEventSource,
+    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber, WorkoutTranslator,
 };

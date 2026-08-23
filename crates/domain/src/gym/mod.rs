@@ -24,7 +24,10 @@ pub mod workout;
 pub use exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise, UnknownExercise};
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{InvalidLoad, Kg, Load, SignedKg};
-pub use measure::{Distance, Duration, InvalidQuantity, Metres, RepCount};
+pub use measure::{
+    Distance, Duration, InvalidQuantity, Metres, PositiveDistance, PositiveDuration, RepCount,
+    Spans,
+};
 pub use outcome::Performed;
 pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
 pub use run::{

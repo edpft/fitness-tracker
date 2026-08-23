@@ -154,14 +154,21 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
                 .map_err(invalid)?,
             ),
         ])),
+        // The operator's own, stated on 2026-08-23. Mobility rests not at all,
+        // and no block but the two below rests differently when supersetted.
+        rest: domain::prescription::RestScheme {
+            plyometric: flat(30),
+            power: flat(90),
+            strength: grouped(120, 180, 90, 150)?,
+            hypertrophy: grouped(120, 180, 90, 150)?,
+            mobility: flat(0),
+        },
         strength: domain::prescription::AccessoryScheme {
-            low: reps(4)?,
-            high: reps(6)?,
+            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
             sets: reps(3)?,
         },
         hypertrophy: domain::prescription::AccessoryScheme {
-            low: reps(4)?,
-            high: reps(6)?,
+            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
             sets: reps(3)?,
         },
         static_hold: domain::gym::Duration::from_seconds(60),
@@ -458,4 +465,34 @@ pub fn primary_does_not_fill_its_slot()
         calendar()?,
         &parameters,
     ))
+}
+
+/// A block that rests the same however its work is grouped.
+const fn flat(seconds: u64) -> domain::prescription::BlockRest {
+    domain::prescription::BlockRest {
+        between_sets: domain::prescription::Target::Exactly(domain::gym::Duration::from_seconds(
+            seconds,
+        )),
+        after_superset: None,
+    }
+}
+
+/// A block that rests less at the end of a superset than on its own.
+fn grouped(
+    low: u64,
+    high: u64,
+    superset_low: u64,
+    superset_high: u64,
+) -> Result<domain::prescription::BlockRest, ProgrammeFixtureError> {
+    let span = |low: u64, high: u64| {
+        domain::prescription::Target::between(
+            domain::gym::Duration::from_seconds(low),
+            domain::gym::Duration::from_seconds(high),
+        )
+        .ok_or_else(|| invalid("a rest range that does not span"))
+    };
+    Ok(domain::prescription::BlockRest {
+        between_sets: span(low, high)?,
+        after_superset: Some(span(superset_low, superset_high)?),
+    })
 }

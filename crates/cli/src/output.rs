@@ -396,13 +396,11 @@ fn authored_parameters(parameters: &domain::prescription::GenerationParameters) 
         println!("  {implement} loads in {steps}");
     }
     println!(
-        "  strength slots {} × {}-{}; hypertrophy slots {} × {}-{}",
+        "  strength slots {} × {}; hypertrophy slots {} × {}",
         parameters.strength.sets,
-        parameters.strength.low,
-        parameters.strength.high,
+        parameters.strength.reps,
         parameters.hypertrophy.sets,
-        parameters.hypertrophy.low,
-        parameters.hypertrophy.high,
+        parameters.hypertrophy.reps,
     );
     println!("  holds {}", parameters.static_hold);
 }
@@ -751,7 +749,9 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
-fn set_line<M: std::fmt::Display>(set: &domain::prescription::PrescribedSet<M>) -> String {
+fn set_line<M: std::fmt::Display + domain::gym::Spans>(
+    set: &domain::prescription::PrescribedSet<M>,
+) -> String {
     use domain::prescription::Prescribed;
     let mut line = match &set.prescription {
         // An unloaded movement has no load worth printing. `Load` keeps
@@ -794,5 +794,50 @@ fn weight(load: domain::gym::Load) -> String {
         Load::Relative(delta) if delta.as_grams() == 0 => "bodyweight".to_owned(),
         Load::Relative(delta) if delta.as_grams() < 0 => format!("bodyweight {delta}kg"),
         Load::Relative(delta) => format!("bodyweight +{delta}kg"),
+    }
+}
+
+/// What a delivery amounted to.
+///
+/// The reference is printed because it is the join a later correspondence
+/// feature reads, and because an operator who cannot find the routine needs
+/// something to search for.
+pub fn delivery(delivered: &application::Delivery) {
+    let lead = if delivered.freshly_delivered {
+        "delivered to"
+    } else {
+        "already delivered to"
+    };
+    println!(
+        "{lead} {} as session {} ({})",
+        delivered.destination, delivered.ordinal, delivered.reference
+    );
+    unexpressed(&delivered.unexpressed);
+}
+
+/// The rendering, and nothing sent.
+pub fn preview(delivered: &application::Delivery, body: &str) {
+    println!(
+        "would deliver session {} to {} — nothing was sent and nothing recorded",
+        delivered.ordinal, delivered.destination
+    );
+    unexpressed(&delivered.unexpressed);
+    println!();
+    println!("{body}");
+}
+
+/// What the destination had no way to state.
+///
+/// Printed rather than swallowed, for the reason an underivable slot is: the
+/// rest of the session still arrived, and the operator is the only one who can
+/// decide what to do about the part that did not.
+fn unexpressed(unexpressed: &[application::Unexpressed]) {
+    if unexpressed.is_empty() {
+        return;
+    }
+    println!();
+    println!("what would not go:");
+    for item in unexpressed {
+        println!("  {} — {}", item.exercise, item.reason);
     }
 }

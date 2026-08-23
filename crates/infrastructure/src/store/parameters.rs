@@ -13,10 +13,10 @@ use std::collections::BTreeMap;
 
 use application::{GenerationParameterStore, StoreError};
 use domain::{
-    gym::{Kg, NonEmpty, RepCount, exercise::Implement},
+    gym::{Duration, Kg, NonEmpty, RepCount, exercise::Implement},
     prescription::{
-        BackOff, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol, Scales,
-        SessionRole, Step, TopSetReps, WarmupStep,
+        BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol,
+        RestScheme, Scales, SessionRole, Step, Target, TopSetReps, WarmupStep,
     },
 };
 use jiff::Timestamp;
@@ -46,6 +46,100 @@ fn grams_from_storage(grams: i64) -> Result<Kg, StoreError> {
     let unsigned = u64::try_from(grams)
         .map_err(|_| corrupt(&"a mass stored as a negative number of grams"))?;
     Ok(Kg::from_grams(unsigned))
+}
+
+/// One block's rest, as the four columns the schema keeps.
+///
+/// The inverse of [`block_rest`]. An exact rest writes no `high`, and a block
+/// that states no superset rest writes no superset pair at all — null there
+/// means "the same however it is grouped", which is a different fact from zero.
+fn rest_columns(rest: BlockRest) -> Result<RestColumns, StoreError> {
+    let (low, high) = rest_bounds(rest.between_sets)?;
+    let (superset_low, superset_high) = match rest.after_superset {
+        Some(grouped) => {
+            let (low, high) = rest_bounds(grouped)?;
+            (Some(low), high)
+        }
+        None => (None, None),
+    };
+    Ok(RestColumns {
+        low,
+        high,
+        superset_low,
+        superset_high,
+    })
+}
+
+/// One block's rest, as the schema keeps it. Named rather than a four-tuple
+/// because three of the four are `Option<i64>` and nothing in a tuple says which
+/// is which.
+struct RestColumns {
+    low: i64,
+    high: Option<i64>,
+    superset_low: Option<i64>,
+    superset_high: Option<i64>,
+}
+
+/// A rest as a pair of columns. `None` for the top of an exact rest.
+fn rest_bounds(rest: Target<Duration>) -> Result<(i64, Option<i64>), StoreError> {
+    let seconds = |value: Duration| {
+        i64::try_from(value.as_seconds())
+            .map_err(|_| corrupt(&"a rest longer than the store can hold"))
+    };
+    match rest {
+        Target::Exactly(value) => Ok((seconds(value)?, None)),
+        range @ Target::Range { .. } => {
+            Ok((seconds(range.minimum())?, Some(seconds(range.maximum())?)))
+        }
+    }
+}
+
+/// One block's rest, from its four columns.
+///
+/// **`high` absent is one number, not a missing one**, and `ss_low` absent means
+/// the block rests the same however its work is grouped — which is not the same
+/// as resting for zero, and is why the superset pair is nullable rather than
+/// defaulted.
+fn block_rest(
+    low: i64,
+    high: Option<i64>,
+    superset_low: Option<i64>,
+    superset_high: Option<i64>,
+) -> Result<BlockRest, StoreError> {
+    Ok(BlockRest {
+        between_sets: rest_target(low, high)?,
+        after_superset: match superset_low {
+            Some(low) => Some(rest_target(low, superset_high)?),
+            None => None,
+        },
+    })
+}
+
+/// A stored rest, as the span the domain holds. `high` absent is an exact rest.
+fn rest_target(low: i64, high: Option<i64>) -> Result<Target<Duration>, StoreError> {
+    let seconds = |value: i64| {
+        u64::try_from(value)
+            .map(Duration::from_seconds)
+            .map_err(|_| corrupt(&"a negative rest"))
+    };
+    match high {
+        Some(high) => Target::between(seconds(low)?, seconds(high)?)
+            .ok_or_else(|| corrupt(&"a stored rest range that does not span")),
+        None => Ok(Target::Exactly(seconds(low)?)),
+    }
+}
+
+/// The stored pair of bounds, back as the span the domain holds.
+///
+/// **Two columns, one type.** The schema keeps `low` and `high` because that is
+/// what a range is queried by, and the domain keeps a minimum and an extent
+/// because that is what cannot be written down wrong. This is the boundary
+/// between them, and it is the one place the pair can fail to be a range — the
+/// column check should already have refused it, so reaching the error arm means
+/// the row is corrupt.
+fn scheme_reps(low: i64, high: i64) -> Result<Target<RepCount>, StoreError> {
+    Target::between(reps_from_storage(low)?, reps_from_storage(high)?)
+        .ok_or_else(|| corrupt(&"a stored rep range that does not span"))
 }
 
 fn reps_from_storage(reps: i64) -> Result<RepCount, StoreError> {
@@ -270,6 +364,12 @@ impl SqliteGenerationParameterStore {
 }
 
 impl GenerationParameterStore for SqliteGenerationParameterStore {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one row of thirty-odd columns, read once. Splitting it would \
+                  move the same list one level down and put the column names \
+                  further from the fields they fill"
+    )]
     async fn current(&self) -> Result<Option<(Timestamp, GenerationParameters)>, StoreError> {
         let Some(row) = sqlx::query!(
             r#"
@@ -287,6 +387,26 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                    reset1_drop_bp AS "reset1_drop_bp!: i64",
                    reset1_reclimb_grams AS "reset1_reclimb_grams!: i64",
                    reset2_drop_bp AS "reset2_drop_bp!: i64",
+                   rest_plyometric_low AS "rest_plyometric_low!: i64",
+                   rest_plyometric_high AS "rest_plyometric_high: i64",
+                   rest_plyometric_ss_low AS "rest_plyometric_ss_low: i64",
+                   rest_plyometric_ss_high AS "rest_plyometric_ss_high: i64",
+                   rest_power_low AS "rest_power_low!: i64",
+                   rest_power_high AS "rest_power_high: i64",
+                   rest_power_ss_low AS "rest_power_ss_low: i64",
+                   rest_power_ss_high AS "rest_power_ss_high: i64",
+                   rest_strength_low AS "rest_strength_low!: i64",
+                   rest_strength_high AS "rest_strength_high: i64",
+                   rest_strength_ss_low AS "rest_strength_ss_low: i64",
+                   rest_strength_ss_high AS "rest_strength_ss_high: i64",
+                   rest_hypertrophy_low AS "rest_hypertrophy_low!: i64",
+                   rest_hypertrophy_high AS "rest_hypertrophy_high: i64",
+                   rest_hypertrophy_ss_low AS "rest_hypertrophy_ss_low: i64",
+                   rest_hypertrophy_ss_high AS "rest_hypertrophy_ss_high: i64",
+                   rest_mobility_low AS "rest_mobility_low!: i64",
+                   rest_mobility_high AS "rest_mobility_high: i64",
+                   rest_mobility_ss_low AS "rest_mobility_ss_low: i64",
+                   rest_mobility_ss_high AS "rest_mobility_ss_high: i64",
                    reset2_reclimb_grams AS "reset2_reclimb_grams!: i64"
             FROM generation_parameters
             ORDER BY authored_at DESC
@@ -313,6 +433,38 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         Ok(Some((
             authored_at,
             GenerationParameters {
+                rest: RestScheme {
+                    plyometric: block_rest(
+                        row.rest_plyometric_low,
+                        row.rest_plyometric_high,
+                        row.rest_plyometric_ss_low,
+                        row.rest_plyometric_ss_high,
+                    )?,
+                    power: block_rest(
+                        row.rest_power_low,
+                        row.rest_power_high,
+                        row.rest_power_ss_low,
+                        row.rest_power_ss_high,
+                    )?,
+                    strength: block_rest(
+                        row.rest_strength_low,
+                        row.rest_strength_high,
+                        row.rest_strength_ss_low,
+                        row.rest_strength_ss_high,
+                    )?,
+                    hypertrophy: block_rest(
+                        row.rest_hypertrophy_low,
+                        row.rest_hypertrophy_high,
+                        row.rest_hypertrophy_ss_low,
+                        row.rest_hypertrophy_ss_high,
+                    )?,
+                    mobility: block_rest(
+                        row.rest_mobility_low,
+                        row.rest_mobility_high,
+                        row.rest_mobility_ss_low,
+                        row.rest_mobility_ss_high,
+                    )?,
+                },
                 warmup,
                 back_off: PerRole {
                     light: light_back_off,
@@ -326,13 +478,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                     heavy: heavy_reps,
                 },
                 strength: domain::prescription::AccessoryScheme {
-                    low: reps_from_storage(row.strength_low)?,
-                    high: reps_from_storage(row.strength_high)?,
+                    reps: scheme_reps(row.strength_low, row.strength_high)?,
                     sets: reps_from_storage(row.strength_sets)?,
                 },
                 hypertrophy: domain::prescription::AccessoryScheme {
-                    low: reps_from_storage(row.hypertrophy_low)?,
-                    high: reps_from_storage(row.hypertrophy_high)?,
+                    reps: scheme_reps(row.hypertrophy_low, row.hypertrophy_high)?,
                     sets: reps_from_storage(row.hypertrophy_sets)?,
                 },
                 static_hold: domain::gym::Duration::from_seconds(
@@ -352,6 +502,12 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         )))
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one row of thirty-odd columns, read once. Splitting it would \
+                  move the same list one level down and put the column names \
+                  further from the fields they fill"
+    )]
     async fn author(
         &self,
         authored_at: Timestamp,
@@ -367,14 +523,19 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         let light_of_heavy = bp_for_storage(parameters.light_of_heavy);
         let ladder_climb = grams_for_storage(parameters.ladder_climb_per_week)?;
         let entry_drop = bp_for_storage(parameters.entry_drop);
-        let strength_low = i64::from(parameters.strength.low.as_u32());
-        let strength_high = i64::from(parameters.strength.high.as_u32());
+        let strength_low = i64::from(parameters.strength.reps.minimum().as_u32());
+        let strength_high = i64::from(parameters.strength.reps.maximum().as_u32());
         let strength_sets = i64::from(parameters.strength.sets.as_u32());
-        let hypertrophy_low = i64::from(parameters.hypertrophy.low.as_u32());
-        let hypertrophy_high = i64::from(parameters.hypertrophy.high.as_u32());
+        let hypertrophy_low = i64::from(parameters.hypertrophy.reps.minimum().as_u32());
+        let hypertrophy_high = i64::from(parameters.hypertrophy.reps.maximum().as_u32());
         let hypertrophy_sets = i64::from(parameters.hypertrophy.sets.as_u32());
         let static_hold = i64::try_from(parameters.static_hold.as_seconds())
             .map_err(|_| corrupt(&"a static hold longer than the store can hold"))?;
+        let rest_plyometric = rest_columns(parameters.rest.plyometric)?;
+        let rest_power = rest_columns(parameters.rest.power)?;
+        let rest_strength = rest_columns(parameters.rest.strength)?;
+        let rest_hypertrophy = rest_columns(parameters.rest.hypertrophy)?;
+        let rest_mobility = rest_columns(parameters.rest.mobility)?;
         let reset1_drop = bp_for_storage(parameters.first_reset.drop);
         let reset1_reclimb = grams_for_storage(parameters.first_reset.reclimb_per_week)?;
         let reset2_drop = bp_for_storage(parameters.second_reset.drop);
@@ -389,9 +550,15 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                 hypertrophy_low, hypertrophy_high, hypertrophy_sets,
                 static_hold_seconds,
                 reset1_drop_bp, reset1_reclimb_grams,
-                reset2_drop_bp, reset2_reclimb_grams
+                reset2_drop_bp, reset2_reclimb_grams,
+                rest_plyometric_low, rest_plyometric_high, rest_plyometric_ss_low, rest_plyometric_ss_high,
+                rest_power_low, rest_power_high, rest_power_ss_low, rest_power_ss_high,
+                rest_strength_low, rest_strength_high, rest_strength_ss_low, rest_strength_ss_high,
+                rest_hypertrophy_low, rest_hypertrophy_high, rest_hypertrophy_ss_low, rest_hypertrophy_ss_high,
+                rest_mobility_low, rest_mobility_high, rest_mobility_ss_low, rest_mobility_ss_high
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
             stamp,
             light_of_heavy,
@@ -407,7 +574,27 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             reset1_drop,
             reset1_reclimb,
             reset2_drop,
-            reset2_reclimb
+            reset2_reclimb,
+            rest_plyometric.low,
+            rest_plyometric.high,
+            rest_plyometric.superset_low,
+            rest_plyometric.superset_high,
+            rest_power.low,
+            rest_power.high,
+            rest_power.superset_low,
+            rest_power.superset_high,
+            rest_strength.low,
+            rest_strength.high,
+            rest_strength.superset_low,
+            rest_strength.superset_high,
+            rest_hypertrophy.low,
+            rest_hypertrophy.high,
+            rest_hypertrophy.superset_low,
+            rest_hypertrophy.superset_high,
+            rest_mobility.low,
+            rest_mobility.high,
+            rest_mobility.superset_low,
+            rest_mobility.superset_high
         )
         .execute(&mut *tx)
         .await

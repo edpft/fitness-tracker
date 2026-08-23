@@ -1,0 +1,434 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_climb_grams AS \"ladder_climb_grams!: i64\",\n                   entry_drop_bp AS \"entry_drop_bp!: i64\",\n                   strength_low AS \"strength_low!: i64\",\n                   strength_high AS \"strength_high!: i64\",\n                   strength_sets AS \"strength_sets!: i64\",\n                   hypertrophy_low AS \"hypertrophy_low!: i64\",\n                   hypertrophy_high AS \"hypertrophy_high!: i64\",\n                   hypertrophy_sets AS \"hypertrophy_sets!: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\",\n                   reset1_drop_bp AS \"reset1_drop_bp!: i64\",\n                   reset1_reclimb_grams AS \"reset1_reclimb_grams!: i64\",\n                   reset2_drop_bp AS \"reset2_drop_bp!: i64\",\n                   rest_plyometric_low AS \"rest_plyometric_low!: i64\",\n                   rest_plyometric_high AS \"rest_plyometric_high: i64\",\n                   rest_plyometric_ss_low AS \"rest_plyometric_ss_low: i64\",\n                   rest_plyometric_ss_high AS \"rest_plyometric_ss_high: i64\",\n                   rest_power_low AS \"rest_power_low!: i64\",\n                   rest_power_high AS \"rest_power_high: i64\",\n                   rest_power_ss_low AS \"rest_power_ss_low: i64\",\n                   rest_power_ss_high AS \"rest_power_ss_high: i64\",\n                   rest_strength_low AS \"rest_strength_low!: i64\",\n                   rest_strength_high AS \"rest_strength_high: i64\",\n                   rest_strength_ss_low AS \"rest_strength_ss_low: i64\",\n                   rest_strength_ss_high AS \"rest_strength_ss_high: i64\",\n                   rest_hypertrophy_low AS \"rest_hypertrophy_low!: i64\",\n                   rest_hypertrophy_high AS \"rest_hypertrophy_high: i64\",\n                   rest_hypertrophy_ss_low AS \"rest_hypertrophy_ss_low: i64\",\n                   rest_hypertrophy_ss_high AS \"rest_hypertrophy_ss_high: i64\",\n                   rest_mobility_low AS \"rest_mobility_low!: i64\",\n                   rest_mobility_high AS \"rest_mobility_high: i64\",\n                   rest_mobility_ss_low AS \"rest_mobility_ss_low: i64\",\n                   rest_mobility_ss_high AS \"rest_mobility_ss_high: i64\",\n                   reset2_reclimb_grams AS \"reset2_reclimb_grams!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "authored_at"
+          }
+        }
+      },
+      {
+        "name": "light_of_heavy_bp!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "light_of_heavy_bp"
+          }
+        }
+      },
+      {
+        "name": "ladder_climb_grams!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "ladder_climb_grams"
+          }
+        }
+      },
+      {
+        "name": "entry_drop_bp!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "entry_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "strength_low!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_low"
+          }
+        }
+      },
+      {
+        "name": "strength_high!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_high"
+          }
+        }
+      },
+      {
+        "name": "strength_sets!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "strength_sets"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_low!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_low"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_high!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_high"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_sets!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "hypertrophy_sets"
+          }
+        }
+      },
+      {
+        "name": "static_hold_seconds!: i64",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "static_hold_seconds"
+          }
+        }
+      },
+      {
+        "name": "reset1_drop_bp!: i64",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset1_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "reset1_reclimb_grams!: i64",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset1_reclimb_grams"
+          }
+        }
+      },
+      {
+        "name": "reset2_drop_bp!: i64",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset2_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "rest_plyometric_low!: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_plyometric_low"
+          }
+        }
+      },
+      {
+        "name": "rest_plyometric_high: i64",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_plyometric_high"
+          }
+        }
+      },
+      {
+        "name": "rest_plyometric_ss_low: i64",
+        "ordinal": 16,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_plyometric_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_plyometric_ss_high: i64",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_plyometric_ss_high"
+          }
+        }
+      },
+      {
+        "name": "rest_power_low!: i64",
+        "ordinal": 18,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_power_low"
+          }
+        }
+      },
+      {
+        "name": "rest_power_high: i64",
+        "ordinal": 19,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_power_high"
+          }
+        }
+      },
+      {
+        "name": "rest_power_ss_low: i64",
+        "ordinal": 20,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_power_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_power_ss_high: i64",
+        "ordinal": 21,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_power_ss_high"
+          }
+        }
+      },
+      {
+        "name": "rest_strength_low!: i64",
+        "ordinal": 22,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_strength_low"
+          }
+        }
+      },
+      {
+        "name": "rest_strength_high: i64",
+        "ordinal": 23,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_strength_high"
+          }
+        }
+      },
+      {
+        "name": "rest_strength_ss_low: i64",
+        "ordinal": 24,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_strength_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_strength_ss_high: i64",
+        "ordinal": 25,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_strength_ss_high"
+          }
+        }
+      },
+      {
+        "name": "rest_hypertrophy_low!: i64",
+        "ordinal": 26,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_hypertrophy_low"
+          }
+        }
+      },
+      {
+        "name": "rest_hypertrophy_high: i64",
+        "ordinal": 27,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_hypertrophy_high"
+          }
+        }
+      },
+      {
+        "name": "rest_hypertrophy_ss_low: i64",
+        "ordinal": 28,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_hypertrophy_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_hypertrophy_ss_high: i64",
+        "ordinal": 29,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_hypertrophy_ss_high"
+          }
+        }
+      },
+      {
+        "name": "rest_mobility_low!: i64",
+        "ordinal": 30,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_mobility_low"
+          }
+        }
+      },
+      {
+        "name": "rest_mobility_high: i64",
+        "ordinal": 31,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_mobility_high"
+          }
+        }
+      },
+      {
+        "name": "rest_mobility_ss_low: i64",
+        "ordinal": 32,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_mobility_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_mobility_ss_high: i64",
+        "ordinal": 33,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "rest_mobility_ss_high"
+          }
+        }
+      },
+      {
+        "name": "reset2_reclimb_grams!: i64",
+        "ordinal": 34,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "generation_parameters",
+            "name": "reset2_reclimb_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "1b33ab25852581ab77108b917695dca37458b0eae6d8e50612bf43b07e23a2af"
+}

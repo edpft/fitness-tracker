@@ -45,9 +45,10 @@ fn target() -> impl Strategy<Value = Target<RepCount>> {
     prop_oneof![
         reps().prop_map(Target::Exactly),
         (1_u32..20, 1_u32..10).prop_filter_map("a spanning range of rep counts", |(low, span)| {
-            let low = RepCount::new(low).ok()?;
-            let high = RepCount::new(low.as_u32() + span).ok()?;
-            Target::range(low, high).ok()
+            Some(Target::spanning(
+                RepCount::new(low).ok()?,
+                RepCount::new(span).ok()?,
+            ))
         }),
     ]
 }

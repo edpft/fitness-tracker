@@ -11,12 +11,16 @@ pub mod lock;
 pub mod programme;
 pub mod store;
 
-pub use hevy::{HevyWorkoutEvents, HevyWorkoutTranslator, PageCount, PageNumber, RetryPolicy};
+pub use hevy::{
+    HevyRoutinePreview, HevyRoutines, HevyWorkoutEvents, HevyWorkoutTranslator, PageCount,
+    PageNumber, RetryPolicy,
+};
 pub use lock::FileRunLock;
 pub use programme::{Document, DocumentError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
     SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
 };

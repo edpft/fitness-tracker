@@ -19,6 +19,7 @@
 
 pub mod anchor;
 pub mod block;
+pub mod delivery;
 pub mod ladder;
 pub mod linear;
 pub mod parameters;
@@ -27,6 +28,7 @@ pub mod programme;
 pub mod progression;
 pub mod project;
 pub mod repmax;
+pub mod rest;
 pub mod schedule;
 pub mod shape;
 pub mod steps;
@@ -41,6 +43,7 @@ pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenan
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
 pub use block::{BlockWeek, EntryTest, InvalidBlock, Periodised, Phase, WeekPlan};
+pub use delivery::{DeliveryReference, DestinationName, InvalidDelivery, SessionOrdinal};
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,
@@ -53,6 +56,7 @@ pub use programme::{InconsistentProgramme, Periodisation, Programme, check_prima
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
+pub use rest::{BlockRest, RestScheme, rested};
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
     SessionRole, Skip, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
@@ -66,6 +70,6 @@ pub use succession::{
     InvalidProgrammeName, ProgrammeName, ProgrammeWindow, RECENT_WEEKS, is_recent_enough,
     weeks_between,
 };
-pub use target::{EmptyRange, Prescribed, PrescribedSet, Target};
+pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
 pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};

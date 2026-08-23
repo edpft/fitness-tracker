@@ -153,6 +153,25 @@ light_of_heavy = "85%"
 # sub-table — TOML puts a bare key under whichever table header precedes it.
 static_hold = "60s"
 
+# How long to rest between sets, block by block. Zero between the members of a
+# superset is not here: that is what a superset is, not a value to choose.
+[parameters.rest.plyometric]
+between_sets = "30s"
+
+[parameters.rest.power]
+between_sets = "90s"
+
+[parameters.rest.strength]
+between_sets   = "120s-180s"
+after_superset = "90s-150s"
+
+[parameters.rest.hypertrophy]
+between_sets   = "120s-180s"
+after_superset = "90s-150s"
+
+[parameters.rest.mobility]
+between_sets = "0s"
+
 # The ladder: what the heavy top set adds each climbing week.
 #
 # **There is no endpoint and no opening.** The climb runs at its stated rate

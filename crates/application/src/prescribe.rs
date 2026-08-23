@@ -23,7 +23,7 @@ use domain::{
         Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, RECENT_WEEKS,
         SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
-        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
+        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max, rested,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -200,8 +200,16 @@ where
         }
 
         let items = NonEmpty::new(items).map_err(|_| PrescriptionError::NothingDerivable)?;
+
+        // **Rest is filled in over the assembled session, not slot by slot.**
+        // What a set rests for depends on which block it is in and on whether
+        // another member of its item follows it, and the second of those is not
+        // known while a slot is still being derived — the grouping happens
+        // above.
+        let shape = rested(&WorkoutShape::new(items), &parameters.rest);
+
         let workout = PrescribedWorkout::new(
-            WorkoutShape::new(items),
+            shape,
             date,
             role,
             recorded,
@@ -985,10 +993,8 @@ fn one_exercise(
     };
     let scheme = scheme_for(parameters, slot.block());
     let load = progressed_load(parameters, exercise, scheme, last).map_err(underivable)?;
-    let target = Target::range(scheme.low, scheme.high)
-        .map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
     let sets: Vec<_> = (0..scheme.sets.as_u32())
-        .map(|_| PrescribedSet::fixed(load, target))
+        .map(|_| PrescribedSet::fixed(load, scheme.reps))
         .collect();
 
     let sets = NonEmpty::new(sets).map_err(|_| underivable(UnderivableReason::NoWorkingSet))?;
@@ -1021,7 +1027,7 @@ fn progressed_load(
     let reached_top = last.sets.iter().all(|set| {
         set.outcome
             .completed()
-            .is_some_and(|reps| *reps >= scheme.high)
+            .is_some_and(|reps| *reps >= scheme.reps.maximum())
     });
 
     if !reached_top {

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT variant AS \"variant!: String\", load_kind AS \"load_kind: String\",\n                   load_grams AS \"load_grams: i64\", target_low AS \"target_low: i64\",\n                   target_high AS \"target_high: i64\", effort AS \"effort: String\",\n                   warmup AS \"warmup!: i64\"\n            FROM prescribed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position ASC\n            ",
+  "query": "\n            SELECT variant AS \"variant!: String\", load_kind AS \"load_kind: String\",\n                   load_grams AS \"load_grams: i64\", target_low AS \"target_low: i64\",\n                   target_high AS \"target_high: i64\", effort AS \"effort: String\",\n                   rest_low_seconds AS \"rest_low_seconds: i64\",\n                   rest_high_seconds AS \"rest_high_seconds: i64\",\n                   warmup AS \"warmup!: i64\"\n            FROM prescribed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -70,8 +70,30 @@
         }
       },
       {
-        "name": "warmup!: i64",
+        "name": "rest_low_seconds: i64",
         "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_set",
+            "name": "rest_low_seconds"
+          }
+        }
+      },
+      {
+        "name": "rest_high_seconds: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_set",
+            "name": "rest_high_seconds"
+          }
+        }
+      },
+      {
+        "name": "warmup!: i64",
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -91,8 +113,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "0504c20ccede234ff0f76a93397f9c80091ab7064e25a0df620f64152c6b80ef"
+  "hash": "0e49d3824b6adbe168fbefd88c3589112a5de2a7dfdde5503a905c868c02d123"
 }

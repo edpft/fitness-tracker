@@ -182,17 +182,38 @@ proptest! {
         prop_assert!(WeekIndex::new(0).is_err());
     }
 
-    /// A range must span. Equal bounds are `Exactly` and there is no third state.
+    /// § 28: an arbitrary instance is valid. **There is no invalid one to
+    /// generate** — a range is a minimum and a strictly positive extent, so
+    /// every pair of arguments produces a range that spans, and the constructor
+    /// has no failure to report.
+    ///
+    /// This used to assert that inverted bounds were *rejected*. They are now
+    /// unrepresentable, so what is left to check is that the derived top is
+    /// genuinely above the bottom for every input.
     #[test]
-    fn a_range_never_holds_a_low_bound_at_or_above_its_high(low in 1_u32..100, high in 1_u32..100) {
+    fn a_range_built_from_any_minimum_and_extent_spans(minimum in 1_u32..100, extent in 1_u32..100) {
+        let (Ok(minimum), Ok(extent)) = (RepCount::new(minimum), RepCount::new(extent)) else {
+            panic!("one and above is a rep count")
+        };
+        let target = Target::spanning(minimum, extent);
+
+        prop_assert!(target.minimum() < target.maximum());
+        prop_assert_eq!(target.minimum(), minimum);
+    }
+
+    /// Reading a pair of bounds back is the one fallible direction, and it
+    /// refuses exactly the pairs that are not ranges.
+    #[test]
+    fn a_pair_of_bounds_is_a_range_only_when_it_spans(low in 1_u32..100, high in 1_u32..100) {
         let (Ok(low_reps), Ok(high_reps)) = (RepCount::new(low), RepCount::new(high)) else {
             panic!("one and above is a rep count")
         };
-        let built = Target::range(low_reps, high_reps);
-        prop_assert_eq!(built.is_ok(), low < high);
+        let built = Target::between(low_reps, high_reps);
+        prop_assert_eq!(built.is_some(), low < high);
 
-        if let Ok(Target::Range { low: l, high: h }) = built {
-            prop_assert!(l < h);
+        if let Some(target) = built {
+            prop_assert_eq!(target.minimum(), low_reps);
+            prop_assert_eq!(target.maximum(), high_reps);
         }
     }
 
@@ -204,9 +225,11 @@ proptest! {
         let (Ok(low_reps), Ok(high_reps)) = (RepCount::new(low), RepCount::new(high)) else {
             panic!("one and above is a rep count")
         };
-        let Ok(target) = Target::range(low_reps, high_reps) else {
-            panic!("a positive span is a range")
+        let Ok(span_reps) = RepCount::new(span) else {
+            panic!("one and above is a rep count")
         };
+        let target = Target::spanning(low_reps, span_reps);
+        prop_assert_eq!(target.maximum(), high_reps);
         let Ok(performed) = RepCount::new(low + offset) else {
             panic!("one and above is a rep count")
         };

@@ -258,3 +258,46 @@ pub enum PrescriptionError {
     #[error("no operator time zone is declared, so no date can be placed in a block")]
     MissingTimeZone,
 }
+
+/// Why a prescription could not be put where the operator trains from.
+///
+/// Separate from [`PrescriptionError`] because the two fail for unrelated
+/// reasons and an operator acts on them differently: a session that cannot be
+/// *derived* is a programme or a record problem, and one that cannot be
+/// *delivered* is a network or a credential problem with a perfectly good
+/// prescription sitting in the store behind it. § 36 turns on that distinction —
+/// the destination being unreachable degrades the system and never fails it.
+#[derive(Debug, thiserror::Error)]
+pub enum DeliveryError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+
+    /// Nothing has been issued for the date, so there is nothing to deliver.
+    ///
+    /// Deliberately not "so I issued one": deriving a session is a decision that
+    /// advances a ladder and writes to the record, and doing it as a side effect
+    /// of a delivery would hide it.
+    #[error("nothing is issued for {date}, so there is nothing to deliver")]
+    NothingIssued { date: Date },
+
+    /// The prescription is issued but its programme is gone, so the session
+    /// cannot be placed in a block. Corrupt rather than ordinary.
+    #[error("the prescription for {date} names a programme that is not in the store")]
+    NoProgramme { date: Date },
+
+    /// The destination is unreachable, refused our credential, or rejected what
+    /// we sent it.
+    #[error("{destination} would not take the session: {message}")]
+    Unreachable {
+        destination: String,
+        message: String,
+    },
+
+    /// The destination answered, but with something we cannot read as a
+    /// delivery — no identifier, or one we cannot use.
+    #[error("{destination} accepted the session but did not say what it called it: {message}")]
+    Unidentifiable {
+        destination: String,
+        message: String,
+    },
+}

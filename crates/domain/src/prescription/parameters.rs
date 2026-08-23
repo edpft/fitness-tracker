@@ -19,7 +19,7 @@ use crate::gym::{
     exercise::{Exercise, Implement},
 };
 
-use super::steps::LoadSteps;
+use super::{steps::LoadSteps, target::Target};
 
 /// Why a percentage could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -298,8 +298,11 @@ pub struct BackOff {
 /// nothing yet needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessoryScheme {
-    pub low: RepCount,
-    pub high: RepCount,
+    /// The rep target, as a target. **Not two loose bounds**: a `low` and a
+    /// `high` beside each other can be written down inverted, and the check that
+    /// would catch it belongs in the type rather than at every call site
+    /// (§ 24). See [`Target`].
+    pub reps: Target<RepCount>,
     pub sets: RepCount,
 }
 
@@ -336,6 +339,12 @@ pub struct GenerationParameters {
     pub strength: AccessoryScheme,
     /// Every hypertrophy slot.
     pub hypertrophy: AccessoryScheme,
+    /// How long to rest, block by block.
+    ///
+    /// § 14 like everything else here: only the current value is required,
+    /// because what it produced is written onto the sets of the prescription
+    /// that used it.
+    pub rest: super::rest::RestScheme,
     /// How long a static hold is held for.
     ///
     /// The mobility work does not progress — it is held, and the same length
