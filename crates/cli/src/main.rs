@@ -157,7 +157,7 @@ fn prescribe_command() -> ClapCommand {
         )
 }
 
-/// Author the programme.
+/// Add the programme, or report the one in force.
 /// Prepare a machine.
 ///
 /// **First in the list because it is first in the order.** An operator who has
@@ -221,13 +221,13 @@ fn deliver_command() -> ClapCommand {
 
 fn programme_command() -> ClapCommand {
     ClapCommand::new("programme")
-        .about("Author the programme, or report the one in force")
-        // Global across `author` and `show`, so `--timezone` may be typed on
+        .about("Add a programme, or report the one in force")
+        // Global across `add` and `show`, so `--timezone` may be typed on
         // either side of the subcommand. Both need it and neither has a default.
         .arg(timezone_argument().global(true))
         .subcommand_required(true)
         .subcommand(
-            ClapCommand::new("author")
+            ClapCommand::new("add")
                 .about("Read a programme document and store it, superseding the previous one")
                 .arg(
                     Arg::new("path")
@@ -561,8 +561,8 @@ async fn authored_command(
                 Err(error) => return Some(Err(error.into())),
             };
             Some(match sub.subcommand() {
-                Some(("author", author)) => match author.get_one::<PathBuf>("path") {
-                    Some(path) => prescribing::author(database, &zone, path).await,
+                Some(("add", add)) => match add.get_one::<PathBuf>("path") {
+                    Some(path) => prescribing::add(database, &zone, path).await,
                     None => Err(Failure::message("no document given", exit::USAGE)),
                 },
                 Some(("show", show)) => {

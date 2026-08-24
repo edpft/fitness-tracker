@@ -886,5 +886,5 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     }
 
     println!();
-    println!("next: author a programme — fitness programme author <document>");
+    println!("next: add a programme — fitness programme add <document>");
 }

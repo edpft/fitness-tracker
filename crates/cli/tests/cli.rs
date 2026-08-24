@@ -507,7 +507,7 @@ fn init_creates_the_store_and_the_settings() {
     // What is left to do is the part an operator cannot discover by succeeding.
     let report = stdout(&output);
     assert!(report.contains("HEVY_API_KEY"), "{report}");
-    assert!(report.contains("programme author"), "{report}");
+    assert!(report.contains("programme add"), "{report}");
 }
 
 /// What `init` writes is what the next invocation reads. The two halves of the
