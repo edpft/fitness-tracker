@@ -21,6 +21,7 @@ clap.workspace = true
 jiff.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+rpassword.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

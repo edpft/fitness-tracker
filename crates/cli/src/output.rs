@@ -848,26 +848,43 @@ fn unexpressed(unexpressed: &[application::Unexpressed]) {
 /// "done" leaves an operator to discover the credential and the programme by
 /// running something else and failing.
 pub fn prepared(prepared: &crate::setup::Prepared) {
+    use crate::setup::CredentialOutcome;
+
     println!("ready to use");
     println!("  settings  {}", prepared.settings_path.display());
     println!("  store     {}", prepared.database.display());
     println!("  time zone {}", prepared.zone);
     println!();
 
-    let mut outstanding = Vec::new();
-    if !prepared.credential_set {
-        for source in &crate::catalogue::SOURCES {
-            outstanding.push(format!(
-                "set {} — get one from {}",
-                source.api_key_variable(),
-                source.credential_url()
-            ));
+    // **A source is something the tool can connect to, not something it needs.**
+    // A programme can be authored and a session prescribed with no source at
+    // all — what a key buys is reading the performed record and delivering to
+    // the phone. Listing them as obligations made one vendor look mandatory.
+    println!("sources:");
+    for (source, outcome) in &prepared.credentials {
+        let said = match outcome {
+            CredentialOutcome::Stored => "connected — key stored",
+            CredentialOutcome::InEnvironment => "connected — key from the environment",
+            CredentialOutcome::Outstanding => {
+                "not connected — needed to read workouts and deliver sessions"
+            }
+        };
+        println!("  {source:<9} {said}");
+    }
+
+    for (source, outcome) in &prepared.credentials {
+        if *outcome == CredentialOutcome::Outstanding
+            && let Some(known) = crate::catalogue::source(source)
+        {
+            println!(
+                "            connect it later with `fitness init --force`, or set {} — \
+                 keys come from {}",
+                known.api_key_variable(),
+                known.credential_url()
+            );
         }
     }
-    outstanding.push("author a programme: fitness programme author <document>".to_owned());
 
-    println!("still to do:");
-    for step in outstanding {
-        println!("  {step}");
-    }
+    println!();
+    println!("next: author a programme — fitness programme author <document>");
 }
