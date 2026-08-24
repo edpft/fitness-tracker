@@ -18,7 +18,10 @@ use domain::gym::{
     Load, PerformedExercise, SetKind,
     exercise::{DurationExercise, Exercise, RepsExercise},
 };
-use infrastructure::hevy::mapping::{self, LoadReading};
+use infrastructure::hevy::{
+    mapping::{self, LoadReading},
+    payload,
+};
 use support::{corpus, derived};
 
 /// Scenario 1. The counts the model of record produced on paper, reproduced by
@@ -98,6 +101,127 @@ fn a_stand_in_template_still_reads_as_the_exercise_it_names() {
         };
         assert_eq!(mapped.exercise, expected);
     }
+}
+
+/// The relative axis is exactly the movements Hevy also names in an assisted
+/// form, and nothing else.
+///
+/// The module doc says `Relative` is for the pull-up, the chin-up and the dip,
+/// because those are the movements the source sells twice — once plain and once
+/// assisted — so one axis has to run through zero in both directions for the
+/// pair to be one series. Every other template is `Absolute`, where the number
+/// is external load.
+///
+/// **Asserted because the claim it replaces went unchecked and was false.** The
+/// doc used to say `Absolute` meant no unloaded version of the movement existed
+/// and offered the single-leg Romanian deadlift as a `Relative` specimen; it has
+/// been `Absolute` since the module's first commit, and nothing noticed. A
+/// sentence about a hundred-and-forty-entry table needs a test or it is a wish.
+#[test]
+fn the_relative_axis_is_the_assisted_family_and_nothing_else() {
+    let Ok(templates) = corpus::landed_template_ids() else {
+        panic!("the corpus fixture loads")
+    };
+
+    let mut relative: Vec<(&str, LoadReading)> = Vec::new();
+    for template in &templates {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} is in the corpus and so must resolve")
+        };
+        if mapped.load != LoadReading::Absolute {
+            relative.push((template.as_str(), mapped.load));
+        }
+    }
+    relative.sort_unstable_by_key(|(template, _)| *template);
+
+    // Six in the corpus; `Neutral Grip Pull Up` is the seventh and has never
+    // been performed, so `the_newly_created_templates_resolve` covers it.
+    let expected = [
+        ("1B2B1E7C", LoadReading::Relative),        // Pull Up
+        ("29083183", LoadReading::Relative),        // Chin Up
+        ("2C37EC5E", LoadReading::RelativeNegated), // Pull Up (Assisted)
+        ("56808FD2", LoadReading::RelativeNegated), // Pull Up (Band)
+        ("6FCD7755", LoadReading::Relative),        // Chest Dip
+        ("E9E4089F", LoadReading::RelativeNegated), // Chest Dip (Assisted)
+    ];
+    assert_eq!(relative, expected, "the relative family the corpus covers");
+
+    for (template, _) in relative {
+        let Some(mapped) = mapping::lookup(template) else {
+            panic!("{template} resolved a moment ago")
+        };
+        assert!(
+            matches!(
+                mapped.exercise,
+                Exercise::Reps(
+                    RepsExercise::PullUp | RepsExercise::ChinUp | RepsExercise::ChestDip
+                )
+            ),
+            "{template} is on the relative axis but is not a pull-up, chin-up or dip",
+        );
+    }
+}
+
+/// A zero load is a real observation on both axes, and the corpus says how many
+/// of each it holds.
+///
+/// The two readings disagree about what a zero *means* — no external load on an
+/// absolute template, no assistance on a negated one — and agree that it is a
+/// set that happened. Neither refuses, which is the point: `Kg::NONE` is
+/// documented as an observation rather than an absence, and 43 sets of the
+/// operator's would be thrown away if it were not.
+///
+/// **This pins the number the module doc used to get wrong.** It claimed the
+/// table was right if and only if seven of the 93 zeros refused. None of them
+/// ever has.
+#[test]
+fn a_zero_load_translates_on_both_axes() {
+    let Ok(records) = corpus::records() else {
+        panic!("the corpus fixture loads")
+    };
+
+    let mut absolute = 0_usize;
+    let mut negated = 0_usize;
+    let mut relative = 0_usize;
+
+    for record in &records {
+        let Ok(envelope) = payload::WorkoutEnvelope::read(record.payload().as_bytes()) else {
+            // The `deleted` record carries no workout.
+            continue;
+        };
+        let Some(workout) = envelope.workout else {
+            continue;
+        };
+        for entry in &workout.exercises {
+            let Some(mapped) = mapping::lookup(&entry.exercise_template_id) else {
+                panic!(
+                    "{} is in the corpus and so must resolve",
+                    entry.exercise_template_id
+                )
+            };
+            for set in &entry.sets {
+                if payload::number(set.weight_kg) != Some("0") {
+                    continue;
+                }
+                match mapped.load {
+                    LoadReading::Absolute => absolute += 1,
+                    LoadReading::RelativeNegated => negated += 1,
+                    LoadReading::Relative => relative += 1,
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        absolute, 43,
+        "zeros on an absolute template: no external load"
+    );
+    assert_eq!(negated, 50, "zeros on an assisted template: no assistance");
+    assert_eq!(
+        relative, 0,
+        "a plain relative template records no bare zero"
+    );
+    assert_eq!(absolute + negated + relative, 93, "zeros in the corpus");
 }
 
 /// The four exercises created on 2026-08-20 resolve to themselves.
