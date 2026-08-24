@@ -27,9 +27,10 @@
 //! - **Config** is what the operator states: the zone they train in. It is
 //!   hand-edited, backed up with dotfiles, and reproducible.
 //!
-//! Credentials are in neither. They stay in the environment (§ 35), which is
-//! what [`crate::catalogue`] already requires and what keeps a key out of a file
-//! that invites being committed.
+//! - **Credentials** sit beside the settings, in a file of their own that is
+//!   created owner-only. § 35 allows a key in local config; what it must not
+//!   share is the file an operator keeps with their dotfiles. See
+//!   [`infrastructure::credentials`].
 
 use std::{
     ffi::OsString,

@@ -64,6 +64,10 @@ sqlx = { version = "0.9.0", default-features = false, features = [
   "macros",
 ] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
+# Reading a secret without echoing it. A prompted key never reaches argv, so
+# the rule against an `--api-key` flag is untouched; this is what makes the
+# prompt no worse than the flag it replaces.
+rpassword = "7.5.4"
 
 # Test-only.
 proptest = "1.11.0"

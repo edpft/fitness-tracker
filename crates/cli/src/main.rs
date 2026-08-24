@@ -182,6 +182,16 @@ fn init_command() -> ClapCommand {
                 .action(ArgAction::SetTrue)
                 .help("Replace an existing settings file. It is hand-edited, so this refuses by default"),
         )
+        .arg(
+            Arg::new("api-key-stdin")
+                .long("api-key-stdin")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Read the source's API key from standard input, for piping from a \
+                     password manager. There is no flag to pass it directly: a secret in \
+                     argv lands in shell history and in `ps` output",
+                ),
+        )
 }
 
 /// Put an issued session where the operator trains from.
@@ -408,6 +418,7 @@ fn run(matches: &ArgMatches) -> Result<(), Failure> {
 /// intent.
 struct Locations {
     settings: infrastructure::Settings,
+    credentials: infrastructure::Credentials,
     /// Named even where it could not be resolved, so a message can say what to
     /// create.
     settings_path: PathBuf,
@@ -431,6 +442,11 @@ fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
     let settings = match resolved.as_deref() {
         Some(path) => infrastructure::Settings::read(path).map_err(config::ConfigError::from)?,
         None => infrastructure::Settings::default(),
+    };
+    let credentials = match resolved.as_deref() {
+        Some(path) => infrastructure::Credentials::read(&infrastructure::credentials::beside(path))
+            .map_err(config::ConfigError::from)?,
+        None => infrastructure::Credentials::default(),
     };
 
     // The default store is resolved only if nothing else supplied one, so a
@@ -456,6 +472,7 @@ fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
 
     Ok(Locations {
         settings,
+        credentials,
         settings_path: resolved.unwrap_or_else(|| PathBuf::from("the settings file")),
         database,
     })
@@ -471,6 +488,7 @@ async fn authored_command(
     name: &str,
     sub: &ArgMatches,
     settings: &infrastructure::Settings,
+    credentials: &infrastructure::Credentials,
     settings_path: &Path,
     database: &Path,
 ) -> Option<Result<(), Failure>> {
@@ -491,6 +509,7 @@ async fn authored_command(
                 database,
                 sub.get_one::<String>("timezone").map(String::as_str),
                 sub.get_flag("force"),
+                sub.get_flag("api-key-stdin"),
             )
             .await
             {
@@ -531,6 +550,7 @@ async fn authored_command(
                     &zone,
                     sub.get_one::<String>("date").map(String::as_str),
                     sub.get_flag("preview"),
+                    credentials,
                 )
                 .await,
             )
@@ -567,11 +587,21 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
 
     let Locations {
         settings,
+        credentials,
         settings_path,
         database,
     } = locations(matches)?;
 
-    if let Some(outcome) = authored_command(name, sub, &settings, &settings_path, &database).await {
+    if let Some(outcome) = authored_command(
+        name,
+        sub,
+        &settings,
+        &credentials,
+        &settings_path,
+        &database,
+    )
+    .await
+    {
         return outcome;
     }
 
@@ -585,7 +615,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             // what it is doing. The completion line carries the run number,
             // which only the store can assign.
             output::run_started(&stream);
-            Command::Extract(source_access(known, sub)?)
+            Command::Extract(source_access(known, sub, &credentials)?)
         }
         "normalise" => {
             let zone = config::timezone(
@@ -681,7 +711,11 @@ fn named_stream(sub: &ArgMatches) -> Result<&'static KnownStream, Failure> {
 
 /// The base URL comes from the flag, then the source's own variable, then the
 /// built-in root; the credential comes from the environment and nowhere else.
-fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, Failure> {
+fn source_access(
+    known: &KnownStream,
+    sub: &ArgMatches,
+    credentials: &infrastructure::Credentials,
+) -> Result<SourceAccess, Failure> {
     let base_url = sub
         .get_one::<String>("base-url")
         .cloned()
@@ -692,6 +726,7 @@ fn source_access(known: &KnownStream, sub: &ArgMatches) -> Result<SourceAccess, 
         known.source(),
         base_url,
         std::env::var(known.api_key_variable()),
+        credentials.key(known.source().name()),
     )?)
 }
 

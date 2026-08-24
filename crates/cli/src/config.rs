@@ -36,6 +36,9 @@ pub enum ConfigError {
     Settings(#[from] infrastructure::SettingsError),
 
     #[error(transparent)]
+    Credentials(#[from] infrastructure::CredentialError),
+
+    #[error(transparent)]
     NoBaseDirectory(#[from] crate::paths::NoBaseDirectory),
 
     #[error(
@@ -140,15 +143,22 @@ impl SourceAccess {
         known: &KnownSource,
         base_url: String,
         api_key: Result<String, VarError>,
+        stored: Option<&str>,
     ) -> Result<Self, ConfigError> {
         let api_key = match api_key {
             Ok(key) if !key.trim().is_empty() => key,
-            Ok(_) | Err(VarError::NotPresent) => {
-                return Err(ConfigError::MissingApiKey {
-                    variable: known.api_key_variable(),
-                    credential_url: known.credential_url(),
-                });
-            }
+            // **The environment wins, and the file answers when it is silent.**
+            // The ordering is the same everywhere else here: a value supplied for
+            // this run beats one stated for every run.
+            Ok(_) | Err(VarError::NotPresent) => match stored {
+                Some(key) if !key.trim().is_empty() => key.to_owned(),
+                _ => {
+                    return Err(ConfigError::MissingApiKey {
+                        variable: known.api_key_variable(),
+                        credential_url: known.credential_url(),
+                    });
+                }
+            },
             Err(VarError::NotUnicode(_)) => {
                 return Err(ConfigError::UnreadableApiKey {
                     variable: known.api_key_variable(),
@@ -263,6 +273,7 @@ mod tests {
             known,
             "https://example.test".to_owned(),
             Ok("   ".to_owned()),
+            None,
         );
         assert_eq!(
             resolved.unwrap_err(),
@@ -419,6 +430,44 @@ mod tests {
         );
     }
 
+    /// **The environment wins and the file answers when it is silent**, which is
+    /// the same ordering every other setting here uses.
+    #[test]
+    fn the_environment_beats_the_stored_key() {
+        let known = hevy().expect("hevy is a known source");
+
+        let from_environment = SourceAccess::resolve(
+            known,
+            "https://example.test".to_owned(),
+            Ok("from-the-environment".to_owned()),
+            Some("from-the-file"),
+        )
+        .expect("a key is available");
+        assert_eq!(from_environment.api_key, "from-the-environment");
+
+        let from_file = SourceAccess::resolve(
+            known,
+            "https://example.test".to_owned(),
+            Err(VarError::NotPresent),
+            Some("from-the-file"),
+        )
+        .expect("a key is available");
+        assert_eq!(from_file.api_key, "from-the-file");
+    }
+
+    /// A blank stored key is no more a key than a blank variable is.
+    #[test]
+    fn a_blank_stored_key_is_treated_as_missing() {
+        let known = hevy().expect("hevy is a known source");
+        let resolved = SourceAccess::resolve(
+            known,
+            "https://example.test".to_owned(),
+            Err(VarError::NotPresent),
+            Some("  "),
+        );
+        assert!(resolved.is_err());
+    }
+
     /// The message names the variable the invocation actually needs, which is
     /// derived from the source rather than compiled in.
     #[test]
@@ -427,6 +476,7 @@ mod tests {
             hevy().expect("hevy.workouts is in the catalogue"),
             "https://example.test".to_owned(),
             Err(VarError::NotPresent),
+            None,
         );
         let message = resolved.unwrap_err().to_string();
         assert!(message.contains("HEVY_API_KEY"), "{message}");
