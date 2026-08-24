@@ -140,8 +140,11 @@ inherit fills from, and a fresh periodisation states every slot itself —
 seventeen of them, out of a hundred-and-thirty-two exercises. That is the pain
 this exists to remove, and it is on the critical path after all.
 
-Scoped to that pain: propose each fill from what the record shows was last done
-in that slot, and ask. The block-level facts — name, template, start, duration,
+Scoped to that pain: propose each fill from `docs/slot-candidates.md`, ordered
+by what the record shows has been performed but **not limited to it** — the
+operator wants to see options he has not done before. The candidate lists are
+his, stated on 2026-08-24, and four of them name exercises the vocabulary does
+not yet have. The block-level facts — name, template, start, duration,
 primary, anchor — are few and short.
 
 **It writes a document and then authors it**, rather than authoring directly.
