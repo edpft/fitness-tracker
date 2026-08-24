@@ -176,7 +176,7 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        132,
+        135,
         "the vocabulary this build has needed so far"
     );
 }

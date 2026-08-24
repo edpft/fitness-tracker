@@ -18,50 +18,77 @@
 //!
 //! ## What decided each entry
 //!
-//! **Load is `Absolute` where no unloaded version of the movement exists.** The
-//! implement has mass, so zero is impossible and a zero is a data error by
-//! construction. `Relative` where an unloaded version does exist, so zero is a
-//! real observation and the number is a delta against a bodyweight the set does
-//! not record.
+//! **`Relative` is for the movements this source also names in an assisted
+//! form.** Seven templates and four exercises, every one of them a pull-up, a
+//! chin-up or a dip, and that is the whole of the relative family. What puts
+//! them there is not that the movement can be done unloaded — plenty of
+//! absolute ones can — but that Hevy sells the same movement twice, once plain
+//! and once assisted, so the axis has to run through zero in both directions
+//! for the pair to be one series.
 //!
-//! That judgement is graded by the corpus and the grade is exact. 93 sets carry
-//! a zero load; the model of record says 7 of them are errors. Every zero on a
-//! `Relative` template is plain bodyweight and translates, every zero on an
-//! `Absolute` one refuses, so this table is right if and only if exactly seven
-//! refuse — and it is wrong in both directions. An eighth means a bodyweight
-//! movement was called absolute; a sixth means the reverse.
+//! **`Absolute` is everything else**, where the number is external load and a
+//! zero is none of it. That is a real observation rather than an absence, which
+//! is what `Kg::NONE` says in as many words, and the corpus bears it out: 43 of
+//! its sets carry a zero on an absolute template — twelve hammer twists, four
+//! Bulgarian split squats, three sissy squats. Nothing about them is wrong and
+//! none of them refuses.
 //!
-//! The pair that shows the rule doing real work: `Romanian Deadlift (Barbell)`
-//! is `Absolute` and `Single Leg Romanian Deadlift (Dumbbell)` is `Relative`.
-//! Nothing in the titles forces that. What forces it is that a single-leg RDL
-//! is a balance drill before it is a loaded hinge — four sets in the corpus
-//! were done with nothing in hand — and there is no barbell RDL without a
-//! barbell.
+//! The other 50 of the corpus's 93 zeros sit on `Chest Dip (Assisted)` and
+//! `Pull Up (Assisted)`, where zero is no assistance — the same set as an
+//! unassisted rep, which is the collapse the relative axis exists to make.
+//!
+//! **What refuses is a value that is not a mass**: text that will not parse, or
+//! a negative on an absolute template, since `Kg` is unsigned. The corpus holds
+//! neither, which is why all 3,779 of its sets translate.
+//!
+//! This section used to claim the opposite — that `Absolute` meant no unloaded
+//! version of the movement existed, that a zero on such a template refused, and
+//! that the table was right if and only if seven of the 93 did. None of it was
+//! ever true: `load_of` has read a zero as `Load::UNLOADED` since the first
+//! commit of this module, and the single-leg Romanian deadlift it offered as
+//! the specimen `Relative` entry has been `Absolute` for just as long. It is
+//! recorded here so the rule does not get reinstated from the paragraph that
+//! described it.
 //!
 //! **An assisted variant negates.** Hevy has no assistance concept: assisted
 //! movements are separately named exercises carrying a positive weight. So
 //! `RelativeNegated` turns 20 into −20 and puts assistance and added weight on
 //! one axis, which is the mapping's reason to exist.
 //!
-//! **A band-resistance exercise refuses**, as a declared limitation. Band
-//! tension varies through the range of motion, nothing records the mechanism,
-//! and the account's assisted loads run `0, 7, 14, 21, 28, 35, 42` — stacked
-//! bands rather than a machine stack, which deterministic translation cannot
-//! tell apart. Four templates, 16 sets.
+//! **Band resistance is read as load, and the limitation is declared rather
+//! than enforced.** Band tension varies through the range of motion and nothing
+//! records the mechanism, so a banded lateral raise at 7kg is not comparable
+//! with a cable one at 7kg. Four templates and 16 sets are affected, and they
+//! are `Absolute` like any other resistance: the number is what the source
+//! said, and `band_resistance_is_load_and_band_assistance_is_negative` pins it.
 //!
-//! `Pull Up (Band)` is not among them: that is band *assistance*, and it maps
-//! to `PullUp` negated like any other assisted pull-up. That band and machine
-//! assistance are not comparable is a limitation declared in the model of
-//! record, not a reason to refuse the set.
+//! Refusing them was described here once and never implemented, which was the
+//! better outcome — comparability is § 6's business, and a set that cannot be
+//! compared is still a set that happened.
 //!
-//! **A mapped template is not the same as a performed one.** Four entries here
-//! have never appeared in a workout: the operator created them in Hevy on
-//! 2026-08-20 because it had no exercise for the movements he wanted, and had
-//! been logging the nearest thing it offered instead. Both now exist and both
-//! stay distinct — `Pull Up (Assisted)` is an assisted pull-up however many
-//! neutral-grip pull-ups were recorded under it. Correcting those workouts is
-//! the edit overlay's job, not this table's, and the slots the new exercises
-//! fill are reported underivable until they have been performed (FR-011).
+//! `Pull Up (Band)` is a different thing: that is band *assistance*, and it
+//! maps to `PullUp` negated like any other assisted pull-up. That band and
+//! machine assistance are not comparable is likewise declared in the model of
+//! record rather than acted on here.
+//!
+//! **A mapped template is not the same as a performed one.** Seven entries here
+//! have never appeared in a workout, for two different reasons.
+//!
+//! Four the operator created in Hevy on 2026-08-20, because it had no exercise
+//! for the movements he wanted and he had been logging the nearest thing it
+//! offered instead. Both now exist and both stay distinct — `Pull Up
+//! (Assisted)` is an assisted pull-up however many neutral-grip pull-ups were
+//! recorded under it. Correcting those workouts is the edit overlay's job, not
+//! this table's.
+//!
+//! Three are builtin templates he has simply never used, mapped because the
+//! autumn block's slots name the movements: a barbell bench press, a barbell
+//! skullcrusher and a barbell Bulgarian split squat. Nothing was created and
+//! nothing was logged under a stand-in.
+//!
+//! Either way the slots these fill are reported underivable until they have
+//! been performed (FR-011), which is the honest answer for an exercise with no
+//! history rather than a defect.
 //!
 //! **What he has been logging them under stays mapped to what it says.** The
 //! record holds `Pull Up (Assisted)`, `Cable Twist (Up to down)` and
@@ -128,7 +155,7 @@ const fn distance(exercise: DistanceExercise, load: LoadReading) -> Mapped {
     }
 }
 
-/// The mapping. 134 templates onto 130 exercises, many-to-one.
+/// The mapping. 141 templates onto 135 exercises, many-to-one.
 ///
 /// A template this does not cover fails the run naming itself. There is no
 /// passthrough, no fallback exercise and no silent omission: the vocabulary is
@@ -215,7 +242,15 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             LoadReading::Absolute,
         ), // Lat Pulldown - Close Grip (Cable) (24)
         "542F3CD5" => reps(RepsExercise::PushPress, LoadReading::Absolute), // Push Press (23)
-        "B5D3A742" => reps(RepsExercise::BulgarianSplitSquat, LoadReading::Absolute), // Bulgarian Split Squat (21)
+        // Hevy's dumbbell template, though the record only ever called it
+        // `Bulgarian Split Squat`: the title informs this table and never keys
+        // it, and the barbell variant is a separate template below. Four of the
+        // 21 sets carry a zero, which on an absolute reading is the movement
+        // done unloaded rather than a missing number.
+        "B5D3A742" => reps(
+            RepsExercise::BulgarianSplitSquatDumbbell,
+            LoadReading::Absolute,
+        ), // Bulgarian Split Squat (21)
         "ABEC557F" => reps(RepsExercise::ShrugDumbbell, LoadReading::Absolute), // Shrug (Dumbbell) (21)
         "AC1BB830" => distance(DistanceExercise::Running, LoadReading::Absolute), // Running (19)
         "50DFDFAB" => reps(
@@ -417,6 +452,23 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             DurationExercise::StandingStraddleFold,
             LoadReading::Absolute,
         ), // Standing Straddle Fold (0)
+
+        // Builtin templates the operator has never logged, added because the
+        // autumn block's slots name the movements and an exercise has to exist
+        // here before anything can be prescribed to it. Zero for the same
+        // reason as the block above, and a different reason from it: nothing
+        // was created in Hevy for these, they were simply never performed.
+        //
+        // All three are `Absolute`. No unloaded version of any of them is a
+        // movement the operator would record — a bench press without a bar is
+        // not a set — so a zero here would be a data error rather than an
+        // observation.
+        "79D0BB3A" => reps(RepsExercise::BenchPressBarbell, LoadReading::Absolute), // Bench Press (Barbell) (0)
+        "875F585F" => reps(RepsExercise::SkullcrusherBarbell, LoadReading::Absolute), // Skullcrusher (EZ) (0)
+        "0F24286A" => reps(
+            RepsExercise::BulgarianSplitSquatBarbell,
+            LoadReading::Absolute,
+        ), // Bulgarian Split Squat (Barbell) (0)
         _ => return None,
     };
     Some(mapped)

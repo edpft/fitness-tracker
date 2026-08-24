@@ -42,6 +42,13 @@
 //! members. Nothing about the vocabulary is closed, and an exercise is added
 //! here before anything can map onto it.
 //!
+//! 135 are declared, so seven have served nothing yet. That is the sentence
+//! above doing what it says rather than a gap: four movements the operator had
+//! been logging under a stand-in, and three the autumn block's slots name — a
+//! barbell bench press, a barbell skullcrusher and a barbell Bulgarian split
+//! squat. An exercise exists here before it can be prescribed, and it is
+//! prescribed before it can have been performed.
+//!
 //! The six fewer than 134 are collapses, and they are all the same collapse: a
 //! variant that differs only in how the movement is loaded is not a different
 //! movement. Assisted and unassisted are one exercise, weighted and unweighted
@@ -215,12 +222,14 @@ vocabulary! {
         BandedScapulaProtraction => "banded-scapula-protraction", Band,
         BehindTheBackCurlCable => "behind-the-back-curl-cable", Cable,
         BehindTheBackWristCurlBarbell => "behind-the-back-wrist-curl-barbell", Barbell,
+        BenchPressBarbell => "bench-press-barbell", Barbell,
         BentOverCableChop => "bent-over-cable-chop", Cable,
         BentOverRowBarbell => "bent-over-row-barbell", Barbell,
         BicepCurlDumbbell => "bicep-curl-dumbbell", Dumbbell,
         BirdDog => "bird-dog", Bodyweight,
         BoxJump => "box-jump", Bodyweight,
-        BulgarianSplitSquat => "bulgarian-split-squat", Bodyweight,
+        BulgarianSplitSquatBarbell => "bulgarian-split-squat-barbell", Barbell,
+        BulgarianSplitSquatDumbbell => "bulgarian-split-squat-dumbbell", Dumbbell,
         Burpee => "burpee", Bodyweight,
         BurpeeOverTheBar => "burpee-over-the-bar", Bodyweight,
         ButterflyPecDeck => "butterfly-pec-deck", Machine,
@@ -308,6 +317,7 @@ vocabulary! {
         SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell", Dumbbell,
         SissySquat => "sissy-squat", Bodyweight,
         SitUp => "sit-up", Bodyweight,
+        SkullcrusherBarbell => "skullcrusher-barbell", Barbell,
         SleeperStretch => "sleeper-stretch", Bodyweight,
         Snatch => "snatch", Barbell,
         SnatchBalance => "snatch-balance", Barbell,
