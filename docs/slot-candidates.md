@@ -107,30 +107,55 @@ is wrong, and the barbell variant has nowhere to go. The operator wants the
 barbell and dumbbell variants as distinct fills, which is the same rule that
 already keeps a barbell and a dumbbell preacher curl apart.
 
-### Needing a decision: implements we do not have
+### An adapter question, not a vocabulary one
 
-Three of the operator's choices name implements the vocabulary has never had,
-and **Hevy has no template for any of them either**:
+Three of the operator's choices name implements the vocabulary has never had —
+an EZ bar and a Smith machine — and Hevy has no template for any of them.
 
-| wanted | Hevy offers |
-|---|---|
-| Skullcrusher (EZ) | Skullcrusher (Barbell) `875F585F`, (Dumbbell) `68F8A292` |
-| Preacher Curl (EZ) | Preacher Curl (Barbell) `4F942934`, (Dumbbell) `FAB6EB2F`, (Machine) `1E9A6B8E` |
-| Sissy Squat (Smith Machine) | Sissy Squat (Weighted) `F5DEF1EB` |
+**That does not constrain our catalogue.** § 8 puts the vocabulary on this side
+and the mapping in the adapter, so `preacher-curl-ez` exists here if an EZ bar
+preacher curl is a different exercise from a barbell one — which it is, on the
+same grounds that already keep a *dumbbell* preacher curl apart from a barbell
+one. What Hevy lacks is the adapter's problem.
 
-Three ways out, and it is the same choice each time:
+The adapter has two ways to answer it:
 
-1. **Treat them as the nearest thing Hevy has.** No new implement, no custom
-   template — but the record then says "barbell" where an EZ bar was used, and
-   § 8 says our vocabulary is ours rather than a source's.
-2. **Add the implement and create a custom Hevy template.** Honest, and it makes
-   the exercise readable and deliverable. Costs an `Implement` variant, a scale
-   in `[parameters.scales]` for each — an EZ bar and a Smith machine load
-   differently from a barbell — and a template created by hand in Hevy.
-3. **Drop them from the candidate list**, if the nearest thing is what actually
-   gets used.
+1. **Create a custom template in Hevy.** There is precedent: the operator did
+   exactly this on 2026-08-20 for four movements Hevy had no exercise for, and
+   `hevy::mapping` documents them.
+2. **Map to the nearest thing Hevy offers** — `preacher-curl-ez` writes to
+   *Preacher Curl (Barbell)*, and we accept that the source's record is less
+   precise than ours.
 
-An EZ bar is a different implement from a straight barbell on the same grounds
-that a dumbbell preacher curl is a different exercise from a barbell one, so
-option 1 is the one that costs something real. It is still the cheapest, and the
-operator is the only one who knows whether the distinction matters to him.
+### Why the second one does not work for a prescribed exercise
+
+It reads well in the writing direction and breaks in the reading one.
+
+Delivery would send `preacher-curl-ez` to Hevy's `4F942934`. The session is
+performed, lands, and normalises — and `4F942934` maps back to
+`preacher-curl-barbell`, because that is what the template says and
+`hevy::mapping` is explicit that reading it as the movement the operator *meant*
+would be the table asserting something the source never said.
+
+So the loop does not close. History for `preacher-curl-ez` stays empty, double
+progression never sees a performance, and the slot reports underivable forever.
+
+Remapping `4F942934` to `preacher-curl-ez` instead is worse: it relabels the 121
+sets of genuine barbell preacher curl already in the record.
+
+**So a custom template is the practical answer for anything we intend to
+prescribe.** The nearest-thing compromise is fine for an exercise we only ever
+*read* — which is how the four stand-ins in `hevy::mapping` got there — and not
+for one we write.
+
+### What is actually left to decide
+
+Only this: **is the distinction real to the operator?** If an EZ bar preacher
+curl and a barbell one are the same exercise as far as his training is
+concerned, there is nothing to add and nothing to map. If they are different, he
+creates three templates in Hevy and the vocabulary gains three exercises, an
+`Implement::EzBar` and an `Implement::SmithMachine` — each needing a scale in
+`[parameters.scales]`, because an EZ bar and a Smith machine load differently
+from a barbell.
+
+Nobody else can answer that.
