@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO schedule (authored_at, from_date, zone)\n            VALUES (?, ?, ?)\n            ON CONFLICT (from_date) DO UPDATE\n                SET authored_at = excluded.authored_at,\n                    zone        = excluded.zone\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "schedule",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ccc02bf3e53adbdb953eb43affa26c6bd915365c877fa4702ba602dc5e2cb04b"
+}

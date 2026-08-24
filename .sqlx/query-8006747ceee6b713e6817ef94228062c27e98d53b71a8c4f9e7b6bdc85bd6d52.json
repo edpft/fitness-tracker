@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT weekday, part\n                FROM schedule_slot\n                WHERE schedule = ?\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_slot",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "part",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_slot",
+            "name": "part"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8006747ceee6b713e6817ef94228062c27e98d53b71a8c4f9e7b6bdc85bd6d52"
+}

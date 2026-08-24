@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, from_date, zone\n            FROM schedule\n            ORDER BY from_date\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "schedule",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "from_date",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule",
+            "name": "from_date"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "37ec5422409e4747a9335445d7cf4171373d4414820d7ee7ff1bb723a3626b95"
+}

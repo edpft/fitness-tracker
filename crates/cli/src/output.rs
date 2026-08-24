@@ -888,3 +888,103 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     println!();
     println!("next: add a programme — fitness programme add <document>");
 }
+
+// --- The operator's week ----------------------------------------------------
+
+/// The slots of a week, as a line per weekday.
+///
+/// Grouped by day rather than listed flat, because "Monday evening, Wednesday
+/// evening" is how the week is said and a flat list of seven is not a week. The
+/// slots arrive ordered by weekday then part, so grouping is a fold rather than
+/// a sort.
+fn week_slots(slots: &std::collections::BTreeSet<domain::schedule::Slot>) {
+    if slots.is_empty() {
+        println!("    no room to train at all");
+        return;
+    }
+
+    let mut days: Vec<(jiff::civil::Weekday, Vec<String>)> = Vec::new();
+    for slot in slots {
+        match days.last_mut() {
+            Some((day, parts)) if *day == slot.weekday => parts.push(slot.part.to_string()),
+            _ => days.push((slot.weekday, vec![slot.part.to_string()])),
+        }
+    }
+
+    for (day, parts) in days {
+        let name = format!("{day:?}").to_lowercase();
+        println!("    {name:<10}{}", parts.join(", "));
+    }
+}
+
+fn patch_line(patch: &domain::schedule::Patch) {
+    let last = patch.last();
+    let span = if patch.days().get() == 1 {
+        patch.start().to_string()
+    } else {
+        format!("{} to {last}", patch.start())
+    };
+
+    println!("  {span} — {}", patch.reason());
+
+    if let Some(zone) = patch.zone() {
+        println!("    in {}", zone.id());
+    }
+    match patch.slots() {
+        // Absent and empty are different facts, and printing them the same way
+        // would undo the distinction the schema goes to trouble to keep.
+        None => println!("    the ordinary week stands"),
+        Some(slots) if slots.is_empty() => println!("    no room to train at all"),
+        Some(slots) => week_slots(slots),
+    }
+}
+
+pub fn schedule_recorded(week: &domain::schedule::Schedule, patches: &[domain::schedule::Patch]) {
+    println!(
+        "recorded the week from {} ({})",
+        week.from(),
+        week.zone().id()
+    );
+    week_slots(week.slots());
+
+    match patches.len() {
+        0 => {}
+        1 => println!("and one holiday"),
+        many => println!("and {many} holidays"),
+    }
+    for patch in patches {
+        patch_line(patch);
+    }
+}
+
+pub fn schedule(diary: &domain::schedule::Diary) {
+    if diary.schedules().is_empty() {
+        println!(
+            "no week recorded — `fitness schedule add <document>` states one, \
+             and nothing derives it from the record"
+        );
+        return;
+    }
+
+    // Every week, not only the one in force: a schedule is superseded by a later
+    // one existing, so the history is what makes that legible.
+    for (at, week) in diary.schedules().iter().enumerate() {
+        let heading = if at + 1 == diary.schedules().len() {
+            "the week"
+        } else {
+            "until superseded"
+        };
+        println!("{heading}, from {} ({})", week.from(), week.zone().id());
+        week_slots(week.slots());
+    }
+
+    if diary.patches().is_empty() {
+        println!("\nno holidays");
+        return;
+    }
+
+    println!("\nholidays");
+    for patch in diary.patches() {
+        patch_line(patch);
+    }
+}

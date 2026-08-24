@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    SELECT weekday, part\n                    FROM schedule_patch_slot\n                    WHERE patch = ?\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch_slot",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "part",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch_slot",
+            "name": "part"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c772c6eca7337324982f62285677bef9f1cf873c5f47959cae49e83c519a0ecb"
+}

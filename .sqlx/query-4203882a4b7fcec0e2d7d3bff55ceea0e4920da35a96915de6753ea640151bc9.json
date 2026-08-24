@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO schedule_patch_slot (patch, weekday, part)\n                VALUES (?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4203882a4b7fcec0e2d7d3bff55ceea0e4920da35a96915de6753ea640151bc9"
+}

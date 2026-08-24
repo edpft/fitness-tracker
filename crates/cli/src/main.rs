@@ -10,6 +10,7 @@ mod config;
 mod output;
 mod paths;
 mod prescribing;
+mod scheduling;
 mod setup;
 mod wiring;
 
@@ -122,6 +123,7 @@ fn command() -> ClapCommand {
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(programme_command())
+        .subcommand(schedule_command())
         .subcommand(
             ClapCommand::new("reset")
                 .about(
@@ -247,6 +249,29 @@ fn programme_command() -> ClapCommand {
                      programmes succeed one another, so which one answers \
                      depends on the date",
                 )),
+        )
+}
+
+fn schedule_command() -> ClapCommand {
+    ClapCommand::new("schedule")
+        .about("Record the week there is room to train in, or report it")
+        // No `--timezone`. The zone is *in* the schedule — it is a fact about
+        // where the operator is, which is what a week and a holiday both say —
+        // so requiring one on the way in would be asking for the answer.
+        .subcommand_required(true)
+        .subcommand(
+            ClapCommand::new("add")
+                .about("Read a schedule document and store the week and holidays it describes")
+                .arg(
+                    Arg::new("path")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf))
+                        .help("The document to read"),
+                ),
+        )
+        .subcommand(
+            ClapCommand::new("show")
+                .about("Report the ordinary week and the holidays that depart from it"),
         )
 }
 
@@ -555,6 +580,14 @@ async fn authored_command(
                 .await,
             )
         }
+        "schedule" => Some(match sub.subcommand() {
+            Some(("add", add)) => match add.get_one::<PathBuf>("path") {
+                Some(path) => scheduling::add(database, path).await,
+                None => Err(Failure::message("no document given", exit::USAGE)),
+            },
+            Some(("show", _)) => scheduling::show(database).await,
+            _ => Err(Failure::message("no schedule command given", exit::USAGE)),
+        }),
         "programme" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,

@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, start_date, days, zone, states_slots, reason\n            FROM schedule_patch\n            ORDER BY start_date\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "start_date",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "name": "days",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "days"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "states_slots",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "states_slots"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "schedule_patch",
+            "name": "reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bf4cc7c04494c97ddb7798cc1b4c635cd62581f818b3334a544754c69c9a1464"
+}

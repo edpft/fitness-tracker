@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM schedule_patch_slot WHERE patch = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "245380013d71a8a2a7e89b77086ca7ad242b4004c42b12090f066002d1e63bfb"
+}

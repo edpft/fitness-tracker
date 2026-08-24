@@ -44,7 +44,7 @@ use super::{corrupt, store_error};
 /// `jiff::civil::Weekday` has no text form we own, so the mapping is written out
 /// rather than derived from `Debug` — a `Debug` representation is not a stable
 /// key, and this one is persisted.
-const fn weekday_key(day: Weekday) -> &'static str {
+pub(super) const fn weekday_key(day: Weekday) -> &'static str {
     match day {
         Weekday::Monday => "monday",
         Weekday::Tuesday => "tuesday",
@@ -56,7 +56,7 @@ const fn weekday_key(day: Weekday) -> &'static str {
     }
 }
 
-fn weekday_of(key: &str) -> Result<Weekday, StoreError> {
+pub(super) fn weekday_of(key: &str) -> Result<Weekday, StoreError> {
     match key {
         "monday" => Ok(Weekday::Monday),
         "tuesday" => Ok(Weekday::Tuesday),
