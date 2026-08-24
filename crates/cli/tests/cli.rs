@@ -482,3 +482,109 @@ fn reading_refusals_needs_no_declared_zone() {
         stdout(&output)
     );
 }
+
+// --- Setup ------------------------------------------------------------------
+
+/// `init` makes both, and says what it made.
+#[test]
+fn init_creates_the_store_and_the_settings() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        home.path()
+            .join(".config/fitness-tracker/config.toml")
+            .exists()
+    );
+    assert!(
+        home.path()
+            .join(".local/share/fitness-tracker/store.db")
+            .exists()
+    );
+
+    // What is left to do is the part an operator cannot discover by succeeding.
+    let report = stdout(&output);
+    assert!(report.contains("HEVY_API_KEY"), "{report}");
+    assert!(report.contains("programme author"), "{report}");
+}
+
+/// What `init` writes is what the next invocation reads. The two halves of the
+/// setup story have to agree or the wizard is theatre.
+#[test]
+fn what_init_writes_is_what_the_next_run_reads() {
+    let home = TempDir::new().expect("a temporary home");
+    fitness_at_home(&["init", "--timezone", "Pacific/Auckland"], home.path())
+        .expect("the binary runs");
+
+    let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
+
+    // No programme is authored, so it gets exactly that far — which is what
+    // proves the zone was read back rather than asked for again.
+    assert!(
+        stderr(&output).contains("no programme covers"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// **A settings file is hand-edited, so replacing one is asked for.**
+#[test]
+fn init_refuses_to_overwrite_without_being_told() {
+    let home = TempDir::new().expect("a temporary home");
+    fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
+
+    let again = fitness_at_home(&["init", "--timezone", "Europe/Paris"], home.path())
+        .expect("the binary runs");
+    assert_eq!(code(&again), 4);
+    assert!(stderr(&again).contains("--force"), "{}", stderr(&again));
+
+    let forced = fitness_at_home(
+        &["init", "--timezone", "Europe/Paris", "--force"],
+        home.path(),
+    )
+    .expect("the binary runs");
+    assert_eq!(code(&forced), 0, "{}", stderr(&forced));
+    assert!(
+        stdout(&forced).contains("Europe/Paris"),
+        "{}",
+        stdout(&forced)
+    );
+}
+
+/// **The same command has to work under a scheduler.** With no terminal to ask
+/// and no zone given, it refuses rather than hanging on a read that will never
+/// be answered — and leaves nothing behind.
+#[test]
+fn init_without_a_terminal_or_a_zone_refuses_and_creates_nothing() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["init"], home.path()).expect("the binary runs");
+
+    assert_eq!(code(&output), 4);
+    assert!(
+        stderr(&output).contains("--timezone"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        !home.path().join(".config/fitness-tracker").exists(),
+        "a refused setup leaves no settings behind"
+    );
+}
+
+/// A zone that is not an identifier is caught while the operator is still
+/// thinking about it, rather than on first use.
+#[test]
+fn init_validates_the_zone_before_writing_anything() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["init", "--timezone", "Not/AZone"], home.path())
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 4);
+    assert!(
+        !home.path().join(".config/fitness-tracker").exists(),
+        "nothing is written until the zone is known to be good"
+    );
+}
