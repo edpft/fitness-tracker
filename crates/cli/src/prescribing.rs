@@ -23,7 +23,7 @@ use jiff::civil::Date;
 use crate::{Failure, catalogue, config, config::ConfigError, exit, output};
 
 /// Read a document and store the programme it describes.
-pub async fn author(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
+pub async fn add(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
     let document = Document::read(path).map_err(|error| Failure::usage(&error))?;
     let stated = document
         .parameters()
