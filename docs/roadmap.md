@@ -4,8 +4,10 @@
 September 2026, using `fitness` as an installed binary rather than
 `./target/debug/fitness` in this checkout.
 
-**Written**: 2026-08-24, revised the same day once the tool was installed.
-Twenty-one days to the goal.
+**Written**: 2026-08-24, revised the same day.
+
+The dates below are ordering, not estimates. The constraint on this work is how
+fast decisions get made, not how fast code gets written.
 
 This is a living document. It records what is planned, in what order, and why —
 so that a session picking the work up cold knows what was decided and what is
@@ -90,7 +92,7 @@ summer block had to be re-authored so a standalone test could inherit its fills.
 
 ### 1. The schedule — store, document, CLI
 
-`fitness schedule author|show`, over the types in #22.
+`fitness schedule add|show|list|remove`, over the types in #22.
 
 Two things get recorded: the **ordinary week** — Monday evening, Wednesday
 evening, Friday evening, Sunday morning, in `Europe/London` — and the
@@ -106,7 +108,12 @@ below.
 **Acceptance**: `fitness schedule show` prints the ordinary week and the
 September patches.
 
-### 2. Authoring consults the schedule
+**Command verbs are the standard words** — add, remove, list, change — unless a
+domain term is better suited. `programme author` became `programme add` in #24
+for exactly this reason: it was the word in a conversation, and a conversational
+coinage should not harden into an interface.
+
+### 2. Adding a programme consults the schedule
 
 The programme is *told* its start, its weeks and the slots it may use, and
 *reads* which of those it loses. It records the result, so derivation never
@@ -117,7 +124,7 @@ inherited fills.
 `interruptions` in a programme document becomes derived, with the ability to
 state one as an override.
 
-**Acceptance**: authoring the test week derives the loss of Monday 14 September
+**Acceptance**: adding the autumn block derives the loss of Monday 14 September
 without it being stated.
 
 ### 3. The programme setup wizard
@@ -160,7 +167,7 @@ reviewable, diffable and re-authorable.
   about to end, in a document about to be superseded.
 - **Redelivery via `PUT`**, revising decision 0017.
 
-## Deliberately not in the twenty-one days
+## Deliberately out of scope
 
 - **A second data source.** Withings body weight is the strongest candidate —
   the degenerate entity § II.3 names, and it would exercise § 6's comparability
