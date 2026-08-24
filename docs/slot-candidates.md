@@ -21,7 +21,7 @@ Which list applies depends on whether the programme makes this pattern its
 |---|---|
 | Back Squat (Barbell) | `squat-barbell` |
 | Front Squat (Barbell) | `front-squat` |
-| Bulgarian Split Squat (Barbell) | **missing** |
+| Bulgarian Split Squat (Barbell) | **to add** — Hevy `0F24286A` |
 
 **As secondary**
 
@@ -29,7 +29,7 @@ Which list applies depends on whether the programme makes this pattern its
 |---|---|
 | Leg Extension (Machine) | `leg-extension-machine` |
 | Bulgarian Split Squat (Dumbbell) | **mismodelled** — see below |
-| Sissy Squat (Smith Machine) | **missing** |
+| Sissy Squat (Smith Machine) | `sissy-squat` — an EZ bar and a Smith machine are not distinct implements here; see below |
 
 ## Hip dominant
 
@@ -64,7 +64,7 @@ Which list applies depends on whether the programme makes this pattern its
 | | in the vocabulary |
 |---|---|
 | Chest Dip | `chest-dip` |
-| Bench Press (Barbell) | **missing** |
+| Bench Press (Barbell) | **to add** — Hevy `79D0BB3A` |
 | Standing Overhead Press (Barbell) | `overhead-press-barbell` |
 
 ## Triceps
@@ -73,13 +73,13 @@ Which list applies depends on whether the programme makes this pattern its
 |---|---|
 | Single Arm Overhead Tricep Extension (Dumbbell) | `single-arm-tricep-extension-dumbbell` |
 | Overhead Tricep Extension (Cable) | `overhead-triceps-extension-cable` |
-| Skullcrusher (EZ) | **missing** |
+| Skullcrusher (EZ) | **to add** as a barbell skullcrusher — Hevy `875F585F` |
 
 ## Biceps
 
 | | in the vocabulary |
 |---|---|
-| Preacher Curl (EZ) | **missing** |
+| Preacher Curl (EZ) | `preacher-curl-barbell` — same total load, same exercise |
 | Bayesian Curl (Cable) | `behind-the-back-curl-cable` — same movement, named descriptively |
 | Incline Curl (Dumbbell) | `seated-incline-curl-dumbbell` |
 
@@ -107,55 +107,64 @@ is wrong, and the barbell variant has nowhere to go. The operator wants the
 barbell and dumbbell variants as distinct fills, which is the same rule that
 already keeps a barbell and a dumbbell preacher curl apart.
 
-### An adapter question, not a vocabulary one
+### The implement question, settled
 
 Three of the operator's choices name implements the vocabulary has never had —
-an EZ bar and a Smith machine — and Hevy has no template for any of them.
+an EZ bar and a Smith machine. Hevy has no template for them either, which was
+briefly treated here as a constraint. **It is not**: § 8 puts the vocabulary on
+this side and the mapping in the adapter, so an exercise exists here if it is a
+distinct exercise, whatever Hevy holds.
 
-**That does not constrain our catalogue.** § 8 puts the vocabulary on this side
-and the mapping in the adapter, so `preacher-curl-ez` exists here if an EZ bar
-preacher curl is a different exercise from a barbell one — which it is, on the
-same grounds that already keep a *dumbbell* preacher curl apart from a barbell
-one. What Hevy lacks is the adapter's problem.
+The operator settled it on 2026-08-24, and the reason is sharper than the
+question:
 
-The adapter has two ways to answer it:
+> There isn't really a distinction between an EZ bar and a barbell because
+> we're recording total load.
 
-1. **Create a custom template in Hevy.** There is precedent: the operator did
-   exactly this on 2026-08-20 for four movements Hevy had no exercise for, and
-   `hevy::mapping` documents them.
-2. **Map to the nearest thing Hevy offers** — `preacher-curl-ez` writes to
-   *Preacher Curl (Barbell)*, and we accept that the source's record is less
-   precise than ours.
+**That is the test.** An implement makes a different exercise when it changes
+what the recorded number *means*, not when it changes how the bar feels. A
+dumbbell preacher curl is distinct because the load is per hand; an EZ bar
+preacher curl is not, because forty kilograms is forty kilograms.
 
-### Why the second one does not work for a prescribed exercise
+So there is no `Implement::EzBar`, no `Implement::SmithMachine`, and no custom
+Hevy template to create:
 
-It reads well in the writing direction and breaks in the reading one.
+| wanted | resolves to |
+|---|---|
+| Preacher Curl (EZ) | `preacher-curl-barbell` — already exists |
+| Skullcrusher (EZ) | a barbell skullcrusher — **to add**, Hevy `875F585F` |
+| Sissy Squat (Smith Machine) | `sissy-squat` — already exists |
 
-Delivery would send `preacher-curl-ez` to Hevy's `4F942934`. The session is
-performed, lands, and normalises — and `4F942934` maps back to
-`preacher-curl-barbell`, because that is what the template says and
+### The whole of what is left
+
+| | Hevy template |
+|---|---|
+| Bench Press (Barbell) | `79D0BB3A` |
+| Skullcrusher (Barbell) | `875F585F` |
+| Bulgarian Split Squat (Barbell) | `0F24286A` |
+| Bulgarian Split Squat (Dumbbell) | `B5D3A742` — currently mismodelled |
+
+Adding an exercise is three edits: the vocabulary in `domain::gym::exercise`,
+the forward mapping in `hevy::mapping`, and the reverse in `hevy::writable`.
+Without the last two it can be neither read back nor delivered.
+
+### One thing the reading direction would have made expensive
+
+Worth keeping, because it is the argument that would have applied had the EZ
+distinction been real.
+
+Mapping one of our exercises to *the nearest thing* Hevy offers reads well going
+out and breaks coming back. Delivery would send `preacher-curl-ez` to Hevy's
+`4F942934`; the session is performed, lands, and normalises — and `4F942934`
+maps back to `preacher-curl-barbell`, because that is what the template says and
 `hevy::mapping` is explicit that reading it as the movement the operator *meant*
 would be the table asserting something the source never said.
 
-So the loop does not close. History for `preacher-curl-ez` stays empty, double
-progression never sees a performance, and the slot reports underivable forever.
-
-Remapping `4F942934` to `preacher-curl-ez` instead is worse: it relabels the 121
+So the loop would not close: history for the prescribed exercise stays empty,
+double progression never sees a performance, and the slot reports underivable
+forever. Remapping the template the other way is worse — it relabels the 121
 sets of genuine barbell preacher curl already in the record.
 
-**So a custom template is the practical answer for anything we intend to
-prescribe.** The nearest-thing compromise is fine for an exercise we only ever
-*read* — which is how the four stand-ins in `hevy::mapping` got there — and not
-for one we write.
-
-### What is actually left to decide
-
-Only this: **is the distinction real to the operator?** If an EZ bar preacher
-curl and a barbell one are the same exercise as far as his training is
-concerned, there is nothing to add and nothing to map. If they are different, he
-creates three templates in Hevy and the vocabulary gains three exercises, an
-`Implement::EzBar` and an `Implement::SmithMachine` — each needing a scale in
-`[parameters.scales]`, because an EZ bar and a Smith machine load differently
-from a barbell.
-
-Nobody else can answer that.
+**The nearest-thing compromise is for exercises we only ever read**, which is
+how the four stand-ins in `hevy::mapping` got there, **and never for one we
+prescribe.**
