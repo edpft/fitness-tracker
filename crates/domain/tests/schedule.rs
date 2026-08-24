@@ -237,8 +237,8 @@ fn the_whole_pool_loses_more_than_the_gym_does() {
 /// reported nothing lost. That is the whole reason a slot carries a part of the
 /// day rather than only a weekday.
 #[test]
-fn a_day_that_keeps_the_wrong_half_is_still_lost() -> Built<()> {
-    let monday = date(2026, 9, 14)?;
+fn a_day_that_keeps_the_wrong_half_is_still_lost() {
+    let monday = date(2026, 9, 14).expect("a real Monday");
 
     let ordinary: BTreeSet<Slot> = [
         Slot::new(Weekday::Monday, PartOfDay::Morning),
@@ -247,31 +247,28 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() -> Built<()> {
     .into_iter()
     .collect();
 
-    let morning_only: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Morning)]
-        .into_iter()
-        .collect();
+    let morning_only: BTreeSet<Slot> =
+        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Morning)).collect();
 
     let diary = Diary::new(
         vec![Schedule::new(
-            date(2026, 9, 7)?,
-            zone("Europe/London")?,
+            date(2026, 9, 7).expect("a real date"),
+            zone("Europe/London").expect("a real zone"),
             ordinary,
         )],
         vec![Patch::new(
             monday,
-            days(1)?,
+            days(1).expect("one day"),
             None,
             Some(morning_only),
             "trains in the morning, away from lunchtime".to_owned(),
         )],
     );
 
-    let evening: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Evening)]
-        .into_iter()
-        .collect();
-    let morning: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Morning)]
-        .into_iter()
-        .collect();
+    let evening: BTreeSet<Slot> =
+        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Evening)).collect();
+    let morning: BTreeSet<Slot> =
+        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Morning)).collect();
 
     assert_eq!(
         diary.unavailable(monday, monday, &evening),
@@ -283,6 +280,4 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() -> Built<()> {
         Vec::new(),
         "a programme holding the morning keeps it"
     );
-
-    Ok(())
 }
