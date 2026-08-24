@@ -359,6 +359,73 @@ vocabulary! {
     }
 }
 
+/// Whether a held position works both sides at once or one side at a time.
+///
+/// **Not the laterality this module refuses.** That refusal is about identity —
+/// a suitcase carry is the single-arm farmer's carry, and naming absorbs it, so
+/// there is no `laterality` axis making `pull-up × single-arm` constructible.
+/// This is a total function *over* identity, the same standing `Implement` has:
+/// nothing exists that was not declared, and no exercise gains a variant.
+///
+/// What makes it matter is that a hold worked one side at a time is only half
+/// prescribed when it is issued once. A couch stretch is sixty seconds per leg,
+/// so a session naming it once names two minutes of work — and the record has
+/// said so all along: every couch stretch and every 90/90 in the corpus is two
+/// sets, and every dead hang is one.
+///
+/// It is declared for held exercises only, and deliberately. A movement counted
+/// in repetitions carries its sides inside the set — the corpus prescribes a
+/// Bulgarian split squat and a single-leg Romanian deadlift in threes, exactly
+/// as it does a back squat — so reading a per-side count onto them would double
+/// work nobody asked to double.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Sides {
+    /// Both at once. One hold is the whole of it.
+    Together,
+    /// One at a time, so the position is held once per side.
+    Separately,
+}
+
+impl Sides {
+    /// How many times the position is held to work it through.
+    ///
+    /// Two is anatomy rather than a parameter: a body has two sides, and the
+    /// authored duration in `GenerationParameters::static_hold` is what each of
+    /// them is held for.
+    pub const fn holds(self) -> u32 {
+        match self {
+            Self::Together => 1,
+            Self::Separately => 2,
+        }
+    }
+}
+
+impl DurationExercise {
+    /// Whether this position is held on both sides at once or on each in turn.
+    ///
+    /// Exhaustive and hand-written rather than a column on the vocabulary
+    /// macro: ten members can be read in one screen, adding an eleventh is a
+    /// compile error until someone says which it is, and the question is
+    /// meaningless for the hundred and twenty-two exercises counted in reps.
+    pub const fn sides(self) -> Sides {
+        match self {
+            // A hip flexor and a hip external rotator belong to one leg, and
+            // the operator has never recorded either any other way.
+            Self::CouchStretch | Self::NinetyNinety => Sides::Separately,
+            // Both legs, both arms, or no side to speak of. A squatting groin
+            // stretch and a standing straddle fold open both hips at once.
+            Self::AirBike
+            | Self::DeadHang
+            | Self::HandstandHold
+            | Self::JumpRope
+            | Self::SledPush
+            | Self::SquattingGroinStretch
+            | Self::StandingStraddleFold
+            | Self::Stretching => Sides::Together,
+        }
+    }
+}
+
 vocabulary! {
     /// Exercises counted in ground covered.
     ///

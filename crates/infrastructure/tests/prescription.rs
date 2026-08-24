@@ -211,26 +211,51 @@ fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
 }
 
 /// The mobility block is held for the authored duration and does not progress.
+///
+/// **Held once per side, which is not once for every stretch.** The fixture
+/// fills the hip flexor slot with a couch stretch and the hip external rotator
+/// slot with a 90/90, and both are worked a leg at a time: sixty seconds is the
+/// duration of each hold rather than of the exercise, so two are issued. The
+/// straddle fold and the squatting groin stretch open both hips at once and are
+/// issued once, as are the handstand hold and the dead hang.
+///
+/// The 003 contract has shown `couch stretch 2 × 60s` since it was written; the
+/// generator issued one until 2026-08-24.
 #[test]
 fn mobility_is_held_not_progressed() {
     let (prescriber, _directory) = prescriber!();
     let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
 
-    for slot in [
-        SlotId::HandstandHold,
-        SlotId::DeadHang,
-        SlotId::HipFlexorStretch,
-        SlotId::HipExternalRotatorStretch,
-        SlotId::HamstringStretch,
-        SlotId::GroinStretch,
+    for (slot, holds) in [
+        (SlotId::HandstandHold, 1),
+        (SlotId::DeadHang, 1),
+        (SlotId::HipFlexorStretch, 2),
+        (SlotId::HipExternalRotatorStretch, 2),
+        (SlotId::HamstringStretch, 1),
+        (SlotId::GroinStretch, 1),
     ] {
-        let Some(hold) = issued.workout.shape().item_for(slot) else {
+        let Some(item) = issued.workout.shape().item_for(slot) else {
             panic!("the {slot} slot is issued")
         };
-        for exercise in hold.exercises() {
-            assert_eq!(exercise.measure(), "duration");
-            assert_eq!(exercise.set_count(), 1, "a hold is held once");
-        }
+
+        // The four stretches are one circuit, so the item filling this slot
+        // holds the other three as well. Zipping the two iterators pairs each
+        // member with its own slot — they run in member order — and asking the
+        // item for its set count would otherwise read a neighbour's.
+        let Some(exercise) = item
+            .slots()
+            .zip(item.exercises())
+            .find_map(|(filled, exercise)| (filled == slot).then_some(exercise))
+        else {
+            panic!("{slot} is filled by the item that names it")
+        };
+
+        assert_eq!(exercise.measure(), "duration");
+        assert_eq!(
+            exercise.set_count(),
+            holds,
+            "{slot} is held once per side it is worked on",
+        );
     }
 }
 

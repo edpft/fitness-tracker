@@ -21,7 +21,9 @@ pub mod set;
 pub mod time;
 pub mod workout;
 
-pub use exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise, UnknownExercise};
+pub use exercise::{
+    DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
+};
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{InvalidLoad, Kg, Load, SignedKg};
 pub use measure::{

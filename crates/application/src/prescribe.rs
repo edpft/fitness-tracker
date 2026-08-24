@@ -933,17 +933,25 @@ const fn scheme_of(slot: SlotId) -> Scheme {
     }
 }
 
-/// A static hold: the authored duration, once.
-const fn hold(parameters: &GenerationParameters, exercise: DurationExercise) -> PrescribedExercise {
-    let set = PrescribedSet::fixed(
-        // Unloaded, and the pinned axis is volume rather than intensity — which
-        // is how a slot with no load still prescribes something.
-        Load::UNLOADED,
-        Target::Exactly(parameters.static_hold),
-    );
+/// A static hold: the authored duration, once per side.
+///
+/// Once for a position held on both sides at once, twice for one worked a side
+/// at a time — a couch stretch is sixty seconds *per leg*, and issuing it as a
+/// single set prescribes half the work. The duration is the authored one either
+/// way; what the exercise decides is how many times it is held.
+fn hold(parameters: &GenerationParameters, exercise: DurationExercise) -> PrescribedExercise {
+    let set = || {
+        PrescribedSet::fixed(
+            // Unloaded, and the pinned axis is volume rather than intensity —
+            // which is how a slot with no load still prescribes something.
+            Load::UNLOADED,
+            Target::Exactly(parameters.static_hold),
+        )
+    };
+    let rest = (1..exercise.sides().holds()).map(|_| set()).collect();
     PrescribedExercise::ForDuration {
         exercise,
-        sets: NonEmpty::of(set, Vec::new()),
+        sets: NonEmpty::of(set(), rest),
     }
 }
 
