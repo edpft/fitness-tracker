@@ -28,10 +28,10 @@ base fill that misstates a block, four commands to do one job — is correctness
 and ergonomics on a block that ends on 13 September, and none of it is on the
 path.
 
-The wizard turned out not to be on the path either, for a reason worth keeping
-in view: a test **inherits** its fills from the programme before it, so the test
-week has no exercises to choose. The wizard is needed a week later, for the
-autumn block.
+The wizard **is** on the path. An earlier revision of this document argued
+otherwise on the grounds that a test inherits its fills; that reasoning applies
+to a *standalone* test, and the autumn block is a periodised one, which owns its
+entry test and states every slot itself.
 
 ---
 
@@ -84,12 +84,9 @@ moment a block is running on it, which is exactly when the release gets cut.
 `normalise` — 165 workouts, and nothing authored. `local.db` in this checkout
 stays where it is; it is a beta-testing artefact and was not worth copying.
 
-**One thing remains: re-author the summer block into the new store.** Not for
-its own sake — it ends on 13 September and the record of what was performed is
-already there — but because **a test inherits its fills from the programme
-before it** (decision 0013), and `preceding()` finds nothing in an empty store.
-
-That is what takes the wizard off the critical path; see step 3.
+Nothing else is needed here. An earlier revision of this document claimed the
+summer block had to be re-authored so a standalone test could inherit its fills.
+**It does not** — see step 3, which is one programme rather than two.
 
 ### 1. The schedule — store, document, CLI
 
@@ -123,21 +120,18 @@ state one as an override.
 **Acceptance**: authoring the test week derives the loss of Monday 14 September
 without it being stated.
 
-### 3. The test week — w/c Monday 14 September
+### 3. The programme setup wizard
 
-Authored as a test document that **inherits** its fills from the summer block,
-so there are no exercises to choose and no wizard needed. The test itself is
-Friday 18 September; Monday 14 is lost to the Rome absence.
+**A periodised block owns its entry test.** `BlockWeek::Entry` makes week one
+the measurement the rest of the block is a share of, `phase_weeks_of` takes that
+week out of the phase count, and the anchor is an *expectation* the test week
+confirms rather than a number that must already have been measured.
 
-**Acceptance**: a routine for Friday 18 September, delivered to Hevy from the
-installed binary.
-
-### 4. The programme setup wizard
-
-Needed for the **autumn block**, not for the test week — a fresh periodisation
-states every slot itself, and choosing seventeen fills out of a
-hundred-and-thirty-two exercise vocabulary by hand is the pain this exists to
-remove.
+So the autumn block is **one programme starting Monday 14 September**, not a
+standalone test followed by a block on the 21st. There is no predecessor to
+inherit fills from, and a fresh periodisation states every slot itself —
+seventeen of them, out of a hundred-and-thirty-two exercises. That is the pain
+this exists to remove, and it is on the critical path after all.
 
 Scoped to that pain: propose each fill from what the record shows was last done
 in that slot, and ask. The block-level facts — name, template, start, duration,
@@ -147,7 +141,7 @@ primary, anchor — are few and short.
 That keeps one authoring path, and leaves the operator an artefact that is
 reviewable, diffable and re-authorable.
 
-### 5. The autumn block — from Monday 21 September
+### 4. The autumn block — from Monday 14 September
 
 ---
 
