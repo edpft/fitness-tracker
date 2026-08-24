@@ -54,14 +54,24 @@
 //! assistance are not comparable is a limitation declared in the model of
 //! record, not a reason to refuse the set.
 //!
-//! **A mapped template is not the same as a performed one.** Four entries here
-//! have never appeared in a workout: the operator created them in Hevy on
-//! 2026-08-20 because it had no exercise for the movements he wanted, and had
-//! been logging the nearest thing it offered instead. Both now exist and both
-//! stay distinct — `Pull Up (Assisted)` is an assisted pull-up however many
-//! neutral-grip pull-ups were recorded under it. Correcting those workouts is
-//! the edit overlay's job, not this table's, and the slots the new exercises
-//! fill are reported underivable until they have been performed (FR-011).
+//! **A mapped template is not the same as a performed one.** Seven entries here
+//! have never appeared in a workout, for two different reasons.
+//!
+//! Four the operator created in Hevy on 2026-08-20, because it had no exercise
+//! for the movements he wanted and he had been logging the nearest thing it
+//! offered instead. Both now exist and both stay distinct — `Pull Up
+//! (Assisted)` is an assisted pull-up however many neutral-grip pull-ups were
+//! recorded under it. Correcting those workouts is the edit overlay's job, not
+//! this table's.
+//!
+//! Three are builtin templates he has simply never used, mapped because the
+//! autumn block's slots name the movements: a barbell bench press, a barbell
+//! skullcrusher and a barbell Bulgarian split squat. Nothing was created and
+//! nothing was logged under a stand-in.
+//!
+//! Either way the slots these fill are reported underivable until they have
+//! been performed (FR-011), which is the honest answer for an exercise with no
+//! history rather than a defect.
 //!
 //! **What he has been logging them under stays mapped to what it says.** The
 //! record holds `Pull Up (Assisted)`, `Cable Twist (Up to down)` and
@@ -128,7 +138,7 @@ const fn distance(exercise: DistanceExercise, load: LoadReading) -> Mapped {
     }
 }
 
-/// The mapping. 134 templates onto 130 exercises, many-to-one.
+/// The mapping. 141 templates onto 135 exercises, many-to-one.
 ///
 /// A template this does not cover fails the run naming itself. There is no
 /// passthrough, no fallback exercise and no silent omission: the vocabulary is
@@ -215,7 +225,15 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             LoadReading::Absolute,
         ), // Lat Pulldown - Close Grip (Cable) (24)
         "542F3CD5" => reps(RepsExercise::PushPress, LoadReading::Absolute), // Push Press (23)
-        "B5D3A742" => reps(RepsExercise::BulgarianSplitSquat, LoadReading::Absolute), // Bulgarian Split Squat (21)
+        // Hevy's dumbbell template, though the record only ever called it
+        // `Bulgarian Split Squat`: the title informs this table and never keys
+        // it, and the barbell variant is a separate template below. Four of the
+        // 21 sets carry a zero, which on an absolute reading is the movement
+        // done unloaded rather than a missing number.
+        "B5D3A742" => reps(
+            RepsExercise::BulgarianSplitSquatDumbbell,
+            LoadReading::Absolute,
+        ), // Bulgarian Split Squat (21)
         "ABEC557F" => reps(RepsExercise::ShrugDumbbell, LoadReading::Absolute), // Shrug (Dumbbell) (21)
         "AC1BB830" => distance(DistanceExercise::Running, LoadReading::Absolute), // Running (19)
         "50DFDFAB" => reps(
@@ -417,6 +435,23 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             DurationExercise::StandingStraddleFold,
             LoadReading::Absolute,
         ), // Standing Straddle Fold (0)
+
+        // Builtin templates the operator has never logged, added because the
+        // autumn block's slots name the movements and an exercise has to exist
+        // here before anything can be prescribed to it. Zero for the same
+        // reason as the block above, and a different reason from it: nothing
+        // was created in Hevy for these, they were simply never performed.
+        //
+        // All three are `Absolute`. No unloaded version of any of them is a
+        // movement the operator would record — a bench press without a bar is
+        // not a set — so a zero here would be a data error rather than an
+        // observation.
+        "79D0BB3A" => reps(RepsExercise::BenchPressBarbell, LoadReading::Absolute), // Bench Press (Barbell) (0)
+        "875F585F" => reps(RepsExercise::SkullcrusherBarbell, LoadReading::Absolute), // Skullcrusher (EZ) (0)
+        "0F24286A" => reps(
+            RepsExercise::BulgarianSplitSquatBarbell,
+            LoadReading::Absolute,
+        ), // Bulgarian Split Squat (Barbell) (0)
         _ => return None,
     };
     Some(mapped)

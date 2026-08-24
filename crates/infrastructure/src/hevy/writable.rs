@@ -195,6 +195,10 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("DDB29047"),
                 assisted: None,
             }, // Behind the Back Wrist Curl (Barbell)
+            RepsExercise::BenchPressBarbell => Writable {
+                added: Some("79D0BB3A"),
+                assisted: None,
+            }, // Bench Press (Barbell)
             RepsExercise::BentOverCableChop => Writable {
                 added: Some("48fdc527-90a4-4713-a766-ced702d9295c"),
                 assisted: None,
@@ -215,7 +219,11 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("56092DD1"),
                 assisted: None,
             }, // Box Jump
-            RepsExercise::BulgarianSplitSquat => Writable {
+            RepsExercise::BulgarianSplitSquatBarbell => Writable {
+                added: Some("0F24286A"),
+                assisted: None,
+            }, // Bulgarian Split Squat (Barbell)
+            RepsExercise::BulgarianSplitSquatDumbbell => Writable {
                 added: Some("B5D3A742"),
                 assisted: None,
             }, // Bulgarian Split Squat
@@ -567,6 +575,10 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("022DF610"),
                 assisted: None,
             }, // Sit Up
+            RepsExercise::SkullcrusherBarbell => Writable {
+                added: Some("875F585F"),
+                assisted: None,
+            }, // Skullcrusher (EZ)
             RepsExercise::SleeperStretch => Writable {
                 added: Some("4f870422-92aa-4fb9-8ee5-12352c1dfe50"),
                 assisted: None,
