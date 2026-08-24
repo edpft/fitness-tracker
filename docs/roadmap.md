@@ -215,10 +215,18 @@ loses its Monday session. The test itself is Friday 18 September.
 
 ## Risks
 
-- **The store is the only copy of authored data.** Raw landing can be re-fetched
-  from Hevy and everything derived rebuilds, but programmes and prescriptions
-  cannot. There is no backup. § 12 calls this a primary input; it is currently
-  a single file in a gitignored path.
+- **The store is the only copy of authored data — and right now that is cheap.**
+  Raw landing re-fetches from Hevy and everything derived rebuilds; programmes
+  and prescriptions do not. § 12 calls that a primary input with no way back.
+
+  But the programmes and prescriptions currently in `local.db`, and the contents
+  of `programme.toml`, are **beta-testing artefacts**. Losing them costs a
+  re-extract and a few minutes of re-authoring, not a fact. So do not be
+  precious with this store: migrating it, starting fresh, or re-authoring
+  against a changed document are all fine, and none of them needs a ceremony.
+
+  What makes this a real risk is the autumn block, when the authored side stops
+  being disposable. A backup wants to exist by then, not before.
 - **`prescribing::deliver` hardcodes `catalogue::source("hevy")`.** The one
   place the tool is genuinely coupled to a vendor. It should be a `--to`
   argument or derived from the programme.
