@@ -949,8 +949,8 @@ pub fn schedule_recorded(week: &domain::schedule::Schedule, patches: &[domain::s
 
     match patches.len() {
         0 => {}
-        1 => println!("and one holiday"),
-        many => println!("and {many} holidays"),
+        1 => println!("and one change to it"),
+        many => println!("and {many} changes to it"),
     }
     for patch in patches {
         patch_line(patch);
@@ -978,12 +978,14 @@ pub fn schedule(diary: &domain::schedule::Diary) {
         week_slots(week.slots());
     }
 
+    // Not "holidays": a run of days that departs from the ordinary week is
+    // as often a course, a visitor or a late finish as it is a trip.
     if diary.patches().is_empty() {
-        println!("\nno holidays");
+        println!("\nno changes to it");
         return;
     }
 
-    println!("\nholidays");
+    println!("\nchanges to it");
     for patch in diary.patches() {
         patch_line(patch);
     }

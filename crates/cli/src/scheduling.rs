@@ -11,7 +11,7 @@ use infrastructure::{ScheduleDocument, SqliteDiaryStore, connect};
 
 use crate::{Failure, exit, output};
 
-/// Read a document and store the week and holidays it describes.
+/// Read a document and store the week and the departures from it.
 pub async fn add(database: &Path, path: &Path) -> Result<(), Failure> {
     let document = ScheduleDocument::read(path).map_err(|error| Failure::usage(&error))?;
     let week = document.week().map_err(|error| Failure::usage(&error))?;
@@ -38,7 +38,7 @@ pub async fn add(database: &Path, path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Report the ordinary week and the holidays that depart from it.
+/// Report the ordinary week and everything that departs from it.
 pub async fn show(database: &Path) -> Result<(), Failure> {
     let pool = connect(database)
         .await

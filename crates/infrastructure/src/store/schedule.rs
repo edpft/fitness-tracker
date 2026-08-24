@@ -5,8 +5,8 @@
 //! operator *did* train, which is not the same as when they could have.
 //!
 //! **Two shapes read as one `Diary`.** Schedules and patches are stored apart
-//! because a holiday is a fact about dates rather than about which ordinary week
-//! was in force when it was booked. Only `Diary` relates them, and it does so by
+//! because a departure is a fact about dates rather than about which ordinary
+//! week was in force when it was recorded. Only `Diary` relates them, and it does so by
 //! date — so this module assembles both and resolves nothing.
 //!
 //! **A week is superseded by a later one existing.** There is no flag and no end

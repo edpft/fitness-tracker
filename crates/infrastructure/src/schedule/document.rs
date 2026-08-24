@@ -93,10 +93,12 @@ fn zone(field: &str, written: &str) -> Result<OperatorZone, DocumentError> {
 #[derive(serde::Deserialize)]
 pub struct Document {
     week: WeekSection,
-    /// **Optional, and a document may be nothing but patches.**
+    /// **Optional, and a document may be nothing but departures.**
     ///
-    /// A holiday is a fact about dates rather than about which ordinary week was
-    /// in force when it was booked, so booking one does not restate the week.
+    /// A departure is a fact about dates rather than about which ordinary week
+    /// was in force when it was recorded, so recording one does not restate the
+    /// week. Not every one is a holiday — a course, a visitor or a late finish
+    /// all change a week without being a trip.
     #[serde(default)]
     patch: Vec<PatchSection>,
 }
@@ -116,7 +118,7 @@ struct WeekSection {
 struct PatchSection {
     start: String,
     days: NonZeroU8,
-    /// Absent leaves the zone alone. Present is a trip somewhere else.
+    /// Absent leaves the zone alone. Present is being somewhere else.
     zone: Option<String>,
     /// **Absent and empty are different facts.** Absent means the ordinary week
     /// stands — away, training as usual. `slots = []` means no room to train at
@@ -148,7 +150,7 @@ impl Document {
         ))
     }
 
-    /// The holidays, in domain terms.
+    /// The departures from the ordinary week, in domain terms.
     ///
     /// # Errors
     ///

@@ -307,19 +307,29 @@ impl Diary {
     /// than reading the pool.** Half the operator's slots may belong to another
     /// discipline entirely, so a programme asking "which of *my* days do I lose"
     /// is the only question it can answer without knowing about the rest.
+    /// **A day is lost when the allocated *slot* is gone, not when the day
+    /// empties.** Parts of a day are the whole reason a slot is a weekday and a
+    /// part rather than a weekday: the operator trains on Monday morning and
+    /// goes away at lunchtime, and a programme holding the Monday evening has
+    /// lost that Monday however open the morning still is.
+    ///
+    /// Asking [`Availability::open`] instead answers "could the operator train
+    /// at all", which is a different question and the wrong one here — it read
+    /// a surviving morning as a surviving evening and reported nothing lost.
     pub fn unavailable(&self, from: Date, until: Date, allocated: &BTreeSet<Slot>) -> Vec<Date> {
         let mut lost = Vec::new();
         let mut cursor = from;
 
         while cursor <= until {
-            let ordinarily_used = allocated
+            let mine: Vec<&Slot> = allocated
                 .iter()
-                .any(|slot| slot.weekday == cursor.weekday());
+                .filter(|slot| slot.weekday == cursor.weekday())
+                .collect();
 
-            if ordinarily_used {
-                let available = self
-                    .on(cursor)
-                    .is_some_and(|availability| availability.open(cursor));
+            if !mine.is_empty() {
+                let available = self.on(cursor).is_some_and(|availability| {
+                    mine.iter().any(|slot| availability.slots.contains(slot))
+                });
                 if !available {
                     lost.push(cursor);
                 }

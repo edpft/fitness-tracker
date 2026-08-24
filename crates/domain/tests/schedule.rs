@@ -224,3 +224,65 @@ fn the_whole_pool_loses_more_than_the_gym_does() {
         "cycling's slots are lost too: {everything:?} against {gym:?}"
     );
 }
+
+/// **A day is lost when the allocated slot is gone, not when the day empties.**
+///
+/// The operator trains Monday morning and Monday evening; the gym has been
+/// allocated the evening. A patch leaves the morning and takes the rest — he
+/// trains, then goes away at lunchtime. The Monday is lost to the gym even
+/// though the day is not empty.
+///
+/// Asking `Availability::open` answers "could he train at all", which is a
+/// different question: it read the surviving morning as a surviving evening and
+/// reported nothing lost. That is the whole reason a slot carries a part of the
+/// day rather than only a weekday.
+#[test]
+fn a_day_that_keeps_the_wrong_half_is_still_lost() -> Built<()> {
+    let monday = date(2026, 9, 14)?;
+
+    let ordinary: BTreeSet<Slot> = [
+        Slot::new(Weekday::Monday, PartOfDay::Morning),
+        Slot::new(Weekday::Monday, PartOfDay::Evening),
+    ]
+    .into_iter()
+    .collect();
+
+    let morning_only: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Morning)]
+        .into_iter()
+        .collect();
+
+    let diary = Diary::new(
+        vec![Schedule::new(
+            date(2026, 9, 7)?,
+            zone("Europe/London")?,
+            ordinary,
+        )],
+        vec![Patch::new(
+            monday,
+            days(1)?,
+            None,
+            Some(morning_only),
+            "trains in the morning, away from lunchtime".to_owned(),
+        )],
+    );
+
+    let evening: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Evening)]
+        .into_iter()
+        .collect();
+    let morning: BTreeSet<Slot> = [Slot::new(Weekday::Monday, PartOfDay::Morning)]
+        .into_iter()
+        .collect();
+
+    assert_eq!(
+        diary.unavailable(monday, monday, &evening),
+        vec![monday],
+        "the evening is gone, so a programme holding it loses the day"
+    );
+    assert_eq!(
+        diary.unavailable(monday, monday, &morning),
+        Vec::new(),
+        "a programme holding the morning keeps it"
+    );
+
+    Ok(())
+}
