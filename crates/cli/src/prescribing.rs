@@ -209,6 +209,7 @@ pub async fn deliver(
     zone: &OperatorZone,
     date: Option<&str>,
     preview: bool,
+    credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let pool = connect(database)
         .await
@@ -231,9 +232,13 @@ pub async fn deliver(
         .ok_or_else(|| Failure::message("this build has no hevy destination wired", exit::USAGE))?;
     let base_url = std::env::var(known.base_url_variable())
         .unwrap_or_else(|_| known.default_base_url().to_owned());
-    let access =
-        config::SourceAccess::resolve(known, base_url, std::env::var(known.api_key_variable()))
-            .map_err(|error| Failure::usage(&error))?;
+    let access = config::SourceAccess::resolve(
+        known,
+        base_url,
+        std::env::var(known.api_key_variable()),
+        credentials.key(known.name()),
+    )
+    .map_err(|error| Failure::usage(&error))?;
 
     let destination = HevyRoutines::new(access.base_url, access.api_key)
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;

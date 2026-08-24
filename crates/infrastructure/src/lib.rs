@@ -6,12 +6,14 @@
 //! Nothing here leaks upward: every vendor error is translated at the boundary
 //! into the application's own view of failure.
 
+pub mod credentials;
 pub mod hevy;
 pub mod lock;
 pub mod programme;
 pub mod settings;
 pub mod store;
 
+pub use credentials::{CredentialError, Credentials};
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevyWorkoutEvents, HevyWorkoutTranslator, PageCount,
     PageNumber, RetryPolicy,

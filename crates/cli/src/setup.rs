@@ -7,10 +7,16 @@
 //! because the failure mode of a setup command is leaving someone unsure
 //! whether it worked.
 //!
-//! **It does not ask for the credential.** § 35 keeps that in the environment,
-//! so the most this can do is say which variable to set and where to get a key.
-//! Prompting for a secret and writing it to a file would be the one thing this
-//! module could do that the operator cannot easily undo.
+//! **It does ask for the credential**, and the reasoning that once said
+//! otherwise conflated three different things. Passing a secret as a *flag* is
+//! genuinely bad — it lands in argv, in shell history and in `ps` output, which
+//! is why there is still no `--api-key`. Storing one in a *file* is what § 35
+//! explicitly allows. *Prompting* for one touches neither: a typed key never
+//! reaches argv, and with echo off it does not reach the scrollback either.
+//!
+//! What survives from the objection is where it goes: not into the settings
+//! file, which is meant to be kept with an operator's dotfiles, but into a file
+//! of its own created owner-only. See [`infrastructure::credentials`].
 //!
 //! **Interactive only when there is somebody there.** A missing value is
 //! prompted for at a terminal and refused without one, so the same command works
@@ -22,7 +28,7 @@ use std::{
     path::Path,
 };
 
-use infrastructure::{Settings, connect};
+use infrastructure::{Credentials, Settings, connect, credentials};
 
 use crate::{Failure, config, exit, paths};
 
@@ -31,9 +37,20 @@ pub struct Prepared {
     pub settings_path: std::path::PathBuf,
     pub database: std::path::PathBuf,
     pub zone: String,
-    /// Whether the credential is already in the environment. Reported rather
-    /// than fixed.
-    pub credential_set: bool,
+    /// What became of each source's key.
+    pub credentials: Vec<(String, CredentialOutcome)>,
+}
+
+/// What `init` was able to do about a source's key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialOutcome {
+    /// Taken and written to the credentials file.
+    Stored,
+    /// Already in the environment, and left there. Nothing is copied into a
+    /// file that the environment is already answering for.
+    InEnvironment,
+    /// Nobody to ask and nothing to take. Reported as outstanding.
+    Outstanding,
 }
 
 /// Prepare this machine: a store, a settings file, and a report of both.
@@ -47,6 +64,7 @@ pub async fn init(
     database: &Path,
     declared: Option<&str>,
     force: bool,
+    key_from_stdin: bool,
 ) -> Result<Prepared, Failure> {
     // **Refusing to overwrite is the whole of the safety here.** A settings file
     // is hand-edited, so silently replacing one loses work that nothing else
@@ -88,14 +106,103 @@ pub async fn init(
     .write(settings_path)
     .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
+    let credentials = keys(settings_path, key_from_stdin)?;
+
     Ok(Prepared {
         settings_path: settings_path.to_path_buf(),
         database: database.to_path_buf(),
         zone,
-        credential_set: crate::catalogue::SOURCES
-            .iter()
-            .all(|source| std::env::var_os(source.api_key_variable()).is_some()),
+        credentials,
     })
+}
+
+/// Obtain and store a key for each source this build knows.
+///
+/// **Three ways in, and none of them is argv.** Standard input when asked for,
+/// so a password manager can pipe one; the environment where it already answers,
+/// which is left alone rather than copied; and a prompt with echo off where
+/// there is somebody to ask.
+fn keys(
+    settings_path: &Path,
+    from_stdin: bool,
+) -> Result<Vec<(String, CredentialOutcome)>, Failure> {
+    let path = credentials::beside(settings_path);
+    let mut stored = Credentials::read(&path)
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let mut outcomes = Vec::new();
+    let mut changed = false;
+
+    for source in &crate::catalogue::SOURCES {
+        let name = source.name().to_owned();
+
+        // Already answered by the environment. Copying it into a file would
+        // duplicate a value that has an owner, and the copy is the one that goes
+        // stale.
+        if std::env::var_os(source.api_key_variable()).is_some() {
+            outcomes.push((name, CredentialOutcome::InEnvironment));
+            continue;
+        }
+
+        let Some(key) = obtain(source, from_stdin)? else {
+            outcomes.push((name, CredentialOutcome::Outstanding));
+            continue;
+        };
+
+        stored.set(&name, &key);
+        changed = true;
+        outcomes.push((name, CredentialOutcome::Stored));
+    }
+
+    if changed {
+        stored
+            .write(&path)
+            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    }
+
+    Ok(outcomes)
+}
+
+/// One source's key, from standard input or from a prompt.
+///
+/// `None` where there is nothing to take and nobody to ask, which is a state to
+/// report rather than an error: the rest of the setup is still worth having.
+fn obtain(
+    source: &crate::catalogue::KnownSource,
+    from_stdin: bool,
+) -> Result<Option<String>, Failure> {
+    if from_stdin {
+        let mut typed = String::new();
+        std::io::stdin()
+            .read_line(&mut typed)
+            .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+        let typed = typed.trim().to_owned();
+        return if typed.is_empty() {
+            Err(Failure::message(
+                format!("no {} on standard input", source.api_key_variable()),
+                exit::USAGE,
+            ))
+        } else {
+            Ok(Some(typed))
+        };
+    }
+
+    if !std::io::stdin().is_terminal() {
+        return Ok(None);
+    }
+
+    println!(
+        "A {} key is needed to read your workouts. Get one from {}",
+        source.name(),
+        source.credential_url()
+    );
+    let typed = rpassword::prompt_password(
+        "Paste it here (it will not be shown), or press enter to skip: ",
+    )
+    .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+
+    let typed = typed.trim().to_owned();
+    Ok(if typed.is_empty() { None } else { Some(typed) })
 }
 
 /// The zone: the one given, or the one somebody types.

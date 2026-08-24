@@ -588,3 +588,142 @@ fn init_validates_the_zone_before_writing_anything() {
         "nothing is written until the zone is known to be good"
     );
 }
+
+/// **A key on standard input never reaches argv**, which is the whole reason
+/// there is no flag for it. It is stored beside the settings rather than in
+/// them, and the file is owner-only.
+#[test]
+fn init_stores_a_key_given_on_standard_input() {
+    use std::process::Stdio;
+
+    let home = TempDir::new().expect("a temporary home");
+    let mut child = Command::new(BINARY)
+        .env_remove("HEVY_API_KEY")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home.path())
+        .args(["init", "--timezone", "Europe/London", "--api-key-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().expect("a pipe");
+        stdin
+            .write_all(b"a-stored-key\n")
+            .expect("the key is piped");
+    }
+    let output = child.wait_with_output().expect("the binary finishes");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    let path = home.path().join(".config/fitness-tracker/credentials.toml");
+    let written = std::fs::read_to_string(&path).expect("the credentials file exists");
+    assert!(written.contains("a-stored-key"), "{written}");
+
+    // The settings file is the one kept with dotfiles, so the key must not be
+    // in it.
+    let settings = std::fs::read_to_string(home.path().join(".config/fitness-tracker/config.toml"))
+        .expect("the settings file exists");
+    assert!(
+        !settings.contains("a-stored-key"),
+        "a key must not reach the settings file: {settings}"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path)
+            .expect("the file exists")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "mode was {:o}", mode & 0o777);
+    }
+}
+
+/// **A key already in the environment is left there.** Copying it into a file
+/// duplicates a value that has an owner, and the copy is the one that goes
+/// stale.
+#[test]
+fn init_does_not_copy_a_key_the_environment_already_answers_for() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = Command::new(BINARY)
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home.path())
+        .env("HEVY_API_KEY", "already-answered")
+        .args(["init", "--timezone", "Europe/London"])
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        !home
+            .path()
+            .join(".config/fitness-tracker/credentials.toml")
+            .exists(),
+        "nothing is written when the environment already answers"
+    );
+    assert!(
+        stdout(&output).contains("from the environment"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+/// The round trip that matters: a key stored by `init` is the key a later
+/// command uses, with nothing in the environment.
+#[test]
+fn a_stored_key_is_used_by_a_later_command() {
+    use std::process::Stdio;
+
+    let home = TempDir::new().expect("a temporary home");
+    let mut child = Command::new(BINARY)
+        .env_remove("HEVY_API_KEY")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home.path())
+        .args(["init", "--timezone", "Europe/London", "--api-key-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the binary runs");
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().expect("a pipe");
+        stdin
+            .write_all(b"a-stored-key\n")
+            .expect("the key is piped");
+    }
+    child.wait().expect("the binary finishes");
+
+    // Pointed at a port nothing is listening on, so it fails on the network —
+    // which is only reachable once the credential has been resolved.
+    let output = Command::new(BINARY)
+        .env_remove("HEVY_API_KEY")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home.path())
+        .env("HEVY_API_BASE_URL", "http://127.0.0.1:1")
+        .args(["extract", "hevy.workouts"])
+        .output()
+        .expect("the binary runs");
+
+    let message = stderr(&output);
+    assert!(
+        !message.contains("HEVY_API_KEY"),
+        "the stored key answered, so nothing asks for the variable: {message}"
+    );
+    assert_eq!(code(&output), 1, "{message}");
+}
