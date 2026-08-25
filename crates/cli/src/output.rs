@@ -637,6 +637,34 @@ fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
     }
 }
 
+/// Where a session's loads came from, in words.
+///
+/// **A test week's anchor is a reference, not a result.** Calling it the anchor
+/// reads as an established maximum, and in a test week it is not one: an entry
+/// test ramps *toward* the number and an exit test is measured *against* it.
+/// The two are indistinguishable here — `WeekKind::Test` covers both — so the
+/// word has to be true of either, and "against" is.
+///
+/// Dropping the number instead would hide what the ramp is aiming at, which is
+/// the thing worth knowing before the session rather than after it.
+fn derived_phrase(
+    derived_from: domain::prescription::DerivedFrom,
+    week: domain::prescription::WeekKind,
+) -> String {
+    use domain::prescription::{DerivedFrom, WeekKind};
+
+    match (derived_from, week) {
+        (DerivedFrom::Anchor(anchor), WeekKind::Test) => format!("against {anchor}"),
+        (DerivedFrom::Anchor(anchor), WeekKind::Climbing(_)) => format!("anchor {anchor}"),
+        // A standalone test has no anchor at all: what it derived from is what
+        // the record put it at, and that is the number worth naming.
+        //
+        // `Kg` displays bare, so the unit is appended here as it is everywhere
+        // else — this line read "for 95, test" until someone looked.
+        (DerivedFrom::Target(target), _) => format!("for {target}kg"),
+    }
+}
+
 /// The prescription, as a session to train from.
 pub fn prescription(issued: &application::Prescription) {
     let workout = &issued.workout;
@@ -653,12 +681,7 @@ pub fn prescription(issued: &application::Prescription) {
     );
     println!(
         "{}, {}{}",
-        match workout.derived_from() {
-            domain::prescription::DerivedFrom::Anchor(anchor) => format!("anchor {anchor}"),
-            // A test session has no anchor: what it derived from is what the
-            // record put it at, and that is the number worth naming here.
-            domain::prescription::DerivedFrom::Target(target) => format!("for {target}"),
-        },
+        derived_phrase(workout.derived_from(), workout.week()),
         workout.week(),
         issued
             .history_through
@@ -990,5 +1013,58 @@ pub fn schedule(diary: &domain::schedule::Diary) {
     println!("\nalterations");
     for alteration in diary.alterations() {
         alteration_line(alteration);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derived_phrase;
+    use domain::{
+        gym::Kg,
+        prescription::{Anchor, AnchorProvenance, DerivedFrom, WeekIndex, WeekKind},
+    };
+    use jiff::civil::date;
+
+    fn ninety() -> Anchor {
+        match Anchor::new(
+            Kg::from_grams(90_000),
+            None,
+            AnchorProvenance::Asserted,
+            date(2026, 7, 3),
+        ) {
+            Ok(anchor) => anchor,
+            Err(error) => panic!("ninety kilograms is an anchor: {error}"),
+        }
+    }
+
+    /// **A test week is measured against the anchor; it does not stand on it.**
+    ///
+    /// The operator read `anchor 90kg …, test` and asked whether the number
+    /// belonged there at all. It does — the entry test's ramp aims at it — but
+    /// "anchor" reads as an established maximum, which in a test week is
+    /// exactly what has not been established yet.
+    #[test]
+    fn a_test_week_is_against_its_anchor_and_a_climbing_week_is_on_it() {
+        assert_eq!(
+            derived_phrase(DerivedFrom::Anchor(ninety()), WeekKind::Test),
+            "against 90kg (asserted, from 2026-07-03)"
+        );
+        assert_eq!(
+            derived_phrase(
+                DerivedFrom::Anchor(ninety()),
+                WeekKind::Climbing(WeekIndex::FIRST)
+            ),
+            "anchor 90kg (asserted, from 2026-07-03)"
+        );
+    }
+
+    /// A standalone test has no anchor: what it derived from is what the record
+    /// put it at, and that number is named rather than dressed up as one.
+    #[test]
+    fn a_standalone_test_names_what_it_is_an_attempt_at() {
+        assert_eq!(
+            derived_phrase(DerivedFrom::Target(Kg::from_grams(95_000)), WeekKind::Test),
+            "for 95kg"
+        );
     }
 }
