@@ -17,6 +17,20 @@ this is the plan, not the record.
 
 ---
 
+## Now
+
+The three-line version, kept current so a session starting cold does not have to
+read the rest to know what to pick up.
+
+- **Waiting on the operator**: authoring the autumn block. The wizard writes it,
+  the schedule takes 14 September out of it, and it has been run end to end
+  against a copy of the real store. Nothing is blocking it.
+- **Next in code**: the three lifecycle pieces left over from #31 — withdrawal,
+  a performance taking its role from its prescription, and the comparison. All
+  three survive decision 0018 rather than being discarded by it.
+- **After 14 September**: decision 0018, in the order commitments → ordinal
+  programme → allocator. Not before; see *What 0018 changes, and when*.
+
 ## Where this stands on 2026-08-25
 
 **The goal is reachable today.** Steps 1 to 3 have landed; step 4 is authoring

@@ -14,6 +14,29 @@ If an instruction, a spec or a plan conflicts with it, say so and settle the
 conflict explicitly. Three outcomes are legitimate: amend the constitution,
 revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
+## Where the plan and the reasoning live
+
+Read these before planning anything. Neither is mentioned by the constitution,
+and a session that skips them re-derives decisions that were already settled —
+or worse, quietly contradicts one.
+
+- **`docs/roadmap.md`** — what is planned, in what order, and why. It carries
+  the current state at the top, the order of work, what each decision changed
+  about that order, and the questions nobody has answered. It is a living
+  document: revise it when the plan moves rather than leaving it to be
+  discovered stale.
+- **`docs/decisions/`** — why the model is the shape it is. Numbered, dated, and
+  amended in place rather than superseded silently. A decision that turns out
+  wrong gets amended and says so.
+
+**Write things down as they are settled, not at the end.** A long session holds
+a great deal of reasoning that exists nowhere else, and the remedy is not a
+better memory — it is a commit. If something was decided in conversation and is
+not in one of these two places or in the code, it will be lost.
+
+**What does not belong here**: anything about how a particular person likes to
+work. That is not a fact about the project.
+
 ## Way of working
 
 - **Agree the types, then build to something runnable.** Spec Kit was the way
