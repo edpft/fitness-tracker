@@ -103,6 +103,35 @@ needing to state two despite having no programme to state them in. Alternation
 removes the question. A programme says what a session *is*; how many are in a
 microcycle is a fact about the week.
 
+### What a microcycle holds when it holds more than two
+
+Stated on 2026-08-25, and the honest version is that only half of it is settled.
+
+**Three gym sessions is two light and one heavy** — "until we think of something
+better", which is the operator's own gloss and is recorded rather than smoothed
+over.
+
+**Linear periodisation has a scheme for it.** He follows top-set-and-back-off
+sessions after <https://youtu.be/MujqxSdHH60>, so a third session is `1 × 5` at
+80% followed by `2 × 5` at 75%. Those numbers are stated, not fitted.
+
+**Block periodisation does not.** Every source consulted programmes one squat
+session a week and suggests a second should use an *alternative* movement — a
+split squat rather than another squat. So a three-session block microcycle has
+no grounding, and a two-session one is already past what the sources cover,
+since the light session runs the primary at a share of the heavy load.
+
+**That recommendation is already expressible**, which is worth knowing before
+anybody builds for it. `check_primary` is applied on the *gating* role alone, in
+both `Linear` and `Block`, so the primary slot may alternate:
+
+    [fills.knee_dominant]
+    light = "bulgarian-split-squat-barbell"   # the alternative movement
+    heavy = "front-squat"                     # the primary the ladder climbs
+
+Nothing needs building for the second session to be a different movement. What
+is missing is a scheme for a *third*, and only for a block.
+
 ### Allocation is a pin, alternation, and the spacing rule
 
 There is no priority order between disciplines, and gym-first is not a rule.
@@ -133,6 +162,17 @@ with cycling on Wednesday and Sunday.
 
 **A pin is a stated fact and refuses like any other.** If pinning a slot makes
 the rest unsatisfiable, the scheduler says so rather than quietly unpinning it.
+
+**And a pin is overridable, like every other scheduling fact.** An alteration
+already restates the slots for a run of days; it restates the pins the same way.
+A week where the Sunday ride is not happening is a week whose pin lifts, and
+that needs no new mechanism — only that alterations carry pins as well as slots.
+
+### The training microcycle is seven days
+
+Stated, and deliberately not generalised: non-weekly microcycles are out of
+scope. The container repeats on a week, which is what makes "four slots and one
+commitment" a complete description of it.
 
 ### Spacing places the sessions, and there is no model of load
 
@@ -227,17 +267,19 @@ A second round on 2026-08-25 answered three more: a discipline's microcycle
 follows the slots, a slot may be pinned, and there is no priority order because
 the pin and the spacing rule between them decide the phase.
 
+A third round on 2026-08-25 answered the rest: three gym sessions is two light
+and one heavy, a pin is overridable through an alteration like anything else,
+and the training microcycle is seven days.
+
 What remains open:
 
-- **What shape a microcycle has when it holds more than two gym sessions.** Two
-  is one heavy and one light. Three is not obviously two light and one heavy,
-  and nothing needs the answer while the week yields two — but a denser week is
-  exactly what "the microcycle follows the slots" invites, so the question
-  arrives with the first extra slot.
-- **Whether a pin can be conditional.** Sunday morning is a ride because of who
-  he rides with; a week where that does not happen is a week where the pin
-  should probably lift. Nothing has asked for this.
-- **What the training microcycle is when the week is not a week.** Four slots
-  and one commitment describes a Monday-to-Sunday cycle. An alteration that
-  moves training to a Saturday for a fortnight does not obviously repeat on
-  seven days, and the container may need to say what it repeats on.
+- **A block's scheme for a third session.** Linear has one; block does not, and
+  the sources do not offer one because they programme a single squat session a
+  week. Two light and one heavy says how many of each, not what the second light
+  session *does*. This is the question that arrives with the first extra slot,
+  and the answer may well be that the extra session takes an alternative
+  movement rather than a third dose of the primary — which the fills already
+  allow.
+- **Whether "two light and one heavy" survives contact.** It is explicitly a
+  placeholder. Recording it as one means nobody later mistakes it for a
+  considered position.
