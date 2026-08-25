@@ -16,6 +16,7 @@
 use std::fmt;
 
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
+use crate::prescription::DeliveryReference;
 
 use super::{
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
@@ -139,6 +140,19 @@ pub struct GymWorkout {
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: LandingRecordId,
+    /// The session this was performed against, as the destination named it.
+    ///
+    /// **This is what makes a prescription knowably performed.** A prescription
+    /// delivered somewhere gets a reference back from that destination
+    /// (decision 0017); a workout performed against it carries the same
+    /// reference, so the two can be joined without guessing from the date. A
+    /// heavy session prescribed for Friday and performed on Saturday morning is
+    /// still that session performed, and this is what says so.
+    ///
+    /// `None` for a session performed freehand, or against a routine since
+    /// deleted — which is most of the record before delivery existed, and is a
+    /// real state rather than a gap to fill in.
+    performed_against: Option<DeliveryReference>,
 }
 
 impl GymWorkout {
@@ -150,6 +164,7 @@ impl GymWorkout {
         provenance: Provenance,
         source_record_id: SourceRecordId,
         landed_as: LandingRecordId,
+        performed_against: Option<DeliveryReference>,
     ) -> Self {
         Self {
             items,
@@ -157,7 +172,13 @@ impl GymWorkout {
             provenance,
             source_record_id,
             landed_as,
+            performed_against,
         }
+    }
+
+    /// The session this was performed against, where the source named one.
+    pub const fn performed_against(&self) -> Option<&DeliveryReference> {
+        self.performed_against.as_ref()
     }
 
     pub const fn items(&self) -> &NonEmpty<WorkoutItem> {

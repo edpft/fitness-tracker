@@ -481,7 +481,8 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                    w.source_record_id AS "source_record_id!: String",
                    w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
-                   w.event_time AS "event_time: String"
+                   w.event_time AS "event_time: String",
+                   w.performed_against AS "performed_against: String"
             FROM gym_workout AS w
             WHERE w.started_at_utc >= ? AND w.started_at_utc < ?
               AND NOT EXISTS (
@@ -523,12 +524,23 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                     detail: error.to_string(),
                 })?;
 
+            // A reference the store cannot read back is corrupt rather than
+            // absent: it was written by something that had one.
+            let performed_against = row
+                .performed_against
+                .map(domain::prescription::DeliveryReference::try_from)
+                .transpose()
+                .map_err(|error| StoreError::Corrupt {
+                    detail: error.to_string(),
+                })?;
+
             assembled.push(GymWorkout::new(
                 items,
                 started_at,
                 provenance,
                 source_record_id,
                 landed_as,
+                performed_against,
             ));
         }
 

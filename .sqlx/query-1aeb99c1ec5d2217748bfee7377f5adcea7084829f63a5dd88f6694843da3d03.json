@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM prescription_delivery WHERE prescription = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1aeb99c1ec5d2217748bfee7377f5adcea7084829f63a5dd88f6694843da3d03"
+}

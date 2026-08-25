@@ -43,7 +43,9 @@ pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenan
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
 pub use block::{BlockWeek, EntryTest, InvalidBlock, Periodised, Phase, WeekPlan};
-pub use delivery::{DeliveryReference, DestinationName, InvalidDelivery, SessionOrdinal};
+pub use delivery::{
+    DeliveryReference, DestinationName, InvalidDelivery, PrescriptionState, SessionOrdinal,
+};
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,

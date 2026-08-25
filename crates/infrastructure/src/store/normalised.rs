@@ -197,13 +197,19 @@ async fn write_workout(
     let event_kind = event.kind().as_str();
     let event_time = event.occurred_at().map(|at| at.to_string());
 
+    // The session it was performed against, where the source named one. This
+    // is what a prescription is joined to in order to know it was performed.
+    let performed_against = workout
+        .performed_against()
+        .map(application::DeliveryReference::as_str);
+
     sqlx::query!(
         r#"
         INSERT INTO gym_workout (
             landing_record_id, source_record_id, started_at_utc, zone,
-            endpoint, event_kind, event_time, run_id
+            endpoint, event_kind, event_time, run_id, performed_against
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         landing_record_id,
         source_record_id,
@@ -212,7 +218,8 @@ async fn write_workout(
         endpoint,
         event_kind,
         event_time,
-        run_id
+        run_id,
+        performed_against
     )
     .execute(&mut **tx)
     .await

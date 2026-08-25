@@ -14,9 +14,11 @@
 //! persisted, digested and compared against rows written by earlier versions.
 //!
 //! Fields we do not model are simply absent from these structs — the title, the
-//! description, the notes, the `routine_id`. Serde ignores what it is not asked
-//! for, raw retains all of it, and a later feature can add a field here without
-//! anything having been lost in between.
+//! description, the notes. Serde ignores what it is not asked for, raw retains
+//! all of it, and a later feature can add a field here without anything having
+//! been lost in between. `routine_id` was one of those until a prescription
+//! needed to know it had been performed; that it could be added years later
+//! from records landed long before is the whole argument for keeping raw.
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -46,6 +48,16 @@ pub struct Workout<'a> {
     /// at 18:00 UTC through British Summer Time and 19:00–20:00 through
     /// Greenwich Mean Time, a clean one-hour shift.
     pub start_time: String,
+    /// The routine this workout was logged against, where there was one.
+    ///
+    /// **The join between what was prescribed and what was performed.** A
+    /// session delivered somewhere gets a reference back; a workout performed
+    /// against it names the same one. Absent for a session logged freehand, and
+    /// absent for one whose routine has since been deleted — which is why 155
+    /// of the 163 workouts in the corpus carry none, and why the two that do
+    /// name only a reused `Heavy` and `Light` pair.
+    #[serde(default)]
+    pub routine_id: Option<String>,
     #[serde(borrow, default)]
     pub exercises: Vec<ExerciseEntry<'a>>,
 }

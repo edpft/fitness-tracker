@@ -124,3 +124,62 @@ impl TryFrom<String> for DestinationName {
 }
 
 string_name!(DestinationName, InvalidDelivery);
+
+/// Where a prescription has got to.
+///
+/// **Three states, and which one it is decides what may be done to it.** The
+/// operator settled this on 2026-08-25, and it is the answer to the question
+/// § 12 left open: authored data keeps its history because "nothing regenerates
+/// it if lost", and that premise is false for a prescription nobody has
+/// performed.
+///
+/// **Derived, never stored.** Drafted is a prescription with no delivery;
+/// published is one with a delivery nothing names; performed is one a workout
+/// names. A status column would be a second source of truth for a fact the
+/// relations already carry, and the two could disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrescriptionState {
+    /// Issued and nowhere else. Nothing outside the store knows it exists, and
+    /// it re-derives exactly from its programme, the record and the parameters
+    /// — so deleting it loses nothing.
+    Drafted,
+    /// Delivered somewhere it can be performed, and fixed by the reference that
+    /// destination gave it. Still cheap: withdrawing it means removing the
+    /// session at the destination as well, rather than merely forgetting it
+    /// here, or the clutter is what is left behind.
+    Published { reference: DeliveryReference },
+    /// A workout names its reference. Now it is not cheap: what it records
+    /// happened, and the performance beside it would be left comparing against
+    /// nothing.
+    Performed { reference: DeliveryReference },
+}
+
+impl PrescriptionState {
+    /// May this be thrown away?
+    ///
+    /// The whole of what the three states are for.
+    pub const fn is_disposable(&self) -> bool {
+        match self {
+            Self::Drafted | Self::Published { .. } => true,
+            Self::Performed { .. } => false,
+        }
+    }
+
+    /// The reference the destination gave it, once it has one.
+    pub const fn reference(&self) -> Option<&DeliveryReference> {
+        match self {
+            Self::Drafted => None,
+            Self::Published { reference } | Self::Performed { reference } => Some(reference),
+        }
+    }
+}
+
+impl fmt::Display for PrescriptionState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Drafted => f.write_str("drafted"),
+            Self::Published { .. } => f.write_str("published"),
+            Self::Performed { .. } => f.write_str("performed"),
+        }
+    }
+}
