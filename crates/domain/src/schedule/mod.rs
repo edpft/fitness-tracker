@@ -2,9 +2,20 @@
 //!
 //! **Operator-level, not programme-level.** This is a fact about a life — when
 //! work, family and social commitments leave room to train, and which zone that
-//! happens in. Every discipline reads it; none owns it. The gym programme is
-//! told which of these slots it may use, and that allocation is planning rather
-//! than fact (see `docs/`), so nothing here allocates anything.
+//! happens in. Every discipline reads it; none owns it.
+//!
+//! **And the allocation lives here too.** Which slots are the gym's and which
+//! are cycling's was going to be somebody else's business, on the grounds that
+//! splitting a week between disciplines is planning rather than fact. It is
+//! not, and an alteration is why: a trip where the hotel gym is only free at
+//! the weekend turns two weekday evenings into a Saturday morning, and the
+//! allocation has to move with them. Anything holding it elsewhere would need
+//! to know about alterations as well, which is the knowledge this module exists
+//! to keep in one place.
+//!
+//! What is still not here is *choosing* the split. Recording that Monday
+//! evening is the gym's is a fact; deciding it should be weighs cycling,
+//! nutrition and the family calendar, and sits above this.
 //!
 //! ## Two kinds of slot, and this is the other one
 //!
@@ -51,7 +62,7 @@
 //! different facts, and collapsing them would make a zone-only alteration
 //! cancel every session of the trip.
 
-use std::{collections::BTreeSet, num::NonZeroU8};
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use jiff::civil::{Date, Weekday};
 
@@ -107,6 +118,59 @@ impl std::fmt::Display for PartOfDay {
     }
 }
 
+/// What a training slot is given to.
+///
+/// **The activity, never the vendor.** Cycling is cycling whether the bike is a
+/// Peloton, a turbo trainer or a road; naming the member after the app that
+/// happens to record it would make the vocabulary a shape of a source, which is
+/// the one thing § II.3 rules out. The same reason the exercise vocabulary is
+/// ours rather than Hevy's.
+///
+/// Closed, and every slot names one. An unclaimed slot is not representable
+/// here: a time nobody is going to use is not a training slot, it is a free
+/// evening, and the pool is the times something *could* be scheduled into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Discipline {
+    Gym,
+    Cycling,
+}
+
+impl Discipline {
+    pub const ALL: &'static [Self] = &[Self::Gym, Self::Cycling];
+
+    /// The stable key. Persisted, so it outlives a rename.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gym => "gym",
+            Self::Cycling => "cycling",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{value:?} does not name a discipline")]
+pub struct UnknownDiscipline {
+    value: String,
+}
+
+impl TryFrom<String> for Discipline {
+    type Error = UnknownDiscipline;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::ALL
+            .iter()
+            .find(|discipline| discipline.as_str() == value)
+            .copied()
+            .ok_or(UnknownDiscipline { value })
+    }
+}
+
+impl std::fmt::Display for Discipline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A time the operator is free to train, and could train instead of another.
 ///
 /// Ordered by weekday then part of day, so a set of them reads as a week.
@@ -153,13 +217,17 @@ impl std::fmt::Display for TrainingSlot {
 pub struct TrainingPattern {
     from: Date,
     zone: OperatorZone,
-    slots: BTreeSet<TrainingSlot>,
+    slots: BTreeMap<TrainingSlot, Discipline>,
 }
 
 impl TrainingPattern {
     /// A schedule may have no slots — a period with no room to train at all is a
     /// real thing to record, and refusing it would mean pretending otherwise.
-    pub const fn new(from: Date, zone: OperatorZone, slots: BTreeSet<TrainingSlot>) -> Self {
+    pub const fn new(
+        from: Date,
+        zone: OperatorZone,
+        slots: BTreeMap<TrainingSlot, Discipline>,
+    ) -> Self {
         Self { from, zone, slots }
     }
 
@@ -171,7 +239,7 @@ impl TrainingPattern {
         &self.zone
     }
 
-    pub const fn slots(&self) -> &BTreeSet<TrainingSlot> {
+    pub const fn slots(&self) -> &BTreeMap<TrainingSlot, Discipline> {
         &self.slots
     }
 }
@@ -182,7 +250,7 @@ pub struct Alteration {
     start: Date,
     days: NonZeroU8,
     zone: Option<OperatorZone>,
-    slots: Option<BTreeSet<TrainingSlot>>,
+    slots: Option<BTreeMap<TrainingSlot, Discipline>>,
     /// Why. An unexplained override is unreadable six months later — § II.2's
     /// obligation on an edit overlay, which this is the authored-data analogue
     /// of.
@@ -194,7 +262,7 @@ impl Alteration {
         start: Date,
         days: NonZeroU8,
         zone: Option<OperatorZone>,
-        slots: Option<BTreeSet<TrainingSlot>>,
+        slots: Option<BTreeMap<TrainingSlot, Discipline>>,
         reason: String,
     ) -> Self {
         Self {
@@ -218,7 +286,7 @@ impl Alteration {
         self.zone.as_ref()
     }
 
-    pub const fn slots(&self) -> Option<&BTreeSet<TrainingSlot>> {
+    pub const fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Discipline>> {
         self.slots.as_ref()
     }
 
@@ -242,13 +310,30 @@ impl Alteration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Availability {
     pub zone: OperatorZone,
-    pub slots: BTreeSet<TrainingSlot>,
+    pub slots: BTreeMap<TrainingSlot, Discipline>,
 }
 
 impl Availability {
-    /// Is this date one the operator could train on at all?
+    /// Is this date one the operator could train on at all, by any discipline?
+    ///
+    /// Rarely the question worth asking: a day open to cycling is not a day the
+    /// gym can use. [`Self::for_discipline`] is what a programme wants.
     pub fn open(&self, date: Date) -> bool {
-        self.slots.iter().any(|slot| slot.weekday == date.weekday())
+        self.slots.keys().any(|slot| slot.weekday == date.weekday())
+    }
+
+    /// This date's slots belonging to one discipline.
+    pub fn for_discipline(
+        &self,
+        discipline: Discipline,
+        date: Date,
+    ) -> impl Iterator<Item = TrainingSlot> + '_ {
+        self.slots
+            .iter()
+            .filter(move |(slot, allocated)| {
+                **allocated == discipline && slot.weekday == date.weekday()
+            })
+            .map(|(slot, _)| *slot)
     }
 }
 
@@ -294,14 +379,11 @@ impl Diary {
     /// with a different arrangement in the middle of it is a perfectly ordinary
     /// thing to describe that way.
     pub fn on(&self, date: Date) -> Option<Availability> {
-        let schedule = self
-            .patterns
-            .iter()
-            .rfind(|schedule| schedule.from() <= date)?;
+        let pattern = self.pattern_on(date)?;
 
         let mut availability = Availability {
-            zone: schedule.zone().clone(),
-            slots: schedule.slots().clone(),
+            zone: pattern.zone().clone(),
+            slots: pattern.slots().clone(),
         };
 
         for alteration in self
@@ -320,42 +402,56 @@ impl Diary {
         Some(availability)
     }
 
-    /// Every date in a range the operator could not train on, given the slots a
-    /// programme has been allocated.
+    /// Every date in a range on which a discipline ordinarily trains and no
+    /// longer can.
     ///
-    /// **This is what a programme consults, and it takes the allocation rather
-    /// than reading the pool.** Half the operator's slots may belong to another
-    /// discipline entirely, so a programme asking "which of *my* days do I lose"
-    /// is the only question it can answer without knowing about the rest.
-    /// **A day is lost when the allocated *slot* is gone, not when the day
+    /// **The allocation is read here rather than passed in**, which is the whole
+    /// reason this module owns it. An alteration may replace the week's slots
+    /// outright — a holiday that turns Monday and Friday evenings into a
+    /// Saturday morning — and a caller holding a fixed set of its own slots
+    /// would find none of them and report everything lost, while the Saturday
+    /// sat unclaimed. Only something that knows both the pattern and the
+    /// alterations can answer.
+    ///
+    /// **A day is lost when the discipline's slot is gone, not when the day
     /// empties.** Parts of a day are the whole reason a slot is a weekday and a
-    /// part rather than a weekday: the operator trains on Monday morning and
-    /// goes away at lunchtime, and a programme holding the Monday evening has
-    /// lost that Monday however open the morning still is.
+    /// part: the operator trains Monday morning and goes away at lunchtime, and
+    /// a programme holding the Monday evening has lost that Monday however open
+    /// the morning still is. A day the *other* discipline keeps is lost too.
     ///
-    /// Asking [`Availability::open`] instead answers "could the operator train
-    /// at all", which is a different question and the wrong one here — it read
-    /// a surviving morning as a surviving evening and reported nothing lost.
-    pub fn unavailable(
-        &self,
-        from: Date,
-        until: Date,
-        allocated: &BTreeSet<TrainingSlot>,
-    ) -> Vec<Date> {
+    /// **A moved slot is a loss here and a gain elsewhere.** If the holiday
+    /// above gives the gym its Saturday morning, this still reports the Monday
+    /// and the Friday: they are days the programme cannot run. What it does
+    /// with the Saturday is [`Self::slots_on`] and a decision, and deciding is
+    /// not this module's business.
+    pub fn unavailable(&self, from: Date, until: Date, discipline: Discipline) -> Vec<Date> {
         let mut lost = Vec::new();
         let mut cursor = from;
 
         while cursor <= until {
-            let mine: Vec<&TrainingSlot> = allocated
-                .iter()
-                .filter(|slot| slot.weekday == cursor.weekday())
-                .collect();
+            // The baseline is the pattern in force, unaltered: "ordinarily" is
+            // what the week says, and the alteration is what happened to it.
+            let ordinarily: Vec<TrainingSlot> = self
+                .pattern_on(cursor)
+                .map(|pattern| {
+                    pattern
+                        .slots()
+                        .iter()
+                        .filter(|(slot, allocated)| {
+                            **allocated == discipline && slot.weekday == cursor.weekday()
+                        })
+                        .map(|(slot, _)| *slot)
+                        .collect()
+                })
+                .unwrap_or_default();
 
-            if !mine.is_empty() {
-                let available = self.on(cursor).is_some_and(|availability| {
-                    mine.iter().any(|slot| availability.slots.contains(slot))
+            if !ordinarily.is_empty() {
+                let kept = self.on(cursor).is_some_and(|availability| {
+                    ordinarily
+                        .iter()
+                        .any(|slot| availability.slots.get(slot) == Some(&discipline))
                 });
-                if !available {
+                if !kept {
                     lost.push(cursor);
                 }
             }
@@ -365,5 +461,20 @@ impl Diary {
         }
 
         lost
+    }
+
+    /// A discipline's slots on one date, after every alteration covering it.
+    ///
+    /// The other half of [`Self::unavailable`]: what a programme *has*, rather
+    /// than what it lost.
+    pub fn slots_on(&self, date: Date, discipline: Discipline) -> Vec<TrainingSlot> {
+        self.on(date)
+            .map(|availability| availability.for_discipline(discipline, date).collect())
+            .unwrap_or_default()
+    }
+
+    /// The pattern in force on a date, before any alteration.
+    fn pattern_on(&self, date: Date) -> Option<&TrainingPattern> {
+        self.patterns.iter().rfind(|pattern| pattern.from() <= date)
     }
 }

@@ -891,23 +891,29 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 
 // --- The operator's week ----------------------------------------------------
 
-/// The slots of a week, as a line per weekday.
+/// The slots of a week, as a line per weekday, each saying whose it is.
 ///
 /// Grouped by day rather than listed flat, because "Monday evening, Wednesday
 /// evening" is how the week is said and a flat list of seven is not a week. The
 /// slots arrive ordered by weekday then part, so grouping is a fold rather than
 /// a sort.
-fn week_slots(slots: &std::collections::BTreeSet<domain::schedule::TrainingSlot>) {
+fn week_slots(
+    slots: &std::collections::BTreeMap<
+        domain::schedule::TrainingSlot,
+        domain::schedule::Discipline,
+    >,
+) {
     if slots.is_empty() {
         println!("    no room to train at all");
         return;
     }
 
     let mut days: Vec<(jiff::civil::Weekday, Vec<String>)> = Vec::new();
-    for slot in slots {
+    for (slot, discipline) in slots {
+        let entry = format!("{} ({discipline})", slot.part);
         match days.last_mut() {
-            Some((day, parts)) if *day == slot.weekday => parts.push(slot.part.to_string()),
-            _ => days.push((slot.weekday, vec![slot.part.to_string()])),
+            Some((day, parts)) if *day == slot.weekday => parts.push(entry),
+            _ => days.push((slot.weekday, vec![entry])),
         }
     }
 

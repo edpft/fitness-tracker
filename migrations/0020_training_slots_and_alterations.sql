@@ -31,14 +31,22 @@ CREATE TABLE training_pattern (
     zone         TEXT    NOT NULL
 ) STRICT;
 
--- A row per slot, which is what a set of slots is.
+-- A row per slot, and each says whose it is.
+--
+-- **The allocation lives with the slot, not beside it.** Which slots are the
+-- gym's and which are cycling's depends on the alterations -- a holiday that
+-- turns two weekday evenings into a Saturday morning has to say who gets the
+-- Saturday -- so anything holding the allocation apart from the slots would
+-- need to know about alterations too. `discipline` is the activity and never
+-- the vendor: cycling is cycling whatever records it.
 CREATE TABLE training_slot (
-    pattern   INTEGER NOT NULL REFERENCES training_pattern(id) ON DELETE CASCADE,
-    weekday   TEXT    NOT NULL
+    pattern    INTEGER NOT NULL REFERENCES training_pattern(id) ON DELETE CASCADE,
+    weekday    TEXT    NOT NULL
         CHECK (weekday IN ('monday', 'tuesday', 'wednesday', 'thursday',
                            'friday', 'saturday', 'sunday')),
-    part      TEXT    NOT NULL
+    part       TEXT    NOT NULL
         CHECK (part IN ('morning', 'afternoon', 'evening')),
+    discipline TEXT    NOT NULL CHECK (discipline IN ('gym', 'cycling')),
 
     PRIMARY KEY (pattern, weekday, part)
 ) STRICT, WITHOUT ROWID;
@@ -73,11 +81,12 @@ CREATE TABLE alteration (
 
 CREATE TABLE alteration_slot (
     alteration INTEGER NOT NULL REFERENCES alteration(id) ON DELETE CASCADE,
-    weekday  TEXT    NOT NULL
+    weekday    TEXT    NOT NULL
         CHECK (weekday IN ('monday', 'tuesday', 'wednesday', 'thursday',
                            'friday', 'saturday', 'sunday')),
-    part     TEXT    NOT NULL
+    part       TEXT    NOT NULL
         CHECK (part IN ('morning', 'afternoon', 'evening')),
+    discipline TEXT    NOT NULL CHECK (discipline IN ('gym', 'cycling')),
 
     PRIMARY KEY (alteration, weekday, part)
 ) STRICT, WITHOUT ROWID;

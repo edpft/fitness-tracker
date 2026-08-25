@@ -6,12 +6,12 @@
 
 mod support;
 
-use std::{collections::BTreeSet, num::NonZeroU8};
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     gym::OperatorZone,
-    schedule::{Alteration, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Weekday, date};
@@ -64,19 +64,19 @@ macro_rules! days {
     };
 }
 
-fn slots(of: &[(Weekday, PartOfDay)]) -> BTreeSet<TrainingSlot> {
+fn slots(of: &[(Weekday, PartOfDay, Discipline)]) -> BTreeMap<TrainingSlot, Discipline> {
     of.iter()
-        .map(|(day, part)| TrainingSlot::new(*day, *part))
+        .map(|(day, part, discipline)| (TrainingSlot::new(*day, *part), *discipline))
         .collect()
 }
 
 /// The operator's ordinary pattern, as stated on 2026-08-24.
-fn ordinary_pattern() -> BTreeSet<TrainingSlot> {
+fn ordinary_pattern() -> BTreeMap<TrainingSlot, Discipline> {
     slots(&[
-        (Weekday::Monday, PartOfDay::Evening),
-        (Weekday::Wednesday, PartOfDay::Evening),
-        (Weekday::Friday, PartOfDay::Evening),
-        (Weekday::Sunday, PartOfDay::Morning),
+        (Weekday::Monday, PartOfDay::Evening, Discipline::Gym),
+        (Weekday::Wednesday, PartOfDay::Evening, Discipline::Cycling),
+        (Weekday::Friday, PartOfDay::Evening, Discipline::Gym),
+        (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
     ])
 }
 
@@ -94,7 +94,7 @@ fn a_pattern_and_its_alterations_round_trip() {
         date(2026, 9, 14),
         days!(1),
         None,
-        Some(BTreeSet::new()),
+        Some(BTreeMap::new()),
         "away, and unable to train".to_owned(),
     );
 
@@ -141,7 +141,7 @@ fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
         date(2026, 9, 14),
         days!(1),
         None,
-        Some(BTreeSet::new()),
+        Some(BTreeMap::new()),
         "away, and unable to train".to_owned(),
     );
 
@@ -172,7 +172,7 @@ fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
     );
     assert_eq!(
         away.slots(),
-        Some(&BTreeSet::new()),
+        Some(&BTreeMap::new()),
         "an unavailable day states the empty set"
     );
 
@@ -211,14 +211,12 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
         date(2026, 9, 14),
         days!(1),
         None,
-        Some(BTreeSet::new()),
+        Some(BTreeMap::new()),
         "away, and unable to train".to_owned(),
     )));
 
     let diary = run!(store.diary());
-    let allocated = ordinary_pattern();
-
-    let lost = diary.unavailable(date(2026, 9, 14), date(2026, 9, 20), &allocated);
+    let lost = diary.unavailable(date(2026, 9, 14), date(2026, 9, 20), Discipline::Gym);
 
     assert_eq!(
         lost,
@@ -244,7 +242,7 @@ fn re_stating_a_pattern_corrects_it() {
     run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        slots(&[(Weekday::Tuesday, PartOfDay::Morning)]),
+        slots(&[(Weekday::Tuesday, PartOfDay::Morning, Discipline::Gym)]),
     )));
 
     let diary = run!(store.diary());
@@ -252,7 +250,7 @@ fn re_stating_a_pattern_corrects_it() {
     assert_eq!(diary.patterns().len(), 1, "one pattern, corrected");
     assert_eq!(
         diary.patterns()[0].slots(),
-        &slots(&[(Weekday::Tuesday, PartOfDay::Morning)]),
+        &slots(&[(Weekday::Tuesday, PartOfDay::Morning, Discipline::Gym)]),
         "the correction is what stands"
     );
 }
@@ -270,7 +268,7 @@ fn a_later_pattern_supersedes_by_existing() {
     run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 9, 21),
         zone!("Europe/London"),
-        slots(&[(Weekday::Saturday, PartOfDay::Morning)]),
+        slots(&[(Weekday::Saturday, PartOfDay::Morning, Discipline::Gym)]),
     )));
 
     let diary = run!(store.diary());
@@ -291,7 +289,7 @@ fn a_later_pattern_supersedes_by_existing() {
     );
     assert_eq!(
         after.slots,
-        slots(&[(Weekday::Saturday, PartOfDay::Morning)]),
+        slots(&[(Weekday::Saturday, PartOfDay::Morning, Discipline::Gym)]),
         "the later pattern answers from its own date"
     );
 
@@ -300,5 +298,59 @@ fn a_later_pattern_supersedes_by_existing() {
     assert!(
         diary.on(date(2026, 8, 1)).is_none(),
         "a date before the first pattern is unknown, not empty"
+    );
+}
+
+/// **The case that put the allocation in this module.**
+///
+/// An alteration may replace the week's slots outright — a trip where the hotel
+/// gym is only free at the weekend turns two weekday evenings into a Saturday
+/// morning. The allocation has to move with them, and only something holding
+/// both the pattern and the alterations can say so.
+///
+/// Were a programme handed a fixed set of its own slots instead, it would look
+/// for its Monday and Friday evenings, find neither, and report the whole week
+/// lost — while the Saturday it had actually been given sat unclaimed.
+#[test]
+fn an_alteration_moves_the_allocation_with_the_slots() {
+    let (store, _directory) = opened!();
+
+    run!(store.record_pattern(&TrainingPattern::new(
+        date(2026, 8, 24),
+        zone!("Europe/London"),
+        ordinary_pattern()
+    )));
+    run!(store.record_alteration(&Alteration::new(
+        date(2026, 9, 14),
+        days!(7),
+        None,
+        Some(slots(&[
+            (Weekday::Saturday, PartOfDay::Morning, Discipline::Gym),
+            (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
+        ])),
+        "away; the hotel gym is only free at the weekend".to_owned(),
+    )));
+
+    let diary = run!(store.diary());
+
+    // The weekday evenings are gone, so those days are lost to the gym.
+    assert_eq!(
+        diary.unavailable(date(2026, 9, 14), date(2026, 9, 20), Discipline::Gym),
+        [date(2026, 9, 14), date(2026, 9, 18)],
+        "the Monday and the Friday the gym ordinarily has"
+    );
+
+    // And the Saturday it was given is there to be found, which is the half a
+    // fixed allocation could never have seen.
+    assert_eq!(
+        diary.slots_on(date(2026, 9, 19), Discipline::Gym),
+        [TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning)],
+        "the gym keeps the Saturday morning the alteration gave it"
+    );
+    assert!(
+        diary
+            .slots_on(date(2026, 9, 19), Discipline::Cycling)
+            .is_empty(),
+        "which is the gym's and not cycling's"
     );
 }

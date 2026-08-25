@@ -178,9 +178,10 @@ reviewable, diffable and re-authorable.
   independence and has never been tested against a second source, so this gets
   more expensive to discover the longer it waits. It competes for the same
   weeks and does not help the operator train.
-- **The macro layer** — Peloton, nutrition, the family calendar. Slots are
-  recorded but nothing allocates them. See the note on fact versus planning
-  below.
+- **The macro layer** — nutrition, the family calendar, and anything that
+  *decides* how a week is spent. Slots are recorded **and allocated**, because
+  the allocation turned out to be a fact rather than a plan; what waits is
+  choosing it. See the note on fact versus planning below.
 
 ---
 
@@ -245,5 +246,19 @@ also weighs cycling, nutrition and the family calendar.
 **Recording a fact is not coordinating.** `fitness` is not a gym-only tool; the
 gym parts are simply what exists so far. So the line is not gym-versus-macro but
 fact-versus-planning: recording that the operator can train on Monday evening is
-data this tool should hold, while allocating that slot between the gym and
-cycling is planning and waits.
+data this tool should hold.
+
+**The allocation is on the fact side, and that was revised on 2026-08-25.** This
+document said allocating a slot between the gym and cycling was planning, and
+waited. It is not: *deciding* the split is planning, and still waits, but
+*which discipline holds Monday evening* is a fact the schedule has to hold —
+because an alteration can move it. A trip where the hotel gym is only free at
+the weekend turns two weekday evenings into a Saturday morning, and the
+allocation has to move with them. Anything holding the allocation elsewhere
+would need to know about alterations too, which is the knowledge this module
+exists to keep in one place.
+
+So `Diary::unavailable` takes a discipline and reads the allocation, rather than
+taking a set of slots somebody else kept in step. What the tool still will not
+do is choose the split — that weighs cycling, nutrition and the family calendar,
+and sits above the gym level.

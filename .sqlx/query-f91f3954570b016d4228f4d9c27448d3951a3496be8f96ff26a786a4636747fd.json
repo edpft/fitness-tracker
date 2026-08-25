@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO training_slot (pattern, weekday, part, discipline)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "f91f3954570b016d4228f4d9c27448d3951a3496be8f96ff26a786a4636747fd"
+}

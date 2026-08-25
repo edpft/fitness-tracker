@@ -14,12 +14,12 @@
 //! column would be a second place for the same fact and the two could disagree,
 //! which is the reasoning the generation parameters beside this are stored under.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     gym::OperatorZone,
-    schedule::{Alteration, Diary, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Diary, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -58,6 +58,10 @@ fn slot_of(weekday: &str, part: &str) -> Result<TrainingSlot, StoreError> {
     Ok(TrainingSlot::new(weekday_of(weekday)?, part_of(part)?))
 }
 
+fn discipline_of(text: &str) -> Result<Discipline, StoreError> {
+    Discipline::try_from(text.to_owned()).map_err(|error| corrupt(&error))
+}
+
 impl DiaryStore for SqliteDiaryStore {
     async fn diary(&self) -> Result<Diary, StoreError> {
         let weeks = sqlx::query!(
@@ -75,7 +79,7 @@ impl DiaryStore for SqliteDiaryStore {
         for week in weeks {
             let slots = sqlx::query!(
                 r"
-                SELECT weekday, part
+                SELECT weekday, part, discipline
                 FROM training_slot
                 WHERE pattern = ?
                 ",
@@ -87,8 +91,13 @@ impl DiaryStore for SqliteDiaryStore {
 
             let slots = slots
                 .iter()
-                .map(|row| slot_of(&row.weekday, &row.part))
-                .collect::<Result<BTreeSet<_>, _>>()?;
+                .map(|row| {
+                    Ok((
+                        slot_of(&row.weekday, &row.part)?,
+                        discipline_of(&row.discipline)?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>, StoreError>>()?;
 
             patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
@@ -123,7 +132,7 @@ impl DiaryStore for SqliteDiaryStore {
             } else {
                 let rows = sqlx::query!(
                     r"
-                    SELECT weekday, part
+                    SELECT weekday, part, discipline
                     FROM alteration_slot
                     WHERE alteration = ?
                     ",
@@ -135,8 +144,13 @@ impl DiaryStore for SqliteDiaryStore {
 
                 Some(
                     rows.iter()
-                        .map(|row| slot_of(&row.weekday, &row.part))
-                        .collect::<Result<BTreeSet<_>, _>>()?,
+                        .map(|row| {
+                            Ok((
+                                slot_of(&row.weekday, &row.part)?,
+                                discipline_of(&row.discipline)?,
+                            ))
+                        })
+                        .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
                 )
             };
 
@@ -193,17 +207,19 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for slot in pattern.slots() {
+        for (slot, discipline) in pattern.slots() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
+            let discipline = discipline.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO training_slot (pattern, weekday, part)
-                VALUES (?, ?, ?)
+                INSERT INTO training_slot (pattern, weekday, part, discipline)
+                VALUES (?, ?, ?, ?)
                 ",
                 id,
                 weekday,
-                part
+                part,
+                discipline
             )
             .execute(&mut *tx)
             .await
@@ -258,17 +274,19 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for slot in alteration.slots().into_iter().flatten() {
+        for (slot, discipline) in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
+            let discipline = discipline.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO alteration_slot (alteration, weekday, part)
-                VALUES (?, ?, ?)
+                INSERT INTO alteration_slot (alteration, weekday, part, discipline)
+                VALUES (?, ?, ?, ?)
                 ",
                 id,
                 weekday,
-                part
+                part,
+                discipline
             )
             .execute(&mut *tx)
             .await

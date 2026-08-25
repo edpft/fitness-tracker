@@ -17,7 +17,7 @@
 //! refusal arrives before any question instead of halfway through.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::{IsTerminal, Write},
     num::NonZeroU8,
     path::Path,
@@ -26,7 +26,7 @@ use std::{
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     gym::OperatorZone,
-    schedule::{Alteration, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Date, Weekday};
@@ -122,17 +122,46 @@ fn parse_parts(typed: &str) -> Result<BTreeSet<PartOfDay>, String> {
     Ok(parts)
 }
 
-/// Ask for a week's worth of slots, a day at a time.
-fn ask_slots(preamble: &str) -> Result<BTreeSet<TrainingSlot>, Failure> {
+fn parse_discipline(typed: &str) -> Result<Discipline, String> {
+    match typed.to_lowercase().as_str() {
+        "" | "g" | "gym" => Ok(Discipline::Gym),
+        "c" | "cycling" => Ok(Discipline::Cycling),
+        other => Err(format!("{other:?} is not gym or cycling")),
+    }
+}
+
+/// Ask for a week's worth of slots, a day at a time, and whose each one is.
+///
+/// **Two passes rather than one prompt per slot-and-discipline.** Which parts of
+/// a day are free is a different question from who gets them, and asking them
+/// together produced a prompt nobody could read. The second pass asks only about
+/// the slots the first one found, so a four-slot week is eleven short questions
+/// and eight of them are a single keystroke.
+///
+/// A slot cannot be claimed twice, because it is asked about once.
+fn ask_slots(preamble: &str) -> Result<BTreeMap<TrainingSlot, Discipline>, Failure> {
     println!("{preamble}");
     println!("  m = morning, a = afternoon, e = evening; several is \"me\"; - is none");
 
-    let mut slots = BTreeSet::new();
+    let mut found = Vec::new();
     for (weekday, name) in WEEKDAYS {
         let parts = ask_until(&format!("  {name:<10}[-] "), parse_parts)?;
         for part in parts {
-            slots.insert(TrainingSlot::new(weekday, part));
+            found.push((name, TrainingSlot::new(weekday, part)));
         }
+    }
+
+    if found.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    println!("And which of those are the gym's?");
+    println!("  g = gym, c = cycling");
+
+    let mut slots = BTreeMap::new();
+    for (name, slot) in found {
+        let asked = format!("  {:<20}[gym] ", format!("{name} {}", slot.part));
+        slots.insert(slot, ask_until(&asked, parse_discipline)?);
     }
     Ok(slots)
 }
