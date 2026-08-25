@@ -1,8 +1,8 @@
-//! The operator's week, through its real store (§ III).
+//! When there is room to train, through its real store (§ III).
 //!
-//! Authored data like the programme beside it: nothing derives a week from the
-//! record, because the record shows when the operator *did* train and that is
-//! not the same as when they could have.
+//! Authored data like the programme beside it: nothing derives a pattern from
+//! the record, because the record shows when the operator *did* train and that
+//! is not the same as when they could have.
 
 mod support;
 
@@ -11,7 +11,7 @@ use std::{collections::BTreeSet, num::NonZeroU8};
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     gym::OperatorZone,
-    schedule::{PartOfDay, Patch, Schedule, Slot},
+    schedule::{Alteration, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Weekday, date};
@@ -64,14 +64,14 @@ macro_rules! days {
     };
 }
 
-fn slots(of: &[(Weekday, PartOfDay)]) -> BTreeSet<Slot> {
+fn slots(of: &[(Weekday, PartOfDay)]) -> BTreeSet<TrainingSlot> {
     of.iter()
-        .map(|(day, part)| Slot::new(*day, *part))
+        .map(|(day, part)| TrainingSlot::new(*day, *part))
         .collect()
 }
 
-/// The operator's week, as stated on 2026-08-24.
-fn ordinary_week() -> BTreeSet<Slot> {
+/// The operator's ordinary pattern, as stated on 2026-08-24.
+fn ordinary_pattern() -> BTreeSet<TrainingSlot> {
     slots(&[
         (Weekday::Monday, PartOfDay::Evening),
         (Weekday::Wednesday, PartOfDay::Evening),
@@ -80,13 +80,17 @@ fn ordinary_week() -> BTreeSet<Slot> {
     ])
 }
 
-/// A week and a holiday go in and come back the same.
+/// A pattern and an alteration go in and come back the same.
 #[test]
-fn a_week_and_its_holidays_round_trip() {
+fn a_pattern_and_its_alterations_round_trip() {
     let (store, _directory) = opened!();
 
-    let week = Schedule::new(date(2026, 8, 24), zone!("Europe/London"), ordinary_week());
-    let holiday = Patch::new(
+    let pattern = TrainingPattern::new(
+        date(2026, 8, 24),
+        zone!("Europe/London"),
+        ordinary_pattern(),
+    );
+    let alteration = Alteration::new(
         date(2026, 9, 14),
         days!(1),
         None,
@@ -94,34 +98,38 @@ fn a_week_and_its_holidays_round_trip() {
         "away, and unable to train".to_owned(),
     );
 
-    run!(store.record_week(&week));
-    run!(store.record_patch(&holiday));
+    run!(store.record_pattern(&pattern));
+    run!(store.record_alteration(&alteration));
 
     let diary = run!(store.diary());
 
-    assert_eq!(diary.schedules(), [week], "the week reads back");
-    assert_eq!(diary.patches(), [holiday], "the holiday reads back");
+    assert_eq!(diary.patterns(), [pattern], "the pattern reads back");
+    assert_eq!(
+        diary.alterations(),
+        [alteration],
+        "the alteration reads back"
+    );
 }
 
 /// **The distinction the schema exists to keep.**
 ///
-/// A patch's slots are `Option<BTreeSet<Slot>>`: absent means the ordinary week
+/// An alteration's slots are `Option<BTreeSet<TrainingSlot>>`: absent means the ordinary week
 /// stands — away, training as usual — and present-but-empty means no room to
 /// train at all. Both are zero rows in `schedule_patch_slot`, so storage has to
 /// carry the difference some other way, and collapsing them would make a
-/// zone-only patch silently cancel every session of a trip.
+/// zone-only alteration silently cancel every session of a trip.
 #[test]
 fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
     let (store, _directory) = opened!();
 
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        ordinary_week()
+        ordinary_pattern()
     )));
 
     // Away, training as usual, in another country.
-    let unchanged = Patch::new(
+    let unchanged = Alteration::new(
         date(2026, 10, 5),
         days!(1),
         Some(zone!("Europe/Rome")),
@@ -129,7 +137,7 @@ fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
         "in Rome, training as usual".to_owned(),
     );
     // Away, and unable to train.
-    let cancelled = Patch::new(
+    let cancelled = Alteration::new(
         date(2026, 9, 14),
         days!(1),
         None,
@@ -137,27 +145,31 @@ fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
         "away, and unable to train".to_owned(),
     );
 
-    run!(store.record_patch(&unchanged));
-    run!(store.record_patch(&cancelled));
+    run!(store.record_alteration(&unchanged));
+    run!(store.record_alteration(&cancelled));
 
     let diary = run!(store.diary());
 
     let Some(rome) = diary
-        .patches()
+        .alterations()
         .iter()
         .find(|p| p.start() == date(2026, 10, 5))
     else {
-        panic!("the Rome patch is stored")
+        panic!("the Rome alteration is stored")
     };
     let Some(away) = diary
-        .patches()
+        .alterations()
         .iter()
         .find(|p| p.start() == date(2026, 9, 14))
     else {
-        panic!("the 14 September patch is stored")
+        panic!("the 14 September alteration is stored")
     };
 
-    assert_eq!(rome.slots(), None, "a zone-only patch changes no slots");
+    assert_eq!(
+        rome.slots(),
+        None,
+        "a zone-only alteration changes no slots"
+    );
     assert_eq!(
         away.slots(),
         Some(&BTreeSet::new()),
@@ -190,12 +202,12 @@ fn a_patch_that_states_no_slots_is_not_a_patch_that_states_none() {
 fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
     let (store, _directory) = opened!();
 
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        ordinary_week()
+        ordinary_pattern()
     )));
-    run!(store.record_patch(&Patch::new(
+    run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(1),
         None,
@@ -204,7 +216,7 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
     )));
 
     let diary = run!(store.diary());
-    let allocated = ordinary_week();
+    let allocated = ordinary_pattern();
 
     let lost = diary.unavailable(date(2026, 9, 14), date(2026, 9, 20), &allocated);
 
@@ -215,21 +227,21 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
     );
 }
 
-/// Re-stating the week in force from a date corrects it rather than adding a
+/// Re-stating the pattern in force from a date corrects it rather than adding a
 /// second one that begins the same day.
 ///
 /// Succession is a *later* date. Two rows sharing one start could not be
 /// ordered, and `Diary::on` takes the last that applies.
 #[test]
-fn re_stating_a_week_corrects_it() {
+fn re_stating_a_pattern_corrects_it() {
     let (store, _directory) = opened!();
 
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        ordinary_week()
+        ordinary_pattern()
     )));
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
         slots(&[(Weekday::Tuesday, PartOfDay::Morning)]),
@@ -237,25 +249,25 @@ fn re_stating_a_week_corrects_it() {
 
     let diary = run!(store.diary());
 
-    assert_eq!(diary.schedules().len(), 1, "one week, corrected");
+    assert_eq!(diary.patterns().len(), 1, "one pattern, corrected");
     assert_eq!(
-        diary.schedules()[0].slots(),
+        diary.patterns()[0].slots(),
         &slots(&[(Weekday::Tuesday, PartOfDay::Morning)]),
         "the correction is what stands"
     );
 }
 
-/// A later week supersedes an earlier one by existing, and both are kept.
+/// A later pattern supersedes an earlier one by existing, and both are kept.
 #[test]
-fn a_later_week_supersedes_by_existing() {
+fn a_later_pattern_supersedes_by_existing() {
     let (store, _directory) = opened!();
 
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        ordinary_week()
+        ordinary_pattern()
     )));
-    run!(store.record_week(&Schedule::new(
+    run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 9, 21),
         zone!("Europe/London"),
         slots(&[(Weekday::Saturday, PartOfDay::Morning)]),
@@ -263,7 +275,7 @@ fn a_later_week_supersedes_by_existing() {
 
     let diary = run!(store.diary());
 
-    assert_eq!(diary.schedules().len(), 2, "both weeks are kept");
+    assert_eq!(diary.patterns().len(), 2, "both patterns are kept");
 
     let Some(before) = diary.on(date(2026, 9, 1)) else {
         panic!("a date the diary covers")
@@ -274,19 +286,19 @@ fn a_later_week_supersedes_by_existing() {
 
     assert_eq!(
         before.slots,
-        ordinary_week(),
-        "the first week still answers"
+        ordinary_pattern(),
+        "the first pattern still answers"
     );
     assert_eq!(
         after.slots,
         slots(&[(Weekday::Saturday, PartOfDay::Morning)]),
-        "the later week answers from its own date"
+        "the later pattern answers from its own date"
     );
 
     // Before the first schedule, the operator has said nothing — which is not
     // the same as having said "no slots".
     assert!(
         diary.on(date(2026, 8, 1)).is_none(),
-        "a date before the first week is unknown, not empty"
+        "a date before the first pattern is unknown, not empty"
     );
 }

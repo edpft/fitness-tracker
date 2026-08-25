@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM training_slot WHERE pattern = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "641a6af1e3bcc5df62313a06dc1a3a5d00bc8847eac866cc5fe35df1da38955f"
+}

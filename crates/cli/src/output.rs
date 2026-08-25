@@ -897,7 +897,7 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 /// evening" is how the week is said and a flat list of seven is not a week. The
 /// slots arrive ordered by weekday then part, so grouping is a fold rather than
 /// a sort.
-fn week_slots(slots: &std::collections::BTreeSet<domain::schedule::Slot>) {
+fn week_slots(slots: &std::collections::BTreeSet<domain::schedule::TrainingSlot>) {
     if slots.is_empty() {
         println!("    no room to train at all");
         return;
@@ -917,60 +917,56 @@ fn week_slots(slots: &std::collections::BTreeSet<domain::schedule::Slot>) {
     }
 }
 
-fn patch_line(patch: &domain::schedule::Patch) {
-    let last = patch.last();
-    let span = if patch.days().get() == 1 {
-        patch.start().to_string()
+fn alteration_line(alteration: &domain::schedule::Alteration) {
+    let last = alteration.last();
+    let span = if alteration.days().get() == 1 {
+        alteration.start().to_string()
     } else {
-        format!("{} to {last}", patch.start())
+        format!("{} to {last}", alteration.start())
     };
 
-    println!("  {span} — {}", patch.reason());
+    println!("  {span} — {}", alteration.reason());
 
-    if let Some(zone) = patch.zone() {
+    if let Some(zone) = alteration.zone() {
         println!("    in {}", zone.id());
     }
-    match patch.slots() {
+    match alteration.slots() {
         // Absent and empty are different facts, and printing them the same way
         // would undo the distinction the schema goes to trouble to keep.
-        None => println!("    the ordinary week stands"),
+        None => println!("    when you train is unchanged"),
         Some(slots) if slots.is_empty() => println!("    no room to train at all"),
         Some(slots) => week_slots(slots),
     }
 }
 
-pub fn schedule_recorded(week: &domain::schedule::Schedule, patches: &[domain::schedule::Patch]) {
+pub fn pattern_recorded(pattern: &domain::schedule::TrainingPattern) {
     println!(
-        "recorded the week from {} ({})",
-        week.from(),
-        week.zone().id()
+        "\nrecorded, from {} ({})",
+        pattern.from(),
+        pattern.zone().id()
     );
-    week_slots(week.slots());
+    week_slots(pattern.slots());
+}
 
-    match patches.len() {
-        0 => {}
-        1 => println!("and one change to it"),
-        many => println!("and {many} changes to it"),
-    }
-    for patch in patches {
-        patch_line(patch);
-    }
+pub fn alteration_recorded(alteration: &domain::schedule::Alteration) {
+    println!("\nrecorded");
+    alteration_line(alteration);
 }
 
 pub fn schedule(diary: &domain::schedule::Diary) {
-    if diary.schedules().is_empty() {
+    if diary.patterns().is_empty() {
         println!(
-            "no week recorded — `fitness schedule add <document>` states one, \
-             and nothing derives it from the record"
+            "nothing recorded — `fitness schedule add` asks when you have room \
+             to train, and nothing derives it from the record"
         );
         return;
     }
 
     // Every week, not only the one in force: a schedule is superseded by a later
     // one existing, so the history is what makes that legible.
-    for (at, week) in diary.schedules().iter().enumerate() {
-        let heading = if at + 1 == diary.schedules().len() {
-            "the week"
+    for (at, week) in diary.patterns().iter().enumerate() {
+        let heading = if at + 1 == diary.patterns().len() {
+            "ordinarily"
         } else {
             "until superseded"
         };
@@ -980,13 +976,13 @@ pub fn schedule(diary: &domain::schedule::Diary) {
 
     // Not "holidays": a run of days that departs from the ordinary week is
     // as often a course, a visitor or a late finish as it is a trip.
-    if diary.patches().is_empty() {
-        println!("\nno changes to it");
+    if diary.alterations().is_empty() {
+        println!("\nno alterations");
         return;
     }
 
-    println!("\nchanges to it");
-    for patch in diary.patches() {
-        patch_line(patch);
+    println!("\nalterations");
+    for alteration in diary.alterations() {
+        alteration_line(alteration);
     }
 }

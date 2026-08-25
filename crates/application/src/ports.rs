@@ -27,7 +27,7 @@ use domain::prescription::{
     GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeName,
     ProgrammeWindow, Progress, SlotId,
 };
-use domain::schedule::{Diary, Patch, Schedule};
+use domain::schedule::{Alteration, Diary, TrainingPattern};
 
 use crate::error::{
     DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
@@ -1140,12 +1140,12 @@ pub trait PrescriptionDeliverer {
 
 /// Everything the operator has said about their week.
 pub trait DiaryStore {
-    /// The whole diary: every ordinary week, and every holiday that departs
-    /// from one.
+    /// The whole diary: every ordinary pattern, and every alteration that
+    /// departs from one.
     ///
     /// **Whole rather than by date**, unlike [`ProgrammeStore::on`]. `Diary`
     /// owns the rule that resolves a date — the week in force, as amended by
-    /// any patch covering it — and answering a date here would put that rule in
+    /// any alteration covering it — and answering a date here would put that rule in
     /// a second place, where the two could disagree.
     ///
     /// An empty diary is a real state: a machine on which nobody has said
@@ -1164,27 +1164,30 @@ pub trait DiaryStore {
 /// reader is what almost everything needs, and a capability nothing but
 /// authoring uses should not be reachable from everything that reads.
 pub trait DiaryAuthor {
-    /// Record an ordinary week, in force from its own date.
+    /// Record an ordinary pattern, in force from its own date.
     ///
-    /// Not an update: a week is superseded by a later one existing, so this
-    /// only ever adds. Re-stating a week already in force from that date
+    /// Not an update: a pattern is superseded by a later one existing, so this
+    /// only ever adds. Re-stating a pattern already in force from that date
     /// replaces it, which is a correction rather than a succession.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn record_week(
+    fn record_pattern(
         &self,
-        schedule: &Schedule,
+        schedule: &TrainingPattern,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
-    /// Record a holiday.
+    /// Record an alteration — a run of days that departs from the pattern.
     ///
     /// Keyed on the day it starts, so re-stating the one that begins on the
-    /// 14th corrects it rather than booking a second.
+    /// 14th corrects it rather than recording a second.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn record_patch(&self, patch: &Patch) -> impl Future<Output = Result<(), StoreError>> + Send;
+    fn record_alteration(
+        &self,
+        alteration: &Alteration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n                SELECT weekday, part\n                FROM schedule_slot\n                WHERE schedule = ?\n                ",
+  "query": "\n                    SELECT weekday, part\n                    FROM alteration_slot\n                    WHERE alteration = ?\n                    ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule_slot",
+            "table": "alteration_slot",
             "name": "weekday"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule_slot",
+            "table": "alteration_slot",
             "name": "part"
           }
         }
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "8006747ceee6b713e6817ef94228062c27e98d53b71a8c4f9e7b6bdc85bd6d52"
+  "hash": "4ae91b873a0251f01ec48d8ac507efc4ad74f2e5fd04b4970e724065baf19175"
 }

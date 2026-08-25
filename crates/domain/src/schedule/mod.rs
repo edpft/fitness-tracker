@@ -1,12 +1,19 @@
-//! What the operator's week looks like, and where they are.
+//! When there is room to train, and where.
 //!
-//! **Operator-level, not programme-level.** A schedule is a fact about a life —
-//! when work, family and social commitments leave room to train, and which zone
-//! that happens in. Every discipline reads it; none owns it. The gym programme
-//! is told which of these slots it may use, and that allocation is planning
-//! rather than fact (see `docs/`), so nothing here allocates anything.
+//! **Operator-level, not programme-level.** This is a fact about a life — when
+//! work, family and social commitments leave room to train, and which zone that
+//! happens in. Every discipline reads it; none owns it. The gym programme is
+//! told which of these slots it may use, and that allocation is planning rather
+//! than fact (see `docs/`), so nothing here allocates anything.
 //!
-//! ## A slot is interchangeable time, not merely free time
+//! ## Two kinds of slot, and this is the other one
+//!
+//! A [`TrainingSlot`] is a time — Monday evening. `prescription::SlotId` is a
+//! position in a session — the knee-dominant one. Both are things to be filled,
+//! which is why both were called a slot and why neither should be called only
+//! that.
+//!
+//! ## A training slot is interchangeable time, not merely free time
 //!
 //! That is the whole of the distinction. A padel game on a Sunday evening
 //! occupies the day and is *not* a slot, because it cannot be swapped with
@@ -15,28 +22,34 @@
 //!
 //! ## Two shapes, and they are not versions of each other
 //!
-//! A [`Schedule`] is the ordinary week, in force from a date until something
-//! supersedes it. A [`Patch`] is a run of days that departs from it — a holiday.
+//! A [`TrainingPattern`] is the ordinary run of a week, in force from a date
+//! until something supersedes it. An [`Alteration`] is a run of days that
+//! departs from it.
 //!
-//! They are held apart rather than nested, because a holiday is a fact about
-//! dates and not about which version of the ordinary week happened to be in
-//! force. Nesting them would lose every booked holiday the next time the
-//! ordinary week changed.
+//! **An alteration is not a holiday.** A course, a visitor, a late finish and a
+//! fortnight in Rome all change a week, and only one of them is a trip. The
+//! type says what it does — this run of days differs, and here is why.
 //!
-//! ## What a patch can say
+//! They are held apart rather than nested, because an alteration is a fact
+//! about dates and not about which pattern happened to be in force when it was
+//! recorded. Nesting them would lose every alteration already recorded the next
+//! time the ordinary pattern changed.
+//!
+//! ## What an alteration can say
 //!
 //! Both of its fields are optional, and the combinations are the cases the
 //! operator actually has:
 //!
 //! - **zone only** — away, training as usual, in another country.
-//! - **no slots** — away and unable to train. The hard case.
-//! - **different slots** — away, but able to train at times the ordinary week
-//!   does not offer. A Friday evening becomes a Saturday morning, which is
-//!   possible on holiday and not in ordinary life.
+//! - **no slots** — unable to train at all. The hard case.
+//! - **different slots** — able to train at times the ordinary pattern does not
+//!   offer. A Friday evening becomes a Saturday morning, which is possible on
+//!   holiday and not in ordinary life. It is also how half a day is said: keep
+//!   the morning, lose the rest.
 //!
 //! `None` is "unchanged" and `Some` of an empty set is "none at all". Those are
-//! different facts and collapsing them would make a zone-only patch cancel every
-//! session.
+//! different facts, and collapsing them would make a zone-only alteration
+//! cancel every session of the trip.
 
 use std::{collections::BTreeSet, num::NonZeroU8};
 
@@ -98,24 +111,24 @@ impl std::fmt::Display for PartOfDay {
 ///
 /// Ordered by weekday then part of day, so a set of them reads as a week.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Slot {
+pub struct TrainingSlot {
     pub weekday: Weekday,
     pub part: PartOfDay,
 }
 
-impl Slot {
+impl TrainingSlot {
     pub const fn new(weekday: Weekday, part: PartOfDay) -> Self {
         Self { weekday, part }
     }
 }
 
-impl PartialOrd for Slot {
+impl PartialOrd for TrainingSlot {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Slot {
+impl Ord for TrainingSlot {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Monday first, which `jiff` does not order by on its own.
         self.weekday
@@ -125,28 +138,28 @@ impl Ord for Slot {
     }
 }
 
-impl std::fmt::Display for Slot {
+impl std::fmt::Display for TrainingSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?} {}", self.weekday, self.part)
     }
 }
 
-/// The ordinary week, in force from a date.
+/// The ordinary run of a week, in force from a date.
 ///
 /// **Open-ended.** It runs until something supersedes it, because a routine does
 /// not have an end date — it has a successor. Which is also why nothing here
 /// carries one: an end would be a second place for the same fact.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Schedule {
+pub struct TrainingPattern {
     from: Date,
     zone: OperatorZone,
-    slots: BTreeSet<Slot>,
+    slots: BTreeSet<TrainingSlot>,
 }
 
-impl Schedule {
+impl TrainingPattern {
     /// A schedule may have no slots — a period with no room to train at all is a
     /// real thing to record, and refusing it would mean pretending otherwise.
-    pub const fn new(from: Date, zone: OperatorZone, slots: BTreeSet<Slot>) -> Self {
+    pub const fn new(from: Date, zone: OperatorZone, slots: BTreeSet<TrainingSlot>) -> Self {
         Self { from, zone, slots }
     }
 
@@ -158,30 +171,30 @@ impl Schedule {
         &self.zone
     }
 
-    pub const fn slots(&self) -> &BTreeSet<Slot> {
+    pub const fn slots(&self) -> &BTreeSet<TrainingSlot> {
         &self.slots
     }
 }
 
-/// A run of days that departs from the ordinary week.
+/// A run of days that departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Patch {
+pub struct Alteration {
     start: Date,
     days: NonZeroU8,
     zone: Option<OperatorZone>,
-    slots: Option<BTreeSet<Slot>>,
+    slots: Option<BTreeSet<TrainingSlot>>,
     /// Why. An unexplained override is unreadable six months later — § II.2's
     /// obligation on an edit overlay, which this is the authored-data analogue
     /// of.
     reason: String,
 }
 
-impl Patch {
+impl Alteration {
     pub const fn new(
         start: Date,
         days: NonZeroU8,
         zone: Option<OperatorZone>,
-        slots: Option<BTreeSet<Slot>>,
+        slots: Option<BTreeSet<TrainingSlot>>,
         reason: String,
     ) -> Self {
         Self {
@@ -205,7 +218,7 @@ impl Patch {
         self.zone.as_ref()
     }
 
-    pub const fn slots(&self) -> Option<&BTreeSet<Slot>> {
+    pub const fn slots(&self) -> Option<&BTreeSet<TrainingSlot>> {
         self.slots.as_ref()
     }
 
@@ -229,7 +242,7 @@ impl Patch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Availability {
     pub zone: OperatorZone,
-    pub slots: BTreeSet<Slot>,
+    pub slots: BTreeSet<TrainingSlot>,
 }
 
 impl Availability {
@@ -246,40 +259,43 @@ impl Availability {
 /// lived.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Diary {
-    schedules: Vec<Schedule>,
-    patches: Vec<Patch>,
+    patterns: Vec<TrainingPattern>,
+    alterations: Vec<Alteration>,
 }
 
 impl Diary {
     /// Schedules are sorted on the way in, so `on` can take the last that
     /// applies without every caller having to have sorted them.
-    pub fn new(mut schedules: Vec<Schedule>, patches: Vec<Patch>) -> Self {
-        schedules.sort_by_key(Schedule::from);
-        Self { schedules, patches }
+    pub fn new(mut patterns: Vec<TrainingPattern>, alterations: Vec<Alteration>) -> Self {
+        patterns.sort_by_key(TrainingPattern::from);
+        Self {
+            patterns,
+            alterations,
+        }
     }
 
-    pub fn schedules(&self) -> &[Schedule] {
-        &self.schedules
+    pub fn patterns(&self) -> &[TrainingPattern] {
+        &self.patterns
     }
 
-    pub fn patches(&self) -> &[Patch] {
-        &self.patches
+    pub fn alterations(&self) -> &[Alteration] {
+        &self.alterations
     }
 
-    /// What a date looks like: the ordinary week in force, as amended by any
-    /// patch covering it.
+    /// What a date looks like: the pattern in force, as amended by any
+    /// alteration covering it.
     ///
     /// `None` before the first schedule begins — a date the operator has said
     /// nothing about is unknown, not empty, and inventing a week for it would be
     /// asserting a fact nobody stated.
     ///
-    /// **The last patch to cover the date wins**, which matters only where two
+    /// **The last alteration to cover the date wins**, which matters only where two
     /// overlap. Refusing an overlap would be stricter and worse: a long trip
     /// with a different arrangement in the middle of it is a perfectly ordinary
     /// thing to describe that way.
     pub fn on(&self, date: Date) -> Option<Availability> {
         let schedule = self
-            .schedules
+            .patterns
             .iter()
             .rfind(|schedule| schedule.from() <= date)?;
 
@@ -288,11 +304,15 @@ impl Diary {
             slots: schedule.slots().clone(),
         };
 
-        for patch in self.patches.iter().filter(|patch| patch.covers(date)) {
-            if let Some(zone) = patch.zone() {
+        for alteration in self
+            .alterations
+            .iter()
+            .filter(|alteration| alteration.covers(date))
+        {
+            if let Some(zone) = alteration.zone() {
                 availability.zone.clone_from(zone);
             }
-            if let Some(slots) = patch.slots() {
+            if let Some(slots) = alteration.slots() {
                 availability.slots.clone_from(slots);
             }
         }
@@ -316,12 +336,17 @@ impl Diary {
     /// Asking [`Availability::open`] instead answers "could the operator train
     /// at all", which is a different question and the wrong one here — it read
     /// a surviving morning as a surviving evening and reported nothing lost.
-    pub fn unavailable(&self, from: Date, until: Date, allocated: &BTreeSet<Slot>) -> Vec<Date> {
+    pub fn unavailable(
+        &self,
+        from: Date,
+        until: Date,
+        allocated: &BTreeSet<TrainingSlot>,
+    ) -> Vec<Date> {
         let mut lost = Vec::new();
         let mut cursor = from;
 
         while cursor <= until {
-            let mine: Vec<&Slot> = allocated
+            let mine: Vec<&TrainingSlot> = allocated
                 .iter()
                 .filter(|slot| slot.weekday == cursor.weekday())
                 .collect();

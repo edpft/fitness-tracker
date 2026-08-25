@@ -254,24 +254,22 @@ fn programme_command() -> ClapCommand {
 
 fn schedule_command() -> ClapCommand {
     ClapCommand::new("schedule")
-        .about("Record the week there is room to train in, or report it")
-        // No `--timezone`. The zone is *in* the schedule — it is a fact about
-        // where the operator is, which is what a week and a holiday both say —
-        // so requiring one on the way in would be asking for the answer.
+        .about("Record when there is room to train, or report it")
+        // No `--timezone`. The zone is *in* the pattern, and in any alteration
+        // that moves it — asking for one on the way in would be asking for the
+        // answer.
         .subcommand_required(true)
         .subcommand(
             ClapCommand::new("add")
-                .about("Read a schedule document and store the week and holidays it describes")
-                .arg(
-                    Arg::new("path")
-                        .required(true)
-                        .value_parser(clap::value_parser!(PathBuf))
-                        .help("The document to read"),
-                ),
+                .about("Ask when you ordinarily have room to train, and record it"),
+        )
+        .subcommand(
+            ClapCommand::new("alter")
+                .about("Ask what departs from the ordinary pattern, and record it"),
         )
         .subcommand(
             ClapCommand::new("show")
-                .about("Report the ordinary week and the holidays that depart from it"),
+                .about("Report the ordinary pattern and everything that departs from it"),
         )
 }
 
@@ -581,10 +579,8 @@ async fn authored_command(
             )
         }
         "schedule" => Some(match sub.subcommand() {
-            Some(("add", add)) => match add.get_one::<PathBuf>("path") {
-                Some(path) => scheduling::add(database, path).await,
-                None => Err(Failure::message("no document given", exit::USAGE)),
-            },
+            Some(("add", _)) => scheduling::add(database).await,
+            Some(("alter", _)) => scheduling::alter(database).await,
             Some(("show", _)) => scheduling::show(database).await,
             _ => Err(Failure::message("no schedule command given", exit::USAGE)),
         }),

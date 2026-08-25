@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, from_date, zone\n            FROM schedule\n            ORDER BY from_date\n            ",
+  "query": "\n            SELECT id, from_date, zone\n            FROM training_pattern\n            ORDER BY from_date\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "schedule",
+            "table": "training_pattern",
             "name": "id"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule",
+            "table": "training_pattern",
             "name": "from_date"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule",
+            "table": "training_pattern",
             "name": "zone"
           }
         }
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "37ec5422409e4747a9335445d7cf4171373d4414820d7ee7ff1bb723a3626b95"
+  "hash": "4ec9f2f61ad0aed7b13f413398b6c6b2130473385ad4c7f576c11648684327ba"
 }

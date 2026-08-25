@@ -9,7 +9,7 @@ use std::{collections::BTreeSet, num::NonZeroU8};
 
 use domain::{
     gym::OperatorZone,
-    schedule::{Diary, PartOfDay, Patch, Schedule, Slot},
+    schedule::{Alteration, Diary, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -28,12 +28,12 @@ fn days(count: u8) -> Built<NonZeroU8> {
 }
 
 /// The operator's ordinary week: four slots, two of which the gym uses.
-fn ordinary() -> BTreeSet<Slot> {
+fn ordinary() -> BTreeSet<TrainingSlot> {
     [
-        Slot::new(Weekday::Monday, PartOfDay::Evening),
-        Slot::new(Weekday::Wednesday, PartOfDay::Evening),
-        Slot::new(Weekday::Friday, PartOfDay::Evening),
-        Slot::new(Weekday::Sunday, PartOfDay::Morning),
+        TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+        TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
+        TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
+        TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
     ]
     .into_iter()
     .collect()
@@ -41,20 +41,20 @@ fn ordinary() -> BTreeSet<Slot> {
 
 /// What the gym has been allocated. **Not the whole pool** — Wednesday evening
 /// and Sunday morning belong to cycling.
-fn allocated_to_the_gym() -> BTreeSet<Slot> {
+fn allocated_to_the_gym() -> BTreeSet<TrainingSlot> {
     [
-        Slot::new(Weekday::Monday, PartOfDay::Evening),
-        Slot::new(Weekday::Friday, PartOfDay::Evening),
+        TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+        TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
     ]
     .into_iter()
     .collect()
 }
 
 fn september() -> Built<Diary> {
-    let schedule = Schedule::new(date(2026, 1, 1)?, zone("Europe/London")?, ordinary());
+    let schedule = TrainingPattern::new(date(2026, 1, 1)?, zone("Europe/London")?, ordinary());
 
     // Away, unable to train: neither place has free weights.
-    let first = Patch::new(
+    let first = Alteration::new(
         date(2026, 8, 29)?,
         days(7)?,
         None,
@@ -63,7 +63,7 @@ fn september() -> Built<Diary> {
     );
 
     // Away, unable to train, and in another country.
-    let second = Patch::new(
+    let second = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
         Some(zone("Europe/Rome")?),
@@ -86,7 +86,7 @@ fn an_ordinary_day_reads_the_schedule_in_force() {
     assert!(availability.open(monday), "Monday evening is a slot");
 }
 
-/// **A patch with no slots removes training without touching the zone.**
+/// **A alteration with no slots removes training without touching the zone.**
 #[test]
 fn a_hard_absence_closes_the_days_it_covers() {
     let diary = september().expect("the diary builds");
@@ -98,11 +98,11 @@ fn a_hard_absence_closes_the_days_it_covers() {
     assert_eq!(
         availability.zone.id(),
         "Europe/London",
-        "a patch that says nothing about the zone leaves it alone"
+        "a alteration that says nothing about the zone leaves it alone"
     );
 }
 
-/// **A patch may change both.** Rome is away *and* elsewhere.
+/// **A alteration may change both.** Rome is away *and* elsewhere.
 #[test]
 fn a_patch_can_change_the_zone_and_the_slots_together() {
     let diary = september().expect("the diary builds");
@@ -113,7 +113,7 @@ fn a_patch_can_change_the_zone_and_the_slots_together() {
     assert!(availability.slots.is_empty());
 }
 
-/// The day after a patch ends is ordinary again, which is the off-by-one worth
+/// The day after a alteration ends is ordinary again, which is the off-by-one worth
 /// pinning: a run of four days from Friday the 11th ends on Monday the 14th.
 #[test]
 fn a_patch_ends_when_its_days_run_out() {
@@ -147,15 +147,15 @@ fn a_date_before_any_schedule_is_unknown() {
 /// its own dates.
 #[test]
 fn a_later_schedule_supersedes_an_earlier_one() {
-    let early = Schedule::new(
+    let early = TrainingPattern::new(
         date(2026, 1, 1).expect("a real date"),
         zone("Europe/London").expect("a zone"),
         ordinary(),
     );
-    let moved = Schedule::new(
+    let moved = TrainingPattern::new(
         date(2026, 10, 1).expect("a real date"),
         zone("America/New_York").expect("a zone"),
-        std::iter::once(Slot::new(Weekday::Tuesday, PartOfDay::Morning)).collect(),
+        std::iter::once(TrainingSlot::new(Weekday::Tuesday, PartOfDay::Morning)).collect(),
     );
     let diary = Diary::new(vec![moved, early], vec![]);
 
@@ -228,7 +228,7 @@ fn the_whole_pool_loses_more_than_the_gym_does() {
 /// **A day is lost when the allocated slot is gone, not when the day empties.**
 ///
 /// The operator trains Monday morning and Monday evening; the gym has been
-/// allocated the evening. A patch leaves the morning and takes the rest — he
+/// allocated the evening. A alteration leaves the morning and takes the rest — he
 /// trains, then goes away at lunchtime. The Monday is lost to the gym even
 /// though the day is not empty.
 ///
@@ -240,23 +240,23 @@ fn the_whole_pool_loses_more_than_the_gym_does() {
 fn a_day_that_keeps_the_wrong_half_is_still_lost() {
     let monday = date(2026, 9, 14).expect("a real Monday");
 
-    let ordinary: BTreeSet<Slot> = [
-        Slot::new(Weekday::Monday, PartOfDay::Morning),
-        Slot::new(Weekday::Monday, PartOfDay::Evening),
+    let ordinary: BTreeSet<TrainingSlot> = [
+        TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
+        TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
     ]
     .into_iter()
     .collect();
 
-    let morning_only: BTreeSet<Slot> =
-        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Morning)).collect();
+    let morning_only: BTreeSet<TrainingSlot> =
+        std::iter::once(TrainingSlot::new(Weekday::Monday, PartOfDay::Morning)).collect();
 
     let diary = Diary::new(
-        vec![Schedule::new(
+        vec![TrainingPattern::new(
             date(2026, 9, 7).expect("a real date"),
             zone("Europe/London").expect("a real zone"),
             ordinary,
         )],
-        vec![Patch::new(
+        vec![Alteration::new(
             monday,
             days(1).expect("one day"),
             None,
@@ -265,10 +265,10 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
         )],
     );
 
-    let evening: BTreeSet<Slot> =
-        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Evening)).collect();
-    let morning: BTreeSet<Slot> =
-        std::iter::once(Slot::new(Weekday::Monday, PartOfDay::Morning)).collect();
+    let evening: BTreeSet<TrainingSlot> =
+        std::iter::once(TrainingSlot::new(Weekday::Monday, PartOfDay::Evening)).collect();
+    let morning: BTreeSet<TrainingSlot> =
+        std::iter::once(TrainingSlot::new(Weekday::Monday, PartOfDay::Morning)).collect();
 
     assert_eq!(
         diary.unavailable(monday, monday, &evening),

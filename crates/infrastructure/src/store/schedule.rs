@@ -1,15 +1,15 @@
-//! The operator's week, and the holidays that depart from it (§ 12).
+//! When the operator has room to train, and what departs from it (§ 12).
 //!
-//! **Authored data, so nothing regenerates it.** A week is a fact about a life
+//! **Authored data, so nothing regenerates it.** A pattern is a fact about a life
 //! rather than something derivable from the record: the record shows when the
 //! operator *did* train, which is not the same as when they could have.
 //!
-//! **Two shapes read as one `Diary`.** Schedules and patches are stored apart
+//! **Two shapes read as one `Diary`.** Schedules and alterations are stored apart
 //! because a departure is a fact about dates rather than about which ordinary
 //! week was in force when it was recorded. Only `Diary` relates them, and it does so by
 //! date — so this module assembles both and resolves nothing.
 //!
-//! **A week is superseded by a later one existing.** There is no flag and no end
+//! **A pattern is superseded by a later one existing.** There is no flag and no end
 //! date: `Diary::on` takes the last schedule whose date has arrived. An end
 //! column would be a second place for the same fact and the two could disagree,
 //! which is the reasoning the generation parameters beside this are stored under.
@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     gym::OperatorZone,
-    schedule::{Diary, PartOfDay, Patch, Schedule, Slot},
+    schedule::{Alteration, Diary, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -54,8 +54,8 @@ fn zone_of(text: &str) -> Result<OperatorZone, StoreError> {
     OperatorZone::try_from(text.to_owned()).map_err(|error| corrupt(&error))
 }
 
-fn slot_of(weekday: &str, part: &str) -> Result<Slot, StoreError> {
-    Ok(Slot::new(weekday_of(weekday)?, part_of(part)?))
+fn slot_of(weekday: &str, part: &str) -> Result<TrainingSlot, StoreError> {
+    Ok(TrainingSlot::new(weekday_of(weekday)?, part_of(part)?))
 }
 
 impl DiaryStore for SqliteDiaryStore {
@@ -63,7 +63,7 @@ impl DiaryStore for SqliteDiaryStore {
         let weeks = sqlx::query!(
             r"
             SELECT id, from_date, zone
-            FROM schedule
+            FROM training_pattern
             ORDER BY from_date
             "
         )
@@ -71,13 +71,13 @@ impl DiaryStore for SqliteDiaryStore {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut schedules = Vec::with_capacity(weeks.len());
+        let mut patterns = Vec::with_capacity(weeks.len());
         for week in weeks {
             let slots = sqlx::query!(
                 r"
                 SELECT weekday, part
-                FROM schedule_slot
-                WHERE schedule = ?
+                FROM training_slot
+                WHERE pattern = ?
                 ",
                 week.id
             )
@@ -90,7 +90,7 @@ impl DiaryStore for SqliteDiaryStore {
                 .map(|row| slot_of(&row.weekday, &row.part))
                 .collect::<Result<BTreeSet<_>, _>>()?;
 
-            schedules.push(Schedule::new(
+            patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
                 zone_of(&week.zone)?,
                 slots,
@@ -100,7 +100,7 @@ impl DiaryStore for SqliteDiaryStore {
         let booked = sqlx::query!(
             r"
             SELECT id, start_date, days, zone, states_slots, reason
-            FROM schedule_patch
+            FROM alteration
             ORDER BY start_date
             "
         )
@@ -108,26 +108,26 @@ impl DiaryStore for SqliteDiaryStore {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut patches = Vec::with_capacity(booked.len());
-        for patch in booked {
-            let days = u8::try_from(patch.days)
+        let mut alterations = Vec::with_capacity(booked.len());
+        for alteration in booked {
+            let days = u8::try_from(alteration.days)
                 .ok()
                 .and_then(std::num::NonZeroU8::new)
-                .ok_or_else(|| corrupt(&"a patch covering no days"))?;
+                .ok_or_else(|| corrupt(&"an alteration covering no days"))?;
 
-            // Absent is "the ordinary week stands"; present-but-empty is "no
+            // Absent is "the ordinary pattern stands"; present-but-empty is "no
             // room at all". Both are zero rows, so the flag is what tells them
             // apart — see migration 0020.
-            let slots = if patch.states_slots == 0 {
+            let slots = if alteration.states_slots == 0 {
                 None
             } else {
                 let rows = sqlx::query!(
                     r"
                     SELECT weekday, part
-                    FROM schedule_patch_slot
-                    WHERE patch = ?
+                    FROM alteration_slot
+                    WHERE alteration = ?
                     ",
-                    patch.id
+                    alteration.id
                 )
                 .fetch_all(&self.pool)
                 .await
@@ -140,23 +140,23 @@ impl DiaryStore for SqliteDiaryStore {
                 )
             };
 
-            let zone = patch.zone.as_deref().map(zone_of).transpose()?;
+            let zone = alteration.zone.as_deref().map(zone_of).transpose()?;
 
-            patches.push(Patch::new(
-                date_of(&patch.start_date)?,
+            alterations.push(Alteration::new(
+                date_of(&alteration.start_date)?,
                 days,
                 zone,
                 slots,
-                patch.reason,
+                alteration.reason,
             ));
         }
 
-        Ok(Diary::new(schedules, patches))
+        Ok(Diary::new(patterns, alterations))
     }
 }
 
 impl DiaryAuthor for SqliteDiaryStore {
-    async fn record_week(&self, schedule: &Schedule) -> Result<(), StoreError> {
+    async fn record_pattern(&self, pattern: &TrainingPattern) -> Result<(), StoreError> {
         let mut tx = self
             .pool
             .begin()
@@ -164,15 +164,15 @@ impl DiaryAuthor for SqliteDiaryStore {
             .map_err(|error| store_error(&error))?;
 
         let authored_at = Timestamp::now().to_string();
-        let from = schedule.from().to_string();
-        let zone = schedule.zone().id().to_owned();
+        let from = pattern.from().to_string();
+        let zone = pattern.zone().id().to_owned();
 
         // Re-stating the week in force from a date corrects it rather than
         // adding a second one that starts the same day, which `Diary` could not
         // order. Succession is a *later* date, not another row on the same one.
         let id = sqlx::query!(
             r"
-            INSERT INTO schedule (authored_at, from_date, zone)
+            INSERT INTO training_pattern (authored_at, from_date, zone)
             VALUES (?, ?, ?)
             ON CONFLICT (from_date) DO UPDATE
                 SET authored_at = excluded.authored_at,
@@ -188,17 +188,17 @@ impl DiaryAuthor for SqliteDiaryStore {
         .map_err(|error| store_error(&error))?
         .id;
 
-        sqlx::query!("DELETE FROM schedule_slot WHERE schedule = ?", id)
+        sqlx::query!("DELETE FROM training_slot WHERE pattern = ?", id)
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
 
-        for slot in schedule.slots() {
+        for slot in pattern.slots() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO schedule_slot (schedule, weekday, part)
+                INSERT INTO training_slot (pattern, weekday, part)
                 VALUES (?, ?, ?)
                 ",
                 id,
@@ -213,7 +213,7 @@ impl DiaryAuthor for SqliteDiaryStore {
         tx.commit().await.map_err(|error| store_error(&error))
     }
 
-    async fn record_patch(&self, patch: &Patch) -> Result<(), StoreError> {
+    async fn record_alteration(&self, alteration: &Alteration) -> Result<(), StoreError> {
         let mut tx = self
             .pool
             .begin()
@@ -221,15 +221,15 @@ impl DiaryAuthor for SqliteDiaryStore {
             .map_err(|error| store_error(&error))?;
 
         let authored_at = Timestamp::now().to_string();
-        let start = patch.start().to_string();
-        let days = i64::from(patch.days().get());
-        let zone = patch.zone().map(|zone| zone.id().to_owned());
-        let states_slots = i64::from(patch.slots().is_some());
-        let reason = patch.reason().to_owned();
+        let start = alteration.start().to_string();
+        let days = i64::from(alteration.days().get());
+        let zone = alteration.zone().map(|zone| zone.id().to_owned());
+        let states_slots = i64::from(alteration.slots().is_some());
+        let reason = alteration.reason().to_owned();
 
         let id = sqlx::query!(
             r"
-            INSERT INTO schedule_patch (
+            INSERT INTO alteration (
                 authored_at, start_date, days, zone, states_slots, reason
             )
             VALUES (?, ?, ?, ?, ?, ?)
@@ -253,17 +253,17 @@ impl DiaryAuthor for SqliteDiaryStore {
         .map_err(|error| store_error(&error))?
         .id;
 
-        sqlx::query!("DELETE FROM schedule_patch_slot WHERE patch = ?", id)
+        sqlx::query!("DELETE FROM alteration_slot WHERE alteration = ?", id)
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
 
-        for slot in patch.slots().into_iter().flatten() {
+        for slot in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO schedule_patch_slot (patch, weekday, part)
+                INSERT INTO alteration_slot (alteration, weekday, part)
                 VALUES (?, ?, ?)
                 ",
                 id,

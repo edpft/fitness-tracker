@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, start_date, days, zone, states_slots, reason\n            FROM schedule_patch\n            ORDER BY start_date\n            ",
+  "query": "\n            SELECT id, start_date, days, zone, states_slots, reason\n            FROM alteration\n            ORDER BY start_date\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "id"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "start_date"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "days"
           }
         }
@@ -42,7 +42,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "zone"
           }
         }
@@ -53,7 +53,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "states_slots"
           }
         }
@@ -64,7 +64,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "schedule_patch",
+            "table": "alteration",
             "name": "reason"
           }
         }
@@ -82,5 +82,5 @@
       false
     ]
   },
-  "hash": "bf4cc7c04494c97ddb7798cc1b4c635cd62581f818b3334a544754c69c9a1464"
+  "hash": "802ee0fae373bd0180af5d33c8aeae11e0a774f1f9d364ec0db9c8cef32a6725"
 }

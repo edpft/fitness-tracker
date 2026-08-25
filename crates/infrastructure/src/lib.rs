@@ -10,7 +10,6 @@ pub mod credentials;
 pub mod hevy;
 pub mod lock;
 pub mod programme;
-pub mod schedule;
 pub mod settings;
 pub mod store;
 
@@ -21,7 +20,6 @@ pub use hevy::{
 };
 pub use lock::FileRunLock;
 pub use programme::{Document, DocumentError};
-pub use schedule::{Document as ScheduleDocument, DocumentError as ScheduleDocumentError};
 pub use settings::{Settings, SettingsError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteDiaryStore, SqliteExerciseHistory,
