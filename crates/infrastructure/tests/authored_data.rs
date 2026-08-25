@@ -428,7 +428,7 @@ fn a_settled_document_authors() {
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
         panic!("Europe/London is a zone")
     };
-    let programme = match document.programme(&parameters, zone, None) {
+    let programme = match document.programme(&parameters, zone, None, &[]) {
         Ok(programme) => programme,
         Err(error) => panic!("the document describes a consistent programme: {error}"),
     };
@@ -487,7 +487,7 @@ fn a_document_can_name_the_sessions_the_block_does_not_run() {
     ) else {
         panic!("the parameters convert and Europe/London is a zone")
     };
-    let programme = match document.programme(&parameters, zone, None) {
+    let programme = match document.programme(&parameters, zone, None, &[]) {
         Ok(programme) => programme,
         Err(error) => panic!("the document describes a consistent programme: {error}"),
     };
@@ -551,7 +551,7 @@ fn a_document_naming_a_week_outside_the_block_does_not_author() {
     let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
         panic!("Europe/London is a zone")
     };
-    match document.programme(&parameters, zone, None) {
+    match document.programme(&parameters, zone, None, &[]) {
         Err(infrastructure::DocumentError::Uncalendarable(error)) => {
             assert!(
                 matches!(
