@@ -139,12 +139,15 @@ fn parse_discipline(typed: &str) -> Result<Discipline, String> {
 /// and eight of them are a single keystroke.
 ///
 /// A slot cannot be claimed twice, because it is asked about once.
-fn ask_slots(preamble: &str) -> Result<BTreeMap<TrainingSlot, Discipline>, Failure> {
+fn ask_slots(
+    preamble: &str,
+    weekdays: &[(Weekday, &str)],
+) -> Result<BTreeMap<TrainingSlot, Discipline>, Failure> {
     println!("{preamble}");
     println!("  m = morning, a = afternoon, e = evening; several is \"me\"; - is none");
 
     let mut found = Vec::new();
-    for (weekday, name) in WEEKDAYS {
+    for &(weekday, name) in weekdays {
         let parts = ask_until(&format!("  {name:<10}[-] "), parse_parts)?;
         for part in parts {
             found.push((name, TrainingSlot::new(weekday, part)));
@@ -166,8 +169,46 @@ fn ask_slots(preamble: &str) -> Result<BTreeMap<TrainingSlot, Discipline>, Failu
     Ok(slots)
 }
 
+/// The weekdays a run of days actually covers, in the order it meets them.
+///
+/// **Asking about all seven is asking about days that do not occur.** A trip
+/// from Friday to Monday has no Wednesday in it, and a slot stated for one
+/// would be a fact about a day the alteration never touches — silently
+/// meaningless, and reasonable to expect otherwise. A run of a week or more
+/// meets every weekday and is asked about every weekday.
+///
+/// Run order rather than Monday-first, because that is the order the operator
+/// lives it: the Friday they leave, then the weekend, then the Monday back.
+fn covered_weekdays(start: Date, days: NonZeroU8) -> Vec<(Weekday, &'static str)> {
+    let mut covered: Vec<(Weekday, &'static str)> = Vec::new();
+    let mut cursor = start;
+
+    for _ in 0..days.get() {
+        if let Some(&(weekday, name)) = WEEKDAYS
+            .iter()
+            .find(|(weekday, _)| *weekday == cursor.weekday())
+            && !covered.iter().any(|(seen, _)| *seen == weekday)
+        {
+            covered.push((weekday, name));
+        }
+        if covered.len() == WEEKDAYS.len() {
+            break;
+        }
+        let Ok(next) = cursor.tomorrow() else { break };
+        cursor = next;
+    }
+
+    covered
+}
+
 fn yes(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "y" | "yes")
+}
+
+/// Only an explicit no. An empty line takes the offered default, which for
+/// "are you able to train" is yes — so a stray return cannot cancel a week.
+fn no(typed: &str) -> bool {
+    matches!(typed.to_lowercase().as_str(), "n" | "no")
 }
 
 async fn store(database: &Path) -> Result<SqliteDiaryStore, Failure> {
@@ -198,7 +239,10 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
         })
     })?;
 
-    let slots = ask_slots("Which parts of each day?")?;
+    let slots = ask_slots(
+        "Which parts of each day do you have room to train?",
+        &WEEKDAYS,
+    )?;
     let pattern = TrainingPattern::new(from, zone, slots);
 
     store(database)
@@ -239,12 +283,19 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
         }
     };
 
-    // **The three cases, asked as two questions.** Leaving the slots alone is
-    // not the same as having none, and it is not the same as having different
-    // ones — so "does this change when you can train" comes first, and only
-    // then what it changes them to.
-    let slots = if yes(&ask("Does this change when you can train? [no] ")?) {
-        Some(ask_slots("Which parts of each day, while it lasts?")?)
+    // **The three cases, asked so the commonest is one keystroke.** Leaving the
+    // slots alone, having none at all, and having different ones are three
+    // different facts. Being unable to train is much the most common of them —
+    // it is why most alterations get recorded — so it is asked first and
+    // answered outright, and the walk through the days only happens for the
+    // case that actually needs it.
+    let slots = if no(&ask("Are you able to train during this period? [yes] ")?) {
+        Some(BTreeMap::new())
+    } else if yes(&ask("Does this change when you can train? [no] ")?) {
+        Some(ask_slots(
+            "Which parts of each day, while it lasts?",
+            &covered_weekdays(start, days),
+        )?)
     } else {
         None
     };
@@ -279,4 +330,99 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
 
     output::schedule(&diary);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{covered_weekdays, no, parse_parts, yes};
+    use domain::schedule::PartOfDay;
+    use jiff::civil::{Weekday, date};
+
+    /// **A run asks about the days it contains, and no others.**
+    ///
+    /// Friday to Monday has no Wednesday in it. Asking anyway invites a slot
+    /// stated for a day the alteration never touches, which would be silently
+    /// meaningless — and reasonable to expect otherwise.
+    #[test]
+    fn a_short_run_covers_only_the_days_it_meets() {
+        let Some(four) = std::num::NonZeroU8::new(4) else {
+            panic!("four is not zero")
+        };
+        // Friday 11 September 2026 through the Monday.
+        let covered: Vec<Weekday> = covered_weekdays(date(2026, 9, 11), four)
+            .into_iter()
+            .map(|(weekday, _)| weekday)
+            .collect();
+
+        assert_eq!(
+            covered,
+            vec![
+                Weekday::Friday,
+                Weekday::Saturday,
+                Weekday::Sunday,
+                Weekday::Monday
+            ],
+            "in the order the trip meets them, not Monday first"
+        );
+    }
+
+    /// One day is one weekday.
+    #[test]
+    fn a_single_day_covers_one_weekday() {
+        let Some(one) = std::num::NonZeroU8::new(1) else {
+            panic!("one is not zero")
+        };
+        let covered = covered_weekdays(date(2026, 9, 14), one);
+        assert_eq!(covered.len(), 1);
+        assert_eq!(covered[0].0, Weekday::Monday);
+    }
+
+    /// A week or more meets every weekday, and each is asked about once.
+    #[test]
+    fn a_week_or_more_covers_every_weekday_once() {
+        for length in [7_u8, 10, 30] {
+            let Some(days) = std::num::NonZeroU8::new(length) else {
+                panic!("{length} is not zero")
+            };
+            let covered = covered_weekdays(date(2026, 9, 11), days);
+            assert_eq!(covered.len(), 7, "{length} days meets all seven");
+
+            let mut seen: Vec<Weekday> = covered.iter().map(|(day, _)| *day).collect();
+            seen.sort_unstable_by_key(|day| day.to_monday_zero_offset());
+            seen.dedup();
+            assert_eq!(seen.len(), 7, "{length} days asks about each one once");
+        }
+    }
+
+    /// **An empty line takes the offered default, and the defaults differ.**
+    ///
+    /// "Are you able to train" defaults to yes, so a stray return cannot cancel
+    /// a week's training; "does this change when you can train" defaults to no,
+    /// so a stray return cannot rewrite it either.
+    #[test]
+    fn an_empty_answer_is_neither_a_yes_nor_a_no() {
+        assert!(!yes(""), "an empty line does not agree");
+        assert!(!no(""), "and does not refuse");
+
+        assert!(yes("y") && yes("yes") && yes("YES"));
+        assert!(no("n") && no("no") && no("No"));
+    }
+
+    /// `-` and an empty line both mean no part of this day.
+    #[test]
+    fn a_day_with_no_parts_is_written_two_ways() {
+        let Ok(dash) = parse_parts("-") else {
+            panic!("- parses")
+        };
+        let Ok(empty) = parse_parts("") else {
+            panic!("an empty line parses")
+        };
+        assert!(dash.is_empty() && empty.is_empty());
+
+        let Ok(several) = parse_parts("me") else {
+            panic!("me parses")
+        };
+        assert_eq!(several.len(), 2);
+        assert!(several.contains(&PartOfDay::Morning) && several.contains(&PartOfDay::Evening));
+    }
 }
