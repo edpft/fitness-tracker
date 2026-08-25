@@ -27,6 +27,7 @@ use domain::prescription::{
     GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeName,
     ProgrammeWindow, Progress, SlotId,
 };
+use domain::schedule::{Alteration, Diary, TrainingPattern};
 
 use crate::error::{
     DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
@@ -1128,4 +1129,65 @@ pub trait PrescriptionDeliverer {
     /// [`DeliveryError`] if nothing is issued for the date, the destination is
     /// unreachable, or the store is unavailable.
     fn deliver(&self, date: Date) -> impl Future<Output = Result<Delivery, DeliveryError>> + Send;
+}
+
+// --- The operator's week ----------------------------------------------------
+//
+// **Operator-level, not programme-level.** A schedule is a fact about a life,
+// and every discipline reads it while none owns it. Nothing here allocates a
+// slot to anything: which of the operator's evenings the gym may use is
+// planning, and planning waits.
+
+/// Everything the operator has said about their week.
+pub trait DiaryStore {
+    /// The whole diary: every ordinary pattern, and every alteration that
+    /// departs from one.
+    ///
+    /// **Whole rather than by date**, unlike [`ProgrammeStore::on`]. `Diary`
+    /// owns the rule that resolves a date — the week in force, as amended by
+    /// any alteration covering it — and answering a date here would put that rule in
+    /// a second place, where the two could disagree.
+    ///
+    /// An empty diary is a real state: a machine on which nobody has said
+    /// anything about their week yet.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn diary(&self) -> impl Future<Output = Result<Diary, StoreError>> + Send;
+}
+
+/// Record what the operator has said about their week.
+///
+/// Split from [`DiaryStore`] for the reason the landing ports are split: a
+/// reader is what almost everything needs, and a capability nothing but
+/// authoring uses should not be reachable from everything that reads.
+pub trait DiaryAuthor {
+    /// Record an ordinary pattern, in force from its own date.
+    ///
+    /// Not an update: a pattern is superseded by a later one existing, so this
+    /// only ever adds. Re-stating a pattern already in force from that date
+    /// replaces it, which is a correction rather than a succession.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_pattern(
+        &self,
+        schedule: &TrainingPattern,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Record an alteration — a run of days that departs from the pattern.
+    ///
+    /// Keyed on the day it starts, so re-stating the one that begins on the
+    /// 14th corrects it rather than recording a second.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_alteration(
+        &self,
+        alteration: &Alteration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

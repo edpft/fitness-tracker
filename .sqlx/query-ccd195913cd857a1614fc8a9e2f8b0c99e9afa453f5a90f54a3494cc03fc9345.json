@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO training_pattern (authored_at, from_date, zone)\n            VALUES (?, ?, ?)\n            ON CONFLICT (from_date) DO UPDATE\n                SET authored_at = excluded.authored_at,\n                    zone        = excluded.zone\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "training_pattern",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ccd195913cd857a1614fc8a9e2f8b0c99e9afa453f5a90f54a3494cc03fc9345"
+}

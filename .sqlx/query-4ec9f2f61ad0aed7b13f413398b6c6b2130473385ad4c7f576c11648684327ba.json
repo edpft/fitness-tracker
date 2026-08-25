@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, from_date, zone\n            FROM training_pattern\n            ORDER BY from_date\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "training_pattern",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "from_date",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_pattern",
+            "name": "from_date"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_pattern",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4ec9f2f61ad0aed7b13f413398b6c6b2130473385ad4c7f576c11648684327ba"
+}

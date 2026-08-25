@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    SELECT weekday, part, discipline\n                    FROM alteration_slot\n                    WHERE alteration = ?\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration_slot",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "part",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration_slot",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "name": "discipline",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration_slot",
+            "name": "discipline"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b761c0dcb29893378744b698c6301d93f12febcf76bb27037d626ee4acf8ef97"
+}

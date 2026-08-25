@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM alteration_slot WHERE alteration = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f6deceba0040db2a35324395e91605cbec4d706c959f4db4aaec32a6f18d835f"
+}

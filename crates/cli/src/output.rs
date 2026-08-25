@@ -888,3 +888,107 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     println!();
     println!("next: add a programme — fitness programme add <document>");
 }
+
+// --- The operator's week ----------------------------------------------------
+
+/// The slots of a week, as a line per weekday, each saying whose it is.
+///
+/// Grouped by day rather than listed flat, because "Monday evening, Wednesday
+/// evening" is how the week is said and a flat list of seven is not a week. The
+/// slots arrive ordered by weekday then part, so grouping is a fold rather than
+/// a sort.
+fn week_slots(
+    slots: &std::collections::BTreeMap<
+        domain::schedule::TrainingSlot,
+        domain::schedule::Discipline,
+    >,
+) {
+    if slots.is_empty() {
+        println!("    no room to train at all");
+        return;
+    }
+
+    let mut days: Vec<(jiff::civil::Weekday, Vec<String>)> = Vec::new();
+    for (slot, discipline) in slots {
+        let entry = format!("{} ({discipline})", slot.part);
+        match days.last_mut() {
+            Some((day, parts)) if *day == slot.weekday => parts.push(entry),
+            _ => days.push((slot.weekday, vec![entry])),
+        }
+    }
+
+    for (day, parts) in days {
+        let name = format!("{day:?}").to_lowercase();
+        println!("    {name:<10}{}", parts.join(", "));
+    }
+}
+
+fn alteration_line(alteration: &domain::schedule::Alteration) {
+    let last = alteration.last();
+    let span = if alteration.days().get() == 1 {
+        alteration.start().to_string()
+    } else {
+        format!("{} to {last}", alteration.start())
+    };
+
+    println!("  {span} — {}", alteration.reason());
+
+    if let Some(zone) = alteration.zone() {
+        println!("    in {}", zone.id());
+    }
+    match alteration.slots() {
+        // Absent and empty are different facts, and printing them the same way
+        // would undo the distinction the schema goes to trouble to keep.
+        None => println!("    when you train is unchanged"),
+        Some(slots) if slots.is_empty() => println!("    no room to train at all"),
+        Some(slots) => week_slots(slots),
+    }
+}
+
+pub fn pattern_recorded(pattern: &domain::schedule::TrainingPattern) {
+    println!(
+        "\nrecorded, from {} ({})",
+        pattern.from(),
+        pattern.zone().id()
+    );
+    week_slots(pattern.slots());
+}
+
+pub fn alteration_recorded(alteration: &domain::schedule::Alteration) {
+    println!("\nrecorded");
+    alteration_line(alteration);
+}
+
+pub fn schedule(diary: &domain::schedule::Diary) {
+    if diary.patterns().is_empty() {
+        println!(
+            "nothing recorded — `fitness schedule add` asks when you have room \
+             to train, and nothing derives it from the record"
+        );
+        return;
+    }
+
+    // Every week, not only the one in force: a schedule is superseded by a later
+    // one existing, so the history is what makes that legible.
+    for (at, week) in diary.patterns().iter().enumerate() {
+        let heading = if at + 1 == diary.patterns().len() {
+            "ordinarily"
+        } else {
+            "until superseded"
+        };
+        println!("{heading}, from {} ({})", week.from(), week.zone().id());
+        week_slots(week.slots());
+    }
+
+    // Not "holidays": a run of days that departs from the ordinary week is
+    // as often a course, a visitor or a late finish as it is a trip.
+    if diary.alterations().is_empty() {
+        println!("\nno alterations");
+        return;
+    }
+
+    println!("\nalterations");
+    for alteration in diary.alterations() {
+        alteration_line(alteration);
+    }
+}

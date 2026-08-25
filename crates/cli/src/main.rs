@@ -10,6 +10,7 @@ mod config;
 mod output;
 mod paths;
 mod prescribing;
+mod scheduling;
 mod setup;
 mod wiring;
 
@@ -122,6 +123,7 @@ fn command() -> ClapCommand {
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(programme_command())
+        .subcommand(schedule_command())
         .subcommand(
             ClapCommand::new("reset")
                 .about(
@@ -247,6 +249,27 @@ fn programme_command() -> ClapCommand {
                      programmes succeed one another, so which one answers \
                      depends on the date",
                 )),
+        )
+}
+
+fn schedule_command() -> ClapCommand {
+    ClapCommand::new("schedule")
+        .about("Record when there is room to train, or report it")
+        // No `--timezone`. The zone is *in* the pattern, and in any alteration
+        // that moves it — asking for one on the way in would be asking for the
+        // answer.
+        .subcommand_required(true)
+        .subcommand(
+            ClapCommand::new("add")
+                .about("Ask when you ordinarily have room to train, and record it"),
+        )
+        .subcommand(
+            ClapCommand::new("alter")
+                .about("Ask what departs from the ordinary pattern, and record it"),
+        )
+        .subcommand(
+            ClapCommand::new("show")
+                .about("Report the ordinary pattern and everything that departs from it"),
         )
 }
 
@@ -555,6 +578,12 @@ async fn authored_command(
                 .await,
             )
         }
+        "schedule" => Some(match sub.subcommand() {
+            Some(("add", _)) => scheduling::add(database).await,
+            Some(("alter", _)) => scheduling::alter(database).await,
+            Some(("show", _)) => scheduling::show(database).await,
+            _ => Err(Failure::message("no schedule command given", exit::USAGE)),
+        }),
         "programme" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,

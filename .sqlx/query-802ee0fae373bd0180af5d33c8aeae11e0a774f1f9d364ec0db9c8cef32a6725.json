@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, start_date, days, zone, states_slots, reason\n            FROM alteration\n            ORDER BY start_date\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "start_date",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "name": "days",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "days"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "states_slots",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "states_slots"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "802ee0fae373bd0180af5d33c8aeae11e0a774f1f9d364ec0db9c8cef32a6725"
+}

@@ -18,6 +18,7 @@ pub mod programme;
 pub mod refusals;
 pub mod resumption;
 pub mod run_log;
+pub mod schedule;
 
 use application::StoreError;
 use domain::{gym::NormalisationRunId, landing::RunId};
@@ -34,6 +35,7 @@ pub use programme::SqliteProgrammeStore;
 pub use refusals::SqliteRefusalStore;
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;
+pub use schedule::SqliteDiaryStore;
 
 /// Translate a store failure into the application's view of one.
 ///

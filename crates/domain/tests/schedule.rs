@@ -5,11 +5,11 @@
 //! Friday 11 September through Monday 14 September, and in `Europe/Rome` for the
 //! second of those.
 
-use std::{collections::BTreeSet, num::NonZeroU8};
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     gym::OperatorZone,
-    schedule::{Diary, PartOfDay, Patch, Schedule, Slot},
+    schedule::{Alteration, Diary, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -27,47 +27,52 @@ fn days(count: u8) -> Built<NonZeroU8> {
     NonZeroU8::new(count).ok_or_else(|| "a run of days is at least one".into())
 }
 
-/// The operator's ordinary week: four slots, two of which the gym uses.
-fn ordinary() -> BTreeSet<Slot> {
+/// The operator's ordinary week: four slots, two of which are the gym's.
+///
+/// The allocation is part of the pattern rather than something a caller brings
+/// with it, which is what lets an alteration move a slot *and* say whose the
+/// new one is.
+fn ordinary() -> BTreeMap<TrainingSlot, Discipline> {
     [
-        Slot::new(Weekday::Monday, PartOfDay::Evening),
-        Slot::new(Weekday::Wednesday, PartOfDay::Evening),
-        Slot::new(Weekday::Friday, PartOfDay::Evening),
-        Slot::new(Weekday::Sunday, PartOfDay::Morning),
-    ]
-    .into_iter()
-    .collect()
-}
-
-/// What the gym has been allocated. **Not the whole pool** — Wednesday evening
-/// and Sunday morning belong to cycling.
-fn allocated_to_the_gym() -> BTreeSet<Slot> {
-    [
-        Slot::new(Weekday::Monday, PartOfDay::Evening),
-        Slot::new(Weekday::Friday, PartOfDay::Evening),
+        (
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+            Discipline::Gym,
+        ),
+        (
+            TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
+            Discipline::Cycling,
+        ),
+        (
+            TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
+            Discipline::Gym,
+        ),
+        (
+            TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
+            Discipline::Cycling,
+        ),
     ]
     .into_iter()
     .collect()
 }
 
 fn september() -> Built<Diary> {
-    let schedule = Schedule::new(date(2026, 1, 1)?, zone("Europe/London")?, ordinary());
+    let schedule = TrainingPattern::new(date(2026, 1, 1)?, zone("Europe/London")?, ordinary());
 
     // Away, unable to train: neither place has free weights.
-    let first = Patch::new(
+    let first = Alteration::new(
         date(2026, 8, 29)?,
         days(7)?,
         None,
-        Some(BTreeSet::new()),
+        Some(BTreeMap::new()),
         "away with family; no free weights where we are staying".to_owned(),
     );
 
     // Away, unable to train, and in another country.
-    let second = Patch::new(
+    let second = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
         Some(zone("Europe/Rome")?),
-        Some(BTreeSet::new()),
+        Some(BTreeMap::new()),
         "away with family in Rome".to_owned(),
     );
 
@@ -86,7 +91,7 @@ fn an_ordinary_day_reads_the_schedule_in_force() {
     assert!(availability.open(monday), "Monday evening is a slot");
 }
 
-/// **A patch with no slots removes training without touching the zone.**
+/// **An alteration with no slots removes training without touching the zone.**
 #[test]
 fn a_hard_absence_closes_the_days_it_covers() {
     let diary = september().expect("the diary builds");
@@ -98,13 +103,13 @@ fn a_hard_absence_closes_the_days_it_covers() {
     assert_eq!(
         availability.zone.id(),
         "Europe/London",
-        "a patch that says nothing about the zone leaves it alone"
+        "an alteration that says nothing about the zone leaves it alone"
     );
 }
 
-/// **A patch may change both.** Rome is away *and* elsewhere.
+/// **An alteration may change both.** Rome is away *and* elsewhere.
 #[test]
-fn a_patch_can_change_the_zone_and_the_slots_together() {
+fn an_alteration_can_change_the_zone_and_the_slots_together() {
     let diary = september().expect("the diary builds");
     let inside = date(2026, 9, 11).expect("a real Friday");
 
@@ -113,10 +118,10 @@ fn a_patch_can_change_the_zone_and_the_slots_together() {
     assert!(availability.slots.is_empty());
 }
 
-/// The day after a patch ends is ordinary again, which is the off-by-one worth
+/// The day after an alteration ends is ordinary again, which is the off-by-one worth
 /// pinning: a run of four days from Friday the 11th ends on Monday the 14th.
 #[test]
-fn a_patch_ends_when_its_days_run_out() {
+fn an_alteration_ends_when_its_days_run_out() {
     let diary = september().expect("the diary builds");
 
     let last = date(2026, 9, 14).expect("a real Monday");
@@ -147,15 +152,19 @@ fn a_date_before_any_schedule_is_unknown() {
 /// its own dates.
 #[test]
 fn a_later_schedule_supersedes_an_earlier_one() {
-    let early = Schedule::new(
+    let early = TrainingPattern::new(
         date(2026, 1, 1).expect("a real date"),
         zone("Europe/London").expect("a zone"),
         ordinary(),
     );
-    let moved = Schedule::new(
+    let moved = TrainingPattern::new(
         date(2026, 10, 1).expect("a real date"),
         zone("America/New_York").expect("a zone"),
-        std::iter::once(Slot::new(Weekday::Tuesday, PartOfDay::Morning)).collect(),
+        std::iter::once((
+            TrainingSlot::new(Weekday::Tuesday, PartOfDay::Morning),
+            Discipline::Gym,
+        ))
+        .collect(),
     );
     let diary = Diary::new(vec![moved, early], vec![]);
 
@@ -178,19 +187,19 @@ fn a_later_schedule_supersedes_an_earlier_one() {
     );
 }
 
-/// **What a programme consults, and it asks about its own slots only.**
+/// **What a programme consults, and it names itself rather than its slots.**
 ///
-/// Wednesday evening and Sunday morning belong to cycling, so a gym block losing
+/// Wednesday evening and Sunday morning are cycling's, so a gym block losing
 /// them is not the gym's problem — and a gym block that counted them would skip
 /// weeks it never planned to run.
 #[test]
-fn a_programme_loses_only_the_days_it_was_allocated() {
+fn a_programme_loses_only_its_own_days() {
     let diary = september().expect("the diary builds");
 
     let lost = diary.unavailable(
         date(2026, 8, 24).expect("a real date"),
         date(2026, 9, 20).expect("a real date"),
-        &allocated_to_the_gym(),
+        Discipline::Gym,
     );
 
     let expected = vec![
@@ -202,25 +211,92 @@ fn a_programme_loses_only_the_days_it_was_allocated() {
     assert_eq!(lost, expected);
 }
 
-/// The same range against the whole pool loses more, which is exactly why a
-/// programme must be told its allocation rather than reading the pool.
+/// The same range asked for cycling loses different days, which is the point of
+/// the allocation living here: each discipline sees only its own.
 #[test]
-fn the_whole_pool_loses_more_than_the_gym_does() {
+fn each_discipline_loses_its_own_days() {
     let diary = september().expect("the diary builds");
 
     let gym = diary.unavailable(
         date(2026, 8, 24).expect("a real date"),
         date(2026, 9, 20).expect("a real date"),
-        &allocated_to_the_gym(),
+        Discipline::Gym,
     );
-    let everything = diary.unavailable(
+    let cycling = diary.unavailable(
         date(2026, 8, 24).expect("a real date"),
         date(2026, 9, 20).expect("a real date"),
-        &ordinary(),
+        Discipline::Cycling,
     );
 
+    assert_ne!(gym, cycling, "the two disciplines lose different days");
     assert!(
-        everything.len() > gym.len(),
-        "cycling's slots are lost too: {everything:?} against {gym:?}"
+        !gym.iter().any(|date| cycling.contains(date)),
+        "no day is lost by both: they train on different days"
+    );
+}
+
+/// **A day is lost when the allocated slot is gone, not when the day empties.**
+///
+/// The operator trains Monday morning and Monday evening; the gym has been
+/// allocated the evening. An alteration leaves the morning and takes the rest — he
+/// trains, then goes away at lunchtime. The Monday is lost to the gym even
+/// though the day is not empty.
+///
+/// Asking `Availability::open` answers "could he train at all", which is a
+/// different question: it read the surviving morning as a surviving evening and
+/// reported nothing lost. That is the whole reason a slot carries a part of the
+/// day rather than only a weekday.
+#[test]
+fn a_day_that_keeps_the_wrong_half_is_still_lost() {
+    let monday = date(2026, 9, 14).expect("a real Monday");
+
+    let ordinary: BTreeMap<TrainingSlot, Discipline> = [
+        (
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
+            Discipline::Cycling,
+        ),
+        (
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+            Discipline::Gym,
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    let morning_only: BTreeMap<TrainingSlot, Discipline> = std::iter::once((
+        TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
+        Discipline::Cycling,
+    ))
+    .collect();
+
+    let diary = Diary::new(
+        vec![TrainingPattern::new(
+            date(2026, 9, 7).expect("a real date"),
+            zone("Europe/London").expect("a real zone"),
+            ordinary,
+        )],
+        vec![Alteration::new(
+            monday,
+            days(1).expect("one day"),
+            None,
+            Some(morning_only),
+            "trains in the morning, away from lunchtime".to_owned(),
+        )],
+    );
+
+    assert_eq!(
+        diary.unavailable(monday, monday, Discipline::Gym),
+        vec![monday],
+        "the gym's evening is gone, so the gym loses the day"
+    );
+    assert_eq!(
+        diary.unavailable(monday, monday, Discipline::Cycling),
+        Vec::new(),
+        "cycling keeps the morning it was allocated"
+    );
+    assert_eq!(
+        diary.slots_on(monday, Discipline::Cycling),
+        vec![TrainingSlot::new(Weekday::Monday, PartOfDay::Morning)],
+        "and can say what it still has"
     );
 }
