@@ -220,6 +220,7 @@ async fn test_programme(
         inherited
             .as_ref()
             .map(domain::prescription::Programme::fills),
+        &[],
     )?)
 }
 
@@ -382,7 +383,7 @@ fn a_test_that_names_a_gating_role_is_refused() {
     let Ok(fills) = programme::fills() else {
         panic!("the fixture fills build")
     };
-    match document.programme(&parameters, zone.as_time_zone(), Some(&fills)) {
+    match document.programme(&parameters, zone.as_time_zone(), Some(&fills), &[]) {
         Err(infrastructure::DocumentError::Invalid { field, .. }) => {
             assert_eq!(field, "programme.gating_role");
         }
@@ -399,7 +400,7 @@ async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::er
     let (_, directory, pool) = corpus_store().await?;
     let parameters = programme::parameters()?;
     let document: Document = toml::from_str(BLOCK_DOCUMENT)?;
-    let block = document.programme(&parameters, corpus::zone()?.as_time_zone(), None)?;
+    let block = document.programme(&parameters, corpus::zone()?.as_time_zone(), None, &[])?;
     Authoring::new(
         SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),

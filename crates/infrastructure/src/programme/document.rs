@@ -239,7 +239,18 @@ struct ProgrammeSection {
     /// is a real state and not an unsettled one — unlike a `TODO`, which is a
     /// decision nobody has taken yet.
     #[serde(default)]
-    interruptions: Vec<SkipSection>,
+    /// **Absent derives; `[]` states none.**
+    ///
+    /// A block loses the days the operator cannot train, and the schedule
+    /// already knows which those are — so a document that says nothing has them
+    /// worked out for it. Writing them by hand is then an *override*, for the
+    /// case the diary has not been told about, and an explicit empty list is how
+    /// a block says it runs through everything.
+    ///
+    /// The distinction is the one an alteration's slots already make: absent and
+    /// empty are different facts, and collapsing them would make every
+    /// unadorned document silently claim it runs through the holidays.
+    interruptions: Option<Vec<SkipSection>>,
     weekdays: BTreeMap<String, String>,
     /// The starting 1RM. Absent for a test, which produces one rather than
     /// reading one — that being the whole of what a test does.
@@ -546,6 +557,56 @@ impl Document {
             .map_err(|error| invalid("programme.start", error))
     }
 
+    /// The days this programme runs across, first and last.
+    ///
+    /// Wanted by the caller ahead of [`Self::programme`], for the same reason
+    /// [`Self::start`] is: what the gym loses is a question about a span of
+    /// dates, and the schedule is the only thing that can answer it.
+    ///
+    /// **The nominal span, before interruptions**, which is what stops this
+    /// being circular: the losses are read from the window, so the window
+    /// cannot be read from the losses. `Calendar` refuses an interruption
+    /// outside the block, so asking over exactly this span is also what keeps
+    /// every derived skip admissible.
+    ///
+    /// **A limitation, declared rather than solved.** `Calendar::calendar_weeks`
+    /// walks the skips, so a week in which *every* session is lost pushes the
+    /// block's real end past this span — and a day lost in that extension is not
+    /// consulted here. It takes a whole training week going at once to happen,
+    /// and the answer when it does is to state the interruptions in the
+    /// document, which overrides this entirely.
+    ///
+    /// `None` where the document does not say how long it runs, which is a
+    /// document `programme` will refuse for its own reasons.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError`] if the start is unsettled or is not a date.
+    pub fn window(&self) -> Result<Option<(Date, Date)>, DocumentError> {
+        let start = self.start()?;
+
+        // A test is one week; anything else says how many it runs for.
+        //
+        // **`duration_weeks` counts phase weeks, and an entry test adds one in
+        // front of them** (decision 0016). A nine-week block that measures its
+        // own entry occupies ten calendar weeks, and asking the schedule over
+        // nine would leave the last week unconsulted.
+        let weeks = if self.programme.template == "test" {
+            1
+        } else {
+            let Some(weeks) = self.programme.duration_weeks else {
+                return Ok(None);
+            };
+            weeks + u32::from(self.programme.entry_test.is_some())
+        };
+
+        let days = i64::from(weeks) * 7 - 1;
+        let Ok(last) = start.checked_add(jiff::Span::new().days(days)) else {
+            return Ok(None);
+        };
+        Ok(Some((start, last)))
+    }
+
     /// The programme, in domain terms, validated.
     ///
     /// **`inherited` is the fills of the programme this one follows**, where the
@@ -566,6 +627,7 @@ impl Document {
         parameters: &GenerationParameters,
         zone: TimeZone,
         inherited: Option<&SlotFills>,
+        derived: &[Skip],
     ) -> Result<Programme, DocumentError> {
         let section = &self.programme;
 
@@ -579,24 +641,34 @@ impl Document {
         }
         let weekdays = Weekdays::new(days).map_err(|error| invalid("programme.weekdays", error))?;
 
-        let mut interruptions = Vec::with_capacity(section.interruptions.len());
-        for (at, skip) in section.interruptions.iter().enumerate() {
-            let field = format!("programme.interruptions[{at}]");
-            let day = |value: &str| -> Result<Date, DocumentError> {
-                settled(&field, value)?
-                    .parse::<Date>()
-                    .map_err(|error| invalid(&field, error))
-            };
-            interruptions.push(match skip {
-                SkipSection::Day(value) => Skip::day(day(value)?),
-                SkipSection::Run { start, days } => Skip::new(
-                    day(start)?,
-                    NonZeroU8::new(*days).ok_or_else(|| {
-                        invalid(&field, "a skip of no days does not skip anything")
-                    })?,
-                ),
-            });
-        }
+        // Stated wins; absent takes what the schedule worked out. Resolved here
+        // rather than at derivation for the reason a test's inherited fills are:
+        // the stored programme is then complete on its own, and a holiday coming
+        // off somebody's calendar afterwards cannot move what it prescribed.
+        let interruptions: Vec<Skip> = match section.interruptions.as_ref() {
+            None => derived.to_vec(),
+            Some(stated) => {
+                let mut parsed = Vec::with_capacity(stated.len());
+                for (at, skip) in stated.iter().enumerate() {
+                    let field = format!("programme.interruptions[{at}]");
+                    let day = |value: &str| -> Result<Date, DocumentError> {
+                        settled(&field, value)?
+                            .parse::<Date>()
+                            .map_err(|error| invalid(&field, error))
+                    };
+                    parsed.push(match skip {
+                        SkipSection::Day(value) => Skip::day(day(value)?),
+                        SkipSection::Run { start, days } => Skip::new(
+                            day(start)?,
+                            NonZeroU8::new(*days).ok_or_else(|| {
+                                invalid(&field, "a skip of no days does not skip anything")
+                            })?,
+                        ),
+                    });
+                }
+                parsed
+            }
+        };
 
         let start = settled("programme.start", &section.start)?
             .parse::<Date>()

@@ -7,14 +7,18 @@
 use std::path::Path;
 
 use application::{
-    GenerationParameterStore as _, PrescriptionDeliverer as _, ProgrammeAuthor as _,
-    ProgrammeStore as _, WorkoutPrescriber as _,
+    DiaryStore as _, GenerationParameterStore as _, PrescriptionDeliverer as _,
+    ProgrammeAuthor as _, ProgrammeStore as _, WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::{gym::OperatorZone, prescription::Programme};
+use domain::{
+    gym::OperatorZone,
+    prescription::{Programme, Skip},
+    schedule::Discipline,
+};
 use infrastructure::{
-    Document, HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory,
+    Document, HevyRoutinePreview, HevyRoutines, SqliteDiaryStore, SqliteExerciseHistory,
     SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
     SqliteProgrammeStore, connect,
 };
@@ -71,11 +75,23 @@ pub async fn add(database: &Path, zone: &OperatorZone, path: &Path) -> Result<()
     } else {
         None
     };
+    // **The days the gym loses, worked out here and recorded.** The schedule
+    // knows when there is room to train and which slots are the gym's; the
+    // programme is told its window and reads back what it loses. Resolved at
+    // authoring for the same reason a test's fills are — the stored programme is
+    // then complete on its own, so a holiday coming off the calendar afterwards
+    // cannot retroactively move what it prescribed.
+    //
+    // A document that states its own interruptions overrides this, and is not
+    // asked. That is the case where the diary has not been told something.
+    let derived = derived_interruptions(&document, &SqliteDiaryStore::new(pool.clone())).await?;
+
     let programme = document
         .programme(
             &parameters,
             zone.as_time_zone(),
             inherited.as_ref().map(Programme::fills),
+            &derived,
         )
         .map_err(|error| Failure::usage(&error))?;
 
@@ -86,6 +102,31 @@ pub async fn add(database: &Path, zone: &OperatorZone, path: &Path) -> Result<()
 
     output::programme_authored(id, authored, &programme, &parameters);
     Ok(())
+}
+
+/// The days this programme's window loses, from the schedule.
+///
+/// Empty where nothing has been recorded about the operator's week, which is a
+/// machine that has not run `fitness schedule add` yet — not a claim that the
+/// block runs through everything.
+async fn derived_interruptions(
+    document: &Document,
+    diary: &SqliteDiaryStore,
+) -> Result<Vec<Skip>, Failure> {
+    let Some(window) = document.window().map_err(|error| Failure::usage(&error))? else {
+        return Ok(Vec::new());
+    };
+
+    let diary = diary
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    Ok(diary
+        .unavailable(window.0, window.1, Discipline::Gym)
+        .into_iter()
+        .map(Skip::day)
+        .collect())
 }
 
 /// Report the programme in force and where its ladder stands.
