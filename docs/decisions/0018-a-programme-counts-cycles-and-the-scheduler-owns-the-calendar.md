@@ -1,7 +1,8 @@
 # 0018 — A programme counts cycles, and the scheduler owns the calendar
 
 **Date**: 2026-08-25
-**Status**: Proposed
+**Status**: Proposed. The three questions it was drafted with were answered on
+2026-08-25 and folded in; what is left under *Open* is new.
 
 **Amends** `0014-block-periodisation-keeps-its-endpoint.md`, which becomes a
 scheduling policy rather than a fact about blocks — and then stops being needed,
@@ -61,6 +62,11 @@ calendar.
 discipline, and does not care whether a session is squats or an endurance ride.
 That is what lets cycling — and anything after it — use the same scheduler.
 
+**And it allocates rather than being told.** Given the slots, the commitments,
+each discipline's demand and the alternation rule, which slots are the gym's is
+*derived*. The operator states his week and what occupies it; he does not state
+that Monday is a gym day.
+
 **The record never learns intent.** Extraction and normalisation are unchanged:
 what happened, from a source, whatever was planned. The only edge between the
 two halves is the session↔performance link, which is `routine_id` and already
@@ -78,6 +84,26 @@ invisible.
 - A **commitment** is time that is spent and that we never allocate — padel on a
   Sunday evening, a match, an appointment. The operator may move one or add
   more; the tool may not.
+
+### A microcycle exists at two levels
+
+The operator's, stated on 2026-08-25:
+
+- the **training microcycle** is his repeating unit — **four slots and one
+  commitment**;
+- the **gym microcycle** is **two sessions**, one heavy and one light;
+- the **cycling microcycle** is **two sessions**.
+
+Two and two fill the four. A discipline's microcycle is a fixed count of
+sessions, which is what makes it independent of the calendar; the training
+microcycle is the container the scheduler fills, and it is the only one that
+knows what a week looks like.
+
+**Every discipline states its demand, whether or not it is programmed.** The
+scheduler cannot allocate four slots between gym and cycling without knowing
+each wants two. For the gym that number comes from its programme. For cycling,
+which has no programme, it is simply stated — two forty-five minute endurance
+rides — and that is enough for allocation to work.
 
 ### Spacing places the sessions, and there is no model of load
 
@@ -100,6 +126,15 @@ Monday, and that is answerable without any of it. Modelling training cost is
 later work, and this decision must not require it. Two forty-five minute
 endurance rides are not distinguished from each other here, and making the
 Sunday ride longer is cycling programming rather than scheduling.
+
+### No admissible slot is a refusal
+
+Where nothing satisfies the spacing, the scheduler says so and places nothing.
+It does not put the session somewhere inadmissible and hope, and it does not
+silently drop it — both would be the tool asserting something the operator never
+agreed to. A refusal that names the session and the rule it could not satisfy is
+the same answer an underivable slot already gives (FR-011), and for the same
+reason.
 
 ### Spacing answers drop-versus-queue
 
@@ -133,18 +168,41 @@ disciplines is planning. A commitment is not planning: it is a fact about time
 already spent, and it is the minimum the gym scheduler needs to be correct. What
 stays out is the tool *deciding* anything about padel.
 
+**The authored allocation goes.** `TrainingPattern` holds a slot-to-discipline
+map, added days earlier at the operator's request so that the schedule would own
+the allocation rather than a programme having to know about alterations. Owning
+it now means *deriving* it: the map becomes an output, the `discipline` columns
+on `training_slot` and `alteration_slot` go, and the wizard stops asking "and
+which of those are the gym's?".
+
+That is a further step rather than a reversal — the reasoning that put
+allocation here is exactly the reasoning that lets the scheduler compute it —
+but it does undo a schema that has only just landed, and saying so plainly is
+cheaper than having it discovered.
+
+**A derived allocation moves when the week does, and only for drafted
+sessions.** Recomputation cannot disturb a published or performed session,
+because those are fixed by § 12.1. So a commitment added mid-block changes what
+is prescribed next and nothing that already happened.
+
 **Prescriptions issued under the old model are unaffected**, because they are
 recorded as issued (§ 12.1) rather than re-derived.
 
 ## Open
 
-- Whether the scheduler eventually **derives the allocation** between gym and
-  cycling as well as placing sessions within it. It has what it needs — slots,
-  commitments, the alternation rule — but the operator states the allocation
-  today and nothing yet asks for that to change.
-- Whether a microcycle is **a fixed number of sessions** or "however many the
-  week holds". The first makes it independent of the calendar, which is the
-  point of this decision; the second is closer to how it is said out loud.
-- What the scheduler does when **no slot satisfies the spacing**. Refusing to
-  place a session says something true; placing it anyway and saying so may be
-  more use.
+The three questions this was drafted with were answered on 2026-08-25 and are
+recorded above: the scheduler allocates, a discipline's microcycle is a fixed
+count of sessions, and no admissible slot is a refusal.
+
+What remains open:
+
+- **Whether a derived allocation is ever overridable.** Sunday morning may be a
+  ride because of who he rides with rather than because the constraints put it
+  there. Nothing has asked for an override yet, and adding one before it is
+  wanted would be inventing a rule.
+- **What happens when the constraints admit more than one allocation.** Four
+  slots split two and two leaves little room, but five would. A tie-break has to
+  come from somewhere, and the operator's stated order is the obvious candidate.
+- **Whether cycling's demand belongs in the schedule or in a cycling
+  programme.** Stated in the schedule it is a fact about the week; stated in a
+  programme it is intent, and cycling has no programme to hold it.
