@@ -63,9 +63,9 @@ discipline, and does not care whether a session is squats or an endurance ride.
 That is what lets cycling — and anything after it — use the same scheduler.
 
 **And it allocates rather than being told.** Given the slots, the commitments,
-each discipline's demand and the alternation rule, which slots are the gym's is
-*derived*. The operator states his week and what occupies it; he does not state
-that Monday is a gym day.
+any pins and the alternation rule, which slots are the gym's is *derived*. The
+operator states his week, what occupies it, and the one slot that is spoken for;
+he does not state that Monday is a gym day.
 
 **The record never learns intent.** Extraction and normalisation are unchanged:
 what happened, from a source, whatever was planned. The only edge between the
@@ -85,25 +85,54 @@ invisible.
   Sunday evening, a match, an appointment. The operator may move one or add
   more; the tool may not.
 
-### A microcycle exists at two levels
+### A microcycle exists at two levels, and only one of them is stated
 
-The operator's, stated on 2026-08-25:
+The **training microcycle** is the operator's repeating unit: four slots and one
+commitment. It is the container, and the only one that knows what a week looks
+like.
 
-- the **training microcycle** is his repeating unit — **four slots and one
-  commitment**;
-- the **gym microcycle** is **two sessions**, one heavy and one light;
-- the **cycling microcycle** is **two sessions**.
+A **discipline's microcycle is however many slots alternation gives it** — not a
+number anybody states. One open slot is a gym session; two is one of each; three
+is two gym and one cycling. So the gym microcycle is two sessions today because
+the week yields two gym slots, and a week with more slots makes a denser block
+rather than a longer one.
 
-Two and two fill the four. A discipline's microcycle is a fixed count of
-sessions, which is what makes it independent of the calendar; the training
-microcycle is the container the scheduler fills, and it is the only one that
-knows what a week looks like.
+**Nothing states a demand**, which is the correction that matters: an earlier
+draft had each discipline declaring how many sessions it wanted, and cycling
+needing to state two despite having no programme to state them in. Alternation
+removes the question. A programme says what a session *is*; how many are in a
+microcycle is a fact about the week.
 
-**Every discipline states its demand, whether or not it is programmed.** The
-scheduler cannot allocate four slots between gym and cycling without knowing
-each wants two. For the gym that number comes from its programme. For cycling,
-which has no programme, it is simply stated — two forty-five minute endurance
-rides — and that is enough for allocation to work.
+### Allocation is a pin, alternation, and the spacing rule
+
+There is no priority order between disciplines, and gym-first is not a rule.
+What decides the week is:
+
+1. a **pin** — a slot nailed to a discipline, because Sunday morning is a ride
+   for reasons the tool does not model and should not overrule;
+2. **alternation** through the remaining slots, its phase fixed by the pin;
+3. the **spacing rule**, which places the heavy session within what the gym got.
+
+Run against the operator's week that reproduces it exactly, deriving every part
+of what he states by hand today:
+
+    pinned    sunday morning -> cycling
+
+    monday    evening   gym        <- alternation
+    wednesday evening   cycling
+    friday    evening   gym
+    sunday    morning   cycling    <- the pin
+
+    gym microcycle = 2 sessions
+
+    heavy: monday   day before is sunday    (ride + padel) -> no
+           friday   day before is thursday  (clear)        -> yes
+
+The Friday falls out. So does the Monday/Friday split, and so does the pairing
+with cycling on Wednesday and Sunday.
+
+**A pin is a stated fact and refuses like any other.** If pinning a slot makes
+the rest unsatisfiable, the scheduler says so rather than quietly unpinning it.
 
 ### Spacing places the sessions, and there is no model of load
 
@@ -194,15 +223,21 @@ The three questions this was drafted with were answered on 2026-08-25 and are
 recorded above: the scheduler allocates, a discipline's microcycle is a fixed
 count of sessions, and no admissible slot is a refusal.
 
+A second round on 2026-08-25 answered three more: a discipline's microcycle
+follows the slots, a slot may be pinned, and there is no priority order because
+the pin and the spacing rule between them decide the phase.
+
 What remains open:
 
-- **Whether a derived allocation is ever overridable.** Sunday morning may be a
-  ride because of who he rides with rather than because the constraints put it
-  there. Nothing has asked for an override yet, and adding one before it is
-  wanted would be inventing a rule.
-- **What happens when the constraints admit more than one allocation.** Four
-  slots split two and two leaves little room, but five would. A tie-break has to
-  come from somewhere, and the operator's stated order is the obvious candidate.
-- **Whether cycling's demand belongs in the schedule or in a cycling
-  programme.** Stated in the schedule it is a fact about the week; stated in a
-  programme it is intent, and cycling has no programme to hold it.
+- **What shape a microcycle has when it holds more than two gym sessions.** Two
+  is one heavy and one light. Three is not obviously two light and one heavy,
+  and nothing needs the answer while the week yields two — but a denser week is
+  exactly what "the microcycle follows the slots" invites, so the question
+  arrives with the first extra slot.
+- **Whether a pin can be conditional.** Sunday morning is a ride because of who
+  he rides with; a week where that does not happen is a week where the pin
+  should probably lift. Nothing has asked for this.
+- **What the training microcycle is when the week is not a week.** Four slots
+  and one commitment describes a Monday-to-Sunday cycle. An alteration that
+  moves training to a Saturday for a fortnight does not obviously repeat on
+  seven days, and the container may need to say what it repeats on.
