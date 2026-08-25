@@ -4,7 +4,8 @@
 September 2026, using `fitness` as an installed binary rather than
 `./target/debug/fitness` in this checkout.
 
-**Written**: 2026-08-24, revised the same day.
+**Written**: 2026-08-24. Revised 2026-08-25, when steps 1 to 3 landed and
+decision 0018 changed what comes after them.
 
 The dates below are ordering, not estimates. The constraint on this work is how
 fast decisions get made, not how fast code gets written.
@@ -15,6 +16,30 @@ still open. Decisions that have actually been made live in `docs/decisions/`;
 this is the plan, not the record.
 
 ---
+
+## Now
+
+The three-line version, kept current so a session starting cold does not have to
+read the rest to know what to pick up.
+
+- **Waiting on the operator**: authoring the autumn block. The wizard writes it,
+  the schedule takes 14 September out of it, and it has been run end to end
+  against a copy of the real store. Nothing is blocking it.
+- **Next in code**: the three lifecycle pieces left over from #31 — withdrawal,
+  a performance taking its role from its prescription, and the comparison. All
+  three survive decision 0018 rather than being discarded by it.
+- **After 14 September**: decision 0018, in the order commitments → ordinal
+  programme → allocator. Not before; see *What 0018 changes, and when*.
+
+## Where this stands on 2026-08-25
+
+**The goal is reachable today.** Steps 1 to 3 have landed; step 4 is authoring
+the block, and it has been run end to end against a copy of the real store. What
+is left before 14 September is the operator sitting down and doing it.
+
+**The interesting work is now the model rather than the goal**, which is a
+better problem to have than the reverse. Decision 0018 is proposed and not
+started, and it belongs after the block starts rather than before — see the end.
 
 ## The uncomfortable observation
 
@@ -51,10 +76,22 @@ Shipped, on `main`:
 - `fitness init` — creates both, connects a source, reports what is outstanding
 - Credentials in `credentials.toml`, `0600`, beside the settings
 
+Landed since this was written, and steps 1 to 3 of the order below:
+
+- **#25** the four exercises the autumn slots name; **#26** a bilateral stretch
+  is held twice
+- **#27** the operator's week, stored and shown — training slots, alterations,
+  and which discipline each slot belongs to
+- **#28** a programme reads the days it loses from the schedule
+- **#29** an alteration asks about its own days; **#30** the programme wizard
+- **#31** a prescription is drafted, published, or performed (§ 12.1), and a
+  performed workout knows which session it was
+
 In flight:
 
-- **#22** — schedule types: the operator's week and the holidays that depart
-  from it. Types only, no store, no consumer.
+- **#32** — decision 0018, proposed. A programme counts cycles and the scheduler
+  owns the calendar. It rewrites three of the steps below; see *What 0018
+  changes* at the end.
 - **#10** — release-please's release PR, deliberately **not** merged. See below.
 
 ---
@@ -90,7 +127,23 @@ Nothing else is needed here. An earlier revision of this document claimed the
 summer block had to be re-authored so a standalone test could inherit its fills.
 **It does not** — see step 3, which is one programme rather than two.
 
-### 1. The schedule — store, document, CLI
+### 1. The schedule — store, prompts, CLI — **done** (#27, #29)
+
+Authored by prompts rather than a document: `fitness schedule add` asks when
+there is room to train, `schedule alter` asks what departs from it, and
+`schedule show` reads it back. A pattern is four or five slots and an alteration
+is a date, a length and a reason — small enough that a file to hold them would
+be a file to lose, and the store is where the object lives.
+
+Each slot also names the discipline it belongs to, because an alteration can
+move a slot and has to say whose the new one is. **0018 makes that derived
+rather than authored**; see the end.
+
+The zone came with it. `timezone` in `config.toml` has not gone yet — the
+schedule holds the zone, and every other command still takes `--timezone`.
+
+*What follows is the original plan, kept because the acceptance line is what was
+met.*
 
 `fitness schedule add|show|list|remove`, over the types in #22.
 
@@ -113,7 +166,15 @@ domain term is better suited. `programme author` became `programme add` in #24
 for exactly this reason: it was the word in a conversation, and a conversational
 coinage should not harden into an interface.
 
-### 2. Adding a programme consults the schedule
+### 2. Adding a programme consults the schedule — **done** (#28)
+
+**And 0018 deletes it.** A programme that holds no dates has nothing to lose and
+nothing to derive, so the interruption machinery this step built — deriving at
+authoring, freezing the result, the override, the window that has to cover the
+entry-test week — all goes. The work bought the understanding that produced
+0018, which is not nothing, but none of the code survives.
+
+*The original plan follows.*
 
 The programme is *told* its start, its weeks and the slots it may use, and
 *reads* which of those it loses. It records the result, so derivation never
@@ -127,7 +188,17 @@ state one as an override.
 **Acceptance**: adding the autumn block derives the loss of Monday 14 September
 without it being stated.
 
-### 3. The programme setup wizard
+### 3. The programme setup wizard — **done** (#30)
+
+`programme add` with no document asks, writes a document, and authors that. Each
+slot offers what `docs/slot-candidates.md` holds for it, ordered by what the
+record shows performed and limited by nothing.
+
+**0018 changes what it asks.** `gating_role` and `[programme.weekdays]` leave
+the document, because the scheduler derives where the heavy session lands. The
+seventeen slots stay.
+
+*The original plan follows.*
 
 **A periodised block owns its entry test.** `BlockWeek::Entry` makes week one
 the measurement the rest of the block is a share of, `phase_weeks_of` takes that
@@ -153,7 +224,66 @@ reviewable, diffable and re-authorable.
 
 ### 4. The autumn block — from Monday 14 September
 
+**Ready now, on the model as it stands.** The wizard writes it, the schedule
+takes 14 September out of it without being told, and `prescribe` refuses that
+Monday and issues the Friday entry test. Run end to end against a copy of the
+real store on 2026-08-25.
+
+Nothing in 0018 is needed for it. The heavy session is on a Friday because the
+document says so, and that is the right answer — 0018 would *derive* the same
+Friday rather than change it.
+
 ---
+
+## What 0018 changes, and when
+
+Decision 0018 — a programme counts sessions, microcycles, mesocycles and
+macrocycles, and the scheduler maps them onto the calendar — is a better model
+and it rewrites three of the four steps above.
+
+**It is not needed for the autumn block**, and that is the whole of the
+scheduling question. The heavy session is on a Friday; 0018 derives that Friday
+instead of being told it, and derives the same one. 14 September is already
+taken out. There is nothing the block cannot do today that it could do after.
+
+**So it lands after 14 September, not before.** Twenty days is not enough to
+remove `Calendar`, `Skip`, `Interruptions`, `WeekKind` and `WeekIndex`, build an
+allocator, and still have a block to run — and attempting it is how one arrives
+at the 14th with neither. The deadline is what makes this the wrong side of it.
+
+**Mid-block is acceptable, which is what makes waiting safe.** Two things make
+it so: a pin and the spacing rule reproduce the operator's week exactly, so a
+derived allocation does not move a running block's sessions; and § 12.1 means
+issued prescriptions are recorded rather than re-derived, so nothing already
+prescribed can change under it. The migration is mostly *dropping* columns.
+
+Order, when it starts:
+
+1. **Commitments.** Purely additive — padel is recorded, nothing reads it yet.
+   The scheduler cannot allocate correctly without them.
+2. **The ordinal programme.** Sessions, microcycles, mesocycles; `Calendar` and
+   the interruption machinery go.
+3. **The allocator.** Pin, alternation, spacing; `gating_role` and
+   `[programme.weekdays]` leave the document.
+
+Nothing is half-migrated between those: the current calendar keeps working until
+the thing replacing it can place a session.
+
+## What is left of the lifecycle, and it survives 0018
+
+#31 landed the states and the link. Three pieces remain, and all three are work
+0018 relies on rather than work it discards — it says what a performance *was*
+is decided by the session it fulfilled, which is exactly this link:
+
+- **A performance takes its role from its prescription, not its date.** The
+  Friday session performed on Saturday morning. `place(performance.on)` is
+  wrong today and 0018 deletes it, but the replacement is this.
+- **Withdrawal** for a published, unperformed session — delete the routine at
+  the source and drop the delivery row. Needs `ON DELETE CASCADE` on
+  `prescribed_item` and its children, which is why a draft is not disposable
+  today despite § 12.1 saying it is.
+- **The comparison** — performed against prescribed, which `project` can already
+  do and nothing calls.
 
 ## Deferred, and none of it on the critical path
 
@@ -187,24 +317,21 @@ reviewable, diffable and re-authorable.
 
 ## Open questions
 
-1. **Where do schedules and patches get authored?** A document like
-   `programme.toml`, or commands? A document was assumed in #22's plan but not
-   settled.
+1. ~~**Where do schedules and patches get authored?**~~ **Answered**: prompts,
+   straight to the store. No document.
 2. **Does `--timezone` survive as a per-run override** once the store answers?
    Probably, and it should stop being *required*.
-3. **Is the wizard a must-have for autumn or a nice-to-have?** Asked on
-   2026-08-24 and not yet answered. The plan above assumes nice-to-have.
+3. ~~**Is the wizard a must-have for autumn?**~~ **Answered**: must-have, and
+   built (#30).
 4. **Should the credential be obtainable by running a command** —
    `key_command = "pass show hevy/api"`, git's `credential.helper` model? It
    makes the config safe to commit by design and works with whatever the
    operator already uses. An OS keyring was considered and rejected as the *only*
    mechanism: it needs an unlocked session, which fails under cron, over SSH and
    in containers.
-5. **§ 12 and unperformed prescriptions.** § 12 says authored data "keeps its
-   history" because "nothing regenerates it if lost". That premise is false for
-   an unperformed prescription, which re-derives exactly. Raised twice and not
-   settled; it is not blocking, because the schedule work gives immutability
-   structurally.
+5. ~~**§ 12 and unperformed prescriptions.**~~ **Answered** by § 12.1 and #31: a
+   prescription is drafted, published or performed, and "nothing regenerates it
+   if lost" is true of only the last.
 
 ---
 
