@@ -133,6 +133,8 @@ fn performed(primary: PrimaryPattern) -> impl Strategy<Value = GymWorkout> {
             provenance,
             SourceRecordId::try_from("synthetic").ok()?,
             LandingRecordId::FIRST,
+            // Performed freehand: no session was delivered for it.
+            None,
         ))
     })
 }

@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT d.reference AS \"reference!: String\",\n                   EXISTS (\n                       SELECT 1 FROM gym_workout AS w\n                       WHERE w.performed_against = d.reference\n                   ) AS \"performed!: i64\"\n            FROM prescription_delivery AS d\n            WHERE d.prescription = ?\n            ORDER BY d.delivered_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "performed!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8c3bd8716add0e2ebe0e816d779b1476406e47d54519fcc5848b576a1cf4c038"
+}

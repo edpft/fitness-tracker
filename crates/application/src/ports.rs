@@ -24,8 +24,8 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, Programme, ProgrammeId, ProgrammeName,
-    ProgrammeWindow, Progress, SlotId,
+    GenerationParameters, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId,
+    ProgrammeName, ProgrammeWindow, Progress, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
 
@@ -941,6 +941,25 @@ pub enum Reissue {
     /// Derive again and supersede. The superseded prescription is kept — § 12
     /// authored data keeps its history — and stops being the one in force.
     Yes,
+}
+
+/// Where a prescription has got to: drafted, published, or performed.
+///
+/// **Derived from the relations, not read from a column.** A prescription with
+/// no delivery is drafted; one whose delivery reference no workout names is
+/// published; one a workout names is performed. Asking the store rather than
+/// storing the answer is what stops the two disagreeing.
+pub trait PrescriptionLifecycle {
+    /// The state of one issued prescription.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn state_of(
+        &self,
+        prescription: PrescribedWorkoutId,
+    ) -> impl Future<Output = Result<PrescriptionState, StoreError>> + Send;
 }
 
 /// Store an authored programme and its parameters.

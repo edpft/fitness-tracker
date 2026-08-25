@@ -4,5 +4,6 @@
 //! permits an interface language to live.
 
 pub mod document;
+pub mod draft;
 
 pub use document::{Document, DocumentError};

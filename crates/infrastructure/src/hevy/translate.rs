@@ -22,6 +22,7 @@ use domain::{
         SignedKg, Superset, WorkoutItem, WorkoutStart, exercise::Exercise, sequence::AtLeastTwo,
     },
     landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
+    prescription::DeliveryReference,
 };
 use std::fmt;
 
@@ -105,6 +106,16 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
             return Ok(scribe.nothing_translatable());
         };
 
+        // **An empty routine id is no routine id.** `DeliveryReference` refuses
+        // an empty string, and a source that serves `""` is saying the same
+        // thing as one that serves nothing — so it is read as absent rather
+        // than refused, which would fail a whole workout over a field nothing
+        // needed until recently.
+        let performed_against = workout
+            .routine_id
+            .as_ref()
+            .and_then(|id| DeliveryReference::try_from(id.clone()).ok());
+
         Ok(Translation::Workout {
             workout: Box::new(GymWorkout::new(
                 items,
@@ -112,6 +123,7 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
                 record.provenance().clone(),
                 record.source_record_id().clone(),
                 record.id(),
+                performed_against,
             )),
             refusals: scribe.into_refusals(),
         })

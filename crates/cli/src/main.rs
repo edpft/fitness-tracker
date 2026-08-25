@@ -5,6 +5,7 @@
 //! picks the adapters — and turns whatever comes back into output and an exit
 //! code.
 
+mod candidates;
 mod catalogue;
 mod config;
 mod output;
@@ -13,6 +14,7 @@ mod prescribing;
 mod scheduling;
 mod setup;
 mod wiring;
+mod wizard;
 
 use std::{
     path::{Path, PathBuf},
@@ -230,12 +232,28 @@ fn programme_command() -> ClapCommand {
         .subcommand_required(true)
         .subcommand(
             ClapCommand::new("add")
-                .about("Read a programme document and store it, superseding the previous one")
+                .about(
+                    "Ask what the block is and write it down, or read a document \
+                     already written. Either way it supersedes the previous one \
+                     of that name",
+                )
                 .arg(
                     Arg::new("path")
-                        .required(true)
                         .value_parser(clap::value_parser!(PathBuf))
-                        .help("The document to read"),
+                        .help(
+                            "The document to read. Omit it and the questions are \
+                             asked instead, and the answers written to a document",
+                        ),
+                )
+                .arg(
+                    Arg::new("into")
+                        .long("into")
+                        .value_parser(clap::value_parser!(PathBuf))
+                        .conflicts_with("path")
+                        .help(
+                            "Where to write the document the questions produce. \
+                             Defaults to the block's name in the working directory",
+                        ),
                 ),
         )
         .subcommand(
@@ -592,7 +610,15 @@ async fn authored_command(
             Some(match sub.subcommand() {
                 Some(("add", add)) => match add.get_one::<PathBuf>("path") {
                     Some(path) => prescribing::add(database, &zone, path).await,
-                    None => Err(Failure::message("no document given", exit::USAGE)),
+                    // No document: ask, write one, and author that.
+                    None => {
+                        wizard::add(
+                            database,
+                            &zone,
+                            add.get_one::<PathBuf>("into").map(PathBuf::as_path),
+                        )
+                        .await
+                    }
                 },
                 Some(("show", show)) => {
                     prescribing::standing(
