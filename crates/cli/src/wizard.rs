@@ -25,19 +25,26 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::{ExerciseHistory as _, GenerationParameterStore as _};
+use application::{DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _};
 use domain::{
     gym::{
-        OperatorZone,
+        Kg, Load, OperatorZone, RepCount,
         exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
     },
-    prescription::{Block, SlotId},
+    // `prescription::Block` is the *slot* block — plyometric, power, strength.
+    // The periodised one is a different type with the same word on it, so it is
+    // named for what it holds: the plan a duration divides into.
+    prescription::{
+        Block, Calendar, GenerationParameters, LoadSteps, SessionRole, Skip, SlotId, Weekdays,
+        block::Block as BlockPlan, rep_max,
+    },
+    schedule::{Diary, Discipline},
 };
 use infrastructure::{
-    SqliteExerciseHistory, SqliteGenerationParameterStore, connect,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, connect,
     programme::draft::{Draft, FillLine, render},
 };
-use jiff::civil::Date;
+use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, candidates, exit};
 
@@ -181,18 +188,25 @@ fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Stri
 }
 
 /// Refuse before asking anything if the store cannot hold what the answers make.
-async fn ready(parameters: &SqliteGenerationParameterStore) -> Result<(), Failure> {
-    if parameters
+///
+/// **And hand back what it found.** The questions need the parameters as well as
+/// the store: what one step up the bar is, and so what "beat it" comes to, is
+/// the plate grid in `scales` rather than anything to ask about.
+async fn ready(
+    parameters: &SqliteGenerationParameterStore,
+) -> Result<GenerationParameters, Failure> {
+    parameters
         .current()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-        .is_some()
-    {
-        return Ok(());
-    }
-    Err(usage(
-        "this store has no generation parameters, so nothing authored here could          prescribe anything. Run `fitness init` first — it stores them. Nothing          was asked and nothing was written",
-    ))
+        .map(|(_, parameters)| parameters)
+        .ok_or_else(|| {
+            usage(
+                "this store has no generation parameters, so nothing authored here could \
+                 prescribe anything. Run `fitness init` first — it stores them. Nothing \
+                 was asked and nothing was written",
+            )
+        })
 }
 
 async fn ask_fill(
@@ -258,21 +272,25 @@ async fn ask_fill(
     Ok((slot, FillLine::Same(exercise)))
 }
 
-const PATTERNS: [(&str, &str); 4] = [
+/// The patterns a block can be built around.
+///
+/// **Two, not four.** The ladder, the anchor and the entry test are all about a
+/// lower-body maximum, and an upper push or pull is an accessory slot whichever
+/// block it sits in. Stated by the operator, twice — the four-item list came
+/// from treating `SlotId`'s patterns as interchangeable, which they are not.
+const PATTERNS: [(&str, &str); 2] = [
     ("knee_dominant", "knee dominant"),
     ("hip_dominant", "hip dominant"),
-    ("upper_push", "upper push"),
-    ("upper_pull", "upper pull"),
 ];
 
-const WEEKDAYS: [(&str, &str); 7] = [
-    ("monday", "monday"),
-    ("tuesday", "tuesday"),
-    ("wednesday", "wednesday"),
-    ("thursday", "thursday"),
-    ("friday", "friday"),
-    ("saturday", "saturday"),
-    ("sunday", "sunday"),
+const WEEKDAYS: [(&str, Weekday); 7] = [
+    ("monday", Weekday::Monday),
+    ("tuesday", Weekday::Tuesday),
+    ("wednesday", Weekday::Wednesday),
+    ("thursday", Weekday::Thursday),
+    ("friday", Weekday::Friday),
+    ("saturday", Weekday::Saturday),
+    ("sunday", Weekday::Sunday),
 ];
 
 fn ask_pattern() -> Result<&'static str, Failure> {
@@ -286,7 +304,7 @@ fn ask_pattern() -> Result<&'static str, Failure> {
         } else {
             typed
                 .parse::<usize>()
-                .map_err(|_| format!("{typed:?} is not one of the four"))?
+                .map_err(|_| format!("{typed:?} is neither of the two"))?
         };
         PATTERNS
             .get(number.wrapping_sub(1))
@@ -295,31 +313,32 @@ fn ask_pattern() -> Result<&'static str, Failure> {
     })
 }
 
-/// The days a block runs, each with the session it is.
-type Weekdays = Vec<(&'static str, &'static str)>;
+/// The days a block runs, each with the session it is, as the document names
+/// them.
+type WeekdayRoles = Vec<(&'static str, &'static str)>;
 
 /// Which weekdays the block runs, and which session each is.
 ///
 /// **The light and the heavy are not interchangeable.** The heavy session is
 /// the one the ladder gates on and the one an entry test is taken in, so a
 /// block with no heavy day is a block that cannot advance.
-fn ask_weekdays() -> Result<(Weekdays, &'static str), Failure> {
+fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
     println!("\nwhich days does it run, and which session is each?");
     println!("  l = light, h = heavy; - is not a training day");
 
     loop {
         let mut chosen = Vec::new();
-        for (key, name) in WEEKDAYS {
-            let role = ask_until(&format!("  {name:<10}[-] "), |typed| {
+        for (key, weekday) in WEEKDAYS {
+            let role = ask_until(&format!("  {key:<10}[-] "), |typed| {
                 match typed.to_lowercase().as_str() {
                     "" | "-" => Ok(None),
-                    "l" | "light" => Ok(Some("light")),
-                    "h" | "heavy" => Ok(Some("heavy")),
+                    "l" | "light" => Ok(Some(SessionRole::Light)),
+                    "h" | "heavy" => Ok(Some(SessionRole::Heavy)),
                     other => Err(format!("{other:?} is not l, h or -")),
                 }
             })?;
             if let Some(role) = role {
-                chosen.push((key, role));
+                chosen.push((key, weekday, role));
             }
         }
 
@@ -327,18 +346,288 @@ fn ask_weekdays() -> Result<(Weekdays, &'static str), Failure> {
             println!("  a block has to run on some day — asking again");
             continue;
         }
-        if !chosen.iter().any(|(_, role)| *role == "heavy") {
+        if !chosen
+            .iter()
+            .any(|(_, _, role)| *role == SessionRole::Heavy)
+        {
             println!("  a block needs a heavy session: it is what the ladder gates on");
             continue;
         }
 
+        // **The same answer in two shapes.** The document names its days in
+        // words and the calendar needs them as weekdays and roles — and the
+        // calendar is needed here, before the document exists, to work out how
+        // many training weeks the operator's dates actually hold.
+        let named = chosen
+            .iter()
+            .map(|(key, _, role)| (*key, role_word(*role)))
+            .collect();
+        let scheduled = Weekdays::new(
+            chosen
+                .iter()
+                .map(|(_, weekday, role)| (*weekday, *role))
+                .collect(),
+        )
+        .map_err(|error| usage(error.to_string()))?;
+
         // Gating is on the heavy session wherever there is one, which there
         // now is.
-        return Ok((chosen, "heavy"));
+        return Ok((named, scheduled, "heavy"));
     }
 }
 
-fn ask_block(history_hint: Option<&str>) -> Result<Draft, Failure> {
+const fn role_word(role: SessionRole) -> &'static str {
+    match role {
+        SessionRole::Light => "light",
+        SessionRole::Heavy => "heavy",
+    }
+}
+
+/// How many weeks the block gets, from the dates it has to run between.
+///
+/// **The operator states dates and the tool derives the plan.** "From the week
+/// commencing 14 September through the week commencing 14 December" is how a
+/// block gets decided; how that divides into an entry test and three phases is
+/// the tool's job, and asking for a count of phase weeks was asking him to do
+/// the arithmetic and the holidays in his head.
+///
+/// **What the schedule takes is taken here**, not discovered later. A week the
+/// diary leaves nothing in is not a training week, so the span holds one fewer
+/// — and because the calendar counts the same way in the other direction, a
+/// duration derived here spans back to exactly these dates.
+fn ask_weeks(diary: &Diary, start: Date, weekdays: &Weekdays) -> Result<u32, Failure> {
+    loop {
+        let last = ask_until("ends? ", |typed| {
+            let ends = parse_date(typed)?;
+            if ends <= start {
+                return Err(format!("a block cannot end on {ends}, before it starts"));
+            }
+            Ok(ends)
+        })?;
+
+        // The gym's own losses. A day the other discipline keeps is a day this
+        // programme cannot run, which is why the question is asked of the
+        // diary rather than of a list of holidays.
+        let skips: Vec<Skip> = diary
+            .unavailable(start, last, Discipline::Gym)
+            .into_iter()
+            .map(Skip::day)
+            .collect();
+        let available = Calendar::training_weeks_within(start, last, weekdays, &skips);
+
+        // One week measures the maximum the rest is a share of, and it is not a
+        // phase. Everything below counts phase weeks, which is what the
+        // operator's own table counts.
+        let Some(most) = available.checked_sub(1).filter(|most| *most > 0) else {
+            println!("  {start} to {last} leaves no room to train — try a later end");
+            continue;
+        };
+
+        report_span(start, last, available, &skips);
+
+        if let Err(error) = BlockPlan::new(most) {
+            println!("  {error}");
+            println!("  try a later end");
+            continue;
+        }
+
+        return ask_until(
+            &format!("how many weeks to programme? [{most}] "),
+            |typed| {
+                let asked = if typed.is_empty() {
+                    most
+                } else {
+                    parse_count("weeks", typed)?
+                };
+                if asked > most {
+                    return Err(format!(
+                        "these dates hold {most} weeks after the test week, not {asked}"
+                    ));
+                }
+                let plan = BlockPlan::new(asked).map_err(|error| error.to_string())?;
+                describe(plan);
+                Ok(asked)
+            },
+        );
+    }
+}
+
+/// What the dates came to, and what the diary took out of them.
+fn report_span(start: Date, last: Date, available: u32, skips: &[Skip]) {
+    let taken: Vec<String> = skips.iter().map(ToString::to_string).collect();
+    if taken.is_empty() {
+        println!("  {available} weeks, {start} to {last}. Nothing lost to the schedule.");
+        return;
+    }
+    // **Printed rather than silently absorbed.** Silence here looks identical
+    // to the bug where a week away quietly cost a rung.
+    println!(
+        "  {available} weeks, {start} to {last}, after the schedule takes {}.",
+        taken.join(", ")
+    );
+}
+
+/// The split, said back in the words the operator's own table uses.
+fn describe(plan: BlockPlan) {
+    println!(
+        "  the test, then {} accumulation, {} intensification, {} realisation — {} weeks in all.",
+        plan.accumulation_weeks(),
+        plan.intensification_weeks(),
+        plan.realisation_weeks(),
+        plan.duration_weeks().saturating_add(1),
+    );
+    println!("  The last realisation week is the exit test.");
+}
+
+/// What the record says the primary is worth, as a one-rep maximum.
+struct Best {
+    /// The set's own load and repetitions, so the operator can see what the
+    /// number was read off rather than being handed a figure.
+    load: Kg,
+    reps: u32,
+    on: Date,
+    /// Converted through the repetition-maximum table, and quantised onto the
+    /// grid the exercise is loaded on.
+    maximum: Kg,
+}
+
+/// What a completed set is worth as a one-rep maximum.
+///
+/// The same published table the block's own percentages run on
+/// ([`rep_max`]), applied in the other direction: a set of `n` at zero in
+/// reserve *is* an `n`-rep maximum, so dividing by its share gives the one-rep
+/// maximum it implies.
+fn as_one_rep_max(load: Kg, reps: RepCount) -> Option<Kg> {
+    let points = i64::from(rep_max(reps)?.as_basis_points());
+    let grams = i64::try_from(load.as_grams())
+        .ok()?
+        .checked_mul(10_000)?
+        .checked_div(points)?;
+    Some(Kg::from_grams(u64::try_from(grams).ok()?))
+}
+
+/// The best one-rep maximum the record implies for a lift.
+///
+/// **Every completed working set is a candidate, not just the heaviest.** A
+/// triple at 85 implies more than a single at 88, and the block's own
+/// percentages already agree — so the comparison is made in the unit the anchor
+/// is stated in rather than in bare load.
+///
+/// `None` where nothing has been performed, which is a real state: an exercise
+/// exists before it is prescribed and is prescribed before it has been done.
+async fn best_of(
+    history: &SqliteExerciseHistory,
+    lift: RepsExercise,
+    scale: Option<&LoadSteps>,
+) -> Result<Option<Best>, Failure> {
+    let performances = history
+        .performances(lift)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let mut best: Option<Best> = None;
+    for performance in performances {
+        for set in performance.sets {
+            let Load::Absolute(load) = set.load else {
+                continue;
+            };
+            let Some(reps) = set.outcome.completed() else {
+                continue;
+            };
+            let Some(maximum) = as_one_rep_max(load, *reps) else {
+                continue;
+            };
+            let maximum = scale.map_or(maximum, |steps| steps.quantise(maximum));
+            if best
+                .as_ref()
+                .is_none_or(|held| maximum.as_grams() > held.maximum.as_grams())
+            {
+                best = Some(Best {
+                    load,
+                    reps: reps.as_u32(),
+                    on: performance.on,
+                    maximum,
+                });
+            }
+        }
+    }
+    Ok(best)
+}
+
+/// What the entry test is an attempt at.
+///
+/// **Three intents, and the operator picks between them** — match a recent
+/// maximum, exceed one, or declare a number. Stated by him on 2026-08-26, and
+/// it settles what the date on an anchor means: where the number points at a
+/// performance the date is that performance's, and where it is plucked out of
+/// the air there is nothing for a date to mean, so none is asked.
+///
+/// **Never `tested`.** The record shows a set, not a test — a completed single
+/// may have been a top set rather than an attempt at a ceiling — so reading a
+/// maximum off it is an estimate however few repetitions it took. Only a test
+/// this tool issued may claim to have tested anything.
+fn ask_anchor(
+    lift: &str,
+    best: Option<&Best>,
+    scale: Option<&LoadSteps>,
+    start: Date,
+) -> Result<(String, Date, &'static str), Failure> {
+    println!("\nwhat should the entry test aim at?");
+
+    let Some(best) = best else {
+        // Nothing to match and nothing to beat. The one remaining answer is
+        // asked directly rather than offered as the only item on a list.
+        println!("  nothing in the record for {lift}, so there is nothing to match");
+        let declared = ask_until("  what should it aim at? ", declared_load)?;
+        return Ok((declared, start, "asserted"));
+    };
+
+    let beaten = scale.map_or(best.maximum, |steps| steps.next_above(best.maximum));
+    if best.reps == 1 {
+        println!("  your best {lift} is {}kg, on {}", best.load, best.on);
+    } else {
+        println!(
+            "  your best {lift} is {}kg × {}, on {} — a maximum of {}kg",
+            best.load, best.reps, best.on, best.maximum,
+        );
+    }
+    // The whole figure is padded, not the number in front of the unit: "95kg"
+    // and "97.5kg" have to end in the same column to be comparable at a glance.
+    println!("   1. match it{:>30}", format!("{}kg", best.maximum));
+    println!("   2. beat it{:>31}", format!("{beaten}kg"));
+    println!("   3. a number of my own");
+
+    let choice = ask_until("  which? [2] ", |typed| match typed {
+        "" | "2" => Ok(2),
+        "1" => Ok(1),
+        "3" => Ok(3),
+        other => Err(format!("{other:?} is not one of the three")),
+    })?;
+
+    match choice {
+        1 => Ok((best.maximum.to_string(), best.on, "estimated")),
+        // Asserted: nobody has lifted it. The date is still the performance's,
+        // because that performance is what the assertion is reasoning from.
+        2 => Ok((beaten.to_string(), best.on, "asserted")),
+        _ => {
+            let declared = ask_until("  what should it aim at? ", declared_load)?;
+            Ok((declared, start, "asserted"))
+        }
+    }
+}
+
+fn declared_load(typed: &str) -> Result<String, String> {
+    if typed.is_empty() {
+        return Err("the ramp aims at this, so there is no sensible default".to_owned());
+    }
+    Ok(typed.trim_end_matches("kg").to_owned())
+}
+
+async fn ask_block(
+    diary: &Diary,
+    history: &SqliteExerciseHistory,
+    parameters: &GenerationParameters,
+) -> Result<Draft, Failure> {
     println!("A block: what it is, before what it contains.\n");
 
     let name = ask_until("name? ", |typed| {
@@ -357,40 +646,23 @@ fn ask_block(history_hint: Option<&str>) -> Result<Draft, Failure> {
     })?;
     let start = ask_until("starts? ", parse_date)?;
 
-    // Phase weeks. The entry test sits in front of them, which is said here
-    // rather than left for the operator to work out from a total.
-    let weeks = ask_until("how many weeks of phases? [9] ", |typed| {
-        if typed.is_empty() {
-            return Ok(9);
-        }
-        parse_count("weeks", typed)
-    })?;
-
     let pattern = ask_pattern()?;
-    let (weekdays, gating) = ask_weekdays()?;
+    let (named, scheduled, gating) = ask_weekdays()?;
+    let weeks = ask_weeks(diary, start, &scheduled)?;
 
     println!("\nthe lift this block is about");
-    let primary = ask_until("  which exercise? ", |typed| match exercise_named(typed) {
-        Some(Exercise::Reps(_)) => Ok(typed.to_owned()),
+    let lift = ask_until("  which exercise? ", |typed| match exercise_named(typed) {
+        Some(Exercise::Reps(exercise)) => Ok(exercise),
         Some(_) => Err(format!(
             "{typed:?} is not counted in repetitions, and a ladder needs one"
         )),
         None => Err(format!("{typed:?} is not an exercise in the vocabulary")),
     })?;
+    let primary = lift.as_str().to_owned();
+    let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
+    let best = best_of(history, lift, scale).await?;
 
-    println!("\nwhat you expect to lift. Week one measures it — this is the");
-    println!("expectation the entry test confirms, not a number already proved.");
-    if let Some(hint) = history_hint {
-        println!("  {hint}");
-    }
-    let anchor = ask_until("  expected one-rep maximum? ", |typed| {
-        if typed.is_empty() {
-            Err("the ramp aims at this, so there is no sensible default".to_owned())
-        } else {
-            Ok(typed.trim_end_matches("kg").to_owned())
-        }
-    })?;
-    let anchor_from = ask_until("  as of which date? ", parse_date)?;
+    let (anchor, anchor_from, provenance) = ask_anchor(&primary, best.as_ref(), scale, start)?;
     let entry_reps = ask_until(
         "  the entry test attempts it at how many reps? [3] ",
         |typed| {
@@ -416,9 +688,10 @@ fn ask_block(history_hint: Option<&str>) -> Result<Draft, Failure> {
         pattern,
         primary,
         gating,
-        weekdays,
+        weekdays: named,
         anchor,
         anchor_from,
+        provenance,
         entry_reps,
         entry_light,
     })
@@ -437,9 +710,14 @@ pub async fn add(database: &Path, zone: &OperatorZone, into: Option<&Path>) -> R
     // programme cannot be authored against nothing (§ 14), and finding that out
     // at the end costs the operator every answer he has just given. Setting the
     // machine up is what puts them there; see `setup::seed_parameters`.
-    ready(&SqliteGenerationParameterStore::new(pool.clone())).await?;
+    let parameters = ready(&SqliteGenerationParameterStore::new(pool.clone())).await?;
 
-    let block = ask_block(None)?;
+    let diary = SqliteDiaryStore::new(pool.clone())
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let block = ask_block(&diary, &history, &parameters).await?;
 
     println!("\nAnd the slots. A number picks from the list; anything else is read");
     println!("as an exercise, so something you have never done is one word away.");

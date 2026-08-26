@@ -28,6 +28,8 @@ pub struct Draft {
     pub weekdays: Vec<(&'static str, &'static str)>,
     pub anchor: String,
     pub anchor_from: Date,
+    /// How the anchor was arrived at: read off the record, or declared.
+    pub provenance: &'static str,
     pub entry_reps: u32,
     pub entry_light: Option<String>,
 }
@@ -105,7 +107,7 @@ pub fn render(block: &Draft, fills: &[(SlotId, FillLine)]) -> String {
     line!(out, "# What you expect to lift. Week one finds out.");
     line!(out, "[programme.anchor]");
     line!(out, "load       = \"{}kg\"", block.anchor);
-    line!(out, "provenance = \"asserted\"");
+    line!(out, "provenance = {:?}", block.provenance);
     line!(out, "from       = {:?}", block.anchor_from.to_string());
 
     line!(out, "");
@@ -169,6 +171,7 @@ mod tests {
             weekdays: vec![("monday", "light"), ("friday", "heavy")],
             anchor: "90".to_owned(),
             anchor_from: date(2026, 7, 3),
+            provenance: "estimated",
             entry_reps: 3,
             entry_light: Some("60".to_owned()),
         }

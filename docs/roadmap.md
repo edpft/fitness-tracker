@@ -194,9 +194,14 @@ without it being stated.
 slot offers what `docs/slot-candidates.md` holds for it, ordered by what the
 record shows performed and limited by nothing.
 
-**0018 changes what it asks.** `gating_role` and `[programme.weekdays]` leave
-the document, because the scheduler derives where the heavy session lands. The
-seventeen slots stay.
+**0019 changed what it asks**, after the operator ran it end to end on
+2026-08-26. A block is stated by its dates and the phases are derived from them;
+the primary is knee or hip dominant and not four patterns; and the entry test's
+target is matched, beaten or declared rather than typed with a date beside it.
+The seventeen slots are unchanged.
+
+**0018 changes what it asks again.** `gating_role` and `[programme.weekdays]`
+leave the document, because the scheduler derives where the heavy session lands.
 
 *The original plan follows.*
 

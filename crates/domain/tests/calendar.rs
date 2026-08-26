@@ -474,3 +474,92 @@ fn an_interrupted_week_contributes_no_ordinals() {
         "the session after the skip is the third, not the fifth"
     );
 }
+
+// --- Dates in, weeks out ----------------------------------------------------
+//
+// **The operator states a block by its dates.** "From the week commencing 14
+// September through the week commencing 14 December" is how a block gets
+// decided; a count of training weeks is what the plan needs. The two have to be
+// the same fact seen from either side, or a block authored by its dates would
+// not end on them.
+
+#[test]
+fn a_span_of_whole_weeks_counts_every_one_of_them() {
+    let start = date(2026, 9, 14).expect("a Monday in September");
+    let last = date(2026, 12, 14).expect("a Monday in December");
+    let weekdays = monday_light_friday_heavy().expect("two sessions a week");
+
+    // 14 September to 14 December inclusive, counting in sevens.
+    assert_eq!(
+        Calendar::training_weeks_within(start, last, &weekdays, &[]),
+        14
+    );
+}
+
+#[test]
+fn any_day_of_the_final_week_gives_the_same_answer() {
+    let start = date(2026, 9, 14).expect("a Monday in September");
+    let weekdays = monday_light_friday_heavy().expect("two sessions a week");
+
+    // The Monday commencing the last week, and the Sunday it ends on. An
+    // operator thinking in weeks commencing and one thinking in last days are
+    // describing the same block.
+    let monday = date(2026, 12, 14).expect("a Monday in December");
+    let sunday = date(2026, 12, 20).expect("the Sunday after it");
+    assert_eq!(
+        Calendar::training_weeks_within(start, monday, &weekdays, &[]),
+        Calendar::training_weeks_within(start, sunday, &weekdays, &[]),
+    );
+}
+
+#[test]
+fn a_week_with_nothing_left_in_it_is_not_a_training_week() {
+    let start = date(2026, 9, 14).expect("a Monday in September");
+    let last = date(2026, 12, 14).expect("a Monday in December");
+    let weekdays = monday_light_friday_heavy().expect("two sessions a week");
+    let away = week_from(date(2026, 10, 19).expect("a Monday in October")).expect("a week away");
+
+    assert_eq!(
+        Calendar::training_weeks_within(start, last, &weekdays, &[away]),
+        13,
+        "the week away is not one of the fourteen"
+    );
+}
+
+#[test]
+fn a_half_lost_week_still_counts() {
+    let start = date(2026, 9, 14).expect("a Monday in September");
+    let last = date(2026, 12, 14).expect("a Monday in December");
+    let weekdays = monday_light_friday_heavy().expect("two sessions a week");
+    // Away for the Friday, back for the Monday. One session survives, so the
+    // week does.
+    let friday = Skip::day(date(2026, 10, 23).expect("a Friday in October"));
+
+    assert_eq!(
+        Calendar::training_weeks_within(start, last, &weekdays, &[friday]),
+        14
+    );
+}
+
+/// **The property that matters.** A duration derived from two dates has to span
+/// back to those same two dates, interruptions and all — otherwise a block
+/// authored by its dates would quietly end somewhere else.
+#[test]
+fn a_duration_derived_from_dates_spans_back_to_them() {
+    let start = date(2026, 9, 14).expect("a Monday in September");
+    let last = date(2026, 12, 14).expect("a Monday in December");
+    let weekdays = monday_light_friday_heavy().expect("two sessions a week");
+    let away = week_from(date(2026, 10, 19).expect("a Monday in October")).expect("a week away");
+
+    for skips in [Vec::new(), vec![away]] {
+        let derived = Calendar::training_weeks_within(start, last, &weekdays, &skips);
+        let calendar = Calendar::new(start, derived, &skips, weekdays.clone(), TimeZone::UTC)
+            .expect("a calendar of the derived duration");
+
+        let span = i64::from(calendar.calendar_weeks()) * 7;
+        let ends = start
+            .checked_add(jiff::Span::new().days(span - 7))
+            .expect("the last week opens inside the calendar");
+        assert_eq!(ends, last, "{} skips", skips.len());
+    }
+}
