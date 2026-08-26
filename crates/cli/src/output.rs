@@ -405,6 +405,108 @@ fn authored_parameters(parameters: &domain::prescription::GenerationParameters) 
     println!("  holds {}", parameters.static_hold);
 }
 
+/// Every parameter in force, and when it was settled.
+///
+/// **Complete rather than summarised**, which is the whole reason it exists.
+/// Decision 0015's guard against a wrong shipped default was that a default is
+/// never invisible — it used to be written into the programme document, and
+/// with the document gone this is what keeps that promise. A report that showed
+/// the interesting half would leave the warm-up ramp and the reset protocols
+/// exactly as unexaminable as they were.
+///
+/// [`authored_parameters`] stays the short form: it runs after authoring, where
+/// the question is what this programme was built against rather than what every
+/// number is.
+pub fn parameters_in_force(
+    authored_at: jiff::Timestamp,
+    parameters: &domain::prescription::GenerationParameters,
+) {
+    // Seconds, not nanoseconds. What the operator wants from this line is
+    // whether it predates the block he is about to author.
+    println!(
+        "generation parameters, in force since {}",
+        authored_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+    );
+
+    println!();
+    println!("the primary lift");
+    println!(
+        "  heavy top set × {}; light top set × {} at {} of the heavy load",
+        parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
+    );
+    println!(
+        "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
+        parameters.back_off.heavy.sets,
+        parameters.back_off.heavy.reps,
+        parameters.back_off.heavy.of_top_set,
+        parameters.back_off.light.sets,
+        parameters.back_off.light.reps,
+        parameters.back_off.light.of_top_set,
+    );
+
+    println!();
+    println!("the warm-up ramp, of the session's own top set");
+    for step in parameters.warmup.iter() {
+        println!("  {} × {}", step.of_top_set, step.reps);
+    }
+
+    println!();
+    println!("the ladder");
+    println!("  climbs {}kg a week", parameters.ladder_climb_per_week);
+    println!(
+        "  a derived opening drops {} off a failed entry test",
+        parameters.entry_drop
+    );
+    println!(
+        "  first stall: drop {}, re-climb {}kg a week",
+        parameters.first_reset.drop, parameters.first_reset.reclimb_per_week,
+    );
+    println!(
+        "  second stall: drop {}, re-climb {}kg a week",
+        parameters.second_reset.drop, parameters.second_reset.reclimb_per_week,
+    );
+
+    println!();
+    println!("everything that is not the primary");
+    println!(
+        "  strength slots {} × {}; hypertrophy slots {} × {}",
+        parameters.strength.sets,
+        parameters.strength.reps,
+        parameters.hypertrophy.sets,
+        parameters.hypertrophy.reps,
+    );
+    println!("  holds {}", parameters.static_hold);
+
+    println!();
+    println!("rest");
+    for (block, rest) in [
+        ("plyometric", parameters.rest.plyometric),
+        ("power", parameters.rest.power),
+        ("strength", parameters.rest.strength),
+        ("hypertrophy", parameters.rest.hypertrophy),
+        ("mobility", parameters.rest.mobility),
+    ] {
+        // **Absent and equal are different**, so a block that says nothing about
+        // supersets says nothing here either rather than repeating its
+        // between-sets rest as though it had been stated.
+        match rest.after_superset {
+            Some(after) => println!(
+                "  {block:<12} {} between sets, {after} after a superset",
+                rest.between_sets
+            ),
+            None => println!("  {block:<12} {} between sets", rest.between_sets),
+        }
+    }
+
+    println!();
+    println!("what each implement can hold");
+    for (implement, steps) in parameters.scales.iter() {
+        // Rendered before it is padded: a `Display` that writes straight to the
+        // formatter ignores a width, and `Implement`'s does.
+        println!("  {:<12} {steps}", implement.to_string());
+    }
+}
+
 /// The programme in force, with its ladder week by week and where it stands.
 ///
 /// **The table is the point.** A rate and a duration are two numbers; what an
@@ -871,12 +973,19 @@ fn unexpressed(unexpressed: &[application::Unexpressed]) {
 /// "done" leaves an operator to discover the credential and the programme by
 /// running something else and failing.
 pub fn prepared(prepared: &crate::setup::Prepared) {
-    use crate::setup::CredentialOutcome;
+    use crate::setup::{CredentialOutcome, ParameterOutcome};
 
     println!("ready to use");
     println!("  settings  {}", prepared.settings_path.display());
     println!("  store     {}", prepared.database.display());
     println!("  time zone {}", prepared.zone);
+    println!(
+        "  numbers   {}",
+        match prepared.parameters {
+            ParameterOutcome::Seeded => "this build's shipped set, stored",
+            ParameterOutcome::AlreadyInForce => "already set, left alone",
+        }
+    );
     println!();
 
     // **A source is something the tool can connect to, not something it needs.**
@@ -909,7 +1018,7 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     }
 
     println!();
-    println!("next: add a programme — fitness programme add <document>");
+    println!("next: add a programme — fitness programme add");
 }
 
 // --- The operator's week ----------------------------------------------------

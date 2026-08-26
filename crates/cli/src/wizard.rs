@@ -25,7 +25,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::ExerciseHistory as _;
+use application::{ExerciseHistory as _, GenerationParameterStore as _};
 use domain::{
     gym::{
         OperatorZone,
@@ -34,7 +34,7 @@ use domain::{
     prescription::{Block, SlotId},
 };
 use infrastructure::{
-    SqliteExerciseHistory, connect,
+    SqliteExerciseHistory, SqliteGenerationParameterStore, connect,
     programme::draft::{Draft, FillLine, render},
 };
 use jiff::civil::Date;
@@ -178,6 +178,21 @@ fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Stri
             )),
         }
     })
+}
+
+/// Refuse before asking anything if the store cannot hold what the answers make.
+async fn ready(parameters: &SqliteGenerationParameterStore) -> Result<(), Failure> {
+    if parameters
+        .current()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+        .is_some()
+    {
+        return Ok(());
+    }
+    Err(usage(
+        "this store has no generation parameters, so nothing authored here could          prescribe anything. Run `fitness init` first — it stores them. Nothing          was asked and nothing was written",
+    ))
 }
 
 async fn ask_fill(
@@ -417,6 +432,12 @@ pub async fn add(database: &Path, zone: &OperatorZone, into: Option<&Path>) -> R
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let history = SqliteExerciseHistory::new(pool.clone());
+
+    // **Asked before the first question, not discovered after the last.** A
+    // programme cannot be authored against nothing (§ 14), and finding that out
+    // at the end costs the operator every answer he has just given. Setting the
+    // machine up is what puts them there; see `setup::seed_parameters`.
+    ready(&SqliteGenerationParameterStore::new(pool.clone())).await?;
 
     let block = ask_block(None)?;
 
