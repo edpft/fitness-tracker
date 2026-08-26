@@ -129,6 +129,35 @@ async fn derived_interruptions(
         .collect())
 }
 
+/// Report the parameters every prescription is generated against (§ 14).
+///
+/// **Only the current set.** Superseded rows stay in the store and nothing
+/// reads one — what a prescription was generated against is recorded on the
+/// prescription itself, which is what makes that safe.
+pub async fn parameters(database: &Path) -> Result<(), Failure> {
+    let pool = connect(database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let current = SqliteGenerationParameterStore::new(pool)
+        .current()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    match current {
+        Some((authored_at, parameters)) => {
+            output::parameters_in_force(authored_at, &parameters);
+            Ok(())
+        }
+        // Not an empty report: a store with no parameters can hold a programme
+        // and prescribe nothing from it, and saying so is more use than printing
+        // a set of headings with nothing under them.
+        None => Err(Failure::usage(
+            &"this store has no generation parameters. Run `fitness init` — it stores them",
+        )),
+    }
+}
+
 /// Report the programme in force and where its ladder stands.
 ///
 /// **Reads and prints, and issues nothing.** Asking where the ladder is should not

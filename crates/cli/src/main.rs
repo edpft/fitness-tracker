@@ -9,6 +9,7 @@ mod candidates;
 mod catalogue;
 mod config;
 mod output;
+mod parameters;
 mod paths;
 mod prescribing;
 mod scheduling;
@@ -125,6 +126,7 @@ fn command() -> ClapCommand {
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(programme_command())
+        .subcommand(parameters_command())
         .subcommand(schedule_command())
         .subcommand(
             ClapCommand::new("reset")
@@ -270,6 +272,21 @@ fn programme_command() -> ClapCommand {
         )
 }
 
+/// The numbers a prescription is generated against.
+///
+/// **Show and nothing else, for now.** They are seeded by `init` and there is
+/// no way to change one from here yet; a `change` that only some of them
+/// accepted would be worse than an honest gap. What this closes is decision
+/// 0015's own guard — a shipped default is never invisible.
+fn parameters_command() -> ClapCommand {
+    ClapCommand::new("parameters")
+        .about("Report the numbers every prescription is generated against")
+        .subcommand_required(true)
+        .subcommand(
+            ClapCommand::new("show").about("Print every parameter in force, and when it was set"),
+        )
+}
+
 fn schedule_command() -> ClapCommand {
     ClapCommand::new("schedule")
         .about("Record when there is room to train, or report it")
@@ -318,6 +335,7 @@ fn stream_argument() -> Arg {
 }
 
 /// A message for the operator and a code for whatever invoked us.
+#[derive(Debug)]
 struct Failure {
     message: String,
     code: u8,
@@ -596,6 +614,10 @@ async fn authored_command(
                 .await,
             )
         }
+        "parameters" => Some(match sub.subcommand() {
+            Some(("show", _)) => prescribing::parameters(database).await,
+            _ => Err(Failure::message("no parameters command given", exit::USAGE)),
+        }),
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
             Some(("alter", _)) => scheduling::alter(database).await,
@@ -607,31 +629,42 @@ async fn authored_command(
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(match sub.subcommand() {
-                Some(("add", add)) => match add.get_one::<PathBuf>("path") {
-                    Some(path) => prescribing::add(database, &zone, path).await,
-                    // No document: ask, write one, and author that.
-                    None => {
-                        wizard::add(
-                            database,
-                            &zone,
-                            add.get_one::<PathBuf>("into").map(PathBuf::as_path),
-                        )
-                        .await
-                    }
-                },
-                Some(("show", show)) => {
-                    prescribing::standing(
-                        database,
-                        &zone,
-                        show.get_one::<String>("date").map(String::as_str),
-                    )
-                    .await
-                }
-                _ => Err(Failure::message("no programme command given", exit::USAGE)),
-            })
+            Some(programme_command_run(sub, database, &zone).await)
         }
         _ => None,
+    }
+}
+
+/// `programme add` and `programme show`, once the zone is in hand.
+///
+/// Its own function only because the arm outgrew the match it lived in.
+async fn programme_command_run(
+    sub: &ArgMatches,
+    database: &Path,
+    zone: &domain::gym::OperatorZone,
+) -> Result<(), Failure> {
+    match sub.subcommand() {
+        Some(("add", add)) => match add.get_one::<PathBuf>("path") {
+            Some(path) => prescribing::add(database, zone, path).await,
+            // No document: ask, write one, and author that.
+            None => {
+                wizard::add(
+                    database,
+                    zone,
+                    add.get_one::<PathBuf>("into").map(PathBuf::as_path),
+                )
+                .await
+            }
+        },
+        Some(("show", show)) => {
+            prescribing::standing(
+                database,
+                zone,
+                show.get_one::<String>("date").map(String::as_str),
+            )
+            .await
+        }
+        _ => Err(Failure::message("no programme command given", exit::USAGE)),
     }
 }
 

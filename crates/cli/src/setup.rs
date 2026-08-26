@@ -28,7 +28,8 @@ use std::{
     path::Path,
 };
 
-use infrastructure::{Credentials, Settings, connect, credentials};
+use application::GenerationParameterStore as _;
+use infrastructure::{Credentials, Settings, SqliteGenerationParameterStore, connect, credentials};
 
 use crate::{Failure, config, exit, paths};
 
@@ -37,8 +38,26 @@ pub struct Prepared {
     pub settings_path: std::path::PathBuf,
     pub database: std::path::PathBuf,
     pub zone: String,
+    /// What became of the generation parameters.
+    pub parameters: ParameterOutcome,
     /// What became of each source's key.
     pub credentials: Vec<(String, CredentialOutcome)>,
+}
+
+/// What `init` did about the parameters a prescription is generated against.
+///
+/// **Seeding them is a step of setting up, not of authoring a programme**
+/// (decision 0015). Nothing on the generation path reaches a compiled-in
+/// number, so a store with no parameters can hold a programme and prescribe
+/// nothing from it — which is exactly the dead end this step exists to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterOutcome {
+    /// None were stored, so this build's shipped set was written, dated.
+    Seeded,
+    /// A set was already in force and is left alone. Re-seeding would supersede
+    /// values the operator may have changed deliberately, and § 12 keeps the
+    /// old rows either way — so the quiet thing to do is nothing.
+    AlreadyInForce,
 }
 
 /// What `init` was able to do about a source's key.
@@ -95,6 +114,7 @@ pub async fn init(
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let parameters = seed_parameters(&SqliteGenerationParameterStore::new(pool.clone())).await?;
     pool.close().await;
 
     Settings {
@@ -112,8 +132,33 @@ pub async fn init(
         settings_path: settings_path.to_path_buf(),
         database: database.to_path_buf(),
         zone,
+        parameters,
         credentials,
     })
+}
+
+/// Put this build's parameters in the store, unless a set is already in force.
+///
+/// **Dated rather than overwritten** (§ 12). The seed becomes a row like any
+/// other, so the value in force at a time stays recoverable and a later change
+/// to what this build ships rewrites nothing already authored.
+async fn seed_parameters(
+    store: &SqliteGenerationParameterStore,
+) -> Result<ParameterOutcome, Failure> {
+    if store
+        .current()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+        .is_some()
+    {
+        return Ok(ParameterOutcome::AlreadyInForce);
+    }
+
+    store
+        .author(jiff::Timestamp::now(), &crate::parameters::seed()?)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    Ok(ParameterOutcome::Seeded)
 }
 
 /// Obtain and store a key for each source this build knows.
