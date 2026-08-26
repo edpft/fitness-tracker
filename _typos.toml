@@ -14,13 +14,6 @@ extend-exclude = [
 # Don't correct the app name "Hevy"
 Hevy = "Hevy"
 
-# Hevy's own title for template `4adc45f1`, reproduced in the mapping comment.
-# The titles there are what the source calls a template, not what we call the
-# exercise — ours is `pigeon-stretch` and is spelt correctly. Renaming it in the
-# app would change the title and not the id, so correcting this would make the
-# comment wrong about the record rather than right about English.
-Strech = "Strech"
-
 [default.extend-identifiers]
 # The plural of SQL's CHECK constraint, in a migration comment. Listed as an
 # identifier rather than a word because the splitter reads `CHECKs` as `CHEC`
