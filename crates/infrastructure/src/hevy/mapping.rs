@@ -16,6 +16,11 @@
 //! mid-history. The titles in the comments are what the template was called
 //! most often, and are there to be read, not matched.
 //!
+//! That was demonstrated live on 2026-08-26: `4adc45f1` was added while its
+//! title carried a misspelling, the operator fixed the spelling in the app, and
+//! the id did not move. A table keyed on titles would have lost the exercise;
+//! this one needed a comment edited.
+//!
 //! ## What decided each entry
 //!
 //! **`Relative` is for the movements this source also names in an assisted
@@ -469,6 +474,9 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             RepsExercise::BulgarianSplitSquatBarbell,
             LoadReading::Absolute,
         ), // Bulgarian Split Squat (Barbell) (0)
+        "4adc45f1-a041-4d0a-a1bf-85264742ea69" => {
+            duration(DurationExercise::PigeonStretch, LoadReading::Absolute)
+        } // Pigeon Stretch (0)
         _ => return None,
     };
     Some(mapped)

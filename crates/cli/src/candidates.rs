@@ -82,7 +82,9 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         SlotId::HandstandHold => &["handstand-hold"],
         SlotId::DeadHang => &["dead-hang"],
         SlotId::HipFlexorStretch => &["couch-stretch"],
-        SlotId::HipExternalRotatorStretch => &["ninety-ninety"],
+        // The operator's own, stated on 2026-08-26: the pigeon is what he wants
+        // to do for external rotation, and the 90/90 is what the record holds.
+        SlotId::HipExternalRotatorStretch => &["pigeon-stretch", "ninety-ninety"],
         SlotId::HamstringStretch => &["standing-straddle-fold"],
         SlotId::GroinStretch => &["squatting-groin-stretch", "ninety-ninety"],
     }

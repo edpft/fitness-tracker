@@ -176,19 +176,21 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        135,
+        136,
         "the vocabulary this build has needed so far"
     );
 }
 
 /// A held position worked one side at a time is held twice.
 ///
-/// The two the operator names are the couch stretch and the 90/90, and the
+/// The couch stretch and the 90/90 are the two the operator named, and the
 /// corpus agrees without being asked: every one of the 14 entries for each is
-/// two sets, while every dead hang is one. Everything else opens both sides at
-/// once — a squatting groin stretch and a standing straddle fold included.
+/// two sets, while every dead hang is one. The pigeon joins them on the same
+/// grounds — a hip belongs to one leg — and has no corpus to agree, having
+/// never been performed. Everything else opens both sides at once: a squatting
+/// groin stretch and a standing straddle fold included.
 ///
-/// Total by construction, since `sides` is an exhaustive match: an eleventh
+/// Total by construction, since `sides` is an exhaustive match: a twelfth
 /// duration exercise will not compile until someone says which it is.
 #[test]
 fn a_position_held_one_side_at_a_time_is_held_twice() {
@@ -196,7 +198,9 @@ fn a_position_held_one_side_at_a_time_is_held_twice() {
 
     for exercise in DurationExercise::ALL {
         let expected = match exercise {
-            DurationExercise::CouchStretch | DurationExercise::NinetyNinety => Sides::Separately,
+            DurationExercise::CouchStretch
+            | DurationExercise::NinetyNinety
+            | DurationExercise::PigeonStretch => Sides::Separately,
             _ => Sides::Together,
         };
         assert_eq!(exercise.sides(), expected, "{exercise}");

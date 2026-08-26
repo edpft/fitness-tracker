@@ -677,6 +677,10 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("5c98d763-9ceb-412c-8365-18110f9d5897"),
                 assisted: None,
             }, // 90/90
+            DurationExercise::PigeonStretch => Writable {
+                added: Some("4adc45f1-a041-4d0a-a1bf-85264742ea69"),
+                assisted: None,
+            }, // Pigeon Stretch
             DurationExercise::SledPush => Writable {
                 added: Some("7757171F"),
                 assisted: None,
