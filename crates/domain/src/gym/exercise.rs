@@ -352,6 +352,7 @@ vocabulary! {
         HandstandHold => "handstand-hold", Bodyweight,
         JumpRope => "jump-rope", Bodyweight,
         NinetyNinety => "ninety-ninety", Bodyweight,
+        PigeonStretch => "pigeon-stretch", Bodyweight,
         SledPush => "sled-push", Sled,
         SquattingGroinStretch => "squatting-groin-stretch", Bodyweight,
         StandingStraddleFold => "standing-straddle-fold", Bodyweight,
@@ -404,14 +405,15 @@ impl DurationExercise {
     /// Whether this position is held on both sides at once or on each in turn.
     ///
     /// Exhaustive and hand-written rather than a column on the vocabulary
-    /// macro: ten members can be read in one screen, adding an eleventh is a
+    /// macro: eleven members can be read in one screen, adding a twelfth is a
     /// compile error until someone says which it is, and the question is
     /// meaningless for the hundred and twenty-two exercises counted in reps.
     pub const fn sides(self) -> Sides {
         match self {
             // A hip flexor and a hip external rotator belong to one leg, and
-            // the operator has never recorded either any other way.
-            Self::CouchStretch | Self::NinetyNinety => Sides::Separately,
+            // the operator has never recorded either any other way. The pigeon
+            // is a second external rotator stretch and is held the same way.
+            Self::CouchStretch | Self::NinetyNinety | Self::PigeonStretch => Sides::Separately,
             // Both legs, both arms, or no side to speak of. A squatting groin
             // stretch and a standing straddle fold open both hips at once.
             Self::AirBike

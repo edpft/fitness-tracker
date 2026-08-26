@@ -469,6 +469,9 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             RepsExercise::BulgarianSplitSquatBarbell,
             LoadReading::Absolute,
         ), // Bulgarian Split Squat (Barbell) (0)
+        "4adc45f1-a041-4d0a-a1bf-85264742ea69" => {
+            duration(DurationExercise::PigeonStretch, LoadReading::Absolute)
+        } // Pigeon Strech — the operator's own custom template, misspelt by him (0)
         _ => return None,
     };
     Some(mapped)
