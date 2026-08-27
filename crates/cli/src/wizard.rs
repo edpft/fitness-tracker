@@ -35,8 +35,8 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Block, Calendar, GenerationParameters, LoadSteps, SessionRole, Skip, SlotId, Weekdays,
-        block::Block as BlockPlan, rep_max,
+        Block, Calendar, GenerationParameters, InvalidBlock, LoadSteps, SessionRole, Skip, SlotId,
+        Weekdays, block::Block as BlockPlan, rep_max,
     },
     schedule::{Diary, Discipline},
 };
@@ -317,18 +317,58 @@ fn ask_pattern() -> Result<&'static str, Failure> {
 /// them.
 type WeekdayRoles = Vec<(&'static str, &'static str)>;
 
-/// Which weekdays the block runs, and which session each is.
+/// Which session each of the gym's days is.
+///
+/// **The schedule says which days are the gym's; the programme says what it
+/// does with them.** This asked all seven and consulted nothing, so a block
+/// could name days the schedule had given to cycling and nothing would object
+/// — the autumn block agreed with the schedule by the operator's hand rather
+/// than by construction. The days come from the diary now, and the only
+/// question left is the one the schedule cannot answer.
+///
+/// **Ordinary days, not the days around the start.** A block starting inside a
+/// holiday would otherwise be offered whatever that holiday left, which is the
+/// alteration deciding the shape of the block rather than interrupting it. The
+/// calendar takes the alteration out separately, as skips.
 ///
 /// **The light and the heavy are not interchangeable.** The heavy session is
 /// the one the ladder gates on and the one an entry test is taken in, so a
 /// block with no heavy day is a block that cannot advance.
-fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
-    println!("\nwhich days does it run, and which session is each?");
-    println!("  l = light, h = heavy; - is not a training day");
+///
+/// A day may still be declined with `-`: which days are the gym's is the
+/// schedule's to say, and how many of them a given block uses is not.
+fn ask_weekdays(
+    diary: &Diary,
+    start: Date,
+) -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
+    let Some(available) = diary.ordinarily(start, Discipline::Gym) else {
+        return Err(usage(format!(
+            "the schedule says nothing about {start}, so there is no way to know \
+             which days are the gym's. Record the week first: fitness schedule add"
+        )));
+    };
+    if available.is_empty() {
+        return Err(usage(format!(
+            "the schedule gives the gym no day of the week as of {start}, so \
+             there is nothing for a block to run on"
+        )));
+    }
+
+    let offered: Vec<(&'static str, Weekday)> = WEEKDAYS
+        .into_iter()
+        .filter(|(_, weekday)| available.contains(weekday))
+        .collect();
+
+    println!("\nwhich session is each of the gym's days?");
+    println!(
+        "  the schedule gives the gym {} as of {start}.",
+        list(&offered)
+    );
+    println!("  l = light, h = heavy; - is a day this block does not use");
 
     loop {
         let mut chosen = Vec::new();
-        for (key, weekday) in WEEKDAYS {
+        for (key, weekday) in &offered {
             let role = ask_until(&format!("  {key:<10}[-] "), |typed| {
                 match typed.to_lowercase().as_str() {
                     "" | "-" => Ok(None),
@@ -338,7 +378,7 @@ fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
                 }
             })?;
             if let Some(role) = role {
-                chosen.push((key, weekday, role));
+                chosen.push((*key, *weekday, role));
             }
         }
 
@@ -376,6 +416,16 @@ fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
     }
 }
 
+/// Days in a sentence, so the line reads as one.
+fn list(days: &[(&'static str, Weekday)]) -> String {
+    let names: Vec<&str> = days.iter().map(|(key, _)| *key).collect();
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 const fn role_word(role: SessionRole) -> &'static str {
     match role {
         SessionRole::Light => "light",
@@ -390,6 +440,14 @@ const fn role_word(role: SessionRole) -> &'static str {
 /// block gets decided; how that divides into an entry test and three phases is
 /// the tool's job, and asking for a count of phase weeks was asking him to do
 /// the arithmetic and the holidays in his head.
+///
+/// **So the dates are the only question.** Decision 0019 removed the arithmetic
+/// and left the question standing, defaulted to the answer it had just worked
+/// out — which invited an answer contradicting the end date the operator had
+/// given one line earlier. A block that should end sooner is a block with an
+/// earlier `ends?`, and a span too long for one block is refused rather than
+/// quietly filled: fifteen phase weeks is where the top-set ladder stops being
+/// liftable, and there is nothing to put in the remainder.
 ///
 /// **What the schedule takes is taken here**, not discovered later. A week the
 /// diary leaves nothing in is not a training week, so the span holds one fewer
@@ -418,37 +476,43 @@ fn ask_weeks(diary: &Diary, start: Date, weekdays: &Weekdays) -> Result<u32, Fai
         // One week measures the maximum the rest is a share of, and it is not a
         // phase. Everything below counts phase weeks, which is what the
         // operator's own table counts.
-        let Some(most) = available.checked_sub(1).filter(|most| *most > 0) else {
+        let Some(weeks) = available.checked_sub(1).filter(|weeks| *weeks > 0) else {
             println!("  {start} to {last} leaves no room to train — try a later end");
             continue;
         };
 
         report_span(start, last, available, &skips);
 
-        if let Err(error) = BlockPlan::new(most) {
-            println!("  {error}");
-            println!("  try a later end");
-            continue;
-        }
-
-        return ask_until(
-            &format!("how many weeks to programme? [{most}] "),
-            |typed| {
-                let asked = if typed.is_empty() {
-                    most
-                } else {
-                    parse_count("weeks", typed)?
-                };
-                if asked > most {
-                    return Err(format!(
-                        "these dates hold {most} weeks after the test week, not {asked}"
-                    ));
-                }
-                let plan = BlockPlan::new(asked).map_err(|error| error.to_string())?;
+        match BlockPlan::new(weeks) {
+            Ok(plan) => {
                 describe(plan);
-                Ok(asked)
-            },
-        );
+                return Ok(weeks);
+            }
+            Err(error) => {
+                println!("  {error}");
+                println!("  {}", remedy(error));
+            }
+        }
+    }
+}
+
+/// Which end of the span to move, for a duration no block can hold.
+///
+/// **The direction is the whole of the advice.** One line told the operator to
+/// try a later end whichever way the block failed, and for a block already too
+/// long that is the wrong way — following it makes the next attempt worse than
+/// the one it was correcting.
+const fn remedy(error: InvalidBlock) -> &'static str {
+    match error {
+        InvalidBlock::TooShort { .. } => "try a later end",
+        // Fifteen phase weeks, plus the week that measures the anchor.
+        InvalidBlock::TooLong { .. } => {
+            "a block runs at most 15 weeks of phases, so 16 with its entry test \
+             — try an earlier end"
+        }
+        // Not reachable from a duration, and a wrong word here would be worse
+        // than a vague one.
+        InvalidBlock::EntryTestTooLong { .. } => "try different dates",
     }
 }
 
@@ -647,7 +711,7 @@ async fn ask_block(
     let start = ask_until("starts? ", parse_date)?;
 
     let pattern = ask_pattern()?;
-    let (named, scheduled, gating) = ask_weekdays()?;
+    let (named, scheduled, gating) = ask_weekdays(diary, start)?;
     let weeks = ask_weeks(diary, start, &scheduled)?;
 
     println!("\nthe lift this block is about");

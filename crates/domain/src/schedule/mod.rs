@@ -474,6 +474,37 @@ impl Diary {
     }
 
     /// The pattern in force on a date, before any alteration.
+    /// The weekdays one discipline ordinarily holds, as of a date.
+    ///
+    /// **Ordinary, so alterations are not applied.** A programme's weekdays are
+    /// its weekly shape; an alteration is a run of days that departs from that
+    /// shape, and the calendar already takes those out as skips. Applying them
+    /// here would let a holiday covering the start date decide the shape of
+    /// every week after it — and the autumn block starts inside one.
+    ///
+    /// Monday first, and one entry per weekday however many slots that day
+    /// holds: a discipline given both a morning and an evening on a Saturday
+    /// still trains on one Saturday.
+    ///
+    /// `None` before the first pattern begins, for the reason [`Self::on`]
+    /// gives: a date the operator has said nothing about is unknown rather than
+    /// empty. `Some(vec![])` is the different fact that the week is known and
+    /// holds nothing for this discipline.
+    pub fn ordinarily(&self, date: Date, discipline: Discipline) -> Option<Vec<Weekday>> {
+        let pattern = self.pattern_on(date)?;
+        // `TrainingSlot` orders Monday-first and then by part of day, so the
+        // map is already in the order this returns and equal weekdays are
+        // adjacent.
+        let mut days: Vec<Weekday> = pattern
+            .slots()
+            .iter()
+            .filter(|(_, held)| **held == discipline)
+            .map(|(slot, _)| slot.weekday)
+            .collect();
+        days.dedup_by_key(|weekday| weekday.to_monday_zero_offset());
+        Some(days)
+    }
+
     fn pattern_on(&self, date: Date) -> Option<&TrainingPattern> {
         self.patterns.iter().rfind(|pattern| pattern.from() <= date)
     }
