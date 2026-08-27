@@ -514,12 +514,50 @@ impl Calendar {
     /// gap in it. The old whole-week behaviour falls out as the case where
     /// nothing survives.
     fn week_runs(&self, week: i64) -> bool {
-        (0..7).any(|day| {
-            let span = jiff::Span::new().days(week.saturating_mul(7).saturating_add(day));
-            self.start.checked_add(span).is_ok_and(|date| {
-                self.weekdays.role_on(date.weekday()).is_some() && !self.interruptions.covers(date)
-            })
-        })
+        week_runs(self.start, week, &self.weekdays, &self.interruptions)
+    }
+
+    /// How many training weeks fit between two dates.
+    ///
+    /// **The inverse of [`Self::calendar_weeks`]**, and the question an
+    /// operator actually asks. He states a block by the dates it has to run
+    /// between — the term, the trip, the week before Christmas — and what the
+    /// plan needs is a count of weeks; going the other way makes him do the
+    /// arithmetic and the holidays in his head.
+    ///
+    /// **A week the schedule leaves nothing in does not count**, by the same
+    /// rule the forward direction uses: a week is a training week if at least
+    /// one of its sessions survives. So a Friday lost to a holiday costs
+    /// nothing here and a week with nothing left in it costs a week — which is
+    /// what makes the two directions agree. A duration derived from these two
+    /// dates spans back to exactly these two dates.
+    ///
+    /// `last` is the last date the block may reach, and weeks are counted from
+    /// `start` in sevens — so the Monday commencing the final week and any
+    /// later day of that week give the same answer.
+    #[must_use]
+    pub fn training_weeks_within(
+        start: Date,
+        last: Date,
+        weekdays: &Weekdays,
+        interruptions: &[Skip],
+    ) -> u32 {
+        let interruptions = Interruptions {
+            skips: interruptions.to_vec(),
+        };
+        let mut training = 0_u32;
+        for week in 0.. {
+            let Ok(opens) = start.checked_add(jiff::Span::new().days(week * 7)) else {
+                break;
+            };
+            if opens > last {
+                break;
+            }
+            if week_runs(start, week, weekdays, &interruptions) {
+                training = training.saturating_add(1);
+            }
+        }
+        training
     }
 
     pub const fn interruptions(&self) -> &Interruptions {
@@ -667,6 +705,27 @@ impl Calendar {
 /// weeks run from the weekday it started on, so this is deliberately not
 /// anchored to Monday: a block beginning on a Wednesday has Wednesday-to-Tuesday
 /// weeks, and its interruptions are the same weeks its sessions are.
+/// Whether any session survives in one calendar week of a block.
+///
+/// **A week is a training week if at least one of its sessions runs.** The
+/// operator settled that on 2026-08-21, and it is what makes a half-skipped
+/// week — away Friday, back for Monday — a week of the block rather than a gap
+/// in it. The old whole-week behaviour falls out as the case where nothing
+/// survives.
+///
+/// A free function rather than a method because both directions need it: the
+/// forward one walks weeks to find where a duration reaches, and
+/// [`Calendar::training_weeks_within`] walks them to find how many a span
+/// holds. Two copies of this rule would be two answers to the same question.
+fn week_runs(start: Date, week: i64, weekdays: &Weekdays, interruptions: &Interruptions) -> bool {
+    (0..7).any(|day| {
+        let span = jiff::Span::new().days(week.saturating_mul(7).saturating_add(day));
+        start.checked_add(span).is_ok_and(|date| {
+            weekdays.role_on(date.weekday()).is_some() && !interruptions.covers(date)
+        })
+    })
+}
+
 fn offset_of(start: Date, date: Date) -> i64 {
     i64::from((date - start).get_days()) / 7
 }
