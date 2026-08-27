@@ -5,7 +5,9 @@ September 2026, using `fitness` as an installed binary rather than
 `./target/debug/fitness` in this checkout.
 
 **Written**: 2026-08-24. Revised 2026-08-25, when steps 1 to 3 landed and
-decision 0018 changed what comes after them.
+decision 0018 changed what comes after them. Revised again 2026-08-27, when the
+operator ran the wizard end to end and it asked three questions it had no
+business asking.
 
 The dates below are ordering, not estimates. The constraint on this work is how
 fast decisions get made, not how fast code gets written.
@@ -22,23 +24,32 @@ this is the plan, not the record.
 The three-line version, kept current so a session starting cold does not have to
 read the rest to know what to pick up.
 
-- **Waiting on the operator**: authoring the autumn block. The wizard writes it,
-  the schedule takes 14 September out of it, and it has been run end to end
-  against a copy of the real store. Nothing is blocking it.
+- **Waiting on the operator**: authoring the autumn block. Nothing is blocking
+  it. The wizard asks what he knows and derives the rest, the schedule takes
+  14 September out without being told, and the whole thing has been run end to
+  end against a copy of the real store.
 - **Next in code**: the three lifecycle pieces left over from #31 — withdrawal,
   a performance taking its role from its prescription, and the comparison. All
   three survive decision 0018 rather than being discarded by it.
 - **After 14 September**: decision 0018, in the order commitments → ordinal
   programme → allocator. Not before; see *What 0018 changes, and when*.
 
-## Where this stands on 2026-08-25
+## Where this stands on 2026-08-27
 
-**The goal is reachable today.** Steps 1 to 3 have landed; step 4 is authoring
-the block, and it has been run end to end against a copy of the real store. What
-is left before 14 September is the operator sitting down and doing it.
+**The goal is reachable today**, and has been since the 25th. What changed since
+is that the operator ran the wizard for real, and the run found three questions
+worth removing rather than anything broken — a block was authored at the end of
+it either way.
 
-**The interesting work is now the model rather than the goal**, which is a
-better problem to have than the reverse. Decision 0018 is proposed and not
+**The lesson generalises, and 0019 and 0020 both state it**: a question is worth
+asking only if the operator is the one who knows the answer. The wizard asked
+for training days the schedule already held, for a week count the end date
+already fixed, and offered no choice of template while the document reader had
+read three of them all along. None of that was visible from the types; it took a
+transcript.
+
+**The interesting work is still the model rather than the goal**, which is a
+better problem to have than the reverse. Decision 0018 is accepted and not
 started, and it belongs after the block starts rather than before — see the end.
 
 ## The uncomfortable observation
@@ -87,11 +98,25 @@ Landed since this was written, and steps 1 to 3 of the order below:
 - **#31** a prescription is drafted, published, or performed (§ 12.1), and a
   performed workout knows which session it was
 
-In flight:
+Landed on 2026-08-26 and 2026-08-27, after the wizard met a real operator:
 
-- **#32** — decision 0018, proposed. A programme counts cycles and the scheduler
+- **#32** decision 0018, accepted — a programme counts cycles and the scheduler
   owns the calendar. It rewrites three of the steps below; see *What 0018
   changes* at the end.
+- **#33** setup seeds the generation parameters and shows them; **#36** a pigeon
+  stretch for external hip rotation
+- **#35** decision 0019 — the wizard asks dates and intents and derives the plan
+- **#37** the 1.0.0 release, backed out. See below.
+- **#38** decision 0020 — the schedule says which days are the gym's, the dates
+  decide the weeks, and a span too long for one block is refused rather than
+  split
+
+In flight:
+
+- **#39** — the wizard authors a test and a ladder, not only a block. The
+  document reader has read all three templates since they existed; the wizard
+  reached one of them, so the only route to the other two was the hand-written
+  document it exists to replace.
 - **the release PR** — release-please's, deliberately **not** merged. See below.
 
 ---
@@ -207,6 +232,19 @@ the primary is knee or hip dominant and not four patterns; and the entry test's
 target is matched, beaten or declared rather than typed with a date beside it.
 The seventeen slots are unchanged.
 
+**0020 changed it again**, after a second run on 2026-08-27 found 0019 half
+applied. The days come from the schedule rather than from seven questions
+consulting nothing; the phase count is gone, because the end date already fixed
+it; and the refusal for an over-long span names the ceiling and points at the
+end that has to move. **A span past fifteen phase weeks is refused, not split**
+— 0020 records what a second periodisation would have cost, which is a starting
+1RM asserted about a test that has not happened.
+
+**And #39 lets it author the other two templates.** `document.rs` has read
+`test`, `linear` and `block` since the templates existed; the wizard reached
+`block`, so a standalone test between two blocks meant hand-writing the document
+this exists to replace.
+
 **0018 changes what it asks again.** `gating_role` and `[programme.weekdays]`
 leave the document, because the scheduler derives where the heavy session lands.
 
@@ -239,7 +277,13 @@ reviewable, diffable and re-authorable.
 **Ready now, on the model as it stands.** The wizard writes it, the schedule
 takes 14 September out of it without being told, and `prescribe` refuses that
 Monday and issues the Friday entry test. Run end to end against a copy of the
-real store on 2026-08-25.
+real store on 2026-08-25, and again after each of 0019 and 0020.
+
+**The 14th is now the strongest test of `Diary::ordinarily`.** It is the last
+day of the Rome alteration, which leaves no room to train at all — so a wizard
+reading the *altered* week there would offer the block no days and no heavy
+session. It reads the ordinary week, and the loss goes on being taken separately
+as a skip.
 
 Nothing in 0018 is needed for it. The heavy session is on a Friday because the
 document says so, and that is the right answer — 0018 would *derive* the same
@@ -344,6 +388,14 @@ is decided by the session it fulfilled, which is exactly this link:
 5. ~~**§ 12 and unperformed prescriptions.**~~ **Answered** by § 12.1 and #31: a
    prescription is drafted, published or performed, and "nothing regenerates it
    if lost" is true of only the last.
+6. **What anchors a programme that follows another?** Raised by 0020 and left
+   open there. Today an anchor is a number authored into the record, so a
+   programme after a block can only assert what that block *plans* to reach. A
+   programme able to say "my anchor is whatever the one before me exits at" —
+   resolved at prescription rather than at authoring — is what would let a long
+   span hold two periodisations. It is not a small change: it makes an authored
+   record depend on a future measurement, which is the opposite of what § 12 and
+   0011 rely on. Nothing needs it before the autumn block.
 
 ---
 
@@ -367,6 +419,13 @@ is decided by the session it fulfilled, which is exactly this link:
 - **Tracking `main` during a block.** Beta testing wants the latest, but once
   the autumn block is running the operator should be on the pinned release. The
   transition is the release itself, and forgetting to make it is the risk.
+
+  **The other half of that risk has now happened.** The release PR was merged on
+  2026-08-26 because conventional commits had piled up, tagging `v1.0.0` on a
+  tool that could not yet author the autumn block correctly. It was backed out
+  in #37 — the commit reverted, the tag and the GitHub release deleted, the
+  standing release PR closed. Cutting the release too early is as real a failure
+  as cutting it too late, and cheaper to make.
 
 ---
 
