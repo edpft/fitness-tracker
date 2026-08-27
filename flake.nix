@@ -96,8 +96,22 @@
           ]
         );
 
+        # **The version every derivation is named for, read once.**
+        #
+        # Not from the workspace root: it carries no version, because
+        # release-please cannot maintain one there — its rust updater writes
+        # `package.version` in each crate's own file and knows nothing about
+        # `[workspace.package]`. A number nothing maintains is a number that
+        # goes stale, so `versions-agree` refuses one there.
+        #
+        # Left to look in the root, crane finds nothing, warns, and names every
+        # derivation `0.0.1` whatever has been released. `cli` is the crate that
+        # ships the binary, and `linked-versions` makes its number every crate's.
+        version = (craneLib.crateNameFromCargoToml { cargoToml = ./crates/cli/Cargo.toml; }).version;
+
         commonArgs = {
-          inherit src;
+          inherit src version;
+          pname = "workspace";
           strictDeps = true;
 
           # sqlx verifies every `query!` against the schema at compile time.
@@ -120,7 +134,6 @@
 
         individualCrateArgs = commonArgs // {
           inherit cargoArtifacts;
-          inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
           # NB: we disable tests since we'll run them all via cargo-nextest
           doCheck = false;
         };
@@ -209,7 +222,8 @@
             ;
 
           format = craneLib.cargoFmt {
-            inherit src;
+            inherit src version;
+            pname = "workspace";
           };
 
           lint = craneLib.cargoClippy (
@@ -433,6 +447,74 @@
                 touch "$out"
               '';
 
+          # Not constitutional — release hygiene. The version is written in ten
+          # places: each crate's `Cargo.toml` and each entry in
+          # `.release-please-manifest.json`. The `linked-versions` plugin means
+          # all ten are one number, and nothing enforced that — so a hand-edit,
+          # or a release half-applied and half-reverted, would show up as a tag
+          # that means nothing.
+          #
+          # **And the workspace root must not carry one.** Cargo's own
+          # unification is `version.workspace = true` inheriting from
+          # `[workspace.package]`, and release-please cannot do it: its rust
+          # updater replaces `package.version` in each crate's own file and
+          # throws on a value that is a table rather than a string
+          # (`replaceTomlValue`: "value at path package.version is not
+          # tagged"). So a `version` under `[workspace.package]` is a number
+          # nothing maintains, sitting exactly where a reader looks first. It
+          # was there and inert until 2026-08-27.
+          versions-agree =
+            pkgs.runCommand "versions-agree"
+              {
+                nativeBuildInputs = [
+                  rustToolchain
+                  pkgs.jq
+                ];
+              }
+              ''
+                export CARGO_HOME="$TMPDIR/cargo"
+
+                cargo metadata --no-deps --offline --format-version 1 \
+                  --manifest-path ${repoSrc}/Cargo.toml \
+                  | jq -r '.packages[] | .name + " " + .version' | sort > cargo-says
+
+                jq -r 'to_entries[] | (.key | split("/") | last) + " " + .value' \
+                  ${repoSrc}/.release-please-manifest.json | sort > manifest-says
+
+                if ! diff -u cargo-says manifest-says; then
+                  echo
+                  echo "A crate's version and its entry in"
+                  echo ".release-please-manifest.json disagree. Release-please"
+                  echo "writes both; if you are here after editing one by hand,"
+                  echo "edit the other."
+                  exit 1
+                fi
+
+                if [ "$(cut -d' ' -f2 cargo-says | sort -u | wc -l)" -ne 1 ]; then
+                  echo
+                  echo "The crates are on different versions. The"
+                  echo "\`linked-versions\` plugin in release-please-config.json"
+                  echo "means they release together and so share one number."
+                  exit 1
+                fi
+
+                if awk '
+                  /^\[workspace\.package\]/ { inside = 1; next }
+                  /^\[/                       { inside = 0 }
+                  inside && /^[[:space:]]*version[[:space:]]*=/ { found = 1 }
+                  END { exit !found }
+                ' ${repoSrc}/Cargo.toml; then
+                  echo
+                  echo "\`[workspace.package]\` in Cargo.toml carries a"
+                  echo "\`version\`. Release-please does not maintain it and no"
+                  echo "crate inherits it, so it is a number that can only go"
+                  echo "stale. Remove it; the crates carry their own."
+                  exit 1
+                fi
+
+                touch "$out"
+              '';
+
           # Constitution § 35: credentials never enter version control. This
           # scans what is tracked; the structural defence is that credentials
           # come from the environment or an untracked local file, and the
@@ -478,15 +560,19 @@
               '';
 
           toml-fmt = craneLib.taploFmt {
+            inherit version;
+            pname = "workspace";
             src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
           };
 
           audit-deps = craneLib.cargoAudit {
-            inherit src advisory-db;
+            inherit src advisory-db version;
+            pname = "workspace";
           };
 
           audit-licenses = craneLib.cargoDeny {
-            inherit src;
+            inherit src version;
+            pname = "workspace";
           };
         };
 
