@@ -92,7 +92,7 @@ In flight:
 - **#32** — decision 0018, proposed. A programme counts cycles and the scheduler
   owns the calendar. It rewrites three of the steps below; see *What 0018
   changes* at the end.
-- **#10** — release-please's release PR, deliberately **not** merged. See below.
+- **the release PR** — release-please's, deliberately **not** merged. See below.
 
 ---
 
@@ -102,10 +102,17 @@ In flight:
 it. Everything until then is development and beta testing, which is what the
 summer block has been.
 
-So #10 stays open and accumulates. Release-please keeps it current as commits
-land; merging it is a deliberate act taken when the tool is ready for a block
-the operator intends to run on it, not something done because conventional
+So the release PR stays open and accumulates. Release-please keeps it current as
+commits land; merging it is a deliberate act taken when the tool is ready for a
+block the operator intends to run on it, not something done because conventional
 commits have piled up.
+
+**This has been got wrong once.** #10 was merged on 2026-08-26, tagging `v1.0.0`
+and publishing a release, and the next release PR then proposed 2.0.0 off a
+`feat(gym)!`. It was backed out: the commit reverted, the tag and the release
+deleted, the standing release PR closed so release-please regenerates from
+0.1.0. The rule above is the whole reason the merge was wrong, which is why the
+rule now says which PR number to leave alone rather than assuming it is obvious.
 
 Until then `nix profile install` tracks `main` and `nix profile upgrade` takes
 whatever has merged. During beta that is the point rather than a hazard — the
