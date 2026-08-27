@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/edpft/fitness-tracker/compare/v1.0.0...v2.0.0) (2026-08-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **gym:** a pigeon stretch for external hip rotation ([#36](https://github.com/edpft/fitness-tracker/issues/36))
+
+### Features
+
+* **cli:** the wizard asks dates and intents, and derives the plan ([#35](https://github.com/edpft/fitness-tracker/issues/35)) ([6e6f237](https://github.com/edpft/fitness-tracker/commit/6e6f23719411356b962ea1c192e2de13e53ced19))
+* **gym:** a pigeon stretch for external hip rotation ([#36](https://github.com/edpft/fitness-tracker/issues/36)) ([3cdb6e3](https://github.com/edpft/fitness-tracker/commit/3cdb6e32d59c4c978c966fb98a2d4f54e238b71a))
+
 ## [1.0.0](https://github.com/edpft/fitness-tracker/compare/v0.1.0...v1.0.0) (2026-08-26)
 
 
