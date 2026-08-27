@@ -35,8 +35,8 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Block, Calendar, GenerationParameters, LoadSteps, SessionRole, Skip, SlotId, Weekdays,
-        block::Block as BlockPlan, rep_max,
+        Block, Calendar, GenerationParameters, InvalidBlock, LoadSteps, SessionRole, Skip, SlotId,
+        Weekdays, block::Block as BlockPlan, rep_max,
     },
     schedule::{Diary, Discipline},
 };
@@ -391,6 +391,14 @@ const fn role_word(role: SessionRole) -> &'static str {
 /// the tool's job, and asking for a count of phase weeks was asking him to do
 /// the arithmetic and the holidays in his head.
 ///
+/// **So the dates are the only question.** Decision 0019 removed the arithmetic
+/// and left the question standing, defaulted to the answer it had just worked
+/// out — which invited an answer contradicting the end date the operator had
+/// given one line earlier. A block that should end sooner is a block with an
+/// earlier `ends?`, and a span too long for one block is refused rather than
+/// quietly filled: fifteen phase weeks is where the top-set ladder stops being
+/// liftable, and there is nothing to put in the remainder.
+///
 /// **What the schedule takes is taken here**, not discovered later. A week the
 /// diary leaves nothing in is not a training week, so the span holds one fewer
 /// — and because the calendar counts the same way in the other direction, a
@@ -418,37 +426,43 @@ fn ask_weeks(diary: &Diary, start: Date, weekdays: &Weekdays) -> Result<u32, Fai
         // One week measures the maximum the rest is a share of, and it is not a
         // phase. Everything below counts phase weeks, which is what the
         // operator's own table counts.
-        let Some(most) = available.checked_sub(1).filter(|most| *most > 0) else {
+        let Some(weeks) = available.checked_sub(1).filter(|weeks| *weeks > 0) else {
             println!("  {start} to {last} leaves no room to train — try a later end");
             continue;
         };
 
         report_span(start, last, available, &skips);
 
-        if let Err(error) = BlockPlan::new(most) {
-            println!("  {error}");
-            println!("  try a later end");
-            continue;
-        }
-
-        return ask_until(
-            &format!("how many weeks to programme? [{most}] "),
-            |typed| {
-                let asked = if typed.is_empty() {
-                    most
-                } else {
-                    parse_count("weeks", typed)?
-                };
-                if asked > most {
-                    return Err(format!(
-                        "these dates hold {most} weeks after the test week, not {asked}"
-                    ));
-                }
-                let plan = BlockPlan::new(asked).map_err(|error| error.to_string())?;
+        match BlockPlan::new(weeks) {
+            Ok(plan) => {
                 describe(plan);
-                Ok(asked)
-            },
-        );
+                return Ok(weeks);
+            }
+            Err(error) => {
+                println!("  {error}");
+                println!("  {}", remedy(error));
+            }
+        }
+    }
+}
+
+/// Which end of the span to move, for a duration no block can hold.
+///
+/// **The direction is the whole of the advice.** One line told the operator to
+/// try a later end whichever way the block failed, and for a block already too
+/// long that is the wrong way — following it makes the next attempt worse than
+/// the one it was correcting.
+const fn remedy(error: InvalidBlock) -> &'static str {
+    match error {
+        InvalidBlock::TooShort { .. } => "try a later end",
+        // Fifteen phase weeks, plus the week that measures the anchor.
+        InvalidBlock::TooLong { .. } => {
+            "a block runs at most 15 weeks of phases, so 16 with its entry test \
+             — try an earlier end"
+        }
+        // Not reachable from a duration, and a wrong word here would be worse
+        // than a vague one.
+        InvalidBlock::EntryTestTooLong { .. } => "try different dates",
     }
 }
 
