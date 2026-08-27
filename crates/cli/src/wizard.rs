@@ -317,18 +317,58 @@ fn ask_pattern() -> Result<&'static str, Failure> {
 /// them.
 type WeekdayRoles = Vec<(&'static str, &'static str)>;
 
-/// Which weekdays the block runs, and which session each is.
+/// Which session each of the gym's days is.
+///
+/// **The schedule says which days are the gym's; the programme says what it
+/// does with them.** This asked all seven and consulted nothing, so a block
+/// could name days the schedule had given to cycling and nothing would object
+/// — the autumn block agreed with the schedule by the operator's hand rather
+/// than by construction. The days come from the diary now, and the only
+/// question left is the one the schedule cannot answer.
+///
+/// **Ordinary days, not the days around the start.** A block starting inside a
+/// holiday would otherwise be offered whatever that holiday left, which is the
+/// alteration deciding the shape of the block rather than interrupting it. The
+/// calendar takes the alteration out separately, as skips.
 ///
 /// **The light and the heavy are not interchangeable.** The heavy session is
 /// the one the ladder gates on and the one an entry test is taken in, so a
 /// block with no heavy day is a block that cannot advance.
-fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
-    println!("\nwhich days does it run, and which session is each?");
-    println!("  l = light, h = heavy; - is not a training day");
+///
+/// A day may still be declined with `-`: which days are the gym's is the
+/// schedule's to say, and how many of them a given block uses is not.
+fn ask_weekdays(
+    diary: &Diary,
+    start: Date,
+) -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
+    let Some(available) = diary.ordinarily(start, Discipline::Gym) else {
+        return Err(usage(format!(
+            "the schedule says nothing about {start}, so there is no way to know \
+             which days are the gym's. Record the week first: fitness schedule add"
+        )));
+    };
+    if available.is_empty() {
+        return Err(usage(format!(
+            "the schedule gives the gym no day of the week as of {start}, so \
+             there is nothing for a block to run on"
+        )));
+    }
+
+    let offered: Vec<(&'static str, Weekday)> = WEEKDAYS
+        .into_iter()
+        .filter(|(_, weekday)| available.contains(weekday))
+        .collect();
+
+    println!("\nwhich session is each of the gym's days?");
+    println!(
+        "  the schedule gives the gym {} as of {start}.",
+        list(&offered)
+    );
+    println!("  l = light, h = heavy; - is a day this block does not use");
 
     loop {
         let mut chosen = Vec::new();
-        for (key, weekday) in WEEKDAYS {
+        for (key, weekday) in &offered {
             let role = ask_until(&format!("  {key:<10}[-] "), |typed| {
                 match typed.to_lowercase().as_str() {
                     "" | "-" => Ok(None),
@@ -338,7 +378,7 @@ fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
                 }
             })?;
             if let Some(role) = role {
-                chosen.push((key, weekday, role));
+                chosen.push((*key, *weekday, role));
             }
         }
 
@@ -373,6 +413,16 @@ fn ask_weekdays() -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
         // Gating is on the heavy session wherever there is one, which there
         // now is.
         return Ok((named, scheduled, "heavy"));
+    }
+}
+
+/// Days in a sentence, so the line reads as one.
+fn list(days: &[(&'static str, Weekday)]) -> String {
+    let names: Vec<&str> = days.iter().map(|(key, _)| *key).collect();
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -661,7 +711,7 @@ async fn ask_block(
     let start = ask_until("starts? ", parse_date)?;
 
     let pattern = ask_pattern()?;
-    let (named, scheduled, gating) = ask_weekdays()?;
+    let (named, scheduled, gating) = ask_weekdays(diary, start)?;
     let weeks = ask_weeks(diary, start, &scheduled)?;
 
     println!("\nthe lift this block is about");

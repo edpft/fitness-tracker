@@ -300,3 +300,112 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
         "and can say what it still has"
     );
 }
+
+/// **Each discipline's ordinary week is its own.** The weekly shape a programme
+/// takes is the days the schedule allocated to it, and nothing else.
+#[test]
+fn the_ordinary_week_names_one_disciplines_days() {
+    let diary = september().expect("the diary builds");
+    let inside_the_block = date(2026, 9, 21).expect("a real Monday");
+
+    assert_eq!(
+        diary.ordinarily(inside_the_block, Discipline::Gym),
+        Some(vec![Weekday::Monday, Weekday::Friday]),
+        "the gym has Monday and Friday, Monday first"
+    );
+    assert_eq!(
+        diary.ordinarily(inside_the_block, Discipline::Cycling),
+        Some(vec![Weekday::Wednesday, Weekday::Sunday]),
+        "and cycling has the other two"
+    );
+}
+
+/// **An alteration interrupts a block; it does not reshape it.**
+///
+/// The autumn block starts on 2026-09-14, which is the last day of the Rome
+/// alteration and has no room to train at all. Reading the altered week there
+/// would give the block no days and no heavy session — a holiday deciding the
+/// shape of the fourteen weeks after it. The loss is taken separately, as a
+/// skip.
+#[test]
+fn an_alteration_does_not_reshape_the_ordinary_week() {
+    let diary = september().expect("the diary builds");
+    let starts = date(2026, 9, 14).expect("a real Monday");
+
+    let availability = diary.on(starts).expect("a schedule is in force");
+    assert!(
+        !availability.open(starts),
+        "the day itself holds no training"
+    );
+    assert_eq!(
+        diary.unavailable(starts, starts, Discipline::Gym),
+        vec![starts],
+        "so the gym loses it"
+    );
+
+    assert_eq!(
+        diary.ordinarily(starts, Discipline::Gym),
+        Some(vec![Weekday::Monday, Weekday::Friday]),
+        "and the ordinary week is untouched by it"
+    );
+}
+
+/// **Two slots on one day are one training day.** A weekday appears once
+/// however many parts of it a discipline holds, because a programme's weekly
+/// shape counts days rather than slots.
+#[test]
+fn a_day_held_twice_is_named_once() {
+    let both_halves = [
+        (
+            TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning),
+            Discipline::Gym,
+        ),
+        (
+            TrainingSlot::new(Weekday::Saturday, PartOfDay::Evening),
+            Discipline::Gym,
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let from = date(2026, 1, 1).expect("a real date");
+    let diary = Diary::new(
+        vec![TrainingPattern::new(
+            from,
+            zone("Europe/London").expect("a real zone"),
+            both_halves,
+        )],
+        vec![],
+    );
+
+    assert_eq!(
+        diary.ordinarily(from, Discipline::Gym),
+        Some(vec![Weekday::Saturday])
+    );
+}
+
+/// **Unknown and empty are different answers**, as they are for `on`.
+#[test]
+fn a_week_nobody_has_described_has_no_ordinary_days() {
+    let diary = september().expect("the diary builds");
+    let before = date(2025, 12, 31).expect("a real date");
+
+    assert_eq!(
+        diary.ordinarily(before, Discipline::Gym),
+        None,
+        "nothing has been said about this week"
+    );
+
+    let empty = Diary::new(
+        vec![TrainingPattern::new(
+            date(2026, 1, 1).expect("a real date"),
+            zone("Europe/London").expect("a real zone"),
+            BTreeMap::new(),
+        )],
+        vec![],
+    );
+    assert_eq!(
+        empty.ordinarily(date(2026, 1, 1).expect("a real date"), Discipline::Gym),
+        Some(Vec::new()),
+        "this week is described, and holds nothing for the gym"
+    );
+}
