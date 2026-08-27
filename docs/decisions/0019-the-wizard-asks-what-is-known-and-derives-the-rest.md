@@ -129,3 +129,20 @@ outgrown.
 - `Draft` carries a provenance, so the document no longer states `asserted`
   unconditionally.
 - `docs/roadmap.md` step 3 records what changed about the wizard it describes.
+
+## Amended 2026-08-27
+
+**The question survived its own reasoning.** Section 1 above says the operator
+states dates and the tool derives the plan, and the implementation then asked
+`how many weeks to programme?` with the derived answer as its default. So the
+wizard printed the span it had worked out and immediately invited a number that
+contradicted it, with nothing to fill the weeks the smaller answer gave up.
+
+[0020](0020-a-span-longer-than-one-block-is-refused.md) removes the question and
+records why the remainder is not filled: fifteen phase weeks is the ceiling, and
+a span past it is refused rather than split.
+
+**Section 2 was also only half done.** "The primary is knee or hip dominant"
+narrowed one list the operator did not need to see. The days question next to it
+kept asking all seven weekdays while the schedule already said which two were
+the gym's — the same defect, one prompt over.
