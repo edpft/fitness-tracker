@@ -733,6 +733,27 @@ pub trait PerformedWorkoutReader {
         from: Date,
         to: Date,
     ) -> impl Future<Output = Result<Vec<GymWorkout>, StoreError>> + Send;
+
+    /// The workout performed against a prescription, and the reference it named.
+    ///
+    /// **Keyed on the prescription rather than on a date**, which is the whole
+    /// point: a session prescribed for Friday and performed on Saturday morning
+    /// is found by this and not by [`Self::between`]. The link is the published
+    /// id — the prescription was delivered, the destination named it, and the
+    /// performance carries that name — so this resolves through the delivery
+    /// rather than asking which destination to look in. Any of them will do; a
+    /// reference a performance names is a reference that was delivered.
+    ///
+    /// `None` where the prescription is drafted, or published and not yet
+    /// performed. Both are ordinary states (§ 12.1), not faults.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn fulfilling(
+        &self,
+        prescription: PrescribedWorkoutId,
+    ) -> impl Future<Output = Result<Option<(DeliveryReference, GymWorkout)>, StoreError>> + Send;
 }
 
 /// The § 14 parameters, in force as one version.

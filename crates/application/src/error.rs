@@ -259,6 +259,37 @@ pub enum PrescriptionError {
     MissingTimeZone,
 }
 
+/// What can go wrong comparing a performance against its prescription.
+#[derive(Debug, thiserror::Error)]
+pub enum ComparisonError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+
+    /// Nothing was prescribed for the date, so there is nothing to compare
+    /// against. Deliberately not "so I derived one": a comparison is a reading
+    /// of the record, and issuing a prescription to have something to compare
+    /// with would invent the expectation it is meant to be testing.
+    #[error("nothing was prescribed for {date}, so there is nothing to compare against")]
+    NothingIssued { date: Date },
+
+    /// A session was prescribed and nothing answers it: no performance names it,
+    /// and nothing was trained that day.
+    #[error("the session prescribed for {date} has not been performed")]
+    NotPerformed { date: Date },
+
+    /// More than one session was trained on the day and none of them names the
+    /// prescription, so which one answered it is not something the record says.
+    ///
+    /// Refused rather than resolved by picking the first: a comparison run
+    /// against the wrong workout reports divergences that are really a mismatch,
+    /// which is worse than declining to answer.
+    #[error(
+        "{count} sessions were trained on {date} and none names the prescription, \
+         so which one answered it is not recorded"
+    )]
+    AmbiguousDay { date: Date, count: usize },
+}
+
 /// Why a prescription could not be put where the operator trains from.
 ///
 /// Separate from [`PrescriptionError`] because the two fail for unrelated

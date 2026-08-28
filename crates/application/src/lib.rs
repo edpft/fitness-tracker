@@ -13,6 +13,7 @@
 //! a driven adapter from quietly calling the application it is supposed to be
 //! driven by.
 
+pub mod compare;
 pub mod deliver;
 pub mod error;
 pub mod extract;
@@ -22,8 +23,8 @@ pub mod prescribe;
 pub mod status;
 
 pub use error::{
-    DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
-    SourceError, StatusError, StoreError,
+    ComparisonError, DeliveryError, ExtractionError, NormalisationError, PrescriptionError,
+    RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
     Authored, Clock, Deliverable, Delivered, Delivery, DeliveryReference, DerivationStatus,

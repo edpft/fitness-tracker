@@ -125,6 +125,7 @@ fn command() -> ClapCommand {
         .subcommand(init_command())
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
+        .subcommand(compare_command())
         .subcommand(programme_command())
         .subcommand(parameters_command())
         .subcommand(schedule_command())
@@ -143,6 +144,18 @@ fn command() -> ClapCommand {
 /// No stream argument: the catalogue is one entry per thing this build can
 /// *collect*, and generation collects nothing. A stream here would be a category
 /// error, and none of the `SOURCE_`-style environment derivation applies.
+/// Read a session back against what it was told to be.
+fn compare_command() -> ClapCommand {
+    ClapCommand::new("compare")
+        .about("Report how a performed session differed from the one prescribed for it")
+        .arg(timezone_argument())
+        .arg(Arg::new("date").long("date").value_name("date").help(
+            "The session to compare, as YYYY-MM-DD — the date it was prescribed \
+                     for, not the day it was trained. Defaults to the next programmed \
+                     day at or after today",
+        ))
+}
+
 fn prescribe_command() -> ClapCommand {
     ClapCommand::new("prescribe")
         .about("Issue the prescription for a date, or show what was already issued")
@@ -594,6 +607,20 @@ async fn authored_command(
                     &zone,
                     sub.get_one::<String>("date").map(String::as_str),
                     reissue,
+                )
+                .await,
+            )
+        }
+        "compare" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            Some(
+                prescribing::compare(
+                    database,
+                    &zone,
+                    sub.get_one::<String>("date").map(String::as_str),
                 )
                 .await,
             )

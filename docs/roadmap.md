@@ -329,8 +329,8 @@ the thing replacing it can place a session.
 
 #31 landed the states and the link. Three pieces remained, and all three are
 work 0018 relies on rather than work it discards — it says what a performance
-*was* is decided by the session it fulfilled, which is exactly this link. **One
-of the three has landed**; the other two have not:
+*was* is decided by the session it fulfilled, which is exactly this link. **Two
+of the three have landed**; withdrawal has not:
 
 - ~~**A performance takes its role from its prescription, not its date.**~~
   **Done**, 2026-08-28. `Performance` carries the session it fulfilled —
@@ -364,8 +364,22 @@ of the three has landed**; the other two have not:
   the source and drop the delivery row. Needs `ON DELETE CASCADE` on
   `prescribed_item` and its children, which is why a draft is not disposable
   today despite § 12.1 saying it is.
-- **The comparison** — performed against prescribed, which `project` can already
-  do and nothing calls.
+- ~~**The comparison** — performed against prescribed, which `project` can
+  already do and nothing calls.~~ **Done**, 2026-08-28. `fitness compare` pairs
+  a performance with the prescription it answers and reports what diverged.
+  `project` and `satisfies` were both already there; what was missing was the
+  pairing, and the pairing is the whole problem — two records that meet in one
+  place.
+
+  **That place is the published id**, so a session performed on a different day
+  from the one it was prescribed for is still found. Where nothing names the
+  session the day stands in, and the output says which it got: a pairing by id
+  is a fact the record holds, one by date is an assumption, and they read
+  identically otherwise. Two sessions on one day with nothing naming the
+  prescription is refused rather than guessed between.
+
+  It writes nothing. A comparison re-derives exactly from the two records, and
+  § 12 asks us to keep what cannot be regenerated.
 
 ## Deferred, and none of it on the critical path
 

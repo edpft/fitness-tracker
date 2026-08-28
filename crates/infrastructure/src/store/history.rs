@@ -26,8 +26,8 @@
 use std::collections::BTreeMap;
 
 use application::{
-    ExerciseHistory, FulfilledSession, LastPerformance, Performance, PerformedSetSummary,
-    PerformedWorkoutReader, StoreError,
+    DeliveryReference, ExerciseHistory, FulfilledSession, LastPerformance, Performance,
+    PerformedSetSummary, PerformedWorkoutReader, PrescribedWorkoutId, StoreError,
 };
 use domain::{
     gym::{
@@ -558,42 +558,147 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
             if day < from || day > to {
                 continue;
             }
-            let items = self.items_of(row.landed_as).await?;
-            let started_at = start_of(&row.on_utc, &row.zone)?;
-            let provenance = provenance_of(&row.endpoint, &row.event_kind, row.event_time)?;
-            let source_record_id = domain::landing::SourceRecordId::try_from(
-                row.source_record_id.as_str(),
-            )
-            .map_err(|error| StoreError::Corrupt {
-                detail: error.to_string(),
-            })?;
-            let landed_as =
-                LandingRecordId::try_from(row.landed_as).map_err(|error| StoreError::Corrupt {
-                    detail: error.to_string(),
-                })?;
-
-            // A reference the store cannot read back is corrupt rather than
-            // absent: it was written by something that had one.
-            let performed_against = row
-                .performed_against
-                .map(domain::prescription::DeliveryReference::try_from)
-                .transpose()
-                .map_err(|error| StoreError::Corrupt {
-                    detail: error.to_string(),
-                })?;
-
-            assembled.push(GymWorkout::new(
-                items,
-                started_at,
-                provenance,
-                source_record_id,
-                landed_as,
-                performed_against,
-            ));
+            assembled.push(
+                self.assemble(WorkoutRow {
+                    landed_as: row.landed_as,
+                    source_record_id: row.source_record_id,
+                    on_utc: row.on_utc,
+                    zone: row.zone,
+                    endpoint: row.endpoint,
+                    event_kind: row.event_kind,
+                    event_time: row.event_time,
+                    performed_against: row.performed_against,
+                })
+                .await?,
+            );
         }
 
         Ok(assembled)
     }
+
+    async fn fulfilling(
+        &self,
+        prescription: PrescribedWorkoutId,
+    ) -> Result<Option<(DeliveryReference, GymWorkout)>, StoreError> {
+        let id = prescription.as_i64();
+
+        // **Any delivery of this prescription will do.** A reference a
+        // performance names is a reference that was delivered, so which
+        // destination it went to is not a question this has to answer -- and
+        // asking would mean the caller knowing where the operator trains.
+        //
+        // Superseded rows are excluded the same way `between` excludes them
+        // (§ 10): the later-served landing of one source record is the one that
+        // counts, and a comparison against a retracted version of a workout
+        // would compare against something the record has superseded.
+        let row = sqlx::query!(
+            r#"
+            SELECT w.landing_record_id AS "landed_as!: i64",
+                   w.source_record_id AS "source_record_id!: String",
+                   w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
+                   w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
+                   w.event_time AS "event_time: String",
+                   w.performed_against AS "performed_against!: String"
+            FROM gym_workout AS w
+            JOIN prescription_delivery AS d ON d.reference = w.performed_against
+            WHERE d.prescription = ?
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM gym_workout AS superseding
+                    JOIN hevy_workout_landing AS later
+                        ON later.id = superseding.landing_record_id
+                    JOIN hevy_workout_landing AS this
+                        ON this.id = w.landing_record_id
+                    WHERE superseding.source_record_id = w.source_record_id
+                      AND later.serve_ordinal > this.serve_ordinal
+              )
+            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
+            LIMIT 1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let reference =
+            DeliveryReference::try_from(row.performed_against.clone()).map_err(|error| {
+                StoreError::Corrupt {
+                    detail: error.to_string(),
+                }
+            })?;
+        let workout = self
+            .assemble(WorkoutRow {
+                landed_as: row.landed_as,
+                source_record_id: row.source_record_id,
+                on_utc: row.on_utc,
+                zone: row.zone,
+                endpoint: row.endpoint,
+                event_kind: row.event_kind,
+                event_time: row.event_time,
+                performed_against: Some(row.performed_against),
+            })
+            .await?;
+
+        Ok(Some((reference, workout)))
+    }
+}
+
+impl SqlitePerformedWorkoutReader {
+    /// One row, plus the items it took five tables to write, as an entity.
+    ///
+    /// Shared by both queries so that a column read one way in one and another
+    /// way in the other is not a thing that can happen.
+    async fn assemble(&self, row: WorkoutRow) -> Result<GymWorkout, StoreError> {
+        let items = self.items_of(row.landed_as).await?;
+        let started_at = start_of(&row.on_utc, &row.zone)?;
+        let provenance = provenance_of(&row.endpoint, &row.event_kind, row.event_time)?;
+        let source_record_id = domain::landing::SourceRecordId::try_from(
+            row.source_record_id.as_str(),
+        )
+        .map_err(|error| StoreError::Corrupt {
+            detail: error.to_string(),
+        })?;
+        let landed_as =
+            LandingRecordId::try_from(row.landed_as).map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?;
+
+        // A reference the store cannot read back is corrupt rather than absent:
+        // it was written by something that had one.
+        let performed_against = row
+            .performed_against
+            .map(DeliveryReference::try_from)
+            .transpose()
+            .map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?;
+
+        Ok(GymWorkout::new(
+            items,
+            started_at,
+            provenance,
+            source_record_id,
+            landed_as,
+            performed_against,
+        ))
+    }
+}
+
+/// One `gym_workout` row, as both of the reader's queries select it.
+struct WorkoutRow {
+    landed_as: i64,
+    source_record_id: String,
+    on_utc: String,
+    zone: String,
+    endpoint: String,
+    event_kind: String,
+    event_time: Option<String>,
+    performed_against: Option<String>,
 }
 
 impl SqlitePerformedWorkoutReader {
