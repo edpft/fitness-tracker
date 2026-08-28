@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   prescriber.name AS \"programme: String\",\n                   session.session_role AS \"session_role: String\",\n                   s.load_kind AS \"load_kind!: String\", s.load_grams AS \"load_grams!: i64\",\n                   s.outcome AS \"outcome!: String\", s.reps AS \"reps: i64\"\n            FROM gym_workout AS w\n            JOIN performed_exercise AS e ON e.workout = w.landing_record_id\n            JOIN performed_set AS s\n              ON s.workout = w.landing_record_id\n             AND s.item_position = e.item_position\n             AND s.exercise_position = e.position\n            -- The published id resolved back to the session it was issued from.\n            --\n            -- **One row per reference, by construction.** A reference is the\n            -- destination's own id for a routine, so two deliveries sharing one\n            -- is not a state this store can reach -- but a join that fanned out\n            -- would duplicate every *set* of the workout, which the gate would\n            -- read as sets performed twice. `MIN(d.prescription)` makes the pick\n            -- deterministic rather than trusting that.\n            --\n            -- The programme is carried by name: re-authoring writes a new\n            -- `programme` row, and a session prescribed before the last\n            -- correction belongs to the same programme all the same.\n            LEFT JOIN (\n                SELECT d.reference AS reference, MIN(d.prescription) AS prescription\n                FROM prescription_delivery AS d\n                GROUP BY d.reference\n            ) AS link ON link.reference = w.performed_against\n            LEFT JOIN prescribed_workout AS session ON session.id = link.prescription\n            LEFT JOIN programme AS prescriber ON prescriber.id = session.programme\n            WHERE e.exercise = ?\n              AND s.set_kind = 'working'\n              AND NOT EXISTS (\n                    SELECT 1\n                    FROM gym_workout AS superseding\n                    JOIN hevy_workout_landing AS later\n                        ON later.id = superseding.landing_record_id\n                    JOIN hevy_workout_landing AS this\n                        ON this.id = w.landing_record_id\n                    WHERE superseding.source_record_id = w.source_record_id\n                      AND later.serve_ordinal > this.serve_ordinal\n              )\n            ORDER BY w.started_at_utc ASC, e.item_position ASC, s.position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "on_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "landed_as!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "programme: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "session_role: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "session_role"
+          }
+        }
+      },
+      {
+        "name": "load_kind!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "outcome!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "reps"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "3b82b11783b7ca2bbf7286bd9f411ec9b0bc89862a387c76b15a54bebf52f6db"
+}

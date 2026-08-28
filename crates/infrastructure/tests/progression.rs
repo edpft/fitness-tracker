@@ -21,15 +21,16 @@
 mod support;
 
 use application::{
-    WorkoutPrescriber as _,
+    DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::prescription::{PrescribedItem, SessionRole, SlotId, WeekIndex, WeekKind};
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore,
 };
 use jiff::civil::Date;
+use sqlx::SqlitePool;
 use support::{corpus, programme, store};
 
 type Prescriber = Prescribing<
@@ -45,24 +46,89 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 /// own test would fall inside it.
 const BLOCK_START: Date = Date::constant(2026, 7, 6);
 
+/// The Hevy routine every session titled Heavy in the record was performed
+/// against.
+///
+/// The corpus carries it, because the operator reused one routine per role
+/// rather than publishing a fresh one each week. Nothing in the store links it
+/// to a prescription until a test records a delivery saying so — which is the
+/// state the whole record was in before any of this was built.
+const HEAVY_ROUTINE: &str = "11437699-cb70-4e0e-a77b-caa9fd5cdb24";
+
 /// A store whose block opens on 2026-07-06, the Monday after its entry test.
+///
+/// **Nothing is published here**, which is the ordinary case and the one the
+/// record is actually in: the block was trained before a prescription could be
+/// delivered, so no performance names a session and the calendar is what places
+/// them. The tests using this fixture are the fallback path.
 async fn ready() -> Fallible<(Prescriber, tempfile::TempDir)> {
+    let (prescriber, directory, _) = assembled().await?;
+    Ok((prescriber, directory))
+}
+
+/// The same store, with the block's first Friday published against the routine
+/// the record already names.
+///
+/// Published rather than merely drafted, because a drafted prescription has no
+/// reference for a performance to name — the destination assigns it on delivery
+/// (decision 0017), and until then nothing the operator trains can point at it.
+async fn published() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
+    let (prescriber, directory, pool) = assembled().await?;
+
+    // The block's first Friday, which is its gating session. Issuing it before
+    // anything reads the gate is the real order: a session is published, then
+    // performed, then read back.
+    deliver(
+        &prescriber,
+        &pool,
+        Date::constant(2026, 7, 10),
+        HEAVY_ROUTINE,
+    )
+    .await?;
+
+    Ok((prescriber, directory, pool))
+}
+
+/// The corpus, derived, with the fixture programme authored and a prescriber
+/// wired to it.
+async fn assembled() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
     let start = BLOCK_START;
     let (directory, pool) = store::with_programme(programme::programme_from(start)?).await?;
-    Ok((
-        Prescribing::new(PrescriptionPorts {
-            history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
-            parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
-        }),
-        directory,
-    ))
+    let prescriber = Prescribing::new(PrescriptionPorts {
+        history: SqliteExerciseHistory::new(pool.clone()),
+        programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        parameters: SqliteGenerationParameterStore::new(pool.clone()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
+    });
+    Ok((prescriber, directory, pool))
+}
+
+/// Issue the session for a date and record what the destination called it.
+async fn deliver(
+    prescriber: &Prescriber,
+    pool: &SqlitePool,
+    date: Date,
+    reference: &str,
+) -> Fallible<()> {
+    let issued = prescriber.prescribe(date, application::Reissue::No).await?;
+    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    deliveries
+        .record(
+            issued.id,
+            &DestinationName::try_from("hevy".to_owned())?,
+            &DeliveryReference::try_from(reference.to_owned())?,
+            jiff::Timestamp::UNIX_EPOCH,
+        )
+        .await?;
+    Ok(())
 }
 
 macro_rules! ready {
     () => {
-        match corpus::block_on(ready()) {
+        ready!(ready())
+    };
+    ($fixture:expr) => {
+        match corpus::block_on($fixture) {
             Ok(Ok(ready)) => ready,
             Ok(Err(error)) => panic!("the corpus lands, derives and authors: {error}"),
             Err(error) => panic!("a runtime is available: {error}"),
@@ -154,7 +220,107 @@ fn the_block_opens_below_what_its_entry_test_failed() {
     );
 }
 
+/// A published session performed the next morning still gates.
+///
+/// **What the link buys, stated as a test.** Asking the calendar what a past
+/// performance was — `place(performance.on)` — answers for the day a session was
+/// *prescribed* for, so a heavy session trained the next morning is a date the
+/// calendar refuses: it falls out of the ladder entirely, the climb does not
+/// advance, and the following Monday is prescribed a rung too low.
+///
+/// A published id says what the session was without asking when it happened, so
+/// this is the fixture that publishes one. Nothing about the performance changes
+/// but its clock: the same session, against the same routine, with the same top
+/// set, moved from Friday evening to Saturday morning — and the Monday after is
+/// prescribed exactly what it is when the session was on time.
+///
+/// **75 against the 72.5 the calendar alone produces**, which is exactly what
+/// [`an_unpublished_session_performed_the_next_morning_is_lost`] asserts from
+/// the same store without the delivery. The pair is the difference the link
+/// makes, and neither half means much without the other.
+///
+/// This is decision 0018's third bullet, and § 12: the performance is the fact.
+#[test]
+fn a_gating_session_performed_the_next_morning_still_gates() {
+    let (prescriber, _directory, pool) = ready!(published());
+    trained_the_next_morning(&pool);
+
+    let (issued, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
+    assert_eq!(issued.workout.session_role(), SessionRole::Light);
+
+    let Ok(gated) = "75".to_owned().try_into().map(domain::gym::Load::Absolute) else {
+        panic!("75 is a mass")
+    };
+    assert_eq!(
+        light,
+        Some(gated),
+        "the session was performed, so it gates — whatever day it landed on"
+    );
+}
+
+/// And without a published id it is lost, which is the limit of the fallback.
+///
+/// **Recorded rather than glossed over.** The calendar is all an unlinked
+/// performance has, and the calendar answers for the day a session was
+/// prescribed for — so one trained a day late is refused and drops out of the
+/// ladder. Nothing here can recover it: there is no other fact in the record
+/// tying that morning's training to the session it was.
+///
+/// The remedy is to publish the session, which is what
+/// [`a_gating_session_performed_the_next_morning_still_gates`] does to the same
+/// store to reach 75 instead of the 72.5 below. Until 0018 removes the calendar
+/// this is the behaviour, and a test saying so is better than discovering it
+/// from a load.
+#[test]
+fn an_unpublished_session_performed_the_next_morning_is_lost() {
+    let (prescriber, _directory, pool) = ready!(assembled());
+    trained_the_next_morning(&pool);
+
+    let (_, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
+
+    let Ok(ungated) = "72.5"
+        .to_owned()
+        .try_into()
+        .map(domain::gym::Load::Absolute)
+    else {
+        panic!("72.5 is a mass")
+    };
+    assert_eq!(
+        light,
+        Some(ungated),
+        "nothing links the session to a prescription, so the calendar refuses it"
+    );
+}
+
+/// Move the block's first Friday session to the Saturday morning after it.
+///
+/// 18:25 on Friday 10 July becomes 09:25 on Saturday the 11th — a day the block
+/// prescribes nothing at all. Nothing else about the performance changes.
+fn trained_the_next_morning(pool: &SqlitePool) {
+    let moved = run!(async {
+        sqlx::query!(
+            "UPDATE gym_workout \
+             SET started_at_utc = replace(started_at_utc, '2026-07-10T18', '2026-07-11T09') \
+             WHERE started_at_utc LIKE '2026-07-10T18%'"
+        )
+        .execute(pool)
+        .await
+    });
+    // Without this the session stays on its Friday and both assertions pass for
+    // the wrong reason.
+    assert_eq!(
+        moved.rows_affected(),
+        1,
+        "the Friday session is the one that moved"
+    );
+}
+
 /// A session the gate does not watch does not move the progression (US3-10).
+///
+/// **The fallback path.** No session in this store names a prescription, which
+/// is the state the record was in for every block trained before one could be
+/// delivered. Those sessions were still trained, so the calendar goes on
+/// placing them and the ladder keeps its position.
 ///
 /// **Counted out, because the numbers are what carry the assertion.** The block
 /// opens climbing in at 90 toward the 95 its entry test failed. By Monday

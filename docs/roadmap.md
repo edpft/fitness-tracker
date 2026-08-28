@@ -327,13 +327,39 @@ the thing replacing it can place a session.
 
 ## What is left of the lifecycle, and it survives 0018
 
-#31 landed the states and the link. Three pieces remain, and all three are work
-0018 relies on rather than work it discards — it says what a performance *was*
-is decided by the session it fulfilled, which is exactly this link:
+#31 landed the states and the link. Three pieces remained, and all three are
+work 0018 relies on rather than work it discards — it says what a performance
+*was* is decided by the session it fulfilled, which is exactly this link. **One
+of the three has landed**; the other two have not:
 
-- **A performance takes its role from its prescription, not its date.** The
-  Friday session performed on Saturday morning. `place(performance.on)` is
-  wrong today and 0018 deletes it, but the replacement is this.
+- ~~**A performance takes its role from its prescription, not its date.**~~
+  **Done**, 2026-08-28. `Performance` carries the session it fulfilled —
+  resolved through the published id, which is the only thing that links the two
+  — and the gate reads the role off that where there is one. A published session
+  performed on Saturday morning now gates.
+
+  **The calendar remains the fallback**, and the first cut of this was wrong to
+  drop it. Run against a copy of `local.db` it moved the summer block from week
+  four of its ladder to week one and prescribed its last six sessions 7.5kg
+  light, because every heavy session of that block was trained against a Hevy
+  routine the operator made by hand and the tool never delivered. Those sessions
+  were trained. So: the prescription answers where it can, the calendar answers
+  otherwise, and an *unlinked* session performed a day late is still lost —
+  which is a test rather than a surprise.
+
+  Two things the work turned up. **A programme's identity across re-authorings
+  is its name, not its row id**: re-authoring writes a new `programme` row, so
+  a link holding a `ProgrammeId` would have dropped every session prescribed
+  before the last correction — six of them for `summer-2026-front-squat`.
+  `latest_of_each` already picks by name for the same reason. And **the corpus
+  already carries its routine ids**: every July session titled Heavy names one
+  Hevy routine and every Light one names another. A re-normalise populates
+  `performed_against` for eleven sessions back to 6 July, though only the one
+  delivered from the tool resolves to a prescription.
+
+  `Calendar::place` is untouched on the prescribing path, where asking what a
+  *date* is for is the right question. 0018 deletes both it and the fallback, by
+  deleting the calendar.
 - **Withdrawal** for a published, unperformed session — delete the routine at
   the source and drop the delivery row. Needs `ON DELETE CASCADE` on
   `prescribed_item` and its children, which is why a draft is not disposable

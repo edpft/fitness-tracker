@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE gym_workout SET started_at_utc = replace(started_at_utc, '2026-07-10T18', '2026-07-11T09') WHERE started_at_utc LIKE '2026-07-10T18%'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "3c54aaf73a82996bbed3d785569e0937a4f22239ddaf985b385609db0df446d1"
+}
