@@ -365,25 +365,34 @@ where
             if performance.on >= before {
                 continue;
             }
-            // **The prescription says what the performance was, not the date.**
-            // A session is this programme's gating session because this
-            // programme prescribed it as one -- which the published id records
-            // and the calendar only ever guessed at. The heavy session
-            // prescribed for Friday and performed on Saturday morning is the
-            // case that made the difference: `place` refused the Saturday and
-            // dropped it out of the ladder, and the operator's rule is that the
-            // performance is the fact.
+            // **The prescription answers where it can; the calendar answers
+            // otherwise.**
             //
-            // A performance naming no prescription of ours is not read. There
-            // is nothing else that could link it to a session -- not the date,
-            // which is what was wrong before.
-            let Some(fulfilled) = &performance.fulfilled else {
-                continue;
+            // A published id is the only thing that *links* a performance to a
+            // prescription, and where there is one it is the better answer: it
+            // records what the session was rather than inferring it from when it
+            // happened. That is what makes the heavy session prescribed for
+            // Friday and performed on Saturday morning gate -- `place` refuses
+            // the Saturday, and the operator's rule is that the performance is
+            // the fact.
+            //
+            // But the sessions of a block trained before any of this existed
+            // were still trained, and a record that cannot say which session it
+            // was is not a record of nothing. So the calendar keeps answering
+            // for them, exactly as it did. It is the weaker answer -- an
+            // unlinked session performed a day late is still dropped, and
+            // nothing here can recover it -- and it is the only one available.
+            //
+            // 0018 removes the fallback by removing the calendar. Until then a
+            // programme that predates the link keeps its ladder position.
+            let role = match &performance.fulfilled {
+                Some(fulfilled) if fulfilled.programme == *programme.name() => fulfilled.role,
+                _ => match programme.calendar().place(performance.on) {
+                    Ok((_, role)) => role,
+                    Err(_) => continue,
+                },
             };
-            if fulfilled.programme != *programme.name() {
-                continue;
-            }
-            if fulfilled.role != programme.gating_role() {
+            if role != programme.gating_role() {
                 continue;
             }
             if let Some(top) = top_set_of(performance) {
