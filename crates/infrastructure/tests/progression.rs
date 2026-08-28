@@ -21,15 +21,16 @@
 mod support;
 
 use application::{
-    WorkoutPrescriber as _,
+    DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::prescription::{PrescribedItem, SessionRole, SlotId, WeekIndex, WeekKind};
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore,
 };
 use jiff::civil::Date;
+use sqlx::SqlitePool;
 use support::{corpus, programme, store};
 
 type Prescriber = Prescribing<
@@ -45,19 +46,81 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 /// own test would fall inside it.
 const BLOCK_START: Date = Date::constant(2026, 7, 6);
 
+/// The two Hevy routines the record's July sessions were performed against.
+///
+/// **The published id is the only thing that links a performance to a
+/// prescription**, so a gating session is one the record says was performed
+/// against a session this programme prescribed as gating. The corpus already
+/// carries both references: every session titled Heavy names one routine and
+/// every Light one names the other, because the operator reused a routine per
+/// role rather than publishing a fresh one each week.
+///
+/// One delivery per role is therefore what the record supports, and it is
+/// enough. What the link supplies is *which session it was*; the load the gate
+/// reads comes from the performance, as it always did.
+const HEAVY_ROUTINE: &str = "11437699-cb70-4e0e-a77b-caa9fd5cdb24";
+const LIGHT_ROUTINE: &str = "f3f2364c-4dd2-4ba5-9406-43035f99161d";
+
 /// A store whose block opens on 2026-07-06, the Monday after its entry test.
 async fn ready() -> Fallible<(Prescriber, tempfile::TempDir)> {
+    let (prescriber, directory, _) = published().await?;
+    Ok((prescriber, directory))
+}
+
+/// The same store, with the block's first two sessions published.
+///
+/// Published rather than merely drafted, because a drafted prescription has no
+/// reference for a performance to name — the destination assigns it on delivery
+/// (decision 0017), and until then nothing the operator trains can point at it.
+async fn published() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
     let start = BLOCK_START;
     let (directory, pool) = store::with_programme(programme::programme_from(start)?).await?;
-    Ok((
-        Prescribing::new(PrescriptionPorts {
-            history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
-            parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
-        }),
-        directory,
-    ))
+    let prescriber = Prescribing::new(PrescriptionPorts {
+        history: SqliteExerciseHistory::new(pool.clone()),
+        programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        parameters: SqliteGenerationParameterStore::new(pool.clone()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
+    });
+
+    // The block's first Monday and first Friday, which are its light and gating
+    // sessions. Issuing them before anything reads the gate is the real order:
+    // a session is published, then performed, then read back.
+    deliver(
+        &prescriber,
+        &pool,
+        Date::constant(2026, 7, 6),
+        LIGHT_ROUTINE,
+    )
+    .await?;
+    deliver(
+        &prescriber,
+        &pool,
+        Date::constant(2026, 7, 10),
+        HEAVY_ROUTINE,
+    )
+    .await?;
+
+    Ok((prescriber, directory, pool))
+}
+
+/// Issue the session for a date and record what the destination called it.
+async fn deliver(
+    prescriber: &Prescriber,
+    pool: &SqlitePool,
+    date: Date,
+    reference: &str,
+) -> Fallible<()> {
+    let issued = prescriber.prescribe(date, application::Reissue::No).await?;
+    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    deliveries
+        .record(
+            issued.id,
+            &DestinationName::try_from("hevy".to_owned())?,
+            &DeliveryReference::try_from(reference.to_owned())?,
+            jiff::Timestamp::UNIX_EPOCH,
+        )
+        .await?;
+    Ok(())
 }
 
 macro_rules! ready {
@@ -151,6 +214,62 @@ fn the_block_opens_below_what_its_entry_test_failed() {
             .heavy_top_set(WeekIndex::FIRST, steps)
             .map(domain::gym::Load::Absolute),
         "and that is the ladder's own first rung: the drop is the opening"
+    );
+}
+
+/// The Friday session performed on Saturday morning still gates.
+///
+/// **The defect this replaced, stated as a test.** The gate used to ask the
+/// calendar what a past performance was — `place(performance.on)` — and the
+/// calendar answers for the day a session was *prescribed* for. So a heavy
+/// session trained the next morning was a date the calendar refused, and it fell
+/// out of the ladder entirely: the climb did not advance, and the following
+/// Monday was prescribed a rung too low.
+///
+/// Nothing about the performance changes here but its clock. The same session,
+/// against the same routine, with the same top set, moved from Friday evening to
+/// Saturday morning — and the Monday after is prescribed exactly what it is when
+/// the session was on time. Read through the calendar this asserts 75 against a
+/// 72.5 that the session going missing would produce.
+///
+/// This is decision 0018's third bullet, and § 12: the performance is the fact.
+#[test]
+fn a_gating_session_performed_the_next_morning_still_gates() {
+    let (prescriber, _directory, pool) = match corpus::block_on(published()) {
+        Ok(Ok(ready)) => ready,
+        Ok(Err(error)) => panic!("the corpus lands, derives and authors: {error}"),
+        Err(error) => panic!("a runtime is available: {error}"),
+    };
+
+    // 18:25 on Friday 10 July becomes 09:25 on Saturday the 11th — a day the
+    // block prescribes nothing at all.
+    let moved = run!(async {
+        sqlx::query!(
+            "UPDATE gym_workout \
+             SET started_at_utc = replace(started_at_utc, '2026-07-10T18', '2026-07-11T09') \
+             WHERE started_at_utc LIKE '2026-07-10T18%'"
+        )
+        .execute(&pool)
+        .await
+    });
+    // Without this the session stays on its Friday and the assertion below
+    // passes for the wrong reason.
+    assert_eq!(
+        moved.rows_affected(),
+        1,
+        "the Friday session is the one that moved"
+    );
+
+    let (issued, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
+    assert_eq!(issued.workout.session_role(), SessionRole::Light);
+
+    let Ok(gated) = "75".to_owned().try_into().map(domain::gym::Load::Absolute) else {
+        panic!("75 is a mass")
+    };
+    assert_eq!(
+        light,
+        Some(gated),
+        "the session was performed, so it gates — whatever day it landed on"
     );
 }
 

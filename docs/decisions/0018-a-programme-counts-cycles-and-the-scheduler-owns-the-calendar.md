@@ -33,11 +33,19 @@ cost something:
   session is on a Friday for a reason, and the document records the Friday
   rather than the reason — so a week that changes leaves the Friday silently
   wrong.
-- **`place(date)`** is used to interpret *history*: `progress` asks the calendar
-  what a past performance's date was, and drops a performance the calendar
-  refuses. A heavy session prescribed for Friday and performed on Saturday
-  morning is dropped from the ladder. The operator's rule is that the
-  performance is the only real fact, and this breaks it.
+- **`place(date)`** was used to interpret *history*: `progress` asked the
+  calendar what a past performance's date was, and dropped a performance the
+  calendar refused. A heavy session prescribed for Friday and performed on
+  Saturday morning was dropped from the ladder. The operator's rule is that the
+  performance is the only real fact, and this broke it.
+
+  **Amended 2026-08-28: this one is fixed, ahead of the rest.** A performance
+  now carries the session it fulfilled — resolved through the published id — and
+  the gate reads its role off that. It did not need the ordinal programme or the
+  allocator, and leaving it until they land meant a whole autumn block gated on
+  the day of the week a session happened to be trained on. `place` survives on
+  the prescribing path, where the question really is what a date is for; this
+  decision still deletes it there.
 
 ## Decision
 

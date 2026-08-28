@@ -327,13 +327,30 @@ the thing replacing it can place a session.
 
 ## What is left of the lifecycle, and it survives 0018
 
-#31 landed the states and the link. Three pieces remain, and all three are work
-0018 relies on rather than work it discards — it says what a performance *was*
-is decided by the session it fulfilled, which is exactly this link:
+#31 landed the states and the link. Three pieces remained, and all three are
+work 0018 relies on rather than work it discards — it says what a performance
+*was* is decided by the session it fulfilled, which is exactly this link. **One
+of the three has landed**; the other two have not:
 
-- **A performance takes its role from its prescription, not its date.** The
-  Friday session performed on Saturday morning. `place(performance.on)` is
-  wrong today and 0018 deletes it, but the replacement is this.
+- ~~**A performance takes its role from its prescription, not its date.**~~
+  **Done**, 2026-08-28. `Performance` carries the session it fulfilled —
+  resolved through the published id, which is the only thing that links the two
+  — and the gate reads the role off that rather than off
+  `place(performance.on)`. The Friday session performed on Saturday morning now
+  gates, and there is a test that moves one to prove it.
+
+  Two things the work turned up. **A programme's identity across re-authorings
+  is its name, not its row id**: re-authoring writes a new `programme` row, so
+  a link holding a `ProgrammeId` would have dropped every session prescribed
+  before the last correction — six of them for `summer-2026-front-squat`.
+  `latest_of_each` already picks by name for the same reason. And **the corpus
+  already carries its routine ids**: every July session titled Heavy names one
+  Hevy routine and every Light one names another, because the operator reused a
+  routine per role. So the fixture records one delivery per role rather than
+  inventing a link.
+
+  `Calendar::place` is untouched on the prescribing path, where asking what a
+  *date* is for is the right question. 0018 still deletes it.
 - **Withdrawal** for a published, unperformed session — delete the routine at
   the source and drop the delivery row. Needs `ON DELETE CASCADE` on
   `prescribed_item` and its children, which is why a draft is not disposable

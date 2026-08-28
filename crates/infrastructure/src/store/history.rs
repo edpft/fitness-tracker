@@ -26,8 +26,8 @@
 use std::collections::BTreeMap;
 
 use application::{
-    ExerciseHistory, LastPerformance, Performance, PerformedSetSummary, PerformedWorkoutReader,
-    StoreError,
+    ExerciseHistory, FulfilledSession, LastPerformance, Performance, PerformedSetSummary,
+    PerformedWorkoutReader, StoreError,
 };
 use domain::{
     gym::{
@@ -37,6 +37,7 @@ use domain::{
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, EventTime, LandingRecordId, Provenance},
+    prescription::{ProgrammeName, SessionRole},
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -113,6 +114,31 @@ fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
     Ok(PerformedSetSummary { load, outcome })
 }
 
+/// The prescribed session a performance names, rebuilt from its two columns.
+///
+/// Both come from the same left join, so they are present together or absent
+/// together. A half-present pair is a store something else has written to, and
+/// it is reported rather than papered over with a default role.
+fn fulfilled_of(
+    programme: Option<String>,
+    role: Option<String>,
+) -> Result<Option<FulfilledSession>, StoreError> {
+    match (programme, role) {
+        (Some(programme), Some(role)) => Ok(Some(FulfilledSession {
+            programme: ProgrammeName::try_from(programme).map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?,
+            role: SessionRole::try_from(role).map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?,
+        })),
+        (None, None) => Ok(None),
+        _ => Err(StoreError::Corrupt {
+            detail: "a prescribed session with only half an identity".to_owned(),
+        }),
+    }
+}
+
 /// The date part of a stored UTC instant, in the zone it was recorded against.
 ///
 /// The zone is on the row, so this resolves through it rather than assuming the
@@ -155,6 +181,8 @@ impl ExerciseHistory for SqliteExerciseHistory {
             r#"
             SELECT w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.landing_record_id AS "landed_as!: i64",
+                   prescriber.name AS "programme: String",
+                   session.session_role AS "session_role: String",
                    s.load_kind AS "load_kind!: String", s.load_grams AS "load_grams!: i64",
                    s.outcome AS "outcome!: String", s.reps AS "reps: i64"
             FROM gym_workout AS w
@@ -163,6 +191,25 @@ impl ExerciseHistory for SqliteExerciseHistory {
               ON s.workout = w.landing_record_id
              AND s.item_position = e.item_position
              AND s.exercise_position = e.position
+            -- The published id resolved back to the session it was issued from.
+            --
+            -- **One row per reference, by construction.** A reference is the
+            -- destination's own id for a routine, so two deliveries sharing one
+            -- is not a state this store can reach -- but a join that fanned out
+            -- would duplicate every *set* of the workout, which the gate would
+            -- read as sets performed twice. `MIN(d.prescription)` makes the pick
+            -- deterministic rather than trusting that.
+            --
+            -- The programme is carried by name: re-authoring writes a new
+            -- `programme` row, and a session prescribed before the last
+            -- correction belongs to the same programme all the same.
+            LEFT JOIN (
+                SELECT d.reference AS reference, MIN(d.prescription) AS prescription
+                FROM prescription_delivery AS d
+                GROUP BY d.reference
+            ) AS link ON link.reference = w.performed_against
+            LEFT JOIN prescribed_workout AS session ON session.id = link.prescription
+            LEFT JOIN programme AS prescriber ON prescriber.id = session.programme
             WHERE e.exercise = ?
               AND s.set_kind = 'working'
               AND NOT EXISTS (
@@ -203,6 +250,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                 _ => performances.push(Performance {
                     on: day,
                     landed_as: id,
+                    fulfilled: fulfilled_of(row.programme, row.session_role)?,
                     sets: vec![summary],
                 }),
             }

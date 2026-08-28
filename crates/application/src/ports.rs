@@ -25,7 +25,7 @@ use domain::landing::{
 };
 use domain::prescription::{
     GenerationParameters, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId,
-    ProgrammeName, ProgrammeWindow, Progress, SlotId,
+    ProgrammeName, ProgrammeWindow, Progress, SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
 
@@ -547,7 +547,35 @@ pub struct Performance {
     /// Which landing record it came from. Kept so a prescription can be traced
     /// back to the observation it was derived from.
     pub landed_as: LandingRecordId,
+    /// The prescribed session this performance was against, where the record
+    /// names one.
+    ///
+    /// **The published id is the only thing that links the two.** A performance
+    /// carries the reference the destination assigned when the session was
+    /// delivered, and that reference resolves to the prescription it came from.
+    /// Nothing else does: not the date, not the exercise, not the order they
+    /// appear in.
+    ///
+    /// `None` is a session performed against no prescription of ours -- logged
+    /// freehand, or against a routine that was never delivered from here.
+    pub fulfilled: Option<FulfilledSession>,
     pub sets: Vec<PerformedSetSummary>,
+}
+
+/// The prescription a performance was performed against.
+///
+/// Two facts, because two is what reading a performance's role needs: whose
+/// session it was, and which of that programme's sessions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FulfilledSession {
+    /// The programme that prescribed it, **by name**.
+    ///
+    /// The name is a programme's identity across re-authorings and the row id
+    /// is not: re-authoring writes a new `programme` row, so a `ProgrammeId`
+    /// held here would stop matching every session prescribed before the last
+    /// correction. `latest_of_each` picks by name for the same reason.
+    pub programme: ProgrammeName,
+    pub role: SessionRole,
 }
 
 /// Enough of a set for double progression and for the gate.

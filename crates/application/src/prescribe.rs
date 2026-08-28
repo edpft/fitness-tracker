@@ -365,10 +365,25 @@ where
             if performance.on >= before {
                 continue;
             }
-            let Ok((_, role)) = programme.calendar().place(performance.on) else {
+            // **The prescription says what the performance was, not the date.**
+            // A session is this programme's gating session because this
+            // programme prescribed it as one -- which the published id records
+            // and the calendar only ever guessed at. The heavy session
+            // prescribed for Friday and performed on Saturday morning is the
+            // case that made the difference: `place` refused the Saturday and
+            // dropped it out of the ladder, and the operator's rule is that the
+            // performance is the fact.
+            //
+            // A performance naming no prescription of ours is not read. There
+            // is nothing else that could link it to a session -- not the date,
+            // which is what was wrong before.
+            let Some(fulfilled) = &performance.fulfilled else {
                 continue;
             };
-            if role != programme.gating_role() {
+            if fulfilled.programme != *programme.name() {
+                continue;
+            }
+            if fulfilled.role != programme.gating_role() {
                 continue;
             }
             if let Some(top) = top_set_of(performance) {
