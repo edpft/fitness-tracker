@@ -1125,6 +1125,57 @@ pub fn schedule(diary: &domain::schedule::Diary) {
     }
 }
 
+/// A performance read against the prescription it answers.
+///
+/// **The pairing is the first line and not a footnote.** A comparison paired by
+/// published id is a fact the record holds; one paired by date is this tool
+/// assuming the session trained that day was the one prescribed. The
+/// divergences below read identically either way, so the line saying which is
+/// what stops an assumption being read as a finding.
+pub fn comparison(comparison: &application::compare::Comparison) {
+    let weekday = comparison.prescribed_for.weekday();
+    println!("prescribed for {} ({weekday:?})", comparison.prescribed_for);
+
+    if comparison.performed_on == comparison.prescribed_for {
+        println!("performed on the day");
+    } else {
+        let performed = comparison.performed_on.weekday();
+        println!("performed on {} ({performed:?})", comparison.performed_on);
+    }
+
+    match &comparison.pairing {
+        application::compare::Pairing::Published(reference) => {
+            println!("matched by published id {reference}");
+        }
+        application::compare::Pairing::Dated => {
+            println!(
+                "matched by date — the record does not say which session this was, \
+                 so it is assumed to be the one prescribed"
+            );
+        }
+    }
+    println!();
+
+    if comparison.satisfied() {
+        println!("the session did what it was told");
+    } else {
+        let count = comparison.divergences.len();
+        let plural = if count == 1 { "" } else { "s" };
+        println!("{count} divergence{plural}");
+        for divergence in &comparison.divergences {
+            println!("  {divergence}");
+        }
+    }
+
+    if !comparison.gaps.is_empty() {
+        println!();
+        println!("what the record could not say");
+        for gap in &comparison.gaps {
+            println!("  {gap}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::derived_phrase;

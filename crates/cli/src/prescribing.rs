@@ -9,6 +9,7 @@ use std::path::Path;
 use application::{
     DiaryStore as _, GenerationParameterStore as _, PrescriptionDeliverer as _,
     ProgrammeAuthor as _, ProgrammeStore as _, WorkoutPrescriber as _,
+    compare::{Comparing, ComparisonPorts},
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
@@ -19,8 +20,8 @@ use domain::{
 };
 use infrastructure::{
     Document, HevyRoutinePreview, HevyRoutines, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteProgrammeStore, connect,
+    SqliteGenerationParameterStore, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, connect,
 };
 use jiff::civil::Date;
 
@@ -387,4 +388,34 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
     ) -> Result<(), application::StoreError> {
         Ok(())
     }
+}
+
+/// What a session did against what it was told.
+///
+/// **Reads and writes nothing.** Both halves are already in the store — the
+/// prescription because `prescribe` issued it, the performance because
+/// `normalise` derived it — so this contacts no source and records no judgement.
+pub async fn compare(
+    database: &Path,
+    zone: &OperatorZone,
+    date: Option<&str>,
+) -> Result<(), Failure> {
+    let pool = connect(database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let comparing = Comparing::new(ComparisonPorts {
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        workouts: SqlitePerformedWorkoutReader::new(pool),
+    });
+
+    let date = resolve(&programmes, zone, date).await?;
+    let comparison = comparing
+        .compare(date)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::comparison(&comparison);
+    Ok(())
 }

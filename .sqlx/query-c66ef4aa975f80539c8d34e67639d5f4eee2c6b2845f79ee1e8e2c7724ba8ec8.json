@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against!: String\"\n            FROM gym_workout AS w\n            JOIN prescription_delivery AS d ON d.reference = w.performed_against\n            WHERE d.prescription = ?\n              AND NOT EXISTS (\n                    SELECT 1\n                    FROM gym_workout AS superseding\n                    JOIN hevy_workout_landing AS later\n                        ON later.id = superseding.landing_record_id\n                    JOIN hevy_workout_landing AS this\n                        ON this.id = w.landing_record_id\n                    WHERE superseding.source_record_id = w.source_record_id\n                      AND later.serve_ordinal > this.serve_ordinal\n              )\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "landed_as!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "on_utc!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "endpoint!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "name": "event_kind!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "event_kind"
+          }
+        }
+      },
+      {
+        "name": "event_time: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "event_time"
+          }
+        }
+      },
+      {
+        "name": "performed_against!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "performed_against"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c66ef4aa975f80539c8d34e67639d5f4eee2c6b2845f79ee1e8e2c7724ba8ec8"
+}

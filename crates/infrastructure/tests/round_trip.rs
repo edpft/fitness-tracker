@@ -12,7 +12,12 @@
 //! template changed while it ran, so agreement or disagreement with it measures
 //! history rather than the model. The forward invariant — a session prescribed
 //! and then performed satisfies its prescription — is a property of sessions run
-//! on this platform, and none exist yet.
+//! on this platform.
+//!
+//! **Pairing the two is `comparison.rs`**, which asks which performance answers
+//! which prescription and reports how far apart they are. It asserts the
+//! pairing rather than the invariant, for the reason above: the corpus is what
+//! there is to pair, and what it says about the model is history.
 
 mod support;
 
