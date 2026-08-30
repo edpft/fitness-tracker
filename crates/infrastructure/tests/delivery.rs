@@ -14,8 +14,8 @@ use std::sync::{
 };
 
 use application::{
-    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, PrescribedWorkoutId,
-    PrescriptionDeliverer as _, PrescriptionDestination, ProgrammeAuthor as _,
+    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, Issuance,
+    PrescribedWorkoutId, PrescriptionDeliverer as _, PrescriptionDestination, ProgrammeAuthor as _,
     WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -38,6 +38,9 @@ use support::{corpus, programme};
 struct Counting {
     name: DestinationName,
     calls: AtomicUsize,
+    /// Counted apart from `calls`, because "was this a create or an update?" is
+    /// the question decision 0022 turns on and the store cannot answer it.
+    replacements: AtomicUsize,
     titles: Mutex<Vec<String>>,
 }
 
@@ -46,12 +49,17 @@ impl Counting {
         Ok(Self {
             name: DestinationName::try_from("hevy".to_owned())?,
             calls: AtomicUsize::new(0),
+            replacements: AtomicUsize::new(0),
             titles: Mutex::new(Vec::new()),
         })
     }
 
     fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    fn replacements(&self) -> usize {
+        self.replacements.load(Ordering::SeqCst)
     }
 }
 
@@ -80,6 +88,28 @@ impl PrescriptionDestination for Counting {
                 message: error.to_string(),
             })
     }
+
+    /// **Keeps the reference it was given**, which is what a real `PUT` does and
+    /// is the whole property under test: the operator's routine changes
+    /// contents without changing identity.
+    async fn replace(
+        &self,
+        session: &Deliverable,
+        occupying: &DeliveryReference,
+    ) -> Result<Delivered, DeliveryError> {
+        self.replacements.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut titles) = self.titles.lock() {
+            titles.push(format!(
+                "{:02} {} (replaced)",
+                session.ordinal.as_u32(),
+                session.workout.session_role()
+            ));
+        }
+        Ok(Delivered {
+            reference: occupying.clone(),
+            unexpressed: Vec::new(),
+        })
+    }
 }
 
 type Prescriber = Prescribing<
@@ -87,6 +117,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 struct Ready {
@@ -150,6 +181,7 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
                 pool.clone(),
                 "Europe/London".to_owned(),
             ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
         }),
         pool,
         zone: corpus::zone()?,
@@ -203,10 +235,7 @@ fn delivering_twice_sends_once() {
     };
 
     let first = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(
             delivering(&ready, &destination).deliver(monday()).await?,
         )
@@ -223,11 +252,16 @@ fn delivering_twice_sends_once() {
     assert_eq!(destination.calls(), 1, "the destination heard from us once");
 }
 
-/// **A reissue is a session in its own right.** § 12 keeps the superseded
-/// prescription, and the replacement is a different one — so it is delivered
-/// rather than mistaken for the session already sent.
+/// **Deriving again is not reissuing.** Since decision 0021 the ordinary run
+/// derives on every call, and a derivation that produces the same workout is the
+/// same prescription — so the daily loop can be run as often as the operator
+/// likes without a second routine appearing on their phone.
+///
+/// This is the test that would have caught the defect the decision fixes: the
+/// delivery guard is keyed on the prescription's identity, which was sound only
+/// while nothing ever re-derived.
 #[test]
-fn a_reissued_prescription_is_delivered_again() {
+fn deriving_the_same_session_again_delivers_nothing() {
     let ready = run!(ready());
     let destination = match Counting::new() {
         Ok(destination) => destination,
@@ -235,31 +269,165 @@ fn a_reissued_prescription_is_delivered_again() {
     };
 
     let first = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(
             delivering(&ready, &destination).deliver(monday()).await?,
         )
     });
 
     let second = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::Yes)
-            .await?;
-        Ok::<_, Box<dyn std::error::Error>>(
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            issued,
             delivering(&ready, &destination).deliver(monday()).await?,
+        ))
+    });
+    let (issued, delivered) = second;
+
+    assert_eq!(
+        issued.issuance,
+        Issuance::Unchanged,
+        "the record has not moved, so neither has the session"
+    );
+    assert!(!delivered.freshly_delivered);
+    assert_eq!(
+        first.reference, delivered.reference,
+        "the session already sent is the session in force"
+    );
+    assert_eq!(destination.calls(), 1, "the destination heard from us once");
+}
+
+/// **A corrected session replaces the one already delivered, in place.**
+///
+/// Decision 0022. Before it, this test asserted the opposite — that a reissue
+/// was delivered as a session of its own, under its own reference — which was
+/// the honest consequence of a destination that could only create. It left the
+/// operator two routines for one Monday and no way to delete either.
+///
+/// The programme is re-authored to start a fortnight later, which puts the same
+/// date on a different rung. That is the operator correcting a block, which is
+/// the case a reissue exists for.
+#[test]
+fn a_corrected_session_replaces_the_one_already_delivered() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let first = run!(async {
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            issued,
+            delivering(&ready, &destination).deliver(monday()).await?,
+        ))
+    });
+    let (first_issued, first_delivery) = first;
+
+    let (issued, second) = run!(async {
+        Authoring::new(
+            SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqliteGenerationParameterStore::new(ready.pool.clone()),
         )
+        .author(
+            &programme::as_programme(programme::programme_from(Date::constant(2026, 7, 20))?),
+            &programme::parameters()?,
+        )
+        .await?;
+
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            issued,
+            delivering(&ready, &destination).deliver(monday()).await?,
+        ))
     });
 
-    assert!(second.freshly_delivered, "the reissue is delivered");
-    assert_ne!(
-        first.reference, second.reference,
-        "as a session of its own, under its own reference"
+    let Issuance::Superseded { stranded, .. } = &issued.issuance else {
+        panic!(
+            "the corrected block derives a different session: {:?}",
+            issued.issuance
+        )
+    };
+    assert_eq!(
+        stranded.as_ref(),
+        Some(&first_delivery.reference),
+        "and names the delivered session it has left standing"
     );
-    assert_eq!(destination.calls(), 2);
+
+    assert!(second.freshly_delivered, "the correction is sent");
+    assert_eq!(
+        second.replaced,
+        Some(first_issued.id),
+        "as a replacement of the prescription that held the place"
+    );
+    assert_eq!(
+        first_delivery.reference, second.reference,
+        "into the same routine, so the operator has one session for the date"
+    );
+    assert_eq!(destination.calls(), 1, "one create");
+    assert_eq!(destination.replacements(), 1, "and one update");
+}
+
+/// **The place changes hands, rather than being shared.**
+///
+/// The store half of the test above, and the reason the hand-over is a delete
+/// and an insert: two prescriptions holding one reference would make a single
+/// performed workout answer for both of them, and `state_of` could not say
+/// which session was trained.
+#[test]
+fn a_replacement_moves_the_delivery_record() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let superseded = run!(async {
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        delivering(&ready, &destination).deliver(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>(issued.id)
+    });
+
+    let replacing = run!(async {
+        Authoring::new(
+            SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqliteGenerationParameterStore::new(ready.pool.clone()),
+        )
+        .author(
+            &programme::as_programme(programme::programme_from(Date::constant(2026, 7, 20))?),
+            &programme::parameters()?,
+        )
+        .await?;
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        delivering(&ready, &destination).deliver(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>(issued.id)
+    });
+
+    let rows: Vec<(i64, String)> = run!(async {
+        sqlx::query!(
+            r#"SELECT prescription AS "prescription!: i64", reference AS "reference!: String"
+               FROM prescription_delivery"#
+        )
+        .fetch_all(&ready.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| (row.prescription, row.reference))
+                .collect()
+        })
+    });
+
+    assert_eq!(rows.len(), 1, "one row, because the place was handed over");
+    assert_eq!(
+        rows[0].0,
+        replacing.as_i64(),
+        "held by the prescription in force"
+    );
+    assert_ne!(
+        rows[0].0,
+        superseded.as_i64(),
+        "and not by the one it superseded"
+    );
 }
 
 /// Nothing issued is not an error to paper over by issuing one: deriving a
@@ -297,10 +465,7 @@ fn the_reference_is_recorded_against_the_prescription() {
     };
 
     let (delivered, recorded) = run!(async {
-        let prescription = ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        let prescription = ready.prescriber.prescribe(monday()).await?;
         let delivered = delivering(&ready, &destination).deliver(monday()).await?;
 
         let store = SqlitePrescriptionDeliveryStore::new(ready.pool.clone());

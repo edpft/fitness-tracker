@@ -331,4 +331,22 @@ pub enum DeliveryError {
         destination: String,
         message: String,
     },
+
+    /// A replacement was aimed at a session the destination no longer holds.
+    ///
+    /// **Not repaired by creating one.** The store says a place is occupied and
+    /// the destination says it is not, and the two disagreeing is the fact worth
+    /// surfacing: the operator deleted the routine by hand, or it was never
+    /// there. Delivering a new one would resolve the disagreement by
+    /// overwriting the evidence of it, and would leave the store's reference
+    /// pointing at nothing either way.
+    #[error(
+        "{destination} no longer holds {reference}, which the store records as \
+         the session for {date}"
+    )]
+    Vanished {
+        destination: String,
+        reference: String,
+        date: Date,
+    },
 }

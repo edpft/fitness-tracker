@@ -17,6 +17,14 @@
 //! session that should be replaced is a new delivery while a session asked about
 //! twice is the same one. That the destination in use also cannot delete what it
 //! has been given is a happy agreement, not the reason.
+//!
+//! **What makes "a session asked about twice" true is decision 0021**, and it is
+//! worth naming because the guard below is keyed on the prescription's identity
+//! rather than on what it says. `prescribe` derives on every run; a derivation
+//! that produces the same `WorkoutShape` is not issued, so it does not get an
+//! identity, so it cannot reach this as a second delivery. Were that not so,
+//! every run of the daily loop would put another routine on the operator's
+//! phone.
 
 use domain::prescription::{DeliveryReference, SessionOrdinal};
 use jiff::{Timestamp, civil::Date};
@@ -81,35 +89,69 @@ where
             .ordinal(date)
             .ok_or(DeliveryError::NoProgramme { date })?;
 
-        // **Asked before sent.** Without this, a second invocation leaves the
-        // operator two sessions for one date and no way to tell which is in
-        // force — and the destination in use cannot delete either of them.
-        if let Some(reference) = self.ports.deliveries.reference_for(id, destination).await? {
-            return Ok(already_delivered(reference, destination.clone(), ordinal));
-        }
+        // **Asked before sent, and asked about the date rather than about this
+        // prescription** (decision 0022). Without this, a second invocation
+        // leaves the operator two sessions for one date and no way to tell
+        // which is in force.
+        let occupant = self.ports.deliveries.occupying(date, destination).await?;
 
-        let delivered = self
-            .ports
-            .destination
-            .deliver(&Deliverable {
-                workout,
-                programme: programme.name().clone(),
-                ordinal,
-            })
-            .await?;
-
-        self.ports
-            .deliveries
-            .record(id, destination, &delivered.reference, Timestamp::now())
-            .await?;
-
-        Ok(Delivery {
-            reference: delivered.reference,
-            destination: destination.clone(),
+        let session = Deliverable {
+            workout,
+            programme: programme.name().clone(),
             ordinal,
-            freshly_delivered: true,
-            unexpressed: delivered.unexpressed,
-        })
+        };
+
+        match occupant {
+            // Already there, under this very prescription. Asking twice is a
+            // question, and the destination hears nothing.
+            Some((holder, reference)) if holder == id => {
+                Ok(already_delivered(reference, destination.clone(), ordinal))
+            }
+
+            // A predecessor holds the date's place. The correction replaces what
+            // is there rather than landing beside it, and the place changes
+            // hands. Sent before recorded: a `PUT` that failed must not leave
+            // the store claiming the new session is the one on the operator's
+            // phone.
+            Some((holder, reference)) => {
+                let delivered = self.ports.destination.replace(&session, &reference).await?;
+                self.ports
+                    .deliveries
+                    .hand_over(
+                        holder,
+                        id,
+                        destination,
+                        &delivered.reference,
+                        Timestamp::now(),
+                    )
+                    .await?;
+                Ok(Delivery {
+                    reference: delivered.reference,
+                    destination: destination.clone(),
+                    ordinal,
+                    freshly_delivered: true,
+                    replaced: Some(holder),
+                    unexpressed: delivered.unexpressed,
+                })
+            }
+
+            // Nothing there. The ordinary first delivery.
+            None => {
+                let delivered = self.ports.destination.deliver(&session).await?;
+                self.ports
+                    .deliveries
+                    .record(id, destination, &delivered.reference, Timestamp::now())
+                    .await?;
+                Ok(Delivery {
+                    reference: delivered.reference,
+                    destination: destination.clone(),
+                    ordinal,
+                    freshly_delivered: true,
+                    replaced: None,
+                    unexpressed: delivered.unexpressed,
+                })
+            }
+        }
     }
 }
 
@@ -130,6 +172,7 @@ const fn already_delivered(
         destination,
         ordinal,
         freshly_delivered: false,
+        replaced: None,
         unexpressed: Vec::new(),
     }
 }

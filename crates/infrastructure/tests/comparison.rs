@@ -31,6 +31,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 type Comparer = Comparing<SqlitePrescribedWorkoutStore, SqlitePerformedWorkoutReader>;
@@ -53,6 +54,7 @@ async fn ready() -> Fallible<(Prescriber, Comparer, tempfile::TempDir, SqlitePoo
         programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     });
     let comparer = Comparing::new(ComparisonPorts {
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
@@ -93,7 +95,7 @@ macro_rules! attempt {
 
 /// Issue the session for a date, and record what the destination called it.
 fn publish(prescriber: &Prescriber, pool: &SqlitePool, date: Date, reference: &str) {
-    let issued = run!(prescriber.prescribe(date, application::Reissue::No));
+    let issued = run!(prescriber.prescribe(date));
     let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
     run!(async {
         deliveries
@@ -159,7 +161,7 @@ fn a_published_session_is_compared_through_its_id() {
 #[test]
 fn an_unpublished_session_is_compared_by_the_day() {
     let (prescriber, comparer, _directory, _pool) = ready!();
-    run!(prescriber.prescribe(GATING, application::Reissue::No));
+    run!(prescriber.prescribe(GATING));
 
     let comparison = run!(comparer.compare(GATING));
 
@@ -176,7 +178,7 @@ fn an_unpublished_session_is_compared_by_the_day() {
 #[test]
 fn two_sessions_on_a_day_are_refused_rather_than_guessed_between() {
     let (prescriber, comparer, _directory, pool) = ready!();
-    run!(prescriber.prescribe(GATING, application::Reissue::No));
+    run!(prescriber.prescribe(GATING));
 
     // The Monday after, moved onto the Friday, so the day holds two sessions.
     let moved = run!(async {
@@ -220,7 +222,7 @@ fn a_prescribed_session_nobody_performed_is_refused() {
 
     // Programmed, inside the block, and absent from the corpus.
     let untrained = Date::constant(2026, 7, 24);
-    run!(prescriber.prescribe(untrained, application::Reissue::No));
+    run!(prescriber.prescribe(untrained));
 
     match attempt!(comparer.compare(untrained)) {
         Err(application::ComparisonError::NotPerformed { date }) => assert_eq!(date, untrained),

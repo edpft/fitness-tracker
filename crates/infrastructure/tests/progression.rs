@@ -38,6 +38,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
@@ -99,6 +100,7 @@ async fn assembled() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
         programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     });
     Ok((prescriber, directory, pool))
 }
@@ -110,7 +112,7 @@ async fn deliver(
     date: Date,
     reference: &str,
 ) -> Fallible<()> {
-    let issued = prescriber.prescribe(date, application::Reissue::No).await?;
+    let issued = prescriber.prescribe(date).await?;
     let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
     deliveries
         .record(
@@ -149,7 +151,7 @@ macro_rules! run {
 /// The primary's top set in an issued session.
 macro_rules! top_set {
     ($prescriber:expr, $date:expr) => {{
-        let issued = run!($prescriber.prescribe($date, application::Reissue::No));
+        let issued = run!($prescriber.prescribe($date));
         let Some(PrescribedItem::Exercise { exercise, .. }) =
             issued.workout.shape().item_for(SlotId::KneeDominant)
         else {

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO prescribed_workout (\n                   programme, issued_for, zone, session_role, week_kind, week_index,\n                   anchor_grams, anchor_provenance, anchor_from,\n                   parameters_authored_at, issued_at\n               )\n               SELECT programme, issued_for, zone, session_role, week_kind, week_index,\n                      anchor_grams, anchor_provenance, anchor_from,\n                      parameters_authored_at, '2099-01-01T00:00:00Z'\n               FROM prescribed_workout WHERE id = ?\n               RETURNING id AS \"id!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b85bb95a6a26d7a5279a2e83992b97204ab39758489584a9eef93f33fd28fc04"
+}

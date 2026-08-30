@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE gym_workout SET performed_against = 'routine-5' WHERE landing_record_id = (SELECT MIN(landing_record_id) FROM gym_workout)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "5c2e49e23d7020a554a59472b149e0eb6316912804b61bbb949c0221eafd285a"
+}

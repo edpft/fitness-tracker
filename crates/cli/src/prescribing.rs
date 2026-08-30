@@ -177,7 +177,8 @@ pub async fn standing(
         history: SqliteExerciseHistory::new(pool.clone()),
         programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool, zone.id().to_owned()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
     });
 
     // **A date, because programmes succeed one another** (decision 0012). With
@@ -207,7 +208,6 @@ pub async fn prescribe(
     database: &Path,
     zone: &OperatorZone,
     date: Option<&str>,
-    reissue: application::Reissue,
 ) -> Result<(), Failure> {
     let pool = connect(database)
         .await
@@ -219,11 +219,12 @@ pub async fn prescribe(
         programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     });
 
     let date = resolve(&programmes, zone, date).await?;
     let issued = prescriber
-        .prescribe(date, reissue)
+        .prescribe(date)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -379,9 +380,38 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
         Ok(None)
     }
 
+    /// **Nothing occupies anything, so a preview always renders a first
+    /// delivery.** Answering otherwise would send the preview down the
+    /// replacement path and have it print what a `PUT` would send — which is
+    /// the same bytes, but aimed at a routine this run has no business naming.
+    async fn occupying(
+        &self,
+        _date: jiff::civil::Date,
+        _destination: &application::DestinationName,
+    ) -> Result<
+        Option<(
+            application::PrescribedWorkoutId,
+            application::DeliveryReference,
+        )>,
+        application::StoreError,
+    > {
+        Ok(None)
+    }
+
     async fn record(
         &self,
         _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+        _reference: &application::DeliveryReference,
+        _at: jiff::Timestamp,
+    ) -> Result<(), application::StoreError> {
+        Ok(())
+    }
+
+    async fn hand_over(
+        &self,
+        _from: application::PrescribedWorkoutId,
+        _to: application::PrescribedWorkoutId,
         _destination: &application::DestinationName,
         _reference: &application::DeliveryReference,
         _at: jiff::Timestamp,

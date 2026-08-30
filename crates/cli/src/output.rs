@@ -769,11 +769,17 @@ fn derived_phrase(
 
 /// The prescription, as a session to train from.
 pub fn prescription(issued: &application::Prescription) {
+    use application::Issuance;
+
     let workout = &issued.workout;
-    let lead = if issued.freshly_issued {
-        "prescribing"
-    } else {
-        "already issued for"
+    // **What the derivation found, in the first three words.** The session below
+    // is the same either way; what the operator cannot see by reading it is
+    // whether it has just changed under them.
+    let lead = match issued.issuance {
+        Issuance::Issued => "prescribing",
+        Issuance::Superseded { .. } => "re-prescribing",
+        Issuance::Unchanged => "unchanged for",
+        Issuance::Performed { .. } => "already performed",
     };
     let weekday = workout.issued_for().weekday();
     println!(
@@ -829,10 +835,37 @@ pub fn prescription(issued: &application::Prescription) {
     }
 
     println!();
-    if issued.freshly_issued {
-        println!("issued as prescription {}", issued.id);
-    } else {
-        println!("already issued as prescription {}", issued.id);
+    match &issued.issuance {
+        Issuance::Issued => println!("issued as prescription {}", issued.id),
+        Issuance::Superseded { previous, stranded } => {
+            println!(
+                "issued as prescription {}, superseding {previous}",
+                issued.id
+            );
+            // **Since decision 0022 this is stale rather than stranded.** The
+            // destination still holds the superseded session, and `deliver`
+            // will replace it in place rather than landing a second one beside
+            // it — so what the operator needs is the instruction, not a warning
+            // about tidying up by hand.
+            if let Some(reference) = stranded {
+                println!(
+                    "  {reference} at the destination is still the superseded session; \
+                     deliver to replace it"
+                );
+            }
+        }
+        // The derivation ran and produced this. Saying so is the whole value of
+        // the line: "unchanged" is a statement about the record having been
+        // read, not about it having been skipped.
+        Issuance::Unchanged => println!(
+            "unchanged since prescription {} — the record has moved on, the session has not",
+            issued.id
+        ),
+        Issuance::Performed { reference } => println!(
+            "prescription {} was performed as {reference}, and a performed session is not \
+             re-derived",
+            issued.id
+        ),
     }
 }
 
@@ -928,15 +961,22 @@ fn weight(load: domain::gym::Load) -> String {
 /// feature reads, and because an operator who cannot find the routine needs
 /// something to search for.
 pub fn delivery(delivered: &application::Delivery) {
-    let lead = if delivered.freshly_delivered {
-        "delivered to"
-    } else {
-        "already delivered to"
+    let lead = match (delivered.freshly_delivered, delivered.replaced) {
+        (true, Some(_)) => "replaced at",
+        (true, None) => "delivered to",
+        (false, _) => "already delivered to",
     };
     println!(
         "{lead} {} as session {} ({})",
         delivered.destination, delivered.ordinal, delivered.reference
     );
+    // **Said out loud, because the operator's phone changed under them.** The
+    // reference is unchanged, so the routine they may already have open now
+    // instructs something else — and a line that reports only the identity
+    // would read as though nothing had happened.
+    if let Some(previous) = delivered.replaced {
+        println!("  in place of prescription {previous}, which it supersedes");
+    }
     unexpressed(&delivered.unexpressed);
 }
 

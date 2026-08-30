@@ -21,9 +21,10 @@ use domain::{
     prescription::{
         Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
         Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, Programme, ProgrammeId, Progress, RECENT_WEEKS,
-        SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
-        WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max, rested,
+        PrescribedSuperset, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId, Progress,
+        RECENT_WEEKS, SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind,
+        WeekPlan, WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
+        rested,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -31,27 +32,34 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::PrescriptionError,
     ports::{
-        Authored, ExerciseHistory, GenerationParameterStore, LadderStanding, LastPerformance,
-        Performance, PrescribedWorkoutStore, Prescription, ProgrammeAuthor, ProgrammeStore,
-        Reissue, UnderivableReason, UnderivableSlot, WorkoutPrescriber,
+        Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
+        LastPerformance, Performance, PrescribedWorkoutStore, Prescription, PrescriptionLifecycle,
+        ProgrammeAuthor, ProgrammeStore, UnderivableReason, UnderivableSlot, WorkoutPrescriber,
     },
 };
 
 /// Everything generation needs from the outside.
-pub struct PrescriptionPorts<H, P, G, S> {
+///
+/// **`lifecycle` is here because a performed session is not re-derived.** The
+/// use case cannot tell that from the prescription — a performed one and a
+/// drafted one are the same row — so it asks, and asking is a port. It is the
+/// same port `deliver` and the lifecycle report already use rather than a
+/// second answer to one question.
+pub struct PrescriptionPorts<H, P, G, S, L> {
     pub history: H,
     pub programmes: P,
     pub parameters: G,
     pub prescriptions: S,
+    pub lifecycle: L,
 }
 
 /// The use case.
-pub struct Prescribing<H, P, G, S> {
-    ports: PrescriptionPorts<H, P, G, S>,
+pub struct Prescribing<H, P, G, S, L> {
+    ports: PrescriptionPorts<H, P, G, S, L>,
 }
 
-impl<H, P, G, S> Prescribing<H, P, G, S> {
-    pub const fn new(ports: PrescriptionPorts<H, P, G, S>) -> Self {
+impl<H, P, G, S, L> Prescribing<H, P, G, S, L> {
+    pub const fn new(ports: PrescriptionPorts<H, P, G, S, L>) -> Self {
         Self { ports }
     }
 }
@@ -83,12 +91,13 @@ impl Derived {
     }
 }
 
-impl<H, P, G, S> WorkoutPrescriber for Prescribing<H, P, G, S>
+impl<H, P, G, S, L> WorkoutPrescriber for Prescribing<H, P, G, S, L>
 where
     H: ExerciseHistory + Sync,
     P: ProgrammeStore + Sync,
     G: GenerationParameterStore + Sync,
     S: PrescribedWorkoutStore + Sync,
+    L: PrescriptionLifecycle + Sync,
 {
     async fn standing(&self, on: Date) -> Result<LadderStanding, PrescriptionError> {
         let Some((programme_id, programme)) = self.ports.programmes.on(on).await? else {
@@ -109,34 +118,121 @@ where
         })
     }
 
-    async fn prescribe(
-        &self,
-        date: Date,
-        reissue: Reissue,
-    ) -> Result<Prescription, PrescriptionError> {
-        // Read what was issued before doing any work. Asking twice for one date
-        // returns what was already issued rather than a second prescription, and
-        // the derived ladder position means there is no counter that could have
-        // advanced in between either.
+    async fn prescribe(&self, date: Date) -> Result<Prescription, PrescriptionError> {
+        // What is in force, and what has become of it. Read before any work,
+        // because both answers decide what the derivation below is allowed to
+        // do with its result.
+        let in_force = self.ports.prescriptions.issued_for(date).await?;
+        let state = match &in_force {
+            Some((id, _)) => Some(self.ports.lifecycle.state_of(*id).await?),
+            None => None,
+        };
+
+        // **A performed session stands, and is not derived at all.** Not
+        // because superseding it would lose it — § 12 keeps every issue — but
+        // because `compare` reads the prescription in force for a date, and
+        // replacing it would leave the performance measured against a session
+        // that was never trained. The record of what was prescribed is part of
+        // what the performance means.
         //
-        // **Unless reissuing was asked for**, which is the answer to a
-        // prescription derived from a programme that has since been corrected.
-        // It is asked for rather than inferred: "the programme changed" cannot
-        // be told from "the parameters changed" or from nothing having changed,
-        // and silently re-deriving a session the operator may already be
-        // halfway through is worse than making them say so.
-        if reissue == Reissue::No
-            && let Some((id, workout)) = self.ports.prescriptions.issued_for(date).await?
+        // Returning *before* the derivation rather than discarding one after it
+        // is the point: a session that cannot be replaced is not a candidate
+        // for replacement, and deriving one to throw away would imply it was.
+        if let (Some((id, workout)), Some(PrescriptionState::Performed { reference })) =
+            (&in_force, &state)
         {
             return Ok(Prescription {
-                id,
-                workout,
-                freshly_issued: false,
+                id: *id,
+                workout: workout.clone(),
+                issuance: Issuance::Performed {
+                    reference: reference.clone(),
+                },
                 history_through: self.ports.history.newest_performance().await?,
                 underivable: Vec::new(),
             });
         }
 
+        let (workout, underivable) = self.derive(date).await?;
+
+        // **The shape decides whether this is the same workout.** Not the whole
+        // of `PrescribedWorkout`, which also carries when it was issued, which
+        // programme version derived it and under which parameters — every one of
+        // those a fact *about* the issuing rather than part of the session. A
+        // superseded programme that produces the same exercises, in the same
+        // order, with the same sets, reps and loads has produced the same
+        // workout, and issuing it again would put a second session in front of
+        // the operator to be delivered and trained.
+        //
+        // So an identical derivation writes nothing and the standing
+        // prescription is returned as it stands — with its own identity, which
+        // is what any delivery already made is recorded against.
+        if let Some((previous, standing)) = in_force {
+            if standing.shape() == workout.shape() {
+                return Ok(Prescription {
+                    id: previous,
+                    workout: standing,
+                    issuance: Issuance::Unchanged,
+                    history_through: self.ports.history.newest_performance().await?,
+                    underivable,
+                });
+            }
+
+            let id = self.ports.prescriptions.issue(&workout).await?;
+            let history_through = self.ports.history.newest_performance().await?;
+            return Ok(Prescription {
+                id,
+                workout,
+                issuance: Issuance::Superseded {
+                    previous,
+                    // A superseded prescription that had been delivered leaves
+                    // that session at the destination until the next delivery
+                    // replaces it in place (decision 0022). Reported rather
+                    // than swallowed: between this command and `deliver` the
+                    // operator's phone still holds the session they are no
+                    // longer meant to train.
+                    stranded: match state {
+                        Some(PrescriptionState::Published { reference }) => Some(reference),
+                        Some(PrescriptionState::Drafted | PrescriptionState::Performed { .. })
+                        | None => None,
+                    },
+                },
+                history_through,
+                underivable,
+            });
+        }
+
+        let id = self.ports.prescriptions.issue(&workout).await?;
+        let history_through = self.ports.history.newest_performance().await?;
+
+        Ok(Prescription {
+            id,
+            workout,
+            issuance: Issuance::Issued,
+            history_through,
+            underivable,
+        })
+    }
+}
+
+impl<H, P, G, S, L> Prescribing<H, P, G, S, L>
+where
+    H: ExerciseHistory + Sync,
+    P: ProgrammeStore + Sync,
+    G: GenerationParameterStore + Sync,
+    S: PrescribedWorkoutStore + Sync,
+    L: PrescriptionLifecycle + Sync,
+{
+    /// Derive the session the programme, the parameters and the record produce
+    /// for a date.
+    ///
+    /// **Separate from `prescribe` because deriving and deciding what to do with
+    /// the result are different questions.** This one is a pure function of the
+    /// store's contents; the caller decides whether what comes out is worth
+    /// writing down.
+    async fn derive(
+        &self,
+        date: Date,
+    ) -> Result<(PrescribedWorkout, Vec<UnderivableSlot>), PrescriptionError> {
         let Some((programme_id, programme)) = self.ports.programmes.on(date).await? else {
             return Err(PrescriptionError::NoProgramme { date });
         };
@@ -220,26 +316,9 @@ where
             Timestamp::now(),
         );
 
-        let id = self.ports.prescriptions.issue(&workout).await?;
-        let history_through = self.ports.history.newest_performance().await?;
-
-        Ok(Prescription {
-            id,
-            workout,
-            freshly_issued: true,
-            history_through,
-            underivable,
-        })
+        Ok((workout, underivable))
     }
-}
 
-impl<H, P, G, S> Prescribing<H, P, G, S>
-where
-    H: ExerciseHistory + Sync,
-    P: ProgrammeStore + Sync,
-    G: GenerationParameterStore + Sync,
-    S: PrescribedWorkoutStore + Sync,
-{
     /// Where the primary's progression stands, walked out of the record.
     ///
     /// **Only the gating role gates** (US3-10). A miss on the other session says

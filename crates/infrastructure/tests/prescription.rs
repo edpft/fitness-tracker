@@ -6,7 +6,7 @@
 mod support;
 
 use application::{
-    ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
+    ExtractionRunLog as _, Issuance, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
     UnderivableReason, WorkoutNormaliser, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -16,7 +16,7 @@ use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
     SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -27,6 +27,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 /// A store holding the corpus, derived, with the fixture programme authored.
@@ -72,7 +73,11 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
             history: SqliteExerciseHistory::new(pool.clone()),
             programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
         }),
         directory,
     ))
@@ -107,9 +112,9 @@ const fn monday() -> Date {
 #[test]
 fn a_workout_is_issued_in_fatigue_order() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
-    assert!(issued.freshly_issued);
+    assert_eq!(issued.issuance, Issuance::Issued);
     assert_eq!(issued.workout.session_role(), SessionRole::Light);
     assert!(matches!(issued.workout.week(), WeekKind::Climbing(_)));
 
@@ -136,7 +141,7 @@ fn a_workout_is_issued_in_fatigue_order() {
 #[test]
 fn the_upper_pair_is_supersetted_and_the_primary_is_not() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     let Some(primary) = issued.workout.shape().item_for(SlotId::KneeDominant) else {
         panic!("the primary slot is issued")
@@ -158,7 +163,7 @@ fn the_upper_pair_is_supersetted_and_the_primary_is_not() {
 #[test]
 fn the_hypertrophy_supersets_pair_antagonists() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     for (first, second) in [
         (SlotId::Biceps, SlotId::Triceps),
@@ -178,7 +183,7 @@ fn the_hypertrophy_supersets_pair_antagonists() {
 #[test]
 fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     let Some(PrescribedItem::Exercise { exercise, .. }) =
         issued.workout.shape().item_for(SlotId::KneeDominant)
@@ -224,7 +229,7 @@ fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
 #[test]
 fn mobility_is_held_not_progressed() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     for (slot, holds) in [
         (SlotId::HandstandHold, 1),
@@ -280,7 +285,7 @@ fn mobility_is_held_not_progressed() {
 #[test]
 fn a_slot_with_no_history_is_reported_rather_than_guessed() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     let reported: Vec<(SlotId, UnderivableReason)> = issued
         .underivable
@@ -310,7 +315,7 @@ fn a_slot_with_no_history_is_reported_rather_than_guessed() {
 #[test]
 fn the_static_slots_re_issue_the_last_performance() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     let Some(plyometric) = issued.workout.shape().item_for(SlotId::Plyometric) else {
         panic!("the plyometric slot is issued")
@@ -324,15 +329,26 @@ fn the_static_slots_re_issue_the_last_performance() {
 }
 
 /// FR-010: asking twice for one date issues once.
+///
+/// **The second call derives.** It used to short-circuit on finding a
+/// prescription already issued for the date, which made this test pass for a
+/// reason that had nothing to do with the sessions agreeing. Now the derivation
+/// runs both times and the second one is discarded because it produced the same
+/// workout — which is the property FR-010 was after, and the one that keeps a
+/// second session off the operator's phone.
 #[test]
 fn asking_twice_issues_once() {
     let (prescriber, _directory) = prescriber!();
 
-    let first = run!(prescriber.prescribe(monday(), application::Reissue::No));
-    let second = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let first = run!(prescriber.prescribe(monday()));
+    let second = run!(prescriber.prescribe(monday()));
 
-    assert!(first.freshly_issued);
-    assert!(!second.freshly_issued, "the second read is not a new issue");
+    assert_eq!(first.issuance, Issuance::Issued);
+    assert_eq!(
+        second.issuance,
+        Issuance::Unchanged,
+        "the second derivation produced the same workout, so nothing was written"
+    );
     assert_eq!(first.id, second.id);
     assert_eq!(
         first.workout.shape(),
@@ -345,7 +361,7 @@ fn asking_twice_issues_once() {
 #[test]
 fn the_prescription_reports_its_history_horizon() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(monday(), application::Reissue::No));
+    let issued = run!(prescriber.prescribe(monday()));
 
     let Some(through) = issued.history_through else {
         panic!("the corpus is not empty")
@@ -359,7 +375,7 @@ fn a_wednesday_is_declined() {
     let (prescriber, _directory) = prescriber!();
     let wednesday = Date::constant(2026, 8, 12);
 
-    match corpus::block_on(prescriber.prescribe(wednesday, application::Reissue::No)) {
+    match corpus::block_on(prescriber.prescribe(wednesday)) {
         Ok(Err(application::PrescriptionError::NotScheduled(reason))) => {
             let message = reason.to_string();
             assert!(
@@ -378,8 +394,8 @@ fn a_wednesday_is_declined() {
 fn the_heavy_session_is_heavier_than_the_light_one() {
     let (prescriber, _directory) = prescriber!();
 
-    let light = run!(prescriber.prescribe(Date::constant(2026, 8, 10), application::Reissue::No));
-    let heavy = run!(prescriber.prescribe(Date::constant(2026, 8, 14), application::Reissue::No));
+    let light = run!(prescriber.prescribe(Date::constant(2026, 8, 10)));
+    let heavy = run!(prescriber.prescribe(Date::constant(2026, 8, 14)));
 
     let top_set = |issued: &application::Prescription| -> u64 {
         let Some(PrescribedItem::Exercise { exercise, .. }) =

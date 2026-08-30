@@ -34,7 +34,7 @@ use domain::{
 };
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePerformedWorkoutReader,
-    SqlitePrescribedWorkoutStore, SqliteProgrammeStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteProgrammeStore,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -45,6 +45,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
@@ -57,7 +58,8 @@ async fn ready() -> Fallible<(SqlitePerformedWorkoutReader, Prescriber, tempfile
         history: SqliteExerciseHistory::new(pool.clone()),
         programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
     });
     Ok((reader, prescriber, directory))
 }
