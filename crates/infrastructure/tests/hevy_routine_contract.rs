@@ -11,7 +11,7 @@
 
 mod support;
 
-use application::{Deliverable, PrescriptionDestination as _};
+use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{
     gym::{
         Duration, Kg, Load, RepCount, SignedKg,
@@ -175,6 +175,143 @@ fn assistance_is_sent_as_the_assisted_template() {
         "the programme's existing folder is found rather than duplicated"
     );
     assert_eq!(reference, "b459cba5-cd6d-463c-abd6-54f8eafcadcb");
+}
+
+/// **A replacement is a `PUT` to the routine's own path, carrying the same body.**
+///
+/// Decision 0022. The two things a stub cannot tell us and a live run would find
+/// the hard way: that the reference goes into the URL rather than the payload,
+/// and that `PutRoutinesRequestBody` really does take what `POST` takes — the
+/// pinned document says the two schemas are identical field for field, and this
+/// is what holds us to it.
+#[test]
+fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
+    let sent = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        // The update endpoint answers with the routine itself, not with a list
+        // containing it. Mirroring that is the point of the separate type.
+        Mock::given(method("PUT"))
+            .and(path("/v1/routines/b459cba5-cd6d-463c-abd6-54f8eafcadcb"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb",
+                "title": "07 Light",
+                "folder_id": 42,
+                "exercises": []
+            })))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let occupying =
+            DeliveryReference::try_from("b459cba5-cd6d-463c-abd6-54f8eafcadcb".to_owned())
+                .expect("the reference is valid");
+        let delivered = hevy
+            .replace(&session().expect("the fixture session builds"), &occupying)
+            .await
+            .expect("the session is replaced");
+
+        let requests = server
+            .received_requests()
+            .await
+            .expect("the mock recorded its requests");
+        let put = requests
+            .iter()
+            .find(|request| request.method == wiremock::http::Method::PUT)
+            .expect("a routine was put");
+        let body: Value = serde_json::from_slice(&put.body).expect("the request body is json");
+
+        (
+            put.url.path().to_owned(),
+            body,
+            delivered.reference.to_string(),
+        )
+    })
+    .expect("the runtime runs");
+
+    let (path_sent, body, reference) = sent;
+    assert_eq!(
+        path_sent, "/v1/routines/b459cba5-cd6d-463c-abd6-54f8eafcadcb",
+        "the reference addresses the routine rather than travelling in the body"
+    );
+    assert!(
+        body["routine"]["id"].is_null(),
+        "and is not repeated inside it"
+    );
+
+    // The same body assertions as the create path, because it is the same body.
+    let exercises = body["routine"]["exercises"]
+        .as_array()
+        .expect("the routine carries exercises");
+    assert_eq!(exercises[0]["exercise_template_id"], "E9E4089F");
+    assert_eq!(exercises[0]["sets"][0]["weight_kg"], 7);
+    assert_eq!(body["routine"]["title"], "07 Light");
+    assert_eq!(body["routine"]["folder_id"], 42);
+
+    assert_eq!(
+        reference, "b459cba5-cd6d-463c-abd6-54f8eafcadcb",
+        "the place keeps its identity across a replacement"
+    );
+}
+
+/// **A routine the source no longer holds is refused, not recreated.**
+///
+/// Hevy retires the id of anything removed by hand, so a 404 here means the
+/// operator deleted the routine. Creating a new one would resolve the
+/// disagreement between store and app by destroying the evidence of it.
+#[test]
+fn a_replacement_of_a_routine_that_is_gone_is_refused() {
+    let refused = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/routines/gone"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let occupying =
+            DeliveryReference::try_from("gone".to_owned()).expect("the reference is valid");
+        let outcome = hevy
+            .replace(&session().expect("the fixture session builds"), &occupying)
+            .await;
+
+        let posted = server
+            .received_requests()
+            .await
+            .expect("the mock recorded its requests")
+            .iter()
+            .any(|request| request.method == wiremock::http::Method::POST);
+
+        (format!("{outcome:?}"), posted)
+    })
+    .expect("the runtime runs");
+
+    let (outcome, posted) = refused;
+    assert!(
+        outcome.contains("Vanished"),
+        "a routine that is gone is its own answer: {outcome}"
+    );
+    assert!(!posted, "and nothing was created in its place");
 }
 
 /// A programme with no folder yet gets one, and the session goes into it.

@@ -380,9 +380,38 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
         Ok(None)
     }
 
+    /// **Nothing occupies anything, so a preview always renders a first
+    /// delivery.** Answering otherwise would send the preview down the
+    /// replacement path and have it print what a `PUT` would send — which is
+    /// the same bytes, but aimed at a routine this run has no business naming.
+    async fn occupying(
+        &self,
+        _date: jiff::civil::Date,
+        _destination: &application::DestinationName,
+    ) -> Result<
+        Option<(
+            application::PrescribedWorkoutId,
+            application::DeliveryReference,
+        )>,
+        application::StoreError,
+    > {
+        Ok(None)
+    }
+
     async fn record(
         &self,
         _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+        _reference: &application::DeliveryReference,
+        _at: jiff::Timestamp,
+    ) -> Result<(), application::StoreError> {
+        Ok(())
+    }
+
+    async fn hand_over(
+        &self,
+        _from: application::PrescribedWorkoutId,
+        _to: application::PrescribedWorkoutId,
         _destination: &application::DestinationName,
         _reference: &application::DeliveryReference,
         _at: jiff::Timestamp,

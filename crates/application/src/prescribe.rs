@@ -185,11 +185,11 @@ where
                 issuance: Issuance::Superseded {
                     previous,
                     // A superseded prescription that had been delivered leaves
-                    // that session behind at the destination, where nothing here
-                    // can reach it — withdrawal is not built and the destination
-                    // in use cannot be asked to replace what it holds. Reported
-                    // rather than swallowed, because the operator is the only
-                    // one who can go and remove it.
+                    // that session at the destination until the next delivery
+                    // replaces it in place (decision 0022). Reported rather
+                    // than swallowed: between this command and `deliver` the
+                    // operator's phone still holds the session they are no
+                    // longer meant to train.
                     stranded: match state {
                         Some(PrescriptionState::Published { reference }) => Some(reference),
                         Some(PrescriptionState::Drafted | PrescriptionState::Performed { .. })

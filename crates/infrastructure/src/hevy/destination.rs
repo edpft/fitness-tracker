@@ -5,17 +5,32 @@
 //! rendering ([`super::routine`]) and the identity the source gives what it is
 //! handed. That identity is the only thing that crosses back over the port.
 //!
-//! ## Created, never updated
+//! ## Created, then updated in place
 //!
-//! Nothing here calls `PUT`. An issued prescription is written once and never
-//! rewritten (§ 12), a reissue is a different prescription, and so every
-//! delivery is a `POST`. That the source also publishes no `DELETE` — for a
-//! routine or for a folder — and retires the id of anything removed by hand is
-//! an agreement with that rule rather than the reason for it. The consequence is
-//! the one worth having: a routine id names exactly one issued session, which is
-//! what makes it a key a performed workout can later be matched on. The record
-//! shows the alternative — of the 8 landed workouts carrying a routine id, 5
-//! carry the *same* one, because that routine was rewritten in place.
+//! **Decision 0022 revised this.** It used to say that nothing here calls `PUT`:
+//! an issued prescription is written once, a reissue is a different
+//! prescription, so every delivery was a `POST`. What that reasoning did not
+//! survive was decision 0021 making re-derivation the ordinary case — a
+//! corrected session then landed *beside* the one it corrected, and since the
+//! source publishes no `DELETE`, the operator was left to tidy up by hand.
+//!
+//! So a routine id names a **place** rather than an issue: whichever
+//! prescription for that date was last delivered into it. `deliver` creates,
+//! `replace` updates, and a date has one routine however many times it is
+//! corrected.
+//!
+//! What that costs is the property the old rule was protecting — a routine id no
+//! longer names exactly one issued session, and the record shows why that
+//! mattered: of the 8 landed workouts carrying a routine id, 5 carry the *same*
+//! one, because that routine was rewritten in place. The answer is that the id
+//! is no longer what pairs a performance with its prescription. The store hands
+//! a place over rather than sharing it, so exactly one prescription holds a
+//! reference at any time, and a workout naming it names that one.
+//!
+//! The source still publishes no `DELETE`, for a routine or for a folder, and
+//! still retires the id of anything removed by hand. `replace` therefore fails
+//! rather than falling back to a `POST` when the routine has gone: see
+//! [`DeliveryError::Vanished`].
 //!
 //! ## The folder
 //!
@@ -104,6 +119,13 @@ impl HevyRoutines {
 
     fn url(&self, endpoint: &str) -> String {
         format!("{}{endpoint}", self.base_url)
+    }
+
+    /// Where one routine lives. The reference is the source's own id and goes
+    /// back unaltered — it was opaque on the way in and is opaque on the way
+    /// out.
+    fn routine_endpoint(reference: &DeliveryReference) -> String {
+        format!("{ROUTINES_ENDPOINT}/{reference}")
     }
 
     /// The folder for a programme: the one with that title, or a new one.
@@ -263,6 +285,60 @@ impl PrescriptionDestination for HevyRoutines {
             unexpressed: rendered.unexpressed,
         })
     }
+
+    async fn replace(
+        &self,
+        session: &Deliverable,
+        occupying: &DeliveryReference,
+    ) -> Result<Delivered, DeliveryError> {
+        let folder = self.folder_for(session.programme.as_str()).await?;
+        let rendered = render(session, folder);
+
+        // **The same body as `deliver` sends.** `PutRoutinesRequestBody` and
+        // `PostRoutinesRequestBody` are the same object field for field, down to
+        // the exercise and set schemas, so the rendering is shared rather than
+        // mirrored — a second renderer would be two places for one decision
+        // about what a session looks like in the app.
+        let response = self
+            .client()?
+            .put(self.url(&Self::routine_endpoint(occupying)))
+            .header("api-key", &self.api_key)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Self::encode(&CreateRoutine {
+                routine: rendered.body,
+            })?)
+            .send()
+            .await
+            .map_err(|error| Self::unreachable(&error.to_string()))?;
+
+        // A routine that is not there is its own answer rather than a transport
+        // failure: the store believes the operator has this session and the app
+        // says otherwise, and only they can say which is right.
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(DeliveryError::Vanished {
+                destination: NAME.to_owned(),
+                reference: occupying.to_string(),
+                date: session.workout.issued_for(),
+            });
+        }
+
+        // **And the reply is a bare routine, not a list.** The create endpoint
+        // wraps its answer in an array; the update endpoint does not. Mirroring
+        // the wire rather than tidying it is the same choice made twice.
+        let updated: UpdatedRoutine = self.read(response).await?;
+
+        let reference = DeliveryReference::try_from(updated.id).map_err(|error| {
+            DeliveryError::Unidentifiable {
+                destination: NAME.to_owned(),
+                message: error.to_string(),
+            }
+        })?;
+
+        Ok(Delivered {
+            reference,
+            unexpressed: rendered.unexpressed,
+        })
+    }
 }
 
 /// The same rendering, stopped before it is sent.
@@ -335,6 +411,23 @@ impl PrescriptionDestination for HevyRoutinePreview {
             unexpressed: rendered.unexpressed,
         })
     }
+
+    /// **A preview renders the same body whichever act it stands in for.** What
+    /// the operator is checking is what the session says, and `PUT` and `POST`
+    /// send byte-identical bodies — so replacing shows exactly what replacing
+    /// would send, and the reference it hands back is the one it was aimed at
+    /// rather than a fresh invention.
+    async fn replace(
+        &self,
+        session: &Deliverable,
+        occupying: &DeliveryReference,
+    ) -> Result<Delivered, DeliveryError> {
+        let delivered = self.deliver(session).await?;
+        Ok(Delivered {
+            reference: occupying.clone(),
+            unexpressed: delivered.unexpressed,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -375,6 +468,15 @@ struct CreatedRoutine {
 
 #[derive(Debug, Deserialize)]
 struct CreatedRoutineBody {
+    id: String,
+}
+
+/// **Not a list.** `PUT /v1/routines/{routineId}` answers with the routine
+/// itself where `POST /v1/routines` answers with an array containing it. Two
+/// types rather than one tolerant one, because a shape we guessed wrong about
+/// should fail to parse rather than silently find nothing.
+#[derive(Debug, Deserialize)]
+struct UpdatedRoutine {
     id: String,
 }
 

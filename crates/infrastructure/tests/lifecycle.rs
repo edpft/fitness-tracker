@@ -325,6 +325,70 @@ fn a_superseded_session_that_was_trained_is_the_one_in_force() {
     );
 }
 
+/// **A performed session's place is not handed over.**
+///
+/// Decision 0022 routes a replacement through a delete and an insert precisely
+/// so that this holds: the delete is what
+/// `prescription_delivery_performed_is_not_deletable` watches, and an
+/// `UPDATE ... SET prescription = ?` would have slid straight past it.
+///
+/// In practice `prescribe` never offers the chance — a performed prescription
+/// is the one in force, so nothing supersedes it and `deliver` finds the place
+/// already held by the session it is delivering. This is the floor under that,
+/// held by the schema rather than by the use case remembering.
+#[test]
+fn a_performed_sessions_place_is_not_handed_over() {
+    let (_directory, pool, id) = run!(issued());
+    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    let performed = application::PrescribedWorkoutId::new(id);
+
+    run!(deliveries.record(
+        performed,
+        &hevy!(),
+        &reference!("routine-6"),
+        Timestamp::UNIX_EPOCH,
+    ));
+    run!(async {
+        sqlx::query!(
+            "UPDATE gym_workout SET performed_against = 'routine-6' \
+             WHERE landing_record_id = (SELECT MIN(landing_record_id) FROM gym_workout)"
+        )
+        .execute(&pool)
+        .await
+    });
+
+    let successor = application::PrescribedWorkoutId::new(id + 1_000);
+    let outcome = match corpus::block_on(deliveries.hand_over(
+        performed,
+        successor,
+        &hevy!(),
+        &reference!("routine-6"),
+        Timestamp::UNIX_EPOCH,
+    )) {
+        Ok(outcome) => outcome,
+        Err(error) => panic!("a runtime is available: {error}"),
+    };
+
+    match outcome {
+        Err(error) => assert!(
+            error.to_string().contains("not withdrawable"),
+            "the schema refuses it, and says why: {error}"
+        ),
+        Ok(()) => panic!("a performed session's place was handed over"),
+    }
+
+    let still: i64 = run!(async {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "n!: i64" FROM prescription_delivery
+               WHERE prescription = ? AND reference = 'routine-6'"#,
+            id
+        )
+        .fetch_one(&pool)
+        .await
+    });
+    assert_eq!(still, 1, "and the delivery is still where it was");
+}
+
 /// **A performed prescription is refused deletion by the schema.**
 ///
 /// The rule lives in a trigger rather than in code, so it holds against every
