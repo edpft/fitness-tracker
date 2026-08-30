@@ -281,6 +281,7 @@ pub async fn deliver(
     zone: &OperatorZone,
     date: Option<&str>,
     preview: bool,
+    known: &'static catalogue::KnownSource,
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let pool = connect(database)
@@ -300,8 +301,11 @@ pub async fn deliver(
         .await;
     }
 
-    let known = catalogue::source("hevy")
-        .ok_or_else(|| Failure::message("this build has no hevy destination wired", exit::USAGE))?;
+    // **The destination is passed in rather than named here.** It used to be the
+    // string "hevy", which was honest while there was one of them and became a
+    // scaling question the moment a second discipline was contemplated: a
+    // discipline knows its own sink, so `gym next` hands its one over and the
+    // flat command names the build's only one. Neither guesses.
     let base_url = std::env::var(known.base_url_variable())
         .unwrap_or_else(|_| known.default_base_url().to_owned());
     let access = config::SourceAccess::resolve(

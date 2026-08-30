@@ -142,6 +142,13 @@ empty file inside the sandbox while passing on your machine.
   a second source adds an entry and an arm in `cli::wiring` rather than a
   constant and a flag.
 
+  **Three tables, and the third is the porcelain's.** Sources are systems,
+  streams are what they serve, and a `KnownDiscipline` is a kind of training with
+  the one source and one sink it has. Only `<discipline> next` reads the third:
+  the plumbing commands stay flat and take a stream name, because collecting is
+  not a discipline-shaped act — body weight has a source, no sink and no session
+  to prescribe. A second discipline is an entry and an arm, not a second command.
+
 ## Easy to get wrong
 
 - **Panics are `forbid`, not `deny`.** `#[allow(clippy::unwrap_used)]` is a

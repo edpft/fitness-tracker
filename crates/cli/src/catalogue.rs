@@ -126,6 +126,56 @@ pub const KNOWN: [KnownStream; 1] = [KnownStream {
     entity: "workouts",
 }];
 
+/// A kind of training, and the one source and one sink it has.
+///
+/// **The third table, and the only one the porcelain reads.** A stream is what
+/// this build can collect and a source is a system it can reach; neither answers
+/// "what does the daily loop for *lifting* consist of", which is the question
+/// `gym next` asks. Cycling would be a second entry naming Peloton on both
+/// sides, and it is the entry rather than a second copy of the command that
+/// makes it a second discipline.
+///
+/// **One source and one sink is a property of a discipline, not of this build.**
+/// It is what makes the porcelain possible at all: `next` never has to choose
+/// where to collect from or where to deliver to, because within a discipline
+/// there is nothing to choose between. The plumbing commands stay flat and take
+/// a stream name, because collecting is not a discipline-shaped act — body
+/// weight has a source and no sink and no session to prescribe.
+pub struct KnownDiscipline {
+    name: &'static str,
+    collects: &'static KnownStream,
+    delivers_to: &'static KnownSource,
+}
+
+impl KnownDiscipline {
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// What its record is collected from.
+    pub const fn collects(&self) -> &'static KnownStream {
+        self.collects
+    }
+
+    /// Where its sessions are put, which is a *source* rather than a stream:
+    /// delivering lands nothing, so there is no landing table to be named after.
+    pub const fn delivers_to(&self) -> &'static KnownSource {
+        self.delivers_to
+    }
+}
+
+/// Every kind of training this build has a daily loop for.
+pub const DISCIPLINES: [KnownDiscipline; 1] = [KnownDiscipline {
+    name: "gym",
+    collects: &KNOWN[0],
+    delivers_to: &SOURCES[0],
+}];
+
+/// The discipline of that name, if this build knows it.
+pub fn discipline(name: &str) -> Option<&'static KnownDiscipline> {
+    DISCIPLINES.iter().find(|known| known.name() == name)
+}
+
 /// The entry an operator named, if this build has one.
 pub fn lookup(name: &str) -> Option<&'static KnownStream> {
     KNOWN.iter().find(|known| known.name() == name)
@@ -151,7 +201,7 @@ pub fn known_names() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{KNOWN, lookup, source};
+    use super::{DISCIPLINES, KNOWN, discipline, lookup, source};
 
     /// Every entry names a stream the domain accepts, and can be found by the
     /// name it prints. A typo here would otherwise surface as an invocation
@@ -165,6 +215,48 @@ mod tests {
             assert_eq!(stream.to_string(), known.name());
             assert!(lookup(&known.name()).is_some());
         }
+    }
+
+    /// **Every discipline's source and sink are ones this build actually has.**
+    /// The table is three static references, so a mistake here is a mistake
+    /// nothing else can catch: a discipline pointing at a stream that was
+    /// renamed would compile and then fail at the first `next`.
+    #[test]
+    fn every_discipline_names_a_stream_and_a_source_this_build_has() {
+        for known in &DISCIPLINES {
+            assert!(
+                lookup(&known.collects().name()).is_some(),
+                "{} collects a stream this build does not have",
+                known.name()
+            );
+            assert!(
+                source(known.delivers_to().name()).is_some(),
+                "{} delivers to a source this build does not have",
+                known.name()
+            );
+            assert!(
+                discipline(known.name()).is_some(),
+                "{} cannot be found by the name it prints",
+                known.name()
+            );
+        }
+    }
+
+    /// **The gym collects from and delivers to one system.** Not a fact about
+    /// Hevy — a fact about what makes the porcelain possible: within a
+    /// discipline there is nothing to choose between, so `gym next` never has to
+    /// ask which source or which sink. A discipline that acquired two of either
+    /// would need a different command, and this is where that would be noticed.
+    #[test]
+    fn the_gym_has_one_source_and_one_sink() {
+        let gym = discipline("gym").expect("the gym is in the catalogue");
+        assert_eq!(gym.collects().name(), "hevy.workouts");
+        assert_eq!(gym.delivers_to().name(), "hevy");
+        assert_eq!(
+            gym.collects().source().name(),
+            gym.delivers_to().name(),
+            "and they are the same system, which is what a round trip means"
+        );
     }
 
     /// The variables are derived, so this pins the shape rather than the list.

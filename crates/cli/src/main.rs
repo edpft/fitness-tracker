@@ -8,6 +8,7 @@
 mod candidates;
 mod catalogue;
 mod config;
+mod gym;
 mod output;
 mod parameters;
 mod paths;
@@ -32,6 +33,13 @@ use wiring::{Command, Outcome, WiringError};
 
 /// Exit codes are part of the contract: an external scheduler distinguishes
 /// outcomes by them, so they are named rather than assorted numbers.
+/// The sink the flat `deliver` command uses.
+///
+/// Named once rather than quoted at the call site. A *discipline* carries its
+/// own (see [`catalogue::KnownDiscipline`]); this is the fallback for the
+/// plumbing command, which names no discipline and so has nothing to ask.
+const DEFAULT_DESTINATION: &str = "hevy";
+
 mod exit {
     pub const SUCCESS: u8 = 0;
     /// The source was unreachable or rejected our credential. Raw is
@@ -123,6 +131,7 @@ fn command() -> ClapCommand {
                 .arg(timezone_argument().required(false)),
         )
         .subcommand(init_command())
+        .subcommand(discipline_command())
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(compare_command())
@@ -137,6 +146,40 @@ fn command() -> ClapCommand {
                 )
                 .arg(stream_argument()),
         )
+}
+
+/// The daily loop, under the discipline it belongs to.
+///
+/// **A group per discipline, and one command in it.** `gym next` is porcelain
+/// over `extract`, `normalise`, `prescribe` and `deliver`, which stay exactly
+/// where they are — the nesting is here because a *pipeline* has one source and
+/// one sink only once a discipline has been named, not because collecting is a
+/// discipline-shaped act. Cycling would be a second entry in the catalogue and a
+/// second group here, and neither would move a plumbing command.
+fn discipline_command() -> ClapCommand {
+    let mut command = ClapCommand::new("gym")
+        .about("What is done in a gym: the daily loop, end to end")
+        .subcommand_required(true)
+        .arg_required_else_help(true);
+
+    command = command.subcommand(
+        ClapCommand::new("next")
+            .about(
+                "Collect what has been done, derive it, prescribe the next session \
+                 against it, and put that session where it is trained from",
+            )
+            .arg(timezone_argument())
+            .arg(Arg::new("date").long("date").value_name("date").help(
+                "The session to prescribe and deliver, as YYYY-MM-DD. \
+                 Defaults to the next programmed day at or after today",
+            ))
+            .arg(Arg::new("base-url").long("base-url").help(
+                "Override the source's API root for this run. \
+                 Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
+            )),
+    );
+
+    command
 }
 
 /// Issue a prescription.
@@ -614,21 +657,15 @@ async fn authored_command(
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(
-                prescribing::deliver(
-                    database,
-                    &zone,
-                    sub.get_one::<String>("date").map(String::as_str),
-                    sub.get_flag("preview"),
-                    credentials,
-                )
-                .await,
-            )
+            Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
         }),
+        name if catalogue::discipline(name).is_some() => Some(
+            discipline_command_run(name, sub, settings, credentials, settings_path, database).await,
+        ),
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
             Some(("alter", _)) => scheduling::alter(database).await,
@@ -644,6 +681,79 @@ async fn authored_command(
         }
         _ => None,
     }
+}
+
+/// `deliver`, once the zone is in hand. Its own function only because the arm
+/// outgrew the match it lived in.
+async fn deliver_command_run(
+    sub: &ArgMatches,
+    zone: &domain::gym::OperatorZone,
+    database: &Path,
+    credentials: &infrastructure::Credentials,
+) -> Result<(), Failure> {
+    // The flat command names the build's only sink. A second one arrives with
+    // the discipline that needs it, and `gym next` already takes its own rather
+    // than this.
+    let Some(known) = catalogue::source(DEFAULT_DESTINATION) else {
+        return Err(Failure::message(
+            format!("this build has no {DEFAULT_DESTINATION} destination wired"),
+            exit::USAGE,
+        ));
+    };
+    prescribing::deliver(
+        database,
+        zone,
+        sub.get_one::<String>("date").map(String::as_str),
+        sub.get_flag("preview"),
+        known,
+        credentials,
+    )
+    .await
+}
+
+/// `<discipline> next`, with its configuration resolved.
+///
+/// **Its own arm rather than one of the stream commands.** `next` names a
+/// discipline, and a discipline supplies the stream rather than taking one —
+/// asking the operator for `hevy.workouts` here would be asking them for the
+/// answer they came for.
+async fn discipline_command_run(
+    name: &str,
+    sub: &ArgMatches,
+    settings: &infrastructure::Settings,
+    credentials: &infrastructure::Credentials,
+    settings_path: &Path,
+    database: &Path,
+) -> Result<(), Failure> {
+    let Some(discipline) = catalogue::discipline(name) else {
+        return Err(Failure::message(
+            format!("unknown discipline {name:?}"),
+            exit::USAGE,
+        ));
+    };
+    let Some(("next", next)) = sub.subcommand() else {
+        return Err(Failure::message(
+            format!("no {name} command given"),
+            exit::USAGE,
+        ));
+    };
+
+    let zone = config::timezone(
+        next.get_one::<String>("timezone").map(String::as_str),
+        settings,
+        settings_path,
+    )?;
+    let access = source_access(discipline.collects(), next, credentials)?;
+
+    gym::next(
+        discipline,
+        database,
+        &zone,
+        next.get_one::<String>("date").map(String::as_str),
+        access,
+        credentials,
+    )
+    .await
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.
