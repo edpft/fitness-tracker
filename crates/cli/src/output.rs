@@ -842,12 +842,15 @@ pub fn prescription(issued: &application::Prescription) {
                 "issued as prescription {}, superseding {previous}",
                 issued.id
             );
-            // Nothing here can withdraw it, so the operator is told plainly
-            // rather than left to find two sessions for one day on their phone.
+            // **Since decision 0022 this is stale rather than stranded.** The
+            // destination still holds the superseded session, and `deliver`
+            // will replace it in place rather than landing a second one beside
+            // it — so what the operator needs is the instruction, not a warning
+            // about tidying up by hand.
             if let Some(reference) = stranded {
                 println!(
-                    "  prescription {previous} was already delivered as {reference}; \
-                     that session is now out of date and needs removing at the destination"
+                    "  {reference} at the destination is still the superseded session; \
+                     deliver to replace it"
                 );
             }
         }
@@ -958,15 +961,22 @@ fn weight(load: domain::gym::Load) -> String {
 /// feature reads, and because an operator who cannot find the routine needs
 /// something to search for.
 pub fn delivery(delivered: &application::Delivery) {
-    let lead = if delivered.freshly_delivered {
-        "delivered to"
-    } else {
-        "already delivered to"
+    let lead = match (delivered.freshly_delivered, delivered.replaced) {
+        (true, Some(_)) => "replaced at",
+        (true, None) => "delivered to",
+        (false, _) => "already delivered to",
     };
     println!(
         "{lead} {} as session {} ({})",
         delivered.destination, delivered.ordinal, delivered.reference
     );
+    // **Said out loud, because the operator's phone changed under them.** The
+    // reference is unchanged, so the routine they may already have open now
+    // instructs something else — and a line that reports only the identity
+    // would read as though nothing had happened.
+    if let Some(previous) = delivered.replaced {
+        println!("  in place of prescription {previous}, which it supersedes");
+    }
     unexpressed(&delivered.unexpressed);
 }
 

@@ -51,6 +51,14 @@ reissue is a *different* prescription; therefore a session asked about twice is
 the same delivery and a session that should be replaced is a new one. Nothing
 here calls `PUT`.
 
+> **Superseded 2026-08-30 by decision 0022.** "Created and never updated" is no
+> longer the rule: `deliver` creates and `replace` updates in place, and a
+> reference names a *place* at the destination rather than a delivered
+> prescription. What survives is everything this decision observed about the
+> source — no `DELETE`, ids retired on manual removal — and the conclusion that
+> one date has one routine, which `PUT` now reaches by replacing rather than by
+> never correcting. The paragraph below records what was believed until then.
+>
 > **Amended 2026-08-29 by decision 0021.** The middle step held only because
 > nothing ever re-derived: once `prescribe` derives on every run, "a reissue is a
 > different prescription" would make every run of the daily loop a new delivery.
@@ -96,6 +104,11 @@ no endpoint — but it would be wrong anyway. § 12 keeps a superseded prescript
 and a delivery that vanished would leave the record claiming a session was
 delivered somewhere it no longer is.
 
+> **Decision 0022 took the other branch of this.** The objection was to a
+> delivery record pointing at a session that is no longer there. Replacing the
+> session in place answers it: the record and the app agree afterwards, because
+> the place still exists and holds the corrected session. The delivery row moves
+> to the prescription that now occupies it rather than being left behind.
 
 **Delivering as part of `prescribe`.** Rejected. § 36 wants a source being
 unavailable to degrade the system rather than fail it, and folding the two

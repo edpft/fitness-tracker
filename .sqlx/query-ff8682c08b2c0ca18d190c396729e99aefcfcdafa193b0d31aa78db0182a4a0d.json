@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT d.prescription AS \"prescription!: i64\",\n                   d.reference    AS \"reference!: String\"\n            FROM prescription_delivery AS d\n            JOIN prescribed_workout AS p ON p.id = d.prescription\n            WHERE p.issued_for = ? AND d.destination = ?\n            ORDER BY d.delivered_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "prescription!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "prescription"
+          }
+        }
+      },
+      {
+        "name": "reference!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "reference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ff8682c08b2c0ca18d190c396729e99aefcfcdafa193b0d31aa78db0182a4a0d"
+}

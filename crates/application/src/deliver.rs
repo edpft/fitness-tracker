@@ -89,35 +89,69 @@ where
             .ordinal(date)
             .ok_or(DeliveryError::NoProgramme { date })?;
 
-        // **Asked before sent.** Without this, a second invocation leaves the
-        // operator two sessions for one date and no way to tell which is in
-        // force — and the destination in use cannot delete either of them.
-        if let Some(reference) = self.ports.deliveries.reference_for(id, destination).await? {
-            return Ok(already_delivered(reference, destination.clone(), ordinal));
-        }
+        // **Asked before sent, and asked about the date rather than about this
+        // prescription** (decision 0022). Without this, a second invocation
+        // leaves the operator two sessions for one date and no way to tell
+        // which is in force.
+        let occupant = self.ports.deliveries.occupying(date, destination).await?;
 
-        let delivered = self
-            .ports
-            .destination
-            .deliver(&Deliverable {
-                workout,
-                programme: programme.name().clone(),
-                ordinal,
-            })
-            .await?;
-
-        self.ports
-            .deliveries
-            .record(id, destination, &delivered.reference, Timestamp::now())
-            .await?;
-
-        Ok(Delivery {
-            reference: delivered.reference,
-            destination: destination.clone(),
+        let session = Deliverable {
+            workout,
+            programme: programme.name().clone(),
             ordinal,
-            freshly_delivered: true,
-            unexpressed: delivered.unexpressed,
-        })
+        };
+
+        match occupant {
+            // Already there, under this very prescription. Asking twice is a
+            // question, and the destination hears nothing.
+            Some((holder, reference)) if holder == id => {
+                Ok(already_delivered(reference, destination.clone(), ordinal))
+            }
+
+            // A predecessor holds the date's place. The correction replaces what
+            // is there rather than landing beside it, and the place changes
+            // hands. Sent before recorded: a `PUT` that failed must not leave
+            // the store claiming the new session is the one on the operator's
+            // phone.
+            Some((holder, reference)) => {
+                let delivered = self.ports.destination.replace(&session, &reference).await?;
+                self.ports
+                    .deliveries
+                    .hand_over(
+                        holder,
+                        id,
+                        destination,
+                        &delivered.reference,
+                        Timestamp::now(),
+                    )
+                    .await?;
+                Ok(Delivery {
+                    reference: delivered.reference,
+                    destination: destination.clone(),
+                    ordinal,
+                    freshly_delivered: true,
+                    replaced: Some(holder),
+                    unexpressed: delivered.unexpressed,
+                })
+            }
+
+            // Nothing there. The ordinary first delivery.
+            None => {
+                let delivered = self.ports.destination.deliver(&session).await?;
+                self.ports
+                    .deliveries
+                    .record(id, destination, &delivered.reference, Timestamp::now())
+                    .await?;
+                Ok(Delivery {
+                    reference: delivered.reference,
+                    destination: destination.clone(),
+                    ordinal,
+                    freshly_delivered: true,
+                    replaced: None,
+                    unexpressed: delivered.unexpressed,
+                })
+            }
+        }
     }
 }
 
@@ -138,6 +172,7 @@ const fn already_delivered(
         destination,
         ordinal,
         freshly_delivered: false,
+        replaced: None,
         unexpressed: Vec::new(),
     }
 }

@@ -1143,9 +1143,43 @@ pub trait PrescriptionDestination {
     /// cannot be recorded against a destination it did not go to.
     fn name(&self) -> &DestinationName;
 
+    /// Put a session there that is not there yet.
+    ///
+    /// # Errors
+    ///
+    /// [`DeliveryError`] if the destination is unreachable or refuses the
+    /// session. An exercise it cannot state is not an error: it comes back in
+    /// [`Delivered::unexpressed`].
     fn deliver(
         &self,
         session: &Deliverable,
+    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send;
+
+    /// Put a session in the place another one occupies, replacing it.
+    ///
+    /// **The second act, because a destination holds places and not just
+    /// sessions** (decision 0022). A date's slot at a destination is occupied by
+    /// whichever prescription was last delivered into it, and correcting a
+    /// session replaces what is there rather than adding beside it — which is
+    /// the whole difference between the operator finding one routine for Monday
+    /// and finding two.
+    ///
+    /// The reference is returned rather than assumed unchanged. Every
+    /// destination in prospect keeps it, but a destination that answers a
+    /// replacement with a new identity is expressing something real, and
+    /// discarding it here would leave the store pointing at a place that no
+    /// longer exists.
+    ///
+    /// # Errors
+    ///
+    /// [`DeliveryError`] as for [`PrescriptionDestination::deliver`], and
+    /// additionally if the destination no longer holds `occupying` — which is
+    /// not something to paper over by creating one, because the session the
+    /// operator can see is the thing being reasoned about.
+    fn replace(
+        &self,
+        session: &Deliverable,
+        occupying: &DeliveryReference,
     ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send;
 }
 
@@ -1163,6 +1197,14 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
     ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send {
         (*self).deliver(session)
     }
+
+    fn replace(
+        &self,
+        session: &Deliverable,
+        occupying: &DeliveryReference,
+    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send {
+        (*self).replace(session, occupying)
+    }
 }
 
 /// What has already been delivered, and where.
@@ -1175,11 +1217,6 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
 pub trait PrescriptionDeliveryStore {
     /// What this prescription was delivered as, if it has been.
     ///
-    /// Read before delivering, so asking twice produces one routine rather than
-    /// two. A reissue is a different prescription and so has no record here,
-    /// which is what makes "one delivery per issued prescription" fall out of
-    /// § 12 rather than out of anything the destination imposes.
-    ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
@@ -1189,7 +1226,30 @@ pub trait PrescriptionDeliveryStore {
         destination: &DestinationName,
     ) -> impl Future<Output = Result<Option<DeliveryReference>, StoreError>> + Send;
 
-    /// Record a delivery. Written once and never rewritten (§ 12).
+    /// Who holds a date's place at a destination, and what that place is called.
+    ///
+    /// **The question `deliver` actually asks** (decision 0022). "Has *this
+    /// prescription* been delivered?" was the right question only while a date
+    /// could have one prescription that mattered; once a correction supersedes
+    /// a delivered session, the prescription in force has no record here while
+    /// the destination is still holding its predecessor. Asking by prescription
+    /// answers "no" and creates a second routine beside the first.
+    ///
+    /// A date has at most one occupant per destination, which is not an
+    /// assumption but a consequence: a replacement moves the record rather than
+    /// adding to it, so there is never a second row to choose between.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn occupying(
+        &self,
+        date: Date,
+        destination: &DestinationName,
+    ) -> impl Future<Output = Result<Option<(PrescribedWorkoutId, DeliveryReference)>, StoreError>> + Send;
+
+    /// Record a delivery into a place nothing occupied.
     ///
     /// # Errors
     ///
@@ -1197,6 +1257,34 @@ pub trait PrescriptionDeliveryStore {
     fn record(
         &self,
         prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reference: &DeliveryReference,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Hand a destination's place from the prescription that held it to the one
+    /// that has replaced it.
+    ///
+    /// **The record moves rather than accumulating** (decision 0022). One row
+    /// per place means every join on a reference stays unambiguous —
+    /// `state_of`, `fulfilling` and the trigger that pins a performed session
+    /// all keep working untouched, where two rows sharing a reference would
+    /// make a single performed workout answer for both prescriptions.
+    ///
+    /// What is given up is the record that `from` was ever delivered. § 12.1
+    /// permits it: a published prescription is cheap, and withdrawing it means
+    /// removing the session at the destination — which is what the replacement
+    /// has just done.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or refuses the hand-over
+    /// because a workout names the reference — a performed session is not
+    /// replaced, and the schema is where that is enforced.
+    fn hand_over(
+        &self,
+        from: PrescribedWorkoutId,
+        to: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
         at: Timestamp,
@@ -1209,6 +1297,14 @@ pub struct Delivery {
     pub reference: DeliveryReference,
     pub destination: DestinationName,
     pub ordinal: SessionOrdinal,
+    /// The prescription whose place at the destination this took over, where it
+    /// took one over. `None` for a first delivery and for a session that was
+    /// already there.
+    ///
+    /// Reported because the operator's phone changed under them: the routine
+    /// they may already have opened now says something else, and that is worth
+    /// a line whatever else the command prints.
+    pub replaced: Option<PrescribedWorkoutId>,
     /// False when the prescription had already been delivered and this is that
     /// delivery. The output side of the same idempotence
     /// [`PrescribedWorkoutStore::issued_for`] gives issuing.
