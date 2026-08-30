@@ -27,7 +27,7 @@ web ──┘
 | `domain` | The core | Entities, value objects, and the rules that govern them. Depends on no workspace crate, and never on a framework, database, or transport. Data-type dependencies — a timestamp, a hash — are fine. |
 | `application` | Use cases and ports | The things your software *does*, and the traits it needs the outside world to satisfy. Ports are declared here, in the application's own vocabulary, and implemented further out. |
 | `infrastructure` | Driven adapters | Implementations of the driven ports: a database, an HTTP client, a filesystem. The one place a technology choice is allowed to show. |
-| `cli` | Driving adapter, composition root | The operator's entry point: `fitness extract`, `normalise`, `refusals`, `status`, `reset`. Extraction is invoked from a terminal or an external scheduler, never over HTTP. |
+| `cli` | Driving adapter, composition root | The operator's entry point: `fitness gym next` for the daily loop, and `extract`, `normalise`, `refusals`, `status`, `reset` beneath it. Extraction is invoked from a terminal or an external scheduler, never over HTTP. |
 | `web` | Driving adapter, composition root | The HTTP surface. Translates requests into use-case calls. |
 
 `cli` and `web` are peers at the same ring. Neither depends on the other, and a
@@ -42,13 +42,30 @@ Two consequences worth keeping in mind:
   store and clock, which is why its tests use fakes and touch no I/O. If a test
   needs a database, the dependency is pointing the wrong way.
 
-## Collecting and normalising
+## The daily loop
 
 ```bash
 export HEVY_API_KEY=...              # from https://hevy.com/settings?developer
 export FITNESS_TRACKER_DATABASE=./local.db
 export FITNESS_TRACKER_TIMEZONE=Europe/London
 
+fitness gym next                     # collect, derive, prescribe, deliver
+```
+
+One command, because it is one question: *what am I doing next?* It runs the
+four steps below in order, reports each one's outcome, and stops at the first
+that fails — with that step's exit code, and the store correct as far as it got.
+Re-running resumes rather than repeating: collection picks up from its
+watermark, an unchanged session is not re-issued, and a session already at the
+destination is not sent again.
+
+It is nested under `gym` because a *pipeline* has one source and one sink only
+once a kind of training has been named. The steps below stay flat and take a
+stream, because collecting is not a discipline-shaped act.
+
+## Collecting and normalising
+
+```bash
 fitness extract   hevy.workouts      # collect since the resumption point
 fitness normalise hevy.workouts      # derive gym workouts from what raw holds
 fitness refusals  hevy.workouts      # what the domain would not accept, and why

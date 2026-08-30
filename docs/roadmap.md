@@ -31,16 +31,19 @@ read the rest to know what to pick up.
   it. The wizard asks what he knows and derives the rest, the schedule takes
   14 September out without being told, and the whole thing has been run end to
   end against a copy of the real store.
-- **Next in code**: `fitness gym next` — the porcelain, agreed 2026-08-30. One
-  command for the daily loop, nested by discipline because that is the level at
-  which a pipeline has one source and one sink; the four plumbing commands are
-  untouched and it wraps them. `PUT` came first and is done (0022), which was
-  the right order: it removed the stale-session warning the wrapper would
-  otherwise have had to find somewhere to put.
+- **Just landed**: `fitness gym next` — the porcelain. One command for the daily
+  loop, nested by discipline because that is the level at which a pipeline has
+  one source and one sink. The four plumbing commands are untouched; it wraps
+  them, and each step still reports its own outcome and its own exit code.
+  `PUT` came first and was the right order: it removed the stale-session warning
+  the wrapper would otherwise have had to find somewhere to put.
 
   **Withdrawal is no longer the piece that matters.** 0022 took its case away —
   a superseded session is replaced in place rather than left behind — so what is
   left for it is removing a session nobody replaces, which nothing yet asks for.
+
+- **Next in code**: nothing is queued. The autumn block is the constraint, not
+  the tool.
 - **After 14 September**: decision 0018, in the order commitments → ordinal
   programme → allocator. Not before; see *What 0018 changes, and when*.
 
@@ -399,7 +402,7 @@ of the three have landed**; withdrawal has not:
   should land before it can bite, not before 14 September.
 - **`config.toml` deleted entirely.** Step 1 empties it of the zone; `database`
   is the last thing in it and goes when there is a reason to touch the file.
-- **Porcelain** — moved up, and now the next thing in code. See *Now*.
+- ~~**Porcelain**~~ **Done**, 2026-08-30. `fitness gym next`.
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **`programme.toml` start → 2026-07-06** — it corrects week numbers on a block
   about to end, in a document about to be superseded.
