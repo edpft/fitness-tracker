@@ -1,10 +1,12 @@
 //! What the operator would consider for each slot.
 //!
-//! **Preference, not domain fact**, which is why this is here and not in
-//! `domain`. That a leg extension is knee-dominant is true of anyone; that these
-//! are the three he would pick is true of him. `docs/slot-candidates.md` states
-//! them and this is that document in a form the wizard can read — the same
-//! standing `catalogue` has for what this build can collect.
+//! **Which exercises fit which slot, which is the fitness domain.** It sat in
+//! `cli` until 2026-08-30 under a comment claiming it was "preference, not
+//! domain fact" — that a leg extension is knee-dominant is true of anyone, that
+//! these are the three he would pick is true of him. Nothing ever decided that,
+//! and it is the wrong test: what keeps a thing out of `domain` is a vendor
+//! (§ II.3), not whose choices they are. `docs/slot-candidates.md` states them
+//! and this is that document in a form a wizard can read.
 //!
 //! **Offered, never enforced.** A slot may be filled with anything in the
 //! vocabulary: the operator asked to see options he has not done before, and a
@@ -16,7 +18,7 @@
 //! not — the wrists, the core, the holds — these are what he has been doing,
 //! which is the same question answered from the record instead of from him.
 
-use domain::prescription::SlotId;
+use crate::prescription::SlotId;
 
 /// The candidates for one slot, as vocabulary keys.
 ///
@@ -93,7 +95,7 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::for_slot;
-    use domain::{gym::exercise::Exercise, prescription::SlotId};
+    use crate::{gym::exercise::Exercise, prescription::SlotId};
 
     /// **Every candidate names a real exercise.**
     ///
@@ -109,7 +111,7 @@ mod tests {
 
             for key in offered {
                 assert!(
-                    crate::wizard::exercise_named(key).is_some(),
+                    Exercise::named(key).is_some(),
                     "{slot} offers {key:?}, which is not in the vocabulary"
                 );
             }
@@ -139,10 +141,10 @@ mod tests {
     fn a_candidate_is_counted_the_way_its_slot_needs() {
         for slot in SlotId::ALL {
             for key in for_slot(*slot) {
-                let Some(exercise) = crate::wizard::exercise_named(key) else {
+                let Some(exercise) = Exercise::named(key) else {
                     panic!("{key} is in the vocabulary")
                 };
-                let held = matches!(slot.block(), domain::prescription::Block::Mobility);
+                let held = matches!(slot.block(), crate::prescription::Block::Mobility);
                 match (held, exercise) {
                     (true, Exercise::Duration(_)) | (false, Exercise::Reps(_)) => {}
                     _ => panic!(

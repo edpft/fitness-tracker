@@ -155,7 +155,11 @@ async fn seed_parameters(
     }
 
     store
-        .author(jiff::Timestamp::now(), &crate::parameters::seed()?)
+        .author(
+            jiff::Timestamp::now(),
+            &domain::prescription::seed::seed()
+                .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?,
+        )
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     Ok(ParameterOutcome::Seeded)

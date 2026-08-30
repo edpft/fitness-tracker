@@ -29,7 +29,7 @@ use application::{DiaryStore as _, ExerciseHistory as _, GenerationParameterStor
 use domain::{
     gym::{
         Kg, Load, OperatorZone, RepCount,
-        exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
+        exercise::{Exercise, RepsExercise},
     },
     // `prescription::Block` is the *slot* block — plyometric, power, strength.
     // The periodised one is a different type with the same word on it, so it is
@@ -46,20 +46,7 @@ use infrastructure::{
 };
 use jiff::civil::{Date, Weekday};
 
-use crate::{Failure, candidates, exit};
-
-/// Our vocabulary, from a key. `None` if the key names nothing.
-pub fn exercise_named(key: &str) -> Option<Exercise> {
-    if let Ok(reps) = RepsExercise::try_from(key.to_owned()) {
-        return Some(Exercise::Reps(reps));
-    }
-    if let Ok(duration) = DurationExercise::try_from(key.to_owned()) {
-        return Some(Exercise::Duration(duration));
-    }
-    DistanceExercise::try_from(key.to_owned())
-        .ok()
-        .map(Exercise::Distance)
-}
+use crate::{Failure, exit};
 
 fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
@@ -122,13 +109,13 @@ async fn offered(
     slot: SlotId,
 ) -> Result<Vec<(String, Option<usize>)>, Failure> {
     let mut offers = Vec::new();
-    for key in candidates::for_slot(slot) {
+    for key in domain::prescription::candidates::for_slot(slot) {
         // **Only repetitions have a count to show.** `ExerciseHistory` answers
         // for exercises counted in reps, because that is what progression
         // needs — so a hold has no number here. Printing "never performed"
         // beside a couch stretch done every session would be worse than
         // printing nothing, which is what `None` renders as.
-        let performed = match exercise_named(key) {
+        let performed = match Exercise::named(key) {
             Some(Exercise::Reps(exercise)) => Some(
                 history
                     .performances(exercise)
@@ -177,7 +164,7 @@ fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Stri
                 .map(|(key, _)| key.clone())
                 .ok_or_else(|| format!("there is no {number} on the list"));
         }
-        match exercise_named(typed) {
+        match Exercise::named(typed) {
             Some(_) => Ok(typed.to_owned()),
             None => Err(format!(
                 "{typed:?} is not an exercise — pick a number, or name one from \
@@ -806,7 +793,7 @@ fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
 /// follow it. Moving it in front of `ends?` puts an exercise between two dates.
 fn ask_lift(template: &str) -> Result<RepsExercise, Failure> {
     println!("\nthe lift this {template} is about");
-    ask_until("  which exercise? ", |typed| match exercise_named(typed) {
+    ask_until("  which exercise? ", |typed| match Exercise::named(typed) {
         Some(Exercise::Reps(exercise)) => Ok(exercise),
         Some(_) => Err(format!(
             "{typed:?} is not counted in repetitions, and a primary needs one"

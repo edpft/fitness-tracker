@@ -19,6 +19,7 @@
 
 pub mod anchor;
 pub mod block;
+pub mod candidates;
 pub mod delivery;
 pub mod ladder;
 pub mod linear;
@@ -30,6 +31,7 @@ pub mod project;
 pub mod repmax;
 pub mod rest;
 pub mod schedule;
+pub mod seed;
 pub mod shape;
 pub mod steps;
 pub mod succession;

@@ -5,12 +5,10 @@
 //! picks the adapters — and turns whatever comes back into output and an exit
 //! code.
 
-mod candidates;
 mod catalogue;
 mod config;
 mod gym;
 mod output;
-mod parameters;
 mod paths;
 mod prescribing;
 mod scheduling;
