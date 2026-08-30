@@ -697,6 +697,23 @@ impl Calendar {
     pub fn today(&self, now: jiff::Timestamp) -> Date {
         Zoned::new(now, self.zone.clone()).date()
     }
+
+    /// The session an operator means when they name no date: today if the block
+    /// runs today, else the next day it does.
+    ///
+    /// **Today counts.** Someone asking on a training morning means *this*
+    /// session, and walking past it to the next one would answer a question
+    /// nobody asked. `None` once the block has nothing left, which is a block
+    /// that has finished rather than an error to paper over with a date outside
+    /// it.
+    ///
+    /// **In this calendar's zone, not the caller's and not UTC.** The two differ
+    /// for several hours of every day, and on one day in seven the difference is
+    /// a whole session: resolved in UTC, a Friday morning in Auckland is still
+    /// Thursday, so the answer walks forward to the following Monday.
+    pub fn next_session(&self, now: jiff::Timestamp) -> Option<Date> {
+        self.next_programmed(self.today(now))
+    }
 }
 
 /// Which calendar week from a block's start a date falls in, zero-based.
@@ -728,4 +745,129 @@ fn week_runs(start: Date, week: i64, weekdays: &Weekdays, interruptions: &Interr
 
 fn offset_of(start: Date, date: Date) -> i64 {
     i64::from((date - start).get_days()) / 7
+}
+
+#[cfg(test)]
+mod next_session_tests {
+    use super::Calendar;
+    use crate::prescription::{SessionRole, Skip, Weekdays};
+    use jiff::{Timestamp, civil::Weekday};
+
+    /// **These moved here from `cli::config` on 2026-08-30.** They were always
+    /// tests of the calendar rather than of a terminal, and while they lived a
+    /// ring away the only thing exercising this logic was one of the two
+    /// adapters that need it.
+    fn build(skipped: &[Skip]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let weekdays = Weekdays::new(vec![
+            (Weekday::Monday, SessionRole::Light),
+            (Weekday::Friday, SessionRole::Heavy),
+        ])?;
+        Ok(Calendar::new(
+            "2026-09-07".parse()?,
+            4,
+            skipped,
+            weekdays,
+            jiff::tz::TimeZone::get("Pacific/Auckland")?,
+        )?)
+    }
+
+    fn calendar(interruptions: &[&str]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let skipped: Vec<_> = interruptions
+            .iter()
+            .map(|day| day.parse().map(Skip::day))
+            .collect::<Result<Vec<_>, _>>()?;
+        build(&skipped)
+    }
+
+    /// The same block, with whole weeks away rather than single days.
+    fn calendar_skipping_weeks(mondays: &[&str]) -> Result<Calendar, Box<dyn std::error::Error>> {
+        let seven = std::num::NonZeroU8::new(7).ok_or("seven is not zero")?;
+        let skipped: Vec<_> = mondays
+            .iter()
+            .map(|monday| monday.parse().map(|start| Skip::new(start, seven)))
+            .collect::<Result<Vec<_>, _>>()?;
+        build(&skipped)
+    }
+
+    /// On a training day the answer is that day, not the next one.
+    #[test]
+    fn today_when_today_is_programmed() {
+        let calendar = calendar(&[]).expect("a calendar");
+        // Monday 2026-09-07, mid-morning in Auckland.
+        let now: Timestamp = "2026-09-06T22:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            calendar.next_session(now).expect("a date").to_string(),
+            "2026-09-07"
+        );
+    }
+
+    /// On a rest day it is the next programmed day.
+    #[test]
+    fn it_walks_forward_to_the_next_programmed_day() {
+        let calendar = calendar(&[]).expect("a calendar");
+        // Wednesday 2026-09-09 in Auckland; the programme runs Monday and Friday.
+        let now: Timestamp = "2026-09-08T22:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            calendar.next_session(now).expect("a date").to_string(),
+            "2026-09-11"
+        );
+    }
+
+    /// **The day is the operator's, not UTC's.**
+    ///
+    /// This instant is Thursday evening in UTC and Friday morning in Auckland,
+    /// and Friday is a training day. Resolving in UTC would answer with a rest
+    /// day and then walk forward to the *following* Monday — a whole session
+    /// skipped, on exactly one day in seven, which is why this is pinned rather
+    /// than left to the zone the machine happens to be in.
+    #[test]
+    fn it_resolves_the_day_in_the_calendars_zone() {
+        let calendar = calendar(&[]).expect("a calendar");
+        let now: Timestamp = "2026-09-10T21:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            calendar.next_session(now).expect("a date").to_string(),
+            "2026-09-11",
+            "Friday in Auckland is a training day"
+        );
+    }
+
+    /// A skipped session is not a session, so it is stepped over.
+    ///
+    /// **And it stops at the next one in the same week.** Skipping the Monday
+    /// leaves the Friday, which is the whole point of skips being sessions
+    /// rather than weeks: this used to answer with the following Monday because
+    /// naming a day took its whole week with it.
+    #[test]
+    fn it_steps_over_a_skipped_session() {
+        let calendar = calendar(&["2026-09-21"]).expect("a calendar");
+        // Saturday 2026-09-19 in Auckland: the next programmed weekday is Monday
+        // the 21st, which is skipped.
+        let now: Timestamp = "2026-09-18T22:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            calendar.next_session(now).expect("a date").to_string(),
+            "2026-09-25",
+            "the Friday of the same week still runs"
+        );
+    }
+
+    /// A week with nothing left in it is stepped over entirely.
+    #[test]
+    fn it_steps_over_a_week_with_no_sessions_left() {
+        let calendar = calendar_skipping_weeks(&["2026-09-21"]).expect("a calendar");
+        let now: Timestamp = "2026-09-18T22:00:00Z".parse().expect("an instant");
+        assert_eq!(
+            calendar.next_session(now).expect("a date").to_string(),
+            "2026-09-28",
+            "a holiday is not a rest day with a session after it"
+        );
+    }
+
+    /// Past the last week there is nothing to answer with, and saying so beats
+    /// answering with a date outside the block.
+    #[test]
+    fn it_refuses_once_the_block_is_over() {
+        let calendar = calendar(&[]).expect("a calendar");
+        let now: Timestamp = "2026-12-24T22:00:00Z".parse().expect("an instant");
+        assert!(calendar.next_session(now).is_none());
+    }
 }
