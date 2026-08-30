@@ -25,7 +25,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
-use crate::{Failure, catalogue, config, config::ConfigError, exit, output};
+use crate::{Failure, catalogue, config, exit, output};
 
 /// Read a document and store the programme it describes.
 pub async fn add(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
@@ -234,14 +234,19 @@ pub async fn prescribe(
 
 /// The date to prescribe for.
 ///
-/// **The defaulting itself is [`config::date`]**, which takes the calendar and
-/// the clock and is unit-tested. What is left here is the part that needs the
-/// store.
+/// **The defaulting itself is [`application::prescribe::next_session`]**,
+/// which reads the programme in force and asks its calendar. It moved out of
+/// this crate on 2026-08-30: a terminal and a browser must not be able to
+/// disagree about which session is next, and while it lived here they could.
 ///
-/// **A named date needs no programme.** Programmes succeed one another, so
-/// which one covers that date is settled when the prescription is derived —
-/// and asking the store first would refuse a perfectly good date merely because
-/// nothing is planned for *today*.
+/// What is left is the half that is genuinely a transport's: turning the text an
+/// operator typed into a date, and telling a typo apart from a finished block so
+/// the two exit differently.
+///
+/// **A named date needs no programme.** Programmes succeed one another, so which
+/// one covers that date is settled when the prescription is derived — and asking
+/// the store first would refuse a perfectly good date merely because nothing is
+/// planned for *today*.
 async fn resolve(
     programmes: &SqliteProgrammeStore,
     zone: &OperatorZone,
@@ -251,24 +256,9 @@ async fn resolve(
         return config::named_date(text).map_err(|error| Failure::usage(&error));
     }
 
-    let now = jiff::Timestamp::now();
-    let today = now.to_zoned(zone.as_time_zone()).date();
-    let covering = application::ProgrammeStore::on(programmes, today)
+    application::prescribe::next_session(programmes, jiff::Timestamp::now(), zone)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let Some((_, programme)) = covering else {
-        return Err(Failure::message(
-            application::PrescriptionError::NoProgramme { date: today }.to_string(),
-            exit::STORE,
-        ));
-    };
-
-    config::date(None, programme.calendar(), now).map_err(|error| match error {
-        // A date that will not parse is the operator's typing; a block with no
-        // session left is the store's state. They exit differently.
-        ConfigError::NotADate { .. } => Failure::usage(&error),
-        _ => Failure::message(error.to_string(), exit::STORE),
-    })
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
 
 /// Put the prescription for a date where the operator trains from.

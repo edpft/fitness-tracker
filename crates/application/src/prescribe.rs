@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use domain::{
     gym::{
-        Kg, Load, NonEmpty, RepCount,
+        Kg, Load, NonEmpty, OperatorZone, RepCount,
         exercise::{DurationExercise, Exercise, RepsExercise},
         sequence::AtLeastTwo,
     },
@@ -37,6 +37,53 @@ use crate::{
         ProgrammeAuthor, ProgrammeStore, UnderivableReason, UnderivableSlot, WorkoutPrescriber,
     },
 };
+
+/// The date an invocation means when it names none.
+///
+/// **Capability, and it lives here because both driving adapters need the same
+/// answer.** "The next programmed day at or after today" is a statement about
+/// the operator's block: it reads the programme in force and asks its calendar.
+/// It sat in `cli` until 2026-08-30, which made a decision about training into
+/// something built into a transport — a terminal and a browser could have
+/// disagreed about which session was next, and nothing would have caught it.
+///
+/// **A function rather than a method on [`WorkoutPrescriber`]**, because the
+/// only port it needs is the programme store. `deliver` and `compare` ask this
+/// question too, and neither should have to construct a prescriber — a whole
+/// generation apparatus, four ports deep — to find out what day it is asking
+/// about.
+///
+/// The zone is passed rather than read from the programme: finding the
+/// programme needs a date, and the calendar that carries a zone is inside the
+/// programme. That circularity is why this takes an instant and a zone.
+///
+/// # Errors
+///
+/// [`PrescriptionError::NoProgramme`] where nothing covers today, and
+/// [`PrescriptionError::NoSessionScheduled`] where the block in force has
+/// finished. They read differently to an operator and are not merged.
+pub async fn next_session(
+    programmes: &(impl ProgrammeStore + Sync),
+    now: Timestamp,
+    zone: &OperatorZone,
+) -> Result<Date, PrescriptionError> {
+    // Today in the operator's zone, because *which programme is in force* is a
+    // question about their day. The calendar answers the rest in its own zone,
+    // which is the same zone by construction and is its business either way.
+    let today = now.to_zoned(zone.as_time_zone()).date();
+
+    let Some((_, programme)) = programmes.on(today).await? else {
+        return Err(PrescriptionError::NoProgramme { date: today });
+    };
+
+    // **The calendar answers, not this.** Which days a block runs, which weeks
+    // it skips and where it ends are all its own; anything more here would be a
+    // second opinion about a schedule that already has one.
+    programme
+        .calendar()
+        .next_session(now)
+        .ok_or(PrescriptionError::NoSessionScheduled { from: today })
+}
 
 /// Everything generation needs from the outside.
 ///

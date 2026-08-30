@@ -252,6 +252,15 @@ pub enum PrescriptionError {
         programme: domain::prescription::ProgrammeName,
     },
 
+    /// The block in force has no session left at or after the date asked from.
+    ///
+    /// Distinct from [`Self::NoProgramme`]: a programme covers the day and
+    /// simply has nothing more to run, which is a block that has finished rather
+    /// than a gap in the plan. The operator's answer is a new block, not a
+    /// correction.
+    #[error("the programme has no session left on or after {from}")]
+    NoSessionScheduled { from: Date },
+
     /// No operator time zone is declared. The same gap as
     /// [`NormalisationError::MissingTimeZone`], and it bites harder here: the
     /// zone decides which calendar day "the next session" falls on.

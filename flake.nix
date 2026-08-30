@@ -365,13 +365,24 @@
           # prescription suites need the real translator and the real store, and
           # `application` may not depend on the ring above it. So the rule is
           # about the adapter, and `tests/` is not the adapter.
+          #
+          # **`web` was checked here until 2026-08-30 and should not have been.**
+          # Every word above is about a *driven* adapter reaching past the ports
+          # it implements. `web` is a *driving* adapter — an operator entry point
+          # and a composition root, at ring 3 beside `cli` — and calling use
+          # cases is the whole of its job, as it is `cli`'s, which was never
+          # checked. The mistake was invisible only because `web` was a stub that
+          # called nothing; the first real line of it would have failed the gate.
           use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
             if grep -rn 'application::\(extract\|normalise\|prescribe\|status\)' \
-                 ${repoSrc}/crates/infrastructure/src ${repoSrc}/crates/web/src; then
+                 ${repoSrc}/crates/infrastructure/src; then
               echo
               echo "Constitution § 16: a driven adapter implements ports, it"
               echo "does not call the use cases. What infrastructure may name"
               echo "from application is its ports and its errors."
+              echo
+              echo "Driving adapters — cli, web — are not checked here: calling"
+              echo "a use case is what they are for."
               exit 1
             fi
 
