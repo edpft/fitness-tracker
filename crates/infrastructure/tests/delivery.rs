@@ -14,8 +14,8 @@ use std::sync::{
 };
 
 use application::{
-    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, PrescribedWorkoutId,
-    PrescriptionDeliverer as _, PrescriptionDestination, ProgrammeAuthor as _,
+    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, Issuance,
+    PrescribedWorkoutId, PrescriptionDeliverer as _, PrescriptionDestination, ProgrammeAuthor as _,
     WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -87,6 +87,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 struct Ready {
@@ -150,6 +151,7 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
                 pool.clone(),
                 "Europe/London".to_owned(),
             ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
         }),
         pool,
         zone: corpus::zone()?,
@@ -203,10 +205,7 @@ fn delivering_twice_sends_once() {
     };
 
     let first = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(
             delivering(&ready, &destination).deliver(monday()).await?,
         )
@@ -223,11 +222,16 @@ fn delivering_twice_sends_once() {
     assert_eq!(destination.calls(), 1, "the destination heard from us once");
 }
 
-/// **A reissue is a session in its own right.** § 12 keeps the superseded
-/// prescription, and the replacement is a different one — so it is delivered
-/// rather than mistaken for the session already sent.
+/// **Deriving again is not reissuing.** Since decision 0021 the ordinary run
+/// derives on every call, and a derivation that produces the same workout is the
+/// same prescription — so the daily loop can be run as often as the operator
+/// likes without a second routine appearing on their phone.
+///
+/// This is the test that would have caught the defect the decision fixes: the
+/// delivery guard is keyed on the prescription's identity, which was sound only
+/// while nothing ever re-derived.
 #[test]
-fn a_reissued_prescription_is_delivered_again() {
+fn deriving_the_same_session_again_delivers_nothing() {
     let ready = run!(ready());
     let destination = match Counting::new() {
         Ok(destination) => destination,
@@ -235,24 +239,85 @@ fn a_reissued_prescription_is_delivered_again() {
     };
 
     let first = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(
             delivering(&ready, &destination).deliver(monday()).await?,
         )
     });
 
     let second = run!(async {
-        ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::Yes)
-            .await?;
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            issued,
+            delivering(&ready, &destination).deliver(monday()).await?,
+        ))
+    });
+    let (issued, delivered) = second;
+
+    assert_eq!(
+        issued.issuance,
+        Issuance::Unchanged,
+        "the record has not moved, so neither has the session"
+    );
+    assert!(!delivered.freshly_delivered);
+    assert_eq!(
+        first.reference, delivered.reference,
+        "the session already sent is the session in force"
+    );
+    assert_eq!(destination.calls(), 1, "the destination heard from us once");
+}
+
+/// **A session that genuinely differs is a session in its own right.** § 12 keeps
+/// the superseded prescription, and the replacement is a different one — so it is
+/// delivered rather than mistaken for the session already sent.
+///
+/// The programme is re-authored to start a fortnight later, which puts the same
+/// date on a different rung of the ladder. That is the operator correcting a
+/// block, which is the case a reissue exists for.
+#[test]
+fn a_changed_session_is_delivered_as_its_own() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let first = run!(async {
+        ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(
             delivering(&ready, &destination).deliver(monday()).await?,
         )
     });
+
+    let (issued, second) = run!(async {
+        Authoring::new(
+            SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqliteGenerationParameterStore::new(ready.pool.clone()),
+        )
+        .author(
+            &programme::as_programme(programme::programme_from(Date::constant(2026, 7, 20))?),
+            &programme::parameters()?,
+        )
+        .await?;
+
+        let issued = ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            issued,
+            delivering(&ready, &destination).deliver(monday()).await?,
+        ))
+    });
+
+    let Issuance::Superseded { stranded, .. } = &issued.issuance else {
+        panic!(
+            "the corrected block derives a different session: {:?}",
+            issued.issuance
+        )
+    };
+    assert_eq!(
+        stranded.as_ref(),
+        Some(&first.reference),
+        "and says which delivered session it has left stale"
+    );
 
     assert!(second.freshly_delivered, "the reissue is delivered");
     assert_ne!(
@@ -297,10 +362,7 @@ fn the_reference_is_recorded_against_the_prescription() {
     };
 
     let (delivered, recorded) = run!(async {
-        let prescription = ready
-            .prescriber
-            .prescribe(monday(), application::Reissue::No)
-            .await?;
+        let prescription = ready.prescriber.prescribe(monday()).await?;
         let delivered = delivering(&ready, &destination).deliver(monday()).await?;
 
         let store = SqlitePrescriptionDeliveryStore::new(ready.pool.clone());

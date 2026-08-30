@@ -7,7 +7,8 @@ September 2026, using `fitness` as an installed binary rather than
 **Written**: 2026-08-24. Revised 2026-08-25, when steps 1 to 3 landed and
 decision 0018 changed what comes after them. Revised again 2026-08-27, when the
 operator ran the wizard end to end and it asked three questions it had no
-business asking.
+business asking. Revised again 2026-08-29, when the operator found that
+`prescribe` was not reading the workout he had just landed — decision 0021.
 
 The dates below are ordering, not estimates. The constraint on this work is how
 fast decisions get made, not how fast code gets written.
@@ -28,9 +29,11 @@ read the rest to know what to pick up.
   it. The wizard asks what he knows and derives the rest, the schedule takes
   14 September out without being told, and the whole thing has been run end to
   end against a copy of the real store.
-- **Next in code**: the three lifecycle pieces left over from #31 — withdrawal,
-  a performance taking its role from its prescription, and the comparison. All
-  three survive decision 0018 rather than being discarded by it.
+- **Next in code**: withdrawal, which is the last of the three lifecycle pieces
+  left over from #31 — and decision 0021 has just made it the one that matters,
+  because a re-derived session that had already been delivered now strands the
+  old one at the destination and says so rather than removing it. It survives
+  decision 0018 rather than being discarded by it.
 - **After 14 September**: decision 0018, in the order commitments → ordinal
   programme → allocator. Not before; see *What 0018 changes, and when*.
 
@@ -390,11 +393,17 @@ of the three have landed**; withdrawal has not:
 - **`config.toml` deleted entirely.** Step 1 empties it of the zone; `database`
   is the last thing in it and goes when there is a reason to touch the file.
 - **Porcelain** — one command for the daily loop. Worth having for the six
-  remaining summer sessions, not worth displacing the schedule.
+  remaining summer sessions, not worth displacing the schedule. Decision 0021
+  removed the reason it was *needed* rather than merely wanted: `prescribe` no
+  longer has to be told to read what `normalise` just landed, so the four
+  commands compose correctly when run by hand. What is left is the typing.
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **`programme.toml` start → 2026-07-06** — it corrects week numbers on a block
   about to end, in a document about to be superseded.
-- **Redelivery via `PUT`**, revising decision 0017.
+- **Redelivery via `PUT`**, revising decision 0017. Decision 0021 raised its
+  value: superseding a delivered session now reports a stale reference the
+  operator has to go and remove by hand, and `PUT` is what would let the
+  replacement land where the original was.
 
 ## Deliberately out of scope
 

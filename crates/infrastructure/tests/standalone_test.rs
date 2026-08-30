@@ -19,7 +19,7 @@ mod support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
-    ProgrammeStore as _, Reissue, WorkoutNormaliser as _, WorkoutPrescriber as _,
+    ProgrammeStore as _, WorkoutNormaliser as _, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
@@ -28,7 +28,7 @@ use infrastructure::{
     Document, HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
     SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -39,6 +39,7 @@ type Prescriber = Prescribing<
     SqliteProgrammeStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
 >;
 
 /// The test document, as the operator would write it.
@@ -144,7 +145,11 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
             history: SqliteExerciseHistory::new(pool.clone()),
             programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
         }),
         directory,
     ))
@@ -262,7 +267,7 @@ const fn other_day() -> Date {
 #[test]
 fn the_heavy_session_is_the_test() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(test_day(), Reissue::No));
+    let issued = run!(prescriber.prescribe(test_day()));
 
     assert_eq!(issued.workout.week(), WeekKind::Test);
     assert!(
@@ -293,7 +298,7 @@ fn the_heavy_session_is_the_test() {
 #[test]
 fn the_light_session_is_the_predecessors() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(other_day(), Reissue::No));
+    let issued = run!(prescriber.prescribe(other_day()));
 
     let Some(PrescribedItem::Exercise { exercise, .. }) =
         issued.workout.shape().item_for(SlotId::KneeDominant)
@@ -324,7 +329,7 @@ fn the_light_session_is_the_predecessors() {
 #[test]
 fn a_test_inherits_every_slot_it_does_not_state() {
     let (prescriber, _directory) = prescriber!();
-    let issued = run!(prescriber.prescribe(test_day(), Reissue::No));
+    let issued = run!(prescriber.prescribe(test_day()));
 
     // The plyometric slot is static — authored outright, no history read — so it
     // is derivable whatever the record holds, which makes it the one that can
@@ -413,7 +418,11 @@ async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::er
             history: SqliteExerciseHistory::new(pool.clone()),
             programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool, "Europe/London".to_owned()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
         }),
         directory,
     ))
@@ -438,7 +447,7 @@ macro_rules! blocked {
 #[test]
 fn a_blocks_entry_test_ramps_toward_what_it_expects() {
     let (prescriber, _directory) = blocked!();
-    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 4), Reissue::No));
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 4)));
 
     assert_eq!(issued.workout.week(), WeekKind::Test);
     let Some(PrescribedItem::Exercise { exercise, .. }) =
@@ -464,7 +473,7 @@ fn a_blocks_entry_test_ramps_toward_what_it_expects() {
 #[test]
 fn the_entry_test_weeks_other_session_runs_the_authored_load() {
     let (prescriber, _directory) = blocked!();
-    let issued = run!(prescriber.prescribe(Date::constant(2026, 8, 31), Reissue::No));
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 8, 31)));
 
     let Some(PrescribedItem::Exercise { exercise, .. }) =
         issued.workout.shape().item_for(SlotId::KneeDominant)
@@ -493,7 +502,7 @@ fn the_phases_start_behind_the_entry_test() {
     let (prescriber, _directory) = blocked!();
     // The Friday of week two: the first week of accumulation, which runs sets
     // across rather than one attempt.
-    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 11), Reissue::No));
+    let issued = run!(prescriber.prescribe(Date::constant(2026, 9, 11)));
 
     assert!(
         matches!(issued.workout.week(), WeekKind::Climbing(_)),

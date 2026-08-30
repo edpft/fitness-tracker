@@ -158,22 +158,12 @@ fn compare_command() -> ClapCommand {
 
 fn prescribe_command() -> ClapCommand {
     ClapCommand::new("prescribe")
-        .about("Issue the prescription for a date, or show what was already issued")
+        .about("Derive the session for a date against the record as it now stands, and issue it if it differs from what is already in force")
         .arg(timezone_argument())
         .arg(Arg::new("date").long("date").value_name("date").help(
             "The session to prescribe for, as YYYY-MM-DD. \
                      Defaults to the next programmed day at or after today",
         ))
-        .arg(
-            Arg::new("reissue")
-                .long("reissue")
-                .action(clap::ArgAction::SetTrue)
-                .help(
-                    "Derive the session again and supersede what was already \
-                     issued for the date. The superseded prescription is kept, \
-                     and stops being the one in force",
-                ),
-        )
 }
 
 /// Add the programme, or report the one in force.
@@ -596,17 +586,11 @@ async fn authored_command(
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            let reissue = if sub.get_flag("reissue") {
-                application::Reissue::Yes
-            } else {
-                application::Reissue::No
-            };
             Some(
                 prescribing::prescribe(
                     database,
                     &zone,
                     sub.get_one::<String>("date").map(String::as_str),
-                    reissue,
                 )
                 .await,
             )

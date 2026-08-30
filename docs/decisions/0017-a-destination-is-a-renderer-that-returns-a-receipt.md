@@ -51,6 +51,14 @@ reissue is a *different* prescription; therefore a session asked about twice is
 the same delivery and a session that should be replaced is a new one. Nothing
 here calls `PUT`.
 
+> **Amended 2026-08-29 by decision 0021.** The middle step held only because
+> nothing ever re-derived: once `prescribe` derives on every run, "a reissue is a
+> different prescription" would make every run of the daily loop a new delivery.
+> It is now true by construction rather than by luck — a derivation that produces
+> the same `WorkoutShape` is not a reissue at all and writes nothing, so the
+> delivery guard keyed on the prescription's identity stays sound. The
+> conclusion is unchanged; what it rests on is not.
+
 ## Consequences
 
 The routine id becomes a key rather than evidence. Open question 1 held that it
@@ -87,6 +95,7 @@ negative gate needs an issued prescription to point at.
 no endpoint — but it would be wrong anyway. § 12 keeps a superseded prescription,
 and a delivery that vanished would leave the record claiming a session was
 delivered somewhere it no longer is.
+
 
 **Delivering as part of `prescribe`.** Rejected. § 36 wants a source being
 unavailable to degrade the system rather than fail it, and folding the two

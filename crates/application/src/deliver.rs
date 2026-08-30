@@ -17,6 +17,14 @@
 //! session that should be replaced is a new delivery while a session asked about
 //! twice is the same one. That the destination in use also cannot delete what it
 //! has been given is a happy agreement, not the reason.
+//!
+//! **What makes "a session asked about twice" true is decision 0021**, and it is
+//! worth naming because the guard below is keyed on the prescription's identity
+//! rather than on what it says. `prescribe` derives on every run; a derivation
+//! that produces the same `WorkoutShape` is not issued, so it does not get an
+//! identity, so it cannot reach this as a second delivery. Were that not so,
+//! every run of the daily loop would put another routine on the operator's
+//! phone.
 
 use domain::prescription::{DeliveryReference, SessionOrdinal};
 use jiff::{Timestamp, civil::Date};

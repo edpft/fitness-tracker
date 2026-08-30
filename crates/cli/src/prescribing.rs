@@ -177,7 +177,8 @@ pub async fn standing(
         history: SqliteExerciseHistory::new(pool.clone()),
         programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool, zone.id().to_owned()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
     });
 
     // **A date, because programmes succeed one another** (decision 0012). With
@@ -207,7 +208,6 @@ pub async fn prescribe(
     database: &Path,
     zone: &OperatorZone,
     date: Option<&str>,
-    reissue: application::Reissue,
 ) -> Result<(), Failure> {
     let pool = connect(database)
         .await
@@ -219,11 +219,12 @@ pub async fn prescribe(
         programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     });
 
     let date = resolve(&programmes, zone, date).await?;
     let issued = prescriber
-        .prescribe(date, reissue)
+        .prescribe(date)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 

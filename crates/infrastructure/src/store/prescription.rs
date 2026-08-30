@@ -502,11 +502,25 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                    issued_at AS "issued_at!: String"
             FROM prescribed_workout
             WHERE issued_for = ?
-            -- The latest issue is the one in force. A date may be prescribed
-            -- more than once and a correction supersedes rather than
-            -- overwrites, so the superseded rows are still here and still
-            -- exactly as they were issued.
-            ORDER BY issued_at DESC
+            -- **A performed issue is in force whatever came after it**, and the
+            -- ordering is where that rule lives rather than in any caller. The
+            -- window it closes: a session is delivered, a re-derivation
+            -- supersedes it while it is still merely published, and then the
+            -- operator trains the routine already on their phone. Now the
+            -- newest row is one nobody ever saw, and `compare` would measure
+            -- the performance against it while `prescribe` would go on
+            -- superseding a session that has been trained.
+            --
+            -- Otherwise the latest issue. A date may be prescribed more than
+            -- once and a correction supersedes rather than overwrites, so the
+            -- superseded rows are still here and still exactly as they were
+            -- issued.
+            ORDER BY EXISTS (
+                SELECT 1
+                FROM prescription_delivery AS d
+                JOIN gym_workout AS w ON w.performed_against = d.reference
+                WHERE d.prescription = prescribed_workout.id
+            ) DESC, issued_at DESC
             LIMIT 1
             "#,
             key

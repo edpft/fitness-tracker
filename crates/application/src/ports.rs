@@ -857,7 +857,15 @@ pub trait PrescribedWorkoutStore {
         workout: &PrescribedWorkout,
     ) -> impl Future<Output = Result<PrescribedWorkoutId, StoreError>> + Send;
 
-    /// What was issued for a date, if anything.
+    /// What is in force for a date, if anything.
+    ///
+    /// **A performed issue, if there is one; otherwise the newest.** A reissue
+    /// supersedes rather than replaces (§ 12), so a date may hold several rows
+    /// and exactly one of them is the answer — and once one has been trained,
+    /// that is the one, whatever was derived afterwards. Decision 0021 states
+    /// the rule; it is enforced here rather than in each caller, because
+    /// `prescribe`, `deliver` and `compare` would otherwise each have to
+    /// remember it and any of them could forget.
     ///
     /// Read before issuing, so asking twice for one date returns what was
     /// already issued rather than a second prescription. The derived ladder
@@ -893,13 +901,51 @@ impl std::fmt::Display for PrescribedWorkoutId {
     }
 }
 
+/// What asking for a date's prescription did.
+///
+/// **Four outcomes, not a flag.** `prescribe` used to answer "is this new?",
+/// which was enough while asking twice could only ever return what was already
+/// there. Now that the ordinary run derives again, the interesting question is
+/// what the derivation *found* — and "unchanged" and "superseded" are the two
+/// answers a boolean would collapse into one, while the very session the
+/// operator is about to train from is the thing that differs between them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Issuance {
+    /// Nothing was in force for the date. Derived and stored.
+    Issued,
+    /// Derived, and it produced the session already in force. Nothing was
+    /// written: an identical derivation is the same workout, and a second row
+    /// saying so would be a second prescription to deliver.
+    Unchanged,
+    /// Derived, it differed, and this supersedes what was in force. The
+    /// superseded prescription is kept (§ 12) and stops being the one in force.
+    Superseded {
+        previous: PrescribedWorkoutId,
+        /// Set when the superseded prescription had been delivered — so the
+        /// session at that destination is now stale, and nothing here can
+        /// withdraw it.
+        stranded: Option<DeliveryReference>,
+    },
+    /// A performance names the session in force, so it stands and no derivation
+    /// was attempted. § 12.1: what it records happened.
+    Performed { reference: DeliveryReference },
+}
+
+impl Issuance {
+    /// Whether what is being reported was written by this call.
+    pub const fn is_fresh(&self) -> bool {
+        matches!(self, Self::Issued | Self::Superseded { .. })
+    }
+}
+
 /// A prescription, and enough to report it honestly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prescription {
     pub id: PrescribedWorkoutId,
     pub workout: PrescribedWorkout,
-    /// False when the date already had a prescription and this is that one.
-    pub freshly_issued: bool,
+    /// What asking did: issued, unchanged, superseded, or standing because it
+    /// has been performed.
+    pub issuance: Issuance,
     /// § 38. The newest performance the derivation read.
     pub history_through: Option<Date>,
     /// Slots that could not be derived (FR-011). Not an error.
@@ -953,7 +999,7 @@ pub trait WorkoutPrescriber {
         on: Date,
     ) -> impl Future<Output = Result<LadderStanding, PrescriptionError>> + Send;
 
-    /// The date, and whether an existing prescription is to be superseded.
+    /// The date. Nothing else, because there is nothing else to decide.
     ///
     /// The session role, the week and the ladder position are all derived — the
     /// role from the programme's calendar, the position from the performed
@@ -962,8 +1008,17 @@ pub trait WorkoutPrescriber {
     /// extraction side, and would let a caller prescribe a heavy session on a
     /// light day.
     ///
-    /// [`Reissue`] is not derived and cannot be: a prescription that should be
-    /// replaced looks exactly like one that should stand.
+    /// **Whether to derive again is derived too**, which is why the `Reissue`
+    /// argument that used to sit here is gone. It asked the caller a question
+    /// the record already answers: a session that has been performed stands,
+    /// and every other session is worth deriving because deriving it is how we
+    /// find out whether it changed. What the caller could not have known — and
+    /// was therefore being asked to guess — is whether the record has moved
+    /// since the session was issued.
+    ///
+    /// Asking twice is still a question rather than an instruction, and still
+    /// answers with one prescription: an identical derivation writes nothing.
+    /// See [`Issuance`].
     ///
     /// # Errors
     ///
@@ -972,24 +1027,7 @@ pub trait WorkoutPrescriber {
     fn prescribe(
         &self,
         date: Date,
-        reissue: Reissue,
     ) -> impl Future<Output = Result<Prescription, PrescriptionError>> + Send;
-}
-
-/// Whether to supersede a prescription already issued for the date.
-///
-/// A two-valued enum rather than a `bool`, because `prescribe(date, true)` at a
-/// call site says nothing about what is true — and this is the argument that
-/// decides whether the operator's session is replaced under them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Reissue {
-    /// Return what was already issued. The ordinary case: asking twice for one
-    /// date is a question, not an instruction.
-    #[default]
-    No,
-    /// Derive again and supersede. The superseded prescription is kept — § 12
-    /// authored data keeps its history — and stops being the one in force.
-    Yes,
 }
 
 /// Where a prescription has got to: drafted, published, or performed.
@@ -1105,11 +1143,6 @@ pub trait PrescriptionDestination {
     /// cannot be recorded against a destination it did not go to.
     fn name(&self) -> &DestinationName;
 
-    /// # Errors
-    ///
-    /// [`DeliveryError`] if the destination is unreachable or refuses the
-    /// session. An exercise it cannot state is not an error: it comes back in
-    /// [`Delivered::unexpressed`].
     fn deliver(
         &self,
         session: &Deliverable,
