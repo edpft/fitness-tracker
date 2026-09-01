@@ -123,7 +123,7 @@ not extend it by inference.
 | 1 | 1 | `M` | 45 min Power Zone Endurance Ride | Matt Wilpers | 2022-05-13 15:00 | `7a077ff36228426794bd3adc362ca757` |
 | 1 | 3 | `L` | 45 min Power Zone Endurance Ride | Olivia Amato | 2022-05-13 15:00 | `887d10592df041ce808cb483ec05687a` |
 | 1 | 6 | `K` | 60 min Power Zone Endurance Ride | Ben Alldis | 2022-05-13 15:00 | `7c55c9f4335a46f2955e2a4827bffa86` |
-| 2 | 1 | `J` | 45 min Power Zone Ride | Denis Morton | 2022-05-13 15:00 | **pending** — see below |
+| 2 | 1 | `J` | 45 min Power Zone Ride | Denis Morton | 2022-05-13 15:00 | `9498613d26df46e0ad2f40d262fbce05` |
 | 2 | 3 | `N` | 45 min Power Zone **Endurance** Ride | Olivia Amato | 2022-05-13 15:00 | `709a359725cf4bffb4cdedb70a6506b0` |
 | 2 | 6 | `O` | 60 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `23cd9015db5947679c321e38dd0082a1` |
 | 3 | 1 | `I` | 45 min Power Zone Ride | Ben Alldis | 2022-05-13 15:00 | `b54a1b4ac2924db0bb5a72cf5a540d40` |
@@ -148,12 +148,13 @@ not extend it by inference.
 
 **All twenty-five classes are mapped.**
 
-**`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
-day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
-Morton, 45 minutes, warm-up 11 and 33 of riding against Alldis's 13 and 46. A
-stale clipboard. Caught only because the interval transcription disagreed with
-the id, which is the argument for capturing both rather than trusting either
-alone.
+**All twenty-five `classId`s are now recorded.** `J`'s arrived late: the link
+first supplied with it repeated week 1 day 6's `7c55c9f4…` while the screenshots
+plainly showed a different class — Denis Morton, 45 minutes, warm-up 11 and 33 of
+riding against Alldis's 13 and 46. A stale clipboard, caught only because the
+interval transcription disagreed with the id. **That is the argument for
+capturing both rather than trusting either alone**, and it is the only error the
+mapping produced across twenty-five classes.
 
 **Week 1 is complete.** All three landed where the week table put them, and all
 three were already transcribed, so the interval data and the mapping corroborate
