@@ -27,10 +27,28 @@ this is the plan, not the record.
 The three-line version, kept current so a session starting cold does not have to
 read the rest to know what to pick up.
 
-- **Waiting on the operator**: authoring the autumn block. Nothing is blocking
-  it. The wizard asks what he knows and derives the rest, the schedule takes
-  14 September out without being told, and the whole thing has been run end to
-  end against a copy of the real store.
+- **Waiting on the operator**: the cycling class-to-session mapping, which he is
+  supplying explicitly. Peloton's *Peak Your Power Zones* — 8 weeks, 3×/week,
+  days 1, 3 and 6 — is transcribed in `docs/cycling-peak-your-power-zones.md`,
+  all eight weeks plus thirteen of the twenty-five class plans.
+
+  **A cycling session is duration × power zone, and Peloton is an adapter.** The
+  class plans are transcribed so the domain can state the session in its own
+  terms; the class link is a reference at the destination (0022's shape), not the
+  session's identity. Choosing a published programme is a convenience about
+  *matching* — every session already has a class that realises it, so nothing has
+  to search a catalogue for a zone profile that fits.
+
+  **Which two of the three days is a real choice, not arithmetic**: days 1+3,
+  1+6 and 3+6 are three different distributions of time across zones, so they are
+  three different programmes. Once the mapping lands, the difference is
+  computable. Note the FTP retest sits on week 8 day 6.
+
+- **Retired as authority**: `specs/`. 8,244 lines of agent-authored prose the
+  operator has never read, and a session had just quoted `specs/003`'s
+  out-of-scope list back at him as a reason cycling was not on the path.
+  Concurrent gym and cycling programming is the point of the tool. `CLAUDE.md`
+  withdraws it; deletion is pending — see 0024.
 - **Just landed**: `fitness gym next` — the porcelain. One command for the daily
   loop, nested by discipline because that is the level at which a pipeline has
   one source and one sink. The four plumbing commands are untouched; it wraps
@@ -42,8 +60,19 @@ read the rest to know what to pick up.
   a superseded session is replaced in place rather than left behind — so what is
   left for it is removing a session nobody replaces, which nothing yet asks for.
 
-- **Next in code**: nothing is queued. The autumn block is the constraint, not
-  the tool.
+- **In progress**: the SBS programme type — decision 0024. The autumn block runs
+  a *published* programme rather than a derived one: Stronger By Science's 2×/week
+  intermediate squat routine, front squat on both days, four weeks, with week 4
+  run standalone first to open on a measured 1RM. The eight prescriptions are
+  settled and verified against the workbook; the maximum moves inside the cycle
+  off SBS's own rep-max table, which is deliberately *not* `repmax.rs`.
+
+- **Parked**: `feat/block-derives-from-prilepin` (decision 0023). Finished,
+  green, never raised as a PR, and it stays unraised. It was prescribing `8 × 2`
+  to stay inside Prilepin's bands — the degeneracy 0023 itself documented as an
+  unresolved open question, and then prescribed anyway. That open question is
+  closed by nothing asking it any more. The `WorkUp` variant it added survives
+  and is what SBS's rep-max days are built on.
 - **After 14 September**: decision 0018, in the order commitments → ordinal
   programme → allocator. Not before; see *What 0018 changes, and when*.
 
