@@ -139,6 +139,8 @@ not extend it by inference.
 | 6 | 6 | `R` | 60 min Power Zone Ride | Christine D'Ercole | **2023-04-21 16:00** | `ae5058e68cf045058bbf405b3e115dda` |
 | 7 | 1 | `S` | 45 min Power Zone **Max** Ride | Ben Alldis | 2022-05-13 15:00 | `251e957464f74530937782a6080eecf9` |
 | 7 | 3 | `T` | 45 min Power Zone Ride | Christine D'Ercole | 2022-05-13 15:00 | `57af0cb0dfb44abba73af9798e312d2d` |
+| 7 | 6 | `U` | **90** min Power Zone Endurance Ride | Matt Wilpers | 2022-05-13 15:00 | `597a32a0c58a4625b5d9299daffb2e05` |
+| 8 | 1 | `V` | 45 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `5833bec716724236bd9d12730ff29776` |
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -206,6 +208,8 @@ warm-up or cool-down, so those are excluded and named separately.
 | R | 60 Power Zone | 13 | 8:00 | — | 22:00 | **16:00** | — | 46:00 |
 | S | 45 Max | 12 | 14:00 | 2:30 | — | **9:00** | 1:30 | 32:00 ‡ |
 | T | 45 Power Zone | 13 | 8:31 | 4:59 | — | **7:00** | 7:02 | 31:00 § |
+| U | 90 Endurance | 13 | — | 20:00 | **56:00** | — | — | 76:00 |
+| V | 45 Endurance | 13 | — | 8:00 | **23:01** | — | — | 31:01 |
 
 § `T` also carries **Z6 3:28**.
 
@@ -343,14 +347,18 @@ was badly posed:
 | week 6, days 1+3 | 17:59 | 15:01 | 5:00 | — |
 | week 7, days 1+3 | 16:00 | 8:32 | 6:28 | **2:00** |
 
-**Week 6 peaks on volume at threshold and VO2; week 7 peaks on intensity.** Week 6
-carries nearly twice the Z5. Week 7 is the only week reaching Z7, and puts its
-hardest zones into shorter and shorter bites. Neither is "harder" without saying
-harder at what — and the earlier claim, which said week 6 simply won, is
-withdrawn rather than defended.
+**Week 6 peaks on volume at threshold and VO2; week 7 peaks on intensity** — and
+once day 6 is counted, week 7 also peaks on total work:
 
-Day 6 does not disturb this: week 6's is a 60-minute threshold ride, week 7's a
-90-minute endurance ride, and neither is yet weighed here.
+| | riding time | Z3 | Z4 | Z5 | Z6 | Z7 |
+|---|---|---|---|---|---|---|
+| week 6 | 108:00 | 22:00 | **33:59** | **15:01** | 5:00 | — |
+| week 7 | 139:00 | **56:00** | 16:00 | 8:32 | 6:28 | **2:00** |
+
+Week 7 rides half an hour longer, does more than twice the Z3, and is the only
+week reaching Z7. Week 6 does more than twice the Z4 and nearly twice the Z5.
+**Week 7 is the peak week**; week 6 is the hardest concentration of threshold and
+VO2 work. The earlier claim that week 6 was simply the hardest week is withdrawn.
 
 Now that all three days are mapped: day 1 is the only session with Z6, day 3 the
 only one welding Z5 onto the end of every Z4 block, and day 6 the only long ride
@@ -438,7 +446,8 @@ simply not the one the programme asks for.
 | 4 | `F` endurance, Z3 23:00 | `E` endurance, Z3 26:00 | `C` endurance 60 ⚠ |
 | 5 | `D` VO2, Z5 7:00 sustained | `B` threshold, Z4 17:00 | `A` endurance 60 |
 | 6 | `P` **anaerobic — Z6, no Z4** | `Q` Z4 blocks with Z5 surges | `R` **threshold 60**, Z4 16:00 |
-| 7 | `S` **Max — Z7**, 33 movements | `T` Z4→Z5→Z6 ladder | — |
+| 7 | `S` **Max — Z7**, 33 movements | `T` Z4→Z5→Z6 ladder | `U` **90 min**, Z3 56:00 |
+| 8 | `V` endurance, Z3 23:01 | — | FTP warm-up + **retest** |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
@@ -465,6 +474,25 @@ threshold progression at all; the climb may live entirely in day 6's aerobic wor
 and day 1's Z5. Recorded as an absence so that a later session does not invent a
 pattern here, and left open because three of eight weeks is thin evidence either
 way.
+
+### The taper and the deload are the same session twice
+
+`V` (week 8 day 1) and `F` (week 4 day 1) are near-identical, and both are
+Christine D'Ercole:
+
+| | formation | Z3 | Z2 | ride |
+|---|---|---|---|---|
+| week 4 — `F` | `3/5/7/5/3` | 23:00 | 9:00 | 32:00 |
+| week 8 — `V` | `7/9/7` | 23:01 | 8:00 | 31:01 |
+
+Twenty-three minutes of Z3 in each, one second apart, both pyramids, both by the
+same instructor. `V` reaches it in three intervals rather than five and takes the
+programme's longest Z2 recoveries — four minutes each — which is what separates a
+taper from a deload: the same aerobic dose, fewer efforts, more rest between
+them.
+
+**These are the two lightest 45-minute rides in the programme**, and they sit at
+weeks 4 and 8 — before the second half, and before the test.
 
 ### The Z5 work goes from bursts to blocks
 
@@ -507,19 +535,25 @@ opens by correcting. Useful for reading the programme; never a field.
 
 ### The deload week is a pyramid, and that is its signature
 
-**Among the *endurance* rides, week 4 pyramids where every build week descends.**
-`F` on day 1 runs `3/5/7/5/3`; `C` on day 6 runs `5/7/9/7/5` and says so itself —
-*"five Z3 intervals in a pyramid formation (5/7/9/7/5)"*. Every endurance ride
-that states a formation is otherwise a descending step: `7/7/5/5/3/3`,
-`8/8/6/6/4/4`, `9/9/7/7/5`.
+**The formation carries no meaning about the week, and this document tried three
+times to make it.** The successive claims were: week 4 pyramids where build weeks
+descend; then, narrowed, that this holds among endurance rides; and both are now
+dead. `U` — week 7 day 6, the programme's **volume peak** at 56 minutes of Z3 —
+states *"five blocks of 2 x Z3 intervals in pyramid formation"*. The same
+formation as week 4's deload, at nearly twice the work.
 
-**Scope matters and an earlier draft overreached.** It said these were "the only
-two pyramids in anything transcribed", which is false: `H` — week 3 day 3, a
-build week — runs its Z4 blocks at `2/2/4/4/2/2`, a pyramid by any reading. The
-claim holds for the Z3 formations of endurance rides, which is where Peloton
-itself uses the word. It does not hold across the Power Zone rides, and nothing
-here has established that a Z4 block sequence and a Z3 interval formation are
-the same kind of object.
+So the formations sort like this, and no further:
+
+| formation | appears in |
+|---|---|
+| descending step | weeks 1, 2, 3 — day 6 |
+| pyramid | week 4 deload (days 1 *and* 6), week 7 volume peak |
+| inverted pyramid | week 5 day 6 |
+
+**A formation describes the arrangement of the work, not its purpose.** Volume
+and zone say what a week is for; shape says how it is laid out. Attaching the two
+was an inference each time, and it failed each time — recorded at length because
+the failure repeated after being corrected once.
 
 A descending formation front-loads the hardest work while fresh. A pyramid peaks
 once in the middle and releases at both ends. **The week's shape and the week's
@@ -565,6 +599,12 @@ under *More info*:
 | 3 — `G` | 9/9/7/7/5 | descending | 36:59 | 10:00 | 46:59 |
 | 4 — `C` | 5/7/9/7/5 | **pyramid** | 32:58 | 12:58 | 45:56 |
 | 5 — `A` | 9/7/5/7/9 | **inverted pyramid** | 37:00 | 11:00 | 48:00 |
+| 6 — `R` | 4/3/4/3 · 3/2/3/2 · 4/3/4/3 | *(threshold, Z3+Z4)* | 22:00 | — | 46:00 |
+| 7 — `U` | 2×4 / 2×6 / 2×8 / 2×6 / 2×4 | **pyramid** | 56:00 | 20:00 | 76:00 |
+
+**Week 7's long ride is the volume peak by a distance** — 56 minutes of Z3 against
+a previous high of 37, in a 90-minute class. Week 6's breaks the series
+differently, being the only long ride that is not endurance at all.
 
 **Work climbs, recovery falls, and the ride length holds.** Thirty minutes of Z3
 becomes thirty-seven across three weeks while Z2 recovery drops from sixteen
