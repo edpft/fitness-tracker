@@ -798,9 +798,9 @@ fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
     };
 
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
-        value
-            .parse::<jiff::civil::Date>()
-            .map_err(|error| Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE))
+        value.parse::<jiff::civil::Date>().map_err(|error| {
+            Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
+        })
     };
 
     let Some(start) = next.get_one::<String>("start") else {
@@ -816,7 +816,10 @@ fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
     let ftp = match next.get_one::<String>("ftp") {
         Some(value) => {
             let watts = value.parse::<u32>().map_err(|error| {
-                Failure::message(format!("{value:?} is not a number of watts: {error}"), exit::USAGE)
+                Failure::message(
+                    format!("{value:?} is not a number of watts: {error}"),
+                    exit::USAGE,
+                )
             })?;
             // Provenance is asserted because a number typed on the command line
             // is neither measured nor derived, whatever produced it upstream.

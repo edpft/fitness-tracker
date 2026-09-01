@@ -18,9 +18,7 @@
 use jiff::civil::{Date, Weekday};
 
 use domain::{
-    cycling::{
-        CycleDay, CyclingSession, Ftp, Ride, Selection, clock, peak_your_power_zones,
-    },
+    cycling::{CycleDay, CyclingSession, Ftp, Ride, Selection, clock, peak_your_power_zones},
     gym::PositiveDuration,
 };
 
@@ -154,10 +152,9 @@ fn report(
     println!("{}, {date}", weekday_name(date.weekday()));
     println!();
 
-    if let Some(class) = infrastructure::peloton::mapping::session(
-        u8::try_from(week).unwrap_or(0),
-        day.as_u8(),
-    ) {
+    if let Some(class) =
+        infrastructure::peloton::mapping::session(u8::try_from(week).unwrap_or(0), day.as_u8())
+    {
         for peloton in class.classes() {
             println!("  {} — {}", peloton.title(), peloton.instructor());
             println!("  {}", peloton.url());

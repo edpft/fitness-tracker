@@ -274,30 +274,126 @@ const W8D6: [PelotonClass; 2] = [
 
 /// Every session of *Peak Your Power Zones*, and what realises it.
 pub const PEAK_YOUR_POWER_ZONES: [MappedSession; 24] = [
-    MappedSession { week: 1, day: 1, classes: &W1D1 },
-    MappedSession { week: 1, day: 3, classes: &W1D3 },
-    MappedSession { week: 1, day: 6, classes: &W1D6 },
-    MappedSession { week: 2, day: 1, classes: &W2D1 },
-    MappedSession { week: 2, day: 3, classes: &W2D3 },
-    MappedSession { week: 2, day: 6, classes: &W2D6 },
-    MappedSession { week: 3, day: 1, classes: &W3D1 },
-    MappedSession { week: 3, day: 3, classes: &W3D3 },
-    MappedSession { week: 3, day: 6, classes: &W3D6 },
-    MappedSession { week: 4, day: 1, classes: &W4D1 },
-    MappedSession { week: 4, day: 3, classes: &W4D3 },
-    MappedSession { week: 4, day: 6, classes: &W4D6 },
-    MappedSession { week: 5, day: 1, classes: &W5D1 },
-    MappedSession { week: 5, day: 3, classes: &W5D3 },
-    MappedSession { week: 5, day: 6, classes: &W5D6 },
-    MappedSession { week: 6, day: 1, classes: &W6D1 },
-    MappedSession { week: 6, day: 3, classes: &W6D3 },
-    MappedSession { week: 6, day: 6, classes: &W6D6 },
-    MappedSession { week: 7, day: 1, classes: &W7D1 },
-    MappedSession { week: 7, day: 3, classes: &W7D3 },
-    MappedSession { week: 7, day: 6, classes: &W7D6 },
-    MappedSession { week: 8, day: 1, classes: &W8D1 },
-    MappedSession { week: 8, day: 3, classes: &W8D3 },
-    MappedSession { week: 8, day: 6, classes: &W8D6 },
+    MappedSession {
+        week: 1,
+        day: 1,
+        classes: &W1D1,
+    },
+    MappedSession {
+        week: 1,
+        day: 3,
+        classes: &W1D3,
+    },
+    MappedSession {
+        week: 1,
+        day: 6,
+        classes: &W1D6,
+    },
+    MappedSession {
+        week: 2,
+        day: 1,
+        classes: &W2D1,
+    },
+    MappedSession {
+        week: 2,
+        day: 3,
+        classes: &W2D3,
+    },
+    MappedSession {
+        week: 2,
+        day: 6,
+        classes: &W2D6,
+    },
+    MappedSession {
+        week: 3,
+        day: 1,
+        classes: &W3D1,
+    },
+    MappedSession {
+        week: 3,
+        day: 3,
+        classes: &W3D3,
+    },
+    MappedSession {
+        week: 3,
+        day: 6,
+        classes: &W3D6,
+    },
+    MappedSession {
+        week: 4,
+        day: 1,
+        classes: &W4D1,
+    },
+    MappedSession {
+        week: 4,
+        day: 3,
+        classes: &W4D3,
+    },
+    MappedSession {
+        week: 4,
+        day: 6,
+        classes: &W4D6,
+    },
+    MappedSession {
+        week: 5,
+        day: 1,
+        classes: &W5D1,
+    },
+    MappedSession {
+        week: 5,
+        day: 3,
+        classes: &W5D3,
+    },
+    MappedSession {
+        week: 5,
+        day: 6,
+        classes: &W5D6,
+    },
+    MappedSession {
+        week: 6,
+        day: 1,
+        classes: &W6D1,
+    },
+    MappedSession {
+        week: 6,
+        day: 3,
+        classes: &W6D3,
+    },
+    MappedSession {
+        week: 6,
+        day: 6,
+        classes: &W6D6,
+    },
+    MappedSession {
+        week: 7,
+        day: 1,
+        classes: &W7D1,
+    },
+    MappedSession {
+        week: 7,
+        day: 3,
+        classes: &W7D3,
+    },
+    MappedSession {
+        week: 7,
+        day: 6,
+        classes: &W7D6,
+    },
+    MappedSession {
+        week: 8,
+        day: 1,
+        classes: &W8D1,
+    },
+    MappedSession {
+        week: 8,
+        day: 3,
+        classes: &W8D3,
+    },
+    MappedSession {
+        week: 8,
+        day: 6,
+        classes: &W8D6,
+    },
 ];
 
 /// What realises the session at this week and day, if this build knows one.

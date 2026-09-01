@@ -259,11 +259,13 @@ fn the_operator_rides_wednesday_and_sunday() {
 #[test]
 fn the_operator_s_own_cool_down_is_added_to_peloton_s() {
     let session = session(1, 1).expect("week 1 day 1 is in the programme");
-    assert_eq!(session.cool_down().map(PositiveDuration::as_seconds), Some(60));
-
-    let extended = session.with_extra_cool_down(
-        PositiveDuration::from_seconds(300).expect("five minutes"),
+    assert_eq!(
+        session.cool_down().map(PositiveDuration::as_seconds),
+        Some(60)
     );
+
+    let extended =
+        session.with_extra_cool_down(PositiveDuration::from_seconds(300).expect("five minutes"));
     assert_eq!(
         extended.cool_down().map(PositiveDuration::as_seconds),
         Some(360),
@@ -280,9 +282,7 @@ fn the_operator_s_own_cool_down_is_added_to_peloton_s() {
 fn the_test_session_gains_a_cool_down_it_did_not_have() {
     let extended = session(8, 6)
         .expect("week 8 day 6 is in the programme")
-        .with_extra_cool_down(
-        PositiveDuration::from_seconds(300).expect("five minutes"),
-    );
+        .with_extra_cool_down(PositiveDuration::from_seconds(300).expect("five minutes"));
     assert_eq!(
         extended.cool_down().map(PositiveDuration::as_seconds),
         Some(300),

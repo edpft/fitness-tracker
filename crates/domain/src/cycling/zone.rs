@@ -340,6 +340,10 @@ impl Ftp {
 
 impl fmt::Display for Ftp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({}, from {})", self.watts, self.provenance, self.from)
+        write!(
+            f,
+            "{} ({}, from {})",
+            self.watts, self.provenance, self.from
+        )
     }
 }
