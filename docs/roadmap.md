@@ -27,22 +27,25 @@ this is the plan, not the record.
 The three-line version, kept current so a session starting cold does not have to
 read the rest to know what to pick up.
 
-- **Waiting on the operator**: the cycling class-to-session mapping, which he is
-  supplying explicitly. Peloton's *Peak Your Power Zones* — 8 weeks, 3×/week,
-  days 1, 3 and 6 — is transcribed in `docs/cycling-peak-your-power-zones.md`,
-  all eight weeks plus thirteen of the twenty-five class plans.
+- **Just landed**: the cycling domain and `fitness cycling next`. All
+  twenty-five sessions of *Peak Your Power Zones* are transcribed into
+  `domain::cycling::seed`, checked against the app's own stated ride durations
+  and movement counts for every one of them. The command prints the session, its
+  zones, what each zone means in watts at a given FTP, the Peloton class that
+  realises it, and a warning on the one class the operator's account cannot
+  start. Decision 0025 has the model; `docs/cycling-peak-your-power-zones.md`
+  has the data.
 
-  **A cycling session is duration × power zone, and Peloton is an adapter.** The
-  class plans are transcribed so the domain can state the session in its own
-  terms; the class link is a reference at the destination (0022's shape), not the
-  session's identity. Choosing a published programme is a convenience about
-  *matching* — every session already has a class that realises it, so nothing has
-  to search a catalogue for a zone profile that fits.
+  **Not built, and named rather than implied**: Peloton as a source and a sink.
+  Decision 0025 settled that it should be both and that a session should ideally
+  be scheduled into the operator's Peloton calendar. Until then cycling
+  prescribes and stops, which is why it is not a `KnownDiscipline` — a catalogue
+  entry pointing at streams that do not exist would make the shape look finished.
 
-  **Which two of the three days is a real choice, not arithmetic**: days 1+3,
-  1+6 and 3+6 are three different distributions of time across zones, so they are
-  three different programmes. Once the mapping lands, the difference is
-  computable. Note the FTP retest sits on week 8 day 6.
+  **Also not built**: persistence. The programme start and the FTP arrive as
+  arguments, because the store holds neither yet. The FTP has no default and
+  never will have one — a session prints its zones without it and its watts only
+  when told what a zone is a share of.
 
 - **Retired as authority**: `specs/`. 8,244 lines of agent-authored prose the
   operator has never read, and a session had just quoted `specs/003`'s

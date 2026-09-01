@@ -7,6 +7,7 @@
 
 mod catalogue;
 mod config;
+mod cycling;
 mod gym;
 mod output;
 mod paths;
@@ -130,6 +131,7 @@ fn command() -> ClapCommand {
         )
         .subcommand(init_command())
         .subcommand(discipline_command())
+        .subcommand(cycling_command())
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(compare_command())
@@ -178,6 +180,40 @@ fn discipline_command() -> ClapCommand {
     );
 
     command
+}
+
+/// `fitness cycling next`.
+///
+/// **A group of its own rather than an entry in the discipline catalogue.** A
+/// [`KnownDiscipline`](catalogue::KnownDiscipline) names a stream it collects
+/// and a source it delivers to, and cycling has neither adapter built — decision
+/// 0025 settled that Peloton should be both, and it is not yet. Adding a
+/// catalogue entry pointing at streams that do not exist would make the shape
+/// look finished while `next` could only ever prescribe.
+fn cycling_command() -> ClapCommand {
+    ClapCommand::new("cycling")
+        .about("What is done on a bike: which ride is next, and what it means in watts")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(
+            ClapCommand::new("next")
+                .about("The next cycling session at or after a date")
+                .arg(
+                    Arg::new("start")
+                        .long("start")
+                        .value_name("date")
+                        .required(true)
+                        .help("The date the programme's week 1 begins, as YYYY-MM-DD"),
+                )
+                .arg(Arg::new("date").long("date").value_name("date").help(
+                    "Which session to show, as YYYY-MM-DD. \
+                     Defaults to the next riding day at or after today",
+                ))
+                .arg(Arg::new("ftp").long("ftp").value_name("watts").help(
+                    "Functional threshold power, to convert each zone into watts. \
+                     Omitted, the zones print without them",
+                )),
+        )
 }
 
 /// Issue a prescription.
@@ -657,6 +693,7 @@ async fn authored_command(
             };
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
+        "cycling" => Some(cycling_command_run(sub)),
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
@@ -752,6 +789,50 @@ async fn discipline_command_run(
         credentials,
     )
     .await
+}
+
+/// `cycling next`, once its arguments are in hand.
+fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
+    let Some(("next", next)) = sub.subcommand() else {
+        return Err(Failure::message("no cycling command given", exit::USAGE));
+    };
+
+    let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
+        value
+            .parse::<jiff::civil::Date>()
+            .map_err(|error| Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE))
+    };
+
+    let Some(start) = next.get_one::<String>("start") else {
+        return Err(Failure::message("no --start given", exit::USAGE));
+    };
+    let start = parse_date(start)?;
+
+    let from = match next.get_one::<String>("date") {
+        Some(value) => parse_date(value)?,
+        None => jiff::Zoned::now().date(),
+    };
+
+    let ftp = match next.get_one::<String>("ftp") {
+        Some(value) => {
+            let watts = value.parse::<u32>().map_err(|error| {
+                Failure::message(format!("{value:?} is not a number of watts: {error}"), exit::USAGE)
+            })?;
+            // Provenance is asserted because a number typed on the command line
+            // is neither measured nor derived, whatever produced it upstream.
+            Some(
+                domain::cycling::Ftp::new(
+                    domain::cycling::Watts::from_u32(watts),
+                    from,
+                    domain::cycling::FtpProvenance::Asserted,
+                )
+                .map_err(|error| Failure::usage(&error))?,
+            )
+        }
+        None => None,
+    };
+
+    cycling::next(from, start, ftp)
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.
