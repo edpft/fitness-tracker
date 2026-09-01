@@ -136,6 +136,9 @@ not extend it by inference.
 | 5 | 6 | `A` | 60 min Power Zone Endurance Ride | Ben Alldis | 2022-05-13 15:00 | `5f660f9700ec47599b51dead06fd2a53` |
 | 6 | 1 | `P` | 45 min Power Zone Ride | Christine D'Ercole | 2022-05-13 15:00 | `062920dde7574be3a5a32628bb11d10c` |
 | 6 | 3 | `Q` | 45 min Power Zone Ride | Matt Wilpers | 2022-05-13 15:00 | `b119477c055044458b155d257ebd1bf8` |
+| 6 | 6 | `R` | 60 min Power Zone Ride | Christine D'Ercole | **2023-04-21 16:00** | `ae5058e68cf045058bbf405b3e115dda` |
+| 7 | 1 | `S` | 45 min Power Zone **Max** Ride | Ben Alldis | 2022-05-13 15:00 | `251e957464f74530937782a6080eecf9` |
+| 7 | 3 | `T` | 45 min Power Zone Ride | Christine D'Ercole | 2022-05-13 15:00 | `57af0cb0dfb44abba73af9798e312d2d` |
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -175,11 +178,16 @@ transcription goes wrong: a scrolled capture that silently omits the last
 interval still looks plausible and still sums to something. Check the count
 before recording a class.
 
-**The date is not an air date and is weak corroboration.** These two classes are
-by different instructors and carry the *same* timestamp, `Fri 13/5/22 @ 15:00`,
-which no pair of live classes can. Whatever the field is — added to the
-programme, or something else — it does not order or identify anything. Recorded
-because it is on the page, relied on for nothing.
+**The date is not an air date, and it does not identify a class.** Sixteen of the
+seventeen mapped classes carry the *identical* timestamp `Fri 13/5/22 @ 15:00`,
+across five instructors — which no set of live classes can share. The seventeenth,
+`R` at week 6 day 6, reads `Fri 21/4/23 @ 16:00`.
+
+So the field varies, but almost never, and a value shared by sixteen classes
+distinguishes nothing. Best guess is that it dates the *programme's* publication
+and that `R` was substituted in later — which would also explain why week 6 day 6
+is the one long ride that is not an endurance ride. **A guess, recorded as one.**
+Relied on for nothing either way.
 
 ## Time in zone, per transcribed class
 
@@ -195,6 +203,14 @@ warm-up or cool-down, so those are excluded and named separately.
 | I | 45 Power Zone | 12 | 8:00 | 4:00 | — | **15:00** | 5:00 | 32:00 |
 | P | 45 Power Zone | 13 | 17:00 | — | — | **—** | 9:00 | 31:00 † |
 | Q | 45 Power Zone | 13 | 7:00 | — | — | **17:59** | 6:01 | 31:00 |
+| R | 60 Power Zone | 13 | 8:00 | — | 22:00 | **16:00** | — | 46:00 |
+| S | 45 Max | 12 | 14:00 | 2:30 | — | **9:00** | 1:30 | 32:00 ‡ |
+| T | 45 Power Zone | 13 | 8:31 | 4:59 | — | **7:00** | 7:02 | 31:00 § |
+
+§ `T` also carries **Z6 3:28**.
+
+‡ `S` also carries **Z6 3:00 and Z7 2:00** — the only two columns this table
+has never needed. Its Z1 of 14:00 is 44% of the ride.
 | E | 45 Endurance | 10 | — | 8:00 | 26:00 | — | — | 34:00 |
 | L | 45 Endurance | 10 | — | 6:01 | 27:59 | — | — | 34:00 |
 | M | 45 Endurance | 11 | — | 9:00 | 24:00 | — | — | 33:00 |
@@ -230,10 +246,13 @@ the VO2 rides but a different session entirely.
 
 Two claims recorded here as settled are therefore withdrawn:
 
-- *"Zones 1 to 5 appear; 6 and 7 appear nowhere."* **False.** Z6 appears at week
-  6 day 1. Any zone type must carry at least 1–6, and given Peloton's scale runs
-  to 7, capping it at what has been observed would be building the type from a
-  sample.
+- *"Zones 1 to 5 appear; 6 and 7 appear nowhere."* **False twice over.** Z6
+  appears at week 6 day 1 and **Z7 at week 7 day 1**. All seven zones are now
+  observed, and the zone type carries 1–7 as a fact rather than as caution.
+  Withdrawing this in two stages is itself the point: the first correction
+  guessed the type "must carry at least 1–6" and hedged about 7 — the hedge was
+  right, and had the type been sized to the evidence at either moment it would
+  have been wrong.
 - *"Every 45-minute Power Zone ride holds Z4 at 15–18 minutes."* **False**, and
   it was the load-bearing generalisation of the whole archetype section. Eleven
   consecutive confirmations, then a counterexample.
@@ -242,8 +261,10 @@ The lesson is the same one this document has already recorded twice: a pattern
 over the transcribed subset is a description of the subset. `P` is the twelfth of
 twenty-five.
 
-**`P` is the outlier rather than the new rule.** `Q`, the very next session, is
-back at 17:59 of Z4. Of thirteen Power Zone rides mapped, exactly one has no Z4.
+**`P` is the outlier rather than the new rule.** `Q` is back at 17:59 of Z4 and
+`R` — a *sixty*-minute Power Zone ride — sits at 16:00. Of fourteen Power Zone
+rides mapped, exactly one has no Z4, and the 15–18 minute band has now held
+across both class lengths.
 
 ### Week 6 day 3 finishes each threshold block with a surge
 
@@ -262,11 +283,78 @@ threshold archetype (`J`, `H`, `B` — Z4 with Z3 between) nor the VO2 one (`D`,
 `I` — Z4 and Z5 kept apart by Z1). *More info* was not captured for this class,
 so Peloton's own word for it is unknown and none is invented here.
 
-### Week 6 is the hardest week, not week 7
+### Week 6 day 6 is a threshold ride, and states its own sets
 
-Day 1 is the only session with Z6; day 3 is the only one welding Z5 onto the end
-of every Z4 block; and day 6 is the programme's only `60 min Power Zone Ride` —
-the one long ride that is not an endurance ride. Week 7 has the only `Max Ride`
+`R` is the programme's only `60 min Power Zone Ride` — the sole long ride that is
+not an endurance ride. Its *More info*:
+
+> 13-min. warm up followed by 3 sets of alternating Z3 and Z4 intervals
+> (4/3/4/3, 3/2/3/2, 4/3/4/3) with 4 min. of Z1 recovery in between each.
+
+The transcription matches exactly. Note the sets dip in the middle — big, small,
+big — which is the shape `A` carries at interval level and Peloton calls an
+inverted pyramid. **It does not use that word here**, so the shape is noted and
+the label is not borrowed.
+
+### The Max Ride is a fifth archetype, and it reaches Z7
+
+`S`, week 7 day 1, is the programme's only `Max Ride` and the only class touching
+Zone 7. Thirty-three movements — half again as many as anything else:
+
+```
+⟨Z6 0:30 · Z4 3:00 · Z7 0:15 · Z1 3:15⟩ × 3
+⟨Z5 0:30 · Z2 0:30⟩ × 3 · ⟨Z6 0:30 · Z2 0:30⟩ × 2 · Z6 0:30
+Z1 3:15
+⟨Z7 0:15 · Z1 0:15⟩ × 4 · Z7 0:15
+```
+
+Three threshold blocks, each opened by a half-minute at Z6 and **closed by a
+fifteen-second sprint at Z7**; then a 30/30 ladder climbing Z5 into Z6; then eight
+fifteen-second Z7 sprints against fifteen-second recoveries. Z7 totals two
+minutes, in eight bites. Z1 totals fourteen — **44% of the ride is recovery**,
+against 55% in `P` and under 20% in every threshold class.
+
+**This one needed stitching from two overlapping captures**, and both checks held:
+the reconstruction is 33 movements against a stated 33, and sums to 32:00 against
+a stated 32. Neither check would have survived a dropped or duplicated interval
+across the seam, which is exactly what they are for.
+
+### Week 7 day 3 climbs the zones twice
+
+`T` runs two sets, each ascending Z4 → Z5 → Z6 while the intervals shorten:
+
+```
+set 1   Z4 4:00 · ⟨Z5 1:00 · Z2 1:00⟩×3 · Z5 1:01 · ⟨Z6 0:30 · Z1 0:30⟩×3 · Z6 0:30
+set 2   Z4 3:00 · ⟨Z5 1:00 · Z2 1:00⟩×2 · Z5 0:59 · ⟨Z6 0:29 · Z1 0:30⟩×2 · Z6 0:30
+```
+
+Four minutes at Z4, then minutes at Z5, then half-minutes at Z6 — **the zone
+rises exactly as the interval shortens**, and the second set is the first with one
+repetition removed from each rung. Thirty-one movements, and the count matches.
+
+### Week 6 or week 7 — resolved, and they peak at different things
+
+An earlier section here argued week 6 was the hardest week, on the evidence then
+available. With week 7 days 1 and 3 mapped the honest answer is that the question
+was badly posed:
+
+| | Z4 | Z5 | Z6 | Z7 |
+|---|---|---|---|---|
+| week 6, days 1+3 | 17:59 | 15:01 | 5:00 | — |
+| week 7, days 1+3 | 16:00 | 8:32 | 6:28 | **2:00** |
+
+**Week 6 peaks on volume at threshold and VO2; week 7 peaks on intensity.** Week 6
+carries nearly twice the Z5. Week 7 is the only week reaching Z7, and puts its
+hardest zones into shorter and shorter bites. Neither is "harder" without saying
+harder at what — and the earlier claim, which said week 6 simply won, is
+withdrawn rather than defended.
+
+Day 6 does not disturb this: week 6's is a 60-minute threshold ride, week 7's a
+90-minute endurance ride, and neither is yet weighed here.
+
+Now that all three days are mapped: day 1 is the only session with Z6, day 3 the
+only one welding Z5 onto the end of every Z4 block, and day 6 the only long ride
+that is not endurance — sixteen minutes of Z4 on top of the other two. Week 7 has the only `Max Ride`
 and the only 90-minute ride, so it looks like the peak from the titles, but on
 what is actually mapped week 6 asks for more.
 
@@ -349,7 +437,8 @@ simply not the one the programme asks for.
 | 3 | `I` VO2, Z5 5:00 in 30/30s | `H` threshold, Z4 15:59 | `G` endurance 60 |
 | 4 | `F` endurance, Z3 23:00 | `E` endurance, Z3 26:00 | `C` endurance 60 ⚠ |
 | 5 | `D` VO2, Z5 7:00 sustained | `B` threshold, Z4 17:00 | `A` endurance 60 |
-| 6 | `P` **anaerobic — Z6, no Z4** | `Q` Z4 blocks with Z5 surges | — |
+| 6 | `P` **anaerobic — Z6, no Z4** | `Q` Z4 blocks with Z5 surges | `R` **threshold 60**, Z4 16:00 |
+| 7 | `S` **Max — Z7**, 33 movements | `T` Z4→Z5→Z6 ladder | — |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
