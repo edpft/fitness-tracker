@@ -78,11 +78,12 @@ Seven weeks of three classes plus week 8's four is 25, reconciling exactly.
 | 5 | 45 Power Zone — Wilpers | 45 Power Zone — Morton | 60 Endurance — Alldis |
 | 6 | 45 Power Zone — D'Ercole | 45 Power Zone — Wilpers | 60 **Power Zone** — D'Ercole |
 | 7 | 45 Power Zone **Max** — Alldis | 45 Power Zone — D'Ercole | 90 Endurance — Wilpers |
-| 8 | 45 Endurance — D'Ercole | *(obscured)* — Morton | **10 min FTP Warm Up + FTP test** — Wilpers |
+| 8 | 45 Endurance — D'Ercole | 45 **Endurance** — Morton | **10 min FTP Warm Up + FTP test** — Wilpers |
 
-Three day-3 titles were hidden behind the `Join program` button. Weeks 2 and 4
-are now resolved by the mapping — both are **Endurance** rides — leaving only
-week 8 day 3 unknown.
+Three day-3 titles were hidden behind the `Join program` button. **All three are
+resolved by the mapping, and all three are Endurance rides** — weeks 2, 4 and 8.
+Every title above was read directly or established by a class the operator
+matched to the slot.
 
 **The arc**: week 1 all endurance; weeks 2, 3, 5, 6 build; week 4 drops day 1
 back to endurance as a deload; week 7 peaks on the only `Max Ride` and the only
@@ -141,6 +142,11 @@ not extend it by inference.
 | 7 | 3 | `T` | 45 min Power Zone Ride | Christine D'Ercole | 2022-05-13 15:00 | `57af0cb0dfb44abba73af9798e312d2d` |
 | 7 | 6 | `U` | **90** min Power Zone Endurance Ride | Matt Wilpers | 2022-05-13 15:00 | `597a32a0c58a4625b5d9299daffb2e05` |
 | 8 | 1 | `V` | 45 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `5833bec716724236bd9d12730ff29776` |
+| 8 | 3 | `W` | 45 min Power Zone **Endurance** Ride | Denis Morton | 2022-05-13 15:00 | `a85ab401308f42268394273971f5468c` |
+| 8 | 6a | `X` | 10 min FTP Warm Up Ride | Matt Wilpers | 2022-05-13 15:00 | `f3474128dec54bbcb7f3775161e4f45e` |
+| 8 | 6b | `Y` | 20 min **FTP Test** Ride | Matt Wilpers | 2022-05-13 15:00 | `67578c4e666046469a20987ccf70ee5f` |
+
+**All twenty-five classes are mapped.**
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -210,6 +216,7 @@ warm-up or cool-down, so those are excluded and named separately.
 | T | 45 Power Zone | 13 | 8:31 | 4:59 | — | **7:00** | 7:02 | 31:00 § |
 | U | 90 Endurance | 13 | — | 20:00 | **56:00** | — | — | 76:00 |
 | V | 45 Endurance | 13 | — | 8:00 | **23:01** | — | — | 31:01 |
+| W | 45 Endurance | 13 | — | 12:00 | **19:00** | — | — | 31:00 |
 
 § `T` also carries **Z6 3:28**.
 
@@ -447,7 +454,7 @@ simply not the one the programme asks for.
 | 5 | `D` VO2, Z5 7:00 sustained | `B` threshold, Z4 17:00 | `A` endurance 60 |
 | 6 | `P` **anaerobic — Z6, no Z4** | `Q` Z4 blocks with Z5 surges | `R` **threshold 60**, Z4 16:00 |
 | 7 | `S` **Max — Z7**, 33 movements | `T` Z4→Z5→Z6 ladder | `U` **90 min**, Z3 56:00 |
-| 8 | `V` endurance, Z3 23:01 | — | FTP warm-up + **retest** |
+| 8 | `V` endurance, Z3 23:01 | `W` endurance, **Z3 19:00** | `X` warm-up, then `Y` the **retest** |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
@@ -491,8 +498,27 @@ programme's longest Z2 recoveries — four minutes each — which is what separa
 taper from a deload: the same aerobic dose, fewer efforts, more rest between
 them.
 
-**These are the two lightest 45-minute rides in the programme**, and they sit at
-weeks 4 and 8 — before the second half, and before the test.
+**Week 8 goes lighter still on day 3.** `W` runs **19:00 of Z3 against 12:00 of
+Z2** — the least Z3 and the most Z2 of any 45-minute ride anywhere in the
+programme. So the taper deepens across the week: 23:01, then 19:00, then the
+test.
+
+**Which sharpens the day-6 problem considerably.** In week 8 the operator's two
+chosen sessions are the two easiest rides of the whole eight weeks, and the only
+thing that measures anything is the day he is dropping. The final week would be
+two recovery rides and nothing else.
+
+### The formation tally, without an inference attached
+
+Five pyramids are now transcribed: week 4 days 1 and 6, week 7 day 6, week 8 days
+1 and 3. Four of the five sit in the deload and the taper; the fifth is the
+volume peak. Descending steps hold weeks 1 to 3; the single inverted pyramid is
+week 5.
+
+**No claim is made about what that means.** Three earlier attempts to tie
+formation to purpose were each withdrawn, the last of them by `U`. The tally is
+recorded because it is a fact about the data; the pattern it suggests has already
+been wrong once at four-out-of-five confidence.
 
 ### The Z5 work goes from bursts to blocks
 
@@ -624,6 +650,72 @@ that day, and days 1 and 3 do not carry it.
 
 Stated as fact, not advice. The choice is the operator's.
 
+## The FTP test prescribes a duration and no zone, and that is the point
+
+`Y` — the retest — has a `Class plan` of **`Cycling · 20 mins` with no movement
+count and no breakdown at all.** No warm-up section (that is `X`, a separate
+class), no cool-down, and no intervals. Difficulty 9.6/10, the highest in the
+programme. Its *More info*:
+
+> This workout is all about realizing the fitness gains you have made since
+> starting this program. Maximize your average output in this test and compare
+> it to your previous test.
+
+**It cannot be expressed in zones, because it is what defines them.** A zone is a
+share of FTP; this ride measures FTP. Prescribing it as "ride at Z5 for twenty
+minutes" would be circular — the whole point is that the output is unknown until
+it is ridden.
+
+### Which is exactly the shape the gym side already has
+
+Decision 0023 added a `WorkUp` variant to `WeekPlan`: **a repetition count and no
+load**, because the load is discovered by working up rather than derived from a
+maximum. `Y` is the same move in the other discipline: **a duration and no zone**,
+because the intensity is discovered.
+
+```
+gym       WorkUp   reps,     no load    →  discovers the load
+cycling   test     duration, no zone    →  discovers the output
+```
+
+Both sit at the end of their programme, and both measure the number every other
+prescription in that programme is a share of — the 1RM for SBS's percentages,
+FTP for Peloton's zones. **This is the strongest evidence so far that the two
+disciplines are one model rather than two**, and it was not designed in: the gym
+variant was written a week earlier for unrelated reasons and the cycling case
+fell out of a transcription.
+
+## A class need not have a ride at all
+
+`X` — the FTP warm-up — has a `Class plan` consisting of **`Warm Up · 10 mins ·
+6 Movements` and nothing else.** No `Cycling` section, no `Cool Down`. Its
+*More info* reads:
+
+> It's time to prepare your body to achieve a higher average output than you did
+> in your last FTP test. Let's warm up!
+
+Every other class in the programme is warm-up, then a zone-interval ride, then a
+one-minute cool-down. **A session type carrying no prescribed intervals must
+therefore be representable** — and a model that made the interval sequence
+mandatory, or non-empty, would be unable to hold one of the twenty-five.
+
+### And no warm-up anywhere is transcribed
+
+`X` makes visible a gap that had gone unnoticed because it never mattered before.
+Every class states its warm-up as a duration and a movement count — `13 mins ·
+9 Movements` — and **the zone breakdown of that section was never expanded in any
+capture.** Only `Cycling` was.
+
+That is **10 to 13 minutes per class across twenty-four classes: on the order of
+four and a half hours of riding with no zone data at all**, against roughly
+seventeen hours that are fully transcribed. For most classes the omission is
+tolerable — a warm-up is a warm-up. For `X` it is the entire session, so what is
+recorded here is a duration and nothing else.
+
+Left as a known hole rather than guessed at. Whether it is worth closing depends
+on whether warm-up zones matter to what the tool computes; if the answer is that
+a prescription states the whole session, it does.
+
 ## Week 4 day 6 cannot be taken
 
 `C` shows **`Unavailable`** rather than `Start` — the only class of the fifteen
@@ -665,6 +757,43 @@ With the time-in-zone table above and the squat chart in 0024, the interaction
 becomes checkable rather than hopeful: week 7 pairs the only `Max Ride` with a
 threshold ride, and squat block 2's week 3 is `3×1 @ 90%` and a 3RM. Whether those
 belong in the same week is a question with numbers behind it.
+
+## The three day-pairings, computed
+
+The question the transcription existed to answer. Ride portions only —
+warm-ups are untranscribed throughout, so all three columns understate equally.
+Totals across the whole eight weeks:
+
+| pairing | Z1 | Z2 | Z3 | Z4 | Z5 | Z6 | Z7 | ride | untimed |
+|---|---|---|---|---|---|---|---|---|---|
+| **days 1+3** | 79:31 | 69:30 | 200:59 | **114:58** | **35:33** | **11:28** | **2:00** | 513:59 | — |
+| **days 1+6** | 60:00 | 113:29 | 332:57 | 73:00 | 22:30 | 8:00 | **2:00** | 641:56 | 30:00 |
+| **days 3+6** | 35:31 | 117:59 | **369:54** | 73:58 | 13:03 | 3:28 | — | 643:53 | 30:00 |
+
+*(All three days: Z3 451:55, Z4 130:58, ride 899:54.)*
+
+**These are three different programmes, and the operator's phrasing was exact.**
+
+- **Days 1+3** is the intensity programme. It carries **57% more Z4** than either
+  alternative, nearly three times the Z5, and over three times the Z6 — in two
+  fewer hours of riding. It is also the only pairing that misses the FTP retest.
+- **Days 3+6** is its opposite: the most Z3 of any pairing, almost no Z5, and
+  **no Z7 at all** — the Max Ride is on day 1, so that pairing never touches the
+  programme's hardest session.
+- **Days 1+6** is the balanced one. It keeps the Max Ride *and* the long-ride
+  progression, sits within three minutes of days 3+6 on total riding time, and
+  lands between the two on every zone above Z2.
+
+**Days 1+6 also solves the week 8 problem for free**, because day 6 of week 8 is
+the FTP retest. No exception has to be remembered.
+
+Two costs, stated because they are real: days 1+6 gives up roughly 42 minutes of
+Z4 against days 1+3, and week 4 day 6 is the class showing `Unavailable`, so one
+of its eight long rides needs substituting.
+
+**Not a recommendation — the operator has the numbers now, which is what he asked
+for.** Note only that the ride totals are not comparable as time commitments: days
+1+3 asks for 8h34m across eight weeks, the other two for about 10h42m.
 
 ## Open
 
