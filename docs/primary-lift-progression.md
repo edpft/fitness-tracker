@@ -275,4 +275,5 @@ The logging app supports this: Hevy records a failed attempt as zero
 repetitions. The discriminator is the rep count and not the `failure` set type,
 which means "taken to failure" and appears on 77 completed sets in the record
 against one genuine failure. Translating it is specified in
-`specs/003-prescribed-workout-generation`.
+`specs/003-prescribed-workout-generation`, deleted 2026-09-01 and recoverable
+from git history.

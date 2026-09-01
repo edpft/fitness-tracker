@@ -139,9 +139,12 @@ He notes: *"I think the value that Peloton takes is slightly lower than the
 average watts. I don't think they expose it in the app."*
 
 **The published convention is 95% of the twenty-minute average**, which gives
-**172 W**. That matches "slightly lower" and is the standard derivation, but it
-is a convention applied here rather than a number read off his account, so it is
-**recorded as unconfirmed**.
+**172 W**. That matches "slightly lower" and is the standard derivation.
+
+**Confirmed by the operator on 2026-09-01** — *"yes, I think 172 is right"* —
+against the zone table below. Its provenance is `Estimated` rather than `Tested`:
+it is arithmetic over a test, not a number the test reported, and § 13 wants that
+difference kept because it is not recoverable from the value.
 
 It is confirmable in one glance without Peloton exposing FTP directly, because
 the zone boundaries are shares of it. At 172 W:
@@ -156,8 +159,8 @@ the zone boundaries are shares of it. At 172 W:
 | Z6 | 121–150% | 208–258 |
 | Z7 | > 150% | > 258 |
 
-If the app's power zone ranges match these, FTP is 172. If they do not, FTP is
-whatever they divide back to, and this table is wrong rather than the app.
+These are what the operator confirmed against. **FTP in force from 2026-07-22 is
+172 W, `Estimated`.**
 
 **FTP is an interpretive parameter under § 13** — effect-dated and retained, never
 overwritten. The value in force from 2026-07-22 is this one; the week 8 retest

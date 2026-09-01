@@ -2,7 +2,7 @@
 
 ## The constitution
 
-`.specify/memory/constitution.md` governs this project. Read it before any
+`docs/constitution.md` governs this project. Read it before any
 non-trivial change. It is binding rather than aspirational, and it is short
 enough to read in full.
 
@@ -67,8 +67,10 @@ work. That is not a fact about the project.
   the seed, the candidates and the vocabulary into `domain`). What governs is
   the constitution, `docs/decisions/`, `docs/roadmap.md` and the code.
 
-  Do not read `specs/`, do not cite it, do not add to it. Same for the
-  `speckit-*` skills. Both are pending deletion — see decision 0024.
+  **Deleted on 2026-09-01**, along with `.specify/` and the `speckit-*` skills;
+  the constitution moved to `docs/constitution.md` on its way out. All of it is
+  in git history if a provenance note ever needs chasing. Do not restore it, do
+  not cite it, and do not write its like again.
 - **Branch, then pull request.** Human sign-off before merge (§ 40). Do not
   merge your own work. Dependency bumps are exempt and merge on green.
 - **Conventional Commits.** release-please derives versions and changelogs from

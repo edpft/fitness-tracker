@@ -453,7 +453,8 @@ shapes the model above; it is what one adapter must translate into it.
   workout it names with no normalised entity: [decision
   0001](decisions/0001-retraction-at-the-normalised-layer.md), which amended the
   constitution to say so. Detail on the feed in
-  [`specs/001-hevy-workout-extraction/research.md`](../specs/001-hevy-workout-extraction/research.md).
+  `specs/001-hevy-workout-extraction/research.md`, deleted 2026-09-01 and
+  recoverable from git history.
 - **Supersession has no ground truth.** 164 records, 164 distinct workout ids,
   not one re-serve. § 10's "the later supersedes" needs a synthetic test.
 

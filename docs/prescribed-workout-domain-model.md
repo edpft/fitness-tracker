@@ -416,7 +416,7 @@ record. On 3 August the top set rose and the back-off did not, which no function
 of the anchor produces — and generation must not reproduce it.
 
 Quantisation is **nearest, ties down**: 85% of 80 is 68, which quantises to
-67.5. Settled in `specs/003-prescribed-workout-generation`. The increment is a
+67.5. Settled in `specs/003-prescribed-workout-generation`, deleted 2026-09-01. The increment is a
 generation parameter; the rounding rule is not, because § 9 puts deterministic
 derivation in code rather than in data.
 

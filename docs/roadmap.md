@@ -524,8 +524,9 @@ of the three have landed**; withdrawal has not:
 
 ## Two things a new session should read first
 
-- `.specify/memory/constitution.md`, which governs. It is short and binding.
-- `CLAUDE.md`, for the way of working. Spec Kit is retired; `specs/` is history.
+- `docs/constitution.md`, which governs. It is short and binding.
+- `CLAUDE.md`, for the way of working. Spec Kit is retired and `specs/` is
+  deleted — see decision 0024.
 
 And two framings settled in conversation that are not otherwise written down:
 
