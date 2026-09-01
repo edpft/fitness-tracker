@@ -131,6 +131,9 @@ not extend it by inference.
 | 4 | 1 | `F` | 45 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `0cd72d4b70c54c8e93b5f13e75fee11d` |
 | 4 | 3 | `E` | 45 min Power Zone **Endurance** Ride | Matt Wilpers | 2022-05-13 15:00 | `ed1fe2a5e2344dacb2f9bd9984d9ca83` |
 | 4 | 6 | `C` | 60 min Power Zone Endurance Ride | Denis Morton | 2022-05-13 15:00 | `c67ec9512f954169acd9df4c95010e49` ⚠ |
+| 5 | 1 | `D` | 45 min Power Zone Ride | Matt Wilpers | 2022-05-13 15:00 | `9cae0c2dfe234c529db4da028ff4addd` |
+| 5 | 3 | `B` | 45 min Power Zone Ride | Denis Morton | 2022-05-13 15:00 | `c2c9fff7966e4743b162b5cc426ad3e7` |
+| 5 | 6 | `A` | 60 min Power Zone Endurance Ride | Ben Alldis | 2022-05-13 15:00 | `5f660f9700ec47599b51dead06fd2a53` |
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -284,6 +287,7 @@ simply not the one the programme asks for.
 | 2 | `J` threshold, Z4 18:00 | `N` endurance | `O` endurance 60 |
 | 3 | `I` VO2, Z5 5:00 in 30/30s | `H` threshold, Z4 15:59 | `G` endurance 60 |
 | 4 | `F` endurance, Z3 23:00 | `E` endurance, Z3 26:00 | `C` endurance 60 ⚠ |
+| 5 | `D` VO2, Z5 7:00 sustained | `B` threshold, Z4 17:00 | `A` endurance 60 |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
@@ -294,13 +298,77 @@ the base week, in the middle of the programme. Its Z3 blocks also run
 `3/5/7/5/3`, a pyramid up and back down, where every day-6 ride descends. That is
 the only pyramid transcribed so far.
 
+### The threshold rides do not progress, and that is worth recording
+
+Three are mapped, and Z4 does not climb:
+
+| | Z4 total | Z3 | Z1 | Z4 block sequence |
+|---|---|---|---|---|
+| week 2 day 1 — `J` | 18:00 | 12:00 | 3:00 | 4/3/2 · 4/3/2 |
+| week 3 day 3 — `H` | 15:59 | 9:59 | 6:00 | 2/2 · 4/4 · 2/2 |
+| week 5 day 3 — `B` | 17:00 | 10:00 | 6:00 | 3/2 · 4/3 · 3/2 |
+
+**The most Z4 in the programme so far is week 2's**, and the block sequences share
+no shape — one descends twice, one pyramids, one does neither. There may be no
+threshold progression at all; the climb may live entirely in day 6's aerobic work
+and day 1's Z5. Recorded as an absence so that a later session does not invent a
+pattern here, and left open because three of eight weeks is thin evidence either
+way.
+
+### The Z5 work goes from bursts to blocks
+
+Two VO2 sessions are mapped, both on day 1, and Z4 is 15:00 in each:
+
+| | Z5 shape | Z5 total | Z1 recovery |
+|---|---|---|---|
+| week 3 — `I` | ten 0:30 bursts, in two blocks of five | 5:00 | 8:00 |
+| week 5 — `D` | three sustained blocks, 2:00 / 3:00 / 2:00 | 7:00 | 10:00 |
+
+**Same total riding time, same Z4, and the Z5 changes character rather than
+merely growing** — thirty-second efforts against two- and three-minute ones.
+Two minutes more Z5, bought with two minutes more Z1 to recover in. Short bursts
+first, sustained blocks later, which is the standard way in to VO2 work and here
+it is the programme's own ordering rather than a reading of the archetypes.
+
+### Peloton names the formations, and there are three
+
+Every word below is the class's own, from *More info* — not a reading imposed
+here:
+
+| formation | example | shape |
+|---|---|---|
+| descending step | `7/7/5/5/3/3` | hardest first, easing throughout |
+| pyramid | `5/7/9/7/5` | builds to one peak, releases both ends |
+| inverted pyramid | `9/7/5/7/9` | hard at both ends, easiest in the middle |
+
+**Day 6 runs all three, in that order**: descending for the three build weeks,
+pyramid for the week 4 deload, inverted pyramid at week 5. So the long ride
+progresses in *shape* as well as in volume — and the shapes are not
+interchangeable. A descending step spends its freshness immediately; an inverted
+pyramid demands a hard effort after forty minutes of work, which is a different
+demand at the same Z3 total.
+
+**This vocabulary is Peloton's and stays out of the domain.** A formation is a
+*description* of an interval sequence and is fully derivable from it, so storing
+one would be keeping a second copy of something already recorded — and it would
+put a vendor's taxonomy inside the model, which is the mistake this document
+opens by correcting. Useful for reading the programme; never a field.
+
 ### The deload week is a pyramid, and that is its signature
 
-**Week 4 uses pyramid formations where every build week descends.** `F` on day 1
-runs `3/5/7/5/3`; `C` on day 6 runs `5/7/9/7/5` and says so itself — *"five Z3
-intervals in a pyramid formation (5/7/9/7/5)"*. Those are the only two pyramids
-in anything transcribed. Every other class with a stated formation is a
-descending step: `7/7/5/5/3/3`, `8/8/6/6/4/4`, `9/9/7/7/5`.
+**Among the *endurance* rides, week 4 pyramids where every build week descends.**
+`F` on day 1 runs `3/5/7/5/3`; `C` on day 6 runs `5/7/9/7/5` and says so itself —
+*"five Z3 intervals in a pyramid formation (5/7/9/7/5)"*. Every endurance ride
+that states a formation is otherwise a descending step: `7/7/5/5/3/3`,
+`8/8/6/6/4/4`, `9/9/7/7/5`.
+
+**Scope matters and an earlier draft overreached.** It said these were "the only
+two pyramids in anything transcribed", which is false: `H` — week 3 day 3, a
+build week — runs its Z4 blocks at `2/2/4/4/2/2`, a pyramid by any reading. The
+claim holds for the Z3 formations of endurance rides, which is where Peloton
+itself uses the word. It does not hold across the Power Zone rides, and nothing
+here has established that a Z4 block sequence and a Z3 interval formation are
+the same kind of object.
 
 A descending formation front-loads the hardest work while fresh. A pyramid peaks
 once in the middle and releases at both ends. **The week's shape and the week's
@@ -339,12 +407,13 @@ punishing.**
 Two consecutive day-6 rides are now mapped, and each states its own formation
 under *More info*:
 
-| week | Z3 intervals | Z2 recoveries | Z3 total | Z2 total | ride |
+| week | Z3 intervals | formation | Z3 total | Z2 total | ride |
 |---|---|---|---|---|---|
-| 1 — `K` | 7/7/5/5/3/3 | 4/4/3/3/2 | 30:00 | 16:00 | 46:00 |
-| 2 — `O` | 8/8/6/6/4/4 | 3/3/2/2/1 | 35:59 | 11:00 | 46:59 |
-| 3 — `G` | 9/9/7/7/5 | 3/3/2/2 | 36:59 | 10:00 | 46:59 |
-| 4 — `C` | 5/7/9/7/5 **pyramid** | 3/3/4/3 | 32:58 | 12:58 | 45:56 |
+| 1 — `K` | 7/7/5/5/3/3 | descending step | 30:00 | 16:00 | 46:00 |
+| 2 — `O` | 8/8/6/6/4/4 | descending step | 35:59 | 11:00 | 46:59 |
+| 3 — `G` | 9/9/7/7/5 | descending | 36:59 | 10:00 | 46:59 |
+| 4 — `C` | 5/7/9/7/5 | **pyramid** | 32:58 | 12:58 | 45:56 |
+| 5 — `A` | 9/7/5/7/9 | **inverted pyramid** | 37:00 | 11:00 | 48:00 |
 
 **Work climbs, recovery falls, and the ride length holds.** Thirty minutes of Z3
 becomes thirty-seven across three weeks while Z2 recovery drops from sixteen
