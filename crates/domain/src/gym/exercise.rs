@@ -455,6 +455,28 @@ pub enum Exercise {
 }
 
 impl Exercise {
+    /// The exercise a vocabulary key names, whichever of the three it is in.
+    ///
+    /// **The one place the three vocabularies are tried in turn.** A key belongs
+    /// to exactly one of them, so the order is not a precedence — but having two
+    /// callers each write their own sequence is how a key that stops parsing in
+    /// one of them starts silently reading as `None` in the other.
+    ///
+    /// It was in `cli::wizard` until 2026-08-30, which put the vocabulary
+    /// lookup in a transport.
+    #[must_use]
+    pub fn named(key: &str) -> Option<Self> {
+        if let Ok(reps) = RepsExercise::try_from(key.to_owned()) {
+            return Some(Self::Reps(reps));
+        }
+        if let Ok(duration) = DurationExercise::try_from(key.to_owned()) {
+            return Some(Self::Duration(duration));
+        }
+        DistanceExercise::try_from(key.to_owned())
+            .ok()
+            .map(Self::Distance)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Reps(exercise) => exercise.as_str(),

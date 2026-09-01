@@ -6,10 +6,16 @@
 //! force at a time is recoverable, and a default that changes later does not
 //! rewrite anything already authored.
 //!
-//! **Preference, not domain fact**, which is why it lives here and not in
-//! `domain` — the same standing [`candidates`](crate::candidates) has. That a
-//! back-off is a share of the top set is true of anyone; that the share is 85%
-//! is true of this operator, stated by him on the dates named below.
+//! **It lives in `domain` because it is configuration of a gym exercise
+//! programme**, and that is the subject matter here. It sat in `cli` until
+//! 2026-08-30, justified by a comment claiming it was "preference, not domain
+//! fact" — that a back-off is a share of the top set is true of anyone, that
+//! the share is 85% is true of this operator. No decision ever said that, and
+//! the test is wrong anyway: by it, no anchor, no ladder rate and no training
+//! day would be domain either. What keeps a thing out of `domain` is a vendor
+//! (§ II.3), not whose numbers they are. While it lived a ring up, the two
+//! adapters could have seeded different parameters and prescriptions would have
+//! differed by which one ran `init`.
 //!
 //! **They were in a TOML document until 2026-08-26**, which is where the
 //! comments come from. The document is gone and the numbers are not: each one
@@ -20,7 +26,7 @@
 
 use std::collections::BTreeMap;
 
-use domain::{
+use crate::{
     gym::{Duration, Kg, NonEmpty, RepCount, exercise::Implement},
     prescription::{
         AccessoryScheme, BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage,
@@ -28,30 +34,35 @@ use domain::{
     },
 };
 
-use crate::{Failure, exit};
-
 /// A value in this file that will not build.
 ///
 /// Every one of them is written a few lines above, so this is a defect in the
 /// build rather than anything an operator did — but panicking is forbidden and
 /// so is pretending it cannot happen, and [`pinned`](self) is the test that
 /// keeps it from happening.
-fn wrong(what: &str, error: impl std::fmt::Display) -> Failure {
-    Failure::message(
-        format!("the shipped {what} will not build ({error}) — this is a defect in this build"),
-        exit::USAGE,
-    )
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the shipped {what} will not build ({detail}) — this is a defect in this build")]
+pub struct InvalidSeed {
+    what: String,
+    detail: String,
 }
 
-fn percentage(what: &str, stated: &str) -> Result<Percentage, Failure> {
+fn wrong(what: &str, error: impl core::fmt::Display) -> InvalidSeed {
+    InvalidSeed {
+        what: what.to_owned(),
+        detail: error.to_string(),
+    }
+}
+
+fn percentage(what: &str, stated: &str) -> Result<Percentage, InvalidSeed> {
     Percentage::try_from(stated.to_owned()).map_err(|error| wrong(what, error))
 }
 
-fn mass(what: &str, kilos: &str) -> Result<Kg, Failure> {
+fn mass(what: &str, kilos: &str) -> Result<Kg, InvalidSeed> {
     Kg::try_from(kilos.to_owned()).map_err(|error| wrong(what, error))
 }
 
-fn count(what: &str, reps: u32) -> Result<RepCount, Failure> {
+fn count(what: &str, reps: u32) -> Result<RepCount, InvalidSeed> {
     RepCount::new(reps).map_err(|error| wrong(what, error))
 }
 
@@ -68,7 +79,7 @@ const fn exactly(seconds: u64) -> BlockRest {
 /// **The domain holds a span rather than two bounds**, so an inverted range is
 /// not expressible past this point — which is why the seed states `120, 180`
 /// and gets `None` rather than a backwards rest if anyone swaps them.
-fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRest, Failure> {
+fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRest, InvalidSeed> {
     let span = |low: u64, high: u64| {
         Target::between(Duration::from_seconds(low), Duration::from_seconds(high))
             .ok_or_else(|| wrong(what, "a rest range runs low-high and must span"))
@@ -80,7 +91,7 @@ fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRes
 }
 
 /// The double-progression scheme a block's non-primary slots run.
-fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, Failure> {
+fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, InvalidSeed> {
     Ok(AccessoryScheme {
         reps: Target::between(count(what, reps.0)?, count(what, reps.1)?)
             .ok_or_else(|| wrong(what, "a rep range runs low-high and must span"))?,
@@ -92,9 +103,9 @@ fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, Fa
 ///
 /// # Errors
 ///
-/// [`Failure`] if a value written here does not build, which is a defect in
+/// [`InvalidSeed`] if a value written here does not build, which is a defect in
 /// this build rather than anything the operator can correct.
-pub fn seed() -> Result<GenerationParameters, Failure> {
+pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
     // The operator's own ramp: 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%, all of
     // the top set rather than of the anchor.
     let mut warmup = Vec::with_capacity(4);
@@ -237,7 +248,7 @@ pub fn seed() -> Result<GenerationParameters, Failure> {
         // The warm-up ramp is not here either. It instructs no rest at all —
         // changing the plates is the rest — except for the step into the working
         // set, which takes the bottom of its block's range. That is a rule
-        // rather than a number, so it lives in `domain::prescription::rest` and
+        // rather than a number, so it lives in `crate::prescription::rest` and
         // nothing authors it.
         rest: RestScheme {
             plyometric: exactly(30),
@@ -334,7 +345,7 @@ mod pinned {
     /// wrong prescribes a 9.5kg dumbbell — a load no rack holds.
     #[test]
     fn every_implement_that_is_loaded_has_a_scale() {
-        use domain::gym::{Kg, exercise::Implement};
+        use crate::gym::{Kg, exercise::Implement};
 
         let seeded = seed().expect("the shipped parameters build");
 
