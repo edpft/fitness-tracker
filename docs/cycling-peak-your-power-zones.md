@@ -72,7 +72,7 @@ Seven weeks of three classes plus week 8's four is 25, reconciling exactly.
 | week | day 1 | day 3 | day 6 |
 |---|---|---|---|
 | 1 | 45 Endurance — Wilpers | 45 Endurance — Amato | 60 Endurance — Alldis |
-| 2 | 45 Power Zone — Morton | *(obscured)* — Amato | 60 Endurance — D'Ercole |
+| 2 | 45 Power Zone — Morton | 45 **Endurance** — Amato | 60 Endurance — D'Ercole |
 | 3 | 45 Power Zone — Alldis | 45 Power Zone — Amato | 60 Endurance — Morton |
 | 4 | 45 Endurance — D'Ercole | *(obscured)* — Wilpers | 60 Endurance — Morton |
 | 5 | 45 Power Zone — Wilpers | 45 Power Zone — Morton | 60 Endurance — Alldis |
@@ -94,8 +94,9 @@ link. Title and instructor do not identify one: week 6 day 1 and week 7 day 3 ar
 both `45 min Power Zone Ride` by Christine D'Ercole, and two different `60 min
 Power Zone Endurance Ride` classes share the same 13/46/1 profile.
 
-The class detail page also carries an **original air date**, which together with
-title and instructor is probably unique and is worth recording as corroboration.
+The class detail page carries a date, but it is **not** an air date and identifies
+nothing — see *The date is not an air date* below. What the page does give, and
+what is worth capturing, is the **movement count** on the `Class plan` summary.
 
 **Strip everything else off the share link.** A link as the app produces it looks
 like:
@@ -115,12 +116,61 @@ and equally not content. **`classId` is the whole of what identifies the class.*
 Supplied by the operator, one at a time. This is the authoritative mapping; do
 not extend it by inference.
 
-| week | day | key | title | instructor | aired | `classId` |
+| week | day | key | title | instructor | dated | `classId` |
 |---|---|---|---|---|---|---|
 | 1 | 1 | `M` | 45 min Power Zone Endurance Ride | Matt Wilpers | 2022-05-13 15:00 | `7a077ff36228426794bd3adc362ca757` |
+| 1 | 3 | `L` | 45 min Power Zone Endurance Ride | Olivia Amato | 2022-05-13 15:00 | `887d10592df041ce808cb483ec05687a` |
+| 1 | 6 | `K` | 60 min Power Zone Endurance Ride | Ben Alldis | 2022-05-13 15:00 | `7c55c9f4335a46f2955e2a4827bffa86` |
+| 2 | 1 | `J` | 45 min Power Zone Ride | Denis Morton | 2022-05-13 15:00 | **pending** — see below |
+| 2 | 3 | `N` | 45 min Power Zone **Endurance** Ride | Olivia Amato | 2022-05-13 15:00 | `709a359725cf4bffb4cdedb70a6506b0` |
+| 2 | 6 | `O` | 60 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `23cd9015db5947679c321e38dd0082a1` |
+| 3 | 1 | `I` | 45 min Power Zone Ride | Ben Alldis | 2022-05-13 15:00 | `b54a1b4ac2924db0bb5a72cf5a540d40` |
+| 3 | 3 | `H` | 45 min Power Zone Ride | Olivia Amato | 2022-05-13 15:00 | `9c2466f479684898905f9629b3cc4c83` |
+| 3 | 6 | `G` | 60 min Power Zone Endurance Ride | Denis Morton | 2022-05-13 15:00 | `d55e8e879dad415d8a3f3935dd1f4b4f` |
 
-`M`'s intervals and its 24:00 of Z3 against 9:00 of Z2 are below, and it lands
-where the week table says week 1 day 1 should be: an endurance ride by Wilpers.
+**`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
+day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
+Morton, 45 minutes, warm-up 11 and 33 of riding against Alldis's 13 and 46. A
+stale clipboard. Caught only because the interval transcription disagreed with
+the id, which is the argument for capturing both rather than trusting either
+alone.
+
+**Week 1 is complete.** All three landed where the week table put them, and all
+three were already transcribed, so the interval data and the mapping corroborate
+each other rather than resting on one reading.
+
+### The class page carries a prose structure note, and it checks out
+
+`K`'s page, under *More info*:
+
+> 13-min warm up followed by six Z3 intervals in a descending step formation
+> (7/7/5/5/3/3) with 4, 3 & 2 min Z2 recovery in between each.
+
+The transcription reads `Z3 7:00 · Z2 4:00 · Z3 7:00 · Z2 4:00 · Z3 5:00 · Z2
+3:00 · Z3 5:00 · Z2 3:00 · Z3 3:00 · Z2 2:00 · Z3 3:00` — six Z3 intervals at
+7/7/5/5/3/3 with Z2 recoveries of 4/4/3/3/2. **Exactly the stated formation.**
+
+Two things follow. This field is **independent corroboration** of a transcription
+where it exists, and it is the only place the class states its own *intent* —
+"descending step formation" is a design decision, not something recoverable from
+the interval list. Worth capturing where present.
+
+### The movement count is a completeness check, and it is free
+
+The `Class plan` summary states a movement count per section — `Cycling, 11
+Movements`. It has matched the transcribed interval count on every class so far:
+`M` and `L` at 7, `J` and `K` at 11, `N` at 5.
+
+**That is what catches a truncated screenshot**, which is the likeliest way this
+transcription goes wrong: a scrolled capture that silently omits the last
+interval still looks plausible and still sums to something. Check the count
+before recording a class.
+
+**The date is not an air date and is weak corroboration.** These two classes are
+by different instructors and carry the *same* timestamp, `Fri 13/5/22 @ 15:00`,
+which no pair of live classes can. Whatever the field is — added to the
+programme, or something else — it does not order or identify anything. Recorded
+because it is on the page, relied on for nothing.
 
 ## Time in zone, per transcribed class
 
@@ -138,8 +188,10 @@ warm-up or cool-down, so those are excluded and named separately.
 | L | 45 Endurance | 10 | — | 6:01 | 27:59 | — | — | 34:00 |
 | M | 45 Endurance | 11 | — | 9:00 | 24:00 | — | — | 33:00 |
 | F | 45 Endurance | 12 | — | 9:00 | 23:00 | — | — | 32:00 |
+| N | 45 Endurance | 12 | — | 6:00 | **26:00** | — | — | 32:00 |
 | A | 60 Endurance | 11 | — | 11:00 | 37:00 | — | — | 48:00 |
 | G | 60 Endurance | 12 | — | 10:01 | 36:59 | — | — | 47:00 |
+| O | 60 Endurance | 12 | — | 11:00 | **35:59** | — | — | 46:59 |
 | C | 60 Endurance | 13 | — | 12:58 | 32:58 | — | — | 45:56 |
 | K | 60 Endurance | 13 | — | 16:00 | 30:00 | — | — | 46:00 |
 
@@ -153,15 +205,22 @@ warm-up or cool-down, so those are excluded and named separately.
   because the recoveries have to be real.
 
 **Every 45-minute Power Zone ride holds Z4 at 15–18 minutes.** What the programme
-varies is what sits beside it: Z3 early, Z5 late. That is the progression, and it
-is visible in the numbers rather than asserted over them.
+varies is what sits beside it — Z3 in the threshold rides, Z5 in the VO2 ones.
+
+**"Z3 early, Z5 late" was written here and is wrong.** It was inferred from the
+archetypes alone, before any class was mapped, and the mapping killed it: `I` —
+five-by-thirty-second Z5 bursts, twice over — is **week 3 day 1**. Z5 arrives in
+the third week, not late. The claim was asserted over the numbers in the same
+sentence that called it visible in them, which is the failure this document
+otherwise exists to avoid. Nothing about the archetypes changes; what changes is
+that their *order* is the mapping's to state, never the grouping's.
 
 `I` is the only class using 30/30s — five Z5 efforts with four Z2 recoveries,
 twice.
 
 ## Transcribed classes — the intervals
 
-Thirteen of twenty-five, **none yet matched to a week or day**; the operator is
+Fifteen of twenty-five, **most not yet matched to a week or day**; the operator is
 matching them explicitly. Keys are arbitrary. Every sequence was checked against
 the app's own `Cycling` total and all thirteen reconcile.
 
@@ -187,6 +246,7 @@ so **a prescribed cycling interval carries seconds, not minutes.**
 | L | `Z3 5:59 · Z2 2:00 · Z3 7:59 · Z2 2:00 · Z3 8:01 · Z2 2:01 · Z3 6:00` |
 | M | `Z3 5:00 · Z2 3:00 · Z3 7:00 · Z2 3:00 · Z3 7:00 · Z2 3:00 · Z3 5:00` |
 | F | `Z3 3:00 · Z2 2:00 · Z3 5:01 · Z2 2:00 · Z3 7:00 · Z2 3:00 · Z3 5:00 · Z2 2:00 · Z3 2:59` |
+| N | `Z3 8:00 · Z2 3:00 · Z3 10:00 · Z2 3:00 · Z3 8:00` |
 
 ### `60 min Power Zone Endurance Ride`
 
@@ -194,6 +254,7 @@ so **a prescribed cycling interval carries seconds, not minutes.**
 |---|---|
 | A | `Z3 9:00 · Z2 3:00 · Z3 7:00 · Z2 3:00 · Z3 5:00 · Z2 2:00 · Z3 7:00 · Z2 3:00 · Z3 9:00` |
 | G | `Z3 9:00 · Z2 3:00 · Z3 9:00 · Z2 3:00 · Z3 7:00 · Z2 2:02 · Z3 6:58 · Z2 1:59 · Z3 5:01` |
+| O | `Z3 8:00 · Z2 3:00 · Z3 8:00 · Z2 3:01 · Z3 5:59 · Z2 2:00 · Z3 6:00 · Z2 1:59 · Z3 4:00 · Z2 1:00 · Z3 4:00` |
 | C | `Z3 4:56 · Z2 3:00 · Z3 7:02 · Z2 2:58 · Z3 9:00 · Z2 4:00 · Z3 7:00 · Z2 3:00 · Z3 5:00` — `Unavailable` |
 | K | `Z3 7:00 · Z2 4:00 · Z3 7:00 · Z2 4:00 · Z3 5:00 · Z2 3:00 · Z3 5:00 · Z2 3:00 · Z3 3:00 · Z2 2:00 · Z3 3:00` |
 
@@ -210,6 +271,46 @@ day 6 wants a 60-minute endurance ride. The sequence is right but **not
 contiguous**, because not every class was captured, and nothing in a screenshot
 says where the gaps fall. A wrong guess here is silent — a plausible ride that is
 simply not the one the programme asks for.
+
+### What the mapping shows so far
+
+| week | day 1 | day 3 | day 6 |
+|---|---|---|---|
+| 1 | `M` endurance | `L` endurance | `K` endurance 60 |
+| 2 | `J` threshold, Z4 18:00 | `N` endurance | `O` endurance 60 |
+| 3 | `I` VO2, Z5 5:00 in 30/30s | `H` threshold, Z4 15:59 | `G` endurance 60 |
+
+Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
+character — endurance while day 1 is threshold, threshold while day 1 is VO2.
+
+## The day-6 ride is where the progression lives
+
+Two consecutive day-6 rides are now mapped, and each states its own formation
+under *More info*:
+
+| week | Z3 intervals | Z2 recoveries | Z3 total | Z2 total | ride |
+|---|---|---|---|---|---|
+| 1 — `K` | 7/7/5/5/3/3 | 4/4/3/3/2 | 30:00 | 16:00 | 46:00 |
+| 2 — `O` | 8/8/6/6/4/4 | 3/3/2/2/1 | 35:59 | 11:00 | 46:59 |
+| 3 — `G` | 9/9/7/7/5 | 3/3/2/2 | 36:59 | 10:00 | 46:59 |
+
+**Work climbs, recovery falls, and the ride length holds.** Thirty minutes of Z3
+becomes thirty-seven across three weeks while Z2 recovery drops from sixteen
+minutes to ten — inside a ride that never changes length. All three classes state
+their own formation under *More info* and all three match the transcription.
+
+An earlier reading here said "every Z3 block grows by a minute and every recovery
+shrinks by one", which held for weeks 1 to 2 and broke at week 3: `G` drops to
+*five* intervals rather than six. The invariant is not the arithmetic, it is
+work up and recovery down at constant duration.
+
+**This is the concrete answer to what dropping day 6 costs.** The progression the
+programme runs on its long ride is a deliberate, week-by-week compression of
+recovery against lengthening work — the thing that builds the aerobic base an FTP
+is drawn from. It is not "a longer ride"; it is the only progressive element on
+that day, and days 1 and 3 do not carry it.
+
+Stated as fact, not advice. The choice is the operator's.
 
 ## The FTP retest is on day 6
 
