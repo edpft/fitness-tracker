@@ -63,17 +63,22 @@ read the rest to know what to pick up.
   a superseded session is replaced in place rather than left behind — so what is
   left for it is removing a session nobody replaces, which nothing yet asks for.
 
-- **In progress**: the SBS gym half. The chart itself has landed —
-  `domain::prescription::sbs` holds all eight prescriptions verified against the
-  workbook, SBS's own rep-max table (deliberately *not* `repmax.rs`, which
-  disagrees by up to five points), and the flooring the workbook's `FLOOR` calls
-  for. Nine tests, one of which walks a whole four-week cycle with the maximum
-  moving off each repetition-maximum day — the one that would catch a wrong
-  table.
+- **Just landed**: the SBS gym half, end to end. `template = "sbs"` authors a
+  four-week cycle, it stores and reads back, and both sessions of a week issue
+  what the chart states. `domain::prescription::sbs` splits into the published
+  chart and the programme built around it.
 
-  **Still to do**: wire it into `Programme` as a third `Periodisation`, persist
-  it, and issue a `WorkoutShape` from it. The chart is the part with the
-  decisions in it; the rest is plumbing that follows the existing `linear` path.
+  **The new shape it needed**: a working set that carries *no load*. The chart
+  says `3 × 5–6 @ 8RM`, and that load is the result of the set above it, so it
+  does not exist when the prescription is written. `PrimaryLoad::RepMax` issues
+  the top set as an attempt and the back-offs as repetition ranges with nothing
+  in the load column.
+
+  **A limitation that is deliberate and visible**: loads after week 1 derive
+  from the *opening* maximum rather than from what was lifted. The store cannot
+  yet answer "what did the last rep-max day produce", and inventing a
+  progression the chart does not state would be worse than saying so —
+  `fitness programme show` prints the caveat.
 
 - **Parked**: `feat/block-derives-from-prilepin` (decision 0023). Finished,
   green, never raised as a PR, and it stays unraised. It was prescribing `8 × 2`

@@ -28,8 +28,8 @@ use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
         Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, Periodisation, Periodised,
-        Programme, ProgrammeId, ProgrammeName, ProgrammeWindow, SessionRole, Skip, SlotId, Test,
-        TestTarget, Tested,
+        Programme, ProgrammeId, ProgrammeName, ProgrammeWindow, Sbs, SessionRole, Skip, SlotId,
+        Test, TestTarget, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -224,7 +224,7 @@ impl SqliteProgrammeStore {
             };
             let programme = match row.template.as_str() {
                 "test" => rehydrate_test(common, row.test_reps, row.test_target_grams)?,
-                template @ ("linear" | "block") => rehydrate_periodisation(
+                template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                     common,
                     template,
                     read_entry(
@@ -273,7 +273,10 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
     let anchor = programme.anchor();
     let entry_test = match programme {
         Programme::Periodisation(Periodisation::Block(block)) => block.entry_test(),
-        Programme::Periodisation(Periodisation::Linear(_)) | Programme::Test(_) => None,
+        // An SBS cycle has no entry test: its test is the last session of the
+        // last week, not a week in front (decision 0024).
+        Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Sbs(_))
+        | Programme::Test(_) => None,
     };
     let entry_test_light = entry_test
         .and_then(EntryTest::light)
@@ -315,7 +318,10 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
         // its anchor, and a test has no ladder to open.
         declared_opening: match programme {
             Programme::Periodisation(Periodisation::Linear(linear)) => linear.declared_opening(),
-            Programme::Periodisation(Periodisation::Block(_)) | Programme::Test(_) => None,
+            // Nor may SBS: every load in the chart is a share of the maximum,
+            // so there is no opening for one to be declared against.
+            Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
+            | Programme::Test(_) => None,
         }
         .map(|opening| {
             i64::try_from(opening.as_grams())
@@ -378,7 +384,7 @@ fn rehydrate_test(
     ))
 }
 
-/// A programme that climbs, by whichever of the two models.
+/// A programme that climbs, by whichever of the three models.
 fn rehydrate_periodisation(
     common: Common,
     template: &str,
@@ -393,6 +399,18 @@ fn rehydrate_periodisation(
         common.exercise,
         SessionRole::try_from(gating).map_err(|error| corrupt(&error))?,
     );
+    if template == "sbs" {
+        // `stored` rather than `new`: the checks ran when it was written, and
+        // re-refusing a row now would make a rule change unreadable data.
+        return Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::stored(
+            common.name,
+            primary,
+            common.fills,
+            entry,
+            common.calendar,
+            common.authored_at,
+        ))));
+    }
     Ok(Programme::Periodisation(if template == "linear" {
         Periodisation::Linear(
             Linear::rehydrate(

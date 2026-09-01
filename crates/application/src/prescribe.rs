@@ -22,9 +22,11 @@ use domain::{
         Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
         Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId, Progress,
-        RECENT_WEEKS, SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind,
-        WeekPlan, WorkoutShape, is_recent_enough, linear::SlotContent, progress_after, rep_max,
-        rested,
+        RECENT_WEEKS, Sbs, SbsDay, SbsSession, SessionRole, SlotId, SupersetMember, Target, Test,
+        TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
+        linear::SlotContent,
+        progress_after, rep_max, rested,
+        sbs::chart::{day as sbs_day, training_max_share, working_load},
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -397,7 +399,12 @@ where
             Programme::Periodisation(Periodisation::Linear(linear)) => {
                 Ok(Some(self.progress(linear, parameters, before).await?))
             }
-            Programme::Periodisation(Periodisation::Block(_)) | Programme::Test(_) => Ok(None),
+            // **Neither has a rung.** A block's loads are shares of a fixed
+            // anchor; an SBS cycle's are shares of a maximum that moves, but it
+            // moves off measured results rather than off a ladder position, so
+            // there is still nothing here for a miss to hold.
+            Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
+            | Programme::Test(_) => Ok(None),
         }
     }
 
@@ -625,7 +632,12 @@ const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
 fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
     match programme {
         Programme::Test(_) => WeekKind::Test,
-        Programme::Periodisation(Periodisation::Linear(_)) => placed,
+        // A linear programme's weeks are all climbing weeks, and an SBS cycle's
+        // are too: **week 4 is not a test week even though it ends on a test**,
+        // because its first session is a taper the chart states in full. Calling
+        // the week a test would send the light session looking for a predecessor
+        // to inherit from, which an SBS cycle never needs.
+        Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Sbs(_)) => placed,
         Programme::Periodisation(Periodisation::Block(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
@@ -679,6 +691,7 @@ pub(crate) struct Inheritance {
 }
 
 /// How the primary slot's sets are built, once a load is known.
+#[derive(Clone, Copy)]
 enum PrimaryLoad {
     /// A ramp, one top set, and the role's back-offs. The linear rung, and the
     /// light session of a test week, which is a linear session by inheritance.
@@ -696,6 +709,25 @@ enum PrimaryLoad {
     /// week exists to produce, so nothing caps it: the target is what the ramp
     /// is built toward and what the report names, not a ceiling.
     Attempt { toward: Kg, reps: RepCount },
+    /// A ramp, one attempt at a repetition maximum, then back-offs **at
+    /// whatever that turned out to be**.
+    ///
+    /// **The back-offs carry no load, and cannot.** SBS's chart says `3 × 5–6 @
+    /// 8RM`: the load is the eight-rep maximum found in the top set of the same
+    /// session, so it does not exist when the prescription is issued. Writing a
+    /// number there would mean predicting the attempt and then prescribing
+    /// against the prediction.
+    ///
+    /// `toward` is what the ramp builds to and what the operator should expect
+    /// to meet — the current maximum taken through SBS's own table at this
+    /// repetition count, which is the exact inverse of the advance the result
+    /// will produce. Derived, not guessed.
+    RepMax {
+        toward: Kg,
+        reps: RepCount,
+        back_off_sets: RepCount,
+        back_off_reps: Target<RepCount>,
+    },
 }
 
 /// The primary slot: a warm-up ramp, and then whatever this template asks for.
@@ -733,6 +765,7 @@ fn primary_slot_item(
         Programme::Periodisation(Periodisation::Block(block)) => {
             block_load(block, role, week, steps)
         }
+        Programme::Periodisation(Periodisation::Sbs(sbs)) => sbs_load(sbs, role, week, steps),
         Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {
@@ -746,57 +779,7 @@ fn primary_slot_item(
         }
     };
 
-    let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
-    // The ramp is a share of what the session is working toward, whatever that
-    // is — never of the anchor. Ramping off the anchor had the operator warming
-    // up toward a number they had passed three weeks earlier (decision 0011).
-    let toward = match plan {
-        PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
-        PrimaryLoad::Attempt { toward, .. } => toward,
-    };
-    for step in parameters.warmup.iter() {
-        sets.push(PrescribedSet::warmup(
-            Load::Absolute(steps.quantise_loaded(step.of_top_set.of(toward))),
-            Target::Exactly(step.reps),
-        ));
-    }
-
-    match plan {
-        PrimaryLoad::TopSet { load, reps } => {
-            sets.push(PrescribedSet::fixed(
-                Load::Absolute(load),
-                Target::Exactly(reps),
-            ));
-            // The back-offs are the role's own pattern — heavy `2 × 4`, light
-            // `3 × 6` — and not the strength block's accessory scheme.
-            let pattern = parameters.back_off.get(role);
-            let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
-            for _ in 0..pattern.sets.as_u32() {
-                sets.push(PrescribedSet::fixed(
-                    Load::Absolute(back_off),
-                    Target::Exactly(pattern.reps),
-                ));
-            }
-        }
-        PrimaryLoad::Across {
-            load,
-            sets: across,
-            reps,
-        } => {
-            for _ in 0..across.as_u32() {
-                sets.push(PrescribedSet::fixed(
-                    Load::Absolute(load),
-                    Target::Exactly(reps),
-                ));
-            }
-        }
-        PrimaryLoad::Attempt { reps, .. } => {
-            sets.push(PrescribedSet::autoregulated(
-                Target::Exactly(reps),
-                domain::gym::Rir::Zero,
-            ));
-        }
-    }
+    let sets = primary_sets(plan, parameters, role, steps);
 
     let Ok(sets) = NonEmpty::new(sets) else {
         return Derived::underivable(UnderivableSlot {
@@ -854,6 +837,72 @@ fn linear_load(
 /// anchor decided by the duration and three literature constants, which is what
 /// makes the whole block computable in advance. A miss does not hold it, because
 /// there is no ladder position to hold.
+/// What an SBS session's primary runs, off the maximum current this week.
+///
+/// **The maximum moves inside the cycle, so this cannot read the anchor for
+/// weeks two onward.** Each repetition-maximum day resets it, and the reset is a
+/// function of what was lifted — so the load for week three is not derivable
+/// from the authored programme alone. Until the store can answer "what did the
+/// last rep-max day produce", this derives from the anchor and is right only in
+/// week one.
+///
+/// That limitation is deliberate and visible rather than papered over: the
+/// alternative is to invent a progression the chart does not state.
+fn sbs_load(
+    sbs: &Sbs,
+    role: SessionRole,
+    week: WeekKind,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
+    let WeekKind::Climbing(index) = week else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let session = match role {
+        SessionRole::Light => SbsSession::First,
+        SessionRole::Heavy => SbsSession::Second,
+    };
+    let Ok(day) = sbs_day(index.as_u32(), session) else {
+        return Err(UnderivableReason::NoLadder);
+    };
+
+    let maximum = sbs.entry().anchor().load();
+    let increment = steps.step_at(maximum);
+
+    match day {
+        SbsDay::Percentage { sets, reps, share } => {
+            let Some(load) = working_load(maximum, share, increment) else {
+                return Err(UnderivableReason::NoLadder);
+            };
+            Ok(PrimaryLoad::Across { load, sets, reps })
+        }
+        SbsDay::RepMax {
+            reps,
+            back_off_sets,
+            back_off_reps,
+        } => {
+            // What the ramp builds toward: this maximum expressed at the
+            // repetition count being attempted, through SBS's own table. The
+            // exact inverse of the advance the result will produce.
+            let Some(share) = training_max_share(reps) else {
+                return Err(UnderivableReason::NoLadder);
+            };
+            let Some(toward) = working_load(maximum, share, increment) else {
+                return Err(UnderivableReason::NoLadder);
+            };
+            Ok(PrimaryLoad::RepMax {
+                toward,
+                reps,
+                back_off_sets,
+                back_off_reps,
+            })
+        }
+        SbsDay::Test { reps } => Ok(PrimaryLoad::Attempt {
+            toward: maximum,
+            reps,
+        }),
+    }
+}
+
 fn block_load(
     block: &Periodised,
     role: SessionRole,
@@ -1362,4 +1411,93 @@ where
             .await?;
         Ok((self.programmes.author(programme).await?, authored))
     }
+}
+
+/// The primary slot's sets: the warm-up ramp, then whatever the plan asks for.
+///
+/// Lifted out of [`primary_slot_item`] when SBS's repetition-maximum day made
+/// that function too long to read in one go. It is the half that turns a
+/// [`PrimaryLoad`] into sets, and it needs nothing about the programme.
+fn primary_sets(
+    plan: PrimaryLoad,
+    parameters: &GenerationParameters,
+    role: SessionRole,
+    steps: &LoadSteps,
+) -> Vec<PrescribedSet<RepCount>> {
+    let mut sets: Vec<PrescribedSet<RepCount>> = Vec::new();
+    // The ramp is a share of what the session is working toward, whatever that
+    // is — never of the anchor. Ramping off the anchor had the operator warming
+    // up toward a number they had passed three weeks earlier (decision 0011).
+    let toward = match plan {
+        PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
+        PrimaryLoad::Attempt { toward, .. } | PrimaryLoad::RepMax { toward, .. } => toward,
+    };
+    for step in parameters.warmup.iter() {
+        sets.push(PrescribedSet::warmup(
+            Load::Absolute(steps.quantise_loaded(step.of_top_set.of(toward))),
+            Target::Exactly(step.reps),
+        ));
+    }
+
+    match plan {
+        PrimaryLoad::TopSet { load, reps } => {
+            sets.push(PrescribedSet::fixed(
+                Load::Absolute(load),
+                Target::Exactly(reps),
+            ));
+            // The back-offs are the role's own pattern — heavy `2 × 4`, light
+            // `3 × 6` — and not the strength block's accessory scheme.
+            let pattern = parameters.back_off.get(role);
+            let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
+            for _ in 0..pattern.sets.as_u32() {
+                sets.push(PrescribedSet::fixed(
+                    Load::Absolute(back_off),
+                    Target::Exactly(pattern.reps),
+                ));
+            }
+        }
+        PrimaryLoad::Across {
+            load,
+            sets: across,
+            reps,
+        } => {
+            for _ in 0..across.as_u32() {
+                sets.push(PrescribedSet::fixed(
+                    Load::Absolute(load),
+                    Target::Exactly(reps),
+                ));
+            }
+        }
+        PrimaryLoad::Attempt { reps, .. } => {
+            sets.push(PrescribedSet::autoregulated(
+                Target::Exactly(reps),
+                domain::gym::Rir::Zero,
+            ));
+        }
+        PrimaryLoad::RepMax {
+            reps,
+            back_off_sets,
+            back_off_reps,
+            ..
+        } => {
+            // The top set finds the maximum: an attempt, open at the top, like
+            // any other.
+            sets.push(PrescribedSet::autoregulated(
+                Target::Exactly(reps),
+                domain::gym::Rir::Zero,
+            ));
+            // **And the back-offs carry no load either**, because the load is
+            // the set above's result. They are not autoregulated in the sense
+            // the top set is — nothing about them is taken to failure — but the
+            // prescription genuinely cannot name a number, and a range of
+            // repetitions at an unstated load is exactly what the chart says.
+            for _ in 0..back_off_sets.as_u32() {
+                sets.push(PrescribedSet::autoregulated(
+                    back_off_reps,
+                    domain::gym::Rir::Zero,
+                ));
+            }
+        }
+    }
+    sets
 }

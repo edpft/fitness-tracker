@@ -62,7 +62,9 @@ pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
 pub use rest::{BlockRest, RestScheme, rested};
-pub use sbs::{InvalidSbs, SbsDay, SbsSession, advance, day, training_max_share, working_load};
+pub use sbs::{
+    InvalidSbs, Sbs, SbsDay, SbsSession, advance, day, training_max_share, working_load,
+};
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
     SessionRole, Skip, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
