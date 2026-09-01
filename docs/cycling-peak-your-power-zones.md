@@ -74,14 +74,15 @@ Seven weeks of three classes plus week 8's four is 25, reconciling exactly.
 | 1 | 45 Endurance — Wilpers | 45 Endurance — Amato | 60 Endurance — Alldis |
 | 2 | 45 Power Zone — Morton | 45 **Endurance** — Amato | 60 Endurance — D'Ercole |
 | 3 | 45 Power Zone — Alldis | 45 Power Zone — Amato | 60 Endurance — Morton |
-| 4 | 45 Endurance — D'Ercole | *(obscured)* — Wilpers | 60 Endurance — Morton |
+| 4 | 45 Endurance — D'Ercole | 45 **Endurance** — Wilpers | 60 Endurance — Morton |
 | 5 | 45 Power Zone — Wilpers | 45 Power Zone — Morton | 60 Endurance — Alldis |
 | 6 | 45 Power Zone — D'Ercole | 45 Power Zone — Wilpers | 60 **Power Zone** — D'Ercole |
 | 7 | 45 Power Zone **Max** — Alldis | 45 Power Zone — D'Ercole | 90 Endurance — Wilpers |
 | 8 | 45 Endurance — D'Ercole | *(obscured)* — Morton | **10 min FTP Warm Up + FTP test** — Wilpers |
 
-Three day-3 titles were hidden behind the `Join program` button; the instructor
-is legible in each. Everything else was read directly.
+Three day-3 titles were hidden behind the `Join program` button. Weeks 2 and 4
+are now resolved by the mapping — both are **Endurance** rides — leaving only
+week 8 day 3 unknown.
 
 **The arc**: week 1 all endurance; weeks 2, 3, 5, 6 build; week 4 drops day 1
 back to endurance as a deload; week 7 peaks on the only `Max Ride` and the only
@@ -127,6 +128,9 @@ not extend it by inference.
 | 3 | 1 | `I` | 45 min Power Zone Ride | Ben Alldis | 2022-05-13 15:00 | `b54a1b4ac2924db0bb5a72cf5a540d40` |
 | 3 | 3 | `H` | 45 min Power Zone Ride | Olivia Amato | 2022-05-13 15:00 | `9c2466f479684898905f9629b3cc4c83` |
 | 3 | 6 | `G` | 60 min Power Zone Endurance Ride | Denis Morton | 2022-05-13 15:00 | `d55e8e879dad415d8a3f3935dd1f4b4f` |
+| 4 | 1 | `F` | 45 min Power Zone Endurance Ride | Christine D'Ercole | 2022-05-13 15:00 | `0cd72d4b70c54c8e93b5f13e75fee11d` |
+| 4 | 3 | `E` | 45 min Power Zone **Endurance** Ride | Matt Wilpers | 2022-05-13 15:00 | `ed1fe2a5e2344dacb2f9bd9984d9ca83` |
+| 4 | 6 | `C` | 60 min Power Zone Endurance Ride | Denis Morton | 2022-05-13 15:00 | `c67ec9512f954169acd9df4c95010e49` ⚠ |
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -279,9 +283,56 @@ simply not the one the programme asks for.
 | 1 | `M` endurance | `L` endurance | `K` endurance 60 |
 | 2 | `J` threshold, Z4 18:00 | `N` endurance | `O` endurance 60 |
 | 3 | `I` VO2, Z5 5:00 in 30/30s | `H` threshold, Z4 15:59 | `G` endurance 60 |
+| 4 | `F` endurance, Z3 23:00 | `E` endurance, Z3 26:00 | `C` endurance 60 ⚠ |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
+
+**Week 4 day 1 is a real deload, and its shape says so.** `F` runs 23:00 of Z3
+against week 1 day 1's 24:00 and week 1 day 3's 27:59 — less aerobic work than
+the base week, in the middle of the programme. Its Z3 blocks also run
+`3/5/7/5/3`, a pyramid up and back down, where every day-6 ride descends. That is
+the only pyramid transcribed so far.
+
+### The deload week is a pyramid, and that is its signature
+
+**Week 4 uses pyramid formations where every build week descends.** `F` on day 1
+runs `3/5/7/5/3`; `C` on day 6 runs `5/7/9/7/5` and says so itself — *"five Z3
+intervals in a pyramid formation (5/7/9/7/5)"*. Those are the only two pyramids
+in anything transcribed. Every other class with a stated formation is a
+descending step: `7/7/5/5/3/3`, `8/8/6/6/4/4`, `9/9/7/7/5`.
+
+A descending formation front-loads the hardest work while fresh. A pyramid peaks
+once in the middle and releases at both ends. **The week's shape and the week's
+purpose agree**, and it is the class's own word for it rather than a reading
+imposed here.
+
+Day 6 deloads on volume too: Z3 falls from `G`'s 36:59 to 32:58, and recovery
+rises from 10:00 to 12:58 — the progression reversing for one week.
+
+**Week 4 deloads by removing intensity, not volume.** Days 1 and 3 are both
+endurance — no Z4 or Z5 anywhere — while `E` still runs 26:00 of Z3, *more* than
+`F`'s 23:00 and more than week 1 day 1. The aerobic work is held and the hard
+work is taken away.
+
+### Days 1 and 3 are not two hard rides a week
+
+Worth stating plainly, because the opposite was said in conversation before the
+mapping existed and it was wrong. It came from reading `45 Power Zone` off the
+week table for both days; two of those were obscured titles that have since
+resolved to *Endurance* rides.
+
+| week | day 1 | day 3 |
+|---|---|---|
+| 1 | endurance | endurance |
+| 2 | threshold | endurance |
+| 3 | VO2 | threshold |
+| 4 | endurance | endurance |
+
+A base week, one quality day against one aerobic day, two quality days, then a
+deload. Only weeks 3, 5 and 6 carry two quality sessions. **The case against
+dropping day 6 rests on the progression day 6 carries, not on days 1 and 3 being
+punishing.**
 
 ## The day-6 ride is where the progression lives
 
@@ -293,6 +344,7 @@ under *More info*:
 | 1 — `K` | 7/7/5/5/3/3 | 4/4/3/3/2 | 30:00 | 16:00 | 46:00 |
 | 2 — `O` | 8/8/6/6/4/4 | 3/3/2/2/1 | 35:59 | 11:00 | 46:59 |
 | 3 — `G` | 9/9/7/7/5 | 3/3/2/2 | 36:59 | 10:00 | 46:59 |
+| 4 — `C` | 5/7/9/7/5 **pyramid** | 3/3/4/3 | 32:58 | 12:58 | 45:56 |
 
 **Work climbs, recovery falls, and the ride length holds.** Thirty minutes of Z3
 becomes thirty-seven across three weeks while Z2 recovery drops from sixteen
@@ -311,6 +363,18 @@ is drawn from. It is not "a longer ride"; it is the only progressive element on
 that day, and days 1 and 3 do not carry it.
 
 Stated as fact, not advice. The choice is the operator's.
+
+## Week 4 day 6 cannot be taken
+
+`C` shows **`Unavailable`** rather than `Start` — the only class of the fifteen
+transcribed that does. It is week 4 day 6, so if the operator takes day 6 at all,
+one week of the eight has no long ride available to it.
+
+Not diagnosed here: whether that is a licensing withdrawal, a regional
+restriction, or something about the account. It has been `Unavailable` across two
+separate captures an hour apart, so it is not a transient. A substitute would
+have to be chosen by zone profile — `5/7/9/7/5`, 32:58 of Z3, 12:58 of Z2 — which
+is precisely the search the published programme otherwise saves.
 
 ## The FTP retest is on day 6
 
