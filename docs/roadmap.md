@@ -63,12 +63,17 @@ read the rest to know what to pick up.
   a superseded session is replaced in place rather than left behind — so what is
   left for it is removing a session nobody replaces, which nothing yet asks for.
 
-- **In progress**: the SBS programme type — decision 0024. The autumn block runs
-  a *published* programme rather than a derived one: Stronger By Science's 2×/week
-  intermediate squat routine, front squat on both days, four weeks, with week 4
-  run standalone first to open on a measured 1RM. The eight prescriptions are
-  settled and verified against the workbook; the maximum moves inside the cycle
-  off SBS's own rep-max table, which is deliberately *not* `repmax.rs`.
+- **In progress**: the SBS gym half. The chart itself has landed —
+  `domain::prescription::sbs` holds all eight prescriptions verified against the
+  workbook, SBS's own rep-max table (deliberately *not* `repmax.rs`, which
+  disagrees by up to five points), and the flooring the workbook's `FLOOR` calls
+  for. Nine tests, one of which walks a whole four-week cycle with the maximum
+  moving off each repetition-maximum day — the one that would catch a wrong
+  table.
+
+  **Still to do**: wire it into `Programme` as a third `Periodisation`, persist
+  it, and issue a `WorkoutShape` from it. The chart is the part with the
+  decisions in it; the rest is plumbing that follows the existing `linear` path.
 
 - **Parked**: `feat/block-derives-from-prilepin` (decision 0023). Finished,
   green, never raised as a PR, and it stays unraised. It was prescribing `8 × 2`

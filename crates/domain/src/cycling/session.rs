@@ -10,9 +10,10 @@
 //! is twenty minutes with no zone attached, because a zone is a share of FTP and
 //! this ride is what measures FTP — prescribing it in zones would be circular.
 //!
-//! That is the same shape the gym side already has. Decision 0023 gave
-//! `WeekPlan` a `WorkUp` variant carrying a repetition count and no load,
-//! because the load is discovered rather than derived:
+//! That is the same shape decision 0023 reached for the gym: a `WorkUp` carrying
+//! a repetition count and no load, because the load is discovered rather than
+//! derived. **That code is parked and not on `main`**, so these are kin by
+//! reasoning rather than by a shared type:
 //!
 //! ```text
 //! gym       WorkUp   reps,     no load   →  discovers the load

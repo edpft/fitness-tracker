@@ -29,8 +29,11 @@ evidence would have been wrong at both intermediate moments.
 `Cycling · 20 mins` with no intervals at all, because **a zone is a share of FTP
 and this ride measures FTP** — prescribing it in zones would be circular.
 
-This is structurally identical to the gym's `WorkUp` (decision 0023): a
-repetition count and no load, because the load is discovered.
+This is structurally identical to the shape decision 0023 reached for the gym: a
+repetition count and no load, because the load is discovered. **0023's code is
+parked and not on `main`**, so the two are kin by reasoning rather than by any
+shared type — which is the stronger claim, since neither was written for the
+other.
 
 ```
 gym       WorkUp   reps,     no load   →  discovers the load

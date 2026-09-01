@@ -119,9 +119,15 @@ green and was never raised as a pull request. It stays unraised. The operator:
 ideas."*
 
 Two things follow. The open question 0023 left — which repetition count to pick
-inside Prilepin's band — **is no longer open, because nothing asks it.** And the
-`WorkUp` variant 0023 added to `WeekPlan` is exactly what SBS's rep-max days
-need, so the one piece of it that the new path depends on is already written.
+inside Prilepin's band — **is no longer open, because nothing asks it.**
+
+**And nothing of 0023's code is available to build on**, which an earlier
+revision of this decision got wrong. It claimed the `WorkUp` variant 0023 added
+to `WeekPlan` was "already written" and that SBS could depend on it. `WorkUp`
+exists only on the parked branch: parking 0023 parks its code with it, and
+`main`'s `WeekPlan` has `Working` and `ExitTest` and nothing else. The *idea* —
+a prescription that names a count and no load, because the load is discovered —
+is 0023's and is worth keeping. SBS implements its own.
 
 ## Why `specs/` goes
 
