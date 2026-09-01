@@ -758,6 +758,101 @@ becomes checkable rather than hopeful: week 7 pairs the only `Max Ride` with a
 threshold ride, and squat block 2's week 3 is `3×1 @ 90%` and a 3RM. Whether those
 belong in the same week is a question with numbers behind it.
 
+## The shape of the programme, by week
+
+**As written — all three days.** Ride portions only; warm-ups are excluded and
+handled separately below.
+
+| wk | Z1 | Z2 | Z3 | Z4 | Z5 | Z6 | Z7 | ride | shape |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | — | 31:01 | 81:59 | — | — | — | — | 113:00 | `................` |
+| 2 | 3:00 | 17:00 | 73:59 | 18:00 | — | — | — | 111:59 | `...............++++` |
+| 3 | 14:00 | 14:01 | 46:58 | 30:59 | 5:00 | — | — | 110:58 | `.........++++++#` |
+| 4 | — | 29:58 | 81:58 | — | — | — | — | 111:56 | `................` |
+| 5 | 16:00 | 11:00 | 47:00 | 32:00 | 7:00 | — | — | 113:00 | `.........++++++#` |
+| 6 | 32:00 | — | 22:00 | 33:59 | 15:01 | 5:00 | — | 108:00 | `....+++++++####` |
+| 7 | 22:31 | 27:29 | 56:00 | 16:00 | 8:32 | 6:28 | 2:00 | 139:00 | `...........+++###` |
+| 8 | — | 20:00 | 42:01 | — | — | — | — | 92:01 | `........` |
+
+`.` = 5 min Z3 · `+` = 5 min Z4 · `#` = 5 min Z5 and above. Week 8's ride
+excludes the untimed FTP warm-up and test (30 minutes).
+
+### Four things the shape says
+
+**1. Weekly volume is held almost perfectly constant, and only the distribution
+moves.** Weeks 1 to 6 sit between 108:00 and 113:00 — a spread of five minutes
+across six weeks. What changes is entirely *where* the time goes. Week 7 breaks
+it deliberately (+26 minutes) and week 8 drops 20 for the taper.
+
+**2. Week 4 reproduces week 1 to the second.** Z3 of **81:59 in week 1 and 81:58
+in week 4**, both with no Z4 and above at all. The deload is not "a bit easier" —
+it is a re-run of the base week's aerobic dose with every hard zone removed.
+
+**3. Weeks 3 and 5 are near-twins**, week 5 slightly amplified: Z4 30:59 → 32:00,
+Z5 5:00 → 7:00, Z3 46:58 → 47:00. The programme repeats a week and adds two
+minutes of Z5.
+
+**4. Weeks 6 and 7 peak at different things and neither is a compromise.** Week 6
+carries **no Z2 whatsoever** and 32 minutes of Z1 — recovery is at the bottom of
+the scale because the work is at the top. Week 7 restores the aerobic work,
+doubles the Z3, and adds the only Z7.
+
+### It is two four-week blocks, and that is not a coincidence
+
+```
+weeks 1–4    base  ·  build  ·  build  ·  deload
+weeks 5–8    build ·  peak   ·  peak   ·  taper + FTP retest
+                     intensity  volume
+```
+
+Week 4 and week 8 are the only two weeks with no Z4 or above. **The cycling
+programme is 3 build weeks plus a recovery week, twice** — which is exactly the
+SBS squat structure of three loading weeks and a fourth that tapers into the
+test (decision 0024).
+
+So the two disciplines are not merely commensurate in length; **their recovery
+weeks fall in the same weeks**. Cycling week 4 is a deload and SBS block 1's week
+4 is a taper into a 1RM; cycling week 8 is a taper into the FTP retest and SBS
+block 2's week 4 is a taper into a 1RM. The light weeks coincide and the test
+weeks coincide, with no adjustment to either programme.
+
+## The warm-ups, and the rule that generates them
+
+The operator, 2026-09-01, on what every warm-up in the programme does:
+
+> a couple of minutes @ Z1, 2-3 x spin up 20-40 seconds @ 120RPM, a build
+> touching each of the zones the ride touches, a final minute or so in Z1.
+
+**This is checkable against the movement counts, and it holds.** Reading it as
+`Z1 + 2 spin-ups + a build from Z2 to the ride's peak zone + Z1`, the predicted
+movement count against the twenty-three classes that have one:
+
+| ride's peak zone | classes | actual movements | predicted |
+|---|---|---|---|
+| Z3 | A, C, E, F, G, K, L, N, O, U, V, W | 5–6 | 6 |
+| Z4 | B, H, J, R | 7–8 | 7 |
+| Z5 | D, I, Q | 7–8 | 8 |
+| Z6 | P, T | 9 | 9 |
+| Z7 | S | 9 | 10 |
+
+Every class lands within one of the prediction, and the variance is exactly the
+operator's own "2-3 spin ups". **The warm-up is a function of the ride** — which
+is why twenty-four of them were transcribed as a duration and nothing was lost.
+
+**Two things follow that the ride data alone never showed.**
+
+**Cadence is an axis, and the model has none.** "20-40 seconds @ 120 RPM" is a
+prescription with no zone in it at all. A spin-up is defined by cadence, and a
+session type of `(zone, duration)` cannot express one. Whether cadence belongs in
+the model is a decision, not an omission to quietly fix — but it cannot be
+decided by pretending the warm-ups are zones.
+
+**The durations are still not known.** "A couple of minutes", "20-40 seconds",
+"a minute or so" describe a structure without pinning it, so warm-ups remain
+excluded from every total in this document rather than estimated into them.
+Expanding two or three warm-up sections in the app would settle it; nothing here
+guesses at the numbers.
+
 ## The three day-pairings, computed
 
 The question the transcription existed to answer. Ride portions only —
