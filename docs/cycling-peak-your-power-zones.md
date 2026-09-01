@@ -886,9 +886,55 @@ Two costs, stated because they are real: days 1+6 gives up roughly 42 minutes of
 Z4 against days 1+3, and week 4 day 6 is the class showing `Unavailable`, so one
 of its eight long rides needs substituting.
 
-**Not a recommendation — the operator has the numbers now, which is what he asked
-for.** Note only that the ride totals are not comparable as time commitments: days
-1+3 asks for 8h34m across eight weeks, the other two for about 10h42m.
+### Which pairing preserves the programme's shape: days 1+6
+
+As proportions of timed ride, against the full programme:
+
+| | Z1 | Z2 | Z3 | Z4 | Z5 | Z6 | Z7 | divergence |
+|---|---|---|---|---|---|---|---|---|
+| **full** | 10.1% | 17.3% | 52.0% | 15.1% | 4.1% | 1.3% | 0.2% | — |
+| days 1+3 | 15.5% | 13.5% | 39.1% | 22.4% | 6.9% | 2.2% | 0.4% | **33.2** |
+| **days 1+6** | 9.8% | 18.5% | 54.4% | 11.9% | 3.7% | 1.3% | 0.3% | **7.6** |
+| days 3+6 | 5.8% | 19.2% | 60.3% | 12.0% | 2.1% | 0.6% | — | **20.5** |
+
+*Divergence is the summed absolute difference in percentage points across all
+seven zones; lower is closer.*
+
+**Days 1+6 is four times closer than days 1+3 and nearly three times closer than
+days 3+6.** Its worst zone is Z4 at 11.9% against 15.1%; every other zone is
+within 1.5 points, and Z6 matches to a tenth.
+
+And the same holds week by week — hard work as a share of each week's riding:
+
+| wk | full | 1+3 | **1+6** | 3+6 |
+|---|---|---|---|---|
+| 1 | 0% | 0% | 0% | 0% |
+| 2 | 16% | 28% | **23%** | 0% |
+| 3 | 32% | 56% | **25%** | 20% |
+| 4 | 0% | 0% | 0% | 0% |
+| 5 | 35% | 60% | **28%** | 21% |
+| 6 | 50% | 61% | **39%** | 52% |
+| 7 | 24% | 52% | **14%** | 16% |
+| 8 | 0% | 0% | 0% | 0% |
+
+**Days 1+3 exaggerates every week** — 60% hard in week 5 against the programme's
+35%, and week 7 more than doubled. **Days 3+6 erases week 2 entirely**, taking it
+to 0% hard when the programme has 16%, and never touches Z7 at all because the
+Max Ride is a day 1. **Days 1+6 tracks the arc**: rise, deload, rise, peak at
+week 6, ease at week 7, taper.
+
+**Two independent criteria pick the same pairing.** Days 1+6 preserves the shape,
+*and* it is the pairing that takes the FTP retest without needing a week 8
+exception. That was not arranged — the retest observation came from the week
+table days before any of this was computed.
+
+Two costs stand, unchanged: about 42 minutes less Z4 across eight weeks than days
+1+3, and week 4 day 6 is the `Unavailable` class, so one long ride of the eight
+needs substituting.
+
+**Time commitment differs and the pairings are not interchangeable on that
+either**: days 1+3 asks 8h34m across eight weeks, days 1+6 about 10h12m of timed
+riding.
 
 ## Open
 
