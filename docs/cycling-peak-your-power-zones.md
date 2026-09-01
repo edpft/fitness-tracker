@@ -134,6 +134,8 @@ not extend it by inference.
 | 5 | 1 | `D` | 45 min Power Zone Ride | Matt Wilpers | 2022-05-13 15:00 | `9cae0c2dfe234c529db4da028ff4addd` |
 | 5 | 3 | `B` | 45 min Power Zone Ride | Denis Morton | 2022-05-13 15:00 | `c2c9fff7966e4743b162b5cc426ad3e7` |
 | 5 | 6 | `A` | 60 min Power Zone Endurance Ride | Ben Alldis | 2022-05-13 15:00 | `5f660f9700ec47599b51dead06fd2a53` |
+| 6 | 1 | `P` | 45 min Power Zone Ride | Christine D'Ercole | 2022-05-13 15:00 | `062920dde7574be3a5a32628bb11d10c` |
+| 6 | 3 | `Q` | 45 min Power Zone Ride | Matt Wilpers | 2022-05-13 15:00 | `b119477c055044458b155d257ebd1bf8` |
 
 **`J`'s `classId` is not yet known.** The link supplied with it repeated week 1
 day 6's `7c55c9f4…`, while the screenshots plainly show a different class — Denis
@@ -191,6 +193,8 @@ warm-up or cool-down, so those are excluded and named separately.
 | H | 45 Power Zone | 12 | 6:00 | — | 9:59 | **15:59** | — | 31:58 |
 | D | 45 Power Zone | 12 | 10:00 | — | — | **15:00** | 7:00 | 32:00 |
 | I | 45 Power Zone | 12 | 8:00 | 4:00 | — | **15:00** | 5:00 | 32:00 |
+| P | 45 Power Zone | 13 | 17:00 | — | — | **—** | 9:00 | 31:00 † |
+| Q | 45 Power Zone | 13 | 7:00 | — | — | **17:59** | 6:01 | 31:00 |
 | E | 45 Endurance | 10 | — | 8:00 | 26:00 | — | — | 34:00 |
 | L | 45 Endurance | 10 | — | 6:01 | 27:59 | — | — | 34:00 |
 | M | 45 Endurance | 11 | — | 9:00 | 24:00 | — | — | 33:00 |
@@ -211,8 +215,65 @@ warm-up or cool-down, so those are excluded and named separately.
 - **VO2** (`D`, `I`) — 15 minutes of Z4 *and* 5–7 of Z5, with much more Z1
   because the recoveries have to be real.
 
-**Every 45-minute Power Zone ride holds Z4 at 15–18 minutes.** What the programme
-varies is what sits beside it — Z3 in the threshold rides, Z5 in the VO2 ones.
+**That held for eleven classes and week 6 broke it.** `P` — week 6 day 1 —
+contains **no Z4 at all**, and contains **Zone 6**, which nothing else does:
+
+```
+Z5 3:00 · Z1 3:00 · Z5 3:00 · Z1 3:00 · Z5 3:00 · Z1 3:00
+Z6 1:00 · Z1 2:00 · Z6 1:00 · Z1 2:00 · Z6 1:00 · Z1 2:00 · Z6 1:00 · Z1 2:00 · Z6 1:00
+```
+
+Nine minutes of Z5 in three-minute blocks, then five one-minute Z6 efforts, and
+**seventeen of its thirty-one riding minutes are Z1 recovery**. No Z2, no Z3, no
+Z4. It is a fourth archetype — call it anaerobic — and it is not a variation on
+the VO2 rides but a different session entirely.
+
+Two claims recorded here as settled are therefore withdrawn:
+
+- *"Zones 1 to 5 appear; 6 and 7 appear nowhere."* **False.** Z6 appears at week
+  6 day 1. Any zone type must carry at least 1–6, and given Peloton's scale runs
+  to 7, capping it at what has been observed would be building the type from a
+  sample.
+- *"Every 45-minute Power Zone ride holds Z4 at 15–18 minutes."* **False**, and
+  it was the load-bearing generalisation of the whole archetype section. Eleven
+  consecutive confirmations, then a counterexample.
+
+The lesson is the same one this document has already recorded twice: a pattern
+over the transcribed subset is a description of the subset. `P` is the twelfth of
+twenty-five.
+
+**`P` is the outlier rather than the new rule.** `Q`, the very next session, is
+back at 17:59 of Z4. Of thirteen Power Zone rides mapped, exactly one has no Z4.
+
+### Week 6 day 3 finishes each threshold block with a surge
+
+`Q` is a structure nothing else uses — four Z4 blocks, each running straight into
+a short Z5 effort with no recovery between them:
+
+```
+Z4 5:00 → Z5 1:00 · Z1 2:00
+Z4 4:00 → Z5 2:00 · Z1 3:01
+Z4 4:59 → Z5 1:00 · Z1 1:59
+Z4 4:00 → Z5 2:01
+```
+
+The Z4 blocks descend 5/4/5/4 and the surges alternate 1/2/1/2. It is neither the
+threshold archetype (`J`, `H`, `B` — Z4 with Z3 between) nor the VO2 one (`D`,
+`I` — Z4 and Z5 kept apart by Z1). *More info* was not captured for this class,
+so Peloton's own word for it is unknown and none is invented here.
+
+### Week 6 is the hardest week, not week 7
+
+Day 1 is the only session with Z6; day 3 is the only one welding Z5 onto the end
+of every Z4 block; and day 6 is the programme's only `60 min Power Zone Ride` —
+the one long ride that is not an endurance ride. Week 7 has the only `Max Ride`
+and the only 90-minute ride, so it looks like the peak from the titles, but on
+what is actually mapped week 6 asks for more.
+
+**The warm-up lengthens as the session hardens.** Both week 6 classes run 13
+minutes of warm-up against 31 of riding — the longest warm-up and shortest ride
+of any 45-minute class. The endurance rides sit at 10–12 against 32–34. Small,
+consistent, and it falls out of the data rather than being imposed on it.
 
 **"Z3 early, Z5 late" was written here and is wrong.** It was inferred from the
 archetypes alone, before any class was mapped, and the mapping killed it: `I` —
@@ -288,6 +349,7 @@ simply not the one the programme asks for.
 | 3 | `I` VO2, Z5 5:00 in 30/30s | `H` threshold, Z4 15:59 | `G` endurance 60 |
 | 4 | `F` endurance, Z3 23:00 | `E` endurance, Z3 26:00 | `C` endurance 60 ⚠ |
 | 5 | `D` VO2, Z5 7:00 sustained | `B` threshold, Z4 17:00 | `A` endurance 60 |
+| 6 | `P` **anaerobic — Z6, no Z4** | `Q` Z4 blocks with Z5 surges | — |
 
 Base week, threshold at week 2, Z5 by week 3. Day 3 lags day 1 by a week in
 character — endurance while day 1 is threshold, threshold while day 1 is VO2.
