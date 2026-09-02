@@ -93,23 +93,44 @@ can't share my credentials with you in this chat, we must build a dedicated
 route for asserting power zones."* So an asserted FTP is not a fallback for the
 bike, it is the only path until Peloton is a source.
 
-## Why this does not violate § 12
+## § 12 does not object, and the roadmap misread it
 
-The roadmap raised the objection and it was right at the time:
+The roadmap raised the objection:
 
 > "It is not a small change: it makes an authored record depend on a future
 > measurement, which is the opposite of what § 12 and 0011 rely on."
 
-That objection holds against an anchor as a **field**. § 12 protects primary
-inputs — things that cannot be regenerated if lost — and an authored number is
-one. It does not reach a **derivation**, because a derivation regenerates by
-definition.
+**§ 12 says no such thing.** Its whole content on this point is a durability
+rule — authored data *"is a primary input — nothing regenerates it if lost — so
+it is stored durably and keeps its history"* — and § 12.1 narrows even that to
+the performed case. It decides **what must be backed up**, not whether a
+programme's output may change as the record does. The operator, 2026-09-02:
 
-And nothing already issued moves, because § 12.1 already settled that: a
-prescription is drafted, published or performed, and a published one is recorded
-rather than re-derived. So a session issued against Tuesday's record stays as
-issued when Friday's record changes. SBS has been relying on exactly this since
-the chart landed.
+> "given the same inputs, a programme will always give the same outputs, the
+> non problem is that, when you run the programme again, with new inputs, you
+> get different outputs. however, I think the objection exists because we didn't
+> expect to have autoregulating programmes, we assumed that you would write a
+> programme once and that would be it, n weeks of loads or intensities or
+> whatever. that's not what we've landed on."
+
+That assumption lived in the roadmap, not the constitution, and the roadmap is
+where it is corrected. No amendment to § 12 is needed.
+
+**And § 12's own words already anticipate this decision.** It lists authored
+data as *"prescriptions, planned sessions, assumed anchors"* — **assumed**. An
+assumed anchor is `AnchorProvenance::Asserted`, the bootstrap, and this decision
+keeps it (point 5) as a measurement in the record rather than a field on a
+programme. It stays authored, stored durably, with its history. What § 12 never
+said was that a *measured* maximum should be authored too.
+
+§ 13 is likewise already aligned: it names FTP outright as an interpretive
+parameter, effect-dated and retained, with the value in force at the time
+applying. Point 4 is that sentence, not a departure from it.
+
+Nothing already issued moves, because § 12.1 settled it: a published
+prescription is recorded rather than re-derived, so a session issued against
+Tuesday's record stays as issued when Friday's record changes. SBS has relied on
+this since the chart landed.
 
 ## What this deletes
 
