@@ -472,7 +472,10 @@ fn ask_weeks(
         // span. A ladder has no such week — every week it holds is a climbing
         // week — so its duration is the span itself.
         let weeks = match climbing {
-            Climbing::Linear => available,
+            // Unreachable: an SBS cycle's length is the chart's, so `ask_climb`
+            // never gets here. Answered rather than left to a wildcard, so that
+            // adding a template forces a decision here.
+            Climbing::Linear | Climbing::Sbs => available,
             Climbing::Block => available.saturating_sub(1),
         };
         if weeks == 0 {
@@ -499,7 +502,9 @@ fn ask_weeks(
             // in the generation parameters rather than in the programme, so
             // whether it makes a ladder over this duration is `Linear::new`'s
             // to answer at authoring.
-            Climbing::Linear => {
+            // Unreachable for `Sbs`, as above: the chart's four weeks are not
+            // negotiated with the calendar.
+            Climbing::Linear | Climbing::Sbs => {
                 if weeks < 2 {
                     println!("  a ladder needs somewhere to climb, and {weeks} week is one load");
                     println!("  try a later end");
@@ -720,7 +725,8 @@ fn declared_load(typed: &str) -> Result<String, String> {
 /// and `block` since the templates existed, and the wizard authored a block
 /// whatever the operator wanted — so the only way to a test or a ladder was a
 /// hand-written document, which is the input format this exists to replace.
-const TEMPLATES: [(&str, &str); 3] = [
+const TEMPLATES: [(&str, &str); 4] = [
+    ("sbs", "Stronger By Science's four-week chart, twice a week"),
     (
         "block",
         "accumulate, intensify, realise — and test at each end",
@@ -745,7 +751,7 @@ fn ask_template() -> Result<&'static str, Failure> {
                 typed == at.saturating_add(1).to_string() || typed.eq_ignore_ascii_case(name)
             })
             .map(|(_, (name, _))| *name)
-            .ok_or_else(|| format!("{typed:?} is not one of the three"))
+            .ok_or_else(|| format!("{typed:?} is not one of the four"))
     })
 }
 
@@ -810,6 +816,7 @@ async fn ask_programme(
 ) -> Result<Draft, Failure> {
     match template {
         "test" => ask_test(diary, history, parameters).await,
+        "sbs" => ask_climb(Climbing::Sbs, diary, history, parameters).await,
         "linear" => ask_climb(Climbing::Linear, diary, history, parameters).await,
         _ => ask_climb(Climbing::Block, diary, history, parameters).await,
     }
@@ -880,6 +887,8 @@ enum Climbing {
     Linear,
     /// The first week measures the anchor and is not a phase.
     Block,
+    /// A published chart: four weeks, stated, with its test as the last session.
+    Sbs,
 }
 
 async fn ask_climb(
@@ -894,10 +903,20 @@ async fn ask_climb(
         // climbs from it rather than measuring it.
         Climbing::Linear => ("ladder", "what does the ladder climb from?"),
         Climbing::Block => ("block", "what should the entry test aim at?"),
+        // **What the chart's percentages are shares of, opening.** It does not
+        // stay fixed: each week's rep-max day resets it.
+        Climbing::Sbs => ("cycle", "what does week one programme from?"),
     };
     println!("A {template}: what it is, before what it contains.\n");
     let common = ask_common(diary, template)?;
-    let weeks = ask_weeks(climbing, diary, common.start, &common.scheduled)?;
+    // **Never asked how long it is.** The chart is four weeks; offering the
+    // question would invite an answer this build cannot prescribe, exactly as a
+    // test is never asked its duration.
+    let weeks = if matches!(climbing, Climbing::Sbs) {
+        domain::prescription::sbs::WEEKS
+    } else {
+        ask_weeks(climbing, diary, common.start, &common.scheduled)?
+    };
     let lift = ask_lift(template)?;
     let primary = lift.as_str().to_owned();
 
@@ -916,6 +935,8 @@ async fn ask_climb(
                 opening: (!typed.is_empty()).then(|| typed.trim_end_matches("kg").to_owned()),
             }
         }
+        // Nothing to ask: the chart states every set it runs.
+        Climbing::Sbs => Ladder::Sbs,
         Climbing::Block => {
             let entry_reps = ask_until(
                 "  the entry test attempts it at how many reps? [3] ",

@@ -404,7 +404,8 @@ fn rehydrate_periodisation(
         // re-refusing a row now would make a rule change unreadable data.
         return Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::stored(
             common.name,
-            primary,
+            common.pattern,
+            common.exercise,
             common.fills,
             entry,
             common.calendar,

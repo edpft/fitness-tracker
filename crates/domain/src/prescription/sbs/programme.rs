@@ -27,6 +27,17 @@ use crate::{
 
 use super::chart::WEEKS;
 
+/// The session whose result moves the maximum.
+///
+/// **Not an input, because the chart already says.** Every other climbing
+/// programme asks which session advances it, because the answer is genuinely the
+/// operator's. Here the second session of every week is the repetition-maximum
+/// day — and in week 4 the test — so the gating session is decided by the chart
+/// and asking would be asking for a number already stated (decisions 0019 and
+/// 0020). Which *weekday* that falls on is the calendar's business, and the
+/// operator's schedule already records Friday as his heavy day.
+pub const GATING: SessionRole = SessionRole::Heavy;
+
 /// A cycle of the SBS chart, as authored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sbs {
@@ -58,26 +69,22 @@ impl Sbs {
     /// that does not precede the cycle it anchors.
     pub fn new(
         name: ProgrammeName,
-        primary: Primary,
+        pattern: PrimaryPattern,
+        exercise: Exercise,
         fills: SlotFills,
         entry: Entry,
         calendar: Calendar,
     ) -> Result<Self, InconsistentProgramme> {
-        // A programme gating on a role it never runs would never advance — and
-        // for this chart that is worse than a stalled ladder: the gating day is
-        // where the maximum is set, so a cycle that never runs one would
-        // prescribe week 2 off week 1's opening for ever.
-        if !calendar.weekdays().runs(primary.gating_role()) {
-            return Err(InconsistentProgramme::GatingRoleNeverRuns {
-                gating: primary.gating_role(),
-            });
+        let primary = Primary::new(pattern, exercise, GATING);
+
+        // A cycle that never runs its gating session would never advance — and
+        // here that is worse than a stalled ladder, because the gating day is
+        // where the maximum is *set*. A cycle without one would prescribe every
+        // week off the opening maximum for ever.
+        if !calendar.weekdays().runs(GATING) {
+            return Err(InconsistentProgramme::GatingRoleNeverRuns { gating: GATING });
         }
-        check_primary(
-            primary.pattern(),
-            primary.exercise(),
-            &fills,
-            primary.gating_role(),
-        )?;
+        check_primary(pattern, exercise, &fills, GATING)?;
 
         // The chart is four weeks. A calendar of any other length is not this
         // programme run longer or shorter — it is a different programme, and
@@ -115,7 +122,8 @@ impl Sbs {
     #[must_use]
     pub const fn stored(
         name: ProgrammeName,
-        primary: Primary,
+        pattern: PrimaryPattern,
+        exercise: Exercise,
         fills: SlotFills,
         entry: Entry,
         calendar: Calendar,
@@ -123,7 +131,7 @@ impl Sbs {
     ) -> Self {
         Self {
             name,
-            primary,
+            primary: Primary::new(pattern, exercise, GATING),
             fills,
             entry,
             calendar,
@@ -159,13 +167,9 @@ impl Sbs {
         self.primary.exercise()
     }
 
-    /// The session whose result moves the maximum.
-    ///
-    /// Always the heavy one: the chart's second day is the repetition-maximum
-    /// day and, in week 4, the test. `programme_weekday` already records Friday
-    /// as the operator's heavy day, so this needs no separate statement.
+    /// The session whose result moves the maximum. Always [`GATING`].
     pub const fn gating_role(&self) -> SessionRole {
-        self.primary.gating_role()
+        GATING
     }
 
     /// The days this cycle occupies, for the rule that two programmes may not

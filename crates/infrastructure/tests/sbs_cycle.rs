@@ -24,7 +24,6 @@ name             = "autumn-2026-front-squat"
 template         = "sbs"
 primary          = "knee_dominant"
 primary_exercise = "front-squat"
-gating_role      = "heavy"
 start            = "2026-09-14"
 
 [programme.weekdays]
@@ -141,6 +140,19 @@ fn an_entry_test_is_refused_because_the_test_is_at_the_end() {
     assert!(
         read(&text).is_err(),
         "an SBS cycle's test is its last session, not a week in front of it",
+    );
+}
+
+#[test]
+fn a_gating_role_is_refused_because_the_chart_says_which_session_advances() {
+    let text = SBS_DOCUMENT.replace(
+        "start            = \"2026-09-14\"",
+        "start            = \"2026-09-14\"\ngating_role      = \"heavy\"",
+    );
+    assert!(
+        read(&text).is_err(),
+        "the second session of every week is the rep-max day by construction, \
+         so there is nothing here for an operator to decide",
     );
 }
 

@@ -111,6 +111,30 @@ may not be one in kilograms, and that is intended.
 **6. Kilograms, floored to 2.5.** The workbook's own rounding, and `FLOOR` is
 its own function — a load is rounded down to the increment, never up.
 
+**7. An SBS cycle has no gating role to author, and is never asked for one.**
+Raised by the operator on 2026-09-02 — *"is there a gating_role in an SBS
+programme?"* — against a first cut that asked for it.
+
+Every other climbing programme asks which session advances it, because the answer
+is genuinely the operator's. Here it is not: **the second session of every week
+is the repetition-maximum day**, and in week 4 the test, so the gating session is
+decided by the chart. Which weekday that falls on is the calendar's business, and
+his schedule already records Friday as the heavy day.
+
+So `Sbs::new` takes a pattern and an exercise rather than a `Primary`, builds the
+`Primary` with `GATING` itself, and a document naming `gating_role` is **refused
+rather than ignored** — the same treatment as a duration, an opening or an entry
+test, and for the same reason. This is decisions 0019 and 0020 again: a question
+is worth asking only if the operator is the one who knows the answer.
+
+**8. The input is the wizard, not a document.** An earlier revision of this
+decision, and the session that implemented it, presented `template = "sbs"` in a
+hand-written TOML file as the way to author a cycle. **TOML was rejected as an
+input format** and the wizard is what writes to the store; the document is an
+internal serialisation the wizard emits and reads straight back. `fitness
+programme add` now offers `sbs` as the first of four templates, and asks it
+neither its duration nor its gating session.
+
 ## What happens to the Prilepin block
 
 **Parked, not deleted.** `feat/block-derives-from-prilepin` is finished and

@@ -67,6 +67,10 @@ pub enum Ladder {
         entry_reps: u32,
         entry_light: Option<String>,
     },
+    /// A published chart. **Nothing to author**: it states every set, every
+    /// repetition, every percentage, its own four weeks and which session
+    /// advances it (decision 0024).
+    Sbs,
 }
 
 impl Shape {
@@ -78,6 +82,10 @@ impl Shape {
                 ladder: Ladder::Linear { .. },
                 ..
             } => "linear",
+            Self::Climb {
+                ladder: Ladder::Sbs,
+                ..
+            } => "sbs",
             Self::Climb {
                 ladder: Ladder::Block { .. },
                 ..
@@ -143,6 +151,14 @@ pub fn render(programme: &Draft, fills: &[(SlotId, FillLine)]) -> String {
             line!(out, "start            = {:?}", programme.start.to_string());
             line!(out, "reps             = {reps}");
         }
+        // **The chart states its own duration and its own gating session**, so
+        // a document naming either is refused by the reader rather than
+        // ignored. Writing them here would produce a document this build will
+        // not read back.
+        Shape::Climb {
+            ladder: Ladder::Sbs,
+            ..
+        } => line!(out, "start            = {:?}", programme.start.to_string()),
         Shape::Climb { weeks, gating, .. } => {
             line!(out, "gating_role      = {gating:?}");
             line!(out, "start            = {:?}", programme.start.to_string());

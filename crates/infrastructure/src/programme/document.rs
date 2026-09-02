@@ -783,6 +783,15 @@ impl Document {
             .as_deref()
             .map(|load| mass("programme.opening", load))
             .transpose()?;
+        // **Before the gating requirement, because the chart answers it.** Every
+        // other climbing template genuinely needs to be told which session
+        // advances it; an SBS cycle's second session is the repetition-maximum
+        // day by construction, so asking would be asking for a settled number.
+        if template == "sbs" {
+            let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
+            return self.sbs(name, pattern, primary_exercise, anchor, calendar);
+        }
+
         let gating = section.gating_role.as_ref().ok_or_else(|| {
             invalid(
                 "programme.gating_role",
@@ -795,10 +804,6 @@ impl Document {
             SessionRole::try_from(gating.clone())
                 .map_err(|error| invalid("programme.gating_role", error))?,
         );
-        if template == "sbs" {
-            let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
-            return self.sbs(name, primary, anchor, calendar);
-        }
 
         let duration = section.duration_weeks.ok_or_else(|| {
             invalid(
@@ -914,7 +919,8 @@ impl Document {
     fn sbs(
         &self,
         name: ProgrammeName,
-        primary: Primary,
+        pattern: PrimaryPattern,
+        exercise: Exercise,
         anchor: Anchor,
         calendar: Calendar,
     ) -> Result<Programme, DocumentError> {
@@ -925,11 +931,15 @@ impl Document {
                 ("programme.duration_weeks", section.duration_weeks.is_some()),
                 ("programme.opening", section.opening.is_some()),
                 ("programme.entry_test", section.entry_test.is_some()),
+                // **The chart says which session advances the cycle**, so this
+                // is a field with nothing to decide. See `sbs::programme::GATING`.
+                ("programme.gating_role", section.gating_role.is_some()),
             ],
         )?;
         Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::new(
             name,
-            primary,
+            pattern,
+            exercise,
             self.fills()?,
             Entry::derived(anchor),
             calendar,
