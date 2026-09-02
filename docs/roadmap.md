@@ -27,6 +27,11 @@ this is the plan, not the record.
 The three-line version, kept current so a session starting cold does not have to
 read the rest to know what to pick up.
 
+- **Start here**: `docs/handover-2026-09-02.md`. Three pieces of work, none
+  started — removing TOML as the programme format, cycling's session intention,
+  and the SBS hold rule. It is written to be checked rather than believed: every
+  claim carries the command that verifies it.
+
 - **Just landed**: the cycling domain and `fitness cycling next`. All
   twenty-five sessions of *Peak Your Power Zones* are transcribed into
   `domain::cycling::seed`, checked against the app's own stated ride durations
