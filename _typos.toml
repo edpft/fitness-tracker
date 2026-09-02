@@ -14,6 +14,13 @@ extend-exclude = [
 # Don't correct the app name "Hevy"
 Hevy = "Hevy"
 
+# The operator's own word, in § II.1 of the constitution: "Unrecognised or
+# unparseable fields are retained". It became visible to this check on
+# 2026-09-01, when the constitution moved out of `.specify/` on that
+# directory's deletion — the word did not change, its scope did. Both spellings
+# are current English and the constitution is not ours to edit for a linter.
+unparseable = "unparseable"
+
 [default.extend-identifiers]
 # The plural of SQL's CHECK constraint, in a migration comment. Listed as an
 # identifier rather than a word because the splitter reads `CHECKs` as `CHEC`

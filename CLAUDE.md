@@ -2,7 +2,7 @@
 
 ## The constitution
 
-`.specify/memory/constitution.md` governs this project. Read it before any
+`docs/constitution.md` governs this project. Read it before any
 non-trivial change. It is binding rather than aspirational, and it is short
 enough to read in full.
 
@@ -53,8 +53,24 @@ work. That is not a fact about the project.
   the acceptance lines before building, so "done" is checkable rather than
   claimed.
 
-  The `speckit-*` skills still exist and `specs/` still holds 001 to 003. Read
-  them as history; do not add to them.
+  **`specs/` is not a source of truth and must not be consulted as one.**
+  Retired 2026-08-20, withdrawn as authority 2026-09-01 after a session quoted
+  `specs/003`'s out-of-scope list — "Cycling, nutrition phases and the
+  constraint calendar" — back at the operator as a reason cycling was not on the
+  path. Concurrent gym and cycling programming is the *point of the tool*, and a
+  scoping line written by an agent in August was being read as a constraint on
+  what the operator is allowed to ask for in September.
+
+  That is the failure mode of the whole directory: 8,244 lines of agent-authored
+  prose that the operator has never read, cited back at him as though it
+  constrained him. Everything load-bearing in it is in the code (630fa02 moved
+  the seed, the candidates and the vocabulary into `domain`). What governs is
+  the constitution, `docs/decisions/`, `docs/roadmap.md` and the code.
+
+  **Deleted on 2026-09-01**, along with `.specify/` and the `speckit-*` skills;
+  the constitution moved to `docs/constitution.md` on its way out. All of it is
+  in git history if a provenance note ever needs chasing. Do not restore it, do
+  not cite it, and do not write its like again.
 - **Branch, then pull request.** Human sign-off before merge (§ 40). Do not
   merge your own work. Dependency bumps are exempt and merge on green.
 - **Conventional Commits.** release-please derives versions and changelogs from

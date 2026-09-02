@@ -322,6 +322,21 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
                 ),
             }
         }
+        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+            println!(
+                "  opening maximum {}, and it does not stay fixed",
+                sbs.entry().anchor(),
+            );
+            println!(
+                "  four weeks, stated by the chart: 5×5 @ 80%, 4×3 @ 85%, \
+                 3×1 @ 90%, 3×3 @ 75%"
+            );
+            println!(
+                "  the second session of each week finds a rep max, and that \
+                 result is what the next week is a share of"
+            );
+            println!("  week 4 ends on a single, which opens the next cycle");
+        }
         Programme::Periodisation(Periodisation::Linear(linear)) => {
             println!("  anchor {}, fixed for the block", linear.anchor());
             // Where the opening came from, because "85kg" alone does not say
@@ -552,7 +567,25 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         Programme::Periodisation(Periodisation::Block(block)) => {
             block_standing(block, parameters);
         }
+        Programme::Periodisation(Periodisation::Sbs(sbs)) => sbs_standing(sbs),
     }
+}
+
+/// An SBS cycle: where the chart stands, and the one caveat that matters.
+fn sbs_standing(sbs: &domain::prescription::Sbs) {
+    println!(
+        "the chart opens from {} ({})",
+        sbs.entry().anchor().load(),
+        sbs.entry().anchor().provenance(),
+    );
+    println!(
+        "  and the maximum moves inside the cycle: each rep-max day resets it, \
+         so week 3 is a share of what week 2 produced"
+    );
+    println!(
+        "  read from the record: each performed rep-max day advances it, so a \
+         week nobody trained leaves it where it was"
+    );
 }
 
 /// A standalone test: what it is an attempt at, and which session takes it.

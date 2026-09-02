@@ -20,10 +20,11 @@ use domain::{
         AccessoryScheme, Anchor, AnchorProvenance, BackOff, BlockRest, Calendar, Entry,
         GenerationParameters, InconsistentProgramme, InvalidCalendar, Linear, LoadSteps, PerRole,
         Percentage, Periodisation, Periodised, Programme, ProgrammeName, ResetProtocol, RestScheme,
-        Scales, SessionRole, Skip, Step, Target, Test, TestTarget, Tested, TopSetReps, WarmupStep,
-        Weekdays,
+        Sbs, Scales, SessionRole, Skip, Step, Target, Test, TestTarget, Tested, TopSetReps,
+        WarmupStep, Weekdays,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
+        sbs::WEEKS,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -690,7 +691,7 @@ impl Document {
                 zone,
                 inherited,
             ),
-            template @ ("linear" | "block") => self.climbing(
+            template @ ("linear" | "block" | "sbs") => self.climbing(
                 template,
                 pattern,
                 primary_exercise,
@@ -706,7 +707,7 @@ impl Document {
                 format!(
                     "{other:?} is not a template this build can read; it reads \
                      \"linear\" and \"block\", which were \"v1\" and \"v2\" until \
-                     2026-08-18, and \"test\""
+                     2026-08-18, \"sbs\", and \"test\""
                 ),
             )),
         }
@@ -776,32 +777,21 @@ impl Document {
         parameters: &GenerationParameters,
     ) -> Result<Programme, DocumentError> {
         let section = &self.programme;
-        let anchor_section = section.anchor.as_ref().ok_or_else(|| {
-            invalid(
-                "programme.anchor",
-                "a programme that climbs opens from a maximum",
-            )
-        })?;
-        let failed = anchor_section
-            .failed
-            .as_deref()
-            .map(|value| mass("programme.anchor.failed", value))
-            .transpose()?;
-        let anchor = Anchor::new(
-            mass("programme.anchor.load", &anchor_section.load)?,
-            failed,
-            AnchorProvenance::try_from(anchor_section.provenance.clone())
-                .map_err(|error| invalid("programme.anchor.provenance", error))?,
-            settled("programme.anchor.from", &anchor_section.from)?
-                .parse::<Date>()
-                .map_err(|error| invalid("programme.anchor.from", error))?,
-        )
-        .map_err(|error| invalid("programme.anchor", error))?;
+        let anchor = self.anchor()?;
         let declared_opening = section
             .opening
             .as_deref()
             .map(|load| mass("programme.opening", load))
             .transpose()?;
+        // **Before the gating requirement, because the chart answers it.** Every
+        // other climbing template genuinely needs to be told which session
+        // advances it; an SBS cycle's second session is the repetition-maximum
+        // day by construction, so asking would be asking for a settled number.
+        if template == "sbs" {
+            let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
+            return self.sbs(name, pattern, primary_exercise, anchor, calendar);
+        }
+
         let gating = section.gating_role.as_ref().ok_or_else(|| {
             invalid(
                 "programme.gating_role",
@@ -814,6 +804,7 @@ impl Document {
             SessionRole::try_from(gating.clone())
                 .map_err(|error| invalid("programme.gating_role", error))?,
         );
+
         let duration = section.duration_weeks.ok_or_else(|| {
             invalid(
                 "programme.duration_weeks",
@@ -884,6 +875,75 @@ impl Document {
                 )?,
             )))
         }
+    }
+
+    /// The maximum a climbing programme opens from.
+    ///
+    /// Its own method because all three climbing templates need it identically,
+    /// and because `climbing` outgrew what fits in one read.
+    fn anchor(&self) -> Result<Anchor, DocumentError> {
+        let section = self.programme.anchor.as_ref().ok_or_else(|| {
+            invalid(
+                "programme.anchor",
+                "a programme that climbs opens from a maximum",
+            )
+        })?;
+        let failed = section
+            .failed
+            .as_deref()
+            .map(|value| mass("programme.anchor.failed", value))
+            .transpose()?;
+        Anchor::new(
+            mass("programme.anchor.load", &section.load)?,
+            failed,
+            AnchorProvenance::try_from(section.provenance.clone())
+                .map_err(|error| invalid("programme.anchor.provenance", error))?,
+            settled("programme.anchor.from", &section.from)?
+                .parse::<Date>()
+                .map_err(|error| invalid("programme.anchor.from", error))?,
+        )
+        .map_err(|error| invalid("programme.anchor", error))
+    }
+
+    /// An SBS cycle.
+    ///
+    /// **It says nothing about duration and must not be asked to.** The chart is
+    /// four weeks; a document stating that would be stating the obvious, and one
+    /// stating anything else would describe a programme this build cannot
+    /// prescribe. Every other climbing template genuinely needs the number, so
+    /// the requirement stays for them and this branch runs before it.
+    ///
+    /// The same goes for an opening — every load is a share of the maximum, so
+    /// there is nothing to open against — and for an entry test, since the
+    /// chart's test is its last session rather than a week in front.
+    fn sbs(
+        &self,
+        name: ProgrammeName,
+        pattern: PrimaryPattern,
+        exercise: Exercise,
+        anchor: Anchor,
+        calendar: Calendar,
+    ) -> Result<Programme, DocumentError> {
+        let section = &self.programme;
+        Self::refuse_unused(
+            "sbs",
+            &[
+                ("programme.duration_weeks", section.duration_weeks.is_some()),
+                ("programme.opening", section.opening.is_some()),
+                ("programme.entry_test", section.entry_test.is_some()),
+                // **The chart says which session advances the cycle**, so this
+                // is a field with nothing to decide. See `sbs::programme::GATING`.
+                ("programme.gating_role", section.gating_role.is_some()),
+            ],
+        )?;
+        Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::new(
+            name,
+            pattern,
+            exercise,
+            self.fills()?,
+            Entry::derived(anchor),
+            calendar,
+        )?)))
     }
 
     /// Refuse a field this template has no use for.

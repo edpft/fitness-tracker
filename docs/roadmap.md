@@ -27,10 +27,31 @@ this is the plan, not the record.
 The three-line version, kept current so a session starting cold does not have to
 read the rest to know what to pick up.
 
-- **Waiting on the operator**: authoring the autumn block. Nothing is blocking
-  it. The wizard asks what he knows and derives the rest, the schedule takes
-  14 September out without being told, and the whole thing has been run end to
-  end against a copy of the real store.
+- **Just landed**: the cycling domain and `fitness cycling next`. All
+  twenty-five sessions of *Peak Your Power Zones* are transcribed into
+  `domain::cycling::seed`, checked against the app's own stated ride durations
+  and movement counts for every one of them. The command prints the session, its
+  zones, what each zone means in watts at a given FTP, the Peloton class that
+  realises it, and a warning on the one class the operator's account cannot
+  start. Decision 0025 has the model; `docs/cycling-peak-your-power-zones.md`
+  has the data.
+
+  **Not built, and named rather than implied**: Peloton as a source and a sink.
+  Decision 0025 settled that it should be both and that a session should ideally
+  be scheduled into the operator's Peloton calendar. Until then cycling
+  prescribes and stops, which is why it is not a `KnownDiscipline` — a catalogue
+  entry pointing at streams that do not exist would make the shape look finished.
+
+  **Also not built**: persistence. The programme start and the FTP arrive as
+  arguments, because the store holds neither yet. The FTP has no default and
+  never will have one — a session prints its zones without it and its watts only
+  when told what a zone is a share of.
+
+- **Retired as authority**: `specs/`. 8,244 lines of agent-authored prose the
+  operator has never read, and a session had just quoted `specs/003`'s
+  out-of-scope list back at him as a reason cycling was not on the path.
+  Concurrent gym and cycling programming is the point of the tool. `CLAUDE.md`
+  withdraws it; deletion is pending — see 0024.
 - **Just landed**: `fitness gym next` — the porcelain. One command for the daily
   loop, nested by discipline because that is the level at which a pipeline has
   one source and one sink. The four plumbing commands are untouched; it wraps
@@ -42,8 +63,28 @@ read the rest to know what to pick up.
   a superseded session is replaced in place rather than left behind — so what is
   left for it is removing a session nobody replaces, which nothing yet asks for.
 
-- **Next in code**: nothing is queued. The autumn block is the constraint, not
-  the tool.
+- **Just landed**: the SBS gym half, end to end. `template = "sbs"` authors a
+  four-week cycle, it stores and reads back, and both sessions of a week issue
+  what the chart states. `domain::prescription::sbs` splits into the published
+  chart and the programme built around it.
+
+  **The new shape it needed**: a working set that carries *no load*. The chart
+  says `3 × 5–6 @ 8RM`, and that load is the result of the set above it, so it
+  does not exist when the prescription is written. `PrimaryLoad::RepMax` issues
+  the top set as an attempt and the back-offs as repetition ranges with nothing
+  in the load column.
+
+  **And the maximum moves off the record**, which is the mechanism rather than
+  a refinement: each performed rep-max day is read, run through SBS's table, and
+  applied in order, so week 3 is a share of what week 2 produced. A week nobody
+  trained leaves it where it was, and a failed attempt advances nothing.
+
+- **Parked**: `feat/block-derives-from-prilepin` (decision 0023). Finished,
+  green, never raised as a PR, and it stays unraised. It was prescribing `8 × 2`
+  to stay inside Prilepin's bands — the degeneracy 0023 itself documented as an
+  unresolved open question, and then prescribed anyway. That open question is
+  closed by nothing asking it any more. The `WorkUp` variant it added survives
+  and is what SBS's rep-max days are built on.
 - **After 14 September**: decision 0018, in the order commitments → ordinal
   programme → allocator. Not before; see *What 0018 changes, and when*.
 
@@ -492,8 +533,9 @@ of the three have landed**; withdrawal has not:
 
 ## Two things a new session should read first
 
-- `.specify/memory/constitution.md`, which governs. It is short and binding.
-- `CLAUDE.md`, for the way of working. Spec Kit is retired; `specs/` is history.
+- `docs/constitution.md`, which governs. It is short and binding.
+- `CLAUDE.md`, for the way of working. Spec Kit is retired and `specs/` is
+  deleted — see decision 0024.
 
 And two framings settled in conversation that are not otherwise written down:
 

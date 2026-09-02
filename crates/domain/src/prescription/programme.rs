@@ -31,6 +31,7 @@ use crate::{
         anchor::{Anchor, Entry},
         block::Periodised,
         linear::{Linear, PrimaryPattern, SlotFills},
+        sbs::Sbs,
         schedule::{Calendar, SessionRole},
         succession::{ProgrammeName, ProgrammeWindow},
     },
@@ -48,6 +49,13 @@ pub enum Programme {
 pub enum Periodisation {
     Linear(Linear),
     Block(Periodised),
+    /// A published chart, transcribed rather than derived (decision 0024).
+    ///
+    /// **A third model of periodisation, not a degenerate one.** Linear climbs
+    /// at a rate and block derives its phases; this reads its loads off a table
+    /// someone else published, and what moves week to week is the *maximum*
+    /// rather than a position on a ladder.
+    Sbs(Sbs),
 }
 
 impl Programme {
@@ -155,6 +163,12 @@ impl Programme {
         match self {
             Self::Test(test) => Some(test.primary_exercise()),
             Self::Periodisation(Periodisation::Block(block)) => Some(block.primary_exercise()),
+            // **An SBS cycle always ends on a one-rep maximum.** Week 4 day 2
+            // is a test and is not optional, so a cycle that runs to its end
+            // leaves a measured maximum behind exactly as a block does — and
+            // that maximum is what the next cycle opens from, which is what
+            // makes the chart self-perpetuating (decision 0024).
+            Self::Periodisation(Periodisation::Sbs(sbs)) => Some(sbs.primary_exercise()),
             Self::Periodisation(Periodisation::Linear(_)) => None,
         }
     }
@@ -193,6 +207,17 @@ impl Programme {
                         crate::prescription::AnchorProvenance::Tested
                     )
             }
+            // **The same claim a block makes, and for a stronger reason.** An
+            // SBS cycle has no entry test at all — its test is the *last*
+            // session, not the first — so a `Tested` anchor here can only be
+            // pointing at something that already happened: the standalone week 4
+            // that opens the sequence, or the previous cycle's own week 4. There
+            // is no case where the cycle is about to measure its own opening, so
+            // no carve-out is needed for one.
+            Self::Periodisation(Periodisation::Sbs(sbs)) => matches!(
+                sbs.entry().anchor().provenance(),
+                crate::prescription::AnchorProvenance::Tested
+            ),
             Self::Periodisation(Periodisation::Linear(_)) | Self::Test(_) => false,
         }
     }
@@ -216,6 +241,7 @@ impl Periodisation {
         match self {
             Self::Linear(_) => "linear",
             Self::Block(_) => "block",
+            Self::Sbs(_) => "sbs",
         }
     }
 
@@ -223,6 +249,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.name(),
             Self::Block(block) => block.name(),
+            Self::Sbs(sbs) => sbs.name(),
         }
     }
 
@@ -230,6 +257,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.fills(),
             Self::Block(block) => block.fills(),
+            Self::Sbs(sbs) => sbs.fills(),
         }
     }
 
@@ -237,6 +265,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.calendar(),
             Self::Block(block) => block.calendar(),
+            Self::Sbs(sbs) => sbs.calendar(),
         }
     }
 
@@ -244,6 +273,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.authored_at(),
             Self::Block(block) => block.authored_at(),
+            Self::Sbs(sbs) => sbs.authored_at(),
         }
     }
 
@@ -251,6 +281,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.primary(),
             Self::Block(block) => block.primary(),
+            Self::Sbs(sbs) => sbs.primary(),
         }
     }
 
@@ -258,6 +289,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.primary_exercise(),
             Self::Block(block) => block.primary_exercise(),
+            Self::Sbs(sbs) => sbs.primary_exercise(),
         }
     }
 
@@ -267,6 +299,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.entry(),
             Self::Block(block) => block.entry(),
+            Self::Sbs(sbs) => sbs.entry(),
         }
     }
 
@@ -279,6 +312,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.gating_role(),
             Self::Block(block) => block.gating_role(),
+            Self::Sbs(sbs) => sbs.gating_role(),
         }
     }
 
@@ -287,6 +321,7 @@ impl Periodisation {
         match self {
             Self::Linear(linear) => linear.window(),
             Self::Block(block) => block.window(),
+            Self::Sbs(sbs) => sbs.window(),
         }
     }
 }
@@ -306,6 +341,12 @@ pub enum InconsistentProgramme {
          so its ladder would never advance"
     )]
     GatingRoleNeverRuns { gating: SessionRole },
+    #[error(
+        "the SBS chart states four weeks and this calendar runs {given} — a \
+         cycle of another length is a different programme, not this one \
+         stretched"
+    )]
+    ChartIsFourWeeks { given: u32 },
     #[error(
         "a test is taken on the {role} session and this one never runs it, \
          so the test would never be taken"
