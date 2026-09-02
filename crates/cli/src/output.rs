@@ -583,9 +583,8 @@ fn sbs_standing(sbs: &domain::prescription::Sbs) {
          so week 3 is a share of what week 2 produced"
     );
     println!(
-        "  ! loads after week 1 are derived from the opening maximum, not from \
-         what was lifted — the store cannot yet answer what the last rep-max day \
-         produced"
+        "  read from the record: each performed rep-max day advances it, so a \
+         week nobody trained leaves it where it was"
     );
 }
 

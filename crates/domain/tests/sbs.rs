@@ -13,7 +13,7 @@
 use domain::{
     gym::{Kg, RepCount},
     prescription::{
-        SbsDay, SbsSession, advance, day,
+        SbsDay, SbsSession, advance, day, maximum_after,
         parameters::Percentage,
         sbs::{InvalidSbs, WEEKS, training_max_share, working_load},
         target::Target,
@@ -263,5 +263,89 @@ fn a_back_off_range_is_a_range() {
     assert!(
         matches!(back_off_reps, Target::Range { .. }),
         "5–6 is a range rather than an exact count",
+    );
+}
+
+/// The whole progression, as the prescriber drives it: an opening maximum and
+/// what was lifted on each repetition-maximum day.
+///
+/// **This is the mechanism, and it is the ordinary case.** A linear ladder reads
+/// the record too; what differs is what it asks. A ladder asks whether the top
+/// set was completed, and this asks what it weighed.
+#[test]
+fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
+    let step = increment();
+    let opening = Kg::from_grams(100_000);
+
+    // Nothing performed yet — week 1 programmes from the opening, unchanged.
+    assert_eq!(
+        maximum_after(opening, &[], step).as_grams(),
+        100_000,
+        "an untrained cycle stands where it was authored",
+    );
+
+    // Week 1's eight-rep day made 82.5. 82.5 / 0.80 is 103.125 → 102.5.
+    assert_eq!(
+        maximum_after(opening, &[(1, Kg::from_grams(82_500))], step).as_grams(),
+        102_500,
+    );
+
+    // And week 2's five-rep day made 90. Applied in order, on top of the first.
+    assert_eq!(
+        maximum_after(
+            opening,
+            &[(1, Kg::from_grams(82_500)), (2, Kg::from_grams(90_000))],
+            step,
+        )
+        .as_grams(),
+        105_000,
+        "90 / 0.85 is 105.88 → 105.0, from the maximum week 1 left behind",
+    );
+}
+
+#[test]
+fn a_week_nobody_trained_leaves_the_maximum_where_it_was() {
+    let step = increment();
+    let opening = Kg::from_grams(100_000);
+
+    // Week 1 skipped, week 2 trained. The week 2 result still advances, off the
+    // opening rather than off a week that never happened.
+    let skipped = maximum_after(opening, &[(2, Kg::from_grams(90_000))], step);
+    assert_eq!(skipped.as_grams(), 105_000);
+}
+
+#[test]
+fn a_week_the_chart_does_not_name_advances_nothing() {
+    let step = increment();
+    let opening = Kg::from_grams(100_000);
+    assert_eq!(
+        maximum_after(opening, &[(9, Kg::from_grams(90_000))], step).as_grams(),
+        100_000,
+        "the chart runs four weeks, and a fifth is not one of them",
+    );
+}
+
+/// Week 1's percentage day against the maximum a performed week 1 produces.
+///
+/// Ties the two halves together: the chart states 85% for week 2, and what that
+/// is 85% *of* is what week 1's rep-max day made.
+#[test]
+fn week_two_is_a_share_of_what_week_one_produced() {
+    let step = increment();
+    let maximum = maximum_after(
+        Kg::from_grams(100_000),
+        &[(1, Kg::from_grams(82_500))],
+        step,
+    );
+
+    let Ok(SbsDay::Percentage { share, .. }) = day(2, SbsSession::First) else {
+        panic!("week 2 day 1 is a percentage day");
+    };
+    let load = working_load(maximum, share, step).expect("the load computes");
+
+    assert_eq!(
+        load.as_grams(),
+        85_000,
+        "85% of 102.5 is 87.125, floored to the grid at 85.0",
     );
 }

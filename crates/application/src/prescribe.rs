@@ -26,7 +26,9 @@ use domain::{
         TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
         linear::SlotContent,
         progress_after, rep_max, rested,
-        sbs::chart::{day as sbs_day, training_max_share, working_load},
+        sbs::chart::{
+            day as sbs_day, maximum_after as sbs_maximum_after, training_max_share, working_load,
+        },
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -329,15 +331,12 @@ where
 
         let mut items = Vec::new();
         let mut underivable = Vec::new();
-        for derived in issue_slots(
-            &programme,
-            &parameters,
-            role,
-            week,
+        let standing = Standing {
             progress,
             inheritance,
-            &history,
-        ) {
+            maximum: self.maximum_of(&programme, &parameters, date).await?,
+        };
+        for derived in issue_slots(&programme, &parameters, role, week, standing, &history) {
             match derived {
                 Derived::Item(item) => items.push(*item),
                 Derived::Underivable(slots) => underivable.extend(slots),
@@ -406,6 +405,105 @@ where
             Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
             | Programme::Test(_) => Ok(None),
         }
+    }
+
+    /// The maximum this programme is a share of, where that moves with the
+    /// record.
+    ///
+    /// `None` for every template but SBS: a ladder's anchor is fixed and a
+    /// block's is too, so there is nothing here for them to answer.
+    async fn maximum_of(
+        &self,
+        programme: &Programme,
+        parameters: &GenerationParameters,
+        before: Date,
+    ) -> Result<Option<Kg>, PrescriptionError> {
+        match programme {
+            Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+                Ok(Some(self.sbs_maximum(sbs, parameters, before).await?))
+            }
+            Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Block(_))
+            | Programme::Test(_) => Ok(None),
+        }
+    }
+
+    /// The maximum an SBS cycle is programming from, on a given date.
+    ///
+    /// **The chart's percentages are shares of a number that moves**, and it
+    /// moves off performance: each week's second session finds a repetition
+    /// maximum, and SBS's own table turns that into what the next week
+    /// programmes from. So this walks the cycle's own gating sessions in order
+    /// and advances the opening anchor through each one.
+    ///
+    /// **Loads depending on performance is the expected behaviour**, not a
+    /// complication — a linear ladder reads the record for the same reason. What
+    /// differs is what is read: a ladder asks whether the top set was completed,
+    /// and this asks what it weighed.
+    ///
+    /// A session that recorded no working set advances nothing, which is right:
+    /// a week nobody trained leaves the maximum where it was.
+    async fn sbs_maximum(
+        &self,
+        sbs: &Sbs,
+        parameters: &GenerationParameters,
+        before: Date,
+    ) -> Result<Kg, PrescriptionError> {
+        let mut maximum = sbs.entry().anchor().load();
+        let Exercise::Reps(primary) = sbs.primary_exercise() else {
+            return Ok(maximum);
+        };
+        // The increment is the plate grid's, not a number of this module's:
+        // what SBS's `FLOOR` rounds to is whatever the bar can actually hold.
+        let Some(steps) = parameters.scales.for_exercise(Exercise::Reps(primary)) else {
+            return Ok(maximum);
+        };
+        let increment = steps.step_at(maximum);
+
+        let mut performances = self.ports.history.performances(primary).await?;
+        // In date order, because each advance is applied to the result of the
+        // one before it. The store's order is not part of its contract.
+        performances.sort_by_key(|performance| performance.on);
+
+        // Gathered first and applied by the chart, because *what* the record
+        // says is this layer's business and what it *means* is the chart's.
+        let mut performed: Vec<(u32, Kg)> = Vec::new();
+        for performance in &performances {
+            if performance.on >= before {
+                continue;
+            }
+            // Same two answers the ladder uses, and in the same order: the
+            // prescription where the record links one, the calendar otherwise.
+            let (week, role) = match &performance.fulfilled {
+                Some(fulfilled) if fulfilled.programme == *sbs.name() => {
+                    match sbs.calendar().place(performance.on) {
+                        Ok((week, _)) => (week, fulfilled.role),
+                        Err(_) => continue,
+                    }
+                }
+                _ => match sbs.calendar().place(performance.on) {
+                    Ok(placed) => placed,
+                    Err(_) => continue,
+                },
+            };
+            if role != sbs.gating_role() {
+                continue;
+            }
+            let WeekKind::Climbing(index) = week else {
+                continue;
+            };
+            let Some(top) = top_set_of(performance) else {
+                continue;
+            };
+            // A failed attempt says what the operator could not do, which is not
+            // a repetition maximum and advances nothing.
+            if !top.completed {
+                continue;
+            }
+            performed.push((index.as_u32(), top.load));
+        }
+
+        maximum = sbs_maximum_after(maximum, &performed, increment);
+        Ok(maximum)
     }
 
     /// What a test week takes from the programme before it (decision 0013).
@@ -576,6 +674,24 @@ fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
     })
 }
 
+/// What the record says, gathered before any slot is derived.
+///
+/// **Three answers to one question — where does this session stand?** They
+/// travel together because every one of them is read from the record before the
+/// derivation begins, and because passing them separately had `issue_slots` at
+/// the argument limit with a fourth already needed.
+#[derive(Debug, Clone, Copy)]
+struct Standing {
+    /// Where a ladder has got to. `None` for every template without one.
+    progress: Option<Progress>,
+    /// What a test week takes from the programme before it.
+    inheritance: Inheritance,
+    /// The maximum an SBS cycle is currently a share of, advanced through the
+    /// chart's own table by each rep-max day already performed. `None` for every
+    /// template whose anchor does not move.
+    maximum: Option<Kg>,
+}
+
 /// Every position the template issues, derived in order.
 ///
 /// The order is [`PrimaryPattern::sequence`]'s; all this adds is which
@@ -586,8 +702,7 @@ fn issue_slots(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
-    progress: Option<Progress>,
-    inheritance: Inheritance,
+    standing: Standing,
     history: &BTreeMap<RepsExercise, LastPerformance>,
 ) -> Vec<Derived> {
     let primary = programme.primary();
@@ -596,7 +711,7 @@ fn issue_slots(
         .into_iter()
         .map(|position| match position {
             Position::Single(slot) if slot == primary.slot() => {
-                primary_slot_item(programme, parameters, role, week, progress, inheritance)
+                primary_slot_item(programme, parameters, role, week, standing)
             }
             Position::Single(slot) => accessory_slot(programme, parameters, role, history, slot),
             Position::Superset(first, second) => {
@@ -736,9 +851,13 @@ fn primary_slot_item(
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
-    progress: Option<Progress>,
-    inheritance: Inheritance,
+    standing: Standing,
 ) -> Derived {
+    let Standing {
+        progress,
+        inheritance,
+        maximum,
+    } = standing;
     let pattern = programme.primary();
     let slot = pattern.slot();
     let exercise = programme.fills().primary(pattern, role);
@@ -765,7 +884,9 @@ fn primary_slot_item(
         Programme::Periodisation(Periodisation::Block(block)) => {
             block_load(block, role, week, steps)
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => sbs_load(sbs, role, week, steps),
+        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+            sbs_load(sbs, role, week, steps, maximum)
+        }
         Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {
@@ -853,6 +974,7 @@ fn sbs_load(
     role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
+    maximum: Option<Kg>,
 ) -> Result<PrimaryLoad, UnderivableReason> {
     let WeekKind::Climbing(index) = week else {
         return Err(UnderivableReason::NoLadder);
@@ -865,7 +987,10 @@ fn sbs_load(
         return Err(UnderivableReason::NoLadder);
     };
 
-    let maximum = sbs.entry().anchor().load();
+    // **What the record says the cycle is at**, falling back to the opening
+    // anchor only when nothing has been read — which is week one, and a cycle
+    // whose primary has no load scale.
+    let maximum = maximum.unwrap_or_else(|| sbs.entry().anchor().load());
     let increment = steps.step_at(maximum);
 
     match day {

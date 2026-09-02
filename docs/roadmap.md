@@ -74,11 +74,10 @@ read the rest to know what to pick up.
   the top set as an attempt and the back-offs as repetition ranges with nothing
   in the load column.
 
-  **A limitation that is deliberate and visible**: loads after week 1 derive
-  from the *opening* maximum rather than from what was lifted. The store cannot
-  yet answer "what did the last rep-max day produce", and inventing a
-  progression the chart does not state would be worse than saying so —
-  `fitness programme show` prints the caveat.
+  **And the maximum moves off the record**, which is the mechanism rather than
+  a refinement: each performed rep-max day is read, run through SBS's table, and
+  applied in order, so week 3 is a share of what week 2 produced. A week nobody
+  trained leaves it where it was, and a failed attempt advances nothing.
 
 - **Parked**: `feat/block-derives-from-prilepin` (decision 0023). Finished,
   green, never raised as a PR, and it stays unraised. It was prescribing `8 × 2`

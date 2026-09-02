@@ -235,3 +235,38 @@ pub fn working_load(maximum: Kg, share: Percentage, increment: Kg) -> Option<Kg>
     let floored = raw - raw.rem_euclid(step);
     u64::try_from(floored).ok().map(Kg::from_grams)
 }
+
+/// The maximum a cycle is programming from, after the repetition-maximum days it
+/// has already run.
+///
+/// **Where the chart's mechanism actually lives.** Each entry is a week and what
+/// was lifted on that week's second session; the chart says what repetition
+/// count that session was taken at, and [`training_max_share`] turns the result
+/// into what the next week programmes from. Applying them in order is the whole
+/// of the progression.
+///
+/// Entries are applied in the order given, because each advance is a share of
+/// the one before it. A week the chart does not name, or one whose session sets
+/// no maximum, is skipped — a week nobody trained leaves the maximum where it
+/// was, which is right rather than merely convenient.
+///
+/// **This is the reason SBS reads the record at all**, and it is the ordinary
+/// case rather than a special one: a linear ladder reads it too. What differs is
+/// what each asks. A ladder asks whether the top set was completed; this asks
+/// what it weighed.
+#[must_use]
+pub fn maximum_after(opening: Kg, performed: &[(u32, Kg)], increment: Kg) -> Kg {
+    let mut maximum = opening;
+    for (week, achieved) in performed {
+        let Ok(day) = day(*week, SbsSession::Second) else {
+            continue;
+        };
+        let Some(reps) = day.sets_the_maximum() else {
+            continue;
+        };
+        if let Some(next) = advance(*achieved, reps, increment) {
+            maximum = next;
+        }
+    }
+    maximum
+}

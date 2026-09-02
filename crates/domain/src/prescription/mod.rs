@@ -63,7 +63,8 @@ pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, 
 pub use repmax::rep_max;
 pub use rest::{BlockRest, RestScheme, rested};
 pub use sbs::{
-    InvalidSbs, Sbs, SbsDay, SbsSession, advance, day, training_max_share, working_load,
+    InvalidSbs, Sbs, SbsDay, SbsSession, advance, day, maximum_after, training_max_share,
+    working_load,
 };
 pub use schedule::{
     Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
