@@ -44,7 +44,10 @@ Both sit at the end of their programme and both measure the number every other
 prescription in that programme is a share of. **Neither was designed for the
 other**; the gym variant was written a week earlier for unrelated reasons.
 
-**4. Cadence is not modelled.** Settled by the operator. The only cadence in the
+**4. Cadence is not modelled. Proposed by an agent, agreed on 2026-09-01** —
+*"fine, cadence stays out"*. The word *fine* is doing work here: this was the
+agent's recommendation and the operator accepted it, which is weaker than his
+deciding it. The only cadence in the
 programme is the warm-up spin-ups — *"2-3 x spin up 20-40 seconds @ 120RPM"* — and
 no working interval anywhere prescribes an RPM. A cadence axis serving one
 section the model does not otherwise carry would be a type built for a single
@@ -144,8 +147,9 @@ average watts. I don't think they expose it in the app."*
 **The published convention is 95% of the twenty-minute average**, which gives
 **172 W**. That matches "slightly lower" and is the standard derivation.
 
-**Confirmed by the operator on 2026-09-01** — *"yes, I think 172 is right"* —
-against the zone table below. Its provenance is `Estimated` rather than `Tested`:
+**The operator's words on 2026-09-01, in full** — *"yes, I think 172 is right"*.
+He hedged and an earlier revision of this record wrote *confirmed*, which is
+stronger than what he said. Its provenance is `Estimated` rather than `Tested`:
 it is arithmetic over a test, not a number the test reported, and § 13 wants that
 difference kept because it is not recoverable from the value.
 

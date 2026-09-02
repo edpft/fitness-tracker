@@ -76,7 +76,8 @@ each rep-max day, the weight achieved is counted as a share of the maximum the
 | 5RM | 85% | 90% |
 | 3RM | 90% | 95% |
 
-**These stay separate, settled by the operator on 2026-09-01.** They answer
+**These stay separate. Asserted by the operator, unprompted, on 2026-09-01** —
+*"yes, keep the SBS rep max separate"*. They answer
 different questions. `repmax.rs` estimates a one-rep maximum from what was
 lifted; SBS's table decides what to programme from next week, and its generosity
 is the mechanism — it is how the bar goes up weekly without a test. SBS's three
@@ -104,9 +105,15 @@ week 4 standalone   Programme::Test — 3×3 @ 75%, then a 1RM
 ```
 
 **5. A percentage inside the cycle is a share of the maximum current at that
-week**, not of the maximum the cycle opened on. So week 4 day 1's 75% is a share
-of the maximum week 3's triple just set. It is a taper in percentage terms and
-may not be one in kilograms, and that is intended.
+week** — **an agent's call, never reviewed.** So week 4 day 1's 75% is a share of
+the maximum week 3's triple just set, which makes it a taper in percentage terms
+and possibly not one in kilograms.
+
+It was put to the operator as *"one assumption I'm stating rather than asking …
+say if you meant otherwise"*, and he did not answer it. **Silence is not
+agreement**, and this was numbered alongside things he actually said, which is
+how an agent's assumption acquires his authority. It is the reading the workbook
+supports, and it binds nothing.
 
 **6. Kilograms, floored to 2.5.** The workbook's own rounding, and `FLOOR` is
 its own function — a load is rounded down to the increment, never up.
