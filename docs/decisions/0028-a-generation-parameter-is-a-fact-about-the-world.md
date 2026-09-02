@@ -61,8 +61,9 @@ has since #27.
 
 - **`GenerationParameters` splits.** `Scales` — load steps per implement — is
   the parameter and stays. `WarmupStep`, `BackOff`, `TopSetReps`,
-  `ResetProtocol` and `AccessoryScheme` move into the context of the programme
-  that prescribes them.
+  `ResetProtocol` and `AccessoryScheme` stop being parameters. Where the
+  published programme states them they become the programme's; where it is
+  silent they become fixed, which is the next section.
 - **`fitness parameters show` narrows to what remains**, or goes. It reports
   *"every parameter in force"* and most of what it currently reports will not be
   a parameter.
@@ -74,11 +75,34 @@ has since #27.
   effect-dated. It belongs with the record. Where it is entered is still open;
   that it is not a generation parameter is now settled.
 
-## Open
+## The original sin was flexibility, not location
 
-**Whether a published programme states all of these, in practice.** The test
-says a warm-up ramp belongs to the programme, and SBS's published notes do not
-give one — the handover of 2026-09-02 records that the ramp toward a rep max is
-an agent's derivation nobody has reviewed. So the rule relocates the value
-correctly and does not conjure a source for it. What a programme does when its
-publisher is silent is not settled here.
+A first draft of this decision said these values "move into the context of the
+programme that prescribes them", and treated it as open what happens when the
+publisher is silent — SBS's notes give no warm-up ramp, and the handover of
+2026-09-02 records that the ramp toward a rep max is an agent's derivation
+nobody reviewed. The operator closed it and rejected the framing with it,
+2026-09-02:
+
+> "a warm up ramp isn't technically part of a programme, if that programme
+> doesn't define one, but, what I mean is, it's something you expect to be
+> determined by programming (more broadly defined). the original sin here was
+> trying to make the programming element flexible when it doesn't need to be. I
+> have a set workout shape, we're not building an arbitrary workout building,
+> similarly, I have a set warm up ramp."
+
+**So the question was never where to keep the knob. It was that there is no
+knob.** He has one warm-up ramp and one workout shape. A value with a single
+value is a constant, and moving it from a settings table into a per-programme
+field would have preserved the mistake while appearing to fix it — the same
+error the aborted block made, inventing flexibility the material did not have.
+
+This is the wider form of 0026. There, structure was imported from a foreign
+context; here, structure was invented from nothing. Both produce a model with
+more degrees of freedom than the thing it describes.
+
+**Still to settle, and he named it**: *"there is some need to iron out exactly
+what that should look like for non 1RM tests, but once we've done that it's
+set."* The ramp toward an 8RM, a 5RM and a 3RM is undecided — see the rep-max
+work-up question raised on 2026-09-02, which research found has no published
+protocol to adopt. It is one decision, taken once, and then a constant.

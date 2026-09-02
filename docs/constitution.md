@@ -1,13 +1,15 @@
 <!--
 Sync Impact Report
-- Version: 2.0.0, amended 2026-09-02. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 1.0.1, amended 2026-09-02. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
-- 2.0.0 — § 14 narrowed and § 14.1 added. A generation parameter is a fact about the world
+- 2026-09-02, unversioned — § 14 narrowed and § 14.1 added. A generation parameter is a fact about the world
   the program is run in, never a fact about how it prescribes; warm-up percentages, back-off
   schemes, top-set repetitions and reset protocols belong to the program that states them.
-  MAJOR rather than PATCH: § 14 named "warmup set percentages" as its first example, so a
-  value that conformed to the rule no longer does, and that is a redefinition rather than a
-  clarification of the same rule's spirit. The operator, 2026-09-02: "available plates
+  No version bump. The operator, 2026-09-02: "we cannot be at or above 1.0.0 because we have
+  no working MVP [...] breaking changes are not breaking changes, in the same way, when
+  you're still in pre release development". This supersedes the Governance bullet requiring
+  a bump per change; that bullet needs revising or the rule dropping, and neither is done
+  here. On the substance, the operator, 2026-09-02: "available plates
   increments stays because it's a fact about the world that we have to programme to, like my
   training availability, the other 'variables' are part of their programmes." Follows from
   docs/decisions/0026-do-not-mix-bounded-contexts.md, which forbids a shared training model
@@ -151,7 +153,7 @@ The state is **derived from the relations and never stored**: a status column wo
 
 **14.** **Generation parameters.** Values consulted when authoring a program, and only those that are facts about the world the program is run in rather than facts about how it prescribes: available plate increments, training availability, scheduling constraints, the family calendar. Only the current value is required. What was generated is recorded concretely in the authored record (§ 12), so the parameter that produced it needs no history and a superseded value answers no question. Where such a value is received from an external system it arrives through an adapter behind a port (§ 16), and need not be persisted at all.
 
-**14.1.** **How a program prescribes belongs to that program.** Warm-up set percentages, back-off schemes, top-set repetitions and reset protocols are not generation parameters, whatever they have in common with one. Each is stated by the published program that prescribes it, and one set of them held in common would be a shared model of training across programs that do not share one. The test is whether the value would still be true if no program were being authored: an available plate increment and an unavailable Monday would; a back-off percentage would not.
+**14.1.** **How a program prescribes is not a parameter.** Warm-up set percentages, back-off schemes, top-set repetitions and reset protocols are not generation parameters, whatever they have in common with one. Where the published program states them they are the program's, and one set held in common would be a shared model of training across programs that do not share one. Where the published program is silent they are one fixed decision, not a knob: this system programs a set workout shape and a set warm-up ramp, and is not a builder of arbitrary workouts. Making them configurable is the error, independently of where the configuration is kept. The test is whether the value would still be true if no program were being authored: an available plate increment and an unavailable Monday would; a back-off percentage would not.
 
 ## IV. Architecture
 
@@ -237,4 +239,4 @@ Dependency updates are not authored changes. A bump whose checks pass may merge 
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-02
+**Version**: 1.0.1 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-02
