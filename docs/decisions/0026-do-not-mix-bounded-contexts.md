@@ -2,6 +2,12 @@
 
 **Date**: 2026-09-02
 
+**Amended**: 2026-09-03. Decision 5 narrowed to the special case it is, the
+rejected alternative reinstated, and decision 4 generalised from sessions to
+microcycles. The assumption decision 5 rested on met its counterexample the
+following day. See *Amendment, 2026-09-03* at the end; the amendment governs
+where it and the original disagree.
+
 **Explains**: why `0023-a-block-derives-its-loading-and-discovers-its-result.md`
 failed, and why `0024-a-published-programme-is-transcribed-not-derived.md`
 worked. Neither is amended; this names the cause they share.
@@ -143,6 +149,9 @@ silently: the arrangement would look aligned and would not be.
 load management explicit and does not depend on where a mesocycle ends. It was
 rejected for cost, not for correctness.
 
+**It broke on 2026-09-03.** Peloton's *Build Your Power Zones* is five
+microcycles. See the amendment.
+
 ### The evidence for PYPZ being 2 × 4
 
 The programme states eight weeks and no internal division. The division is
@@ -181,6 +190,8 @@ This is therefore a live alternative rather than a closed one. It is what
 decision 5 falls back to if a programme turns up that does not build to its
 unloading, and nothing here should be read as an argument that a shared
 load vocabulary would be wrong in principle.
+
+**Reinstated 2026-09-03.** That programme turned up the next day.
 
 ## Consequences
 
@@ -239,3 +250,113 @@ than subtracting a feature from one that does not fit.
 consequence above. This decision rules out Friel's abilities and rules out
 naming archetypes from the transcribed sample; it does not say what replaces
 them.
+
+---
+
+## Amendment, 2026-09-03
+
+### What happened
+
+Decision 5 said two programmes are compatible when they agree on microcycles
+per mesocycle, and recorded that this assumes a mesocycle builds to a test or
+some other unloading. The operator flagged it as an assumption when he proposed
+it: *"what you were suggesting was probably more likely to be correct because it
+made the load management explicit however it was much more complicated."*
+
+It held for a day. Peloton publishes four power-zone programmes, and reading all
+four found no four-week one at all:
+
+| programme | microcycles | sessions/microcycle | shape | FTP test |
+|---|---|---|---|---|
+| Discover Your Power Zones | 5 | 4–6 | onboarding | weeks 1 **and** 5 |
+| Boost Your Base | 8 | 3 | unloads at 4 and 8, all Z2–Z3 | **none** |
+| Build Your Power Zones | 5 | 3 | 4 loading, then recovery | week 5 |
+| Peak Your Power Zones | 8 | 3 | deload at 4, taper at 8 | week 8 |
+
+**Build is five microcycles**, four loading and a recovery week. Run beside
+three SBS cycles across a fourteen-microcycle span, two unloading weeks
+coincide and the third does not: the term's heaviest single lands in the same
+week as Build's hardest ride, and the following week the bike tests while the
+gym has nothing. Counting cannot see that, because four and five do not divide.
+
+The operator, on being shown it:
+
+> "congratulations, you've rediscovered one of the main reasons for this tool to
+> exist! If every published training programme was a 4 week cycle ending in a
+> deload or a test, I wouldn't need this!"
+
+**That is the correction.** Decision 5 solved the case where the problem does
+not arise and called it settled. Misalignment between published programmes is
+not an edge case the planner tolerates; it is the thing the planner is for.
+
+### What the objective actually is
+
+Not "test weeks land on deloads", and not "mesocycle lengths agree". Those are
+proxies that happened to hold for two programmes that were both fours. The
+operator named the real one, 2026-09-03:
+
+> "we want to be trying to ensure that the fatigue profiles coincide"
+
+Fatigue is what two programmes genuinely share, being imposed on one body. That
+was the argument for the rejected alternative and it was right; what was wrong
+was accepting a cheaper proxy for it.
+
+### Decision 4 generalises from sessions to microcycles
+
+The operator, 2026-09-03:
+
+> "what we could do is take the approach we took with taking 2 sessions a
+> mesocycle from PYPZs programmed 3 sessions a mesocycle and ask, say, build to
+> provide a 4 microcycle mesocycle that confirms as closely as possible to the
+> written programme."
+
+So a programme is asked for a **shape** — so many sessions per microcycle, so
+many microcycles — and answers in its own terms. Which of PYPZ's three sessions
+to take, and what Build drops to fit four, are both knowledge inside those
+programmes' contexts. The planner never learns what a power zone is.
+
+### And the load declaration sits underneath it, not against it
+
+**"Give me four microcycles" has more than one honest answer**, and they are not
+equivalent for fatigue:
+
+- Build 1–4 conforms most closely to what is written and ends on *Peak
+  Intensity* — a mesocycle finishing at its hardest, the opposite of SBS's
+  week 4.
+- Build 1, 2, 3, 5 conforms less closely and ends on recovery, so the profile
+  matches.
+
+Build can offer either, honestly, in its own terms. What it cannot do is know
+which is wanted, because that depends on what the gym is doing that week and it
+is not allowed to know. So something outside has to compare them, and comparing
+fatigue profiles means each microcycle saying how heavy it is relative to its
+own programme's range, and whether it measures.
+
+**The two mechanisms compose**: the programme offers the shapes it can honestly
+take, and the planner picks the one whose fatigue profile coincides. Neither
+replaces the other, which is why rejecting the declaration in favour of counting
+was a false economy rather than a simplification.
+
+### Decision 5, as it now stands
+
+Agreeing on microcycles per mesocycle **aligns unloading weeks where it holds,
+and is worth checking first because it is free**. It is not the definition of
+compatibility and it is not sufficient. Compatibility is coincident fatigue
+profiles, established by comparison, and available whether or not the lengths
+divide.
+
+### Also found, and it confirms 0027
+
+**Boost Your Base contains no FTP test and says to test before starting.** A
+published programme stating an input it cannot itself produce is exactly the
+shape 0027 gives every programme, and the operator's rule that a test's position
+is derived rather than placed. It is corroboration from outside this project,
+which is the only kind this project's documents can get.
+
+## Open, after the amendment
+
+**Who decides what a programme drops when asked to conform.** Build answering
+"four microcycles" is a judgement made by whoever transcribes Build, reading
+Build. That is the right place for it under this decision, but it is a decision
+to record at transcription time rather than something to let fall out of an
+implementation. The judgement relocates; it does not disappear.
