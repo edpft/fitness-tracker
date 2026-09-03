@@ -91,6 +91,12 @@ vocabulary.** SBS has training maxima and rep-max days. *Peak Your Power Zones*
 has power zones, Peloton's own class naming, and an intent per session that is
 not reducible to either. Friel, if he is ever built, has abilities and periods.
 
+> **Amended 2026-09-03 by 0029: the context is the *provider*, not the
+> programme.** Peloton's four power-zone programmes share a vocabulary and an
+> ordering — Discover, Boost, Build, Peak — and an ordering across programmes is
+> a fact no programme-level context can hold. Everything else in this decision is
+> unaffected; the boundary moves out one level.
+
 **2. Nothing translates between them.** There is no shared training model in
 `domain` of which the three are special cases. That model is what 0023 tried to
 build, and building it is the failure this decision names.
@@ -250,6 +256,12 @@ than subtracting a feature from one that does not fit.
 consequence above. This decision rules out Friel's abilities and rules out
 naming archetypes from the transcribed sample; it does not say what replaces
 them.
+
+> **Closed 2026-09-03 by 0029**: Coggan's adaptation targets, the published
+> meaning of each power zone, which `domain::cycling::zone` already credits.
+> Peloton adopted Coggan rather than the reverse, so this is not a provider's
+> vocabulary. Whether it is fine-grained enough to separate week 3's
+> thirty-second bursts from week 5's sustained blocks is open in 0029.
 
 ---
 
