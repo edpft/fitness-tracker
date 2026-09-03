@@ -1,5 +1,18 @@
 # Roadmap
 
+> **STALE as of 2026-09-03. Do not plan from this file.**
+>
+> A design session on 2 and 3 September changed the model substantially:
+> decisions 0026 to 0029, plus an amendment to the constitution. A programme no
+> longer holds its own numbers or its own dates, a test is not a programme, the
+> bounded context is the provider rather than the published programme, and the
+> planner produces coherent hybrid programmes rather than one programme at a
+> time.
+>
+> **Read `docs/handover-2026-09-03.md` instead.** Everything below predates all
+> of it. Open question 6 in particular — *"what anchors a programme that follows
+> another?"* — is dissolved by 0027 rather than answered.
+
 **Goal**: author and prescribe a test week for the week commencing Monday 14
 September 2026, using `fitness` as an installed binary rather than
 `./target/debug/fitness` in this checkout.

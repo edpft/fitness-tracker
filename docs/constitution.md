@@ -1,7 +1,20 @@
 <!--
 Sync Impact Report
-- Version: 1.0.1, amended 2026-08-14. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 2.0.0, amended 2026-09-02. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 2.0.0 — § 14 narrowed and § 14.1 added. A generation parameter is a fact about the world
+  the program is run in, never a fact about how it prescribes; warm-up percentages, back-off
+  schemes, top-set repetitions and reset protocols belong to the program that states them.
+  MAJOR: § 14 named "warmup set percentages" as its first example, so a value that conformed
+  to the rule no longer does. This document's version is its own and says nothing about the
+  crates', which are at 0.2.0 and stay below 1.0.0 until there is a working MVP — a release
+  choice under SemVer items 4 and 5, never a consequence of a change being breaking. The
+  operator, 2026-09-02: "available plates increments stays because it's a fact about the
+  world that we have to programme to, like my training availability, the other 'variables'
+  are part of their programmes." Follows from
+  docs/decisions/0026-do-not-mix-bounded-contexts.md, which forbids a shared training model
+  across programs that do not share one. Recorded in
+  docs/decisions/0028-a-generation-parameter-is-a-fact-about-the-world.md.
 - 1.0.1 — retraction. § II.3 gains two paragraphs and § 10's first bullet a sentence, all
   saying that a source withdrawing a record it previously served leaves that record with no
   normalised entity. PATCH, not MAJOR: the per-record rule is about composition — one entity
@@ -138,7 +151,9 @@ The state is **derived from the relations and never stored**: a status column wo
 
 **13.** **Interpretive parameters.** Values consulted in order to interpret observations: heart-rate and power zones, FTP, the default timezone. Effect-dated and retained — the value in force at the time of the observation is the one that applies, and a superseded value is never overwritten or deleted. § 7 requires this: analytical results are re-derived on demand rather than stored (§ 5), so a lost past value makes past analysis unreproducible. Changing one does not rewrite an existing series; § 6 governs.
 
-**14.** **Generation parameters.** Values consulted when authoring a program: warmup set percentages, scheduling constraints, the family calendar. Only the current value is required. What was generated is recorded concretely in the authored record (§ 12), so the parameter that produced it needs no history and a superseded value answers no question. Where such a value is received from an external system it arrives through an adapter behind a port (§ 16), and need not be persisted at all.
+**14.** **Generation parameters.** Values consulted when authoring a program, and only those that are facts about the world the program is run in rather than facts about how it prescribes: available plate increments, training availability, scheduling constraints, the family calendar. Only the current value is required. What was generated is recorded concretely in the authored record (§ 12), so the parameter that produced it needs no history and a superseded value answers no question. Where such a value is received from an external system it arrives through an adapter behind a port (§ 16), and need not be persisted at all.
+
+**14.1.** **How a program prescribes is not a parameter.** Warm-up set percentages, back-off schemes, top-set repetitions and reset protocols are not generation parameters, whatever they have in common with one. Where the published program states them they are the program's, and one set held in common would be a shared model of training across programs that do not share one. Where the published program is silent they are one fixed decision, not a knob: this system programs a set workout shape and a set warm-up ramp, and is not a builder of arbitrary workouts. Making them configurable is the error, independently of where the configuration is kept. The test is whether the value would still be true if no program were being authored: an available plate increment and an unavailable Monday would; a back-off percentage would not.
 
 ## IV. Architecture
 
@@ -224,4 +239,4 @@ Dependency updates are not authored changes. A bump whose checks pass may merge 
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 1.0.1 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-08-14
+**Version**: 2.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-02
