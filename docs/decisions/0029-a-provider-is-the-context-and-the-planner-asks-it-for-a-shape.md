@@ -135,3 +135,115 @@ while trying to loose fat."* A deficit lowers recovery capacity and so bears on
 what fatigue profiles are tolerable. Nutrition is currently out of scope in
 `docs/roadmap.md`; this is the first time it has appeared as an input to
 programming rather than as a deferred layer. Named, not scoped.
+
+---
+
+## Amendment, 2026-09-03
+
+Written the same day, after the operator applied decision 3 to his own gym side
+and it did not fit.
+
+### Intention is for a provider with a catalogue, and nothing else
+
+> "I don't think intention works on the gym / strength side because the workout
+> template already has sections for power, strength, and hypertrophy."
+> — the operator, 2026-09-03
+
+**He is right and the reason generalises.** ACSM's goals are *structural* in his
+workout, not selectable at span level: every session fills a plyometric slot, a
+power slot, a primary lift and a run of accessories, so strength, hypertrophy
+and power are all trained every time. There is no choice for an intention to
+express.
+
+So decision 3's third input is **conditional**. An intention is what lets a
+provider choose *among its programmes*. Peloton has four and an ordering, so it
+must be told. Stronger By Science, as transcribed, has one — nothing to choose,
+nothing to ask.
+
+Decision 4 narrows with it: the literature supplies the **vocabulary** an
+intention is stated in. It does not supply the **choice**.
+
+### Two intentions, at two levels, from two places
+
+The word was at risk of the overload that happened to "template". It does not
+collide, because the levels are distinct:
+
+| level | what it selects | vocabulary | from |
+|---|---|---|---|
+| span | which of a provider's programmes | Base, Build, Peak | classical endurance periodisation |
+| session | what a ride trains | endurance, threshold, VO2max, anaerobic capacity | Coggan |
+
+### Friel's periods are common property; Friel's abilities are not
+
+The operator observed that Peloton's programme names are three of Friel's six
+periods and doubted the coincidence. **No evidence was found that Peloton took
+them from Friel.** What was found is Matt Wilpers describing the plan as
+*classical periodization, the same framework used in competitive endurance
+sport* — base phases to build the aerobic engine, peak phases to sharpen
+threshold — with the explicit note that the structure is not unique to Peloton
+and coaches have used it for decades.
+
+**That is stronger than borrowing.** Base, Build and Peak are the shared
+tradition both draw on, older than either, and so nobody's property. The same
+test 0029 applies to Coggan.
+
+**It licenses nothing else of Friel's.** His *abilities* — endurance, force,
+speed skill and their combinations — are his own contribution, and 0026's
+rejection of them stands unchanged. That half also did not fit the
+transcription, which is how the error was caught.
+
+### What the recomposition literature does and does not settle
+
+The operator's autumn goal is to balance strength and conditioning while losing
+fat, and he asked whether any kind of cardio is better for that, suspecting the
+conventional answer was under-evidenced.
+
+**He was right to suspect it.** The one robust finding is about *modality*: a
+concurrent-training meta-analysis found resistance training alongside **running**
+produced significant decrements in hypertrophy and strength, and alongside
+**cycling** it did not. The second is that interference scales with endurance
+**frequency and duration**, not intensity.
+
+The direct evidence is weak. A 2025 network meta-analysis of 62 RCTs and 4,429
+participants concludes that moderate- and low-intensity work best preserves lean
+mass under caloric restriction — but its lean-retention ranking is topped by the
+**no-exercise control**, which ranks last for fat loss. That is the signature of
+a ranking confounded by total weight lost. No GRADE ratings, and a population of
+"healthy individuals", which in this literature means untrained and overweight.
+
+**So: cycle rather than run, and keep the volume moderate.** Beyond that the
+literature informs and does not decide.
+
+### A provider offers several conforming shapes, not one
+
+0026's amendment left open who decides what a provider drops. This is the case
+that shows the answer must be plural.
+
+Peloton's catalogue, as the operator states it: **Discover** identifies a new
+rider's zones and is not worth including; **Base** increases aerobic endurance
+and runs eight microcycles; **Build** improves FTP over five; **Peak** also
+improves FTP, presented as more advanced, over eight.
+
+Across a fourteen-microcycle span with the entry test taking the first, thirteen
+remain, and Base + Build and Build + Peak are both thirteen exactly. Against
+three SBS cycles running microcycles 2–13, both align two of three and collide
+at 13, where Build's *Peak Intensity* week meets an SBS test.
+
+**Asking Build for four microcycles fixes both**, and how it answers decides
+whether it does:
+
+| Build asked for four | ends on | aligns |
+|---|---|---|
+| weeks 1–4 | Peak Intensity | **no** |
+| weeks 1, 2, 3, 5 | recovery and test | yes |
+| weeks 2, 3, 4, 5 | recovery and test | yes |
+
+All three are honest answers in Build's own terms. Build cannot know which is
+wanted, because that depends on what the gym is doing that week and it is not
+allowed to know. **So a provider returns a set of conforming shapes and the
+planner chooses among them by fatigue** — the composition argued for in 0026's
+amendment, here as a real case rather than a hypothetical.
+
+With Build at four, both pairings reach three of three, and the fatigue
+constraint stops discriminating. **That is the constraint working as intended**:
+it rules out arrangements that would hurt, and never chooses the training.
