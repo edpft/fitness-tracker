@@ -10,7 +10,7 @@
 //! asking the programme which slot is primary rather than by anything about the
 //! exercise filling it.
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use domain::{
     gym::{
@@ -29,6 +29,7 @@ use domain::{
         sbs::chart::{
             day as sbs_day, maximum_after as sbs_maximum_after, training_max_share, working_load,
         },
+        warmup_ramp,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -1557,7 +1558,19 @@ fn primary_sets(
         PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
         PrimaryLoad::Attempt { toward, .. } | PrimaryLoad::RepMax { toward, .. } => toward,
     };
-    for step in parameters.warmup.iter() {
+    // **The ramp's repetition counts follow the top set's** (decision 0030), but
+    // only where the top set is maximal: a percentage day states a submaximal
+    // load, so its ramp has nothing to rehearse. The stored ramp is the floor in
+    // both cases, so a low count leaves it exactly as authored.
+    let ramp = match plan {
+        PrimaryLoad::RepMax { reps, .. } | PrimaryLoad::Attempt { reps, .. } => {
+            Cow::Owned(warmup_ramp(&parameters.warmup, reps))
+        }
+        PrimaryLoad::TopSet { .. } | PrimaryLoad::Across { .. } => {
+            Cow::Borrowed(&parameters.warmup)
+        }
+    };
+    for step in ramp.iter() {
         sets.push(PrescribedSet::warmup(
             Load::Absolute(steps.quantise_loaded(step.of_top_set.of(toward))),
             Target::Exactly(step.reps),
@@ -1625,4 +1638,72 @@ fn primary_sets(
         }
     }
     sets
+}
+
+#[cfg(test)]
+mod ramp_tests {
+    //! The ramp before a maximal top set follows its repetition count
+    //! (decision 0030), and the ramp before a submaximal one does not.
+    //!
+    //! Here rather than in `infrastructure/tests` because [`primary_sets`] is
+    //! private and needs no port: it turns a [`PrimaryLoad`] into sets and
+    //! nothing else. What an SBS *cycle* prescribes end to end cannot be tested
+    //! at all yet — the store's `template` CHECK does not admit `sbs`.
+
+    use super::{PrimaryLoad, primary_sets};
+    use domain::{
+        gym::{Kg, RepCount},
+        prescription::{LoadSteps, SessionRole, seed::seed},
+    };
+
+    fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+        let parameters = seed()?;
+        let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
+        let sets = primary_sets(plan, &parameters, SessionRole::Heavy, &steps);
+        Ok(sets
+            .iter()
+            .filter(|set| set.warmup)
+            .filter_map(|set| match set.prescription {
+                domain::prescription::Prescribed::Fixed { measure, .. } => {
+                    Some(measure.minimum().as_u32())
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
+    #[test]
+    fn the_eight_rep_maximum_ramps_eight_eight_six_five() {
+        let plan = PrimaryLoad::RepMax {
+            toward: Kg::from_grams(75_000),
+            reps: RepCount::new(8).expect("eight is a repetition count"),
+            back_off_sets: RepCount::new(3).expect("three is a set count"),
+            back_off_reps: domain::prescription::Target::between(
+                RepCount::new(5).expect("five is a repetition count"),
+                RepCount::new(6).expect("six is a repetition count"),
+            )
+            .expect("five to six is a range"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![8, 8, 6, 5]);
+    }
+
+    #[test]
+    fn the_one_rep_test_keeps_the_stored_ramp() {
+        let plan = PrimaryLoad::Attempt {
+            toward: Kg::from_grams(92_500),
+            reps: RepCount::new(1).expect("one is a repetition count"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_percentage_day_keeps_the_stored_ramp_however_many_reps_it_runs() {
+        // 5 × 5 @ 80% is not a maximum, so its ramp has nothing to rehearse.
+        let plan = PrimaryLoad::Across {
+            load: Kg::from_grams(74_000),
+            sets: RepCount::new(5).expect("five is a set count"),
+            reps: RepCount::new(5).expect("five is a repetition count"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![4, 3, 2, 1]);
+    }
 }
