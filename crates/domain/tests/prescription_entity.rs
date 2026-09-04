@@ -71,13 +71,8 @@ fn prescription() -> impl Strategy<Value = Prescribed<RepCount>> {
                 predicted,
             }
         }),
-        (target(), effort(), proptest::option::of(load())).prop_map(|(measure, effort, toward)| {
-            Prescribed::Autoregulated {
-                measure,
-                effort,
-                toward,
-            }
-        }),
+        (target(), effort())
+            .prop_map(|(measure, effort)| Prescribed::Autoregulated { measure, effort }),
     ]
 }
 
@@ -135,15 +130,12 @@ proptest! {
                 prop_assert!(prescription.load().is_some());
                 prop_assert!(prescription.measure().is_none());
                 prop_assert!(prescription.effort().is_some());
-                prop_assert!(prescription.toward().is_none());
             }
-            // Load open. A target may be stated and is never a load: whatever
-            // the plan expects, nothing here pins what must be lifted.
-            Prescribed::Autoregulated { toward, .. } => {
+            // Load open.
+            Prescribed::Autoregulated { .. } => {
                 prop_assert!(prescription.load().is_none());
                 prop_assert!(prescription.measure().is_some());
                 prop_assert!(prescription.effort().is_some());
-                prop_assert_eq!(prescription.toward(), toward);
             }
         }
     }

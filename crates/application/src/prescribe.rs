@@ -1618,21 +1618,24 @@ fn primary_sets(
             back_off_sets,
             back_off_reps,
         } => {
-            // The top set finds the maximum, and **states what it is expected to
-            // be**. The chart derives that from the maximum current this week,
-            // so unlike a block's exit test it is a number the plan has and the
-            // ramp was built toward. Nothing caps it: going past is the outcome
-            // the day exists to produce.
+            // **A set, not a work-up.** The working up is done by the time the
+            // bar is loaded: decision 0030's ramp reaches `n − 3` repetitions at
+            // 90% of this load, so what remains is one set at a stated weight
+            // taken to nothing in reserve. Prescribing it as autoregulated —
+            // load open, work up to it — described a session that no longer
+            // happens, and hid the number the chart had already derived.
+            //
+            // Working up re-enters only if this set turns out *not* to be at
+            // zero in reserve, and that is a decision in the room. The record
+            // carries what was actually lifted and `maximum_after` reads it, so
+            // nothing is lost by the plan declining to predict it.
             sets.push(
-                PrescribedSet::autoregulated(Target::Exactly(reps), domain::gym::Rir::Zero)
-                    .toward(Load::Absolute(toward)),
+                PrescribedSet::fixed(Load::Absolute(toward), Target::Exactly(reps))
+                    .with_effort(domain::gym::Rir::Zero),
             );
-            // **The back-offs are sets at that load, not work-ups.** The chart
-            // says `3 × 5–6 @ 8RM` and the eight-rep maximum is what the set
-            // above found — which will usually be `toward` and is whatever it
-            // turned out to be. Prescribing them as autoregulated said they were
-            // taken to failure, which is not what the chart asks and not what
-            // the operator does.
+            // The chart's `3 × 5–6 @ 8RM`, at the same load. Autoregulating
+            // these said they were taken to failure, which the chart does not
+            // ask and the operator does not do.
             for _ in 0..back_off_sets.as_u32() {
                 sets.push(PrescribedSet::fixed(Load::Absolute(toward), back_off_reps));
             }

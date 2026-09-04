@@ -950,27 +950,33 @@ fn set_line<M: std::fmt::Display + domain::gym::Spans>(
         // relative-zero ("plain bodyweight" — a pull-up, where assistance and
         // added weight are both conventional), and only the second is worth a
         // word on the line.
-        Prescribed::Fixed { load, measure, .. } if unloaded(*load) => format!("{measure}"),
-        Prescribed::Fixed { load, measure, .. } => format!("{measure} @ {}", weight(*load)),
+        Prescribed::Fixed {
+            load,
+            measure,
+            effort,
+        } if unloaded(*load) => effort.as_ref().map_or_else(
+            || format!("{measure}"),
+            |effort| format!("{measure}, {effort} in reserve"),
+        ),
+        // **Effort is guidance on a fixed set, and it is printed.** Until SBS's
+        // repetition-maximum day nothing issued one, so the line dropped it
+        // silently; the day's whole instruction is "eight at this weight with
+        // nothing left", and half of that was going missing.
+        Prescribed::Fixed {
+            load,
+            measure,
+            effort,
+        } => effort.as_ref().map_or_else(
+            || format!("{measure} @ {}", weight(*load)),
+            |effort| format!("{measure} @ {}, {effort} in reserve", weight(*load)),
+        ),
         Prescribed::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }
-        // Working up. A block's exit test names no target — decision 0011 makes
-        // it move with the record — but an SBS repetition-maximum day derives
-        // one, and it is what the ramp was built toward.
-        Prescribed::Autoregulated {
-            measure,
-            effort,
-            toward,
-        } => toward.map_or_else(
-            || format!("{measure} — work up, {effort} in reserve"),
-            |target| {
-                format!(
-                    "{measure} — work up to {}, {effort} in reserve",
-                    weight(target)
-                )
-            },
-        ),
+        // A test: the load is what the day allows, so there is none to print.
+        Prescribed::Autoregulated { measure, effort } => {
+            format!("{measure} — work up, {effort} in reserve")
+        }
     };
     if set.warmup {
         line.push_str(" (warm-up)");
