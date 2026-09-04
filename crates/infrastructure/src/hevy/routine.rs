@@ -341,15 +341,33 @@ fn annotate<M: std::fmt::Display + Spans>(prescription: &Prescribed<M>) -> Optio
             || format!("as many as, {} in reserve", Rir::as_str(*effort)),
             |measure| format!("~{measure}, {} in reserve", Rir::as_str(*effort)),
         )),
-        Prescribed::Autoregulated { measure, effort } => Some(format!(
-            "work up to {measure}, {} in reserve — the load is the day's",
-            Rir::as_str(*effort)
-        )),
+        Prescribed::Autoregulated {
+            measure,
+            effort,
+            toward,
+        } => Some(if toward.is_some() {
+            format!(
+                "work up to {measure}, {} in reserve — the weight shown is what the plan expects",
+                Rir::as_str(*effort)
+            )
+        } else {
+            format!(
+                "work up to {measure}, {} in reserve — the load is the day's",
+                Rir::as_str(*effort)
+            )
+        }),
     }
 }
 
 fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> SetOutcome {
-    let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
+    // **A destination that insists on a number gets the expected one.** Hevy has
+    // no way to show "the load is the day's", so an autoregulated set with a
+    // derived target is written at that target and the note says so.
+    let planned = set
+        .prescription
+        .load()
+        .or_else(|| set.prescription.toward());
+    let (template_id, kg) = match resolve(exercise, planned) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
     };
@@ -382,7 +400,14 @@ fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> S
 }
 
 fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) -> SetOutcome {
-    let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
+    // **A destination that insists on a number gets the expected one.** Hevy has
+    // no way to show "the load is the day's", so an autoregulated set with a
+    // derived target is written at that target and the note says so.
+    let planned = set
+        .prescription
+        .load()
+        .or_else(|| set.prescription.toward());
+    let (template_id, kg) = match resolve(exercise, planned) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
     };
@@ -413,7 +438,14 @@ fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) 
 }
 
 fn distance_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Distance>) -> SetOutcome {
-    let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
+    // **A destination that insists on a number gets the expected one.** Hevy has
+    // no way to show "the load is the day's", so an autoregulated set with a
+    // derived target is written at that target and the note says so.
+    let planned = set
+        .prescription
+        .load()
+        .or_else(|| set.prescription.toward());
+    let (template_id, kg) = match resolve(exercise, planned) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
     };

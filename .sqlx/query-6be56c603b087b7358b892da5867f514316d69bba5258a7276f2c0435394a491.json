@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT variant AS \"variant!: String\", load_kind AS \"load_kind: String\",\n                   load_grams AS \"load_grams: i64\", target_low AS \"target_low: i64\",\n                   target_high AS \"target_high: i64\", effort AS \"effort: String\",\n                   rest_low_seconds AS \"rest_low_seconds: i64\",\n                   rest_high_seconds AS \"rest_high_seconds: i64\",\n                   warmup AS \"warmup!: i64\"\n            FROM prescribed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position ASC\n            ",
+  "query": "\n            SELECT variant AS \"variant!: String\", load_kind AS \"load_kind: String\",\n                   load_grams AS \"load_grams: i64\",\n                   toward_kind AS \"toward_kind: String\",\n                   toward_grams AS \"toward_grams: i64\",\n                   target_low AS \"target_low: i64\",\n                   target_high AS \"target_high: i64\", effort AS \"effort: String\",\n                   rest_low_seconds AS \"rest_low_seconds: i64\",\n                   rest_high_seconds AS \"rest_high_seconds: i64\",\n                   warmup AS \"warmup!: i64\"\n            FROM prescribed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,30 @@
         }
       },
       {
-        "name": "target_low: i64",
+        "name": "toward_kind: String",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_set",
+            "name": "toward_kind"
+          }
+        }
+      },
+      {
+        "name": "toward_grams: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_set",
+            "name": "toward_grams"
+          }
+        }
+      },
+      {
+        "name": "target_low: i64",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +71,7 @@
       },
       {
         "name": "target_high: i64",
-        "ordinal": 4,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +82,7 @@
       },
       {
         "name": "effort: String",
-        "ordinal": 5,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +93,7 @@
       },
       {
         "name": "rest_low_seconds: i64",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "rest_high_seconds: i64",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +115,7 @@
       },
       {
         "name": "warmup!: i64",
-        "ordinal": 8,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -115,8 +137,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "0e49d3824b6adbe168fbefd88c3589112a5de2a7dfdde5503a905c868c02d123"
+  "hash": "6be56c603b087b7358b892da5867f514316d69bba5258a7276f2c0435394a491"
 }

@@ -1613,27 +1613,28 @@ fn primary_sets(
             ));
         }
         PrimaryLoad::RepMax {
+            toward,
             reps,
             back_off_sets,
             back_off_reps,
-            ..
         } => {
-            // The top set finds the maximum: an attempt, open at the top, like
-            // any other.
-            sets.push(PrescribedSet::autoregulated(
-                Target::Exactly(reps),
-                domain::gym::Rir::Zero,
-            ));
-            // **And the back-offs carry no load either**, because the load is
-            // the set above's result. They are not autoregulated in the sense
-            // the top set is — nothing about them is taken to failure — but the
-            // prescription genuinely cannot name a number, and a range of
-            // repetitions at an unstated load is exactly what the chart says.
+            // The top set finds the maximum, and **states what it is expected to
+            // be**. The chart derives that from the maximum current this week,
+            // so unlike a block's exit test it is a number the plan has and the
+            // ramp was built toward. Nothing caps it: going past is the outcome
+            // the day exists to produce.
+            sets.push(
+                PrescribedSet::autoregulated(Target::Exactly(reps), domain::gym::Rir::Zero)
+                    .toward(Load::Absolute(toward)),
+            );
+            // **The back-offs are sets at that load, not work-ups.** The chart
+            // says `3 × 5–6 @ 8RM` and the eight-rep maximum is what the set
+            // above found — which will usually be `toward` and is whatever it
+            // turned out to be. Prescribing them as autoregulated said they were
+            // taken to failure, which is not what the chart asks and not what
+            // the operator does.
             for _ in 0..back_off_sets.as_u32() {
-                sets.push(PrescribedSet::autoregulated(
-                    back_off_reps,
-                    domain::gym::Rir::Zero,
-                ));
+                sets.push(PrescribedSet::fixed(Load::Absolute(toward), back_off_reps));
             }
         }
     }

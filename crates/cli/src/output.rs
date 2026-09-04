@@ -955,10 +955,22 @@ fn set_line<M: std::fmt::Display + domain::gym::Spans>(
         Prescribed::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }
-        // A test: the load is what the day allows, so there is none to print.
-        Prescribed::Autoregulated { measure, effort } => {
-            format!("{measure} — work up, {effort} in reserve")
-        }
+        // Working up. A block's exit test names no target — decision 0011 makes
+        // it move with the record — but an SBS repetition-maximum day derives
+        // one, and it is what the ramp was built toward.
+        Prescribed::Autoregulated {
+            measure,
+            effort,
+            toward,
+        } => toward.map_or_else(
+            || format!("{measure} — work up, {effort} in reserve"),
+            |target| {
+                format!(
+                    "{measure} — work up to {}, {effort} in reserve",
+                    weight(target)
+                )
+            },
+        ),
     };
     if set.warmup {
         line.push_str(" (warm-up)");

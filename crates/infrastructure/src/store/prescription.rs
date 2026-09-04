@@ -224,6 +224,9 @@ struct SetColumns {
     variant: &'static str,
     load_kind: Option<&'static str>,
     load_grams: Option<i64>,
+    /// What a work-up expects to reach. Only an autoregulated set has one.
+    toward_kind: Option<&'static str>,
+    toward_grams: Option<i64>,
     target: Option<TargetColumns>,
     effort: Option<String>,
     /// The rest instruction, as its two columns. `high` absent is an exact rest;
@@ -247,6 +250,13 @@ where
         }
         None => (None, None),
     };
+    let (toward_kind, toward_grams) = match set.prescription.toward() {
+        Some(load) => {
+            let (kind, grams) = load_for_storage(load)?;
+            (Some(kind), Some(grams))
+        }
+        None => (None, None),
+    };
     let target = match set.prescription.measure() {
         Some(measure) => Some(target_of(*measure)?),
         None => None,
@@ -260,6 +270,8 @@ where
         variant: set.prescription.as_str(),
         load_kind,
         load_grams,
+        toward_kind,
+        toward_grams,
         target,
         effort: set.prescription.effort().map(|rir| rir.as_str().to_owned()),
         rest,
@@ -302,11 +314,11 @@ async fn write_set(
         r"
         INSERT INTO prescribed_set (
             workout, item_position, exercise_position, position,
-            variant, load_kind, load_grams,
+            variant, load_kind, load_grams, toward_kind, toward_grams,
             target_kind, target_low, target_high,
             effort, rest_low_seconds, rest_high_seconds, warmup
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         workout,
         item,
@@ -315,6 +327,8 @@ async fn write_set(
         columns.variant,
         columns.load_kind,
         columns.load_grams,
+        columns.toward_kind,
+        columns.toward_grams,
         target_kind,
         target_low,
         target_high,
@@ -686,7 +700,10 @@ async fn read_exercises(
         let sets = sqlx::query!(
             r#"
             SELECT variant AS "variant!: String", load_kind AS "load_kind: String",
-                   load_grams AS "load_grams: i64", target_low AS "target_low: i64",
+                   load_grams AS "load_grams: i64",
+                   toward_kind AS "toward_kind: String",
+                   toward_grams AS "toward_grams: i64",
+                   target_low AS "target_low: i64",
                    target_high AS "target_high: i64", effort AS "effort: String",
                    rest_low_seconds AS "rest_low_seconds: i64",
                    rest_high_seconds AS "rest_high_seconds: i64",
@@ -709,6 +726,8 @@ async fn read_exercises(
                 variant: set.variant,
                 load_kind: set.load_kind,
                 load_grams: set.load_grams,
+                toward_kind: set.toward_kind,
+                toward_grams: set.toward_grams,
                 target_low: set.target_low,
                 target_high: set.target_high,
                 effort: set.effort,
@@ -861,7 +880,14 @@ fn rebuild<M: Spans>(
                     &"an autoregulated set with no measure or no effort",
                 ));
             };
-            Prescribed::Autoregulated { measure, effort }
+            Prescribed::Autoregulated {
+                measure,
+                effort,
+                toward: match (row.toward_kind.as_deref(), row.toward_grams) {
+                    (Some(kind), Some(grams)) => Some(load_from_storage(kind, grams)?),
+                    _ => None,
+                },
+            }
         }
         other => return Err(corrupt(&format!("{other:?} is not a prescription variant"))),
     };
@@ -900,6 +926,8 @@ struct SetRow {
     variant: String,
     load_kind: Option<String>,
     load_grams: Option<i64>,
+    toward_kind: Option<String>,
+    toward_grams: Option<i64>,
     target_low: Option<i64>,
     target_high: Option<i64>,
     effort: Option<String>,

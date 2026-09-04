@@ -139,7 +139,18 @@ pub enum Prescribed<M: Spans> {
     /// but unreached. It turned out to be exactly what a block's exit
     /// **test** is: one repetition, nothing in reserve, and the load is whatever
     /// the day allows. That is the only thing that issues one now.
-    Autoregulated { measure: Target<M>, effort: Rir },
+    /// **`toward` is what the plan expects, not a cap.** A block's exit test has
+    /// none: decision 0011 makes its target a function of where the progression
+    /// stands, so it moves as the record does and a stored number would be stale
+    /// the first time a session goes up. An SBS repetition-maximum day has one,
+    /// because the chart derives it from the maximum current that week and it is
+    /// fixed for the session — it is what the ramp was built toward, and going
+    /// past it is still the outcome the day exists to produce.
+    Autoregulated {
+        measure: Target<M>,
+        effort: Rir,
+        toward: Option<Load>,
+    },
 }
 
 impl<M: Spans> Prescribed<M> {
@@ -148,6 +159,16 @@ impl<M: Spans> Prescribed<M> {
         match self {
             Self::Fixed { load, .. } | Self::ToEffort { load, .. } => Some(*load),
             Self::Autoregulated { .. } => None,
+        }
+    }
+
+    /// What an autoregulated set is expected to reach. Not a load the plan pins
+    /// — [`load`](Self::load) stays `None` — but the number a destination that
+    /// insists on one should be given.
+    pub const fn toward(&self) -> Option<Load> {
+        match self {
+            Self::Autoregulated { toward, .. } => *toward,
+            Self::Fixed { .. } | Self::ToEffort { .. } => None,
         }
     }
 
@@ -224,10 +245,28 @@ impl<M: Spans> PrescribedSet<M> {
     /// and the load is whatever the day allows.
     pub const fn autoregulated(measure: Target<M>, effort: Rir) -> Self {
         Self {
-            prescription: Prescribed::Autoregulated { measure, effort },
+            prescription: Prescribed::Autoregulated {
+                measure,
+                effort,
+                toward: None,
+            },
             rest_after: None,
             warmup: false,
         }
+    }
+
+    /// What the plan expects an autoregulated set to reach. Nothing on any other
+    /// variant, which already pin a load.
+    #[must_use]
+    pub const fn toward(mut self, target: Load) -> Self {
+        if let Prescribed::Autoregulated {
+            toward: ref mut slot,
+            ..
+        } = self.prescription
+        {
+            *slot = Some(target);
+        }
+        self
     }
 
     #[must_use]
@@ -268,8 +307,16 @@ impl<M: Spans + fmt::Display> fmt::Display for PrescribedSet<M> {
                 }
                 write!(f, ", {effort} in reserve")?;
             }
-            Prescribed::Autoregulated { measure, effort } => {
-                write!(f, "{measure} at {effort} in reserve")?;
+            Prescribed::Autoregulated {
+                measure,
+                effort,
+                toward,
+            } => {
+                match toward {
+                    Some(load) => write!(f, "{measure} toward {load}")?,
+                    None => write!(f, "{measure}")?,
+                }
+                write!(f, " at {effort} in reserve")?;
             }
         }
         if self.warmup {
