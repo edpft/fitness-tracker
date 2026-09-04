@@ -1606,11 +1606,24 @@ fn primary_sets(
                 ));
             }
         }
-        PrimaryLoad::Attempt { reps, .. } => {
-            sets.push(PrescribedSet::autoregulated(
-                Target::Exactly(reps),
-                domain::gym::Rir::Zero,
-            ));
+        PrimaryLoad::Attempt { toward, reps } => {
+            // **The target is in the plan, so it is printed.** The ramp above is
+            // built as a share of exactly this number, so omitting it left the
+            // operator working up to something the session had already decided
+            // and would not say.
+            //
+            // Decision 0011 keeps the target out of `programme show`, and that
+            // still holds: there it is a *projection* for a week that has not
+            // happened, and every session between now and then can move it. A
+            // prescription is issued for one date against the record as it
+            // stands, which is the moment the number is knowable.
+            //
+            // Nothing caps it. Going past is the outcome the day exists to
+            // produce, and zero in reserve is what says so.
+            sets.push(
+                PrescribedSet::fixed(Load::Absolute(toward), Target::Exactly(reps))
+                    .with_effort(domain::gym::Rir::Zero),
+            );
         }
         PrimaryLoad::RepMax {
             toward,

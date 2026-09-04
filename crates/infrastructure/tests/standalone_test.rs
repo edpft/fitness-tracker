@@ -288,9 +288,18 @@ fn the_heavy_session_is_the_test() {
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
     assert_eq!(warmups, 4, "the authored ramp is four steps");
     assert_eq!(working.len(), 1, "one attempt, and nothing after it");
+    // **The attempt states the load it is an attempt at.** The ramp above is
+    // built as a share of exactly this number, so a prescription that withheld
+    // it was working the operator up to something it had already decided.
+    // Nothing caps it — zero in reserve is what says going past is the point.
     assert!(
-        working[0].prescription.load().is_none(),
-        "the attempt is autoregulated: its load is what the day allows"
+        working[0].prescription.load().is_some(),
+        "the attempt names the load the ramp was built toward"
+    );
+    assert_eq!(
+        working[0].prescription.effort(),
+        Some(domain::gym::Rir::Zero),
+        "nothing left in reserve is what makes it a test"
     );
 }
 
@@ -461,8 +470,13 @@ fn a_blocks_entry_test_ramps_toward_what_it_expects() {
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
     assert_eq!(working.len(), 1, "one attempt, and nothing after it");
     assert!(
-        working[0].prescription.load().is_none(),
-        "the attempt is autoregulated"
+        working[0].prescription.load().is_some(),
+        "the attempt names the load the ramp was built toward"
+    );
+    assert_eq!(
+        working[0].prescription.effort(),
+        Some(domain::gym::Rir::Zero),
+        "nothing left in reserve is what makes it a test"
     );
 }
 
