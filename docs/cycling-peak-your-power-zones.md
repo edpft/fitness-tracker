@@ -1,5 +1,25 @@
 # Peak Your Power Zones — transcribed
 
+> **Superseded as a source of zone data, 2026-09-05. Do not read the interval
+> tables below as current.**
+>
+> Every class here was later read from the Peloton API, and the two disagree by
+> about a minute in all twenty-three zoned sessions: the transcription opens each
+> ride at Z3 where the class opens at Z1. `domain::cycling::seed`, which was
+> built from these tables, is deleted, and `cycling next` now answers from the
+> authored programme in the store (issue #55).
+>
+> **What is still live is the class list**, not the intervals.
+> `infrastructure::peloton::mapping` carries Peak's class ids with the weekday
+> numbering used here, and `skeleton::peak_your_power_zones` derives Peak's
+> placements from it — so the ids, the titles and the one class marked
+> `Unavailable` are all still load-bearing.
+>
+> The rest of this file is kept for its method rather than its numbers: how the
+> warm-up was found to be a function of the ride, why a session is one or more
+> classes, and the two independent readings that caught a wrong `classId`. That
+> reasoning is what the API-derived reader was built against.
+
 **Source**: operator screenshots of the Peloton app, 2026-09-01, 17:56–18:04.
 This is **data**, transcribed from what the app displayed. Not analysis, not a
 specification.
