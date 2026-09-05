@@ -35,6 +35,10 @@ infrastructure = { path = "crates/infrastructure" }
 # requires.
 jiff = { version = "0.2.35", features = ["tzdb-bundle-always"] }
 sha2 = "0.11.0"
+# PKCE: a code verifier must be unguessable, and its challenge is the
+# base64url of its SHA-256. Neither is something to improvise.
+base64 = "0.22.1"
+rand = "0.9.2"
 thiserror = "2.0.20"
 
 # Adapters. Nothing below this line may appear in `domain` or `application`.
@@ -45,6 +49,14 @@ reqwest = { version = "0.13.4", default-features = false, features = [
   "rustls",
   # Query-string building is feature-gated in 0.13.
   "query",
+  # Peloton authenticates through Auth0, which carries the CSRF token for the
+  # login POST in a cookie set by the authorize redirect. Without a jar the
+  # flow cannot be completed at all.
+  "cookies",
+  "json",
+  # Both Auth0 token endpoints and its self-submitting login form are
+  # `application/x-www-form-urlencoded`.
+  "form",
 ] }
 serde = { version = "1.0.229", features = ["derive"] }
 # `raw_value` is load-bearing, not a convenience: RawValue borrows the exact

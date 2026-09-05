@@ -9,6 +9,7 @@
 //! that says which class realises which session, which is what a prescription
 //! needs in order to name where the ride is done.
 
+pub mod auth;
 pub mod mapping;
 
 pub use mapping::{MappedSession, PEAK_YOUR_POWER_ZONES, PelotonClass};
