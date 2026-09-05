@@ -34,9 +34,29 @@ sbs-2              sbs   2026-10-19  4 weeks  → 2026-11-15
 sbs-3              sbs   2026-11-16  4 weeks  → 2026-12-13
 ```
 
-**What is not built**: the cycling side of the autumn, the planner that makes the
-two coherent, and `fitness next` across both. The gym half works; the *hybrid*
-half — which is the point of the tool — does not exist.
+**Both disciplines prescribe a session today.** The gym runs the whole loop —
+authored programme in the store, prescription, delivery to Hevy. `cycling next`
+prints a full session from the transcribed Peloton programme: warm-up, the
+intervals in order, time in zone, cool-down and the class link.
+
+**What is missing is everything that joins them, and two gaps on the cycling
+side:**
+
+- **Cycling has no authored programme.** `cycling next --start 2026-09-14` takes
+  the start date as a flag every run. Nothing is stored — `cycling` appears in
+  the migrations only as a `discipline` value on training slots. The gym authors
+  and remembers; cycling recomputes from a flag.
+- **One of Peloton's four programmes is transcribed** — Peak Your Power Zones.
+  The autumn needs two of Build, Base and Peak, and step 5 is where they arrive.
+- **No planner.** Nothing takes a span, the providers, the primary lift and a
+  session count per discipline and returns the arrangements that cohere.
+- **No fatigue coherence exists in the code.** `fatigue` appears five times and
+  every one is about ordering exercises *within* a gym session by quality.
+  Nothing weighs a cycling week against a gym week.
+
+So: both disciplines can prescribe, neither can be planned, and nothing weighs
+one against the other. **The gym loop is the deepest thing built; the hybrid
+programming that the tool exists for is step 6.**
 
 **Waiting on the operator**: one thing, and it blocks nothing. Whether 0018's
 "spacing rule" is the same as *"a full rest day before the hardest gym session"*.
