@@ -209,6 +209,13 @@ empty file inside the sandbox while passing on your machine.
   invisible to them — a base URL that already ended in `/v1` produced
   `/v1/v1/workouts/events` and only a live run found it. Pin composed defaults
   in their own unit test.
-- **Regenerate `.sqlx` after changing a query**: `cargo sqlx prepare
-  --workspace`. Builds read it offline, so a stale directory is a compile
+- **Regenerate `.sqlx` after changing a query**: `cargo sqlx prepare --workspace
+  -- --all-targets`. Builds read it offline, so a stale directory is a compile
   error rather than a silent fallback.
+
+  **`--all-targets` is not optional**, and this line said `--workspace` alone
+  until 2026-09-05. Without it the tests' own queries are not seen, so `prepare`
+  *deletes* their cache entries and the next `cargo nextest run` fails on eleven
+  queries nobody touched. It also needs a `DATABASE_URL` pointing at a scratch
+  database with the migrations applied — `.env` has none, deliberately, since the
+  one in the repo would be the operator's own.

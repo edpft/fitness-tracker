@@ -227,13 +227,6 @@ fn cycling_command() -> ClapCommand {
         .subcommand(
             ClapCommand::new("next")
                 .about("The next cycling session at or after a date")
-                .arg(
-                    Arg::new("start")
-                        .long("start")
-                        .value_name("date")
-                        .required(true)
-                        .help("The date the programme's week 1 begins, as YYYY-MM-DD"),
-                )
                 .arg(Arg::new("date").long("date").value_name("date").help(
                     "Which session to show, as YYYY-MM-DD. \
                      Defaults to the next riding day at or after today",
@@ -722,8 +715,8 @@ async fn authored_command(
             };
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
-        "cycling" => Some(cycling_command_run(sub)),
-        "plan" => Some(plan_command_run(sub).await),
+        "cycling" => Some(cycling_command_run(sub, database).await),
+        "plan" => Some(plan_command_run(sub, database).await),
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
@@ -822,7 +815,7 @@ async fn discipline_command_run(
 }
 
 /// `plan`, once its arguments are in hand.
-async fn plan_command_run(sub: &ArgMatches) -> Result<(), Failure> {
+async fn plan_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
     let count = |name: &str| -> Result<usize, Failure> {
         sub.get_one::<String>(name)
             .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))?
@@ -841,11 +834,11 @@ async fn plan_command_run(sub: &ArgMatches) -> Result<(), Failure> {
             exit::USAGE,
         ));
     }
-    plan::generate(count("microcycles")?, count("cycling-sessions")?).await
+    plan::generate(database, count("microcycles")?, count("cycling-sessions")?).await
 }
 
 /// `cycling next`, once its arguments are in hand.
-fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
+async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
     let Some(("next", next)) = sub.subcommand() else {
         return Err(Failure::message("no cycling command given", exit::USAGE));
     };
@@ -855,11 +848,6 @@ fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
             Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
         })
     };
-
-    let Some(start) = next.get_one::<String>("start") else {
-        return Err(Failure::message("no --start given", exit::USAGE));
-    };
-    let start = parse_date(start)?;
 
     let from = match next.get_one::<String>("date") {
         Some(value) => parse_date(value)?,
@@ -888,7 +876,7 @@ fn cycling_command_run(sub: &ArgMatches) -> Result<(), Failure> {
         None => None,
     };
 
-    cycling::next(from, start, ftp)
+    cycling::next(database, from, ftp).await
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.

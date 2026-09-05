@@ -43,18 +43,27 @@ gym       entry test    3 SBS cycles of 4
 cycling   FTP test      3 mesocycles of 4
 ```
 
-**Both disciplines prescribe a session today.** The gym runs the whole loop —
-authored programme in the store, prescription, delivery to Hevy. `cycling next`
-prints a full session from the transcribed Peloton programme: warm-up, the
-intervals in order, time in zone, cool-down and the class link.
+**Both disciplines prescribe a session today, and both from the store.** The gym
+runs the whole loop — authored programme in the store, prescription, delivery to
+Hevy. `cycling next` takes no arguments and reads no network: `fitness plan`
+authors the four cycling programmes and `next` prints warm-up, the intervals in
+order, time in zone, cool-down and the class link from the rows.
 
-**What is missing is everything that joins them, and two gaps on the cycling
+**What is missing is everything that joins them, and one gap on the cycling
 side:**
 
-- **Cycling has no authored programme.** `cycling next --start 2026-09-14` takes
-  the start date as a flag every run. Nothing is stored — `cycling` appears in
-  the migrations only as a `discipline` value on training slots. The gym authors
-  and remembers; cycling recomputes from a flag.
+- ~~Cycling has no authored programme~~ — **authored on 2026-09-05** (issue #55,
+  migration 0023). Four cycling programmes are written by `fitness plan`: the FTP
+  test week, then the three mesocycles, each with its rides, its zone plan
+  and the class ids they are ridden at. **The test week is a published programme
+  of its own** — *Power Zone test*, a copy of Build's fifth microcycle — for the
+  reason the gym's entry test is a `test` programme rather than "SBS µ4": the
+  operator, 2026-09-05, *"even though it's exactly the same classes, it's a
+  separate thing"*. Without it the autumn authored Build µ5 twice, five weeks
+  apart, with nothing to tell the two apart. Its own tables rather than a fifth
+  `programme.template`, because the succession rule refuses two programmes
+  covering one day and cycling covers the gym's days on purpose. The
+  screenshot-transcribed Peak seed is deleted.
 - ~~One of Peloton's four programmes is transcribed~~ — **Build was read from the
   Peloton API on 2026-09-05** (`docs/cycling-power-zone-build.md`, decisions 0032
   and 0033). Peak and Build are both in hand; Base is not, and is needed only if
@@ -74,6 +83,11 @@ programming that the tool exists for is step 6.**
 "spacing rule" is the same as *"a full rest day before the hardest gym session"*.
 
 **PR #53 is open** and carries everything from 3–4 September.
+
+**`plan` writes half of what it prints.** The cycling side is authored; the gym
+side is still `fitness programme add`. Composing the gym wizard into `plan` is
+issue #73, and the operator settled on 2026-09-05 that the half-written
+intermediate state is fine rather than waiting for both.
 
 ## Order
 
@@ -119,9 +133,11 @@ peak 2   µ5-6-7-8  by sessions 1+3                 14.6
 ```
 
 `transcribe <skeleton> 4 2` computes them. The autumn needs three, and both
-pairings 0034 admitted are three. **The cycling side also
-needs an authored programme that can hold a `Test` microcycle ahead of its
-periodisations**, the way the gym's already does (0016, 0034).
+pairings 0034 admitted are three. ~~The cycling side also needs an authored
+programme that can hold a test microcycle ahead of its periodisations~~ —
+**built on 2026-09-05**, and it needed no template to do it: a cycling programme
+is microcycles of rides, and the test microcycle is a one-microcycle programme
+whose Sunday ride carries a duration and no zone.
 
 **6. The planner, the span view, and `fitness next`.** The tool takes a span, the
 providers, the primary lift and a session count per discipline per microcycle,
@@ -211,6 +227,34 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 - **The zone read by date at derivation.** The § 13 defect is real — change the
   zone, re-normalise, and every workout's wall clock is rewritten — but it bites
   only if the operator trains in another zone. It should land before it can bite.
+- **The cool-down ride is resolved at delivery, not at authoring.** Every cycling
+  session ends with a separate *5 min Cool Down Ride* by the same instructor —
+  the operator, 2026-09-05: *"all cycling sessions should include a cool down
+  ride"* — and it is a third class, not five minutes appended to the second.
+  Which class it is belongs to the Peloton *sink*, which does not exist yet:
+  *"grabbing the cool down ride only needs to happen when you're delivering to
+  Peloton"*. Until then `cycling next` carries the five minutes as a generation
+  parameter and names no class for them.
+
+  Three things were established on 2026-09-05 so the delivery work does not
+  re-derive them:
+
+  - **It is found by query, not by a table** — the operator's own filters, and
+    verified against the live API: `GET /api/v2/ride/archived` with
+    `browse_category=cycling`, `duration=300`,
+    `class_type_id=a1fa617f3ba14c0a8c25468d5c88b3ea` (*Cool Down Ride*),
+    `instructor_id=<id>`, `sort_by=original_air_time&desc=true`. Its first result
+    for Matt Wilpers is the class he actually rides. A table of ids would go
+    stale by construction, because what he rides is the *most recent* one.
+  - **The instructor is in the class payload** at `ride.instructor.id`, with the
+    name beside it. Twelve instructors appear across *Boost Your Base*, *Power
+    Zone Build* and *Peak Your Power Zones*, one of which is the co-taught
+    "Denis & Matt" — a single instructor id, and so a case the query has to be
+    checked against rather than assumed away.
+  - **It joins cleanly.** A *5 min Cool Down Ride* is one `Cool Down` segment of
+    300 seconds with no ride segment, so appending it to a session adds five
+    minutes of cool-down and nothing to the zone plan. Composition scores are
+    unaffected.
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **A backup of the authored side.** See the risk below; wanted by 14 September.
 

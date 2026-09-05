@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO cycling_weekday (programme, weekday, session)\n                VALUES (?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c57fedd19b96f8ee0a9740a30ce64a23404db0b1605c7dbc5926f682226c2ea8"
+}

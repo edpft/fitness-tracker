@@ -14,6 +14,7 @@ use std::{collections::BTreeMap, future::Future};
 
 use jiff::{Timestamp, civil::Date};
 
+use domain::cycling::{CyclingProgramme, CyclingProgrammeId};
 use domain::gym::{
     GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
     OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
@@ -843,6 +844,63 @@ pub trait ProgrammeStore {
         &self,
         programme: &Programme,
     ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
+}
+
+/// The authored cycling programme.
+///
+/// **A second store rather than a second template**, and not for the schema's
+/// sake. [`ProgrammeStore`]'s succession rule refuses two programmes covering
+/// one day, and cycling covers the same days as the gym on purpose — so the two
+/// disciplines are two sets, and the one rule is applied to each of them
+/// separately. Sharing a table would mean either refusing the arrangement the
+/// tool exists to produce, or growing a discipline column and no longer being
+/// one rule.
+///
+/// The methods are [`ProgrammeStore`]'s, minus the ones that ask about a lift.
+pub trait CyclingProgrammeStore {
+    /// The cycling programme that answers for a date.
+    ///
+    /// `None` is a date no cycling programme covers — between two mesocycles, or
+    /// before the first. A real state, not a fault.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn on(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
+
+    /// The first cycling programme to begin after a date, if there is one.
+    ///
+    /// **What makes the next ride findable across a mesocycle boundary.** The
+    /// autumn authors four cycling programmes back to back, and a question asked
+    /// in the last days of one has its answer in the next.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn following(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
+
+    /// Every cycling programme's name and the days it occupies, oldest first.
+    ///
+    /// What the overlap rule reads, and it reads cycling only.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn windows(&self) -> impl Future<Output = Result<Vec<ProgrammeWindow>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn author(
+        &self,
+        programme: &CyclingProgramme,
+    ) -> impl Future<Output = Result<CyclingProgrammeId, StoreError>> + Send;
 }
 
 /// What was issued.

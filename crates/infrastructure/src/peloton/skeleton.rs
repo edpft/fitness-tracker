@@ -158,9 +158,49 @@ pub fn peak_your_power_zones() -> Vec<Placement> {
         .collect()
 }
 
+/// How many microcycles *Power Zone Build* runs, and so which of them the test
+/// programme was copied from: its last.
+const BUILD_MICROCYCLES: u8 = 5;
+
+/// *Power Zone test* — one microcycle, and a programme in its own right.
+///
+/// **A test microcycle is a standalone programme, not a microcycle borrowed
+/// from another one.** The operator, 2026-09-05:
+///
+/// > "my idea was to copy the 5th microcycle of Build into a standalone Power
+/// > Zone test programme. this is also what I intended with the standalone SBS
+/// > test. so, the tool shouldn't be able to confuse it with the actual 5th
+/// > microcycle of the Build programme because, even though it's exactly the
+/// > same classes, it's a separate thing."
+///
+/// It is the same rule the gym already follows: `autumn-entry-test` is a `test`
+/// programme of its own and not "SBS µ4". Without it the autumn authored *Power
+/// Zone Build µ5* twice — once as the opening test week and again five weeks
+/// later as the deload closing the first mesocycle — and nothing in the record
+/// could tell the two apart.
+///
+/// **Derived from Build rather than restated**, so one list of class ids is
+/// kept in step rather than two. What makes it a separate thing is its name and
+/// its own numbering, which is exactly what the operator said is separate about
+/// it; the classes really are the same classes.
+#[must_use]
+pub fn power_zone_test() -> Vec<Placement> {
+    POWER_ZONE_BUILD_PLACEMENTS
+        .iter()
+        .filter(|placed| placed.microcycle == BUILD_MICROCYCLES)
+        .map(|placed| at(1, placed.session, placed.class_id))
+        .collect()
+}
+
+/// What the standalone test programme is called.
+///
+/// Named here because it is the name the authored record carries, and a name
+/// spelled twice is a name that drifts.
+pub const POWER_ZONE_TEST: &str = "Power Zone test";
+
 /// Every programme this build can pull a mesocycle from.
 ///
-/// Peak is absent from this list and reached through
-/// [`peak_your_power_zones`], because its placements are derived rather than
-/// stated. A caller wanting all three joins them.
+/// Peak and the test programme are absent from this list and reached through
+/// [`peak_your_power_zones`] and [`power_zone_test`], because their placements
+/// are derived rather than stated. A caller wanting all of them joins them.
 pub const SKELETONS: [Skeleton; 2] = [BOOST_YOUR_BASE, POWER_ZONE_BUILD];
