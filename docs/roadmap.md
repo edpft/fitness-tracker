@@ -54,8 +54,13 @@ side:**
 
 - ~~Cycling has no authored programme~~ — **authored on 2026-09-05** (issue #55,
   migration 0023). Four cycling programmes are written by `fitness plan`: the FTP
-  test microcycle, then the three mesocycles, each with its rides, its zone plan
-  and the class ids they are ridden at. Its own tables rather than a fifth
+  test week, then the three mesocycles, each with its rides, its zone plan
+  and the class ids they are ridden at. **The test week is a published programme
+  of its own** — *Power Zone test*, a copy of Build's fifth microcycle — for the
+  reason the gym's entry test is a `test` programme rather than "SBS µ4": the
+  operator, 2026-09-05, *"even though it's exactly the same classes, it's a
+  separate thing"*. Without it the autumn authored Build µ5 twice, five weeks
+  apart, with nothing to tell the two apart. Its own tables rather than a fifth
   `programme.template`, because the succession rule refuses two programmes
   covering one day and cycling covers the gym's days on purpose. The
   screenshot-transcribed Peak seed is deleted.
@@ -222,6 +227,34 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 - **The zone read by date at derivation.** The § 13 defect is real — change the
   zone, re-normalise, and every workout's wall clock is rewritten — but it bites
   only if the operator trains in another zone. It should land before it can bite.
+- **The cool-down ride is resolved at delivery, not at authoring.** Every cycling
+  session ends with a separate *5 min Cool Down Ride* by the same instructor —
+  the operator, 2026-09-05: *"all cycling sessions should include a cool down
+  ride"* — and it is a third class, not five minutes appended to the second.
+  Which class it is belongs to the Peloton *sink*, which does not exist yet:
+  *"grabbing the cool down ride only needs to happen when you're delivering to
+  Peloton"*. Until then `cycling next` carries the five minutes as a generation
+  parameter and names no class for them.
+
+  Three things were established on 2026-09-05 so the delivery work does not
+  re-derive them:
+
+  - **It is found by query, not by a table** — the operator's own filters, and
+    verified against the live API: `GET /api/v2/ride/archived` with
+    `browse_category=cycling`, `duration=300`,
+    `class_type_id=a1fa617f3ba14c0a8c25468d5c88b3ea` (*Cool Down Ride*),
+    `instructor_id=<id>`, `sort_by=original_air_time&desc=true`. Its first result
+    for Matt Wilpers is the class he actually rides. A table of ids would go
+    stale by construction, because what he rides is the *most recent* one.
+  - **The instructor is in the class payload** at `ride.instructor.id`, with the
+    name beside it. Twelve instructors appear across *Boost Your Base*, *Power
+    Zone Build* and *Peak Your Power Zones*, one of which is the co-taught
+    "Denis & Matt" — a single instructor id, and so a case the query has to be
+    checked against rather than assumed away.
+  - **It joins cleanly.** A *5 min Cool Down Ride* is one `Cool Down` segment of
+    300 seconds with no ride segment, so appending it to a session adds five
+    minutes of cool-down and nothing to the zone plan. Composition scores are
+    unaffected.
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **A backup of the authored side.** See the risk below; wanted by 14 September.
 

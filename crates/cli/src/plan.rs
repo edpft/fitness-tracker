@@ -56,9 +56,6 @@ const GYM_PROVIDERS: [&str; 1] = ["Stronger By Science, two-day intermediate"];
 /// Microcycles in a mesocycle, and where the test sits in an SBS one.
 const SBS_MICROCYCLES: usize = 4;
 
-/// The programme that carries the FTP test, whichever pairing is chosen.
-const TESTS_FTP: &str = "Power Zone Build";
-
 /// One published programme, read once.
 struct Read {
     name: &'static str,
@@ -85,11 +82,11 @@ struct Pairing {
 const PAIRINGS: [Pairing; 2] = [
     Pairing {
         label: "Boost Your Base, then Power Zone Build",
-        programmes: ["Boost Your Base", TESTS_FTP],
+        programmes: ["Boost Your Base", "Power Zone Build"],
     },
     Pairing {
         label: "Power Zone Build, then Peak Your Power Zones",
-        programmes: [TESTS_FTP, "Peak Your Power Zones"],
+        programmes: ["Power Zone Build", "Peak Your Power Zones"],
     },
 ];
 
@@ -139,39 +136,20 @@ pub async fn generate(database: &Path, microcycles: usize, sessions: usize) -> R
 
     let mut read = Vec::new();
     for name in pairing.programmes {
-        let placements = placements(name)?;
-        let fetched = provider::fetch(&classes, &placements)
-            .await
-            .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
-        let programme = provider::programme(&fetched);
-        read.push(Read {
-            name,
-            published: ProgrammeName::try_from(name).map_err(|error| Failure::usage(&error))?,
-            fetched,
-            programme,
-        });
+        read.push(fetch(&classes, name).await?);
     }
+    // **The test programme is read whichever pairing is chosen**, because it is
+    // a programme in its own right rather than a microcycle borrowed from one of
+    // them. Every cycling block opens by measuring FTP.
+    let testing = fetch(&classes, skeleton::POWER_ZONE_TEST).await?;
 
     let mut offered = Vec::new();
     for one in &read {
         offered.extend(mesocycles_of(one, microcycles, sessions));
     }
-    // **Build supplies the cycling test microcycle**, whether or not the pairing
-    // rides Build's mesocycle later: it is the only Power Zone programme holding
-    // an FTP test.
-    let test = read
-        .iter()
-        .find(|one| one.name == TESTS_FTP)
-        .and_then(|one| test_microcycle(one, sessions));
+    let test = test_microcycle(&testing, sessions);
 
-    report(
-        &offered,
-        gym,
-        &lift,
-        start,
-        test.as_ref().map(|(_, number, _)| *number),
-        microcycles,
-    );
+    report(&offered, gym, &lift, start, test.is_some(), microcycles);
 
     let taken: Vec<&Offered> = offered
         .iter()
@@ -179,7 +157,15 @@ pub async fn generate(database: &Path, microcycles: usize, sessions: usize) -> R
         .take(3)
         .collect();
     let store = SqliteCyclingProgrammeStore::new(pool);
-    author(&store, start, &riding_days, test.as_ref(), &taken).await
+    author(
+        &store,
+        start,
+        &riding_days,
+        test.as_ref()
+            .map(|sessions| (&testing, sessions.as_slice())),
+        &taken,
+    )
+    .await
 }
 
 /// Which weekdays the schedule gives cycling, as of the start date.
@@ -247,11 +233,27 @@ fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
         "Boost Your Base" => Ok(skeleton::BOOST_YOUR_BASE.placements().to_vec()),
         "Power Zone Build" => Ok(skeleton::POWER_ZONE_BUILD.placements().to_vec()),
         "Peak Your Power Zones" => Ok(skeleton::peak_your_power_zones()),
+        skeleton::POWER_ZONE_TEST => Ok(skeleton::power_zone_test()),
         other => Err(Failure::message(
             format!("this build holds no skeleton for {other:?}"),
             exit::USAGE,
         )),
     }
+}
+
+/// Read one published programme: every class it places, and what it trains.
+async fn fetch(classes: &PelotonClasses, name: &'static str) -> Result<Read, Failure> {
+    let placements = placements(name)?;
+    let fetched = provider::fetch(classes, &placements)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+    let programme = provider::programme(&fetched);
+    Ok(Read {
+        name,
+        published: ProgrammeName::try_from(name).map_err(|error| Failure::usage(&error))?,
+        fetched,
+        programme,
+    })
 }
 
 /// Split a programme and ask each mesocycle for the shape wanted.
@@ -273,17 +275,17 @@ fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offere
         .collect()
 }
 
-/// The test microcycle, its number, and which of its sessions are ridden.
+/// Which of the test programme's sessions are ridden.
 ///
 /// **The FTP test is taken, and the rest of the week fills up around it.** A
-/// test microcycle that dropped the session measuring FTP would be a week of
-/// ordinary riding wearing the name.
-fn test_microcycle(read: &Read, sessions: usize) -> Option<(&Read, u32, Vec<u32>)> {
-    let number = read
-        .programme
-        .mesocycles()
-        .last()
-        .and_then(|mesocycle| mesocycle.last().copied())?;
+/// test week that dropped the session measuring FTP would be a week of ordinary
+/// riding wearing the name.
+///
+/// The microcycle is the programme's own first and only one, so there is nothing
+/// to choose there — which is the point of it being a programme rather than a
+/// microcycle of Build.
+fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
+    let number = read.programme.microcycles().first().copied()?;
 
     let measures = |session: u32| {
         read.fetched
@@ -305,7 +307,7 @@ fn test_microcycle(read: &Read, sessions: usize) -> Option<(&Read, u32, Vec<u32>
         }
     }
     taken.sort_unstable();
-    Some((read, number, taken))
+    Some(taken)
 }
 
 /// Write the cycling side: the test microcycle, then the three mesocycles.
@@ -313,7 +315,7 @@ async fn author(
     store: &SqliteCyclingProgrammeStore,
     start: Date,
     riding_days: &[Weekday],
-    test: Option<&(&Read, u32, Vec<u32>)>,
+    test: Option<(&Read, &[u32])>,
     taken: &[&Offered<'_>],
 ) -> Result<(), Failure> {
     println!();
@@ -345,13 +347,13 @@ async fn author(
     let mut at = start;
     let mut written = Vec::new();
 
-    if let Some((read, number, sessions)) = test {
+    if let Some((read, sessions)) = test {
         let programme = build(
             &format!("{stem}-test"),
             authored_at,
             at,
             read,
-            &[*number],
+            &[1],
             sessions,
             riding_days,
         )?;
@@ -501,7 +503,7 @@ fn report(
     gym: &str,
     lift: &str,
     start: Date,
-    test_microcycle: Option<u32>,
+    tests: bool,
     microcycles: usize,
 ) {
     println!("\nwhat each cycling mesocycle answers\n");
@@ -531,8 +533,15 @@ fn report(
 
     println!("\n{gym}, {lift}\n");
     println!("  {:>2}  {:<12}{:<24}cycling", "µ", "w/c", "gym");
-    let test = test_microcycle.map_or_else(|| "—".to_owned(), |micro| format!("Build µ{micro}"));
-    println!("   0  {start}  {:<24}{test}", "SBS µ4 — the 1RM test");
+    // **A standalone programme on both sides**, and neither row names a
+    // microcycle of the block that follows it: the gym's is a `test` programme
+    // and cycling's is *Power Zone test*.
+    let test = if tests {
+        format!("{} µ1 — the FTP test", skeleton::POWER_ZONE_TEST)
+    } else {
+        "—".to_owned()
+    };
+    println!("   0  {start}  {:<24}{test}", "entry test — the 1RM test");
 
     let usable: Vec<&Offered> = offered.iter().filter(|one| one.answer.is_some()).collect();
     for (cycle, one) in usable.iter().take(3).enumerate() {
