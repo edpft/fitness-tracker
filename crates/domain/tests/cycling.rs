@@ -16,7 +16,7 @@
 use domain::{
     cycling::{
         CycleDay, CyclingSession, Ftp, FtpProvenance, Interval, PowerZone, Ride, Selection, Watts,
-        ZoneProfile, bottom_level, mesocycles, peak_your_power_zones,
+        ZoneProfile, bottom_level, diverges, mesocycles, peak_your_power_zones, span, zones_lost,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
 };
@@ -531,4 +531,74 @@ fn an_empty_profile_has_no_intensity_to_report() {
 
     assert_eq!(profile.total(), 0);
     assert!(profile.intensity().abs() < f64::EPSILON);
+}
+
+#[test]
+fn an_identical_composition_diverges_by_nothing_at_any_volume() {
+    let half = held(PowerZone::Three, 1800).expect("half an hour of three is a ride");
+    let full = held(PowerZone::Three, 3600).expect("an hour of three is a ride");
+
+    let (half, full) = (ZoneProfile::of([&half]), ZoneProfile::of([&full]));
+
+    assert!(
+        diverges(&half, &full).abs() < f64::EPSILON,
+        "twice the riding at one zone is the same composition"
+    );
+}
+
+#[test]
+fn a_dropped_zone_is_a_structural_fact_and_not_a_score() {
+    // **Why `zones_lost` exists.** A reference that is mostly zone three with a
+    // sliver of zone six: dropping every second of the zone six costs about
+    // twice its share of the clock and nothing more, which is a rounding error
+    // beside the scale of the other zones. Squaring and dividing by the zone's
+    // own share does not rescue it — that charges *less* for a zone going
+    // missing, not more. So the fact is carried separately.
+    let bulk = held(PowerZone::Three, 3540).expect("fifty-nine minutes of three is a ride");
+    let sliver = held(PowerZone::Six, 60).expect("a minute of six is a ride");
+    let reference = ZoneProfile::of([&bulk, &sliver]);
+    let without = ZoneProfile::of([&bulk]);
+
+    assert!(
+        diverges(&without, &reference) < 4.0,
+        "losing a whole zone is cheap in percentage points, which is the point"
+    );
+    assert_eq!(
+        zones_lost(&without, &reference),
+        vec![PowerZone::Six],
+        "and is not cheap at all when it is named rather than scored"
+    );
+    assert!(
+        zones_lost(&reference, &without).is_empty(),
+        "gaining a zone the reference lacks is not losing one"
+    );
+}
+
+#[test]
+fn span_is_a_ratio_and_so_survives_a_change_of_length() {
+    // Build's four working microcycles against a three-microcycle selection
+    // from them. **Both are describable; neither had to be resampled.**
+    let written = [108.0, 123.0, 129.0, 141.0];
+    let selected = [108.0, 123.0, 141.0];
+
+    let (written, selected) = (
+        span(&written).expect("the written programme climbs"),
+        span(&selected).expect("so does the selection"),
+    );
+
+    assert!((written - 141.0 / 108.0).abs() < 1e-9);
+    assert!(
+        (written - selected).abs() < f64::EPSILON,
+        "keeping both endpoints keeps the span: {written} against {selected}"
+    );
+}
+
+#[test]
+fn a_run_with_nothing_in_it_has_no_span() {
+    assert_eq!(span(&[]), None);
+    assert_eq!(
+        span(&[0.0, 5.0]),
+        None,
+        "there is no ratio to take against zero"
+    );
 }

@@ -230,11 +230,25 @@ impl ZoneProfile {
     }
 }
 
-/// How far one selection's shape sits from another's, in percentage points.
+/// How far one selection's composition sits from another's, in percentage points.
 ///
-/// Summed across all seven zones, so a candidate that is three points light on
-/// one zone and three heavy on another scores six rather than zero. Lower is
-/// closer, and zero is the same shape at any volume.
+/// Summed across all seven zones, so a candidate three points light on one zone
+/// and three heavy on another scores six rather than zero. Lower is closer, and
+/// zero is the same composition at any volume.
+///
+/// **What this cannot do, and no aggregation of it can.** It charges for a zone
+/// in proportion to the *time* that zone occupies, and the zones that say what a
+/// programme trains occupy almost none of it — losing every second of Build's Z6
+/// costs 1.0 where a five-point wobble in Z2 costs 5. Squaring and dividing by
+/// the zone's own share does not fix this: for a zone of share `e`, dropping it
+/// entirely costs `e` either way, and dropping *half* of it costs `e/4` squared
+/// against `e/2` summed — so the squared form is the *less* sensitive of the two
+/// to a zone going missing. It is only harsher on a rare zone being
+/// over-represented.
+///
+/// So a dropped zone is checked structurally by [`zones_lost`] rather than
+/// scored here, the way a deload is checked by [`mesocycles`] rather than
+/// scored. **Constraints refuse; scores rank what survives.**
 #[must_use]
 pub fn diverges(candidate: &ZoneProfile, from: &ZoneProfile) -> f64 {
     let (a, b) = (candidate.shares(), from.shares());
@@ -246,6 +260,48 @@ pub fn diverges(candidate: &ZoneProfile, from: &ZoneProfile) -> f64 {
             (mine - theirs).abs()
         })
         .sum()
+}
+
+/// The zones the reference trains that the candidate does not train at all.
+///
+/// **A structural check, not a score.** A selection that drops a zone outright
+/// has stopped training something the programme trains, and that is a different
+/// kind of fact from being a few points light on it — Build's µ1-2-3 loses every
+/// second of Z6 and Z7, all of its anaerobic and neuromuscular work, and
+/// [`diverges`] charges it 1.03 points for that out of 16.9.
+///
+/// Nothing here decides what to do about it. It says which zones went.
+#[must_use]
+pub fn zones_lost(candidate: &ZoneProfile, from: &ZoneProfile) -> Vec<PowerZone> {
+    let (a, b) = (candidate.shares(), from.shares());
+    PowerZone::ALL
+        .into_iter()
+        .filter(|zone| {
+            b.get(zone).copied().unwrap_or_default() > 0.0
+                && a.get(zone).copied().unwrap_or_default() <= 0.0
+        })
+        .collect()
+}
+
+/// How far a run climbs: its hardest microcycle over its easiest.
+///
+/// **A ratio, so it does not care how many microcycles there are** — which is
+/// what lets a three-microcycle selection be compared with the four-microcycle
+/// programme it was taken from. Comparing the two arcs point by point would need
+/// them resampled to a common length, and § II names that as a mistake.
+///
+/// **Hand it the working microcycles.** A run including its deload reports the
+/// depth of the deload rather than the climb, and those are different questions:
+/// Build spans 1.30× across its four working microcycles and 2.24× if its
+/// deload is included.
+///
+/// `None` for an empty run, or one whose easiest microcycle scores nothing —
+/// there is no ratio to take against zero.
+#[must_use]
+pub fn span(scores: &[f64]) -> Option<f64> {
+    let floor = scores.iter().copied().reduce(f64::min)?;
+    let peak = scores.iter().copied().reduce(f64::max)?;
+    (floor > 0.0).then(|| peak / floor)
 }
 
 /// How far above a run's lightest microcycle still counts as its bottom level.
