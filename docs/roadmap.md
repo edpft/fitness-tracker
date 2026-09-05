@@ -34,6 +34,15 @@ sbs-2              sbs   2026-10-19  4 weeks  → 2026-11-15
 sbs-3              sbs   2026-11-16  4 weeks  → 2026-12-13
 ```
 
+**Both disciplines open with a test microcycle and run three mesocycles of
+four** (0034). Thirteen weeks against thirteen, starting the same day:
+
+```text
+              week 1        weeks 2-13
+gym       entry test    3 SBS cycles of 4
+cycling   FTP test      3 mesocycles of 4
+```
+
 **Both disciplines prescribe a session today.** The gym runs the whole loop —
 authored programme in the store, prescription, delivery to Hevy. `cycling next`
 prints a full session from the transcribed Peloton programme: warm-up, the
@@ -82,11 +91,37 @@ otherwise be written twice.
 parameters and become facts about the world.
 
 **4. The ordinal programme** (0018), then the allocator: pin, alternation,
-spacing.
+spacing. **Remove `Prescribed::Autoregulated` while here** — it has had no
+producer since 2026-09-04 and the operator settled on 2026-09-05 that it goes.
+It is a migration.
 
-**5. Transcribe the cycling programmes.** Peloton's Build, and Base if that
-pairing is chosen. Record what a provider answers when asked for four
-microcycles as a **set** of options, not one (0029).
+**5. Transcribe the cycling programmes.** Base, Build and Peak were all read
+from the Peloton API on 2026-09-05, which is every programme this tool will use.
+
+**Discover is out of scope, and permanently.** The operator, 2026-09-05: *"it's
+specifically design to introduce the concept of power zones to a new rider. it's
+first week has 7 classes over 5 days, including a FTP warm and test pair on day
+2. I don't think it's a programme we're going to be pulling from going
+forwards."* Its ids were never asked for and should not be. It corroborates 0034
+in passing — the introductory programme tests FTP almost first, because a zone is
+a share of a number the rider does not yet have. Record what a provider answers when asked for four
+microcycles. ~~As a **set** of options, not one (0029)~~ — 0036 settled that it
+is a single answer, the lowest score, because a tie preserves no choice.
+
+**A provider supplies mesocycles, not programmes** (0036), and there are five:
+
+```text
+base 1   µ1-2-3-4  by sessions 2+3     composition  6.0
+base 2   µ5-6-7-8  by sessions 1+2                  1.1
+build    µ1-2-4-5  by sessions 1+3                  5.4
+peak 1   µ1-2-3-4  by sessions 1+3                  5.4
+peak 2   µ5-6-7-8  by sessions 1+3                 14.6
+```
+
+`transcribe <skeleton> 4 2` computes them. The autumn needs three, and both
+pairings 0034 admitted are three. **The cycling side also
+needs an authored programme that can hold a `Test` microcycle ahead of its
+periodisations**, the way the gym's already does (0016, 0034).
 
 **6. The planner, the span view, and `fitness next`.** The tool takes a span, the
 providers, the primary lift and a session count per discipline per microcycle,
@@ -104,6 +139,10 @@ deliverable the other five exist for.
 - **0027** dissolved the old open question *"what anchors a programme that
   follows another?"* rather than answering it. A programme is a shape; the
   numbers come from the record.
+- **0034** made coherence a constraint rather than an objective: the planner
+  admits or refuses an arrangement instead of ranking one. That shrinks step 6 —
+  there is no scoring function to design — and it fixed Build at four
+  microcycles from a direction unrelated to 0032's.
 - **2026-09-04** added step 0 and finished it in the same day — see below.
 
 ## What 2026-09-04 changed
@@ -131,20 +170,26 @@ which the chart does not ask.
 arithmetic, whose own rule has the same flaw hidden behind a round worked
 example. Flag it rather than "fix" it back.
 
-## Open questions
+## Nothing is open
 
-1. **Which cycling pairing** — Base (8) + Build (4), or Build (4) + Peak (8).
-   Both align three of three against the gym's cycles, so what remains is a
-   training judgement. **The operator's, and not urgent until step 5.** That
-   alignment was worked out by hand on 2026-09-03, not computed: there is no
-   fatigue coherence in the code, so it is a result for the planner to re-derive
-   rather than one it produced.
-2. **Does `--timezone` survive as a per-run override** once the store answers?
-   Probably, and it should stop being *required*.
-3. **Is the spacing rule 0018's?** The one thing waiting on the operator.
-4. **Does `Prescribed::Autoregulated` come out?** It has had no producer since
-   2026-09-04: every session now states a load. Removing it is a migration, so
-   it waits until the model has clearly settled.
+Four things sat here as "open questions" until 2026-09-05, when the operator
+pointed out that none of them was one. **An open question is only open if
+resolving it unblocks something** — the criterion is in `CLAUDE.md` and it
+applies to `docs/decisions/` as well.
+
+- **Which cycling pairing** — `base 1, base 2, build` or `build, peak 1, peak 2`.
+  *"that's not a question, that's a programming choice."* 0034 admits both. The
+  one input the tool can offer: Base carries no FTP test of its own, so the first
+  re-anchors the zones at weeks 1 and 13 where the second does it at 1, 5 and 13.
+- **Is the spacing rule 0018's?** 0018's own worked example answers it — Monday
+  gym, Wednesday cycling, Friday gym, Sunday cycling leaves a clear day before
+  the heavy session.
+- **Does `--timezone` survive as a per-run override?** The scheduler already owns
+  the zone: `schedule.rs` resolves arithmetic through the calendar's IANA zone
+  and a test pins that it uses the calendar's rather than the machine's. Whether
+  the CLI keeps a flag once the store holds the setting is a consequence.
+- **Does `Prescribed::Autoregulated` come out?** Yes — *"we're not using it."*
+  It is a migration, so it is a **task** and is in the order above, not here.
 
 Answered and kept here only because a session may go looking: credentials and
 settings (2026-09-03, no TOML); zone minimums are independent floors
@@ -152,7 +197,10 @@ settings (2026-09-03, no TOML); zone minimums are independent floors
 load); Peloton is reachable and serves class content and the performed record but
 not programme structure (2026-09-05, 0033).
 
-**Reopened by 0033**: the FTP work. It was taken off the list on 2026-09-03
+**Due, not merely reopened** (0033 reopened it, 0034 dates it): the FTP work.
+The block cannot start without a fresh value — every zone in twelve weeks of
+prescription is a share of a number whose most recent reading is nearly eight
+weeks stale by 14 September. It was taken off the list on 2026-09-03
 because the need arrived with Peloton ingestion; Peloton ingestion now exists,
 and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 **172 on 2026-07-22**, each the twenty-minute test's average output × 0.95. An
