@@ -19,6 +19,7 @@
 pub mod programme;
 pub mod seed;
 pub mod session;
+pub mod shape;
 pub mod zone;
 
 pub use programme::{
@@ -27,6 +28,7 @@ pub use programme::{
 };
 pub use seed::{InvalidCyclingSeed, peak_your_power_zones};
 pub use session::{CyclingSession, Interval, Ride, clock};
+pub use shape::{ZoneProfile, diverges, is_three_to_one};
 pub use zone::{
     Ftp, FtpProvenance, InvalidFtp, PowerZone, UnknownZone, WattRange, Watts, ZoneBand,
 };

@@ -52,6 +52,13 @@ const AUDIENCE: &str = "https://api.onepeloton.com/";
 const SCOPE: &str = "offline_access openid peloton-api.members:default";
 const REDIRECT_URI: &str = "https://members.onepeloton.com/callback";
 
+/// **Auth0 refuses a client that does not look like a browser.** Without this
+/// the login step answers 401 and is indistinguishable from a wrong password —
+/// which is what happened the first time this ran against the real endpoint,
+/// while every stubbed test passed. A stub cannot catch a wrong default.
+const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+                          (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
 /// Auth0 expects its own client fingerprint. Base64 of
 /// `{"name":"auth0.js-ulp","version":"9.14.3"}`.
 const AUTH0_CLIENT: &str = "eyJuYW1lIjoiYXV0aDAuanMtdWxwIiwidmVyc2lvbiI6IjkuMTQuMyJ9";
@@ -198,6 +205,7 @@ impl PelotonAuth {
         self.client
             .get_or_init(|| {
                 Client::builder()
+                    .user_agent(USER_AGENT)
                     .cookie_provider(Arc::clone(&self.jar))
                     .redirect(Policy::none())
                     .timeout(Duration::from_secs(30))
@@ -232,6 +240,12 @@ impl PelotonAuth {
         let nonce = random_url_safe();
 
         let login_url = self.authorize(&challenge, &state, &nonce).await?;
+        // **Auth0 issues its own state and expects that one back.** The value
+        // generated above is what starts the flow; what continues it is
+        // whatever the authorize redirect settled on. Sending ours instead
+        // earns `403 AnomalyDetected: Invalid state`, which is indistinguishable
+        // from a rejected password unless the body is read.
+        let state = query_value(&login_url, "state").unwrap_or(state);
         let csrf = self.csrf()?;
         let next = self
             .submit_credentials(&login_url, &csrf, &challenge, &state, &nonce)
