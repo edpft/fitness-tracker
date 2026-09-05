@@ -197,13 +197,6 @@ fn plan_command() -> ClapCommand {
     ClapCommand::new("plan")
         .about("Generate a hybrid programme from a gym provider and a cycling provider")
         .arg(
-            Arg::new("start")
-                .long("start")
-                .value_name("date")
-                .required(true)
-                .help("The Monday the block begins, as YYYY-MM-DD"),
-        )
-        .arg(
             Arg::new("microcycles")
                 .long("microcycles")
                 .value_name("count")
@@ -838,20 +831,17 @@ async fn plan_command_run(sub: &ArgMatches) -> Result<(), Failure> {
                 Failure::message(format!("--{name} is not a count: {error}"), exit::USAGE)
             })
     };
-    let Some(start) = sub.get_one::<String>("start") else {
-        return Err(Failure::message("no --start given", exit::USAGE));
-    };
-    let start = start.parse::<jiff::civil::Date>().map_err(|error| {
-        Failure::message(format!("{start:?} is not a date: {error}"), exit::USAGE)
-    })?;
-
-    plan::generate(
-        start,
-        count("microcycles")?,
-        count("cycling-sessions")?,
-        count("gym-sessions")?,
-    )
-    .await
+    let gym = count("gym-sessions")?;
+    if gym != 2 {
+        return Err(Failure::message(
+            format!(
+                "the SBS chart is two sessions a microcycle and cannot answer for {gym} — \
+                 a percentage day and a repetition-maximum day"
+            ),
+            exit::USAGE,
+        ));
+    }
+    plan::generate(count("microcycles")?, count("cycling-sessions")?).await
 }
 
 /// `cycling next`, once its arguments are in hand.

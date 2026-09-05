@@ -52,7 +52,7 @@ fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
 }
 
-fn interactive() -> Result<(), Failure> {
+pub fn interactive() -> Result<(), Failure> {
     if std::io::stdin().is_terminal() {
         return Ok(());
     }
@@ -62,7 +62,7 @@ fn interactive() -> Result<(), Failure> {
     ))
 }
 
-fn ask(question: &str) -> Result<String, Failure> {
+pub fn ask(question: &str) -> Result<String, Failure> {
     print!("{question}");
     std::io::stdout().flush().map_err(usage)?;
     let mut typed = String::new();
@@ -74,7 +74,10 @@ fn ask(question: &str) -> Result<String, Failure> {
 ///
 /// Thirty answers in, unwinding on a typo would throw away the twenty-nine
 /// before it. So a bad answer is re-asked and nothing else is lost.
-fn ask_until<T>(question: &str, parse: impl Fn(&str) -> Result<T, String>) -> Result<T, Failure> {
+pub fn ask_until<T>(
+    question: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> Result<T, Failure> {
     loop {
         let typed = ask(question)?;
         match parse(&typed) {
