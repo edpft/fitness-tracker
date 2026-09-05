@@ -46,8 +46,11 @@ side:**
   the start date as a flag every run. Nothing is stored — `cycling` appears in
   the migrations only as a `discipline` value on training slots. The gym authors
   and remembers; cycling recomputes from a flag.
-- **One of Peloton's four programmes is transcribed** — Peak Your Power Zones.
-  The autumn needs two of Build, Base and Peak, and step 5 is where they arrive.
+- ~~One of Peloton's four programmes is transcribed~~ — **Build was read from the
+  Peloton API on 2026-09-05** (`docs/cycling-power-zone-build.md`, decisions 0032
+  and 0033). Peak and Build are both in hand; Base is not, and is needed only if
+  that pairing is chosen. Class *content* is now fetched rather than transcribed;
+  the programme *skeleton* still is not available and remains the operator's.
 - **No planner.** Nothing takes a span, the providers, the primary lift and a
   session count per discipline and returns the arrangements that cohere.
 - **No fatigue coherence exists in the code.** `fatigue` appears five times and
@@ -145,9 +148,15 @@ example. Flag it rather than "fix" it back.
 
 Answered and kept here only because a session may go looking: credentials and
 settings (2026-09-03, no TOML); zone minimums are independent floors
-(2026-09-03); the FTP assertion route is **not needed** until there is Peloton
-data to read (2026-09-03); what a rep-max day prescribes (2026-09-04, one set at
-a stated load).
+(2026-09-03); what a rep-max day prescribes (2026-09-04, one set at a stated
+load); Peloton is reachable and serves class content and the performed record but
+not programme structure (2026-09-05, 0033).
+
+**Reopened by 0033**: the FTP work. It was taken off the list on 2026-09-03
+because the need arrived with Peloton ingestion; Peloton ingestion now exists,
+and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
+**172 on 2026-07-22**, each the twenty-minute test's average output × 0.95. An
+*asserted* FTP is no longer the only path and is probably the wrong one.
 
 ## Deferred, and none of it on the critical path
 
