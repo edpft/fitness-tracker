@@ -469,3 +469,66 @@ fn a_run_of_any_requested_length_can_be_asked_for() {
         "nor is one longer than the programme"
     );
 }
+
+#[test]
+fn the_two_axes_multiply_to_the_score() {
+    // **An identity, not a calibration**: TSS is volume × intensity², so
+    // carrying all three loses nothing and separates what the product hides.
+    let ride = held(PowerZone::Four, 1800).expect("half an hour of zone four is a ride");
+    let easy = held(PowerZone::Two, 2700).expect("three quarters of an hour of two is a ride");
+    let profile = ZoneProfile::of([&ride, &easy]);
+
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "seconds of riding; f64 is exact far past any plausible total"
+    )]
+    let from_axes = profile.total() as f64 * (profile.intensity() / 100.0).powi(2) / 36.0;
+
+    assert!(
+        (profile.tss() - from_axes).abs() < 1e-9,
+        "{} should be the two axes multiplied, got {from_axes}",
+        profile.tss()
+    );
+}
+
+#[test]
+fn volume_and_intensity_move_independently() {
+    // The same intensity at two volumes, and the same volume at two
+    // intensities. **This is what the product cannot tell apart** — Boost Your
+    // Base raises volume at a flat intensity where Build raises intensity at a
+    // flat volume, and both read as a rising TSS.
+    let short = held(PowerZone::Three, 1800).expect("half an hour of three is a ride");
+    let long = held(PowerZone::Three, 3600).expect("an hour of three is a ride");
+    let hard = held(PowerZone::Five, 1800).expect("half an hour of five is a ride");
+
+    let (short, long, hard) = (
+        ZoneProfile::of([&short]),
+        ZoneProfile::of([&long]),
+        ZoneProfile::of([&hard]),
+    );
+
+    assert!(
+        (short.intensity() - long.intensity()).abs() < 1e-9,
+        "twice the riding at one zone is twice the volume at the same intensity"
+    );
+    assert_eq!(
+        (short.total(), hard.total()),
+        (1800, 1800),
+        "and these two differ in intensity at one volume"
+    );
+    assert!(hard.intensity() > short.intensity());
+    assert!(hard.tss() > short.tss() && long.tss() > short.tss());
+}
+
+#[test]
+fn an_empty_profile_has_no_intensity_to_report() {
+    // Not zero because it was easy — zero because there was nothing. A week of
+    // rest has no shape, and the same reason `shares` is empty for it.
+    let duration = PositiveDuration::from_seconds(1200).expect("twenty minutes is a duration");
+    let test = Ride::Effort(duration);
+
+    let profile = ZoneProfile::of([&test]);
+
+    assert_eq!(profile.total(), 0);
+    assert!(profile.intensity().abs() < f64::EPSILON);
+}

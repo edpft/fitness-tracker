@@ -13,6 +13,17 @@
 //!   coincide. [`hard_share`] is what makes it checkable.
 //! - Among candidates, the closest is the one that [`diverges`] least.
 //!
+//! **Two axes, and a programme moves them independently.**
+//! [`total`](ZoneProfile::total) is how much riding there is and
+//! [`intensity`](ZoneProfile::intensity) is how hard it is, and
+//! [`tss`](ZoneProfile::tss) is the two multiplied. Carrying all three is not
+//! redundancy: *Boost Your Base* raises volume at a flat intensity, *Build*
+//! raises intensity at a flat volume, and a gym cycle sheds volume to buy
+//! intensity — and the product alone cannot tell those apart. It is also why a
+//! deload is easier to find than a peak. **A deload drops both axes at once**,
+//! so every metric agrees where it is; a peak moves one axis, so metrics that
+//! weight the axes differently disagree.
+//!
 //! **A microcycle is weighed two ways, and they can disagree.**
 //! [`hard_share`](ZoneProfile::hard_share) thresholds at zone four;
 //! [`tss`](ZoneProfile::tss) multiplies time by intensity across every zone. The
@@ -98,6 +109,47 @@ impl ZoneProfile {
             .collect()
     }
 
+    /// How hard this riding is, independent of how much of it there is.
+    ///
+    /// **The second of the two axes a programme moves** — [`total`](Self::total)
+    /// is the first. Coggan's intensity factor as the zone plan implies it: the
+    /// time-weighted quadratic mean of the zones' midpoints, in percent of FTP.
+    /// An hour of zone two and a fortnight of it score the same, which is the
+    /// point.
+    ///
+    /// **Quadratic rather than arithmetic, and not as a choice.** It is the mean
+    /// that makes the identity below hold, and squaring is how TSS weights
+    /// intensity in the first place. An arithmetic mean would under-report any
+    /// ride that mixes hard and easy.
+    ///
+    /// Zero where nothing was ridden — no riding has no intensity, and inventing
+    /// one would make an empty week look easy rather than absent.
+    #[must_use]
+    pub fn intensity(&self) -> f64 {
+        let total = self.total();
+        if total == 0 {
+            return 0.0;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "seconds of riding; f64 is exact far past any plausible total"
+        )]
+        let weighted: f64 = self
+            .0
+            .iter()
+            .map(|(zone, seconds)| {
+                let midpoint = zone.band().midpoint_percent();
+                *seconds as f64 * midpoint * midpoint
+            })
+            .sum();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "seconds of riding; f64 is exact far past any plausible total"
+        )]
+        let mean = weighted / total as f64;
+        mean.sqrt()
+    }
+
     /// Coggan's Training Stress Score for this riding, from the zone plan alone.
     ///
     /// `TSS = Σ (seconds × IF²) / 36`, where `IF` is each zone's
@@ -119,6 +171,19 @@ impl ZoneProfile {
     /// **No FTP and no heart rate are needed**, so a class scores before anyone
     /// rides it. That is what makes this a property of the *programme* — a fact
     /// about what was prescribed, not a measurement of what was performed.
+    ///
+    /// **It is the two axes multiplied**, and exactly so:
+    ///
+    /// ```text
+    /// tss  ==  total() × (intensity() / 100)²  /  36
+    /// ```
+    ///
+    /// So nothing is lost by carrying [`total`](Self::total) and
+    /// [`intensity`](Self::intensity) beside it — and something is gained, because
+    /// a programme moves the two independently and the product hides which.
+    /// *Boost Your Base* raises volume at a flat intensity; *Build* raises
+    /// intensity at a flat volume; an SBS cycle sheds volume to buy intensity.
+    /// All three can look alike in TSS alone.
     ///
     /// A ride with no zones contributes nothing, for the same reason it
     /// contributes no share: the FTP test measures the number the zones are

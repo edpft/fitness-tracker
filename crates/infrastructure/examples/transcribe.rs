@@ -178,8 +178,8 @@ fn derivation(placed: &[Placed]) {
     // from Z2 toward Z3 that such a programme is made of. Both are printed
     // because they can disagree about where a mesocycle starts, and which of
     // them bounds one is the operator's judgement rather than this code's.
-    println!("\nTSS of each microcycle, from the zone plan — no FTP, no heart rate\n");
-    print!("  {:<10}", "sessions");
+    println!("\nvolume, intensity and TSS of each microcycle — no FTP, no heart rate\n");
+    print!("  {:<11}", "sessions");
     for micro in &microcycles {
         print!("{:>7}", format!("µ{micro}"));
     }
@@ -187,14 +187,31 @@ fn derivation(placed: &[Placed]) {
 
     let mut windows: Vec<Option<(u32, u32)>> = Vec::new();
     for candidate in &candidates {
-        print!("  {:<10}", label(candidate, &sessions));
-        let mut scores = Vec::new();
-        for micro in &microcycles {
-            let score = microcycle(placed, *micro, candidate).tss();
-            scores.push(score);
+        // **All three, because a programme moves the two axes independently.**
+        // Base raises volume at a flat intensity and Build raises intensity at a
+        // flat volume; both read as a rising TSS, and only the pair says which.
+        let profiles: Vec<_> = microcycles
+            .iter()
+            .map(|micro| microcycle(placed, *micro, candidate))
+            .collect();
+        let scores: Vec<f64> = profiles.iter().map(ZoneProfile::tss).collect();
+
+        print!("  {:<7}{:<4}", label(candidate, &sessions), "min");
+        for profile in &profiles {
+            print!("{:>7}", profile.total() / 60);
+        }
+        println!();
+        print!("  {:<7}{:<4}", "", "int");
+        for profile in &profiles {
+            print!("{:>7.1}", profile.intensity());
+        }
+        println!();
+        print!("  {:<7}{:<4}", "", "TSS");
+        for score in &scores {
             print!("{score:>7.0}");
         }
         println!("   {}", found(&scores, &microcycles));
+
         windows.push(first_window(&scores, &microcycles));
     }
 
