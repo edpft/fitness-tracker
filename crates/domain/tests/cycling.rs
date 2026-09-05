@@ -15,10 +15,10 @@
 
 use domain::{
     cycling::{
-        CycleDay, CyclingSession, Ftp, FtpProvenance, PowerZone, Ride, Selection, Watts,
-        peak_your_power_zones,
+        CycleDay, CyclingSession, Ftp, FtpProvenance, Interval, PowerZone, Ride, Selection, Watts,
+        ZoneProfile, peak_your_power_zones,
     },
-    gym::PositiveDuration,
+    gym::{PositiveDuration, sequence::NonEmpty},
 };
 use jiff::civil::{Weekday, date};
 
@@ -287,5 +287,91 @@ fn the_test_session_gains_a_cool_down_it_did_not_have() {
         extended.cool_down().map(PositiveDuration::as_seconds),
         Some(300),
         "absent plus five minutes is five minutes, not six",
+    );
+}
+
+/// A ride of one stretch at one zone.
+///
+/// Fallible and unwrapped at each call site: the test exemptions for `expect`
+/// reach a `#[test]` function and not a helper beside it (`CLAUDE.md`).
+fn held(zone: PowerZone, seconds: u64) -> Result<Ride, Box<dyn std::error::Error>> {
+    let duration = PositiveDuration::from_seconds(seconds)?;
+    Ok(Ride::Intervals(NonEmpty::new(vec![Interval::new(
+        zone, duration,
+    )])?))
+}
+
+#[test]
+fn an_hour_at_a_zone_scores_the_intensity_that_zone_names() {
+    let ride = held(PowerZone::Four, 3600).expect("an hour of zone four is a ride");
+
+    // Zone four spans 91-105% of FTP, so it is scored at 98%. An hour at an
+    // intensity factor of 0.98 is 0.98² × 100 = 96.04 — the definition of TSS
+    // rather than anything fitted here.
+    let scored = ZoneProfile::of([&ride]).tss();
+
+    assert!(
+        (scored - 96.04).abs() < 0.005,
+        "an hour at zone four should score 96.04, scored {scored}"
+    );
+}
+
+#[test]
+fn the_open_ended_zones_are_scored_at_a_stated_intensity() {
+    // Zone one has no floor and zone seven has no ceiling, so neither has a
+    // midpoint and each is given one. **Pinned because they are invented**:
+    // changing either should be a decision, not a diff nobody noticed.
+    let one = held(PowerZone::One, 3600).expect("an hour of zone one is a ride");
+    let seven = held(PowerZone::Seven, 3600).expect("an hour of zone seven is a ride");
+
+    let (scored_one, scored_seven) = (
+        ZoneProfile::of([&one]).tss(),
+        ZoneProfile::of([&seven]).tss(),
+    );
+
+    assert!(
+        (scored_one - 20.25).abs() < 0.005,
+        "zone one is scored at 45% of FTP, so an hour is 20.25 — scored {scored_one}"
+    );
+    assert!(
+        (scored_seven - 289.0).abs() < 0.005,
+        "zone seven is scored at 170% of FTP, so an hour is 289 — scored {scored_seven}"
+    );
+}
+
+#[test]
+fn equal_riding_at_zone_two_and_zone_three_scores_differently() {
+    // **This is the whole reason TSS was added.** Boost Your Base is entirely
+    // Z1/Z2/Z3, so hard share reports zero for every microcycle of it and finds
+    // no structure at all — while the programme builds by shifting Z2 toward Z3.
+    let steady = held(PowerZone::Two, 1800).expect("half an hour of zone two is a ride");
+    let tempo = held(PowerZone::Three, 1800).expect("half an hour of zone three is a ride");
+
+    let (steady, tempo) = (ZoneProfile::of([&steady]), ZoneProfile::of([&tempo]));
+
+    assert!(
+        steady.hard_share().abs() < f64::EPSILON && tempo.hard_share().abs() < f64::EPSILON,
+        "neither reaches zone four, which is exactly what makes hard share blind here"
+    );
+    assert!(
+        tempo.tss() > steady.tss(),
+        "the same half hour at tempo should score above endurance: {} against {}",
+        tempo.tss(),
+        steady.tss()
+    );
+}
+
+#[test]
+fn the_ftp_test_scores_nothing() {
+    // It measures the number every zone is a share of, so it has no intensity
+    // of its own to score — the same reason it contributes no zone share.
+    let duration = PositiveDuration::from_seconds(1200).expect("twenty minutes is a duration");
+    let test = Ride::Effort(duration);
+
+    let scored = ZoneProfile::of([&test]).tss();
+
+    assert!(
+        scored.abs() < f64::EPSILON,
+        "an effort names no zone, so it scores nothing — scored {scored}"
     );
 }

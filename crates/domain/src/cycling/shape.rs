@@ -13,6 +13,16 @@
 //!   coincide. [`hard_share`] is what makes it checkable.
 //! - Among candidates, the closest is the one that [`diverges`] least.
 //!
+//! **A microcycle is weighed two ways, and they can disagree.**
+//! [`hard_share`](ZoneProfile::hard_share) thresholds at zone four;
+//! [`tss`](ZoneProfile::tss) multiplies time by intensity across every zone. The
+//! first is what 3:1 was stated in and cannot see a programme built entirely
+//! below threshold — *Boost Your Base* is eight microcycles of flat zeros to it.
+//! The second sees that programme's structure and disagrees with the first about
+//! where *Build*'s mesocycle starts. **Which one bounds a mesocycle is a
+//! training judgement and is not settled here**; both are offered and neither is
+//! wired into [`is_three_to_one`].
+//!
 //! **The divergence score is a heuristic and is not defended here.** It ranks by
 //! zone profile alone: it knows nothing about how the sessions are spaced, about
 //! which of them carries a test, or about what the other discipline is doing that
@@ -85,6 +95,47 @@ impl ZoneProfile {
             .iter()
             .map(|(zone, seconds)| (*zone, ratio(*seconds)))
             .collect()
+    }
+
+    /// Coggan's Training Stress Score for this riding, from the zone plan alone.
+    ///
+    /// `TSS = Σ (seconds × IF²) / 36`, where `IF` is each zone's
+    /// [midpoint](super::ZoneBand::midpoint_percent) as a share of FTP. An hour
+    /// held exactly at threshold scores 100, which is the definition rather than
+    /// a calibration.
+    ///
+    /// **Why this exists beside [`hard_share`](Self::hard_share).** Hard share
+    /// thresholds at Z4, and *Boost Your Base* contains no Z4 at all — so it
+    /// reports a flat row of zeros across eight microcycles and finds no
+    /// structure in a programme that plainly has some. The operator, 2026-09-05:
+    ///
+    /// > "percentage of Z4 is too coarse... it also increases intensity, it's
+    /// > just that it increases intensity from Z2 to Z3."
+    ///
+    /// TSS sees that, because it multiplies time by intensity rather than
+    /// thresholding intensity and counting time.
+    ///
+    /// **No FTP and no heart rate are needed**, so a class scores before anyone
+    /// rides it. That is what makes this a property of the *programme* — a fact
+    /// about what was prescribed, not a measurement of what was performed.
+    ///
+    /// A ride with no zones contributes nothing, for the same reason it
+    /// contributes no share: the FTP test measures the number the zones are
+    /// shares of, so it has no intensity of its own to score.
+    #[must_use]
+    pub fn tss(&self) -> f64 {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "seconds of riding; f64 is exact far past any plausible total"
+        )]
+        let score = |zone: PowerZone, seconds: u64| {
+            let intensity = zone.band().midpoint_percent() / 100.0;
+            seconds as f64 * intensity * intensity / 36.0
+        };
+        self.0
+            .iter()
+            .map(|(zone, seconds)| score(*zone, *seconds))
+            .sum()
     }
 
     /// Time at zone four and above, as a percentage of timed riding.

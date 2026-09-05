@@ -163,27 +163,10 @@ fn derivation(placed: &[Placed]) {
 
     let whole = ZoneProfile::of(rides(placed, &sessions));
     for candidate in &candidates {
-        let label = if *candidate == sessions {
-            "all".to_owned()
-        } else {
-            candidate
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("+")
-        };
-        print!("  {label:<10}");
+        print!("  {:<10}", label(candidate, &sessions));
         let mut shares = Vec::new();
         for micro in &microcycles {
-            let profile = ZoneProfile::of(
-                placed
-                    .iter()
-                    .filter(|entry| {
-                        entry.microcycle == *micro && candidate.contains(&entry.session)
-                    })
-                    .filter_map(|entry| entry.class.ride.as_ref()),
-            );
-            let share = profile.hard_share();
+            let share = microcycle(placed, *micro, candidate).hard_share();
             shares.push(share);
             print!("{share:>6.0}%");
         }
@@ -196,6 +179,30 @@ fn derivation(placed: &[Placed]) {
             Some((from, to)) => println!("   µ{from}–{to}"),
             None => println!("   none"),
         }
+    }
+
+    // **The same microcycles weighed the other way** (issue #71). Hard share
+    // thresholds at Z4 and so reports zeros for a programme built entirely below
+    // it; TSS multiplies time by intensity and sees the volume and the drift
+    // from Z2 toward Z3 that such a programme is made of. Both are printed
+    // because they can disagree about where a mesocycle starts, and which of
+    // them bounds one is the operator's judgement rather than this code's.
+    println!("\nTSS of each microcycle, from the zone plan — no FTP, no heart rate\n");
+    print!("  {:<10}", "sessions");
+    for micro in &microcycles {
+        print!("{:>7}", format!("µ{micro}"));
+    }
+    println!("    min");
+
+    for candidate in &candidates {
+        print!("  {:<10}", label(candidate, &sessions));
+        let mut ridden = 0_u64;
+        for micro in &microcycles {
+            let profile = microcycle(placed, *micro, candidate);
+            ridden += profile.total();
+            print!("{:>7.0}", profile.tss());
+        }
+        println!("{:>7}", ridden / 60);
     }
 
     println!("\ndivergence from the whole programme's zone profile\n");
@@ -218,6 +225,28 @@ fn derivation(placed: &[Placed]) {
         0.0,
         shares_line(&whole)
     );
+}
+
+/// The zone profile of one microcycle, taking only the sessions asked for.
+fn microcycle(placed: &[Placed], micro: u32, sessions: &[u32]) -> ZoneProfile {
+    ZoneProfile::of(
+        placed
+            .iter()
+            .filter(|entry| entry.microcycle == micro && sessions.contains(&entry.session))
+            .filter_map(|entry| entry.class.ride.as_ref()),
+    )
+}
+
+/// How a candidate selection is named in a table.
+fn label(candidate: &[u32], every: &[u32]) -> String {
+    if candidate == every {
+        return "all".to_owned();
+    }
+    candidate
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 fn rides<'a>(placed: &'a [Placed], sessions: &'a [u32]) -> impl Iterator<Item = &'a Ride> {
