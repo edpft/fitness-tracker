@@ -93,9 +93,16 @@ parameters and become facts about the world.
 **4. The ordinal programme** (0018), then the allocator: pin, alternation,
 spacing.
 
-**5. Transcribe the cycling programmes.** Base and Peak were read from the API
-on 2026-09-05 and Build on the same day; Discover is not held and its class ids
-have not been asked for. Record what a provider answers when asked for four
+**5. Transcribe the cycling programmes.** Base, Build and Peak were all read
+from the Peloton API on 2026-09-05, which is every programme this tool will use.
+
+**Discover is out of scope, and permanently.** The operator, 2026-09-05: *"it's
+specifically design to introduce the concept of power zones to a new rider. it's
+first week has 7 classes over 5 days, including a FTP warm and test pair on day
+2. I don't think it's a programme we're going to be pulling from going
+forwards."* Its ids were never asked for and should not be. It corroborates 0034
+in passing — the introductory programme tests FTP almost first, because a zone is
+a share of a number the rider does not yet have. Record what a provider answers when asked for four
 microcycles as a **set** of options, not one (0029). **The cycling side also
 needs an authored programme that can hold a `Test` microcycle ahead of its
 periodisations**, the way the gym's already does (0016, 0034).
