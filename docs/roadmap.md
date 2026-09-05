@@ -131,9 +131,11 @@ example. Flag it rather than "fix" it back.
 ## Open questions
 
 1. **Which cycling pairing** — Base (8) + Build (4), or Build (4) + Peak (8).
-   Both align three of three, so the fatigue constraint no longer discriminates
-   and what remains is a training judgement. **The operator's, and not urgent
-   until step 5.**
+   Both align three of three against the gym's cycles, so what remains is a
+   training judgement. **The operator's, and not urgent until step 5.** That
+   alignment was worked out by hand on 2026-09-03, not computed: there is no
+   fatigue coherence in the code, so it is a result for the planner to re-derive
+   rather than one it produced.
 2. **Does `--timezone` survive as a per-run override** once the store answers?
    Probably, and it should stop being *required*.
 3. **Is the spacing rule 0018's?** The one thing waiting on the operator.
