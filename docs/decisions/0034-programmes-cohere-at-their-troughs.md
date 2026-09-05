@@ -238,9 +238,16 @@ names.
 
 - The planner admits or refuses an arrangement rather than ranking one. Where
   several are admitted the answer is a set, which is what 0029 asked for.
-- `is_three_to_one` stays keyed on `hard_share` and is not rewritten. Ranked
-  within a run of four, TSS and `hard_share` agree on Build and on Peak; the
-  disagreement reported in issue #71 came of comparing a five-microcycle shape
-  against a four-microcycle window.
+- ~~`is_three_to_one` stays keyed on `hard_share` and is not rewritten.~~
+  **Amended 2026-09-05, the same day.** Written on the belief that `hard_share`
+  sufficed, because ranked within a run of four it agrees with TSS on Build and
+  on Peak — the disagreement reported in issue #71 came of comparing a
+  five-microcycle shape against a four-microcycle window. But it cannot see
+  *Boost Your Base* at all, whose hard shares are eight zeros, so a rule keyed on
+  it cannot find the mesocycles this decision's own calendar rests on.
+  `is_three_to_one` is replaced by `cycling::shape::mesocycles`, which takes any
+  sequence of scores and asks the question this decision actually states: does
+  the run end at its bottom level, with something above it. Handed hard shares it
+  reproduces the old answers; handed TSS it finds Base's two mesocycles.
 - The cycling side needs an authored programme that can hold a `Test` microcycle
   ahead of its periodisations, the way the gym's already does.

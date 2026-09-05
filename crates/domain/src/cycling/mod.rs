@@ -28,7 +28,7 @@ pub use programme::{
 };
 pub use seed::{InvalidCyclingSeed, peak_your_power_zones};
 pub use session::{CyclingSession, Interval, Ride, clock};
-pub use shape::{ZoneProfile, diverges, is_three_to_one};
+pub use shape::{ZoneProfile, bottom_level, diverges, mesocycles};
 pub use zone::{
     Ftp, FtpProvenance, InvalidFtp, PowerZone, UnknownZone, WattRange, Watts, ZoneBand,
 };

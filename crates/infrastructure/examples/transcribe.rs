@@ -17,7 +17,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use domain::cycling::{PowerZone, ZoneProfile, diverges, is_three_to_one};
+use domain::cycling::{PowerZone, ZoneProfile, diverges, mesocycles};
 use infrastructure::peloton::{
     auth::{PelotonAuth, PelotonCredentials},
     class::{ClassSession, PelotonClasses},
@@ -161,7 +161,6 @@ fn derivation(placed: &[Placed]) {
         }
     }
 
-    let mut mesocycles: Vec<Option<(u32, u32)>> = Vec::new();
     for candidate in &candidates {
         print!("  {:<10}", label(candidate, &sessions));
         let mut shares = Vec::new();
@@ -170,16 +169,7 @@ fn derivation(placed: &[Placed]) {
             shares.push(share);
             print!("{share:>6.0}%");
         }
-        let mesocycle = microcycles.windows(4).enumerate().find_map(|(at, window)| {
-            let run = shares.get(at..at + 4)?;
-            let (first, last) = (window.first()?, window.last()?);
-            is_three_to_one(run).then_some((*first, *last))
-        });
-        match mesocycle {
-            Some((from, to)) => println!("   µ{from}–{to}"),
-            None => println!("   none"),
-        }
-        mesocycles.push(mesocycle);
+        println!("   {}", found(&shares, &microcycles));
     }
 
     // **The same microcycles weighed the other way** (issue #71). Hard share
@@ -193,17 +183,19 @@ fn derivation(placed: &[Placed]) {
     for micro in &microcycles {
         print!("{:>7}", format!("µ{micro}"));
     }
-    println!("    min");
+    println!("   mesocycles");
 
+    let mut windows: Vec<Option<(u32, u32)>> = Vec::new();
     for candidate in &candidates {
         print!("  {:<10}", label(candidate, &sessions));
-        let mut ridden = 0_u64;
+        let mut scores = Vec::new();
         for micro in &microcycles {
-            let profile = microcycle(placed, *micro, candidate);
-            ridden += profile.total();
-            print!("{:>7.0}", profile.tss());
+            let score = microcycle(placed, *micro, candidate).tss();
+            scores.push(score);
+            print!("{score:>7.0}");
         }
-        println!("{:>7}", ridden / 60);
+        println!("   {}", found(&scores, &microcycles));
+        windows.push(first_window(&scores, &microcycles));
     }
 
     // **Scored over the mesocycle the candidate answers with**, not over the
@@ -215,7 +207,7 @@ fn derivation(placed: &[Placed]) {
     // records 8.5. Where no 3:1 run is found there is no mesocycle to score
     // against and the whole programme is used, which the column says.
     println!("\ndivergence from the same microcycles taken whole\n");
-    for (candidate, mesocycle) in candidates.iter().zip(&mesocycles) {
+    for (candidate, mesocycle) in candidates.iter().zip(&windows) {
         let span = mesocycle.map_or_else(
             || {
                 (
@@ -251,6 +243,28 @@ fn over(placed: &[Placed], (from, to): (u32, u32), sessions: &[u32]) -> ZoneProf
             .filter(|entry| sessions.contains(&entry.session))
             .filter_map(|entry| entry.class.ride.as_ref()),
     )
+}
+
+/// Every mesocycle a run of scores contains, named by microcycle.
+fn found(scores: &[f64], microcycles: &[u32]) -> String {
+    let runs = mesocycles(scores, 4);
+    if runs.is_empty() {
+        return "none".to_owned();
+    }
+    runs.iter()
+        .filter_map(|run| {
+            let from = microcycles.get(run.start)?;
+            let to = microcycles.get(run.end - 1)?;
+            Some(format!("µ{from}–{to}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The first mesocycle, for scoring divergence against (decision 0032).
+fn first_window(scores: &[f64], microcycles: &[u32]) -> Option<(u32, u32)> {
+    let run = mesocycles(scores, 4).into_iter().next()?;
+    Some((*microcycles.get(run.start)?, *microcycles.get(run.end - 1)?))
 }
 
 /// The zone profile of one microcycle, taking only the sessions asked for.

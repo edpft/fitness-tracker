@@ -16,7 +16,7 @@
 use domain::{
     cycling::{
         CycleDay, CyclingSession, Ftp, FtpProvenance, Interval, PowerZone, Ride, Selection, Watts,
-        ZoneProfile, peak_your_power_zones,
+        ZoneProfile, bottom_level, mesocycles, peak_your_power_zones,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
 };
@@ -373,5 +373,99 @@ fn the_ftp_test_scores_nothing() {
     assert!(
         scored.abs() < f64::EPSILON,
         "an effort names no zone, so it scores nothing — scored {scored}"
+    );
+}
+
+/// TSS per microcycle, read from the Peloton API on 2026-09-05 by
+/// `infrastructure/examples/transcribe.rs`. All three sessions of each.
+const BASE: [f64; 8] = [50.0, 86.0, 111.0, 49.0, 116.0, 131.0, 148.0, 79.0];
+const PEAK: [f64; 8] = [114.0, 124.0, 126.0, 113.0, 129.0, 132.0, 160.0, 61.0];
+const BUILD: [f64; 5] = [108.0, 123.0, 129.0, 141.0, 63.0];
+
+#[test]
+fn the_bottom_level_is_the_operators_reading_of_each_shape() {
+    // His own words for these, 2026-09-05: Peak µ1-4 is 1-2-2-1, Base µ1-4 is
+    // 1-2-3-1, Peak µ5-8 is 2-3-4-1. Only where the 1s fall is derived here.
+    assert_eq!(
+        bottom_level(&PEAK[0..4]),
+        [true, false, false, true],
+        "1-2-2-1 opens and closes at the bottom"
+    );
+    assert_eq!(
+        bottom_level(&BASE[0..4]),
+        [true, false, false, true],
+        "1-2-3-1 does too"
+    );
+    assert_eq!(
+        bottom_level(&PEAK[4..8]),
+        [false, false, false, true],
+        "2-3-4-1 opens above the bottom"
+    );
+}
+
+#[test]
+fn reordering_within_a_level_does_not_change_the_shape() {
+    // The operator, 2026-09-05: "if the numbers were the other way around and
+    // they went 113, 126, 124, 114, they still would be" a 1-2-2-1. **This is
+    // the test that says a level is not a rank**: swapping 113 with 114 and 124
+    // with 126 exchanges the strict minimum and must change nothing.
+    let stated = [114.0, 124.0, 126.0, 113.0];
+    let reordered = [113.0, 126.0, 124.0, 114.0];
+
+    assert_eq!(bottom_level(&stated), bottom_level(&reordered));
+    assert_eq!(
+        mesocycles(&stated, 4).len(),
+        mesocycles(&reordered, 4).len()
+    );
+}
+
+#[test]
+fn every_programme_yields_the_mesocycles_it_is_said_to_have() {
+    assert_eq!(
+        mesocycles(&PEAK, 4),
+        vec![0..4, 4..8],
+        "Peak is two of four"
+    );
+    assert_eq!(mesocycles(&BASE, 4), vec![0..4, 4..8], "so is Base");
+
+    // **Build is five microcycles answering four** (decision 0032), and only
+    // µ2-5 qualifies: µ1-4 peaks last and so has no deload to end on.
+    assert_eq!(mesocycles(&BUILD, 4), vec![1..5]);
+}
+
+#[test]
+fn base_is_the_programme_a_threshold_count_cannot_see() {
+    // Boost Your Base contains no zone four at all, so its hard shares are eight
+    // zeros — the failure issue #71 opened on. Scored by TSS the same eight
+    // microcycles carry two mesocycles.
+    let hard_shares = [0.0; 8];
+
+    assert!(
+        mesocycles(&hard_shares, 4).is_empty(),
+        "a flat row of zeros has no working microcycle, so no mesocycle"
+    );
+    assert_eq!(mesocycles(&BASE, 4).len(), 2);
+}
+
+#[test]
+fn a_run_of_any_requested_length_can_be_asked_for() {
+    // Issue #71 asks a programme for *n* microcycles, not always four.
+    assert_eq!(
+        mesocycles(&BUILD, 5),
+        vec![0..5],
+        "Build's own shape is five"
+    );
+    assert_eq!(
+        mesocycles(&BUILD, 2),
+        vec![3..5],
+        "and its last two are one too"
+    );
+    assert!(
+        mesocycles(&BUILD, 0).is_empty(),
+        "a run of nothing is not a run"
+    );
+    assert!(
+        mesocycles(&BUILD, 9).is_empty(),
+        "nor is one longer than the programme"
     );
 }
