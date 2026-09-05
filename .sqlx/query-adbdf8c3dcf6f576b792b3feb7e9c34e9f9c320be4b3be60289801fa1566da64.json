@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT reference AS \"reference!: String\", called AS \"called!: String\"\n        FROM cycling_venue\n        WHERE programme = ? AND microcycle = ? AND session = ?\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_venue",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "called!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_venue",
+            "name": "called"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "adbdf8c3dcf6f576b792b3feb7e9c34e9f9c320be4b3be60289801fa1566da64"
+}

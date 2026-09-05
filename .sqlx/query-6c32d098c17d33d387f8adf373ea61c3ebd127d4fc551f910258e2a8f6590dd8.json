@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT weekday AS \"weekday!: String\", session AS \"session!: i64\"\n        FROM cycling_weekday\n        WHERE programme = ?\n        ORDER BY session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_weekday",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "session!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_weekday",
+            "name": "session"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6c32d098c17d33d387f8adf373ea61c3ebd127d4fc551f910258e2a8f6590dd8"
+}

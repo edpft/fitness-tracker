@@ -6,6 +6,7 @@
 //! integration tests at the port boundaries run against a temporary file
 //! inside the nix sandbox, with no service to start and no network.
 
+pub mod cycling;
 pub mod delivery;
 pub mod history;
 pub mod landing;
@@ -23,6 +24,7 @@ pub mod schedule;
 use application::StoreError;
 use domain::{gym::NormalisationRunId, landing::RunId};
 
+pub use cycling::SqliteCyclingProgrammeStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
 pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;

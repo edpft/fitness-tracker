@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT zone AS \"zone!: i64\", seconds AS \"seconds!: i64\"\n        FROM cycling_interval\n        WHERE programme = ? AND microcycle = ? AND session = ?\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "zone!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_interval",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "seconds!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_interval",
+            "name": "seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "918b47f272c4f87a0c9ca4e4a2390db4a58cc138804478fddf7f82c158a020c2"
+}

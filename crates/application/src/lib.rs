@@ -14,6 +14,7 @@
 //! driven by.
 
 pub mod compare;
+pub mod cycling;
 pub mod deliver;
 pub mod error;
 pub mod extract;
@@ -27,9 +28,9 @@ pub use error::{
     RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    Authored, Clock, Deliverable, Delivered, Delivery, DeliveryReference, DerivationStatus,
-    DerivationStatusReporter, DestinationName, DiaryAuthor, DiaryStore, EventBatch,
-    ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FulfilledSession,
+    Authored, Clock, CyclingProgrammeStore, Deliverable, Delivered, Delivery, DeliveryReference,
+    DerivationStatus, DerivationStatusReporter, DestinationName, DiaryAuthor, DiaryStore,
+    EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FulfilledSession,
     GenerationParameterStore, Issuance, LadderStanding, LandingRecordReader, LandingStore,
     LastPerformance, NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore,
     Performance, PerformedSetSummary, PerformedWorkoutReader, PrescribedWorkoutId,

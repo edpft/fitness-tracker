@@ -72,11 +72,38 @@ impl PelotonClass {
     /// Built from the `classId` alone — see the module note on what is stripped.
     #[must_use]
     pub fn url(&self) -> String {
-        format!(
-            "https://members.onepeloton.co.uk/classes/cycling?modal=classDetailsModal&classId={}",
-            self.class_id
-        )
+        url_for(self.class_id)
     }
+}
+
+/// Where the operator opens a class, from its identifier alone.
+///
+/// **A free function because an authored ride carries a reference and not a
+/// row.** What a prescription holds is the class id the programme was authored
+/// against, which may name a class no table here lists — every class of *Boost
+/// Your Base* and *Power Zone Build* is exactly that. The link is a function of
+/// the id, so it needs no table.
+#[must_use]
+pub fn url_for(class_id: &str) -> String {
+    format!(
+        "https://members.onepeloton.co.uk/classes/cycling?modal=classDetailsModal&classId={class_id}"
+    )
+}
+
+/// Whether a class is one this build knows the operator's account cannot start.
+///
+/// **Absence is not availability.** Only the transcribed *Peak Your Power Zones*
+/// table records this, and it records it from what the app showed on two
+/// captures in September — so `false` means "nothing here says otherwise", which
+/// is the honest answer for every class outside that table.
+#[must_use]
+pub fn is_known_unavailable(class_id: &str) -> bool {
+    PEAK_YOUR_POWER_ZONES.iter().any(|session| {
+        session
+            .classes()
+            .iter()
+            .any(|class| class.class_id() == class_id && !class.available())
+    })
 }
 
 /// A session of the programme, and the class or classes that realise it.

@@ -24,9 +24,9 @@ pub use peloton::{MappedSession, PelotonClass};
 pub use programme::{Document, DocumentError};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteCyclingProgrammeStore,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteGenerationParameterStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog,
+    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteProgrammeStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };

@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT session AS \"session!: i64\", warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE programme = ? AND microcycle = ?\n        ORDER BY session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "warm_up_seconds!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "warm_up_seconds"
+          }
+        }
+      },
+      {
+        "name": "cool_down_seconds: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "cool_down_seconds"
+          }
+        }
+      },
+      {
+        "name": "effort_seconds: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "effort_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "3125cc3a959c7c0505d1df200ac4624b5745ea00ac604e14738f8e9b8b00ce74"
+}
