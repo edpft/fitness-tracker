@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/edpft/fitness-tracker/compare/v0.2.0...v0.3.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** one command for the daily loop, under the discipline it belongs to ([#48](https://github.com/edpft/fitness-tracker/issues/48)) ([a0d8260](https://github.com/edpft/fitness-tracker/commit/a0d82606c2898531a86eae0809a4b4e69765ca12))
+* **cli:** performed against prescribed, paired by the id that links them ([#45](https://github.com/edpft/fitness-tracker/issues/45)) ([7b4703a](https://github.com/edpft/fitness-tracker/commit/7b4703ad864e9400dd48c5602e0df8246e92aaaf))
+* **prescribe:** derive every run, and identify a prescription by its shape ([#46](https://github.com/edpft/fitness-tracker/issues/46)) ([7e3355d](https://github.com/edpft/fitness-tracker/commit/7e3355ded6115f556502898bb5eaeae79514b591))
+* the autumn block authors, and its sessions say what they mean ([#53](https://github.com/edpft/fitness-tracker/issues/53)) ([ac98571](https://github.com/edpft/fitness-tracker/commit/ac98571c5698764715ec3129f4f4b2f8bc38661d))
+* the autumn block runs published programmes, gym and cycling ([#51](https://github.com/edpft/fitness-tracker/issues/51)) ([150b861](https://github.com/edpft/fitness-tracker/commit/150b8612014da1d9ebf2bb28bf11401cbba8a769))
+
 ## [0.2.0](https://github.com/edpft/fitness-tracker/compare/v0.1.0...v0.2.0) (2026-08-27)
 
 
