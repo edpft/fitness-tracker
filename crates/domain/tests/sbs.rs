@@ -159,8 +159,60 @@ fn a_repetition_maximum_advances_the_training_maximum() {
     let advanced = advance(achieved, three, increment()).expect("the table names a triple");
     assert_eq!(
         advanced.as_grams(),
-        110_000,
-        "100 / 0.90 is 111.11, and the grid below it is 110.0",
+        112_500,
+        "100 / 0.90 is 111.11, and the grid above it is 112.5",
+    );
+}
+
+/// **A cycle that goes exactly to plan leaves the maximum where it was.**
+///
+/// The property the opposite roundings exist for. Flooring both ends ran a
+/// perfect cycle from 92.5kg to 85kg, and three of them to 70kg, because the
+/// maximum makes a round trip through the plate grid every repetition-maximum
+/// day and rounding down at both ends loses at both ends.
+#[test]
+fn meeting_every_target_holds_the_maximum() {
+    let step = increment();
+    let mut maximum = Kg::from_grams(92_500);
+    for _ in 0..3 {
+        for count in [8_u32, 5, 3] {
+            let count = reps(count).expect("the table names this count");
+            let share = training_max_share(count).expect("the table names this count");
+            // Exactly what the day prescribes, and no more.
+            let prescribed = working_load(maximum, share, step).expect("the load computes");
+            maximum = advance(prescribed, count, step).expect("the table names this count");
+        }
+    }
+    assert_eq!(
+        maximum.as_grams(),
+        92_500,
+        "three cycles of meeting every target should leave the maximum untouched",
+    );
+}
+
+/// Beating a target still raises it, and missing one still lowers it.
+///
+/// Holding on an exact hit is worth nothing if it holds on a miss too — that was
+/// the flaw in clamping the maximum at its previous value instead.
+#[test]
+fn the_maximum_still_moves_with_the_performance() {
+    let step = increment();
+    let maximum = Kg::from_grams(92_500);
+    let eight = reps(8).expect("eight is a count");
+    let share = training_max_share(eight).expect("the table names eight");
+    let prescribed = working_load(maximum, share, step).expect("the load computes");
+
+    let beaten = advance(Kg::from_grams(prescribed.as_grams() + 2_500), eight, step)
+        .expect("the table names eight");
+    let missed = advance(Kg::from_grams(prescribed.as_grams() - 2_500), eight, step)
+        .expect("the table names eight");
+    assert!(
+        beaten.as_grams() > maximum.as_grams(),
+        "a target beaten raises the maximum",
+    );
+    assert!(
+        missed.as_grams() < maximum.as_grams(),
+        "a target missed lowers it",
     );
 }
 
@@ -217,41 +269,42 @@ fn a_cycle_climbs_off_its_own_repetition_maxima() {
     .expect("an 8RM advances");
     assert_eq!(
         maximum.as_grams(),
-        102_500,
-        "82.5 / 0.80 is 103.125 → 102.5"
+        105_000,
+        "82.5 / 0.80 is 103.125 → 105.0"
     );
 
-    // Week 2: 4×3 at 85% of 102.5 is 87.125 → 85.0.
-    assert_eq!(load_on(2, maximum).as_grams(), 85_000);
+    // Week 2: 4×3 at 85% of 105 is 89.25 → 87.5.
+    assert_eq!(load_on(2, maximum).as_grams(), 87_500);
     maximum = advance(
         Kg::from_grams(90_000),
         reps(5).expect("five is a count"),
         step,
     )
     .expect("a 5RM advances");
-    assert_eq!(maximum.as_grams(), 105_000, "90 / 0.85 is 105.88 → 105.0");
+    assert_eq!(maximum.as_grams(), 107_500, "90 / 0.85 is 105.88 → 107.5");
 
-    // Week 3: 3×1 at 90% of 105 is 94.5 → 92.5.
-    assert_eq!(load_on(3, maximum).as_grams(), 92_500);
+    // Week 3: 3×1 at 90% of 107.5 is 96.75 → 95.0.
+    assert_eq!(load_on(3, maximum).as_grams(), 95_000);
     maximum = advance(
         Kg::from_grams(97_500),
         reps(3).expect("three is a count"),
         step,
     )
     .expect("a 3RM advances");
-    assert_eq!(maximum.as_grams(), 107_500, "97.5 / 0.90 is 108.3 → 107.5");
+    assert_eq!(maximum.as_grams(), 110_000, "97.5 / 0.90 is 108.3 → 110.0");
 
-    // Week 4 day 1: 3×3 at 75% of 107.5 is 80.625 → 80.
+    // Week 4 day 1: 3×3 at 75% of 110 is 82.5.
     let taper = load_on(4, maximum);
-    assert_eq!(taper.as_grams(), 80_000);
+    assert_eq!(taper.as_grams(), 82_500);
 
     // **The taper is a taper in percentage and not in kilograms.** Week 1 opened
-    // at 80 kg from 80% of 100; week 4 asks 80 kg from 75% of 107.5. The
-    // operator was told this and confirmed it (decision 0024).
-    assert_eq!(
-        taper.as_grams(),
-        load_on(1, Kg::from_grams(100_000)).as_grams(),
-        "five points lighter against a maximum seven and a half kilos heavier",
+    // at 80 kg from 80% of 100; week 4 asks 82.5 kg from 75% of 110. Five points
+    // lighter as a share, and heavier on the bar, because the maximum moved ten
+    // kilos underneath it. The operator was told this and confirmed it
+    // (decision 0024).
+    assert!(
+        taper.as_grams() >= load_on(1, Kg::from_grams(100_000)).as_grams(),
+        "a taper in percentage is not a taper in kilograms",
     );
 }
 
@@ -284,10 +337,10 @@ fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
         "an untrained cycle stands where it was authored",
     );
 
-    // Week 1's eight-rep day made 82.5. 82.5 / 0.80 is 103.125 → 102.5.
+    // Week 1's eight-rep day made 82.5. 82.5 / 0.80 is 103.125 → 105.0.
     assert_eq!(
         maximum_after(opening, &[(1, Kg::from_grams(82_500))], step).as_grams(),
-        102_500,
+        105_000,
     );
 
     // And week 2's five-rep day made 90. Applied in order, on top of the first.
@@ -298,8 +351,8 @@ fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
             step,
         )
         .as_grams(),
-        105_000,
-        "90 / 0.85 is 105.88 → 105.0, from the maximum week 1 left behind",
+        107_500,
+        "90 / 0.85 is 105.88 → 107.5, from the maximum week 1 left behind",
     );
 }
 
@@ -311,7 +364,7 @@ fn a_week_nobody_trained_leaves_the_maximum_where_it_was() {
     // Week 1 skipped, week 2 trained. The week 2 result still advances, off the
     // opening rather than off a week that never happened.
     let skipped = maximum_after(opening, &[(2, Kg::from_grams(90_000))], step);
-    assert_eq!(skipped.as_grams(), 105_000);
+    assert_eq!(skipped.as_grams(), 107_500);
 }
 
 #[test]
@@ -345,7 +398,7 @@ fn week_two_is_a_share_of_what_week_one_produced() {
 
     assert_eq!(
         load.as_grams(),
-        85_000,
-        "85% of 102.5 is 87.125, floored to the grid at 85.0",
+        87_500,
+        "85% of 105 is 89.25, floored to the grid at 87.5",
     );
 }

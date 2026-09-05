@@ -38,6 +38,7 @@ pub mod steps;
 pub mod succession;
 pub mod target;
 pub mod test;
+pub mod warmup;
 pub mod workout;
 
 pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
@@ -81,4 +82,5 @@ pub use succession::{
 };
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
+pub use warmup::ramp as warmup_ramp;
 pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};

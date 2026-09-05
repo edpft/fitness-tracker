@@ -10,7 +10,7 @@
 //! asking the programme which slot is primary rather than by anything about the
 //! exercise filling it.
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use domain::{
     gym::{
@@ -29,6 +29,7 @@ use domain::{
         sbs::chart::{
             day as sbs_day, maximum_after as sbs_maximum_after, training_max_share, working_load,
         },
+        warmup_ramp,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -1557,7 +1558,19 @@ fn primary_sets(
         PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
         PrimaryLoad::Attempt { toward, .. } | PrimaryLoad::RepMax { toward, .. } => toward,
     };
-    for step in parameters.warmup.iter() {
+    // **The ramp's repetition counts follow the top set's** (decision 0030), but
+    // only where the top set is maximal: a percentage day states a submaximal
+    // load, so its ramp has nothing to rehearse. The stored ramp is the floor in
+    // both cases, so a low count leaves it exactly as authored.
+    let ramp = match plan {
+        PrimaryLoad::RepMax { reps, .. } | PrimaryLoad::Attempt { reps, .. } => {
+            Cow::Owned(warmup_ramp(&parameters.warmup, reps))
+        }
+        PrimaryLoad::TopSet { .. } | PrimaryLoad::Across { .. } => {
+            Cow::Borrowed(&parameters.warmup)
+        }
+    };
+    for step in ramp.iter() {
         sets.push(PrescribedSet::warmup(
             Load::Absolute(steps.quantise_loaded(step.of_top_set.of(toward))),
             Target::Exactly(step.reps),
@@ -1593,36 +1606,121 @@ fn primary_sets(
                 ));
             }
         }
-        PrimaryLoad::Attempt { reps, .. } => {
-            sets.push(PrescribedSet::autoregulated(
-                Target::Exactly(reps),
-                domain::gym::Rir::Zero,
-            ));
+        PrimaryLoad::Attempt { toward, reps } => {
+            // **The target is in the plan, so it is printed.** The ramp above is
+            // built as a share of exactly this number, so omitting it left the
+            // operator working up to something the session had already decided
+            // and would not say.
+            //
+            // Decision 0011 keeps the target out of `programme show`, and that
+            // still holds: there it is a *projection* for a week that has not
+            // happened, and every session between now and then can move it. A
+            // prescription is issued for one date against the record as it
+            // stands, which is the moment the number is knowable.
+            //
+            // Nothing caps it. Going past is the outcome the day exists to
+            // produce, and zero in reserve is what says so.
+            sets.push(
+                PrescribedSet::fixed(Load::Absolute(toward), Target::Exactly(reps))
+                    .with_effort(domain::gym::Rir::Zero),
+            );
         }
         PrimaryLoad::RepMax {
+            toward,
             reps,
             back_off_sets,
             back_off_reps,
-            ..
         } => {
-            // The top set finds the maximum: an attempt, open at the top, like
-            // any other.
-            sets.push(PrescribedSet::autoregulated(
-                Target::Exactly(reps),
-                domain::gym::Rir::Zero,
-            ));
-            // **And the back-offs carry no load either**, because the load is
-            // the set above's result. They are not autoregulated in the sense
-            // the top set is — nothing about them is taken to failure — but the
-            // prescription genuinely cannot name a number, and a range of
-            // repetitions at an unstated load is exactly what the chart says.
+            // **A set, not a work-up.** The working up is done by the time the
+            // bar is loaded: decision 0030's ramp reaches `n − 3` repetitions at
+            // 90% of this load, so what remains is one set at a stated weight
+            // taken to nothing in reserve. Prescribing it as autoregulated —
+            // load open, work up to it — described a session that no longer
+            // happens, and hid the number the chart had already derived.
+            //
+            // Working up re-enters only if this set turns out *not* to be at
+            // zero in reserve, and that is a decision in the room. The record
+            // carries what was actually lifted and `maximum_after` reads it, so
+            // nothing is lost by the plan declining to predict it.
+            sets.push(
+                PrescribedSet::fixed(Load::Absolute(toward), Target::Exactly(reps))
+                    .with_effort(domain::gym::Rir::Zero),
+            );
+            // The chart's `3 × 5–6 @ 8RM`, at the same load. Autoregulating
+            // these said they were taken to failure, which the chart does not
+            // ask and the operator does not do.
             for _ in 0..back_off_sets.as_u32() {
-                sets.push(PrescribedSet::autoregulated(
-                    back_off_reps,
-                    domain::gym::Rir::Zero,
-                ));
+                sets.push(PrescribedSet::fixed(Load::Absolute(toward), back_off_reps));
             }
         }
     }
     sets
+}
+
+#[cfg(test)]
+mod ramp_tests {
+    //! The ramp before a maximal top set follows its repetition count
+    //! (decision 0030), and the ramp before a submaximal one does not.
+    //!
+    //! Here rather than in `infrastructure/tests` because [`primary_sets`] is
+    //! private and needs no port: it turns a [`PrimaryLoad`] into sets and
+    //! nothing else. What an SBS *cycle* prescribes end to end cannot be tested
+    //! at all yet — the store's `template` CHECK does not admit `sbs`.
+
+    use super::{PrimaryLoad, primary_sets};
+    use domain::{
+        gym::{Kg, RepCount},
+        prescription::{LoadSteps, SessionRole, seed::seed},
+    };
+
+    fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+        let parameters = seed()?;
+        let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
+        let sets = primary_sets(plan, &parameters, SessionRole::Heavy, &steps);
+        Ok(sets
+            .iter()
+            .filter(|set| set.warmup)
+            .filter_map(|set| match set.prescription {
+                domain::prescription::Prescribed::Fixed { measure, .. } => {
+                    Some(measure.minimum().as_u32())
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
+    #[test]
+    fn the_eight_rep_maximum_ramps_eight_eight_six_five() {
+        let plan = PrimaryLoad::RepMax {
+            toward: Kg::from_grams(75_000),
+            reps: RepCount::new(8).expect("eight is a repetition count"),
+            back_off_sets: RepCount::new(3).expect("three is a set count"),
+            back_off_reps: domain::prescription::Target::between(
+                RepCount::new(5).expect("five is a repetition count"),
+                RepCount::new(6).expect("six is a repetition count"),
+            )
+            .expect("five to six is a range"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![8, 8, 6, 5]);
+    }
+
+    #[test]
+    fn the_one_rep_test_keeps_the_stored_ramp() {
+        let plan = PrimaryLoad::Attempt {
+            toward: Kg::from_grams(92_500),
+            reps: RepCount::new(1).expect("one is a repetition count"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_percentage_day_keeps_the_stored_ramp_however_many_reps_it_runs() {
+        // 5 × 5 @ 80% is not a maximum, so its ramp has nothing to rehearse.
+        let plan = PrimaryLoad::Across {
+            load: Kg::from_grams(74_000),
+            sets: RepCount::new(5).expect("five is a set count"),
+            reps: RepCount::new(5).expect("five is a repetition count"),
+        };
+        assert_eq!(reps_of(plan).expect("the seed builds"), vec![4, 3, 2, 1]);
+    }
 }

@@ -950,8 +950,26 @@ fn set_line<M: std::fmt::Display + domain::gym::Spans>(
         // relative-zero ("plain bodyweight" — a pull-up, where assistance and
         // added weight are both conventional), and only the second is worth a
         // word on the line.
-        Prescribed::Fixed { load, measure, .. } if unloaded(*load) => format!("{measure}"),
-        Prescribed::Fixed { load, measure, .. } => format!("{measure} @ {}", weight(*load)),
+        Prescribed::Fixed {
+            load,
+            measure,
+            effort,
+        } if unloaded(*load) => effort.as_ref().map_or_else(
+            || format!("{measure}"),
+            |effort| format!("{measure}, {effort} in reserve"),
+        ),
+        // **Effort is guidance on a fixed set, and it is printed.** Until SBS's
+        // repetition-maximum day nothing issued one, so the line dropped it
+        // silently; the day's whole instruction is "eight at this weight with
+        // nothing left", and half of that was going missing.
+        Prescribed::Fixed {
+            load,
+            measure,
+            effort,
+        } => effort.as_ref().map_or_else(
+            || format!("{measure} @ {}", weight(*load)),
+            |effort| format!("{measure} @ {}, {effort} in reserve", weight(*load)),
+        ),
         Prescribed::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }

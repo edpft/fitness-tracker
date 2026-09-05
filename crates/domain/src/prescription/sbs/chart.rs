@@ -199,9 +199,33 @@ pub fn training_max_share(reps: RepCount) -> Option<Percentage> {
 
 /// The training maximum to programme from next week, given what was lifted.
 ///
-/// **Floored to the increment, never rounded up.** The workbook uses `FLOOR`,
-/// and the difference is not cosmetic: rounding up would prescribe a load the
-/// operator has not shown he can hold, every week, compounding.
+/// **Raised to the increment, and this departs from the programme notes.** They
+/// say to round the inference down:
+///
+/// > "if you have a training max of 300 going into the week, and you get 235 for
+/// > a 10RM, increase your max to 235/.75=313. When it's between two 5-pound
+/// > increments, round down. So in this case, you'd use 310."
+///
+/// Their example works only because 300 is a round number. The operator's
+/// counterexample, 2026-09-04: *"295 × 0.75 = 221.25, which rounds down to 220.
+/// 220 ÷ 0.75 = 293.33, which rounds down to 290."* Five pounds a week, lost on
+/// a **perfect** execution.
+///
+/// The maximum makes a round trip through the plate grid every repetition-maximum
+/// day — down through [`working_load`] to a load, back up through here to a
+/// maximum — and rounding down at both ends loses at both ends, amplified by the
+/// division. Flooring both, this chart ran the operator from 92.5kg to 70kg over
+/// the autumn's three cycles while he did exactly what it asked.
+///
+/// **So the two roundings are deliberately opposite, because they are different
+/// acts.** [`working_load`] floors, because it names a load to put on the bar and
+/// must never ask for more than has been shown. This raises, because it infers a
+/// maximum from a load that was *already floored* — rounding down again would
+/// compound the instruction's own rounding into the model.
+///
+/// A cycle where every target is met now holds the maximum where it was; one
+/// where a target is beaten raises it; one where a target is missed lowers it.
+/// None of those was true before.
 ///
 /// `None` where the repetition count is not one the table names, or where the
 /// arithmetic will not fit.
@@ -218,13 +242,21 @@ pub fn advance(achieved: Kg, reps: RepCount, increment: Kg) -> Option<Kg> {
     if step <= 0 {
         return None;
     }
-    let floored = raw - raw.rem_euclid(step);
-    u64::try_from(floored).ok().map(Kg::from_grams)
+    let remainder = raw.rem_euclid(step);
+    let raised = if remainder == 0 {
+        raw
+    } else {
+        raw.checked_add(step.checked_sub(remainder)?)?
+    };
+    u64::try_from(raised).ok().map(Kg::from_grams)
 }
 
 /// The load a percentage day calls for, floored to the increment.
 ///
-/// The same flooring as [`advance`], and for the same reason.
+/// **Floored, and never rounded up.** The workbook floors, and the difference is
+/// not cosmetic: rounding up would prescribe a load the operator has not shown he
+/// can hold, every week, compounding. [`advance`] rounds the other way on
+/// purpose, and its documentation says why.
 #[must_use]
 pub fn working_load(maximum: Kg, share: Percentage, increment: Kg) -> Option<Kg> {
     let raw = i64::try_from(share.of(maximum).as_grams()).ok()?;
