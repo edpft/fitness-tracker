@@ -103,10 +103,21 @@ first week has 7 classes over 5 days, including a FTP warm and test pair on day
 forwards."* Its ids were never asked for and should not be. It corroborates 0034
 in passing — the introductory programme tests FTP almost first, because a zone is
 a share of a number the rider does not yet have. Record what a provider answers when asked for four
-microcycles as a **set** of options, not one (0029). **Build's answer is
-µ1-2-4-5 by sessions 1+3** (0035, amending 0032), and `transcribe skeleton.txt
-4 2` computes it. Peak and Base answer selections that straddle both their
-mesocycles, which is the open question 0035 leaves. **The cycling side also
+microcycles. ~~As a **set** of options, not one (0029)~~ — 0036 settled that it
+is a single answer, the lowest score, because a tie preserves no choice.
+
+**A provider supplies mesocycles, not programmes** (0036), and there are five:
+
+```text
+base 1   µ1-2-3-4  by sessions 2+3     composition  6.0
+base 2   µ5-6-7-8  by sessions 1+2                  1.1
+build    µ1-2-4-5  by sessions 1+3                  5.4
+peak 1   µ1-2-3-4  by sessions 1+3                  5.4
+peak 2   µ5-6-7-8  by sessions 1+3                 14.6
+```
+
+`transcribe <skeleton> 4 2` computes them. The autumn needs three, and both
+pairings 0034 admitted are three. **The cycling side also
 needs an authored programme that can hold a `Test` microcycle ahead of its
 periodisations**, the way the gym's already does (0016, 0034).
 

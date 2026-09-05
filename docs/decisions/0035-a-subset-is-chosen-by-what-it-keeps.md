@@ -175,10 +175,11 @@ takes rather more of that shape apart than 0032 did.
   and 2+3 stops training Z6 and Z7, because session 1 carries the Max Ride. The
   same is true of every 2+3 candidate in the programme. A score that had the
   dropped zones folded into it would have chosen one of them.
-- **It does not yet generalise to a programme of two mesocycles.** Asked for four
-  by two, Peak answers µ3-5-7-8 and Base answers µ2-6-7-8 — selections that
-  straddle both of the programme's own mesocycles, taking one microcycle from the
-  first and three from the second. Each passes both structural checks, because
-  µ8 is a deload and no zone is lost. Whether a selection may cross a mesocycle
-  boundary is not settled, and nothing above answers it: Build has one mesocycle
-  and a lead-in, so the question could not arise there.
+- ~~It does not yet generalise to a programme of two mesocycles.~~
+  **Answered by 0036 the same day, by dissolving the question.** Asked for four
+  by two, Peak answered µ3-5-7-8 and Base µ2-6-7-8 — selections straddling both
+  halves of themselves. That was not a missing constraint but a malformed
+  request: **a provider supplies mesocycles, not programmes**, so an
+  eight-microcycle programme is two answers and never one. Split first and there
+  is no boundary left to cross. Everything above stands — Build is one mesocycle
+  of five, which is why it was the only programme this worked on.

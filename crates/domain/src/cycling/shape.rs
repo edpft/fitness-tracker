@@ -368,12 +368,52 @@ pub fn mesocycles(scores: &[f64], length: usize) -> Vec<std::ops::Range<usize>> 
     scores
         .windows(length)
         .enumerate()
-        .filter(|(_, run)| {
-            let floor = bottom_level(run);
-            let ends_low = floor.last().copied().unwrap_or_default();
-            let has_working = floor.iter().any(|at_bottom| !at_bottom);
-            ends_low && has_working
-        })
+        .filter(|(_, run)| is_mesocycle(run))
         .map(|(at, _)| at..at + length)
         .collect()
+}
+
+/// Whether a run of microcycles is a mesocycle: it ends at its bottom level,
+/// and something in it is above that level.
+///
+/// The second half is what stops a programme with no hard riding anywhere from
+/// reporting a mesocycle at every offset — if everything is at the bottom then
+/// nothing in it is working.
+#[must_use]
+pub fn is_mesocycle(run: &[f64]) -> bool {
+    let floor = bottom_level(run);
+    floor.last().copied().unwrap_or_default() && floor.iter().any(|at_bottom| !at_bottom)
+}
+
+/// The mesocycles a programme is made of, taken in order and without overlap.
+///
+/// **A provider supplies mesocycles, not programmes** (decision 0036). The
+/// operator, 2026-09-05, on why an eight-microcycle programme kept answering a
+/// four-microcycle request with a selection straddling both halves of itself:
+///
+/// > "that's a product of asking programmes of 2x 4 microcycle mesocycles to
+/// > give you 1 4 microcycle mesocycle that represents the entire programme"
+///
+/// Greedy, and shortest-first: take the shortest prefix that is a mesocycle,
+/// then start again after it. **The decomposition the operator states falls out
+/// of this and did not have to be given** — Base and Peak split µ1-4 and µ5-8,
+/// Build stays whole at µ1-5, under TSS and under every two-session selection of
+/// it.
+///
+/// A tail that is no mesocycle is left out rather than forced into one, so the
+/// ranges need not cover `scores`. A caller that needs them to can check.
+#[must_use]
+pub fn partition(scores: &[f64]) -> Vec<std::ops::Range<usize>> {
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < scores.len() {
+        let Some(end) =
+            (at + 1..=scores.len()).find(|end| scores.get(at..*end).is_some_and(is_mesocycle))
+        else {
+            break;
+        };
+        found.push(at..end);
+        at = end;
+    }
+    found
 }

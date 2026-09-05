@@ -17,7 +17,9 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use domain::cycling::{PowerZone, ZoneProfile, diverges, mesocycles, span, zones_lost};
+use domain::cycling::{
+    PowerZone, ZoneProfile, diverges, is_mesocycle, mesocycles, partition, span, zones_lost,
+};
 use infrastructure::peloton::{
     auth::{PelotonAuth, PelotonCredentials},
     class::{ClassSession, PelotonClasses},
@@ -278,88 +280,100 @@ fn over(placed: &[Placed], (from, to): (u32, u32), sessions: &[u32]) -> ZoneProf
 
 /// What this programme answers when asked for `n` microcycles of `m` sessions.
 ///
-/// **Subsets, never permutations** (decision 0035): microcycles may be dropped
-/// but the written order is kept, so nothing here has to be order-aware.
+/// **A provider supplies mesocycles, not programmes** (decision 0036), so the
+/// programme is split first and each mesocycle answers for itself. Asking an
+/// eight-microcycle programme for one four-microcycle shape that represents the
+/// whole of it is the wrong question, and it produced selections straddling both
+/// halves of Base and of Peak.
 ///
-/// Two structural checks refuse a candidate before anything scores it — it must
-/// end at its bottom level, and it must not stop training a zone the programme
-/// trains. What survives is ranked by composition, with span reported beside it.
+/// **Subsets, never permutations** (0035): microcycles may be dropped, the
+/// written order kept. Two structural checks refuse before anything is scored —
+/// the run must end at its bottom level, and it must not stop training a zone
+/// the mesocycle trains. What survives is ranked by composition, lowest wins.
 fn answers(placed: &[Placed], wanted_microcycles: usize, wanted_sessions: usize) {
     let (microcycles, sessions) = (microcycles(placed), sessions(placed));
     if wanted_microcycles == 0 || wanted_sessions == 0 {
         println!("\n\nnothing was asked for");
         return;
     }
-    println!(
-        "\n\nasked for {wanted_microcycles} microcycles of {wanted_sessions} sessions, \
-         from {} of {}\n",
-        microcycles.len(),
-        sessions.len()
-    );
 
-    let whole = ZoneProfile::of(placed.iter().filter_map(|entry| entry.class.ride.as_ref()));
-    println!(
-        "  {:<12}{:<12}{:>7}{:>7}   verdict",
-        "microcycles", "sessions", "compos", "span"
-    );
+    let whole: Vec<f64> = microcycles
+        .iter()
+        .map(|micro| microcycle(placed, *micro, &sessions).tss())
+        .collect();
+    let split = partition(&whole);
 
-    let mut answered = Vec::new();
-    for chosen in subsets(&microcycles, wanted_microcycles) {
-        for taken in subsets(&sessions, wanted_sessions) {
-            let profile = of(placed, &chosen, &taken);
-            let scores: Vec<f64> = chosen
+    println!("\n\nasked for {wanted_microcycles} microcycles of {wanted_sessions} sessions\n");
+    if split.is_empty() {
+        println!("  this programme contains no mesocycle to answer with");
+        return;
+    }
+
+    for (at, run) in split.iter().enumerate() {
+        let within: Vec<u32> = run
+            .clone()
+            .filter_map(|index| microcycles.get(index).copied())
+            .collect();
+        let reference = of(placed, &within, &sessions);
+        println!(
+            "  mesocycle {} — µ{}\n",
+            at + 1,
+            within
                 .iter()
-                .map(|micro| microcycle(placed, *micro, &taken).tss())
-                .collect();
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join("-")
+        );
 
-            let ends_low = !mesocycles(&scores, scores.len()).is_empty();
-            let lost = zones_lost(&profile, &whole);
-            let working = scores.split_last().map_or(&[][..], |(_, rest)| rest);
+        let mut admitted: Vec<(f64, String, String)> = Vec::new();
+        for chosen in subsets(&within, wanted_microcycles) {
+            for taken in subsets(&sessions, wanted_sessions) {
+                let profile = of(placed, &chosen, &taken);
+                let scores: Vec<f64> = chosen
+                    .iter()
+                    .map(|micro| microcycle(placed, *micro, &taken).tss())
+                    .collect();
+                let (mus, ss) = (name(&chosen, "-"), name(&taken, "+"));
+                let lost = zones_lost(&profile, &reference);
 
-            let verdict = if !ends_low {
-                "refused — does not end in a deload".to_owned()
-            } else if !lost.is_empty() {
-                let named: Vec<String> = lost.iter().map(ToString::to_string).collect();
-                format!("refused — stops training {}", named.join(", "))
-            } else {
-                answered.push((diverges(&profile, &whole), chosen.clone(), taken.clone()));
-                String::new()
-            };
-            println!(
-                "  µ{:<11}{:<12}{:>7.1}{:>7}   {verdict}",
-                chosen
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join("-"),
-                taken
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join("+"),
-                diverges(&profile, &whole),
-                span(working).map_or_else(|| "—".to_owned(), |ratio| format!("{ratio:.2}×")),
-            );
+                let verdict = if !is_mesocycle(&scores) {
+                    "refused — does not end in a deload".to_owned()
+                } else if !lost.is_empty() {
+                    let named: Vec<String> = lost.iter().map(ToString::to_string).collect();
+                    format!("refused — stops training {}", named.join(", "))
+                } else {
+                    admitted.push((diverges(&profile, &reference), mus.clone(), ss.clone()));
+                    String::new()
+                };
+                let working = scores.split_last().map_or(&[][..], |(_, rest)| rest);
+                println!(
+                    "    µ{mus:<10}{ss:<8}{:>7.1}{:>7}   {verdict}",
+                    diverges(&profile, &reference),
+                    span(working).map_or_else(|| "—".to_owned(), |ratio| format!("{ratio:.2}×")),
+                );
+            }
+        }
+
+        // **Simply the lowest** (decision 0036). Where two candidates are close
+        // enough to be a tie, the operator's reasoning is that the choice is
+        // therefore immaterial, so there is nothing to preserve by offering both.
+        admitted.sort_by(|a, b| a.0.total_cmp(&b.0));
+        match admitted.first() {
+            Some((score, mus, ss)) => {
+                println!("\n    answers µ{mus} by sessions {ss}, diverging {score:.1}\n");
+            }
+            None => println!("\n    answers nothing — every candidate was refused\n"),
         }
     }
+}
 
-    answered.sort_by(|a, b| a.0.total_cmp(&b.0));
-    match answered.first() {
-        Some((score, chosen, taken)) => println!(
-            "\n  answer: microcycles {} by sessions {}, diverging {score:.1}",
-            chosen
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("-"),
-            taken
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("+"),
-        ),
-        None => println!("\n  answer: none — every candidate was refused"),
-    }
+/// A selection, written the way the tables write it.
+fn name(items: &[u32], between: &str) -> String {
+    items
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(between)
 }
 
 /// Every subset of `items` of the given size, keeping the order they are given.

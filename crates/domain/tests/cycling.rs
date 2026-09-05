@@ -16,7 +16,8 @@
 use domain::{
     cycling::{
         CycleDay, CyclingSession, Ftp, FtpProvenance, Interval, PowerZone, Ride, Selection, Watts,
-        ZoneProfile, bottom_level, diverges, mesocycles, peak_your_power_zones, span, zones_lost,
+        ZoneProfile, bottom_level, diverges, mesocycles, partition, peak_your_power_zones, span,
+        zones_lost,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
 };
@@ -600,5 +601,42 @@ fn a_run_with_nothing_in_it_has_no_span() {
         span(&[0.0, 5.0]),
         None,
         "there is no ratio to take against zero"
+    );
+}
+
+#[test]
+fn a_programme_splits_into_the_mesocycles_the_operator_names() {
+    // His, 2026-09-05: base 1 is µ1-4, base 2 is µ5-8, build is µ1-5, peak 1 is
+    // µ1-4, peak 2 is µ5-8. **None of that is given to the code** — it falls out
+    // of taking the shortest prefix that ends at its bottom level, and repeating.
+    assert_eq!(partition(&BASE), vec![0..4, 4..8]);
+    assert_eq!(partition(&PEAK), vec![0..4, 4..8]);
+    assert_eq!(
+        partition(&BUILD),
+        vec![0..5],
+        "Build is one mesocycle of five, not four and a spare"
+    );
+}
+
+#[test]
+fn a_programme_with_no_deload_splits_into_nothing() {
+    // Four rising microcycles are a progression, not a mesocycle, and forcing a
+    // split would invent a deload the programme does not contain.
+    assert!(partition(&[100.0, 110.0, 120.0, 130.0]).is_empty());
+    assert!(
+        partition(&[0.0; 8]).is_empty(),
+        "and neither is a flat programme, which has no working microcycle"
+    );
+}
+
+#[test]
+fn a_tail_that_is_no_mesocycle_is_left_out_rather_than_forced() {
+    // Build's five, then two rising microcycles going nowhere.
+    let trailing = [108.0, 123.0, 129.0, 141.0, 63.0, 100.0, 120.0];
+
+    assert_eq!(
+        partition(&trailing),
+        vec![0..5],
+        "the mesocycle is found and the tail is not made into one"
     );
 }
