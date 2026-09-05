@@ -34,6 +34,15 @@ sbs-2              sbs   2026-10-19  4 weeks  → 2026-11-15
 sbs-3              sbs   2026-11-16  4 weeks  → 2026-12-13
 ```
 
+**Both disciplines open with a test microcycle and run three mesocycles of
+four** (0034). Thirteen weeks against thirteen, starting the same day:
+
+```text
+              week 1        weeks 2-13
+gym       entry test    3 SBS cycles of 4
+cycling   FTP test      3 mesocycles of 4
+```
+
 **Both disciplines prescribe a session today.** The gym runs the whole loop —
 authored programme in the store, prescription, delivery to Hevy. `cycling next`
 prints a full session from the transcribed Peloton programme: warm-up, the
@@ -84,9 +93,12 @@ parameters and become facts about the world.
 **4. The ordinal programme** (0018), then the allocator: pin, alternation,
 spacing.
 
-**5. Transcribe the cycling programmes.** Peloton's Build, and Base if that
-pairing is chosen. Record what a provider answers when asked for four
-microcycles as a **set** of options, not one (0029).
+**5. Transcribe the cycling programmes.** Base and Peak were read from the API
+on 2026-09-05 and Build on the same day; Discover is not held and its class ids
+have not been asked for. Record what a provider answers when asked for four
+microcycles as a **set** of options, not one (0029). **The cycling side also
+needs an authored programme that can hold a `Test` microcycle ahead of its
+periodisations**, the way the gym's already does (0016, 0034).
 
 **6. The planner, the span view, and `fitness next`.** The tool takes a span, the
 providers, the primary lift and a session count per discipline per microcycle,
@@ -104,6 +116,10 @@ deliverable the other five exist for.
 - **0027** dissolved the old open question *"what anchors a programme that
   follows another?"* rather than answering it. A programme is a shape; the
   numbers come from the record.
+- **0034** made coherence a constraint rather than an objective: the planner
+  admits or refuses an arrangement instead of ranking one. That shrinks step 6 —
+  there is no scoring function to design — and it fixed Build at four
+  microcycles from a direction unrelated to 0032's.
 - **2026-09-04** added step 0 and finished it in the same day — see below.
 
 ## What 2026-09-04 changed
@@ -134,11 +150,14 @@ example. Flag it rather than "fix" it back.
 ## Open questions
 
 1. **Which cycling pairing** — Base (8) + Build (4), or Build (4) + Peak (8).
-   Both align three of three against the gym's cycles, so what remains is a
-   training judgement. **The operator's, and not urgent until step 5.** That
-   alignment was worked out by hand on 2026-09-03, not computed: there is no
-   fatigue coherence in the code, so it is a result for the planner to re-derive
-   rather than one it produced.
+   **0034 checked both and admits both**, so the choice is now known to be
+   unforced rather than merely unanswered: every gym test week lands on a cycling
+   test or deload either way. Still the operator's judgement, and it gained one
+   input it did not have — Base carries no FTP test of its own, so
+   `test + Base(8) + Build(4)` re-anchors the zones at weeks 1 and 13 where
+   `test + Build(4) + Peak(8)` does it at 1, 5 and 13. Eleven weeks on one FTP is
+   the cost of the first. The hand-worked alignment of 2026-09-03 has now been
+   computed rather than asserted.
 2. **Does `--timezone` survive as a per-run override** once the store answers?
    Probably, and it should stop being *required*.
 3. **Is the spacing rule 0018's?** The one thing waiting on the operator.
@@ -152,7 +171,10 @@ settings (2026-09-03, no TOML); zone minimums are independent floors
 load); Peloton is reachable and serves class content and the performed record but
 not programme structure (2026-09-05, 0033).
 
-**Reopened by 0033**: the FTP work. It was taken off the list on 2026-09-03
+**Due, not merely reopened** (0033 reopened it, 0034 dates it): the FTP work.
+The block cannot start without a fresh value — every zone in twelve weeks of
+prescription is a share of a number whose most recent reading is nearly eight
+weeks stale by 14 September. It was taken off the list on 2026-09-03
 because the need arrived with Peloton ingestion; Peloton ingestion now exists,
 and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 **172 on 2026-07-22**, each the twenty-minute test's average output × 0.95. An
