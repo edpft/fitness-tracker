@@ -11,6 +11,7 @@ mod cycling;
 mod gym;
 mod output;
 mod paths;
+mod plan;
 mod prescribing;
 mod scheduling;
 mod setup;
@@ -132,6 +133,7 @@ fn command() -> ClapCommand {
         .subcommand(init_command())
         .subcommand(discipline_command())
         .subcommand(cycling_command())
+        .subcommand(plan_command())
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(compare_command())
@@ -190,6 +192,40 @@ fn discipline_command() -> ClapCommand {
 /// 0025 settled that Peloton should be both, and it is not yet. Adding a
 /// catalogue entry pointing at streams that do not exist would make the shape
 /// look finished while `next` could only ever prescribe.
+/// `plan` — generate a hybrid programme from the providers and the constraints.
+fn plan_command() -> ClapCommand {
+    ClapCommand::new("plan")
+        .about("Generate a hybrid programme from a gym provider and a cycling provider")
+        .arg(
+            Arg::new("start")
+                .long("start")
+                .value_name("date")
+                .required(true)
+                .help("The Monday the block begins, as YYYY-MM-DD"),
+        )
+        .arg(
+            Arg::new("microcycles")
+                .long("microcycles")
+                .value_name("count")
+                .default_value("4")
+                .help("Microcycles per mesocycle"),
+        )
+        .arg(
+            Arg::new("cycling-sessions")
+                .long("cycling-sessions")
+                .value_name("count")
+                .default_value("2")
+                .help("Cycling sessions per microcycle"),
+        )
+        .arg(
+            Arg::new("gym-sessions")
+                .long("gym-sessions")
+                .value_name("count")
+                .default_value("2")
+                .help("Gym sessions per microcycle"),
+        )
+}
+
 fn cycling_command() -> ClapCommand {
     ClapCommand::new("cycling")
         .about("What is done on a bike: which ride is next, and what it means in watts")
@@ -694,6 +730,7 @@ async fn authored_command(
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
         "cycling" => Some(cycling_command_run(sub)),
+        "plan" => Some(plan_command_run(sub).await),
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
@@ -787,6 +824,32 @@ async fn discipline_command_run(
         next.get_one::<String>("date").map(String::as_str),
         access,
         credentials,
+    )
+    .await
+}
+
+/// `plan`, once its arguments are in hand.
+async fn plan_command_run(sub: &ArgMatches) -> Result<(), Failure> {
+    let count = |name: &str| -> Result<usize, Failure> {
+        sub.get_one::<String>(name)
+            .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))?
+            .parse::<usize>()
+            .map_err(|error| {
+                Failure::message(format!("--{name} is not a count: {error}"), exit::USAGE)
+            })
+    };
+    let Some(start) = sub.get_one::<String>("start") else {
+        return Err(Failure::message("no --start given", exit::USAGE));
+    };
+    let start = start.parse::<jiff::civil::Date>().map_err(|error| {
+        Failure::message(format!("{start:?} is not a date: {error}"), exit::USAGE)
+    })?;
+
+    plan::generate(
+        start,
+        count("microcycles")?,
+        count("cycling-sessions")?,
+        count("gym-sessions")?,
     )
     .await
 }

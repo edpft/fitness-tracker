@@ -417,3 +417,212 @@ pub fn partition(scores: &[f64]) -> Vec<std::ops::Range<usize>> {
     }
     found
 }
+
+/// A published programme as a grid: what each microcycle and session trains.
+///
+/// **This is what a provider is asked** (decisions 0029, 0036). It holds zone
+/// profiles and no identifiers — which class realises a cell is the adapter's
+/// business (§ II.3) — so the same type serves any source that can say how long
+/// was spent in which zone.
+#[derive(Debug, Clone, Default)]
+pub struct Programme {
+    cells: BTreeMap<(u32, u32), ZoneProfile>,
+}
+
+/// What a mesocycle answers when asked for a smaller shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    /// The microcycles kept, in the programme's own order.
+    pub microcycles: Vec<u32>,
+    /// The sessions kept, likewise.
+    pub sessions: Vec<u32>,
+    /// How far its composition sits from the mesocycle taken whole. Lower wins.
+    pub composition: f64,
+    /// How far its working microcycles climb, hardest over easiest.
+    pub span: Option<f64>,
+}
+
+/// Why a candidate was refused before it could be scored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refused {
+    /// It does not end at its bottom level, so it is a progression rather than
+    /// a mesocycle.
+    NoDeload,
+    /// It stops training something the mesocycle trains.
+    StopsTraining(Vec<PowerZone>),
+}
+
+impl Programme {
+    /// Build from `(microcycle, session)` cells. Absent cells are empty.
+    pub fn new(cells: impl IntoIterator<Item = ((u32, u32), ZoneProfile)>) -> Self {
+        Self {
+            cells: cells.into_iter().collect(),
+        }
+    }
+
+    fn ordered(&self, of: impl Fn(&(u32, u32)) -> u32) -> Vec<u32> {
+        let mut seen: Vec<u32> = self.cells.keys().map(&of).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        seen
+    }
+
+    /// Every microcycle, in order.
+    #[must_use]
+    pub fn microcycles(&self) -> Vec<u32> {
+        self.ordered(|(microcycle, _)| *microcycle)
+    }
+
+    /// Every session position, in order.
+    #[must_use]
+    pub fn sessions(&self) -> Vec<u32> {
+        self.ordered(|(_, session)| *session)
+    }
+
+    /// The zone profile of a selection.
+    #[must_use]
+    pub fn profile(&self, microcycles: &[u32], sessions: &[u32]) -> ZoneProfile {
+        let mut total = ZoneProfile::default();
+        for ((microcycle, session), profile) in &self.cells {
+            if microcycles.contains(microcycle) && sessions.contains(session) {
+                for (zone, seconds) in profile.iter() {
+                    *total.0.entry(zone).or_default() += seconds;
+                }
+            }
+        }
+        total
+    }
+
+    /// The mesocycles this programme is made of, each as its microcycles.
+    ///
+    /// Scored by [`tss`](ZoneProfile::tss) across every session, and split by
+    /// [`partition`].
+    #[must_use]
+    pub fn mesocycles(&self) -> Vec<Vec<u32>> {
+        let (microcycles, sessions) = (self.microcycles(), self.sessions());
+        let scores: Vec<f64> = microcycles
+            .iter()
+            .map(|micro| self.profile(&[*micro], &sessions).tss())
+            .collect();
+        partition(&scores)
+            .into_iter()
+            .map(|run| {
+                run.filter_map(|index| microcycles.get(index).copied())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What one mesocycle answers when asked for `microcycles` of `sessions`.
+    ///
+    /// Every candidate that survives both structural checks, best first. Empty
+    /// where none does. **The answer is the first**, and there is no set: the
+    /// operator settled on 2026-09-05 that where two score alike the choice is
+    /// immaterial, so there is nothing to preserve by offering both (0036).
+    #[must_use]
+    pub fn answer(&self, mesocycle: &[u32], microcycles: usize, sessions: usize) -> Vec<Answer> {
+        let mut admitted: Vec<Answer> = self
+            .candidates(mesocycle, microcycles, sessions)
+            .into_iter()
+            .filter_map(
+                |(chosen, taken)| match self.refuse(mesocycle, &chosen, &taken) {
+                    Some(_) => None,
+                    None => Some(self.score(mesocycle, chosen, taken)),
+                },
+            )
+            .collect();
+        admitted.sort_by(|a, b| a.composition.total_cmp(&b.composition));
+        admitted
+    }
+
+    /// Every candidate, refused or not, with the reason where there is one.
+    ///
+    /// For showing the work: [`answer`](Self::answer) drops the refusals.
+    #[must_use]
+    pub fn considered(
+        &self,
+        mesocycle: &[u32],
+        microcycles: usize,
+        sessions: usize,
+    ) -> Vec<(Answer, Option<Refused>)> {
+        self.candidates(mesocycle, microcycles, sessions)
+            .into_iter()
+            .map(|(chosen, taken)| {
+                let refused = self.refuse(mesocycle, &chosen, &taken);
+                (self.score(mesocycle, chosen, taken), refused)
+            })
+            .collect()
+    }
+
+    fn candidates(
+        &self,
+        mesocycle: &[u32],
+        microcycles: usize,
+        sessions: usize,
+    ) -> Vec<(Vec<u32>, Vec<u32>)> {
+        let taken = subsets(&self.sessions(), sessions);
+        subsets(mesocycle, microcycles)
+            .into_iter()
+            .flat_map(|chosen| {
+                taken
+                    .iter()
+                    .map(move |sessions| (chosen.clone(), sessions.clone()))
+            })
+            .collect()
+    }
+
+    fn refuse(&self, mesocycle: &[u32], chosen: &[u32], taken: &[u32]) -> Option<Refused> {
+        let sessions = self.sessions();
+        let scores: Vec<f64> = chosen
+            .iter()
+            .map(|micro| self.profile(&[*micro], taken).tss())
+            .collect();
+        if !is_mesocycle(&scores) {
+            return Some(Refused::NoDeload);
+        }
+        let lost = zones_lost(
+            &self.profile(chosen, taken),
+            &self.profile(mesocycle, &sessions),
+        );
+        (!lost.is_empty()).then_some(Refused::StopsTraining(lost))
+    }
+
+    fn score(&self, mesocycle: &[u32], microcycles: Vec<u32>, sessions: Vec<u32>) -> Answer {
+        let reference = self.profile(mesocycle, &self.sessions());
+        let composition = diverges(&self.profile(&microcycles, &sessions), &reference);
+        let scores: Vec<f64> = microcycles
+            .iter()
+            .map(|micro| self.profile(&[*micro], &sessions).tss())
+            .collect();
+        let working = scores.split_last().map_or(&[][..], |(_, rest)| rest);
+        Answer {
+            span: span(working),
+            microcycles,
+            sessions,
+            composition,
+        }
+    }
+}
+
+/// Every subset of `items` of the given size, keeping the order they are given.
+///
+/// **Subsets, never permutations** (decision 0035): a microcycle may be dropped
+/// but the written order is kept. Recursive rather than index arithmetic,
+/// because indexing can panic and panics are forbidden here.
+fn subsets(items: &[u32], size: usize) -> Vec<Vec<u32>> {
+    if size == 0 {
+        return vec![Vec::new()];
+    }
+    let Some((first, rest)) = items.split_first() else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec<u32>> = subsets(rest, size - 1)
+        .into_iter()
+        .map(|mut including| {
+            including.insert(0, *first);
+            including
+        })
+        .collect();
+    out.extend(subsets(rest, size));
+    out
+}
