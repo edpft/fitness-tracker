@@ -10,6 +10,11 @@
 //! needs in order to name where the ride is done.
 
 pub mod auth;
+pub mod class;
 pub mod mapping;
+pub mod provider;
+pub mod skeleton;
 
+pub use class::{ClassSession, PelotonClasses};
 pub use mapping::{MappedSession, PEAK_YOUR_POWER_ZONES, PelotonClass};
+pub use skeleton::{Placement, Skeleton};

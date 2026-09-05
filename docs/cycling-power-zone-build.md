@@ -40,6 +40,39 @@ corroborated by the source rather than by us.
 122 of his 153 riding days carry more than one class. A session is one or more
 classes, and this table does not show the second one.
 
+## The classes, by identifier
+
+**The `classId` is the whole of what names a class** — not the title, not the
+instructor, both of which repeat within this programme. Supplied by the operator
+on 2026-09-05 and read from the API the same day; every row below reproduced the
+table above exactly.
+
+The `code` parameter of the share link the app produces is **deliberately
+absent**, as it is for Peak: it decodes to two further identifiers, one of them
+plausibly the operator's own Peloton user id, so it is not repository content.
+
+| µ | s | class id |
+|---|---|---|
+| 1 | 1 | `9f8f3af689cc4f0db9afa013d4676ed6` |
+| 1 | 2 | `44867a5486184a09b8ca135a6d8c7494` |
+| 1 | 3 | `e825140788a84d31b3948419e50bedb5` |
+| 2 | 1 | `7fa9796be8484c9987122d357de25fc7` |
+| 2 | 2 | `49c2c7626aba4effa39b53b85c0e16f6` |
+| 2 | 3 | `d3d85447e9d14ea29344a002823a82ca` |
+| 3 | 1 | `a5f95a660f5b4a84ac6a86aa4468ea1d` |
+| 3 | 2 | `daa6ce2d3a454d1c82937fa926a59db4` |
+| 3 | 3 | `414a518108ea4c5cada00ab9899a9d8d` |
+| 4 | 1 | `4c2110dd4de74c9b9a4a4e9176501702` |
+| 4 | 2 | `47ad3764fbfb4774967958874465bee4` |
+| 4 | 3 | `1b768ee376c546ae92493d8301eeec85` |
+| 5 | 1 | `725d618516674f7581d4d566fe3f0655` |
+| 5 | 2 | `4355cbf8734648c1a26c2f6d354035c5` |
+| 5 | 3 | `1eabf70b20744f48b99259f93889ced5` — 10 min FTP Warm Up Ride |
+| 5 | 3 | `4d302bef49574118a071269bed38bd30` — 20 min FTP Test Ride |
+
+**Sixteen classes, fifteen sessions.** The last is two, because the test class
+carries no warm-up of its own (decision 0033).
+
 ## The intervals, in order
 
 **µ1 s1 — 45 min Power Zone Endurance Ride, Matt Wilpers**  

@@ -166,6 +166,26 @@ pub struct ZoneBand {
     upper: Option<u16>,
 }
 
+/// Where zone one is taken to sit when a plan is scored.
+///
+/// **One of only two invented numbers in this file, and it was checked rather
+/// than chosen.** Zone one has no floor, so it has no midpoint, and scoring a
+/// zone plan needs one. Across the whole of *Boost Your Base* — twenty-four
+/// classes, in which zone one is 2.6% of the riding — moving this anywhere
+/// between 40 and 55 changes no microcycle's [`tss`] by a whole point, and
+/// changes no ordering and no arc. 45 is the number the operator's scratchpad
+/// used, so the figures he has already seen reproduce exactly.
+///
+/// [`tss`]: crate::cycling::ZoneProfile::tss
+const ZONE_ONE_MIDPOINT_PERCENT: f64 = 45.0;
+
+/// Where zone seven is taken to sit when a plan is scored.
+///
+/// The other invented number, and it matters less still. The only zone seven in
+/// anything read so far is the fifteen seconds of the *Power Zone Max Ride*,
+/// worth 0.9 TSS at 150 and 1.7 at 200 against a microcycle scoring 141.
+const ZONE_SEVEN_MIDPOINT_PERCENT: f64 = 170.0;
+
 impl ZoneBand {
     const fn upto(upper: u16) -> Self {
         Self {
@@ -194,6 +214,26 @@ impl ZoneBand {
 
     pub const fn upper_percent(self) -> Option<u16> {
         self.upper
+    }
+
+    /// The share of FTP this band is scored at, as one number.
+    ///
+    /// **The midpoint, except where there is no midpoint to take.** Zones one
+    /// and seven are open at one end by design — see this type's own note — so
+    /// each answers with a stated constant instead. Both constants were checked
+    /// against the programmes read so far for how far they move the answer, and
+    /// neither moves it enough to change anything.
+    #[must_use]
+    pub fn midpoint_percent(self) -> f64 {
+        match (self.lower, self.upper) {
+            (Some(lower), Some(upper)) => f64::from(lower + upper) / 2.0,
+            (None, Some(_)) => ZONE_ONE_MIDPOINT_PERCENT,
+            (Some(_), None) => ZONE_SEVEN_MIDPOINT_PERCENT,
+            // No zone is open at both ends, so this is unreachable — but § 26
+            // forbids asserting that with a panic, and FTP itself is the one
+            // answer that assumes nothing.
+            (None, None) => 100.0,
+        }
     }
 
     /// What this band is in watts, for a rider at `ftp`.

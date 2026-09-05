@@ -50,6 +50,16 @@ sessions 1+2   17.5    arc 22% → 51% → 45% → 0%
 sessions 2+3   24.9    arc  0% → 14% → 37% → 0%
 ```
 
+**Amended 2026-09-05, after Build was re-read from the API with the operator's
+own class ids.** The figures above reproduce exactly, but only over **µ2–5** —
+the mesocycle being answered — and not over the whole five-microcycle programme,
+which gives 6.0, 15.5 and 20.0. The prose above says "the programme's own
+proportions" and is loose: **µ2–5 is the right window and these are the right
+numbers.** Once the microcycles are chosen, the question is which *sessions*
+represent them, so the candidate is compared against the same microcycles taken
+whole. Including µ1 mixes in a microcycle the candidate does not cover. The
+ranking is identical either way and 1+3 wins decisively in both.
+
 Sessions 1+2 doubles microcycle 3. Sessions 2+3 erases microcycle 2 entirely.
 
 ## Why the correction was needed
