@@ -95,6 +95,15 @@ Build µ2-5                95%    105%    124%      0%             µ4
 between 3% and 9% gives the same answer in all five mesocycles. Recorded at 5%,
 in the middle of a fivefold berth.
 
+**And the bottom level does not depend on which sessions are ridden**, which
+matters because the operator rides twice a week and the figures here are the
+three-session ones. Base, Peak and Build were all read from the API on
+2026-09-05 and every mesocycle scored four ways — all three sessions, and each of
+1+2, 1+3 and 2+3. **The last microcycle of every mesocycle is at the bottom level
+in all twenty scorings.** The membership widens once — Peak µ1-4 taken as
+sessions 2+3 reads 81, 82, 87, 81, which puts µ2 at the bottom too — and that
+widens what the rule admits without disturbing what it requires.
+
 **The full 1-2-3-4 labelling is the operator's reading and is not derived here.**
 Peak µ5-8's 129 and 132 are two per cent apart and are levels 2 and 3; Peak
 µ1-4's 124 and 126 are two per cent apart and are one level. Nothing in the
@@ -208,10 +217,6 @@ not settled here.
 **Two agreeing criteria are corroboration, not proof.** 0032's divergence score
 and this rule both put Build at four microcycles, and both are heuristics the
 operator has agreed with rather than results anyone has demonstrated.
-
-**Build was scored from issue #71's figures rather than read live.** Base and
-Peak were read from the Peloton API on 2026-09-05; Build's class ids are not held
-in this repository, so its TSS is taken on trust from the issue.
 
 **The 5% tolerance is this agent's**, even though the separation it sits in is
 the data's.

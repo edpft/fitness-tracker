@@ -17,7 +17,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use domain::cycling::{PowerZone, Ride, ZoneProfile, diverges, is_three_to_one};
+use domain::cycling::{PowerZone, ZoneProfile, diverges, is_three_to_one};
 use infrastructure::peloton::{
     auth::{PelotonAuth, PelotonCredentials},
     class::{ClassSession, PelotonClasses},
@@ -161,7 +161,7 @@ fn derivation(placed: &[Placed]) {
         }
     }
 
-    let whole = ZoneProfile::of(rides(placed, &sessions));
+    let mut mesocycles: Vec<Option<(u32, u32)>> = Vec::new();
     for candidate in &candidates {
         print!("  {:<10}", label(candidate, &sessions));
         let mut shares = Vec::new();
@@ -179,6 +179,7 @@ fn derivation(placed: &[Placed]) {
             Some((from, to)) => println!("   µ{from}–{to}"),
             None => println!("   none"),
         }
+        mesocycles.push(mesocycle);
     }
 
     // **The same microcycles weighed the other way** (issue #71). Hard share
@@ -205,26 +206,51 @@ fn derivation(placed: &[Placed]) {
         println!("{:>7}", ridden / 60);
     }
 
-    println!("\ndivergence from the whole programme's zone profile\n");
-    for candidate in candidates.iter().filter(|c| **c != sessions) {
-        let profile = ZoneProfile::of(rides(placed, candidate));
+    // **Scored over the mesocycle the candidate answers with**, not over the
+    // whole programme. Once the microcycles are chosen the question is which
+    // *sessions* represent them, so the candidate is compared against the same
+    // microcycles taken whole; including one the candidate does not cover mixes
+    // in a different question. Decision 0032's figures are this window, and
+    // reading Build over all five microcycles instead gives 6.0 where 0032
+    // records 8.5. Where no 3:1 run is found there is no mesocycle to score
+    // against and the whole programme is used, which the column says.
+    println!("\ndivergence from the same microcycles taken whole\n");
+    for (candidate, mesocycle) in candidates.iter().zip(&mesocycles) {
+        let span = mesocycle.map_or_else(
+            || {
+                (
+                    microcycles.first().copied().unwrap_or(0),
+                    microcycles.last().copied().unwrap_or(0),
+                )
+            },
+            |window| window,
+        );
+        let profile = over(placed, span, candidate);
+        let whole = over(placed, span, &sessions);
+        let window = format!(
+            "µ{}–{}{}",
+            span.0,
+            span.1,
+            if mesocycle.is_some() { "" } else { ", no 3:1" }
+        );
         println!(
-            "  sessions {:<8} {:>6.1}   {}",
-            candidate
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("+"),
+            "  {:<10} {:>6.1}   over {window:<14}{}",
+            label(candidate, &sessions),
             diverges(&profile, &whole),
             shares_line(&profile)
         );
     }
-    println!(
-        "  {:<17} {:>6.1}   {}",
-        "all sessions",
-        0.0,
-        shares_line(&whole)
-    );
+}
+
+/// The zone profile of a run of microcycles, taking only the sessions asked for.
+fn over(placed: &[Placed], (from, to): (u32, u32), sessions: &[u32]) -> ZoneProfile {
+    ZoneProfile::of(
+        placed
+            .iter()
+            .filter(|entry| (from..=to).contains(&entry.microcycle))
+            .filter(|entry| sessions.contains(&entry.session))
+            .filter_map(|entry| entry.class.ride.as_ref()),
+    )
 }
 
 /// The zone profile of one microcycle, taking only the sessions asked for.
@@ -247,13 +273,6 @@ fn label(candidate: &[u32], every: &[u32]) -> String {
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join("+")
-}
-
-fn rides<'a>(placed: &'a [Placed], sessions: &'a [u32]) -> impl Iterator<Item = &'a Ride> {
-    placed
-        .iter()
-        .filter(move |entry| sessions.contains(&entry.session))
-        .filter_map(|entry| entry.class.ride.as_ref())
 }
 
 fn shares_line(profile: &ZoneProfile) -> String {
