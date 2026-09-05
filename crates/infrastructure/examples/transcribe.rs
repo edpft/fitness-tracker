@@ -17,7 +17,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use domain::cycling::{PowerZone, ZoneProfile, diverges, mesocycles};
+use domain::cycling::{PowerZone, ZoneProfile, diverges, mesocycles, span, zones_lost};
 use infrastructure::peloton::{
     auth::{PelotonAuth, PelotonCredentials},
     class::{ClassSession, PelotonClasses},
@@ -39,7 +39,12 @@ fn clock(seconds: u64) -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
         .nth(1)
-        .ok_or("usage: transcribe <skeleton file>")?;
+        .ok_or("usage: transcribe <skeleton file> [microcycles] [sessions]")?;
+    // **The request** (decision 0035). Absent, the programme is only described.
+    let request = match (std::env::args().nth(2), std::env::args().nth(3)) {
+        (Some(micro), Some(session)) => Some((micro.parse::<usize>()?, session.parse::<usize>()?)),
+        _ => None,
+    };
     let skeleton = std::fs::read_to_string(&path)?;
     let email = std::env::var("PELOTON_EMAIL")?;
     let password = std::env::var("PELOTON_PASSWORD")?;
@@ -77,6 +82,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     report(&placed);
+    if let Some((wanted_microcycles, wanted_sessions)) = request {
+        answers(&placed, wanted_microcycles, wanted_sessions);
+    }
     Ok(())
 }
 
@@ -133,13 +141,24 @@ fn transcription(placed: &[Placed]) {
     );
 }
 
+/// Every microcycle the skeleton places a class in, in order.
+fn microcycles(placed: &[Placed]) -> Vec<u32> {
+    let mut seen: Vec<u32> = placed.iter().map(|entry| entry.microcycle).collect();
+    seen.sort_unstable();
+    seen.dedup();
+    seen
+}
+
+/// Every session position the skeleton uses, in order.
+fn sessions(placed: &[Placed]) -> Vec<u32> {
+    let mut seen: Vec<u32> = placed.iter().map(|entry| entry.session).collect();
+    seen.sort_unstable();
+    seen.dedup();
+    seen
+}
+
 fn derivation(placed: &[Placed]) {
-    let microcycles: Vec<u32> = {
-        let mut seen: Vec<u32> = placed.iter().map(|entry| entry.microcycle).collect();
-        seen.sort_unstable();
-        seen.dedup();
-        seen
-    };
+    let microcycles = microcycles(placed);
 
     println!("\nhard work (Z4+) as a share of each microcycle's riding\n");
     print!("  {:<10}", "sessions");
@@ -148,12 +167,7 @@ fn derivation(placed: &[Placed]) {
     }
     println!("   3:1?");
 
-    let sessions: Vec<u32> = {
-        let mut seen: Vec<u32> = placed.iter().map(|entry| entry.session).collect();
-        seen.sort_unstable();
-        seen.dedup();
-        seen
-    };
+    let sessions = sessions(placed);
     let mut candidates: Vec<Vec<u32>> = vec![sessions.clone()];
     for (index, first) in sessions.iter().enumerate() {
         for second in sessions.iter().skip(index + 1) {
@@ -258,6 +272,129 @@ fn over(placed: &[Placed], (from, to): (u32, u32), sessions: &[u32]) -> ZoneProf
             .iter()
             .filter(|entry| (from..=to).contains(&entry.microcycle))
             .filter(|entry| sessions.contains(&entry.session))
+            .filter_map(|entry| entry.class.ride.as_ref()),
+    )
+}
+
+/// What this programme answers when asked for `n` microcycles of `m` sessions.
+///
+/// **Subsets, never permutations** (decision 0035): microcycles may be dropped
+/// but the written order is kept, so nothing here has to be order-aware.
+///
+/// Two structural checks refuse a candidate before anything scores it — it must
+/// end at its bottom level, and it must not stop training a zone the programme
+/// trains. What survives is ranked by composition, with span reported beside it.
+fn answers(placed: &[Placed], wanted_microcycles: usize, wanted_sessions: usize) {
+    let (microcycles, sessions) = (microcycles(placed), sessions(placed));
+    if wanted_microcycles == 0 || wanted_sessions == 0 {
+        println!("\n\nnothing was asked for");
+        return;
+    }
+    println!(
+        "\n\nasked for {wanted_microcycles} microcycles of {wanted_sessions} sessions, \
+         from {} of {}\n",
+        microcycles.len(),
+        sessions.len()
+    );
+
+    let whole = ZoneProfile::of(placed.iter().filter_map(|entry| entry.class.ride.as_ref()));
+    println!(
+        "  {:<12}{:<12}{:>7}{:>7}   verdict",
+        "microcycles", "sessions", "compos", "span"
+    );
+
+    let mut answered = Vec::new();
+    for chosen in subsets(&microcycles, wanted_microcycles) {
+        for taken in subsets(&sessions, wanted_sessions) {
+            let profile = of(placed, &chosen, &taken);
+            let scores: Vec<f64> = chosen
+                .iter()
+                .map(|micro| microcycle(placed, *micro, &taken).tss())
+                .collect();
+
+            let ends_low = !mesocycles(&scores, scores.len()).is_empty();
+            let lost = zones_lost(&profile, &whole);
+            let working = scores.split_last().map_or(&[][..], |(_, rest)| rest);
+
+            let verdict = if !ends_low {
+                "refused — does not end in a deload".to_owned()
+            } else if !lost.is_empty() {
+                let named: Vec<String> = lost.iter().map(ToString::to_string).collect();
+                format!("refused — stops training {}", named.join(", "))
+            } else {
+                answered.push((diverges(&profile, &whole), chosen.clone(), taken.clone()));
+                String::new()
+            };
+            println!(
+                "  µ{:<11}{:<12}{:>7.1}{:>7}   {verdict}",
+                chosen
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join("-"),
+                taken
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join("+"),
+                diverges(&profile, &whole),
+                span(working).map_or_else(|| "—".to_owned(), |ratio| format!("{ratio:.2}×")),
+            );
+        }
+    }
+
+    answered.sort_by(|a, b| a.0.total_cmp(&b.0));
+    match answered.first() {
+        Some((score, chosen, taken)) => println!(
+            "\n  answer: microcycles {} by sessions {}, diverging {score:.1}",
+            chosen
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join("-"),
+            taken
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join("+"),
+        ),
+        None => println!("\n  answer: none — every candidate was refused"),
+    }
+}
+
+/// Every subset of `items` of the given size, keeping the order they are given.
+///
+/// **Subsets, never permutations** (decision 0035): a microcycle may be dropped
+/// but the written order is kept, so this only ever leaves things out. Built by
+/// recursion rather than by index arithmetic, because indexing can panic and
+/// panics are forbidden.
+///
+/// A size of zero yields one empty subset, which is what makes the recursion
+/// terminate. Callers asking for nothing are refused before they get here.
+fn subsets(items: &[u32], size: usize) -> Vec<Vec<u32>> {
+    if size == 0 {
+        return vec![Vec::new()];
+    }
+    let Some((first, rest)) = items.split_first() else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec<u32>> = subsets(rest, size - 1)
+        .into_iter()
+        .map(|mut including| {
+            including.insert(0, *first);
+            including
+        })
+        .collect();
+    out.extend(subsets(rest, size));
+    out
+}
+
+/// The zone profile of a set of microcycles, taking only the sessions asked for.
+fn of(placed: &[Placed], chosen: &[u32], taken: &[u32]) -> ZoneProfile {
+    ZoneProfile::of(
+        placed
+            .iter()
+            .filter(|entry| chosen.contains(&entry.microcycle) && taken.contains(&entry.session))
             .filter_map(|entry| entry.class.ride.as_ref()),
     )
 }
