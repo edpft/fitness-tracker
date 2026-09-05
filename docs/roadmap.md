@@ -91,7 +91,9 @@ otherwise be written twice.
 parameters and become facts about the world.
 
 **4. The ordinal programme** (0018), then the allocator: pin, alternation,
-spacing.
+spacing. **Remove `Prescribed::Autoregulated` while here** — it has had no
+producer since 2026-09-04 and the operator settled on 2026-09-05 that it goes.
+It is a migration.
 
 **5. Transcribe the cycling programmes.** Base, Build and Peak were all read
 from the Peloton API on 2026-09-05, which is every programme this tool will use.
@@ -168,23 +170,26 @@ which the chart does not ask.
 arithmetic, whose own rule has the same flaw hidden behind a round worked
 example. Flag it rather than "fix" it back.
 
-## Open questions
+## Nothing is open
 
-1. **Which cycling pairing** — Base (8) + Build (4), or Build (4) + Peak (8).
-   **0034 checked both and admits both**, so the choice is now known to be
-   unforced rather than merely unanswered: every gym test week lands on a cycling
-   test or deload either way. Still the operator's judgement, and it gained one
-   input it did not have — Base carries no FTP test of its own, so
-   `test + Base(8) + Build(4)` re-anchors the zones at weeks 1 and 13 where
-   `test + Build(4) + Peak(8)` does it at 1, 5 and 13. Eleven weeks on one FTP is
-   the cost of the first. The hand-worked alignment of 2026-09-03 has now been
-   computed rather than asserted.
-2. **Does `--timezone` survive as a per-run override** once the store answers?
-   Probably, and it should stop being *required*.
-3. **Is the spacing rule 0018's?** The one thing waiting on the operator.
-4. **Does `Prescribed::Autoregulated` come out?** It has had no producer since
-   2026-09-04: every session now states a load. Removing it is a migration, so
-   it waits until the model has clearly settled.
+Four things sat here as "open questions" until 2026-09-05, when the operator
+pointed out that none of them was one. **An open question is only open if
+resolving it unblocks something** — the criterion is in `CLAUDE.md` and it
+applies to `docs/decisions/` as well.
+
+- **Which cycling pairing** — `base 1, base 2, build` or `build, peak 1, peak 2`.
+  *"that's not a question, that's a programming choice."* 0034 admits both. The
+  one input the tool can offer: Base carries no FTP test of its own, so the first
+  re-anchors the zones at weeks 1 and 13 where the second does it at 1, 5 and 13.
+- **Is the spacing rule 0018's?** 0018's own worked example answers it — Monday
+  gym, Wednesday cycling, Friday gym, Sunday cycling leaves a clear day before
+  the heavy session.
+- **Does `--timezone` survive as a per-run override?** The scheduler already owns
+  the zone: `schedule.rs` resolves arithmetic through the calendar's IANA zone
+  and a test pins that it uses the calendar's rather than the machine's. Whether
+  the CLI keeps a flag once the store holds the setting is a consequence.
+- **Does `Prescribed::Autoregulated` come out?** Yes — *"we're not using it."*
+  It is a migration, so it is a **task** and is in the order above, not here.
 
 Answered and kept here only because a session may go looking: credentials and
 settings (2026-09-03, no TOML); zone minimums are independent floors

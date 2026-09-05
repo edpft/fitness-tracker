@@ -29,6 +29,19 @@ or worse, quietly contradicts one.
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.
 
+  **Write one only when there was a decision to make.** The operator's advice,
+  2026-09-05, after this agent produced three records in a day: a decision record
+  earns its place when there was genuine disagreement about approach — between
+  contributors, or with a position someone held and changed. *"if there was only
+  ever one answer, there was no decision to make."* Being wrong and then being
+  corrected is not a disagreement; it is one party catching up, and it belongs in
+  a commit message rather than in a numbered record.
+
+  **The same test governs open questions**, wherever they are parked: a question
+  is only open if resolving it unblocks something. A thing nobody needs an answer
+  to before shipping is not an open question, and a choice that is the operator's
+  to make whenever he likes is not one either — it is a programming choice.
+
 **Write things down as they are settled, not at the end.** A long session holds
 a great deal of reasoning that exists nowhere else, and the remedy is not a
 better memory — it is a commit. If something was decided in conversation and is
