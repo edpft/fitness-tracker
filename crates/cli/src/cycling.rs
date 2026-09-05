@@ -21,7 +21,10 @@
 use std::path::Path;
 
 use domain::{
-    cycling::{CyclingProgramme, CyclingSession, Ftp, PlannedRide, Ride, SessionPosition, clock},
+    cycling::{
+        CyclingMicrocycle, CyclingProgramme, CyclingSession, Ftp, PlannedRide, Ride,
+        SessionPosition, clock,
+    },
     gym::PositiveDuration,
 };
 use infrastructure::{SqliteCyclingProgrammeStore, connect};
@@ -97,14 +100,20 @@ fn report(
     session: &CyclingSession,
     ftp: Option<Ftp>,
 ) {
-    let published = programme
-        .microcycle(microcycle)
-        .map(|one| one.from().to_string())
-        .unwrap_or_default();
+    // **Both numbers are the programme's own, and the provenance line carries
+    // the published ones.** Microcycle 3 of 4 may be Build's fourth, and session
+    // 2 of 2 may be its third; printing the published numbering as the headline
+    // is what had a two-session week reporting "session 3".
+    let week = programme.microcycle(microcycle);
+    let sessions = week.map_or(0, CyclingMicrocycle::session_count);
+    let published = week.map_or_else(String::new, |one| {
+        format!("{} session {}", one.from(), planned.published_session())
+    });
     println!(
-        "{} — microcycle {microcycle} of {}, {position}",
+        "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
         programme.name(),
         programme.duration_weeks(),
+        position_number = position.as_u8(),
     );
     println!("{}, {date}   {published}", weekday_name(date.weekday()));
     println!();

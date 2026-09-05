@@ -27,6 +27,7 @@ fn ride(
     zone: PowerZone,
     seconds: u64,
     called: &str,
+    published_session: u32,
 ) -> Result<PlannedRide, Box<dyn std::error::Error>> {
     let duration = PositiveDuration::from_seconds(seconds)?;
     let session = CyclingSession::new(
@@ -35,7 +36,11 @@ fn ride(
         Some(PositiveDuration::from_seconds(60)?),
     );
     let venue = RideVenue::new("0bc8a790d8ca49cc8355cc7411842ca9", called)?;
-    Ok(PlannedRide::new(session, NonEmpty::of(venue, Vec::new())))
+    Ok(PlannedRide::new(
+        session,
+        NonEmpty::of(venue, Vec::new()),
+        published_session,
+    ))
 }
 
 /// A microcycle riding sessions 1 and 3, taken from a published microcycle.
@@ -43,11 +48,11 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
     let rides = [
         (
             SessionPosition::new(1)?,
-            ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride")?,
+            ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride", 1)?,
         ),
         (
-            SessionPosition::new(3)?,
-            ride(PowerZone::Four, 2400, "60 min Power Zone Ride")?,
+            SessionPosition::new(2)?,
+            ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3)?,
         ),
     ];
     Ok(CyclingMicrocycle::new(
@@ -66,7 +71,7 @@ fn programme() -> Result<CyclingProgramme, Box<dyn std::error::Error>> {
     ])?;
     let weekdays = CyclingWeekdays::new(vec![
         (Weekday::Wednesday, SessionPosition::new(1)?),
-        (Weekday::Sunday, SessionPosition::new(3)?),
+        (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
     Ok(CyclingProgramme::new(
         ProgrammeName::try_from("cycling-1")?,
@@ -120,11 +125,40 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
         .on(date(2026, 10, 11))
         .expect("the third Sunday rides");
     assert_eq!(number, 3, "three weeks after the start is microcycle three");
-    assert_eq!(position.as_u8(), 3);
+    assert_eq!(position.as_u8(), 2, "Sunday is the second ride of the week");
+    assert_eq!(
+        ride.published_session(),
+        3,
+        "and it is the published third session, which is not what it is called",
+    );
     assert_eq!(
         ride.session().ride().duration().as_seconds(),
         2400,
         "Sunday takes the longer ride",
+    );
+}
+
+/// **The week counts its own sessions and remembers the published ones.** The
+/// operator rides two of the three a microcycle states, and those two are his
+/// first and second — reporting the second as "session 3" is what he caught on
+/// 2026-09-05.
+#[test]
+fn a_week_counts_its_own_sessions_and_keeps_the_published_numbers() {
+    let programme = programme().expect("the fixture programme is valid");
+    let week = programme.microcycle(1).expect("the first microcycle");
+
+    assert_eq!(week.session_count(), 2, "two rides, so two of two");
+    let ours: Vec<u8> = week.rides().keys().map(|at| at.as_u8()).collect();
+    assert_eq!(ours, vec![1, 2], "numbered from one, in the order ridden");
+    let published: Vec<u32> = week
+        .rides()
+        .values()
+        .map(PlannedRide::published_session)
+        .collect();
+    assert_eq!(
+        published,
+        vec![1, 3],
+        "taken from the published first and third"
     );
 }
 
@@ -170,7 +204,7 @@ fn a_weekday_riding_a_session_no_microcycle_holds_is_refused() {
         .expect("one microcycle is enough");
     let weekdays = CyclingWeekdays::new(vec![(
         Weekday::Friday,
-        SessionPosition::new(2).expect("session two"),
+        SessionPosition::new(3).expect("session three"),
     )])
     .expect("one day is a week");
 
@@ -181,7 +215,10 @@ fn a_weekday_riding_a_session_no_microcycle_holds_is_refused() {
         microcycles,
         weekdays,
     );
-    assert!(refused.is_err(), "the microcycle rides sessions 1 and 3");
+    assert!(
+        refused.is_err(),
+        "the microcycle holds a first and a second"
+    );
 }
 
 /// Two weekdays riding one session would prescribe the same ride twice in a
@@ -225,7 +262,7 @@ fn a_cycling_programme_occupies_the_weeks_it_runs() {
 /// in, and it is applied when a session is prescribed rather than stored.
 #[test]
 fn the_operator_s_own_cool_down_is_added_to_the_class_s() {
-    let planned = ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride")
+    let planned = ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride", 1)
         .expect("the fixture ride is valid");
     let session = planned.session();
     let extended =

@@ -410,9 +410,15 @@ fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
 
 /// Turn an answer into a programme the store can hold.
 ///
-/// The published numbering is kept — an answer of µ1-2-4-5 authors four
-/// microcycles that still say which published ones they are — and the sessions
-/// are mapped onto the schedule's cycling days in order.
+/// **Both axes are renumbered from one and both keep their provenance.** An
+/// answer of µ1-2-4-5 by sessions 1+3 authors four microcycles of two rides, and
+/// each says which published microcycle and which published session it came
+/// from. The operator rides a first and a second session in the week; that they
+/// are the published first and third is a fact about where they were taken from,
+/// not what to call them.
+///
+/// The sessions are mapped onto the schedule's cycling days in the order both
+/// are given: the week's earlier ride to the week's earlier day.
 fn build(
     name: &str,
     authored_at: jiff::Timestamp,
@@ -434,13 +440,14 @@ fn build(
         ));
     }
 
-    let positions = sessions
-        .iter()
-        .map(|session| {
-            u8::try_from(*session)
+    // This programme's own numbering: the first ride of the week is session one
+    // whichever published session it was taken from.
+    let positions = (1..=sessions.len())
+        .map(|ordinal| {
+            u8::try_from(ordinal)
                 .ok()
                 .and_then(|number| SessionPosition::new(number).ok())
-                .ok_or_else(|| Failure::message("a session position beyond a week", exit::USAGE))
+                .ok_or_else(|| Failure::message("more rides than a week can hold", exit::USAGE))
         })
         .collect::<Result<Vec<_>, Failure>>()?;
 
@@ -459,7 +466,7 @@ fn build(
             })?;
             let (ride, at) = provider::session((*number, *session), classes)
                 .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
-            rides.insert(*position, PlannedRide::new(ride, at));
+            rides.insert(*position, PlannedRide::new(ride, at, *session));
         }
         weeks.push(
             CyclingMicrocycle::new(

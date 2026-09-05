@@ -49,13 +49,24 @@ use super::session::CyclingSession;
 
 /// Which session of a microcycle, counting from one.
 ///
-/// **Ordinal, never a weekday** (decision 0018): the published programme states
-/// a first, second and third session and says nothing about Wednesdays. What
-/// maps one onto a calendar day is [`CyclingWeekdays`].
+/// **This programme's own numbering, not the published one.** The operator
+/// rides two of the three sessions a published microcycle states, and those two
+/// are his first and second — the same rule the microcycles follow, where an
+/// answer of µ1-2-4-5 authors a first, second, third and fourth. Which
+/// published session each was is carried by
+/// [`PlannedRide::published_session`], for the same reason
+/// [`PublishedMicrocycle`] exists: it is the way back to what was not chosen.
 ///
-/// No ceiling beyond the type's own. A microcycle's session count is a fact
-/// about a published programme rather than a number to decide here — *Discover*
-/// runs seven sessions in its first week — so nothing is refused that a
+/// Numbering them as published would make the printed line say "session 3" for
+/// the second of two, which is what the operator caught on 2026-09-05.
+///
+/// **Ordinal, never a weekday** (decision 0018): a programme states a first and
+/// a second session and says nothing about Wednesdays. What maps one onto a
+/// calendar day is [`CyclingWeekdays`].
+///
+/// No ceiling beyond the type's own. How many sessions a microcycle holds is a
+/// fact about a published programme rather than a number to decide here —
+/// *Discover* runs seven in its first week — so nothing is refused that a
 /// programme might really contain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SessionPosition(u8);
@@ -152,11 +163,20 @@ impl std::fmt::Display for RideVenue {
 pub struct PlannedRide {
     session: CyclingSession,
     at: NonEmpty<RideVenue>,
+    published_session: u32,
 }
 
 impl PlannedRide {
-    pub const fn new(session: CyclingSession, at: NonEmpty<RideVenue>) -> Self {
-        Self { session, at }
+    pub const fn new(
+        session: CyclingSession,
+        at: NonEmpty<RideVenue>,
+        published_session: u32,
+    ) -> Self {
+        Self {
+            session,
+            at,
+            published_session,
+        }
     }
 
     pub const fn session(&self) -> &CyclingSession {
@@ -166,6 +186,15 @@ impl PlannedRide {
     /// Every place this ride is done, in the order they are ridden.
     pub const fn at(&self) -> &NonEmpty<RideVenue> {
         &self.at
+    }
+
+    /// Which session of the published microcycle this was.
+    ///
+    /// The counterpart of [`PublishedMicrocycle::microcycle`], and kept for the
+    /// same reason: a re-authoring that wants the session the operator did not
+    /// take has to know which one it is asking the provider for.
+    pub const fn published_session(&self) -> u32 {
+        self.published_session
     }
 }
 
@@ -213,7 +242,10 @@ pub enum InvalidMicrocycle {
     NoRides,
 }
 
-/// One week of an authored programme: what is ridden, at which session position.
+/// One week of an authored programme: what is ridden, and in what order.
+///
+/// Keyed on this programme's own session numbering, so the first entry is the
+/// first ride of the week whichever published session it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclingMicrocycle {
     rides: BTreeMap<SessionPosition, PlannedRide>,
@@ -245,6 +277,13 @@ impl CyclingMicrocycle {
 
     pub const fn from(&self) -> &PublishedMicrocycle {
         &self.from
+    }
+
+    /// How many sessions the week holds. What "the second of two" counts
+    /// against.
+    #[must_use]
+    pub fn session_count(&self) -> usize {
+        self.rides.len()
     }
 }
 

@@ -44,8 +44,13 @@ CREATE TABLE cycling_programme (
 -- Which weekday rides which session of the microcycle.
 --
 -- The cycling counterpart of `programme_weekday`, and ordinal where that one is
--- named: the gym's two sessions are a light and a heavy, and a published cycling
--- programme's are a first, a second and a third.
+-- named: the gym's two sessions are a light and a heavy, and a cycling
+-- programme's are a first and a second.
+--
+-- **This programme's own numbering, not the published one.** The operator rides
+-- two of the three sessions a published microcycle states, and they are his
+-- first and second -- the same rule the microcycles follow. Which published
+-- session each was is `cycling_ride.published_session`.
 --
 -- A session is ridden once a week and a weekday rides once, so both are unique.
 CREATE TABLE cycling_weekday (
@@ -96,7 +101,12 @@ CREATE TABLE cycling_microcycle (
 CREATE TABLE cycling_ride (
     programme       INTEGER NOT NULL REFERENCES cycling_programme(id) ON DELETE CASCADE,
     microcycle      INTEGER NOT NULL CHECK (microcycle > 0),
+    -- This programme's own order within the week, from one.
     session         INTEGER NOT NULL CHECK (session > 0),
+    -- Which session of the published microcycle it was, in that programme's own
+    -- numbering. `cycling_microcycle.published_ordinal`'s counterpart, and the
+    -- way back to the session the operator did not take.
+    published_session INTEGER NOT NULL CHECK (published_session > 0),
 
     warm_up_seconds INTEGER NOT NULL CHECK (warm_up_seconds > 0),
     cool_down_seconds INTEGER CHECK (cool_down_seconds IS NULL OR cool_down_seconds > 0),

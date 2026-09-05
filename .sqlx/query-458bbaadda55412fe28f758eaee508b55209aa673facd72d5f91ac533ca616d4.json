@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session AS \"session!: i64\", warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE programme = ? AND microcycle = ?\n        ORDER BY session\n        ",
+  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE programme = ? AND microcycle = ?\n        ORDER BY session\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "warm_up_seconds!: i64",
+        "name": "published_session!: i64",
         "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "published_session"
+          }
+        }
+      },
+      {
+        "name": "warm_up_seconds!: i64",
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "cool_down_seconds: i64",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "effort_seconds: i64",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -54,9 +65,10 @@
     "nullable": [
       false,
       false,
+      false,
       true,
       true
     ]
   },
-  "hash": "3125cc3a959c7c0505d1df200ac4624b5745ea00ac604e14738f8e9b8b00ce74"
+  "hash": "458bbaadda55412fe28f758eaee508b55209aa673facd72d5f91ac533ca616d4"
 }

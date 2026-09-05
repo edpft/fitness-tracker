@@ -50,7 +50,7 @@ macro_rules! run {
 }
 
 /// A ride of several zones in order, at one class.
-fn intervals(reference: &str, called: &str) -> Fallible<PlannedRide> {
+fn intervals(reference: &str, called: &str, published: u32) -> Fallible<PlannedRide> {
     let runs = [
         (PowerZone::One, 300),
         (PowerZone::Three, 600),
@@ -76,6 +76,7 @@ fn intervals(reference: &str, called: &str) -> Fallible<PlannedRide> {
     Ok(PlannedRide::new(
         session,
         NonEmpty::of(RideVenue::new(reference, called)?, Vec::new()),
+        published,
     ))
 }
 
@@ -95,6 +96,7 @@ fn ftp_test() -> Fallible<PlannedRide> {
                 "20 min FTP Test Ride",
             )?],
         ),
+        3,
     ))
 }
 
@@ -102,7 +104,11 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
     let second = if test {
         ftp_test()?
     } else {
-        intervals("414a518108ea4c5cada00ab9899a9d8d", "60 min Power Zone Ride")?
+        intervals(
+            "414a518108ea4c5cada00ab9899a9d8d",
+            "60 min Power Zone Ride",
+            3,
+        )?
     };
     let rides = [
         (
@@ -110,9 +116,12 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
             intervals(
                 "9f8f3af689cc4f0db9afa013d4676ed6",
                 "45 min Power Zone Endurance Ride",
+                1,
             )?,
         ),
-        (SessionPosition::new(3)?, second),
+        // The operator's second ride of the week, taken from the published
+        // third — numbered as his, with the published number kept beside it.
+        (SessionPosition::new(2)?, second),
     ];
     Ok(CyclingMicrocycle::new(
         rides.into_iter().collect(),
@@ -127,7 +136,7 @@ fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible
         .collect::<Fallible<Vec<_>>>()?;
     let weekdays = CyclingWeekdays::new(vec![
         (Weekday::Wednesday, SessionPosition::new(1)?),
-        (Weekday::Sunday, SessionPosition::new(3)?),
+        (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
     Ok(CyclingProgramme::new(
         ProgrammeName::try_from(name)?,

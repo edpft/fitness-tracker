@@ -151,7 +151,9 @@ async fn read_rides(
 ) -> Result<BTreeMap<SessionPosition, PlannedRide>, StoreError> {
     let rows = sqlx::query!(
         r#"
-        SELECT session AS "session!: i64", warm_up_seconds AS "warm_up_seconds!: i64",
+        SELECT session AS "session!: i64",
+               published_session AS "published_session!: i64",
+               warm_up_seconds AS "warm_up_seconds!: i64",
                cool_down_seconds AS "cool_down_seconds: i64",
                effort_seconds AS "effort_seconds: i64"
         FROM cycling_ride
@@ -187,11 +189,14 @@ async fn read_rides(
             }
         };
 
+        let published = u32::try_from(row.published_session)
+            .map_err(|_| corrupt(&"a published session number the domain cannot hold"))?;
         rides.insert(
             position_of(row.session)?,
             PlannedRide::new(
                 domain::cycling::CyclingSession::new(warm_up, ride, cool_down),
                 read_venues(pool, id, microcycle, row.session).await?,
+                published,
             ),
         );
     }
@@ -404,16 +409,19 @@ async fn write_ride(
         Ride::Intervals(_) => None,
     };
 
+    let published = i64::from(planned.published_session());
     sqlx::query!(
         r"
         INSERT INTO cycling_ride (
-            programme, microcycle, session, warm_up_seconds, cool_down_seconds, effort_seconds
+            programme, microcycle, session, published_session,
+            warm_up_seconds, cool_down_seconds, effort_seconds
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ",
         programme,
         microcycle,
         session,
+        published,
         warm_up,
         cool_down,
         effort
