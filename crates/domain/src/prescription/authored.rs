@@ -1,4 +1,4 @@
-//! What the operator answered, and the [`Programme`] it makes.
+//! What the operator answered, and the [`Mesocycle`] it makes.
 //!
 //! **This replaced a document format.** Until 2026-09-06 a programme was a TOML
 //! file: the wizard asked its questions, wrote one, and the reader parsed it
@@ -22,10 +22,10 @@ use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
     prescription::{
         anchor::{Anchor, Entry},
-        block::{EntryTest, Periodised},
+        block::{BlockPeriodisation, EntryTest},
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
+        mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
         parameters::GenerationParameters,
-        programme::{InconsistentProgramme, Periodisation, Programme},
         sbs::{Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
         succession::ProgrammeName,
@@ -45,7 +45,7 @@ pub enum AuthoringError {
     #[error("these weeks do not make a calendar: {0}")]
     Calendar(#[from] InvalidCalendar),
     #[error(transparent)]
-    Programme(#[from] InconsistentProgramme),
+    Mesocycle(#[from] InconsistentMesocycle),
 }
 
 /// What every programme is asked, whatever its template.
@@ -115,9 +115,9 @@ pub enum Shape {
 }
 
 impl Shape {
-    /// The stable key, matching [`Programme::template`].
+    /// The stable key, matching [`Mesocycle::template`].
     ///
-    /// Here as well as on `Programme` because the wizard names the template
+    /// Here as well as on `Mesocycle` because the wizard names the template
     /// before it has a programme to ask.
     #[must_use]
     pub const fn template(&self) -> &'static str {
@@ -199,7 +199,7 @@ pub fn programme(
     interruptions: &[Skip],
     zone: TimeZone,
     parameters: &GenerationParameters,
-) -> Result<Programme, AuthoringError> {
+) -> Result<Mesocycle, AuthoringError> {
     let Authored {
         name,
         start,
@@ -212,7 +212,7 @@ pub fn programme(
     match shape {
         Shape::Test { reps, target } => {
             let calendar = Test::week(start, interruptions, weekdays, zone)?;
-            Ok(Programme::Test(Test::new(
+            Ok(Mesocycle::Test(Test::new(
                 name,
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
@@ -227,16 +227,14 @@ pub fn programme(
             opening,
         } => {
             let calendar = Calendar::new(start, weeks, interruptions, weekdays, zone)?;
-            Ok(Programme::Periodisation(Periodisation::Linear(
-                Linear::new(
-                    name,
-                    Primary::new(pattern, primary_exercise, gating),
-                    fills,
-                    Entry::new(anchor, opening),
-                    calendar,
-                    parameters,
-                )?,
-            )))
+            Ok(Mesocycle::Progression(Progression::Linear(Linear::new(
+                name,
+                Primary::new(pattern, primary_exercise, gating),
+                fills,
+                Entry::new(anchor, opening),
+                calendar,
+                parameters,
+            )?)))
         }
         Shape::Block {
             gating,
@@ -244,7 +242,7 @@ pub fn programme(
             anchor,
             entry_test,
         } => {
-            let calendar = Periodised::weeks(
+            let calendar = BlockPeriodisation::weeks(
                 start,
                 weeks,
                 entry_test.is_some(),
@@ -252,8 +250,8 @@ pub fn programme(
                 weekdays,
                 zone,
             )?;
-            Ok(Programme::Periodisation(Periodisation::Block(
-                Periodised::new(
+            Ok(Mesocycle::Progression(Progression::Block(
+                BlockPeriodisation::new(
                     name,
                     Primary::new(pattern, primary_exercise, gating),
                     fills,
@@ -268,7 +266,7 @@ pub fn programme(
         }
         Shape::Sbs { anchor } => {
             let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
-            Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::new(
+            Ok(Mesocycle::Progression(Progression::Sbs(Sbs::new(
                 name,
                 pattern,
                 primary_exercise,

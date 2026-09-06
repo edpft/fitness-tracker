@@ -139,7 +139,7 @@ async fn corpus_store() -> Result<
 /// The questions ask every slot unconditionally, so there was never anything
 /// left to inherit — and the fixture fills here are the same ones the programme
 /// before it was authored with.
-fn test_programme() -> Result<domain::prescription::Programme, Box<dyn std::error::Error>> {
+fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
         "entry-test",
         Date::constant(2026, 8, 31),
@@ -307,7 +307,7 @@ fn a_test_week_issues_every_slot() {
 /// **Ten phase weeks, and eleven calendar weeks.** The number counts phases
 /// whether or not there is an entry test; the week in front is added by the
 /// presence of the entry test and by nothing else.
-fn autumn_block() -> Result<domain::prescription::Programme, Box<dyn std::error::Error>> {
+fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
         "autumn",
         Date::constant(2026, 8, 31),

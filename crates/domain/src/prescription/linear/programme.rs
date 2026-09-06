@@ -8,12 +8,12 @@
 //! Fills are inputs rather than choices the programme makes. Generation produces
 //! the loading series, never the exercise selection.
 //!
-//! **It was called `Programme` until 2026-08-22**, when a test became a
+//! **It was called `Mesocycle` until 2026-08-22**, when a test became a
 //! programme in its own right (decision 0013) and the name had to go to the
-//! thing that is either. This is now [`Periodisation::Linear`], and it never
+//! thing that is either. This is now [`Progression::Linear`], and it never
 //! includes a test: every week it holds is a climbing week.
 //!
-//! [`Periodisation::Linear`]: crate::prescription::Periodisation::Linear
+//! [`Progression::Linear`]: crate::prescription::Progression::Linear
 
 use jiff::Timestamp;
 
@@ -22,8 +22,8 @@ use crate::{
     prescription::{
         anchor::{Anchor, Entry},
         ladder::{InvalidLadder, Ladder, Opening},
+        mesocycle::{InconsistentMesocycle, check_primary},
         parameters::GenerationParameters,
-        programme::{InconsistentProgramme, check_primary},
         schedule::{Calendar, SessionRole, Weekdays},
         steps::LoadSteps,
         succession::{ProgrammeName, ProgrammeWindow},
@@ -121,7 +121,7 @@ impl Linear {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a gating role the programme never runs, a
+    /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary that is not counted in repetitions, a primary exercise that does
     /// not fill the slot named as primary, or a climb and duration that do not
     /// make a ladder.
@@ -132,7 +132,7 @@ impl Linear {
         entry: Entry,
         calendar: Calendar,
         parameters: &GenerationParameters,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(
             primary.pattern,
             primary.exercise,
@@ -150,7 +150,7 @@ impl Linear {
         //    miss inside it. Refusing here is what makes the opening derivation
         //    safe. See `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
         if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
+            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
                 tested: entry.anchor().from(),
             });
@@ -203,7 +203,7 @@ impl Linear {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for any of the three parameter-independent
+    /// [`InconsistentMesocycle`] for any of the three parameter-independent
     /// checks.
     pub fn rehydrate(
         name: ProgrammeName,
@@ -212,7 +212,7 @@ impl Linear {
         entry: Entry,
         calendar: Calendar,
         authored_at: Timestamp,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(
             primary.pattern,
             primary.exercise,
@@ -237,10 +237,10 @@ impl Linear {
         fills: &SlotFills,
         gating_role: SessionRole,
         weekdays: &Weekdays,
-    ) -> Result<(), InconsistentProgramme> {
+    ) -> Result<(), InconsistentMesocycle> {
         // A programme gating on a role it never runs would never advance.
         if !weekdays.runs(gating_role) {
-            return Err(InconsistentProgramme::GatingRoleNeverRuns {
+            return Err(InconsistentMesocycle::GatingRoleNeverRuns {
                 gating: gating_role,
             });
         }
@@ -267,7 +267,7 @@ impl Linear {
 
     /// The entry test and the opening it may be overridden by, together.
     ///
-    /// The pair rather than either half: `Periodisation` asks both models for
+    /// The pair rather than either half: `Progression` asks both models for
     /// this, and splitting it is the mistake `Entry` exists to prevent.
     pub const fn entry(&self) -> Entry {
         self.entry

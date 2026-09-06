@@ -19,10 +19,9 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, Prescribed,
+        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        ProgrammeId, SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind,
-        WorkoutShape,
+        SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
 };
 use jiff::civil::Date;
@@ -574,7 +573,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             derived_from,
             parameters,
             parameters_at,
-            ProgrammeId::new(row.programme),
+            MesocycleId::new(row.programme),
             row.issued_at
                 .parse()
                 .map_err(|_| corrupt(&"an issue time that is not an instant"))?,

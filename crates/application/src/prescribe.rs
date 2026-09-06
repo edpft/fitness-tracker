@@ -19,11 +19,11 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
-        Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId, Progress,
-        RECENT_WEEKS, Sbs, SbsDay, SbsSession, SessionRole, SlotId, SupersetMember, Target, Test,
-        TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
+        Block, BlockPeriodisation, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters,
+        Linear, LoadSteps, Mesocycle, MesocycleId, Position, PrescribedExercise, PrescribedItem,
+        PrescribedSet, PrescribedSuperset, PrescribedWorkout, PrescriptionState, Progress,
+        Progression, RECENT_WEEKS, Sbs, SbsDay, SbsSession, SessionRole, SlotId, SupersetMember,
+        Target, Test, TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
         linear::SlotContent,
         progress_after, rep_max, rested,
         sbs::chart::{
@@ -391,20 +391,20 @@ where
     /// with no meaning behind it rather than an absence.
     async fn progress_of(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Option<Progress>, PrescriptionError> {
         match programme {
-            Programme::Periodisation(Periodisation::Linear(linear)) => {
+            Mesocycle::Progression(Progression::Linear(linear)) => {
                 Ok(Some(self.progress(linear, parameters, before).await?))
             }
             // **Neither has a rung.** A block's loads are shares of a fixed
             // anchor; an SBS cycle's are shares of a maximum that moves, but it
             // moves off measured results rather than off a ladder position, so
             // there is still nothing here for a miss to hold.
-            Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
-            | Programme::Test(_) => Ok(None),
+            Mesocycle::Progression(Progression::Block(_) | Progression::Sbs(_))
+            | Mesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -415,16 +415,16 @@ where
     /// block's is too, so there is nothing here for them to answer.
     async fn maximum_of(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Option<Kg>, PrescriptionError> {
         match programme {
-            Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+            Mesocycle::Progression(Progression::Sbs(sbs)) => {
                 Ok(Some(self.sbs_maximum(sbs, parameters, before).await?))
             }
-            Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Block(_))
-            | Programme::Test(_) => Ok(None),
+            Mesocycle::Progression(Progression::Linear(_) | Progression::Block(_))
+            | Mesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -520,11 +520,11 @@ where
     /// light session is the predecessor's session whatever it was training.
     async fn inheritance(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         date: Date,
     ) -> Result<Inheritance, PrescriptionError> {
-        let Programme::Test(test) = programme else {
+        let Mesocycle::Test(test) = programme else {
             return Ok(Inheritance {
                 target: None,
                 light: None,
@@ -541,7 +541,7 @@ where
             .programmes
             .preceding(test.calendar().start())
             .await?;
-        let Some((_, Programme::Periodisation(Periodisation::Linear(before)))) = predecessor else {
+        let Some((_, Mesocycle::Progression(Progression::Linear(before)))) = predecessor else {
             // Nothing before it, or a predecessor with no ladder to read a
             // position off. A block's exit test anchors what follows through its
             // own result rather than through a target, so a test after one has
@@ -699,7 +699,7 @@ struct Standing {
 /// derivation each position gets — the primary its top set and back-offs, and
 /// everything else double progression, a hold, or its authored numbers.
 fn issue_slots(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -745,16 +745,16 @@ const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
 /// test is decided by the phase plan and nothing else. A standalone test week is
 /// a test week on both its sessions: the week is what it is, and which session
 /// is the attempt is the role's business.
-fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
+fn week_of(programme: &Mesocycle, placed: WeekKind) -> WeekKind {
     match programme {
-        Programme::Test(_) => WeekKind::Test,
+        Mesocycle::Test(_) => WeekKind::Test,
         // A linear programme's weeks are all climbing weeks, and an SBS cycle's
         // are too: **week 4 is not a test week even though it ends on a test**,
         // because its first session is a taper the chart states in full. Calling
         // the week a test would send the light session looking for a predecessor
         // to inherit from, which an SBS cycle never needs.
-        Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Sbs(_)) => placed,
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Sbs(_)) => placed,
+        Mesocycle::Progression(Progression::Block(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
             };
@@ -772,12 +772,12 @@ fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
 /// session with one slot missing — it is a week whose whole purpose is
 /// unanswerable, so it is refused rather than issued incomplete.
 fn derived_from(
-    programme: &Programme,
+    programme: &Mesocycle,
     inheritance: Inheritance,
 ) -> Result<DerivedFrom, PrescriptionError> {
     match programme {
-        Programme::Periodisation(periodisation) => Ok(DerivedFrom::Anchor(periodisation.anchor())),
-        Programme::Test(test) => {
+        Mesocycle::Progression(periodisation) => Ok(DerivedFrom::Anchor(periodisation.anchor())),
+        Mesocycle::Test(test) => {
             inheritance
                 .target
                 .map(DerivedFrom::Target)
@@ -848,7 +848,7 @@ enum PrimaryLoad {
 
 /// The primary slot: a warm-up ramp, and then whatever this template asks for.
 fn primary_slot_item(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -879,16 +879,12 @@ fn primary_slot_item(
     };
 
     let plan = match programme {
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_load(linear, parameters, role, week, progress, steps)
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
-            block_load(block, role, week, steps)
-        }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
-            sbs_load(sbs, role, week, steps, maximum)
-        }
-        Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
+        Mesocycle::Progression(Progression::Block(block)) => block_load(block, role, week, steps),
+        Mesocycle::Progression(Progression::Sbs(sbs)) => sbs_load(sbs, role, week, steps, maximum),
+        Mesocycle::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {
         Ok(plan) => plan,
@@ -1030,7 +1026,7 @@ fn sbs_load(
 }
 
 fn block_load(
-    block: &Periodised,
+    block: &BlockPeriodisation,
     role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
@@ -1135,7 +1131,7 @@ fn test_load(
 /// slot in it is then reported, the failure with its own reason and the rest as
 /// withheld.
 fn group(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1187,7 +1183,7 @@ fn group(
 
 /// Any slot that is not the primary: double progression, a hold, or static.
 fn accessory_slot(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1204,7 +1200,7 @@ fn accessory_slot(
 /// Separate from [`accessory_slot`] because a supersetted position needs the
 /// exercise without the item wrapped around it.
 fn accessory_exercise(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1452,7 +1448,7 @@ where
     /// [`PrescriptionError`] if the store is unavailable, if no test of this lift
     /// ran before this block, if the anchor is not dated to it, or if it is too
     /// old to still speak.
-    async fn claimed_maximum_exists(&self, programme: &Programme) -> Result<(), PrescriptionError> {
+    async fn claimed_maximum_exists(&self, programme: &Mesocycle) -> Result<(), PrescriptionError> {
         if !programme.claims_an_earlier_maximum() {
             return Ok(());
         }
@@ -1503,9 +1499,9 @@ where
 {
     async fn author(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
-    ) -> Result<(ProgrammeId, Authored), PrescriptionError> {
+    ) -> Result<(MesocycleId, Authored), PrescriptionError> {
         // Refused before anything is written. Two programmes covering one day
         // would make which of them answers depend on the order rows came back
         // in, which is the silent ambiguity § 12's discipline exists to stop.

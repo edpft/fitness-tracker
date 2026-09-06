@@ -19,8 +19,8 @@ use domain::{
         sequence::{AtLeastTwo, NonEmpty},
     },
     prescription::{
-        DerivedFrom, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
-        PrescribedWorkout, ProgrammeId, SessionOrdinal, SessionRole, SlotId, SupersetMember,
+        DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
+        PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SessionRole, SlotId, SupersetMember,
         Target, WeekIndex, WeekKind, WorkoutShape,
     },
 };
@@ -74,7 +74,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         DerivedFrom::Anchor(support::programme::anchor()?),
         support::programme::parameters()?,
         "2026-08-01T00:00:00Z".parse()?,
-        ProgrammeId::new(1),
+        MesocycleId::new(1),
         "2026-08-23T18:00:00Z".parse()?,
     );
 

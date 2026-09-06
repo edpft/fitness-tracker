@@ -29,9 +29,9 @@ use super::{
 
 /// Which authored programme issued a prescription.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProgrammeId(i64);
+pub struct MesocycleId(i64);
 
-impl ProgrammeId {
+impl MesocycleId {
     pub const fn new(id: i64) -> Self {
         Self(id)
     }
@@ -41,7 +41,7 @@ impl ProgrammeId {
     }
 }
 
-impl fmt::Display for ProgrammeId {
+impl fmt::Display for MesocycleId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -109,7 +109,7 @@ pub struct PrescribedWorkout {
     /// prescriptions generated under different parameters are indistinguishable
     /// except by comparing every field.
     parameters_authored_at: Timestamp,
-    programme: ProgrammeId,
+    programme: MesocycleId,
     issued_at: Timestamp,
 }
 
@@ -129,7 +129,7 @@ impl PrescribedWorkout {
         derived_from: DerivedFrom,
         parameters: GenerationParameters,
         parameters_authored_at: Timestamp,
-        programme: ProgrammeId,
+        programme: MesocycleId,
         issued_at: Timestamp,
     ) -> Self {
         Self {
@@ -179,7 +179,7 @@ impl PrescribedWorkout {
         self.parameters_authored_at
     }
 
-    pub const fn programme(&self) -> ProgrammeId {
+    pub const fn programme(&self) -> MesocycleId {
         self.programme
     }
 

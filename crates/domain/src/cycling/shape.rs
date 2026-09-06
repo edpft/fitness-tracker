@@ -425,7 +425,7 @@ pub fn partition(scores: &[f64]) -> Vec<std::ops::Range<usize>> {
 /// business (§ II.3) — so the same type serves any source that can say how long
 /// was spent in which zone.
 #[derive(Debug, Clone, Default)]
-pub struct Programme {
+pub struct PublishedProgramme {
     cells: BTreeMap<(u32, u32), ZoneProfile>,
 }
 
@@ -452,7 +452,7 @@ pub enum Refused {
     StopsTraining(Vec<PowerZone>),
 }
 
-impl Programme {
+impl PublishedProgramme {
     /// Build from `(microcycle, session)` cells. Absent cells are empty.
     pub fn new(cells: impl IntoIterator<Item = ((u32, u32), ZoneProfile)>) -> Self {
         Self {

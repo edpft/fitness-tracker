@@ -179,7 +179,7 @@ pub enum PrescriptionError {
     /// could not catch. Raised at authoring rather than at the first
     /// `prescribe`, so a bad programme never reaches the store.
     #[error(transparent)]
-    InconsistentProgramme(#[from] domain::prescription::InconsistentProgramme),
+    InconsistentMesocycle(#[from] domain::prescription::InconsistentMesocycle),
 
     /// The programme's plan cannot be built from the parameters in force —
     /// most often because no load scale has been authored for the implement the

@@ -11,8 +11,8 @@ use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
     prescription::{
-        GenerationParameters, Linear, Periodisation, Periodised, Programme, TestTarget, WeekIndex,
-        WeekPlan,
+        BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, TestTarget,
+        WeekIndex, WeekPlan,
     },
 };
 
@@ -236,9 +236,9 @@ fn short(id: &str) -> String {
 
 /// What was authored.
 pub fn programme_authored(
-    id: domain::prescription::ProgrammeId,
+    id: domain::prescription::MesocycleId,
     authored: application::Authored,
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
@@ -303,10 +303,10 @@ pub fn programme_authored(
 /// Split out because it is three unrelated reports sharing a `match`, and
 /// because what the parameters say is a separate question from what the
 /// programme does with them.
-fn authored_plan(programme: &Programme, parameters: &domain::prescription::GenerationParameters) {
+fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::GenerationParameters) {
     let calendar = programme.calendar();
     match programme {
-        Programme::Test(test) => {
+        Mesocycle::Test(test) => {
             println!(
                 "  a test at {} — no anchor, because producing one is what it does",
                 test.reps()
@@ -322,7 +322,7 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
                 ),
             }
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+        Mesocycle::Progression(Progression::Sbs(sbs)) => {
             println!(
                 "  opening maximum {}, and it does not stay fixed",
                 sbs.entry().anchor(),
@@ -337,7 +337,7 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
             );
             println!("  week 4 ends on a single, which opens the next cycle");
         }
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             println!("  anchor {}, fixed for the block", linear.anchor());
             // Where the opening came from, because "85kg" alone does not say
             // whether anybody chose it. A declared opening means the anchor's
@@ -358,7 +358,7 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
                 calendar.duration_weeks(),
             );
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::Block(block)) => {
             match block.entry_test() {
                 Some(test) => println!(
                     "  anchor {}, expected — week one measures it at {}",
@@ -560,14 +560,14 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     }
 
     match programme {
-        Programme::Test(test) => test_standing(test, standing),
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Test(test) => test_standing(test, standing),
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_standing(linear, standing, parameters);
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::Block(block)) => {
             block_standing(block, parameters);
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => sbs_standing(sbs),
+        Mesocycle::Progression(Progression::Sbs(sbs)) => sbs_standing(sbs),
     }
 }
 
@@ -702,7 +702,7 @@ fn linear_standing(
 /// three literature constants — so there is no rung a miss could hold and
 /// nothing for the record to place. That is the difference between the two
 /// models, and printing an arrow here would hide it.
-fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
+fn block_standing(block: &BlockPeriodisation, parameters: &GenerationParameters) {
     match block.entry_test() {
         Some(test) => println!(
             "anchor {}, expected — week one measures it at {}",

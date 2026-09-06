@@ -25,7 +25,7 @@ use domain::landing::{
     SourceRecordId, Watermark,
 };
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId,
+    GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     ProgrammeName, ProgrammeWindow, Progress, SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
@@ -572,7 +572,7 @@ pub struct FulfilledSession {
     /// The programme that prescribed it, **by name**.
     ///
     /// The name is a programme's identity across re-authorings and the row id
-    /// is not: re-authoring writes a new `programme` row, so a `ProgrammeId`
+    /// is not: re-authoring writes a new `programme` row, so a `MesocycleId`
     /// held here would stop matching every session prescribed before the last
     /// correction. `latest_of_each` picks by name for the same reason.
     pub programme: ProgrammeName,
@@ -803,7 +803,7 @@ pub trait ProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, Mesocycle)>, StoreError>> + Send;
 
     /// The programme immediately before a date, if there is one.
     ///
@@ -824,7 +824,7 @@ pub trait ProgrammeStore {
     fn preceding(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, Mesocycle)>, StoreError>> + Send;
 
     /// Every programme's name and the days it occupies, oldest first.
     ///
@@ -842,8 +842,8 @@ pub trait ProgrammeStore {
     /// [`StoreError`] if the store is unavailable.
     fn author(
         &self,
-        programme: &Programme,
-    ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
+        programme: &Mesocycle,
+    ) -> impl Future<Output = Result<MesocycleId, StoreError>> + Send;
 }
 
 /// The authored cycling programme.
@@ -1019,8 +1019,8 @@ pub struct Prescription {
 /// needs all three and needs no workout at all.
 #[derive(Debug, Clone)]
 pub struct LadderStanding {
-    pub programme_id: ProgrammeId,
-    pub programme: Programme,
+    pub programme_id: MesocycleId,
+    pub programme: Mesocycle,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.
     /// Where the record puts the programme, for the one template that has a
@@ -1136,9 +1136,9 @@ pub trait ProgrammeAuthor {
     /// inconsistent in a way the types could not catch.
     fn author(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
-    ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
+    ) -> impl Future<Output = Result<(MesocycleId, Authored), PrescriptionError>> + Send;
 }
 
 // --- Delivery ---------------------------------------------------------------

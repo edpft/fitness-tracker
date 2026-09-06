@@ -29,8 +29,8 @@ use domain::{
     },
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
-        GenerationParameters, Linear, LoadSteps, PerRole, Percentage, Periodisation, Programme,
-        ProgrammeName, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
+        GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, ProgrammeName,
+        Progression, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
         Weekdays,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
@@ -360,7 +360,7 @@ pub fn authored(
 pub fn authoring(
     answers: Authored,
     interruptions: &[Skip],
-) -> Result<Result<Programme, AuthoringError>, ProgrammeFixtureError> {
+) -> Result<Result<Mesocycle, AuthoringError>, ProgrammeFixtureError> {
     Ok(domain::prescription::authored::programme(
         answers,
         fills()?,
@@ -373,10 +373,10 @@ pub fn authoring(
 /// A linear programme, as one of the three things a programme can be.
 ///
 /// The fixtures below build a `Linear` because that is what they are about;
-/// every port takes a `Programme`, so this is the one line between them.
+/// every port takes a `Mesocycle`, so this is the one line between them.
 #[must_use]
-pub const fn as_programme(linear: Linear) -> Programme {
-    Programme::Periodisation(Periodisation::Linear(linear))
+pub const fn as_programme(linear: Linear) -> Mesocycle {
+    Mesocycle::Progression(Progression::Linear(linear))
 }
 
 pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
@@ -451,7 +451,7 @@ pub fn programme_named_from(called: &str, start: Date) -> Result<Linear, Program
 /// [`ProgrammeFixtureError`] only if a literal here is invalid; the programme
 /// itself is expected to be refused, which the caller asserts.
 pub fn gating_on_a_role_it_never_runs()
--> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     // Monday only, and Monday is light — so a heavy gate never fires.
     let monday_only =
@@ -477,7 +477,7 @@ pub fn gating_on_a_role_it_never_runs()
 ///
 /// [`ProgrammeFixtureError`] only if a literal here is invalid.
 pub fn primary_not_counted_in_reps()
--> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
         name(FIXTURE_NAME)?,
@@ -500,7 +500,7 @@ pub fn primary_not_counted_in_reps()
 ///
 /// [`ProgrammeFixtureError`] only if a literal here is invalid.
 pub fn primary_does_not_fill_its_slot()
--> Result<Result<Linear, domain::prescription::InconsistentProgramme>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
         name(FIXTURE_NAME)?,

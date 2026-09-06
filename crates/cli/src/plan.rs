@@ -27,8 +27,8 @@ use std::path::Path;
 use application::{Authored, DiaryStore as _};
 use domain::{
     cycling::{
-        Answer, CyclingMicrocycle, CyclingProgramme, CyclingWeekdays, PlannedRide, Programme,
-        PublishedMicrocycle, SessionPosition,
+        Answer, CyclingMicrocycle, CyclingProgramme, CyclingWeekdays, PlannedRide,
+        PublishedMicrocycle, PublishedProgramme, SessionPosition,
     },
     gym::sequence::NonEmpty,
     prescription::ProgrammeName,
@@ -61,7 +61,7 @@ struct Read {
     name: &'static str,
     published: ProgrammeName,
     fetched: Fetched,
-    programme: Programme,
+    programme: PublishedProgramme,
 }
 
 /// One cycling mesocycle, named, with what it answers.

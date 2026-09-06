@@ -35,7 +35,7 @@ use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
     prescription::{
         linear::{PrimaryPattern, SlotFills},
-        programme::{InconsistentProgramme, check_primary},
+        mesocycle::{InconsistentMesocycle, check_primary},
         repmax::rep_max,
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
         shape::SlotId,
@@ -171,7 +171,7 @@ impl Test {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a calendar longer than a test's one week, a
+    /// [`InconsistentMesocycle`] for a calendar longer than a test's one week, a
     /// tested exercise not counted in repetitions, one that does not fill the
     /// slot the pattern names, a repetition count the maximum table cannot
     /// convert, or a weekday map that never runs the session the test is taken
@@ -182,7 +182,7 @@ impl Test {
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
             name,
@@ -210,7 +210,7 @@ impl Test {
         calendar: Calendar,
         target: TestTarget,
         authored_at: Timestamp,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
             name,
@@ -227,12 +227,12 @@ impl Test {
         tested: Tested,
         fills: &SlotFills,
         calendar: &Calendar,
-    ) -> Result<(), InconsistentProgramme> {
+    ) -> Result<(), InconsistentMesocycle> {
         // 1. A test is one week. `Self::week` is the only builder that says so,
         //    and a calendar can also arrive from the store, so this is what
         //    holds for a row somebody wrote by hand.
         if calendar.duration_weeks() != Self::WEEKS {
-            return Err(InconsistentProgramme::TestIsNotOneWeek {
+            return Err(InconsistentMesocycle::TestIsNotOneWeek {
                 weeks: calendar.duration_weeks(),
             });
         }
@@ -242,7 +242,7 @@ impl Test {
         //    and it is the same mistake: a plan whose whole purpose falls on a
         //    day it does not train.
         if !calendar.weekdays().runs(Self::ROLE) {
-            return Err(InconsistentProgramme::TestNeverRunsItsSession { role: Self::ROLE });
+            return Err(InconsistentMesocycle::TestNeverRunsItsSession { role: Self::ROLE });
         }
 
         // 3. The tested lift has to be countable in repetitions and has to fill
@@ -258,7 +258,7 @@ impl Test {
         //    block held; the number belongs to the test, so the check follows
         //    it.
         if rep_max(tested.reps()).is_none() {
-            return Err(InconsistentProgramme::TestRepsTooMany {
+            return Err(InconsistentMesocycle::TestRepsTooMany {
                 reps: tested.reps().as_u32(),
             });
         }

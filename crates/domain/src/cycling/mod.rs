@@ -33,8 +33,8 @@ pub use programme::{
 };
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{
-    Answer, Programme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle, mesocycles,
-    partition, span, zones_lost,
+    Answer, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,
+    mesocycles, partition, span, zones_lost,
 };
 pub use zone::{
     Ftp, FtpProvenance, InvalidFtp, PowerZone, UnknownZone, WattRange, Watts, ZoneBand,

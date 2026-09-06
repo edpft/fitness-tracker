@@ -27,9 +27,9 @@ use application::{ProgrammeStore, StoreError};
 use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, Linear, PerRole, Periodisation, Periodised,
-        Programme, ProgrammeId, ProgrammeName, ProgrammeWindow, Sbs, SessionRole, Skip, SlotId,
-        Test, TestTarget, Tested,
+        Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Entry, Linear, Mesocycle,
+        MesocycleId, PerRole, ProgrammeName, ProgrammeWindow, Progression, Sbs, SessionRole, Skip,
+        SlotId, Test, TestTarget, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -155,7 +155,7 @@ impl SqliteProgrammeStore {
         Self { pool, zone }
     }
 
-    async fn latest_of_each(&self) -> Result<Vec<(ProgrammeId, Programme)>, StoreError> {
+    async fn latest_of_each(&self) -> Result<Vec<(MesocycleId, Mesocycle)>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", name AS "name!: String",
@@ -244,7 +244,7 @@ impl SqliteProgrammeStore {
                 }
             };
 
-            programmes.push((ProgrammeId::new(row.id), programme));
+            programmes.push((MesocycleId::new(row.id), programme));
         }
         Ok(programmes)
     }
@@ -269,14 +269,14 @@ struct Columns {
     entry_test_light: Option<i64>,
 }
 
-fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
+fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
     let anchor = programme.anchor();
     let entry_test = match programme {
-        Programme::Periodisation(Periodisation::Block(block)) => block.entry_test(),
+        Mesocycle::Progression(Progression::Block(block)) => block.entry_test(),
         // An SBS cycle has no entry test: its test is the last session of the
         // last week, not a week in front (decision 0024).
-        Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Sbs(_))
-        | Programme::Test(_) => None,
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Sbs(_))
+        | Mesocycle::Test(_) => None,
     };
     let entry_test_light = entry_test
         .and_then(EntryTest::light)
@@ -286,7 +286,7 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
         })
         .transpose()?;
     let (test_reps, test_target) = match programme {
-        Programme::Test(test) => (
+        Mesocycle::Test(test) => (
             Some(i64::from(test.reps().as_u32())),
             match test.target() {
                 TestTarget::Inherited => None,
@@ -296,7 +296,7 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
                 ),
             },
         ),
-        Programme::Periodisation(_) => (None, None),
+        Mesocycle::Progression(_) => (None, None),
     };
     Ok(Columns {
         anchor_grams: anchor
@@ -317,11 +317,11 @@ fn columns_of(programme: &Programme) -> Result<Columns, StoreError> {
         // Only a linear programme may declare one: a block's loads are shares of
         // its anchor, and a test has no ladder to open.
         declared_opening: match programme {
-            Programme::Periodisation(Periodisation::Linear(linear)) => linear.declared_opening(),
+            Mesocycle::Progression(Progression::Linear(linear)) => linear.declared_opening(),
             // Nor may SBS: every load in the chart is a share of the maximum,
             // so there is no opening for one to be declared against.
-            Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
-            | Programme::Test(_) => None,
+            Mesocycle::Progression(Progression::Block(_) | Progression::Sbs(_))
+            | Mesocycle::Test(_) => None,
         }
         .map(|opening| {
             i64::try_from(opening.as_grams())
@@ -354,7 +354,7 @@ fn rehydrate_test(
     common: Common,
     test_reps: Option<i64>,
     test_target_grams: Option<i64>,
-) -> Result<Programme, StoreError> {
+) -> Result<Mesocycle, StoreError> {
     let reps = test_reps.ok_or_else(|| corrupt(&"a test with no repetition count"))?;
     let reps = u32::try_from(reps)
         .ok()
@@ -371,7 +371,7 @@ fn rehydrate_test(
                 .map_err(|_| corrupt(&"a target stored as a negative mass"))?,
         ),
     };
-    Ok(Programme::Test(
+    Ok(Mesocycle::Test(
         Test::rehydrate(
             common.name,
             Tested::new(common.pattern, common.exercise, reps),
@@ -391,7 +391,7 @@ fn rehydrate_periodisation(
     entry: Entry,
     gating_role: Option<String>,
     entry_test: Option<EntryTest>,
-) -> Result<Programme, StoreError> {
+) -> Result<Mesocycle, StoreError> {
     let gating =
         gating_role.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
     let primary = Primary::new(
@@ -402,7 +402,7 @@ fn rehydrate_periodisation(
     if template == "sbs" {
         // `stored` rather than `new`: the checks ran when it was written, and
         // re-refusing a row now would make a rule change unreadable data.
-        return Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::stored(
+        return Ok(Mesocycle::Progression(Progression::Sbs(Sbs::stored(
             common.name,
             common.pattern,
             common.exercise,
@@ -412,8 +412,8 @@ fn rehydrate_periodisation(
             common.authored_at,
         ))));
     }
-    Ok(Programme::Periodisation(if template == "linear" {
-        Periodisation::Linear(
+    Ok(Mesocycle::Progression(if template == "linear" {
+        Progression::Linear(
             Linear::rehydrate(
                 common.name,
                 primary,
@@ -425,8 +425,8 @@ fn rehydrate_periodisation(
             .map_err(|error| corrupt(&error))?,
         )
     } else {
-        Periodisation::Block(
-            Periodised::rehydrate(
+        Progression::Block(
+            BlockPeriodisation::rehydrate(
                 common.name,
                 primary,
                 common.fills,
@@ -516,7 +516,7 @@ fn read_entry(
 }
 
 impl ProgrammeStore for SqliteProgrammeStore {
-    async fn on(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
+    async fn on(&self, date: Date) -> Result<Option<(MesocycleId, Mesocycle)>, StoreError> {
         Ok(self
             .latest_of_each()
             .await?
@@ -524,7 +524,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .find(|(_, programme)| programme.window().covers(date)))
     }
 
-    async fn preceding(&self, date: Date) -> Result<Option<(ProgrammeId, Programme)>, StoreError> {
+    async fn preceding(&self, date: Date) -> Result<Option<(MesocycleId, Mesocycle)>, StoreError> {
         // The latest programme that has finished by this date. `latest_of_each`
         // is ordered by start, so the last one whose window ends at or before
         // the date is the one immediately before it.
@@ -544,7 +544,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
             .collect())
     }
 
-    async fn author(&self, programme: &Programme) -> Result<ProgrammeId, StoreError> {
+    async fn author(&self, programme: &Mesocycle) -> Result<MesocycleId, StoreError> {
         let mut tx = self
             .pool
             .begin()
@@ -641,7 +641,7 @@ impl ProgrammeStore for SqliteProgrammeStore {
         write_calendar(&mut tx, id, programme.calendar()).await?;
 
         tx.commit().await.map_err(|error| store_error(&error))?;
-        Ok(ProgrammeId::new(id))
+        Ok(MesocycleId::new(id))
     }
 }
 

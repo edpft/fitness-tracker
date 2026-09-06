@@ -30,9 +30,9 @@ use domain::{
         exercise::{Exercise, RepsExercise},
     },
     prescription::{
-        Anchor, AnchorProvenance, Calendar, Entry, EntryTest, Fill, GenerationParameters, Linear,
-        Periodisation, Periodised, Primary, PrimaryPattern, Programme, ProgrammeName, SessionRole,
-        Skip, SlotFills, Test, TestTarget, Tested, Weekdays,
+        Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Entry, EntryTest, Fill,
+        GenerationParameters, Linear, Mesocycle, Primary, PrimaryPattern, ProgrammeName,
+        Progression, SessionRole, Skip, SlotFills, Test, TestTarget, Tested, Weekdays,
     },
 };
 use infrastructure::{SqliteGenerationParameterStore, SqliteProgrammeStore, connect};
@@ -115,10 +115,10 @@ const fn primary(lift: RepsExercise) -> Primary {
 fn predecessor(
     before: Before,
     parameters: &GenerationParameters,
-) -> Result<Programme, Box<dyn std::error::Error>> {
+) -> Result<Mesocycle, Box<dyn std::error::Error>> {
     Ok(match before {
         // One week, 14 to 20 September, testing on the Friday.
-        Before::Test(lift) => Programme::Test(Test::new(
+        Before::Test(lift) => Mesocycle::Test(Test::new(
             name("before")?,
             Tested::new(
                 PrimaryPattern::KneeDominant,
@@ -135,7 +135,7 @@ fn predecessor(
             TestTarget::Declared(Kg::try_from("90".to_owned())?),
         )?),
         // Three weeks, 31 August to 20 September. It tests nothing, ever.
-        Before::Linear(lift) => Programme::Periodisation(Periodisation::Linear(Linear::new(
+        Before::Linear(lift) => Mesocycle::Progression(Progression::Linear(Linear::new(
             name("before")?,
             primary(lift),
             fills(lift)?,
@@ -163,7 +163,7 @@ fn predecessor(
         // Eight phase weeks and an entry test in front, 20 July to 20 September.
         // Its exit test is the last of them, on Friday 18 September.
         Before::Block(lift) => {
-            Programme::Periodisation(Periodisation::Block(Periodised::new(
+            Mesocycle::Progression(Progression::Block(BlockPeriodisation::new(
                 name("before")?,
                 primary(lift),
                 fills(lift)?,
@@ -176,7 +176,7 @@ fn predecessor(
                     Date::constant(2026, 7, 17),
                 )?),
                 Some(EntryTest::new(RepCount::new(3)?, None)?),
-                Periodised::weeks(
+                BlockPeriodisation::weeks(
                     Date::constant(2026, 7, 20),
                     8,
                     true,
@@ -194,10 +194,10 @@ fn predecessor(
 fn block_opening_from(
     gap: i64,
     provenance: AnchorProvenance,
-) -> Result<Programme, Box<dyn std::error::Error>> {
+) -> Result<Mesocycle, Box<dyn std::error::Error>> {
     let start = ADJACENT.checked_add(jiff::Span::new().days(gap * 7))?;
-    Ok(Programme::Periodisation(Periodisation::Block(
-        Periodised::new(
+    Ok(Mesocycle::Progression(Progression::Block(
+        BlockPeriodisation::new(
             name("under-test")?,
             primary(B),
             fills(B)?,
@@ -205,7 +205,7 @@ fn block_opening_from(
             // which is what the operator writes when opening from one.
             Entry::derived(anchor(provenance)?),
             None,
-            Periodised::weeks(
+            BlockPeriodisation::weeks(
                 start,
                 8,
                 false,

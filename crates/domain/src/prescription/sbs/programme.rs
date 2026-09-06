@@ -2,7 +2,7 @@
 //!
 //! **Almost nothing is authored, and that is the point of a published
 //! programme.** [`Linear`](crate::prescription::linear::Linear) takes a climb
-//! rate and a duration; [`Periodised`](crate::prescription::block::Periodised)
+//! rate and a duration; [`BlockPeriodisation`](crate::prescription::block::BlockPeriodisation)
 //! takes a duration that shapes its phases. This takes neither, because the
 //! chart states every set, every repetition and every percentage itself
 //! ([`chart`](super::chart)). What an operator supplies is which lift, which
@@ -19,7 +19,7 @@ use crate::{
     prescription::{
         anchor::Entry,
         linear::{Primary, PrimaryPattern, SlotFills},
-        programme::{InconsistentProgramme, check_primary},
+        mesocycle::{InconsistentMesocycle, check_primary},
         schedule::{Calendar, SessionRole},
         succession::{ProgrammeName, ProgrammeWindow},
     },
@@ -63,7 +63,7 @@ impl Sbs {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a gating role the programme never runs, a
+    /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary not counted in repetitions, a primary exercise that does not fill
     /// the slot named as primary, a calendar that is not four weeks, or a test
     /// that does not precede the cycle it anchors.
@@ -74,7 +74,7 @@ impl Sbs {
         fills: SlotFills,
         entry: Entry,
         calendar: Calendar,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
 
         // A cycle that never runs its gating session would never advance — and
@@ -82,7 +82,7 @@ impl Sbs {
         // where the maximum is *set*. A cycle without one would prescribe every
         // week off the opening maximum for ever.
         if !calendar.weekdays().runs(GATING) {
-            return Err(InconsistentProgramme::GatingRoleNeverRuns { gating: GATING });
+            return Err(InconsistentMesocycle::GatingRoleNeverRuns { gating: GATING });
         }
         check_primary(pattern, exercise, &fills, GATING)?;
 
@@ -90,7 +90,7 @@ impl Sbs {
         // programme run longer or shorter — it is a different programme, and
         // there is no rule here for what its extra weeks would prescribe.
         if calendar.duration_weeks() != WEEKS {
-            return Err(InconsistentProgramme::ChartIsFourWeeks {
+            return Err(InconsistentMesocycle::ChartIsFourWeeks {
                 given: calendar.duration_weeks(),
             });
         }
@@ -99,7 +99,7 @@ impl Sbs {
         // cycle containing the test that anchors it would read that session
         // twice, once as its own opening and once as work inside it.
         if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
+            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
                 tested: entry.anchor().from(),
             });

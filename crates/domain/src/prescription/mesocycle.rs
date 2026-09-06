@@ -1,27 +1,42 @@
-//! What a programme is: a test, or a way of periodising.
+//! What a mesocycle is: a test, or a progression.
 //!
 //! **Two levels, because there are two questions** (decision 0013). The first is
-//! whether this programme measures or progresses — a test belongs to neither
+//! whether this mesocycle measures or progresses — a test belongs to neither
 //! neighbour and climbs nothing, so it is not a degenerate progression but the
-//! other thing a programme can be. The second only arises once the answer is
-//! "progresses": linear and block are two models of periodisation, and
-//! `block.rs` has said so since 2026-08-18.
+//! other thing a mesocycle can be. The second only arises once the answer is
+//! "progresses": how it progresses.
 //!
 //! ```text
-//! Programme  ─┬─ Test                    one week, no ladder, a maximum
-//!             └─ Periodisation ─┬─ Linear   a top-set ladder at a rate
-//!                               └─ Block    phases to a planned endpoint
+//! Mesocycle ─┬─ Test         one week, no ladder, a maximum
+//!            └─ Progression ─┬─ Linear              a fixed increment a week
+//!                            ├─ BlockPeriodisation  phases to a planned endpoint
+//!                            └─ Sbs                 a published chart
 //! ```
 //!
 //! Flattening these into one enum would put `Linear` and `Test` side by side and
 //! lose the fact that the first two share an entry test, an anchor and a primary
 //! that climbs, while a test shares none of it.
 //!
+//! **It was `Programme` until 2026-09-06**, and the level was wrong rather than
+//! the shape. The operator's hierarchy is
+//! `macrocycle → plan → programme → mesocycle → microcycle → session`: what this
+//! type holds is four weeks of one discipline, which is a mesocycle, and a
+//! *programme* is the set of them one discipline runs inside a plan. The enum
+//! below was `Periodisation` in the same move — block periodisation is one way
+//! of progressing rather than the category all of them belong to.
+//!
+//! **`Sbs` is a name still owed a replacement.** It labels the method after the
+//! publisher of one chart, where its siblings are named for what they do — and
+//! the operator, 2026-09-06, on there being other SBS programmes: *Squat 2x Int*
+//! is an external programme providing mesocycles, exactly as *Peak Your Power
+//! Zones* is. What this variant really is, is a progression taken from such a
+//! programme rather than derived here.
+//!
 //! **The discriminant is not a type.** [`linear`](super::linear) records why:
-//! selecting a template is selecting among programme types, so a `Template`
+//! selecting a template is selecting among mesocycle types, so a `Template`
 //! enum beside this one would be a second copy of the same distinction, free to
 //! disagree with it. What the store needs is a stable string, and
-//! [`Programme::template`] derives it from the variant in force.
+//! [`Mesocycle::template`] derives it from the variant in force.
 
 use jiff::Timestamp;
 
@@ -29,7 +44,7 @@ use crate::{
     gym::exercise::Exercise,
     prescription::{
         anchor::{Anchor, Entry},
-        block::Periodised,
+        block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
         sbs::Sbs,
         schedule::{Calendar, SessionRole},
@@ -39,16 +54,16 @@ use crate::{
 
 /// What was authored: one programme, of whichever kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Programme {
+pub enum Mesocycle {
     Test(crate::prescription::test::Test),
-    Periodisation(Periodisation),
+    Progression(Progression),
 }
 
 /// A programme that progresses a lift, by one of the two models.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Periodisation {
+pub enum Progression {
     Linear(Linear),
-    Block(Periodised),
+    Block(BlockPeriodisation),
     /// A published chart, transcribed rather than derived (decision 0024).
     ///
     /// **A third model of periodisation, not a degenerate one.** Linear climbs
@@ -58,40 +73,40 @@ pub enum Periodisation {
     Sbs(Sbs),
 }
 
-impl Programme {
+impl Mesocycle {
     /// The stable key. Persisted, so it outlives a rename.
     pub const fn template(&self) -> &'static str {
         match self {
             Self::Test(_) => "test",
-            Self::Periodisation(periodisation) => periodisation.template(),
+            Self::Progression(periodisation) => periodisation.template(),
         }
     }
 
     pub const fn name(&self) -> &ProgrammeName {
         match self {
             Self::Test(test) => test.name(),
-            Self::Periodisation(periodisation) => periodisation.name(),
+            Self::Progression(periodisation) => periodisation.name(),
         }
     }
 
     pub const fn fills(&self) -> &SlotFills {
         match self {
             Self::Test(test) => test.fills(),
-            Self::Periodisation(periodisation) => periodisation.fills(),
+            Self::Progression(periodisation) => periodisation.fills(),
         }
     }
 
     pub const fn calendar(&self) -> &Calendar {
         match self {
             Self::Test(test) => test.calendar(),
-            Self::Periodisation(periodisation) => periodisation.calendar(),
+            Self::Progression(periodisation) => periodisation.calendar(),
         }
     }
 
     pub const fn authored_at(&self) -> Timestamp {
         match self {
             Self::Test(test) => test.authored_at(),
-            Self::Periodisation(periodisation) => periodisation.authored_at(),
+            Self::Progression(periodisation) => periodisation.authored_at(),
         }
     }
 
@@ -102,14 +117,14 @@ impl Programme {
     pub const fn primary(&self) -> PrimaryPattern {
         match self {
             Self::Test(test) => test.primary(),
-            Self::Periodisation(periodisation) => periodisation.primary(),
+            Self::Progression(periodisation) => periodisation.primary(),
         }
     }
 
     pub const fn primary_exercise(&self) -> Exercise {
         match self {
             Self::Test(test) => test.primary_exercise(),
-            Self::Periodisation(periodisation) => periodisation.primary_exercise(),
+            Self::Progression(periodisation) => periodisation.primary_exercise(),
         }
     }
 
@@ -119,7 +134,7 @@ impl Programme {
     pub fn window(&self) -> ProgrammeWindow {
         match self {
             Self::Test(test) => test.window(),
-            Self::Periodisation(periodisation) => periodisation.window(),
+            Self::Progression(periodisation) => periodisation.window(),
         }
     }
 
@@ -131,7 +146,7 @@ impl Programme {
     pub const fn anchor(&self) -> Option<Anchor> {
         match self {
             Self::Test(_) => None,
-            Self::Periodisation(periodisation) => Some(periodisation.anchor()),
+            Self::Progression(periodisation) => Some(periodisation.anchor()),
         }
     }
 
@@ -162,14 +177,14 @@ impl Programme {
     pub const fn produces_maximum(&self) -> Option<Exercise> {
         match self {
             Self::Test(test) => Some(test.primary_exercise()),
-            Self::Periodisation(Periodisation::Block(block)) => Some(block.primary_exercise()),
+            Self::Progression(Progression::Block(block)) => Some(block.primary_exercise()),
             // **An SBS cycle always ends on a one-rep maximum.** Week 4 day 2
             // is a test and is not optional, so a cycle that runs to its end
             // leaves a measured maximum behind exactly as a block does — and
             // that maximum is what the next cycle opens from, which is what
             // makes the chart self-perpetuating (decision 0024).
-            Self::Periodisation(Periodisation::Sbs(sbs)) => Some(sbs.primary_exercise()),
-            Self::Periodisation(Periodisation::Linear(_)) => None,
+            Self::Progression(Progression::Sbs(sbs)) => Some(sbs.primary_exercise()),
+            Self::Progression(Progression::Linear(_)) => None,
         }
     }
 
@@ -200,7 +215,7 @@ impl Programme {
     #[must_use]
     pub const fn claims_an_earlier_maximum(&self) -> bool {
         match self {
-            Self::Periodisation(Periodisation::Block(block)) => {
+            Self::Progression(Progression::Block(block)) => {
                 block.entry_test().is_none()
                     && matches!(
                         block.entry().anchor().provenance(),
@@ -214,11 +229,11 @@ impl Programme {
             // that opens the sequence, or the previous cycle's own week 4. There
             // is no case where the cycle is about to measure its own opening, so
             // no carve-out is needed for one.
-            Self::Periodisation(Periodisation::Sbs(sbs)) => matches!(
+            Self::Progression(Progression::Sbs(sbs)) => matches!(
                 sbs.entry().anchor().provenance(),
                 crate::prescription::AnchorProvenance::Tested
             ),
-            Self::Periodisation(Periodisation::Linear(_)) | Self::Test(_) => false,
+            Self::Progression(Progression::Linear(_)) | Self::Test(_) => false,
         }
     }
 
@@ -230,12 +245,12 @@ impl Programme {
     pub const fn gating_role(&self) -> Option<SessionRole> {
         match self {
             Self::Test(_) => None,
-            Self::Periodisation(periodisation) => Some(periodisation.gating_role()),
+            Self::Progression(periodisation) => Some(periodisation.gating_role()),
         }
     }
 }
 
-impl Periodisation {
+impl Progression {
     /// The stable key. Persisted.
     pub const fn template(&self) -> &'static str {
         match self {
@@ -335,7 +350,7 @@ impl Periodisation {
 /// variants a given template can produce, and that is not worth three types
 /// which every reader would then have to hold apart.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InconsistentProgramme {
+pub enum InconsistentMesocycle {
     #[error(
         "this programme gates on the {gating} session but never runs one, \
          so its ladder would never advance"
@@ -405,22 +420,22 @@ pub enum InconsistentProgramme {
 ///
 /// # Errors
 ///
-/// [`InconsistentProgramme`] for either.
+/// [`InconsistentMesocycle`] for either.
 pub fn check_primary(
     pattern: PrimaryPattern,
     exercise: Exercise,
     fills: &SlotFills,
     role: SessionRole,
-) -> Result<(), InconsistentProgramme> {
+) -> Result<(), InconsistentMesocycle> {
     if !matches!(exercise, Exercise::Reps(_)) {
-        return Err(InconsistentProgramme::PrimaryIsNotCountedInReps {
+        return Err(InconsistentMesocycle::PrimaryIsNotCountedInReps {
             primary: exercise.as_str(),
             measure: exercise.measure(),
         });
     }
     let filled = *fills.primary(pattern, role);
     if filled != exercise {
-        return Err(InconsistentProgramme::PrimaryDoesNotFillItsSlot {
+        return Err(InconsistentMesocycle::PrimaryDoesNotFillItsSlot {
             pattern,
             primary: exercise.as_str(),
             fill: filled.as_str(),

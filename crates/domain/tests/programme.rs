@@ -18,9 +18,10 @@ use domain::{
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     prescription::{
-        Anchor, AnchorProvenance, BlockWeek, Entry, EntryTest, Fill, InconsistentProgramme,
-        PerRole, Periodisation, Periodised, Primary, PrimaryPattern, Programme, ProgrammeName,
-        SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex, Weekdays,
+        Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,
+        InconsistentMesocycle, Mesocycle, PerRole, Primary, PrimaryPattern, ProgrammeName,
+        Progression, SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex,
+        Weekdays,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -106,8 +107,8 @@ fn anchor(provenance: AnchorProvenance) -> Result<Anchor, Invalid> {
 fn block(
     provenance: AnchorProvenance,
     entry_test: Option<EntryTest>,
-) -> Result<Result<Periodised, InconsistentProgramme>, Invalid> {
-    let calendar = Periodised::weeks(
+) -> Result<Result<BlockPeriodisation, InconsistentMesocycle>, Invalid> {
+    let calendar = BlockPeriodisation::weeks(
         date(2026, 9, 21)?,
         10,
         entry_test.is_some(),
@@ -116,7 +117,7 @@ fn block(
         TimeZone::UTC,
     )
     .map_err(invalid)?;
-    Ok(Periodised::new(
+    Ok(BlockPeriodisation::new(
         name("autumn")?,
         Primary::new(
             PrimaryPattern::KneeDominant,
@@ -145,7 +146,7 @@ fn test(
     knee_dominant: Fill<Exercise>,
     reps_at: u32,
     weekdays: Weekdays,
-) -> Result<Result<Test, InconsistentProgramme>, Invalid> {
+) -> Result<Result<Test, InconsistentMesocycle>, Invalid> {
     let week =
         Test::week(date(2026, 9, 14)?, &[] as &[Skip], weekdays, TimeZone::UTC).map_err(invalid)?;
     Ok(Test::new(
@@ -242,7 +243,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
     };
     assert!(matches!(
         refused,
-        Err(InconsistentProgramme::TestNeverRunsItsSession {
+        Err(InconsistentMesocycle::TestNeverRunsItsSession {
             role: SessionRole::Heavy
         })
     ));
@@ -267,7 +268,7 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
     };
     assert!(matches!(
         refused,
-        Err(InconsistentProgramme::TestRepsTooMany { reps: 41 })
+        Err(InconsistentMesocycle::TestRepsTooMany { reps: 41 })
     ));
 }
 
@@ -276,7 +277,7 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
 /// **The rule left this type on 2026-08-22.** Whether a block may state a number
 /// outright depends on what precedes it — nothing, an unusable test, or a
 /// measurement it should have opened from — and that is a fact about the store.
-/// `Periodised` sees one programme, so it accepts all three provenances and
+/// `BlockPeriodisation` sees one programme, so it accepts all three provenances and
 /// `Authoring` refuses the one that is wrong; `tests/composition.rs` at the
 /// adapter's ring is where that rule is asserted.
 #[test]
@@ -364,7 +365,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     ) else {
         panic!("a front squat single on the heavy day is a test")
     };
-    let programme = Programme::Test(test);
+    let programme = Mesocycle::Test(test);
     assert_eq!(programme.template(), "test");
     assert_eq!(
         programme.anchor(),
@@ -376,7 +377,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
         panic!("a tested anchor makes a block")
     };
-    let programme = Programme::Periodisation(Periodisation::Block(block));
+    let programme = Mesocycle::Progression(Progression::Block(block));
     assert_eq!(programme.template(), "block");
     assert!(programme.anchor().is_some());
     assert_eq!(programme.gating_role(), Some(SessionRole::Heavy));

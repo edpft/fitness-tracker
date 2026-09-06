@@ -12,12 +12,12 @@
 
 mod support;
 
-use domain::prescription::{Anchor, AnchorProvenance, Periodisation, Programme, authored::Shape};
+use domain::prescription::{Anchor, AnchorProvenance, Mesocycle, Progression, authored::Shape};
 use jiff::civil::Date;
 use support::programme;
 
 /// The cycle the autumn opens with: four weeks from Monday 14 September.
-fn cycle(anchored_on: (i16, i8, i8)) -> Result<Programme, Box<dyn std::error::Error>> {
+fn cycle(anchored_on: (i16, i8, i8)) -> Result<Mesocycle, Box<dyn std::error::Error>> {
     let (year, month, day) = anchored_on;
     // From the standalone week 4 that runs first, so the cycle opens on a
     // measured number rather than an expectation (decision 0024).
@@ -42,7 +42,7 @@ fn the_answers_author_an_sbs_cycle() {
     assert_eq!(programme.template(), "sbs");
     assert_eq!(programme.name().as_str(), "autumn-2026-front-squat");
     assert!(
-        matches!(programme, Programme::Periodisation(Periodisation::Sbs(_))),
+        matches!(programme, Mesocycle::Progression(Progression::Sbs(_))),
         "and it is a periodisation, beside linear and block",
     );
     assert_eq!(
