@@ -18,9 +18,9 @@
 //! lower one is not a stored fact but an act: asking a programme for a shape,
 //! which is `cycling::shape` and decision 0036.
 //!
-//! **Not `cycling`'s, though that is where it started.** `PublishedMicrocycle`
-//! has carried "which microcycle of which programme" since the cycling side was
-//! authored, and the gym side carried nothing at all — it stored
+//! **Not `cycling`'s, though that is where it started.** A `PublishedMicrocycle`
+//! carried "which microcycle of which programme" from the day the cycling side
+//! was authored, and the gym side carried nothing at all — it stored
 //! `template = "sbs"`, which names the publisher of one chart and not the
 //! programme. Both disciplines take mesocycles from external programmes, so the
 //! record of that sits above both.
@@ -30,8 +30,63 @@ use std::fmt;
 use crate::{
     gym::sequence::{NonEmpty, TooShort},
     newtype::string_name,
-    prescription::succession::ProgrammeName,
 };
+
+/// The longest a published programme's name may be.
+///
+/// A terminal line, not a rule about naming: the name is printed beside a date
+/// and a microcycle selection, and something longer than this wraps. Nothing
+/// downstream depends on the value.
+pub const MAX_PROGRAMME: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidProgrammeName {
+    #[error("a programme's name must not be empty")]
+    Empty,
+    #[error("a programme's name must be at most {MAX_PROGRAMME} characters, and this is {length}")]
+    TooLong { length: usize },
+    #[error("a programme's name must be one line of printable text")]
+    NotPrintable,
+}
+
+/// What a published programme is called: *Squat 2x Int*, *Peak Your Power
+/// Zones*.
+///
+/// **The publisher's word, not ours.** It was this tool's own identity for an
+/// authored programme until 2026-09-06, when identity moved up to the plan
+/// ([`PlanName`](crate::plan::PlanName)) and the only names left below it were
+/// the ones somebody else chose. *Power Zone Build* being wrong here was a
+/// transcription error rather than a naming decision, which is the difference.
+///
+/// **Free text, deliberately.** There is no catalogue of published programmes to
+/// validate against, and inventing one would refuse the next programme the
+/// operator wants to run. The rules that do exist are the ones a label has to
+/// satisfy to be comparable at all: surrounding whitespace is trimmed rather
+/// than rejected, so that two transcriptions of one title cannot become two
+/// programmes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProgrammeName(String);
+
+impl TryFrom<String> for ProgrammeName {
+    type Error = InvalidProgrammeName;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(InvalidProgrammeName::Empty);
+        }
+        let length = trimmed.chars().count();
+        if length > MAX_PROGRAMME {
+            return Err(InvalidProgrammeName::TooLong { length });
+        }
+        if trimmed.chars().any(char::is_control) {
+            return Err(InvalidProgrammeName::NotPrintable);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+string_name!(ProgrammeName, InvalidProgrammeName);
 
 /// The longest a provider's name may be.
 ///

@@ -15,8 +15,6 @@
 //!
 //! [`Progression::Linear`]: crate::prescription::Progression::Linear
 
-use jiff::Timestamp;
-
 use crate::{
     gym::{Kg, exercise::Exercise},
     prescription::{
@@ -26,7 +24,6 @@ use crate::{
         parameters::GenerationParameters,
         schedule::{Calendar, SessionRole, Weekdays},
         steps::LoadSteps,
-        succession::{ProgrammeName, ProgrammeWindow},
     },
 };
 
@@ -101,10 +98,6 @@ impl Primary {
 /// A rule for generating a series of prescribed workouts, plus its inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Linear {
-    /// What identifies this programme across re-authorings (decision 0012).
-    /// Two programmes sharing a name are one programme's versions; two that do
-    /// not are rivals for the days they cover, and may not overlap.
-    name: ProgrammeName,
     primary: Primary,
     fills: SlotFills,
     /// The starting 1RM. Fixed for this block; only its exit test replaces it,
@@ -113,7 +106,6 @@ pub struct Linear {
     /// one rather than deriving it from that test.
     entry: Entry,
     calendar: Calendar,
-    authored_at: Timestamp,
 }
 
 impl Linear {
@@ -126,7 +118,6 @@ impl Linear {
     /// not fill the slot named as primary, or a climb and duration that do not
     /// make a ladder.
     pub fn new(
-        name: ProgrammeName,
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
@@ -169,12 +160,10 @@ impl Linear {
         )?;
 
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             calendar,
-            authored_at: Timestamp::now(),
         })
     }
 
@@ -194,7 +183,7 @@ impl Linear {
     /// duration below two and a climb of nothing, and the `programme` and
     /// `generation_parameters` tables both carry a `CHECK` excluding them. So this
     /// is about the check meaning the wrong thing rather than about it failing.
-    /// Keeping it out also keeps `ProgrammeStore` able to answer its own question
+    /// Keeping it out also keeps `MesocycleStore` able to answer its own question
     /// without another store's data, which is what lets a programme still be
     /// displayed when the parameters are the thing that is broken.
     ///
@@ -206,12 +195,10 @@ impl Linear {
     /// [`InconsistentMesocycle`] for any of the three parameter-independent
     /// checks.
     pub fn rehydrate(
-        name: ProgrammeName,
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
         calendar: Calendar,
-        authored_at: Timestamp,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(
             primary.pattern,
@@ -221,12 +208,10 @@ impl Linear {
             calendar.weekdays(),
         )?;
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             calendar,
-            authored_at,
         })
     }
 
@@ -279,29 +264,6 @@ impl Linear {
 
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
-    }
-
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
-    }
-
-    /// The days this programme occupies, for the rule that two programmes may
-    /// not compete for one of them.
-    ///
-    /// Calendar weeks rather than training weeks: a block interrupted for a
-    /// fortnight still occupies those days, and a programme starting inside
-    /// them would be answering for the same dates.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 
     /// The block's plan.

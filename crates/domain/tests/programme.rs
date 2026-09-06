@@ -17,11 +17,11 @@ use domain::{
         Kg, RepCount,
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
+    plan::Occupies,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,
-        InconsistentMesocycle, Mesocycle, PerRole, Primary, PrimaryPattern, ProgrammeName,
-        Progression, SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex,
-        Weekdays,
+        InconsistentMesocycle, Mesocycle, PerRole, Primary, PrimaryPattern, Progression,
+        SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex, Weekdays,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -36,10 +36,6 @@ fn invalid(detail: impl std::fmt::Display) -> Invalid {
 
 fn reps(count: u32) -> Result<RepCount, Invalid> {
     RepCount::new(count).map_err(invalid)
-}
-
-fn name(value: &str) -> Result<ProgrammeName, Invalid> {
-    ProgrammeName::try_from(value.to_owned()).map_err(invalid)
 }
 
 fn date(year: i16, month: i8, day: i8) -> Result<Date, Invalid> {
@@ -118,7 +114,6 @@ fn block(
     )
     .map_err(invalid)?;
     Ok(BlockPeriodisation::new(
-        name("autumn")?,
         Primary::new(
             PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -150,7 +145,6 @@ fn test(
     let week =
         Test::week(date(2026, 9, 14)?, &[] as &[Skip], weekdays, TimeZone::UTC).map_err(invalid)?;
     Ok(Test::new(
-        name("autumn-entry-test")?,
         Tested::new(
             PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -164,11 +158,11 @@ fn test(
 
 // ---------------------------------------------------------------------------
 
-/// A test occupies exactly one week, and says so to the overlap rule.
+/// A test occupies exactly one week, and says so to the plan holding it.
 ///
-/// The rule that two programmes may not compete for a day reads the window, so a
-/// test claiming more than its week would refuse the block that follows it three
-/// days later.
+/// The rule that two mesocycles of one programme may not compete for a day reads
+/// the span, so a test claiming more than its week would refuse the block that
+/// follows it three days later.
 #[test]
 fn a_test_occupies_one_week() {
     let Ok(weekdays) = weekdays() else {
@@ -182,16 +176,16 @@ fn a_test_occupies_one_week() {
         panic!("a front squat single on the heavy day is a test")
     };
     assert_eq!(test.calendar().duration_weeks(), 1);
-    let window = test.window();
+    let span = Mesocycle::Test(test).span();
     let Ok(monday) = Date::new(2026, 9, 14) else {
         panic!("14 September is a date")
     };
     let Ok(next_monday) = Date::new(2026, 9, 21) else {
         panic!("21 September is a date")
     };
-    assert!(window.covers(monday), "the test covers its own Monday");
+    assert!(span.covers(monday), "the test covers its own Monday");
     assert!(
-        !window.covers(next_monday),
+        !span.covers(next_monday),
         "and stops before the block that inherits it opens"
     );
 }

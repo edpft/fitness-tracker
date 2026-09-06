@@ -29,7 +29,7 @@ pub mod zone;
 pub use mesocycle::{
     CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays,
     InvalidCyclingMesocycle, InvalidMicrocycle, InvalidSessionPosition, InvalidVenue,
-    InvalidWeekdays, PlannedRide, PublishedMicrocycle, RideVenue, SessionPosition,
+    InvalidWeekdays, PlannedRide, RideVenue, SessionPosition,
 };
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{

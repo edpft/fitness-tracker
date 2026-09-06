@@ -14,8 +14,8 @@
 //!
 //! **This is a record of intent (§ 12), so it holds what is ridden and not what
 //! was offered.** A published mesocycle prescribes three sessions a microcycle
-//! and the operator rides two; the two are here, and [`PublishedMicrocycle`]
-//! keeps the way back to the rest.
+//! and the operator rides two; the two are here, and the published numbering on
+//! each microcycle and ride keeps the way back to the rest.
 //!
 //! **The zone plan is stored rather than re-derived.** Re-fetching a class is
 //! neither free nor always available, and § 13 wants a prescription issued last
@@ -28,24 +28,25 @@
 //! [`DeliveryReference`](crate::prescription::DeliveryReference) holds — neither
 //! is interpreted here, and nothing here knows a Peloton class id exists.
 //!
-//! **Succession is the gym's, reused rather than restated.**
-//! [`ProgrammeName`] and [`ProgrammeWindow`] say what identifies a programme
-//! across re-authorings and which days it occupies, and neither is about
-//! lifting. Two copies would be two overlap rules to keep in step. The *sets*
-//! stay apart, which is the whole of what cycling needs differently: a cycling
-//! programme is refused for overlapping another cycling programme, and never
-//! for overlapping the gym block it is meant to run beside.
+//! **Identity is the plan's, and there is no overlap rule here at all.** A
+//! mesocycle had a [`ProgrammeName`] of its own until 2026-09-06 and competed
+//! for its days against every other cycling mesocycle, which is how four of
+//! them were held in sequence without a plan to hold them. `Programme` orders
+//! them now and refuses two that collide, and the only overlap rule left is
+//! between *plans* — so the gym and the bike compete for every day of one plan
+//! on purpose, which is the point of the tool.
+//!
+//! **What is left of a name is the published one.** [`ExternalProgramme`] says
+//! which Peloton programme these microcycles were taken from, and
+//! [`CyclingMesocycle::provided_from`] pairs it with their published numbers.
 
 use std::collections::BTreeMap;
 
-use jiff::{
-    Timestamp,
-    civil::{Date, Weekday},
-};
+use jiff::civil::{Date, Weekday};
 
 use crate::{
     gym::sequence::NonEmpty,
-    prescription::{ProgrammeName, ProgrammeWindow},
+    provider::{ExternalProgramme, InvalidProvision, ProvidedFrom},
 };
 
 use super::session::CyclingSession;
@@ -58,7 +59,8 @@ use super::session::CyclingSession;
 /// answer of µ1-2-4-5 authors a first, second, third and fourth. Which
 /// published session each was is carried by
 /// [`PlannedRide::published_session`], for the same reason
-/// [`PublishedMicrocycle`] exists: it is the way back to what was not chosen.
+/// [`CyclingMicrocycle::published_ordinal`] exists: it is the way back to what
+/// was not chosen.
 ///
 /// Numbering them as published would make the printed line say "session 3" for
 /// the second of two, which is what the operator caught on 2026-09-05.
@@ -193,49 +195,11 @@ impl PlannedRide {
 
     /// Which session of the published microcycle this was.
     ///
-    /// The counterpart of [`PublishedMicrocycle::microcycle`], and kept for the
-    /// same reason: a re-authoring that wants the session the operator did not
-    /// take has to know which one it is asking the provider for.
+    /// The counterpart of [`CyclingMicrocycle::published_ordinal`], and kept for
+    /// the same reason: a re-authoring that wants the session the operator did
+    /// not take has to know which one it is asking the provider for.
     pub const fn published_session(&self) -> u32 {
         self.published_session
-    }
-}
-
-/// Which microcycle of which published programme a microcycle was taken from.
-///
-/// **The way back to what was not chosen.** The authored record holds the rides
-/// the operator will do; this says where they came from, so a re-authoring that
-/// wants the third session of the week knows which microcycle of which
-/// programme to ask for.
-///
-/// The published programme's own numbering, never this programme's: an answer
-/// of µ1-2-4-5 keeps the four numbers the programme itself uses.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublishedMicrocycle {
-    programme: ProgrammeName,
-    microcycle: u32,
-}
-
-impl PublishedMicrocycle {
-    pub const fn new(programme: ProgrammeName, microcycle: u32) -> Self {
-        Self {
-            programme,
-            microcycle,
-        }
-    }
-
-    pub const fn programme(&self) -> &ProgrammeName {
-        &self.programme
-    }
-
-    pub const fn microcycle(&self) -> u32 {
-        self.microcycle
-    }
-}
-
-impl std::fmt::Display for PublishedMicrocycle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} µ{}", self.programme, self.microcycle)
     }
 }
 
@@ -243,6 +207,8 @@ impl std::fmt::Display for PublishedMicrocycle {
 pub enum InvalidMicrocycle {
     #[error("a microcycle with no ride in it is a week off, not a microcycle")]
     NoRides,
+    #[error("a published programme's microcycles count from one, so there is no microcycle 0")]
+    ZeroPublishedOrdinal,
 }
 
 /// One week of an authored programme: what is ridden, and in what order.
@@ -252,7 +218,7 @@ pub enum InvalidMicrocycle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclingMicrocycle {
     rides: BTreeMap<SessionPosition, PlannedRide>,
-    from: PublishedMicrocycle,
+    published_ordinal: u32,
 }
 
 impl CyclingMicrocycle {
@@ -261,12 +227,18 @@ impl CyclingMicrocycle {
     /// [`InvalidMicrocycle::NoRides`] if it prescribes nothing.
     pub fn new(
         rides: BTreeMap<SessionPosition, PlannedRide>,
-        from: PublishedMicrocycle,
+        published_ordinal: u32,
     ) -> Result<Self, InvalidMicrocycle> {
         if rides.is_empty() {
             return Err(InvalidMicrocycle::NoRides);
         }
-        Ok(Self { rides, from })
+        if published_ordinal == 0 {
+            return Err(InvalidMicrocycle::ZeroPublishedOrdinal);
+        }
+        Ok(Self {
+            rides,
+            published_ordinal,
+        })
     }
 
     pub const fn rides(&self) -> &BTreeMap<SessionPosition, PlannedRide> {
@@ -278,8 +250,14 @@ impl CyclingMicrocycle {
         self.rides.get(&at)
     }
 
-    pub const fn from(&self) -> &PublishedMicrocycle {
-        &self.from
+    /// Which microcycle of the published programme this is, in that
+    /// programme's own numbering.
+    ///
+    /// An answer of µ1-2-4-5 keeps the four numbers the programme uses, so the
+    /// third microcycle here says 4. Which programme they are microcycles *of*
+    /// is [`CyclingMesocycle::programme`], said once rather than on every week.
+    pub const fn published_ordinal(&self) -> u32 {
+        self.published_ordinal
     }
 
     /// How many sessions the week holds. What "the second of two" counts
@@ -377,6 +355,13 @@ pub enum InvalidCyclingMesocycle {
         microcycle: usize,
         position: SessionPosition,
     },
+    /// The published numbers are not a selection: one is taken twice.
+    ///
+    /// **Not reachable through [`CyclingMicrocycle::new`]**, which refuses a
+    /// zero on its own — this is the rule that spans the weeks rather than one
+    /// of them.
+    #[error(transparent)]
+    NotASelection(#[from] InvalidProvision),
 }
 
 /// A row identity, given by the store.
@@ -402,8 +387,12 @@ impl std::fmt::Display for CyclingMesocycleId {
 /// An authored cycling mesocycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclingMesocycle {
-    name: ProgrammeName,
-    authored_at: Timestamp,
+    /// The published programme these microcycles were taken from.
+    ///
+    /// **Always present on this side.** A cycling mesocycle is microcycles of a
+    /// Peloton programme; there is no derived kind of one, which is why this is
+    /// not an `Option` as the gym's provider is.
+    programme: ExternalProgramme,
     /// The Monday microcycle one begins on.
     start: Date,
     microcycles: NonEmpty<CyclingMicrocycle>,
@@ -417,9 +406,12 @@ impl CyclingMesocycle {
     /// a session the weekday map rides. That is the one thing the parts cannot
     /// guarantee between them, and leaving it unchecked would author a
     /// programme with a Wednesday nothing answers for.
+    ///
+    /// [`InvalidCyclingMesocycle::NotASelection`] where two microcycles claim
+    /// the same published week. A selection takes each week once, and µ1-2-2-4
+    /// is not one anybody made.
     pub fn new(
-        name: ProgrammeName,
-        authored_at: Timestamp,
+        programme: ExternalProgramme,
         start: Date,
         microcycles: NonEmpty<CyclingMicrocycle>,
         weekdays: CyclingWeekdays,
@@ -434,21 +426,42 @@ impl CyclingMesocycle {
                 }
             }
         }
+        ProvidedFrom::new(
+            programme.clone(),
+            microcycles
+                .iter()
+                .map(CyclingMicrocycle::published_ordinal)
+                .collect(),
+        )?;
         Ok(Self {
-            name,
-            authored_at,
+            programme,
             start,
             microcycles,
             weekdays,
         })
     }
 
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
+    pub const fn programme(&self) -> &ExternalProgramme {
+        &self.programme
     }
 
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
+    /// Which microcycles of which published programme this is.
+    ///
+    /// **Derived rather than stored.** The numbers are on the microcycles and
+    /// the programme is on the mesocycle, so a stored copy would be a second
+    /// place for one fact and free to disagree with the rows it was built from.
+    /// `new` refuses a mesocycle whose numbers do not make a selection, so this
+    /// answers.
+    #[must_use]
+    pub fn provided_from(&self) -> Option<ProvidedFrom> {
+        ProvidedFrom::new(
+            self.programme.clone(),
+            self.microcycles
+                .iter()
+                .map(CyclingMicrocycle::published_ordinal)
+                .collect(),
+        )
+        .ok()
     }
 
     pub const fn start(&self) -> Date {
@@ -475,16 +488,6 @@ impl CyclingMesocycle {
         number
             .checked_sub(1)
             .and_then(|index| self.microcycles.iter().nth(index))
-    }
-
-    /// The name and the days this programme occupies.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.start,
-            u32::try_from(self.duration_weeks()).unwrap_or(u32::MAX),
-        )
     }
 
     /// Which microcycle a date falls in, counting from one.

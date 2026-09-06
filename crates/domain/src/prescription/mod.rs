@@ -82,10 +82,7 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
-pub use succession::{
-    InvalidProgrammeName, ProgrammeName, ProgrammeWindow, RECENT_WEEKS, is_recent_enough,
-    weeks_between,
-};
+pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
 pub use warmup::ramp as warmup_ramp;

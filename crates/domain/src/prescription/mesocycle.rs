@@ -38,8 +38,6 @@
 //! disagree with it. What the store needs is a stable string, and
 //! [`Mesocycle::template`] derives it from the variant in force.
 
-use jiff::Timestamp;
-
 use crate::{
     gym::exercise::Exercise,
     prescription::{
@@ -48,8 +46,8 @@ use crate::{
         linear::{Linear, PrimaryPattern, SlotFills},
         sbs::Sbs,
         schedule::{Calendar, SessionRole},
-        succession::{ProgrammeName, ProgrammeWindow},
     },
+    provider::ProvidedFrom,
 };
 
 /// What was authored: one programme, of whichever kind.
@@ -83,7 +81,11 @@ pub enum Progression {
     /// implies has not happened yet: a provided cycling mesocycle is a different
     /// type today, and whether the two collapse into one is settled by building
     /// both and looking rather than by predicting.
-    Provided(Sbs),
+    Provided {
+        /// Which microcycles of which external programme this is.
+        from: ProvidedFrom,
+        cycle: Sbs,
+    },
 }
 
 impl Mesocycle {
@@ -92,13 +94,6 @@ impl Mesocycle {
         match self {
             Self::Test(_) => "test",
             Self::Progression(periodisation) => periodisation.template(),
-        }
-    }
-
-    pub const fn name(&self) -> &ProgrammeName {
-        match self {
-            Self::Test(test) => test.name(),
-            Self::Progression(periodisation) => periodisation.name(),
         }
     }
 
@@ -113,13 +108,6 @@ impl Mesocycle {
         match self {
             Self::Test(test) => test.calendar(),
             Self::Progression(periodisation) => periodisation.calendar(),
-        }
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        match self {
-            Self::Test(test) => test.authored_at(),
-            Self::Progression(periodisation) => periodisation.authored_at(),
         }
     }
 
@@ -138,16 +126,6 @@ impl Mesocycle {
         match self {
             Self::Test(test) => test.primary_exercise(),
             Self::Progression(periodisation) => periodisation.primary_exercise(),
-        }
-    }
-
-    /// The days this programme occupies, for the rule that two programmes may
-    /// not compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        match self {
-            Self::Test(test) => test.window(),
-            Self::Progression(periodisation) => periodisation.window(),
         }
     }
 
@@ -198,7 +176,9 @@ impl Mesocycle {
             // leaves a measured maximum behind exactly as a block does — and
             // that maximum is what the next cycle opens from, which is what
             // makes the chart self-perpetuating (decision 0024).
-            Self::Progression(Progression::Provided(sbs)) => Some(sbs.primary_exercise()),
+            Self::Progression(Progression::Provided { cycle: sbs, .. }) => {
+                Some(sbs.primary_exercise())
+            }
             Self::Progression(Progression::Linear(_)) => None,
         }
     }
@@ -244,7 +224,7 @@ impl Mesocycle {
             // that opens the sequence, or the previous cycle's own week 4. There
             // is no case where the cycle is about to measure its own opening, so
             // no carve-out is needed for one.
-            Self::Progression(Progression::Provided(sbs)) => matches!(
+            Self::Progression(Progression::Provided { cycle: sbs, .. }) => matches!(
                 sbs.entry().anchor().provenance(),
                 crate::prescription::AnchorProvenance::Tested
             ),
@@ -275,15 +255,7 @@ impl Progression {
             // this method exists precisely so a variant can be renamed without
             // rewriting rows. They change when the schema does.
             Self::BlockPeriodisation(_) => "block",
-            Self::Provided(_) => "sbs",
-        }
-    }
-
-    pub const fn name(&self) -> &ProgrammeName {
-        match self {
-            Self::Linear(linear) => linear.name(),
-            Self::BlockPeriodisation(block) => block.name(),
-            Self::Provided(sbs) => sbs.name(),
+            Self::Provided { .. } => "sbs",
         }
     }
 
@@ -291,7 +263,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.fills(),
             Self::BlockPeriodisation(block) => block.fills(),
-            Self::Provided(sbs) => sbs.fills(),
+            Self::Provided { cycle: sbs, .. } => sbs.fills(),
         }
     }
 
@@ -299,15 +271,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.calendar(),
             Self::BlockPeriodisation(block) => block.calendar(),
-            Self::Provided(sbs) => sbs.calendar(),
-        }
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        match self {
-            Self::Linear(linear) => linear.authored_at(),
-            Self::BlockPeriodisation(block) => block.authored_at(),
-            Self::Provided(sbs) => sbs.authored_at(),
+            Self::Provided { cycle: sbs, .. } => sbs.calendar(),
         }
     }
 
@@ -315,7 +279,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.primary(),
             Self::BlockPeriodisation(block) => block.primary(),
-            Self::Provided(sbs) => sbs.primary(),
+            Self::Provided { cycle: sbs, .. } => sbs.primary(),
         }
     }
 
@@ -323,7 +287,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.primary_exercise(),
             Self::BlockPeriodisation(block) => block.primary_exercise(),
-            Self::Provided(sbs) => sbs.primary_exercise(),
+            Self::Provided { cycle: sbs, .. } => sbs.primary_exercise(),
         }
     }
 
@@ -333,7 +297,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.entry(),
             Self::BlockPeriodisation(block) => block.entry(),
-            Self::Provided(sbs) => sbs.entry(),
+            Self::Provided { cycle: sbs, .. } => sbs.entry(),
         }
     }
 
@@ -346,16 +310,7 @@ impl Progression {
         match self {
             Self::Linear(linear) => linear.gating_role(),
             Self::BlockPeriodisation(block) => block.gating_role(),
-            Self::Provided(sbs) => sbs.gating_role(),
-        }
-    }
-
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        match self {
-            Self::Linear(linear) => linear.window(),
-            Self::BlockPeriodisation(block) => block.window(),
-            Self::Provided(sbs) => sbs.window(),
+            Self::Provided { cycle: sbs, .. } => sbs.gating_role(),
         }
     }
 }

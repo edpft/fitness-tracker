@@ -29,7 +29,7 @@
 //!
 //! [`Fill::Alternating`]: crate::prescription::Fill::Alternating
 
-use jiff::{Timestamp, civil::Date, tz::TimeZone};
+use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
@@ -39,7 +39,6 @@ use crate::{
         repmax::rep_max,
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
         shape::SlotId,
-        succession::{ProgrammeName, ProgrammeWindow},
     },
 };
 
@@ -106,9 +105,6 @@ impl Tested {
 /// A standalone test week.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Test {
-    /// What identifies this test across re-authorings (decision 0012). A test
-    /// is a programme, so it names itself and competes for its days like one.
-    name: ProgrammeName,
     /// The lift being tested, the slot it fills — which is the *next*
     /// programme's primary pattern, not the predecessor's — and what the attempt
     /// is performed at.
@@ -129,7 +125,6 @@ pub struct Test {
     /// One week, always: [`Test::new`] builds it and nothing else may.
     calendar: Calendar,
     target: TestTarget,
-    authored_at: Timestamp,
 }
 
 impl Test {
@@ -177,7 +172,6 @@ impl Test {
     /// convert, or a weekday map that never runs the session the test is taken
     /// on.
     pub fn new(
-        name: ProgrammeName,
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
@@ -185,12 +179,10 @@ impl Test {
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
-            name,
             tested,
             fills,
             calendar,
             target,
-            authored_at: Timestamp::now(),
         })
     }
 
@@ -204,21 +196,17 @@ impl Test {
     ///
     /// As [`Self::new`].
     pub fn rehydrate(
-        name: ProgrammeName,
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
-        authored_at: Timestamp,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
-            name,
             tested,
             fills,
             calendar,
             target,
-            authored_at,
         })
     }
 
@@ -265,10 +253,6 @@ impl Test {
         Ok(())
     }
 
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
-    }
-
     /// What is being tested, whole.
     pub const fn tested(&self) -> Tested {
         self.tested
@@ -299,21 +283,6 @@ impl Test {
 
     pub const fn target(&self) -> TestTarget {
         self.target
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
-    }
-
-    /// The days this test occupies, for the rule that two programmes may not
-    /// compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 
     /// Whether this slot is the one being tested.

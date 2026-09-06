@@ -12,8 +12,6 @@
 //! chart is four weeks. Offering a duration would invite a five-week SBS cycle,
 //! which is not a thing that exists.
 
-use jiff::Timestamp;
-
 use crate::{
     gym::exercise::Exercise,
     prescription::{
@@ -21,7 +19,6 @@ use crate::{
         linear::{Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         schedule::{Calendar, SessionRole},
-        succession::{ProgrammeName, ProgrammeWindow},
     },
 };
 
@@ -41,8 +38,6 @@ pub const GATING: SessionRole = SessionRole::Heavy;
 /// A cycle of the SBS chart, as authored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sbs {
-    /// What identifies this programme across re-authorings (decision 0012).
-    name: ProgrammeName,
     primary: Primary,
     fills: SlotFills,
     /// The maximum week 1 programmes from.
@@ -55,7 +50,6 @@ pub struct Sbs {
     /// performance.
     entry: Entry,
     calendar: Calendar,
-    authored_at: Timestamp,
 }
 
 impl Sbs {
@@ -68,7 +62,6 @@ impl Sbs {
     /// the slot named as primary, a calendar that is not four weeks, or a test
     /// that does not precede the cycle it anchors.
     pub fn new(
-        name: ProgrammeName,
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
@@ -106,12 +99,10 @@ impl Sbs {
         }
 
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             calendar,
-            authored_at: Timestamp::now(),
         })
     }
 
@@ -121,26 +112,18 @@ impl Sbs {
     /// written, and re-refusing it now would make a rule change unreadable data.
     #[must_use]
     pub const fn stored(
-        name: ProgrammeName,
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
         entry: Entry,
         calendar: Calendar,
-        authored_at: Timestamp,
     ) -> Self {
         Self {
-            name,
             primary: Primary::new(pattern, exercise, GATING),
             fills,
             entry,
             calendar,
-            authored_at,
         }
-    }
-
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
     }
 
     pub const fn fills(&self) -> &SlotFills {
@@ -149,10 +132,6 @@ impl Sbs {
 
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
     }
 
     pub const fn entry(&self) -> Entry {
@@ -170,16 +149,5 @@ impl Sbs {
     /// The session whose result moves the maximum. Always [`GATING`].
     pub const fn gating_role(&self) -> SessionRole {
         GATING
-    }
-
-    /// The days this cycle occupies, for the rule that two programmes may not
-    /// compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 }
