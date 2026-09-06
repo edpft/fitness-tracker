@@ -79,9 +79,13 @@ async fn authenticated(server: &MockServer) {
         .await;
 }
 
-/// Matt Wilpers' id, and the class the live API really answers with.
+/// Matt Wilpers' id, and the class the live API really answers with. He is
+/// also the instructor every session falls back to.
 const INSTRUCTOR: &str = "304389e2bfe44830854e071bffc137c9";
 const COOL_DOWN: &str = "df190d7077c244208bdf6f9e0dae12f5";
+
+/// The co-taught id, which really does publish no cool-down ride.
+const DENIS_AND_MATT: &str = "5c784412fb234b2b833dda585d518642";
 
 fn one_result() -> serde_json::Value {
     serde_json::json!({
@@ -176,4 +180,97 @@ fn the_first_result_is_the_one_taken() {
 #[test]
 fn a_body_that_is_not_a_listing_is_malformed() {
     assert!(cool_down_from(INSTRUCTOR, "<html>an error page</html>").is_err());
+}
+
+/// Stub a search that answers `found` for `instructor`.
+async fn searching(server: &MockServer, instructor: &'static str, found: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(query_param("instructor_id", instructor))
+        .respond_with(ResponseTemplate::new(200).set_body_json(found))
+        .mount(server)
+        .await;
+}
+
+fn classes(server: &MockServer) -> PelotonClasses {
+    PelotonClasses::new(
+        server.uri(),
+        PelotonAuth::new(
+            server.uri(),
+            PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+        ),
+    )
+}
+
+/// **Four of twelve instructors publish none**, so a session by one of them
+/// takes Matt Wilpers'. The operator, 2026-09-06: "fall back to Matt Wilpers".
+#[test]
+fn an_instructor_with_no_cool_down_falls_back_to_matt_wilpers() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        searching(&server, DENIS_AND_MATT, serde_json::json!({ "data": [] })).await;
+        searching(&server, INSTRUCTOR, one_result()).await;
+
+        let found = classes(&server)
+            .cool_down_after(Some(DENIS_AND_MATT))
+            .await
+            .expect("the fallback answers");
+        assert_eq!(found.id, COOL_DOWN);
+    });
+}
+
+/// **The fallback is a fallback, not a default.** An instructor with a cool-down
+/// of their own keeps it — a session should end with the voice it was ridden
+/// with wherever that is possible.
+#[test]
+fn an_instructor_with_a_cool_down_keeps_their_own() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        searching(
+            &server,
+            "1e59e949a19341539214a4a13ea7ff01",
+            serde_json::json!({
+                "data": [{
+                    "id": "ec7720246e4f4223acd99d944b33f692",
+                    "title": "5 min Cool Down Ride",
+                    "duration": 300,
+                }]
+            }),
+        )
+        .await;
+        // Matt's search is stubbed too, so taking it would pass unnoticed if the
+        // fallback fired when it should not. It must not be reached.
+        searching(&server, INSTRUCTOR, one_result()).await;
+
+        let found = classes(&server)
+            .cool_down_after(Some("1e59e949a19341539214a4a13ea7ff01"))
+            .await
+            .expect("Denis Morton has one of his own");
+        assert_eq!(found.id, "ec7720246e4f4223acd99d944b33f692");
+    });
+}
+
+/// A catalogue where even the fallback has none is not a session with no
+/// cool-down; it is this adapter no longer describing Peloton.
+#[test]
+fn a_fallback_with_no_cool_down_is_an_error_rather_than_silence() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        searching(&server, INSTRUCTOR, serde_json::json!({ "data": [] })).await;
+
+        let refused = classes(&server).cool_down_after(Some(INSTRUCTOR)).await;
+        assert!(refused.is_err(), "nobody to fall back to is a fault");
+    });
 }

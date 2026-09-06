@@ -47,6 +47,19 @@ use serde::Deserialize;
 /// stated rather than derived from the word "cool down".
 const COOL_DOWN_RIDE_CLASS_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
 
+/// Whose cool-down ride is used when a class's own instructor has none.
+///
+/// Matt Wilpers, by the operator's instruction on 2026-09-06. Four of the twelve
+/// instructors these programmes use publish no five-minute cool-down ride —
+/// the co-taught "Denis &amp; Matt", Christian Vande Velde, Charlotte
+/// Weidenbach and Erik Jäger — so a session taught by one of them would
+/// otherwise end with nowhere to ride the five minutes he rides anyway.
+///
+/// **His id, not his class.** Which cool-down is his most recent is resolved by
+/// the same query as everyone else's, so the fallback does not go stale where
+/// the ordinary path stays current.
+const FALLBACK_INSTRUCTOR: &str = "304389e2bfe44830854e071bffc137c9";
+
 /// How long a cool-down ride is, in seconds.
 ///
 /// Five minutes, and it is a filter rather than a preference: the operator rides
@@ -350,6 +363,45 @@ impl PelotonClasses {
             .as_ref()
             .map_err(|detail| SourceError::Unavailable {
                 detail: detail.clone(),
+            })
+    }
+
+    /// The cool-down ride a session ends with.
+    ///
+    /// The class's own instructor where they have one, and
+    /// [`FALLBACK_INSTRUCTOR`]'s where they do not — the operator, 2026-09-06,
+    /// asked what a session by an instructor with no cool-down should do:
+    /// *"fall back to Matt Wilpers"*.
+    ///
+    /// **The fallback is here rather than in [`cool_down_for`](Self::cool_down_for)**,
+    /// which keeps answering what the source actually says. One of the two is a
+    /// fact about Peloton's catalogue and the other is the operator's choice
+    /// about his own training, and a function that quietly did both would make
+    /// the first untestable.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] as [`cool_down_for`](Self::cool_down_for) gives it, and
+    /// [`SourceError::Malformed`] if even the fallback has no cool-down ride —
+    /// which would mean the catalogue is not what this adapter was built
+    /// against, rather than that this session has none.
+    pub async fn cool_down_after(
+        &self,
+        instructor: Option<&str>,
+    ) -> Result<ClassSummary, SourceError> {
+        if let Some(instructor) = instructor
+            && instructor != FALLBACK_INSTRUCTOR
+            && let Some(theirs) = self.cool_down_for(instructor).await?
+        {
+            return Ok(theirs);
+        }
+        self.cool_down_for(FALLBACK_INSTRUCTOR)
+            .await?
+            .ok_or_else(|| SourceError::Malformed {
+                detail: format!(
+                    "no five-minute cool-down ride was found for instructor \
+                     {FALLBACK_INSTRUCTOR}, who is the one every session falls back to"
+                ),
             })
     }
 
