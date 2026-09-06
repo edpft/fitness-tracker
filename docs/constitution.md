@@ -1,7 +1,15 @@
 <!--
 Sync Impact Report
-- Version: 2.0.0, amended 2026-09-02. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 3.0.0, amended 2026-09-06. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 3.0.0 — § 40 redefined. Sign-off is on the design, given in conversation, rather than on the
+  merge; a change whose design is settled may be merged by whoever wrote it once the checks
+  pass. MAJOR: the rule said human sign-off before merge "is not delegated", and it now is.
+  The operator, 2026-09-06: "The you-don't-merge-rule was for when I was going to be reviewing
+  the PRs. I'm not doing that, my feedback is contributing to design decisions, providing
+  domain expertise, defining the automated tests, and actually using the tool." No decision
+  record: there was no disagreement to record, and CLAUDE.md's test for one is not met.
+- 2.0.0 — § 14 narrowed and § 14.1 added.
 - 2.0.0 — § 14 narrowed and § 14.1 added. A generation parameter is a fact about the world
   the program is run in, never a fact about how it prescribes; warm-up percentages, back-off
   schemes, top-set repetitions and reset protocols belong to the program that states them.
@@ -227,9 +235,13 @@ No rule above records which of the two applies to it. Enforceability changes as 
 
 **39.** Review covers design, naming, invariant modelling and architectural fit. Agent review surfaces candidates for attention; it does not gate, because it shares blind spots with the agent that wrote the code.
 
-**40.** Human sign-off before merge is a real gate and is not delegated. It covers authored changes — code written by a person or an agent — where what is being signed off is a judgement about design that no suite can stand in for.
+**40.** **The operator's sign-off is on the design, not on the merge.** It is given in conversation — settling how a thing should work, supplying the domain expertise, saying what the automated tests must assert, and using the tool against real data — and that is where a judgement no suite can stand in for actually happens. The operator, 2026-09-06: *"my feedback is contributing to design decisions, providing domain expertise, defining the automated tests, and actually using the tool."*
 
-Dependency updates are not authored changes. A bump whose checks pass may merge automatically: what is trusted there is the test suite and the advisory database, both of which say more about a version bump than a human skimming a lockfile diff.
+**So a change whose design has been settled that way may be merged by whoever wrote it, agent included, once the checks pass.** Until 2026-09-06 this rule required human sign-off *at the merge*, on the assumption that the operator would review pull requests. He does not, and a gate nobody stands at is not a gate: it delays work and invites the sign-off to become a formality, which is worse than not claiming one.
+
+What is not delegated is unchanged in substance: **a design nobody has agreed is not ready to merge, whatever the checks say.** The gate moved earlier, it did not disappear.
+
+Dependency updates were already exempt, and remain so for their own reason: what is trusted there is the test suite and the advisory database, both of which say more about a version bump than a human skimming a lockfile diff.
 
 ## Governance
 
@@ -239,4 +251,4 @@ Dependency updates are not authored changes. A bump whose checks pass may merge 
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-02
+**Version**: 3.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-06

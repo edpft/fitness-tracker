@@ -84,8 +84,11 @@ work. That is not a fact about the project.
   the constitution moved to `docs/constitution.md` on its way out. All of it is
   in git history if a provenance note ever needs chasing. Do not restore it, do
   not cite it, and do not write its like again.
-- **Branch, then pull request.** Human sign-off before merge (§ 40). Do not
-  merge your own work. Dependency bumps are exempt and merge on green.
+- **Branch, then pull request, then merge it yourself on green** (§ 40, amended
+  2026-09-06). Sign-off is on the *design*, given in conversation before the work
+  — so a change whose shape was agreed and whose checks pass does not wait for a
+  review that is not coming. A change whose design has *not* been agreed is not
+  ready to merge, whatever the checks say.
 - **Conventional Commits.** release-please derives versions and changelogs from
   them, so a mislabelled commit produces a wrong release.
 - **`nix flake check` is the gate.** `cargo nextest run` inside `nix develop`
