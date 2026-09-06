@@ -1,48 +1,53 @@
-//! Probe Peloton's Stack and Schedule APIs — issue #70.
+//! Probe Peloton's Stack API — issue #70.
 //!
-//! **What #70 found**: `modifyStack` and `addClassToStack` accept a well-formed
-//! call, answer 200 with a success payload, and change nothing. **Confirmed here
-//! on 2026-09-06, and against a stronger reading**: that verdict rested on
-//! `numClasses` and `totalTime` both being zero, which two counters could be
-//! zero for other reasons. `userStack.stackedClassList` is the actual list, and
-//! it is `[]`.
+//! **The stack accepts writes.** #70 concluded it did not: `addClassToStack`
+//! answered 200 with `numClasses: 0` and the stack stayed empty. The mutation
+//! was fine and the identifier was wrong.
 //!
-//! **What #70 did not know**: there is a second write surface, and it is not the
-//! stack.
+//! **`pelotonClassId` is a join token, not a ride id** — base64 of
+//! `{"home_peloton_id": null, "ride_id": <id>, "studio_peloton_id": null,
+//! "type": "on_demand"}`. A raw ride id decodes to nothing, which is why it
+//! looked exactly as bogus as the string `not-a-class-id-at-all`: both were
+//! lookup misses, and the resolver reports a miss as an empty stack rather than
+//! an error. Found in `jasonmotylinski/peloton-planner`, which the operator
+//! pointed at on 2026-09-06; proven here the same day, `numClasses: 1,
+//! totalTime: 2700` for a 45-minute class, then cleared.
 //!
 //! ```text
-//! mutation addClassToSchedule(scheduledClassInput: ScheduledClassInput!): ScheduledClassResponse!
-//! mutation rescheduleClass(rescheduleClassInput: RescheduleClassInput!):   ScheduledClassResponse!
-//! mutation removeClassFromSchedule(scheduledClassId: String!):             ScheduledClassResponse!
-//! query    scheduledClass(scheduledClassId: String!):                      ScheduledClassResponse!
-//! query    userScheduledItemsList(startTime: DateTime!, endTime: DateTime!): YourScheduleListResponse!
+//! mutation addClassToStack(input: AddClassToStackInput!): StackResponse!   -- pelotonClassId: ID!
+//! mutation modifyStack(input: ModifyStackInput!):         StackResponse!   -- pelotonClassIdList: [ID!]!  (replaces; [] clears)
+//! mutation playClassFromStack(input: PlayClassFromStackInput!)
+//! query    viewUserStack:                                 StackResponse!
 //!
-//! input ScheduledClassInput { id: ID!, scheduledStartTime: … }
-//! union ScheduledClassResponse   -- needs an inline fragment on ScheduledClass
+//! StackResponse { numClasses, totalTime, userStack { stackedClassList { pelotonClassId } } }
 //! ```
 //!
-//! That is the operator's calendar rather than his stack, and it is what
-//! decision 0025 actually asked for: *a session should ideally be scheduled into
-//! the operator's Peloton calendar*. **Whether it writes is untested** — it has
-//! not been called, because calling it puts a real entry in a real calendar.
+//! **Read the list, not the counters.** `numClasses` and `totalTime` are zero
+//! both when the stack is empty and when a write missed, so a test that watches
+//! only those cannot tell success from silence — which is how #70 reached the
+//! wrong verdict. `userStack.stackedClassList` is what a write has to change.
 //!
-//! ## How the schema was read, since introspection is off
+//! **The schedule is the wrong shape and is not used.** `addClassToSchedule`
+//! exists and takes a `scheduledStartTime`; the operator, 2026-09-06: *"the
+//! problem with scheduling as opposed to adding classes to a stack is that it
+//! assumes a time, and that time needs to be flexible."* A prescription says
+//! Wednesday, not half past six.
+//!
+//! ## Reading a schema with introspection disabled
 //!
 //! The gateway is `gql-graphql-gateway.prod.k8s.onepeloton.com/graphql`;
-//! `api.onepeloton.com/graphql` answers 404 and `graph.onepeloton.com` is not a
-//! server. It is an Apollo server with `introspection: false`, so `__schema` is
-//! refused — but it still answers a wrong field with *"Cannot query field X on
-//! type Y. Did you mean Z?"*, and the suggestions come from the real schema. So
-//! the schema is read a few names at a time by guessing near-misses, which is
-//! what [`GUESSES`] is for. Edit it and re-run.
-//!
-//! **Every guess below is a read.** Nothing here writes, and nothing here should
-//! be made to write without the operator saying so first.
+//! `api.onepeloton.com/graphql` answers 404. It is an Apollo server with
+//! `introspection: false`, so `__schema` is refused — but a wrong field still
+//! comes back as *"Cannot query field X on type Y. Did you mean Z?"*, and the
+//! suggestions are drawn from the real schema. That is what [`GUESSES`] is for:
+//! put a near-miss in it and re-run.
 //!
 //! ```text
 //! set -a; . ./.env; set +a
 //! cargo run -p infrastructure --example stack
 //! ```
+//!
+//! **This writes to a real account.** What is in `GUESSES` now is a read.
 
 use std::fmt::Write as _;
 
@@ -59,21 +64,16 @@ const GATEWAY: &str = "https://gql-graphql-gateway.prod.k8s.onepeloton.com/graph
 ///
 /// A correct one returns data; a near-miss returns Apollo's suggestions, which
 /// is how the schema above was read. Both are useful and neither writes.
-const GUESSES: [(&str, &str); 3] = [
-    // The stack, read properly: the list rather than the two counters.
+const PLATFORMS: [Option<&str>; 1] = [Some("web")];
+
+const GUESSES: [(&str, &str); 2] = [
+    (
+        "mutation",
+        "modifyStack(input: {pelotonClassIdList: []}) { numClasses totalTime }",
+    ),
     (
         "query",
         "viewUserStack { numClasses totalTime userStack { stackedClassList { pelotonClassId } } }",
-    ),
-    // The schedule. A near-miss on purpose, to keep printing the input shape
-    // without calling the mutation.
-    (
-        "mutation",
-        "addClassToSchedule(scheduledClassInput: {id: \"probe\", probe: 1}) { probe }",
-    ),
-    (
-        "query",
-        "userScheduledItemsList(startTime: \"2026-09-01T00:00:00Z\", endTime: \"2026-12-31T00:00:00Z\") { probe }",
     ),
 ];
 
@@ -92,12 +92,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .user_agent("fitness-tracker/0.2 (+stack probe, issue #70)")
             .build()?;
 
-        for (operation, field) in GUESSES {
-            let document = format!("{operation} {{ {field} }}");
-            println!("\n=== {document}");
-            match ask(&client, &bearer, &document).await {
-                Ok(answer) => println!("{answer}"),
-                Err(error) => println!("  {error}"),
+        for platform in PLATFORMS {
+            for (operation, field) in GUESSES {
+                let document = format!("{operation} {{ {field} }}");
+                println!("\n=== [{}] {document}", platform.unwrap_or("no header"));
+                match ask(&client, &bearer, &document, platform).await {
+                    Ok(answer) => println!("{answer}"),
+                    Err(error) => println!("  {error}"),
+                }
             }
         }
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -109,14 +111,16 @@ async fn ask(
     client: &reqwest::Client,
     bearer: &str,
     document: &str,
+    platform: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let response = client
+    let mut request = client
         .post(GATEWAY)
         .bearer_auth(bearer)
-        .header("Peloton-Platform", "web")
-        .json(&serde_json::json!({ "query": document }))
-        .send()
-        .await?;
+        .json(&serde_json::json!({ "query": document }));
+    if let Some(platform) = platform {
+        request = request.header("Peloton-Platform", platform);
+    }
+    let response = request.send().await?;
 
     let status = response.status();
     let body = response.text().await?;
