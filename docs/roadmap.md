@@ -111,6 +111,37 @@ This was first because everything after it would otherwise be written twice, and
 programme and a mesocycle would have meant relevelling a document reader with a
 known expiry date.
 
+**1a. A plan holds programmes** (#86), in flight on
+`refactor/a-plan-holds-programmes`. The operator's hierarchy is
+`macrocycle → plan → programme → mesocycle → microcycle → session`, and the store
+had four rows per discipline and no plan at all.
+
+**Landed and green**: the renames (`Mesocycle`, `Progression`,
+`BlockPeriodisation`, `PublishedProgramme`, `CyclingMesocycle`),
+`Progression::Provided` in place of `Sbs`, `domain::provider` — who published a
+programme and which of its microcycles a mesocycle took — and `Plan`,
+`Programme<M>`, `Span` and `PlanWindow` in `domain::plan`.
+
+**Written and verified but not committed**: migration 0024, which drops and
+rebuilds the authored side around a `plan` table. It applies to a fresh store and
+to copies of both beta stores. The operator authorised dropping the rows on
+2026-09-06 — *"there's nothing that can't be reconstructed after the fact"* — and
+**that authorisation expires when the autumn starts** (§ 12).
+
+**Still to do**, and it is mechanical rather than undecided: the two stores, the
+rest of `application`, `fitness plan` authoring a whole plan (which closes #73),
+and the tests. A stash on that branch carries the half-done application layer.
+
+**Names settled with the operator on 2026-09-06**, and worth not re-deriving:
+the gym programme is *Squat 2x Int* provided by Stronger By Science; the cycling
+side is *Build Your Power Zones* entry test, then Build micros 1-2-4-5, Peak
+micros 1-2-3-4 and Peak micros 5-6-7-8 — **which settles the pairing** the file
+below still calls a programming choice. *Power Zone Build* is a wrong name
+throughout the code and the seed: Peloton calls it **Build Your Power Zones**.
+`Progression::Sbs` was renamed because a provider is a relation rather than a
+rung — *"Peloton and SBS are providers of programmes… within our tool, those same
+programmes are providers of mesocycles"*.
+
 **2. 0027's deletions** — `Entry`, `Anchor`, `declared_opening`,
 `TestTarget::Declared`, and the anchor columns.
 
