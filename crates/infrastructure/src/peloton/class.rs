@@ -39,11 +39,78 @@ use domain::{
 };
 use serde::Deserialize;
 
+/// Peloton's own id for the *Cool Down Ride* class type.
+///
+/// A source's identifier, so it lives with the source's adapter (§ II.3). Read
+/// off the browse endpoint's own `class_types` list on 2026-09-05, beside
+/// *Cool Down Walking*, *Cool Down Running* and their kin — which is why it is
+/// stated rather than derived from the word "cool down".
+const COOL_DOWN_RIDE_CLASS_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
+
+/// How long a cool-down ride is, in seconds.
+///
+/// Five minutes, and it is a filter rather than a preference: the operator rides
+/// the five-minute one, and the browse endpoint takes an exact duration.
+const COOL_DOWN_SECONDS: u64 = 300;
+
+/// A class as the browse endpoint lists it — enough to name it and stack it.
+///
+/// Not a [`ClassSession`]: nothing here is fetched in enough detail to say what
+/// it prescribes, and a cool-down does not need to be. It has no zones by
+/// construction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassSummary {
+    pub id: String,
+    pub title: String,
+    pub duration_seconds: u64,
+}
+
+/// Read the first class out of a browse response.
+///
+/// # Errors
+///
+/// [`SourceError::Malformed`] where the response cannot be read at all. An
+/// empty list is `None` rather than an error: an instructor with no cool-down
+/// ride is a fact about the catalogue, not a fault.
+pub fn cool_down_from(instructor: &str, body: &str) -> Result<Option<ClassSummary>, SourceError> {
+    let listing: Listing = serde_json::from_str(body).map_err(|error| SourceError::Malformed {
+        detail: format!(
+            "the cool-down search for instructor {instructor} could not be read: {error}"
+        ),
+    })?;
+    Ok(listing.data.into_iter().next().map(|found| ClassSummary {
+        id: found.id,
+        title: found.title,
+        duration_seconds: found.duration,
+    }))
+}
+
+#[derive(Deserialize)]
+struct Listing {
+    #[serde(default)]
+    data: Vec<Listed>,
+}
+
+#[derive(Deserialize)]
+struct Listed {
+    id: String,
+    title: String,
+    duration: u64,
+}
+
 /// What one class prescribes, before it is joined to any other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassSession {
     pub id: String,
     pub title: String,
+    /// Who teaches it, and what they are called.
+    ///
+    /// **The id, because a name is not an identifier** — this module already
+    /// says so about class titles, and the same is true one level up: two
+    /// instructors can share a name and one instructor can change theirs. The
+    /// name is carried beside it for reporting only. `None` where the payload
+    /// omits the instructor, which no class read so far does.
+    pub instructor: Option<Instructor>,
     /// Seconds. Not a [`PositiveDuration`]: the FTP test's is zero.
     pub warm_up_seconds: u64,
     pub cool_down_seconds: u64,
@@ -120,6 +187,7 @@ pub fn derive(id: &str, body: &str) -> Result<ClassSession, SourceError> {
         return Ok(ClassSession {
             id: id.to_owned(),
             title: detail.ride.title,
+            instructor: detail.ride.instructor,
             warm_up_seconds: warm_up,
             cool_down_seconds: cool_down,
             ride: None,
@@ -184,6 +252,7 @@ pub fn derive(id: &str, body: &str) -> Result<ClassSession, SourceError> {
     Ok(ClassSession {
         id: id.to_owned(),
         title: detail.ride.title,
+        instructor: detail.ride.instructor,
         warm_up_seconds: warm_up,
         cool_down_seconds: cool_down,
         ride: Some(ride),
@@ -202,9 +271,18 @@ struct ClassDetail {
     is_ftp_test: bool,
 }
 
+/// Who teaches a class.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Instructor {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Deserialize)]
 struct RideMeta {
     title: String,
+    #[serde(default)]
+    instructor: Option<Instructor>,
 }
 
 #[derive(Deserialize)]
@@ -273,6 +351,72 @@ impl PelotonClasses {
             .map_err(|detail| SourceError::Unavailable {
                 detail: detail.clone(),
             })
+    }
+
+    /// The most recent five-minute cool-down ride taught by one instructor.
+    ///
+    /// **The operator's own app filters, as a query.** Cycling, five minutes,
+    /// class type *Cool Down Ride*, that instructor, newest first — which is
+    /// what he does by hand: *"I just use the most recent 5 minute cool down
+    /// ride from the same instructor"* (2026-09-05).
+    ///
+    /// **A query rather than a table**, and not for tidiness: what he rides is
+    /// the *most recent* one, so a table of class ids would be wrong as soon as
+    /// Peloton published another. The answer is resolved when a session is
+    /// delivered and recorded in what was delivered, so a stacked session stays
+    /// reproducible without the lookup being repeatable (§ 12).
+    ///
+    /// `None` is an instructor with no such class — a real answer, and the one
+    /// the co-taught "Denis &amp; Matt" may well give. The caller decides what a
+    /// session missing its cool-down means; § 37 says it is not quietly dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the token, or
+    /// answers something this cannot read.
+    pub async fn cool_down_for(
+        &self,
+        instructor: &str,
+    ) -> Result<Option<ClassSummary>, SourceError> {
+        let bearer = self.auth.bearer().await?;
+        let response = self
+            .client()?
+            .get(format!("{}/api/v2/ride/archived", self.api_base))
+            .bearer_auth(bearer)
+            .header("Peloton-Platform", "web")
+            .query(&[
+                ("browse_category", "cycling"),
+                ("duration", &COOL_DOWN_SECONDS.to_string()),
+                ("class_type_id", COOL_DOWN_RIDE_CLASS_TYPE),
+                ("instructor_id", instructor),
+                ("sort_by", "original_air_time"),
+                ("desc", "true"),
+                ("limit", "1"),
+            ])
+            .send()
+            .await
+            .map_err(|error| SourceError::Unavailable {
+                detail: error.to_string(),
+            })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(SourceError::Unauthorised);
+        }
+        if !status.is_success() {
+            return Err(SourceError::Unavailable {
+                detail: format!(
+                    "the cool-down search for instructor {instructor} answered {status}"
+                ),
+            });
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|error| SourceError::Malformed {
+                detail: error.to_string(),
+            })?;
+        cool_down_from(instructor, &body)
     }
 
     /// One class, derived.

@@ -15,7 +15,7 @@ pub mod mapping;
 pub mod provider;
 pub mod skeleton;
 
-pub use class::{ClassSession, PelotonClasses};
+pub use class::{ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from};
 pub use mapping::{
     MappedSession, PEAK_YOUR_POWER_ZONES, PelotonClass, is_known_unavailable, url_for,
 };
