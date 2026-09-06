@@ -20,8 +20,8 @@
 //! **The discriminant is not a type.** [`linear`](super::linear) records why:
 //! selecting a template is selecting among programme types, so a `Template`
 //! enum beside this one would be a second copy of the same distinction, free to
-//! disagree with it. What the store and the document reader need is a stable
-//! string, and [`Programme::template`] derives it from the variant in force.
+//! disagree with it. What the store needs is a stable string, and
+//! [`Programme::template`] derives it from the variant in force.
 
 use jiff::Timestamp;
 
@@ -176,14 +176,14 @@ impl Programme {
     /// Whether this programme's anchor is a claim about a test that already
     /// happened.
     ///
-    /// **A block's anchor comes from one of three places, and the document says
-    /// which:**
+    /// **A block's anchor comes from one of three places, and the authored
+    /// programme says which:**
     ///
     /// ```text
-    /// a previous test    provenance = "tested", and no entry test of its own
+    /// a previous test    provenance = tested, and no entry test of its own
     /// its own entry test the anchor is what the operator expects; week one
     ///                    measures it
-    /// declared           provenance = "asserted" or "estimated": a number, and
+    /// declared           provenance = asserted or estimated: a number, and
     ///                    it says so
     /// ```
     ///

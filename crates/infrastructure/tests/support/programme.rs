@@ -4,17 +4,19 @@
 //! `clippy.toml` exemptions cover `#[test]` bodies and not helpers defined
 //! beside them.
 //!
-//! **The ladder span here is a test value and not the authored one.** Research
-//! D8 records that the real span is undecided, and the authored document at
-//! `tests/fixtures/programme.toml` still carries `TODO` for it. These numbers
-//! exist so the machinery can be exercised, and a test asserting a real
+//! **The ladder span here is a test value and not the authored one.** These
+//! numbers exist so the machinery can be exercised, and a test asserting a real
 //! prescribed load must not read them as the programme's intent.
 //!
-//! Three others are inferred from the performed record rather than stated by the
-//! operator, and the document marks them `INFERRED`: the light-of-heavy
-//! percentage, the accessory range, and the per-role top-set repetitions. The
-//! back-off percentage, the warm-up ramp and the anchor are the operator's own.
-//! The duration is neither — it is an input the operator supplies per block.
+//! Three are inferred from the performed record rather than stated by the
+//! operator: the light-of-heavy percentage, the accessory range, and the
+//! per-role top-set repetitions. The back-off percentage, the warm-up ramp and
+//! the anchor are the operator's own. The duration is neither — it is an input
+//! the operator supplies per block.
+//!
+//! Until 2026-09-06 these values had a second home in
+//! `tests/fixtures/programme.toml`, and a test asserted the two agreed. The
+//! document is gone and so is that test; this file is now the only fixture.
 
 use application::StoreError;
 use std::collections::BTreeMap;
@@ -26,10 +28,12 @@ use domain::{
         sequence::{AtLeastTwo, NonEmpty},
     },
     prescription::{
-        Anchor, AnchorProvenance, BackOff, Calendar, Entry, GenerationParameters, Linear,
-        LoadSteps, PerRole, Percentage, Periodisation, Programme, ProgrammeName, ResetProtocol,
-        Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
-        linear::{Fill, Primary, SlotFills, StaticFill},
+        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
+        GenerationParameters, Linear, LoadSteps, PerRole, Percentage, Periodisation, Programme,
+        ProgrammeName, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
+        Weekdays,
+        authored::Shape,
+        linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -316,6 +320,54 @@ pub const FIXTURE_NAME: &str = "fixture";
 /// [`ProgrammeFixtureError`] if the text is not a usable programme name.
 pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
     ProgrammeName::try_from(text.to_owned()).map_err(invalid)
+}
+
+/// A set of answers, as the wizard would hand them over.
+///
+/// **The one place these tests name a template.** What used to be a TOML
+/// document in every suite is now a [`Shape`] and the five facts every
+/// programme states, so a test says what it is about — a cycle, a block, a
+/// test — and nothing about how it was typed in.
+///
+/// The pattern and the primary are the fixture's own, so they agree with
+/// [`fills`] by construction.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the name or the weekday list is invalid.
+pub fn authored(
+    called: &str,
+    start: Date,
+    shape: Shape,
+) -> Result<Authored, ProgrammeFixtureError> {
+    Ok(Authored {
+        name: name(called)?,
+        start,
+        pattern: PrimaryPattern::KneeDominant,
+        primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+        weekdays: weekdays()?,
+        shape,
+    })
+}
+
+/// What a set of answers authors, over the fixture's own fills and parameters.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if a fixture value is invalid. What the assembly
+/// itself refuses is returned as an [`AuthoringError`] for the caller to assert
+/// on.
+pub fn authoring(
+    answers: Authored,
+    interruptions: &[Skip],
+) -> Result<Result<Programme, AuthoringError>, ProgrammeFixtureError> {
+    Ok(domain::prescription::authored::programme(
+        answers,
+        fills()?,
+        interruptions,
+        zone()?,
+        &parameters()?,
+    ))
 }
 
 /// A linear programme, as one of the three things a programme can be.

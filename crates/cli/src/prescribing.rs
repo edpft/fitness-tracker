@@ -7,128 +7,20 @@
 use std::path::Path;
 
 use application::{
-    DiaryStore as _, GenerationParameterStore as _, PrescriptionDeliverer as _,
-    ProgrammeAuthor as _, ProgrammeStore as _, WorkoutPrescriber as _,
+    GenerationParameterStore as _, PrescriptionDeliverer as _, WorkoutPrescriber as _,
     compare::{Comparing, ComparisonPorts},
     deliver::{Delivering, DeliveryPorts},
-    prescribe::{Authoring, Prescribing, PrescriptionPorts},
+    prescribe::{Prescribing, PrescriptionPorts},
 };
-use domain::{
-    gym::OperatorZone,
-    prescription::{Programme, Skip},
-    schedule::Discipline,
-};
+use domain::gym::OperatorZone;
 use infrastructure::{
-    Document, HevyRoutinePreview, HevyRoutines, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteGenerationParameterStore, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, connect,
+    HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteProgrammeStore, connect,
 };
 use jiff::civil::Date;
 
 use crate::{Failure, catalogue, config, exit, output};
-
-/// Read a document and store the programme it describes.
-pub async fn add(database: &Path, zone: &OperatorZone, path: &Path) -> Result<(), Failure> {
-    let document = Document::read(path).map_err(|error| Failure::usage(&error))?;
-    let stated = document
-        .parameters()
-        .map_err(|error| Failure::usage(&error))?;
-
-    let pool = connect(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
-    let parameter_store = SqliteGenerationParameterStore::new(pool.clone());
-
-    // **A document without a `[parameters]` section is authored against the set
-    // in force.** § 14 asks only for the current value of a generation
-    // parameter, and what each prescription was generated against is recorded on
-    // the prescription — so restating them is how they are changed, not a
-    // condition of authoring. A test is two sessions and has nothing to say
-    // about a warm-up ramp.
-    let parameters = match stated {
-        Some(parameters) => parameters,
-        None => parameter_store
-            .current()
-            .await
-            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-            .map(|(_, parameters)| parameters)
-            .ok_or_else(|| {
-                Failure::usage(
-                    &"this document states no parameters and none are stored: \
-                      the first programme authored has to carry them",
-                )
-            })?,
-    };
-
-    // **A test's fills are resolved here, against the store, once.** The
-    // document names what changes and the programme before it supplies the rest
-    // (decision 0013), and doing that at authoring rather than at derivation is
-    // what keeps the stored test complete on its own — so correcting the
-    // predecessor later cannot silently move what this test prescribes.
-    let inherited = if document.inherits() {
-        let start = document.start().map_err(|error| Failure::usage(&error))?;
-        programmes
-            .preceding(start)
-            .await
-            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-            .map(|(_, programme)| programme)
-    } else {
-        None
-    };
-    // **The days the gym loses, worked out here and recorded.** The schedule
-    // knows when there is room to train and which slots are the gym's; the
-    // programme is told its window and reads back what it loses. Resolved at
-    // authoring for the same reason a test's fills are — the stored programme is
-    // then complete on its own, so a holiday coming off the calendar afterwards
-    // cannot retroactively move what it prescribed.
-    //
-    // A document that states its own interruptions overrides this, and is not
-    // asked. That is the case where the diary has not been told something.
-    let derived = derived_interruptions(&document, &SqliteDiaryStore::new(pool.clone())).await?;
-
-    let programme = document
-        .programme(
-            &parameters,
-            zone.as_time_zone(),
-            inherited.as_ref().map(Programme::fills),
-            &derived,
-        )
-        .map_err(|error| Failure::usage(&error))?;
-
-    let (id, authored) = Authoring::new(programmes, parameter_store)
-        .author(&programme, &parameters)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    output::programme_authored(id, authored, &programme, &parameters);
-    Ok(())
-}
-
-/// The days this programme's window loses, from the schedule.
-///
-/// Empty where nothing has been recorded about the operator's week, which is a
-/// machine that has not run `fitness schedule add` yet — not a claim that the
-/// block runs through everything.
-async fn derived_interruptions(
-    document: &Document,
-    diary: &SqliteDiaryStore,
-) -> Result<Vec<Skip>, Failure> {
-    let Some(window) = document.window().map_err(|error| Failure::usage(&error))? else {
-        return Ok(Vec::new());
-    };
-
-    let diary = diary
-        .diary()
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    Ok(diary
-        .unavailable(window.0, window.1, Discipline::Gym)
-        .into_iter()
-        .map(Skip::day)
-        .collect())
-}
 
 /// Report the parameters every prescription is generated against (§ 14).
 ///
