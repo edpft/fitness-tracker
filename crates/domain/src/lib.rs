@@ -13,4 +13,5 @@ pub mod gym;
 pub mod landing;
 mod newtype;
 pub mod prescription;
+pub mod provider;
 pub mod schedule;
