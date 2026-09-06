@@ -1,7 +1,16 @@
 # Removing TOML as the programme format
 
 **Written**: 2026-09-02, after surveying the code but before changing any of it.
-For whoever does the work — this is a plan, not a record.
+**Done 2026-09-06** for the programme half (#61), and the survey below held up:
+`document.rs` and `draft.rs` are deleted, the four pieces of machinery went
+rather than being ported, and the typed shape landed as
+`domain::prescription::authored` rather than in `infrastructure` — there was no
+adapter left in it once the format was gone.
+
+**What remains is the tail of this document**, under *Then, separately*:
+`credentials.rs` and `settings.rs`. The survey of the programme half is kept
+below because it records what was deleted and why, which the deletion itself
+cannot.
 
 The operator has asked for this across several sessions. The handover of
 2026-09-02 has the standing quotes; question 11 of the same day settled the two

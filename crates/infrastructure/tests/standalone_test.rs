@@ -1,11 +1,12 @@
 //! A test as a programme in its own right, end to end (decision 0013).
 //!
-//! **Two halves, and they need different things.** What a test *document* says
-//! is a question for the reader alone — no store, no record — so those tests
-//! build a `Document` and assert on the programme it produces. What a test
-//! *week* prescribes is a question about the record, so those go through the
-//! store with the corpus in it, which is why this file is at the adapter's ring
-//! rather than in `application`.
+//! **What a test week prescribes is a question about the record**, so these go
+//! through the store with the corpus in it, which is why this file is at the
+//! adapter's ring rather than in `application`.
+//!
+//! One test went with the document format on 2026-09-06: a `gating_role` on a
+//! test was a field the reader had to refuse, and `Shape::Test` has nowhere to
+//! put one.
 //!
 //! The week under test runs the Monday and the Friday, and only one of them is
 //! the test:
@@ -19,13 +20,16 @@ mod support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
-    ProgrammeStore as _, WorkoutNormaliser as _, WorkoutPrescriber as _,
+    WorkoutNormaliser as _, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::prescription::{DerivedFrom, PrescribedItem, SlotId, WeekKind};
+use domain::prescription::{
+    Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SessionRole, SlotId,
+    WeekKind, authored::Shape,
+};
 use infrastructure::{
-    Document, HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
     SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
@@ -42,85 +46,6 @@ type Prescriber = Prescribing<
     SqlitePrescriptionDeliveryStore,
 >;
 
-/// The test document, as the operator would write it.
-///
-/// **Nineteen lines and no `[fills]`**, which is the whole of what decision 0013
-/// bought: the week runs the same seventeen slots as the programme before it,
-/// and saying so takes no lines at all.
-const TEST_DOCUMENT: &str = r#"
-[programme]
-name             = "entry-test"
-template         = "test"
-primary          = "knee_dominant"
-primary_exercise = "front-squat"
-reps             = 1
-start            = "2026-08-31"
-
-[programme.weekdays]
-monday = "light"
-friday = "heavy"
-"#;
-
-/// A block that measures its own entry, in the week after the fixture block.
-///
-/// **Ten phase weeks, and eleven calendar weeks.** `duration_weeks` counts
-/// phases whether or not there is an entry test; the week in front is added by
-/// the presence of the `[programme.entry_test]` table and by nothing else.
-const BLOCK_DOCUMENT: &str = r#"
-[programme]
-name             = "autumn"
-template         = "block"
-primary          = "knee_dominant"
-primary_exercise = "front-squat"
-gating_role      = "heavy"
-start            = "2026-08-31"
-duration_weeks   = 10
-
-[programme.weekdays]
-monday = "light"
-friday = "heavy"
-
-# What the operator expects to lift. Week one finds out; a result that differs is
-# answered by re-authoring, which decision 0012 makes a supersession.
-[programme.anchor]
-load       = "90kg"
-provenance = "asserted"
-from       = "2026-07-03"
-
-[programme.entry_test]
-reps  = 3
-light = "60kg"
-
-# A block states every slot itself. Only a test inherits, and only because a test
-# is two sessions rather than a programme.
-[fills]
-knee_dominant                = "front-squat"
-upper_push                   = "chest-dip"
-upper_pull                   = "neutral-grip-pull-up"
-hip_dominant                 = "nordic-hamstrings-curls"
-biceps                       = "preacher-curl-barbell"
-triceps                      = "overhead-triceps-extension-cable"
-wrist_flexion                = "wrist-flexion-dumbbell"
-wrist_extension              = "wrist-extension-dumbbell"
-core                         = "bent-over-cable-chop"
-handstand_hold               = "handstand-hold"
-dead_hang                    = "dead-hang"
-hip_flexor_stretch           = "couch-stretch"
-hip_external_rotator_stretch = "ninety-ninety"
-hamstring_stretch            = "standing-straddle-fold"
-groin_stretch                = "squatting-groin-stretch"
-
-[fills.plyometric]
-exercise = "pogo"
-sets     = 3
-reps     = 20
-
-[fills.power]
-exercise = "box-jump"
-sets     = 3
-reps     = 5
-"#;
-
 /// A store holding the corpus, derived, with the fixture programme authored and
 /// a standalone test in the week after it.
 ///
@@ -130,9 +55,7 @@ reps     = 5
 async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     let (parameters, directory, pool) = corpus_store().await?;
 
-    // The test inherits the fills of the programme it follows, resolved here,
-    // against what the store already holds.
-    let test = test_programme(&pool, &parameters).await?;
+    let test = test_programme()?;
     Authoring::new(
         SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
@@ -208,25 +131,26 @@ async fn corpus_store() -> Result<
     Ok((parameters, directory, pool))
 }
 
-/// The test document, read over the fills the store already holds.
-async fn test_programme(
-    pool: &SqlitePool,
-    parameters: &domain::prescription::GenerationParameters,
-) -> Result<domain::prescription::Programme, Box<dyn std::error::Error>> {
-    let document: Document = toml::from_str(TEST_DOCUMENT)?;
-    let store = SqliteProgrammeStore::new(pool.clone(), corpus::zone()?);
-    let inherited = store
-        .preceding(document.start()?)
-        .await?
-        .map(|(_, programme)| programme);
-    Ok(document.programme(
-        parameters,
-        corpus::zone()?.as_time_zone(),
-        inherited
-            .as_ref()
-            .map(domain::prescription::Programme::fills),
-        &[],
-    )?)
+/// A test week, authored in its own right.
+///
+/// **It states its seventeen slots like any other programme.** Until 2026-09-06
+/// a test document could name only what changed and take the rest from the
+/// programme before it, which the store had to be asked about at authoring time.
+/// The questions ask every slot unconditionally, so there was never anything
+/// left to inherit — and the fixture fills here are the same ones the programme
+/// before it was authored with.
+fn test_programme() -> Result<domain::prescription::Programme, Box<dyn std::error::Error>> {
+    let answers = programme::authored(
+        "entry-test",
+        Date::constant(2026, 8, 31),
+        Shape::Test {
+            reps: domain::gym::RepCount::new(1)?,
+            // What the programme before it stands at, which is the ordinary case
+            // (decision 0013).
+            target: domain::prescription::TestTarget::Inherited,
+        },
+    )?;
+    Ok(programme::authoring(answers, &[])??)
 }
 
 macro_rules! prescriber {
@@ -330,13 +254,13 @@ fn the_light_session_is_the_predecessors() {
     );
 }
 
-/// Every slot the document leaves out comes from the programme before it.
+/// A test week runs the whole template, not just the lift being measured.
 ///
-/// This is what stops a test being a whole programme's worth of authoring. The
-/// document above names no fills at all, and the week still runs the same
-/// seventeen slots with the same exercises in them.
+/// **What it is not is a session with one exercise in it.** The heavy day is the
+/// attempt and everything around it is the programme's ordinary seventeen slots,
+/// which is what makes a test week a week rather than a measurement.
 #[test]
-fn a_test_inherits_every_slot_it_does_not_state() {
+fn a_test_week_issues_every_slot() {
     let (prescriber, _directory) = prescriber!();
     let issued = run!(prescriber.prescribe(test_day()));
 
@@ -351,7 +275,7 @@ fn a_test_inherits_every_slot_it_does_not_state() {
     assert_eq!(
         exercise.exercise_key(),
         "pogo",
-        "the fixture's plyometric fill, and this document states none"
+        "the plyometric fill this test week was authored with"
     );
 
     // Every other slot is either issued or reported. A slot that inherited
@@ -375,46 +299,44 @@ fn a_test_inherits_every_slot_it_does_not_state() {
     }
 }
 
-/// A field the template has no use for is refused, not ignored.
-///
-/// A `gating_role` on a test is the operator believing something untrue of this
-/// programme — there is no ladder to gate — and reading past it silently is how
-/// a document and what it authors come apart.
-#[test]
-fn a_test_that_names_a_gating_role_is_refused() {
-    // The extra key belongs to the `[programme]` table, so it goes before the
-    // weekday table rather than after it.
-    let document = TEST_DOCUMENT.replace(
-        "start            = \"2026-08-31\"",
-        "start            = \"2026-08-31\"\ngating_role      = \"heavy\"",
-    );
-    let Ok(document) = toml::from_str::<Document>(&document) else {
-        panic!("the amended document is valid TOML")
-    };
-    let (Ok(parameters), Ok(zone)) = (programme::parameters(), corpus::zone()) else {
-        panic!("the fixture parameters and zone build")
-    };
-    let Ok(fills) = programme::fills() else {
-        panic!("the fixture fills build")
-    };
-    match document.programme(&parameters, zone.as_time_zone(), Some(&fills), &[]) {
-        Err(infrastructure::DocumentError::Invalid { field, .. }) => {
-            assert_eq!(field, "programme.gating_role");
-        }
-        Ok(_) => panic!("a test with a gating role must not author"),
-        Err(other) => panic!("the refusal names the field, got {other}"),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // A block that measures its own entry (decision 0016, as amended).
+
+/// A block that measures its own entry, in the week after the fixture block.
+///
+/// **Ten phase weeks, and eleven calendar weeks.** The number counts phases
+/// whether or not there is an entry test; the week in front is added by the
+/// presence of the entry test and by nothing else.
+fn autumn_block() -> Result<domain::prescription::Programme, Box<dyn std::error::Error>> {
+    let answers = programme::authored(
+        "autumn",
+        Date::constant(2026, 8, 31),
+        Shape::Block {
+            gating: SessionRole::Heavy,
+            weeks: 10,
+            // What the operator expects to lift. Week one finds out; a result
+            // that differs is answered by re-authoring, which decision 0012
+            // makes a supersession.
+            anchor: Anchor::new(
+                "90".to_owned().try_into()?,
+                None,
+                AnchorProvenance::Asserted,
+                Date::constant(2026, 7, 3),
+            )?,
+            entry_test: Some(EntryTest::new(
+                domain::gym::RepCount::new(3)?,
+                Some("60".to_owned().try_into()?),
+            )?),
+        },
+    )?;
+    Ok(programme::authoring(answers, &[])??)
+}
 
 /// A store with the fixture block, and an autumn block that tests its own entry.
 async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     let (_, directory, pool) = corpus_store().await?;
     let parameters = programme::parameters()?;
-    let document: Document = toml::from_str(BLOCK_DOCUMENT)?;
-    let block = document.programme(&parameters, corpus::zone()?.as_time_zone(), None, &[])?;
+    let block = autumn_block()?;
     Authoring::new(
         SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
@@ -506,7 +428,7 @@ fn the_entry_test_weeks_other_session_runs_the_authored_load() {
         Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
             60_000
         ))),
-        "the 60kg the document states, not a share of anything"
+        "the 60kg the block states, not a share of anything"
     );
 }
 

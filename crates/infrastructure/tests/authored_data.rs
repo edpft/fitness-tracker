@@ -368,130 +368,14 @@ fn the_three_inconsistencies_are_refused() {
 
 // --- The authored document -------------------------------------------------
 
-/// A document still carrying a `TODO` refuses to author.
+/// A block authored with days away skips them, and reaches a week further.
 ///
-/// **The fixture no longer has one**, so this puts one back. D8's two unsettled
-/// values are gone — the ladder's endpoint stopped existing (D13) and its
-/// opening is now derived from the entry test (D14) — but the mechanism has to
-/// keep working, because a placeholder that authored successfully would produce
-/// a workout indistinguishable from a decided one. Injecting the `TODO` is what
-/// keeps this a test of the refusal rather than a test of the fixture.
+/// **The duration counts training weeks**, so a holiday does not shorten a
+/// block — it pushes its last week later. A week that loses both its sessions
+/// survives as no training week at all, which is the case this asserts: the
+/// Monday is named outright and the Friday falls inside a three-day run.
 #[test]
-fn an_unsettled_document_refuses_to_author() {
-    let Ok(settled) = settled_document() else {
-        panic!("the fixture document is readable")
-    };
-    let unsettled = settled.replace(r#"climb_per_week = "2.5kg""#, r#"climb_per_week = "TODO""#);
-    assert_ne!(unsettled, settled, "the fixture carries the key to replace");
-
-    let Ok(document) = toml::from_str::<infrastructure::Document>(&unsettled) else {
-        panic!("the amended document is valid TOML")
-    };
-
-    match document.parameters() {
-        Err(infrastructure::DocumentError::Unsettled { field }) => {
-            assert_eq!(field, "parameters.ladder.climb_per_week");
-        }
-        Ok(_) => panic!("a document with a TODO must not author"),
-        Err(other) => panic!("the refusal names the unsettled field, got {other}"),
-    }
-}
-
-/// The fixture document, which is now settled throughout.
-///
-/// It carried `TODO`s until 2026-08-19 and this returned it with them filled in.
-/// Nothing is left to fill: see `docs/decisions/0008-the-linear-ladder-climbs-at-a-rate.md`
-/// and `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`. A free
-/// function returning `Result`, because the test exemptions do not reach one.
-fn settled_document() -> Result<String, Box<dyn std::error::Error>> {
-    let path = std::path::Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/programme.toml"
-    ));
-    Ok(std::fs::read_to_string(path)?)
-}
-
-/// The whole document converts — every fill shape, the anchor, the weekday
-/// mapping and the parameters.
-#[test]
-fn a_settled_document_authors() {
-    let Ok(settled) = settled_document() else {
-        panic!("the fixture document is readable")
-    };
-
-    let Ok(document) = toml::from_str::<infrastructure::Document>(&settled) else {
-        panic!("the settled document is valid TOML")
-    };
-    let Ok(Some(parameters)) = document.parameters() else {
-        panic!("a settled document's parameters convert")
-    };
-    let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
-        panic!("Europe/London is a zone")
-    };
-    let programme = match document.programme(&parameters, zone, None, &[]) {
-        Ok(programme) => programme,
-        Err(error) => panic!("the document describes a consistent programme: {error}"),
-    };
-
-    // The fills the document describes, in all four shapes.
-    let Ok(expected) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
-    };
-    assert_eq!(
-        parameters.back_off, expected.back_off,
-        "the document and the Rust fixture agree on the back-off, per role"
-    );
-    assert_eq!(
-        parameters.scales, expected.scales,
-        "and on what each implement can hold"
-    );
-    assert_eq!(parameters.static_hold, expected.static_hold);
-    let Ok(expected_fills) = programme::fills() else {
-        panic!("the fixture fills are valid")
-    };
-    assert_eq!(programme.fills(), &expected_fills);
-    assert_eq!(programme.calendar().duration_weeks(), 8);
-    assert!(
-        programme.calendar().interruptions().is_empty(),
-        "the fixture block has nothing in its way"
-    );
-}
-
-/// A document naming days away authors a block that skips them.
-///
-/// The key is optional, so this is also the assertion that it is read at all: a
-/// document whose `interruptions` went unparsed would author a programme that
-/// looks exactly like the one above.
-///
-/// **Both spellings, because the document accepts both.** A bare date is one
-/// day; a table is a run of them. They normalise to the same type, so the
-/// domain never sees two ways of saying one thing.
-#[test]
-fn a_document_can_name_the_sessions_the_block_does_not_run() {
-    let Ok(settled) = settled_document() else {
-        panic!("the fixture document is readable")
-    };
-    // Inside the block, which starts 2026-07-06 and runs eight training weeks.
-    let named = settled.replace(
-        "interruptions = []",
-        r#"interruptions = ["2026-07-20", { start = "2026-07-24", days = 3 }]"#,
-    );
-    assert_ne!(named, settled, "the fixture carries the key to replace");
-
-    let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
-        panic!("the amended document is valid TOML")
-    };
-    let (Ok(Some(parameters)), Ok(zone)) = (
-        document.parameters(),
-        jiff::tz::TimeZone::get("Europe/London"),
-    ) else {
-        panic!("the parameters convert and Europe/London is a zone")
-    };
-    let programme = match document.programme(&parameters, zone, None, &[]) {
-        Ok(programme) => programme,
-        Err(error) => panic!("the document describes a consistent programme: {error}"),
-    };
-
+fn a_block_authored_with_days_away_skips_them() {
     let (Ok(monday), Ok(friday), Ok(after)) = (
         jiff::civil::Date::new(2026, 7, 20),
         jiff::civil::Date::new(2026, 7, 24),
@@ -502,26 +386,34 @@ fn a_document_can_name_the_sessions_the_block_does_not_run() {
     let Some(three) = std::num::NonZeroU8::new(3) else {
         panic!("three is not zero")
     };
+    let skips = [
+        domain::prescription::Skip::day(monday),
+        domain::prescription::Skip::new(friday, three),
+    ];
+
+    let programme = match fixture_block().and_then(|answers| programme::authoring(answers, &skips))
+    {
+        Ok(Ok(programme)) => programme,
+        Ok(Err(error)) => panic!("the block is consistent: {error}"),
+        Err(error) => panic!("the fixture builds: {error}"),
+    };
+
     assert_eq!(
         programme
             .calendar()
             .interruptions()
             .iter()
             .collect::<Vec<_>>(),
-        vec![
-            domain::prescription::Skip::day(monday),
-            domain::prescription::Skip::new(friday, three),
-        ],
-        "both spellings read back as skips"
+        skips.to_vec(),
+        "both skips are the block's"
     );
     assert_eq!(
         programme.calendar().duration_weeks(),
         8,
         "the duration counts training weeks, so a holiday does not shorten it"
     );
-    // The week of the 20th loses both its sessions — Monday named outright, and
-    // Friday the 24th inside the three-day run — so nothing survives in it and
-    // the block reaches one calendar week further.
+    // The week of the 20th loses both its sessions, so nothing survives in it
+    // and the block reaches one calendar week further.
     assert_eq!(programme.calendar().calendar_weeks(), 9);
     assert!(programme.calendar().place(monday).is_err());
     assert!(programme.calendar().place(friday).is_err());
@@ -533,26 +425,38 @@ fn a_document_can_name_the_sessions_the_block_does_not_run() {
     }
 }
 
-/// A week outside the block is refused rather than ignored.
-#[test]
-fn a_document_naming_a_week_outside_the_block_does_not_author() {
-    let Ok(settled) = settled_document() else {
-        panic!("the fixture document is readable")
-    };
-    // The block starts 2026-07-06; this is the week before it.
-    let named = settled.replace("interruptions = []", r#"interruptions = ["2026-06-29"]"#);
+/// The fixture block, as a set of answers: eight weeks from 2026-07-06.
+///
+/// A free function returning `Result`, because the test exemptions do not reach
+/// one.
+fn fixture_block() -> Result<domain::prescription::Authored, programme::ProgrammeFixtureError> {
+    programme::authored(
+        "summer-2026-front-squat",
+        jiff::civil::Date::constant(2026, 7, 6),
+        domain::prescription::authored::Shape::Linear {
+            gating: domain::prescription::SessionRole::Heavy,
+            weeks: 8,
+            anchor: programme::anchor()?,
+            // Derived from the anchor, as the fixtures do it.
+            opening: None,
+        },
+    )
+}
 
-    let Ok(document) = toml::from_str::<infrastructure::Document>(&named) else {
-        panic!("the amended document is valid TOML")
-    };
-    let Ok(Some(parameters)) = document.parameters() else {
-        panic!("the parameters convert")
-    };
-    let Ok(zone) = jiff::tz::TimeZone::get("Europe/London") else {
-        panic!("Europe/London is a zone")
-    };
-    match document.programme(&parameters, zone, None, &[]) {
-        Err(infrastructure::DocumentError::Uncalendarable(error)) => {
+/// A week outside the block is refused rather than ignored.
+///
+/// An interruption before the start means the operator and the programme
+/// disagree about when the block runs, and that disagreement is worth more than
+/// the holiday.
+#[test]
+fn a_week_outside_the_block_does_not_author() {
+    // The block starts 2026-07-06; this is the week before it.
+    let before = [domain::prescription::Skip::day(
+        jiff::civil::Date::constant(2026, 6, 29),
+    )];
+
+    match fixture_block().and_then(|answers| programme::authoring(answers, &before)) {
+        Ok(Err(domain::prescription::AuthoringError::Calendar(error))) => {
             assert!(
                 matches!(
                     error,
@@ -561,8 +465,9 @@ fn a_document_naming_a_week_outside_the_block_does_not_author() {
                 "the refusal says the week is before the block, got {error}"
             );
         }
-        Ok(_) => panic!("a week outside the block must not author"),
-        Err(other) => panic!("the refusal names the calendar, got {other}"),
+        Ok(Ok(_)) => panic!("a week outside the block must not author"),
+        Ok(Err(other)) => panic!("the refusal names the calendar, got {other}"),
+        Err(error) => panic!("the fixture builds: {error}"),
     }
 }
 

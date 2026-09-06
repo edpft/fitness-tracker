@@ -91,12 +91,25 @@ intermediate state is fine rather than waiting for both.
 
 ## Order
 
-**1. Remove TOML.** `docs/removing-toml.md` has the survey. ~1,700 lines
-deleted, and four pieces of machinery become unnecessary rather than needing to
-be ported. Settled 2026-09-03, credentials widened 2026-09-06: settings to the
-database, credentials somewhere safe — *"it could also be the database"* —
-**no TOML anywhere**. This is first because everything after it would
-otherwise be written twice.
+**1. Remove TOML.** ~~The programme half~~ — **done 2026-09-06** (#61). The
+document reader and writer are deleted, 1,723 lines, and the four pieces of
+machinery the survey named went with them rather than being ported: eight
+`refuse_unused` checks are unrepresentable, inherited fills have nothing to
+inherit from, stated interruptions have nowhere to be stated, and a `[parameters]`
+section has no document to sit in. `fitness programme add` asks and writes to the
+store; there is no path, no `--into` and no file. What the operator answers is a
+`domain::prescription::Authored`, and the assembly is `authored::programme`.
+
+**What is left of it is `credentials.rs` and `settings.rs`**, and where
+credentials go is open rather than settled on the keystore — see #61's comment
+and the tail of `docs/removing-toml.md`. Settled 2026-09-03 and widened
+2026-09-06: settings to the database, credentials somewhere safe — *"it could
+also be the database"*.
+
+This was first because everything after it would otherwise be written twice, and
+#86 is the first thing that would have: relevelling `Programme` into a plan, a
+programme and a mesocycle would have meant relevelling a document reader with a
+known expiry date.
 
 **2. 0027's deletions** — `Entry`, `Anchor`, `declared_opening`,
 `TestTarget::Declared`, and the anchor columns.
@@ -263,7 +276,7 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
   be precious with the store, and migrate it or start fresh without ceremony.
   **Once the autumn block is running, the authored side is a primary input with
   no way back** (§ 12). A backup wants to exist by then.
-- **`fitness deliver` names one sink and there are now two** (#84). The flat
+- **`fitness deliver` names one sink and there are now two** (#67). The flat
   command compiles in `hevy` where `gym next` and `cycling next` each reach their
   own; a cycling `KnownDiscipline` stays blocked on there being no Peloton
   *source* to collect from.

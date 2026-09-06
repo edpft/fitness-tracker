@@ -1125,8 +1125,10 @@ pub enum Authored {
 pub trait ProgrammeAuthor {
     /// Takes `domain` types.
     ///
-    /// The document format is converted in `infrastructure`, so nothing here
-    /// knows one exists — which is what keeps § 21's exemption honest.
+    /// What the operator answered is assembled into one by
+    /// `domain::prescription::authored`, so nothing here knows how a programme
+    /// was typed in. It was a TOML document converted in `infrastructure` until
+    /// 2026-09-06, and this said so.
     ///
     /// # Errors
     ///

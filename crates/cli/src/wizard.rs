@@ -4,14 +4,18 @@
 //! periodisation states every slot itself — there is no predecessor to inherit
 //! from — and typing that by hand is the pain this exists to remove.
 //!
-//! ## It writes a document and then authors it
+//! ## It authors, and leaves no file behind
 //!
-//! Rather than authoring directly, which would be shorter and worse. A
-//! programme is seventeen slots and a set of parameters, and it is worth
-//! leaving behind something reviewable, diffable and re-authorable; the
-//! schedule, which is four slots and a zone, is not and goes straight to the
-//! store. It also keeps one authoring path, so the interruptions a document
-//! derives from the diary are derived the same way whoever wrote it.
+//! Until 2026-09-06 it wrote a TOML document and then read it back, so that the
+//! operator had something reviewable to keep. The document was also the only
+//! other way in, and the two paths had to agree about everything: what a
+//! template may state, where the interruptions come from, which fills a test
+//! inherits. The answers now go to the store directly, and the questions are the
+//! only authoring path there is.
+//!
+//! What is asked is typed as it is answered — a [`PrimaryPattern`] rather than
+//! the word for one — so the assembly in [`domain::prescription::authored`] has
+//! nothing left to validate that the questions did not already refuse.
 //!
 //! ## Ordered by the record, limited by nothing
 //!
@@ -22,10 +26,13 @@
 
 use std::{
     io::{IsTerminal, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
-use application::{DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _};
+use application::{
+    DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _, ProgrammeAuthor as _,
+    prescribe::Authoring,
+};
 use domain::{
     gym::{
         Kg, Load, OperatorZone, RepCount,
@@ -35,18 +42,20 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Block, Calendar, GenerationParameters, InvalidBlock, LoadSteps, SessionRole, Skip, SlotId,
-        Weekdays, block::Block as BlockPlan, rep_max,
+        Anchor, AnchorProvenance, Authored, Block, Calendar, EntryTest, Fill, GenerationParameters,
+        InvalidBlock, LoadSteps, PerRole, PrimaryPattern, ProgrammeName, SessionRole, Skip,
+        SlotFills, SlotId, StaticFill, TestTarget, Weekdays, authored::Shape,
+        block::Block as BlockPlan, rep_max,
     },
     schedule::{Diary, Discipline},
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, connect,
-    programme::draft::{Draft, FillLine, Ladder, Shape, render},
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteProgrammeStore,
+    connect,
 };
 use jiff::civil::{Date, Weekday};
 
-use crate::{Failure, exit};
+use crate::{Failure, exit, output};
 
 fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
@@ -57,8 +66,8 @@ pub fn interactive() -> Result<(), Failure> {
         return Ok(());
     }
     Err(usage(
-        "this asks questions and there is nobody to ask: pass a document, or run \
-         it from a terminal. Nothing was written",
+        "this asks questions and there is nobody to ask: run it from a terminal. \
+         Nothing was written",
     ))
 }
 
@@ -141,7 +150,7 @@ async fn offered(
 ///
 /// A number picks from the list; anything else is read as a vocabulary key, so
 /// an exercise nobody thought to offer is one word rather than an impossibility.
-fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<String, Failure> {
+fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Exercise, Failure> {
     println!("\n{slot}");
     for (at, (key, performed)) in offers.iter().enumerate() {
         let seen = match performed {
@@ -155,26 +164,38 @@ fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Stri
 
     let question = format!("  which? [{}] ", offers.first().map_or("", |(key, _)| key));
     ask_until(&question, |typed| {
-        if typed.is_empty() {
-            return offers
+        // **The offer is a vocabulary key either way.** A number picks one off
+        // the list and a word is looked up, and both end at the same
+        // `Exercise` — so a key that no longer names an exercise is caught here
+        // rather than several hundred lines later.
+        let key = if typed.is_empty() {
+            offers
                 .first()
                 .map(|(key, _)| key.clone())
-                .ok_or_else(|| "nothing is offered; name an exercise".to_owned());
-        }
-        if let Ok(number) = typed.parse::<usize>() {
-            return offers
+                .ok_or_else(|| "nothing is offered; name an exercise".to_owned())?
+        } else if let Ok(number) = typed.parse::<usize>() {
+            offers
                 .get(number.wrapping_sub(1))
                 .map(|(key, _)| key.clone())
-                .ok_or_else(|| format!("there is no {number} on the list"));
-        }
-        match Exercise::named(typed) {
-            Some(_) => Ok(typed.to_owned()),
-            None => Err(format!(
-                "{typed:?} is not an exercise — pick a number, or name one from \
+                .ok_or_else(|| format!("there is no {number} on the list"))?
+        } else {
+            typed.to_owned()
+        };
+        Exercise::named(&key).ok_or_else(|| {
+            format!(
+                "{key:?} is not an exercise — pick a number, or name one from \
                  the vocabulary"
-            )),
-        }
+            )
+        })
     })
+}
+
+/// A count the operator typed, as the domain's.
+///
+/// The questions refuse zero already; this is the conversion, and it fails only
+/// where the two disagree about what a count may be.
+fn count(value: u32) -> Result<RepCount, Failure> {
+    RepCount::new(value).map_err(usage)
 }
 
 /// Refuse before asking anything if the store cannot hold what the answers make.
@@ -199,67 +220,109 @@ async fn ready(
         })
 }
 
-async fn ask_fill(
+/// Ask which exercise fills a slot that carries its own sets and reps.
+///
+/// The plyometric and power blocks are set at the start of a block and read no
+/// history, so they state their whole prescription and never alternate.
+async fn ask_static(
     history: &SqliteExerciseHistory,
     slot: SlotId,
-    block: &Draft,
-) -> Result<(SlotId, FillLine), Failure> {
+) -> Result<Fill<StaticFill>, Failure> {
+    let offers = offered(history, slot).await?;
+    let exercise = ask_exercise(slot, &offers)?;
+    let sets = ask_until("  sets? [3] ", |typed| {
+        if typed.is_empty() {
+            return Ok(3);
+        }
+        parse_count("sets", typed)
+    })?;
+    let reps = ask_until("  reps? ", |typed| parse_count("reps", typed))?;
+    Ok(Fill::Same(StaticFill {
+        exercise,
+        sets: count(sets)?,
+        reps: count(reps)?,
+    }))
+}
+
+/// Ask which exercise fills a slot that takes its prescription from the
+/// parameters.
+async fn ask_single(
+    history: &SqliteExerciseHistory,
+    slot: SlotId,
+    pattern: PrimaryPattern,
+    primary: Exercise,
+) -> Result<Fill<Exercise>, Failure> {
     // **The primary pattern's slot is the primary lift.** Authoring refuses a
-    // block that names one exercise as its primary and fills that slot with
-    // another, and rightly — the ladder and the slot would be climbing
-    // different things. So it is stated rather than asked, and the operator
-    // cannot answer his way into a document that will not author.
-    if slot.as_str() == block.pattern {
+    // programme that names one exercise as its primary and fills that slot with
+    // another, and rightly — the ladder and the slot would be climbing different
+    // things. So it is stated rather than asked, and the operator cannot answer
+    // his way into a programme that will not author.
+    if slot == pattern.slot() {
         println!("\n{slot}");
         println!(
             "  {} — the primary, so it fills its own slot",
-            block.primary
+            primary.as_str()
         );
-        return Ok((slot, FillLine::Same(block.primary.clone())));
+        return Ok(Fill::Same(primary));
     }
 
     let offers = offered(history, slot).await?;
     let exercise = ask_exercise(slot, &offers)?;
 
-    // The plyometric and power blocks are set at the start of a block and read
-    // no history, so they carry their own sets and reps.
-    if matches!(slot.block(), Block::Plyometric | Block::Power) {
-        let sets = ask_until("  sets? [3] ", |typed| {
-            if typed.is_empty() {
-                return Ok(3);
-            }
-            parse_count("sets", typed)
-        })?;
-        let reps = ask_until("  reps? ", |typed| parse_count("reps", typed))?;
-        return Ok((
-            slot,
-            FillLine::Static {
-                exercise,
-                sets,
-                reps,
-            },
-        ));
-    }
-
     // A hold is the authored duration on every session, so there is nothing to
     // alternate: asking would be offering a distinction that does not exist.
     if matches!(slot.block(), Block::Mobility) {
-        return Ok((slot, FillLine::Same(exercise)));
+        return Ok(Fill::Same(exercise));
     }
 
     let alternates = ask("  a different one on the other session? [no] ")?;
     if matches!(alternates.to_lowercase().as_str(), "y" | "yes") {
         let other = ask_exercise(slot, &offers)?;
-        return Ok((
-            slot,
-            FillLine::Alternating {
-                light: exercise,
-                heavy: other,
-            },
-        ));
+        return Ok(Fill::Alternating(PerRole {
+            light: exercise,
+            heavy: other,
+        }));
     }
 
-    Ok((slot, FillLine::Same(exercise)))
+    Ok(Fill::Same(exercise))
+}
+
+/// Every slot, asked in [`SlotId::ALL`] order.
+///
+/// **A field per slot rather than a list of answers**, which is what
+/// [`SlotFills`] is for: there is no assembly step that could leave one out, and
+/// no lookup that could fail. Adding a slot to the template is a compile error
+/// here until it is asked.
+async fn ask_fills(
+    history: &SqliteExerciseHistory,
+    pattern: PrimaryPattern,
+    primary: Exercise,
+) -> Result<SlotFills, Failure> {
+    Ok(SlotFills {
+        plyometric: ask_static(history, SlotId::Plyometric).await?,
+        power: ask_static(history, SlotId::Power).await?,
+        knee_dominant: ask_single(history, SlotId::KneeDominant, pattern, primary).await?,
+        upper_push: ask_single(history, SlotId::UpperPush, pattern, primary).await?,
+        upper_pull: ask_single(history, SlotId::UpperPull, pattern, primary).await?,
+        hip_dominant: ask_single(history, SlotId::HipDominant, pattern, primary).await?,
+        biceps: ask_single(history, SlotId::Biceps, pattern, primary).await?,
+        triceps: ask_single(history, SlotId::Triceps, pattern, primary).await?,
+        wrist_flexion: ask_single(history, SlotId::WristFlexion, pattern, primary).await?,
+        wrist_extension: ask_single(history, SlotId::WristExtension, pattern, primary).await?,
+        core: ask_single(history, SlotId::Core, pattern, primary).await?,
+        handstand_hold: ask_single(history, SlotId::HandstandHold, pattern, primary).await?,
+        dead_hang: ask_single(history, SlotId::DeadHang, pattern, primary).await?,
+        hip_flexor_stretch: ask_single(history, SlotId::HipFlexorStretch, pattern, primary).await?,
+        hip_external_rotator_stretch: ask_single(
+            history,
+            SlotId::HipExternalRotatorStretch,
+            pattern,
+            primary,
+        )
+        .await?,
+        hamstring_stretch: ask_single(history, SlotId::HamstringStretch, pattern, primary).await?,
+        groin_stretch: ask_single(history, SlotId::GroinStretch, pattern, primary).await?,
+    })
 }
 
 /// The patterns a block can be built around.
@@ -268,9 +331,9 @@ async fn ask_fill(
 /// lower-body maximum, and an upper push or pull is an accessory slot whichever
 /// block it sits in. Stated by the operator, twice — the four-item list came
 /// from treating `SlotId`'s patterns as interchangeable, which they are not.
-const PATTERNS: [(&str, &str); 2] = [
-    ("knee_dominant", "knee dominant"),
-    ("hip_dominant", "hip dominant"),
+const PATTERNS: [(PrimaryPattern, &str); 2] = [
+    (PrimaryPattern::KneeDominant, "knee dominant"),
+    (PrimaryPattern::HipDominant, "hip dominant"),
 ];
 
 const WEEKDAYS: [(&str, Weekday); 7] = [
@@ -283,7 +346,7 @@ const WEEKDAYS: [(&str, Weekday); 7] = [
     ("sunday", Weekday::Sunday),
 ];
 
-fn ask_pattern() -> Result<&'static str, Failure> {
+fn ask_pattern() -> Result<PrimaryPattern, Failure> {
     println!("\nwhich pattern is the primary?");
     for (at, (_, name)) in PATTERNS.iter().enumerate() {
         println!("  {}. {name}", at + 1);
@@ -298,14 +361,10 @@ fn ask_pattern() -> Result<&'static str, Failure> {
         };
         PATTERNS
             .get(number.wrapping_sub(1))
-            .map(|(key, _)| *key)
+            .map(|(pattern, _)| *pattern)
             .ok_or_else(|| format!("there is no {number} on the list"))
     })
 }
-
-/// The days a block runs, each with the session it is, as the document names
-/// them.
-type WeekdayRoles = Vec<(&'static str, &'static str)>;
 
 /// Which session each of the gym's days is.
 ///
@@ -327,10 +386,7 @@ type WeekdayRoles = Vec<(&'static str, &'static str)>;
 ///
 /// A day may still be declined with `-`: which days are the gym's is the
 /// schedule's to say, and how many of them a given block uses is not.
-fn ask_weekdays(
-    diary: &Diary,
-    start: Date,
-) -> Result<(WeekdayRoles, Weekdays, &'static str), Failure> {
+fn ask_weekdays(diary: &Diary, start: Date) -> Result<(Weekdays, SessionRole), Failure> {
     let Some(available) = diary.ordinarily(start, Discipline::Gym) else {
         return Err(usage(format!(
             "the schedule says nothing about {start}, so there is no way to know \
@@ -386,14 +442,8 @@ fn ask_weekdays(
             continue;
         }
 
-        // **The same answer in two shapes.** The document names its days in
-        // words and the calendar needs them as weekdays and roles — and the
-        // calendar is needed here, before the document exists, to work out how
-        // many training weeks the operator's dates actually hold.
-        let named = chosen
-            .iter()
-            .map(|(key, _, role)| (*key, role_word(*role)))
-            .collect();
+        // The calendar is needed here, before the programme exists, to work out
+        // how many training weeks the operator's dates actually hold.
         let scheduled = Weekdays::new(
             chosen
                 .iter()
@@ -404,7 +454,7 @@ fn ask_weekdays(
 
         // Gating is on the heavy session wherever there is one, which there
         // now is.
-        return Ok((named, scheduled, "heavy"));
+        return Ok((scheduled, SessionRole::Heavy));
     }
 }
 
@@ -415,13 +465,6 @@ fn list(days: &[(&'static str, Weekday)]) -> String {
         None => String::new(),
         Some((last, [])) => (*last).to_owned(),
         Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
-const fn role_word(role: SessionRole) -> &'static str {
-    match role {
-        SessionRole::Light => "light",
-        SessionRole::Heavy => "heavy",
     }
 }
 
@@ -677,7 +720,7 @@ fn ask_anchor(
     best: Option<&Best>,
     scale: Option<&LoadSteps>,
     start: Date,
-) -> Result<(String, Date, &'static str), Failure> {
+) -> Result<Anchor, Failure> {
     println!("\n{asks}");
 
     let Some(best) = best else {
@@ -685,7 +728,7 @@ fn ask_anchor(
         // asked directly rather than offered as the only item on a list.
         println!("  nothing in the record for {lift}, so there is nothing to match");
         let declared = ask_until("  what should it aim at? ", declared_load)?;
-        return Ok((declared, start, "asserted"));
+        return anchor(declared, start, AnchorProvenance::Asserted);
     };
 
     let beaten = scale.map_or(best.maximum, |steps| steps.next_above(best.maximum));
@@ -704,30 +747,38 @@ fn ask_anchor(
     })?;
 
     match choice {
-        1 => Ok((best.maximum.to_string(), best.on, "estimated")),
+        1 => anchor(best.maximum, best.on, AnchorProvenance::Estimated),
         // Asserted: nobody has lifted it. The date is still the performance's,
         // because that performance is what the assertion is reasoning from.
-        2 => Ok((beaten.to_string(), best.on, "asserted")),
+        2 => anchor(beaten, best.on, AnchorProvenance::Asserted),
         _ => {
             let declared = ask_until("  what should it aim at? ", declared_load)?;
-            Ok((declared, start, "asserted"))
+            anchor(declared, start, AnchorProvenance::Asserted)
         }
     }
 }
 
-fn declared_load(typed: &str) -> Result<String, String> {
+/// The anchor, once the load and where it came from are settled.
+///
+/// **No ceiling is ever asked for here.** `Anchor::failed` is what an entry test
+/// *found*, and this is authored before the test is taken.
+fn anchor(load: Kg, from: Date, provenance: AnchorProvenance) -> Result<Anchor, Failure> {
+    Anchor::new(load, None, provenance, from).map_err(usage)
+}
+
+fn declared_load(typed: &str) -> Result<Kg, String> {
     if typed.is_empty() {
         return Err("the ramp aims at this, so there is no sensible default".to_owned());
     }
-    Ok(typed.trim_end_matches("kg").to_owned())
+    Kg::try_from(typed.trim_end_matches("kg").to_owned()).map_err(|error| error.to_string())
 }
 
 /// Which of the three programmes this build can author.
 ///
-/// **The wizard reached one of them.** `document.rs` has read `test`, `linear`
-/// and `block` since the templates existed, and the wizard authored a block
-/// whatever the operator wanted — so the only way to a test or a ladder was a
-/// hand-written document, which is the input format this exists to replace.
+/// **The wizard reached one of them until 2026-09-02.** It authored a block
+/// whatever the operator wanted, and the only way to a test or a ladder was a
+/// hand-written document — which is the input format it has now replaced
+/// outright.
 const TEMPLATES: [(&str, &str); 4] = [
     ("sbs", "Stronger By Science's four-week chart, twice a week"),
     (
@@ -760,38 +811,33 @@ fn ask_template() -> Result<&'static str, Failure> {
 
 /// The questions every programme answers, whatever its template.
 struct Common {
-    name: String,
+    name: ProgrammeName,
     start: Date,
-    pattern: &'static str,
-    named: WeekdayRoles,
+    pattern: PrimaryPattern,
     scheduled: Weekdays,
-    gating: &'static str,
+    gating: SessionRole,
 }
 
 fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
     let name = ask_until("name? ", |typed| {
-        if typed.is_empty() {
-            // The name is the identity a re-authoring supersedes on
-            // (decision 0012), so an empty one would make every programme the
-            // same programme.
-            Err(format!(
-                "a {template} is identified by its name, and re-authoring under \
-                 the same one is what corrects it"
-            ))
-        } else {
-            Ok(typed.to_owned())
-        }
+        // The name is the identity a re-authoring supersedes on (decision 0012),
+        // so an empty one would make every programme the same programme.
+        ProgrammeName::try_from(typed.to_owned()).map_err(|error| {
+            format!(
+                "{error} — a {template} is identified by its name, and \
+                 re-authoring under the same one is what corrects it"
+            )
+        })
     })?;
     let start = ask_until("starts? ", parse_date)?;
 
     let pattern = ask_pattern()?;
-    let (named, scheduled, gating) = ask_weekdays(diary, start)?;
+    let (scheduled, gating) = ask_weekdays(diary, start)?;
 
     Ok(Common {
         name,
         start,
         pattern,
-        named,
         scheduled,
         gating,
     })
@@ -816,7 +862,7 @@ async fn ask_programme(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Draft, Failure> {
+) -> Result<Authored, Failure> {
     match template {
         "test" => ask_test(diary, history, parameters).await,
         "sbs" => ask_climb(Climbing::Sbs, diary, history, parameters).await,
@@ -825,18 +871,18 @@ async fn ask_programme(
     }
 }
 
-/// **A test is a week, so it is never asked how long it is.** `document.rs`
-/// refuses a duration on one, and `Test::week` derives the calendar from the
+/// **A test is a week, so it is never asked how long it is.** `Shape::Test` has
+/// nowhere to put a duration, and `Test::week` derives the calendar from the
 /// start alone.
 async fn ask_test(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Draft, Failure> {
+) -> Result<Authored, Failure> {
     println!("A test: one week, measuring.\n");
     let common = ask_common(diary, "test")?;
     let lift = ask_lift("test")?;
-    let primary = lift.as_str().to_owned();
+    let primary = lift.as_str();
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(history, lift, scale).await?;
@@ -848,7 +894,7 @@ async fn ask_test(
     // inheritance cannot answer.
     let target = match best.as_ref() {
         Some(best) => {
-            println!("  {}", best.describe(&primary));
+            println!("  {}", best.describe(primary));
             println!("   1. the load the programme before this one stands at");
             println!("   2. a number of my own");
             let choice = ask_until("  which? [1] ", |typed| match typed {
@@ -857,14 +903,14 @@ async fn ask_test(
                 other => Err(format!("{other:?} is not one of the two")),
             })?;
             if choice == 1 {
-                None
+                TestTarget::Inherited
             } else {
-                Some(ask_until("  what should it aim at? ", declared_load)?)
+                TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?)
             }
         }
         // Nothing performed, so there is nothing to describe and nothing a
         // predecessor could hand over either.
-        None => Some(ask_until("  what should it aim at? ", declared_load)?),
+        None => TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?),
     };
     let reps = ask_until("  attempted at how many reps? [1] ", |typed| {
         if typed.is_empty() {
@@ -873,13 +919,16 @@ async fn ask_test(
         parse_count("reps", typed)
     })?;
 
-    Ok(Draft {
+    Ok(Authored {
         name: common.name,
         start: common.start,
         pattern: common.pattern,
-        primary,
-        weekdays: common.named,
-        shape: Shape::Test { reps, target },
+        primary_exercise: Exercise::Reps(lift),
+        weekdays: common.scheduled,
+        shape: Shape::Test {
+            reps: count(reps)?,
+            target,
+        },
     })
 }
 
@@ -899,7 +948,7 @@ async fn ask_climb(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Draft, Failure> {
+) -> Result<Authored, Failure> {
     let (template, asks_anchor) = match climbing {
         // **A ladder has no test week, so nothing aims at its anchor.** The
         // anchor is the maximum its percentages are shares of, and week one
@@ -921,25 +970,37 @@ async fn ask_climb(
         ask_weeks(climbing, diary, common.start, &common.scheduled)?
     };
     let lift = ask_lift(template)?;
-    let primary = lift.as_str().to_owned();
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(history, lift, scale).await?;
-    let (anchor, anchor_from, provenance) =
-        ask_anchor(asks_anchor, &primary, best.as_ref(), scale, common.start)?;
+    let anchor = ask_anchor(
+        asks_anchor,
+        lift.as_str(),
+        best.as_ref(),
+        scale,
+        common.start,
+    )?;
 
-    let ladder = match climbing {
+    let shape = match climbing {
         Climbing::Linear => {
             // **The anchor is where it opens unless the operator says
-            // otherwise**, which is the `None` the document reader takes as
-            // "derive it".
+            // otherwise**, which is the `None` the assembly takes as "derive
+            // it".
             let typed = ask("  and it opens at? [the anchor] ")?;
-            Ladder::Linear {
-                opening: (!typed.is_empty()).then(|| typed.trim_end_matches("kg").to_owned()),
+            let opening = if typed.is_empty() {
+                None
+            } else {
+                Some(declared_load(&typed).map_err(usage)?)
+            };
+            Shape::Linear {
+                gating: common.gating,
+                weeks,
+                anchor,
+                opening,
             }
         }
         // Nothing to ask: the chart states every set it runs.
-        Climbing::Sbs => Ladder::Sbs,
+        Climbing::Sbs => Shape::Sbs { anchor },
         Climbing::Block => {
             let entry_reps = ask_until(
                 "  the entry test attempts it at how many reps? [3] ",
@@ -951,32 +1012,41 @@ async fn ask_climb(
                 },
             )?;
             let typed = ask("  and the light session of that week runs at? [skip] ")?;
-            Ladder::Block {
-                entry_reps,
-                entry_light: (!typed.is_empty()).then(|| typed.trim_end_matches("kg").to_owned()),
+            let light = if typed.is_empty() {
+                None
+            } else {
+                Some(declared_load(&typed).map_err(usage)?)
+            };
+            Shape::Block {
+                gating: common.gating,
+                weeks,
+                anchor,
+                entry_test: Some(EntryTest::new(count(entry_reps)?, light).map_err(usage)?),
             }
         }
     };
 
-    Ok(Draft {
+    Ok(Authored {
         name: common.name,
         start: common.start,
         pattern: common.pattern,
-        primary,
-        weekdays: common.named,
-        shape: Shape::Climb {
-            weeks,
-            gating: common.gating,
-            anchor,
-            anchor_from,
-            provenance,
-            ladder,
-        },
+        primary_exercise: Exercise::Reps(lift),
+        weekdays: common.scheduled,
+        shape,
     })
 }
 
-/// Ask, write, and author.
-pub async fn add(database: &Path, zone: &OperatorZone, into: Option<&Path>) -> Result<(), Failure> {
+/// Ask, and author.
+///
+/// **Nothing is written to disk.** The questions produced a TOML document until
+/// 2026-09-06 and that document was then read back; what it carried is now
+/// carried by [`Authored`], and the store is the only record.
+///
+/// # Errors
+///
+/// [`Failure`] if there is nobody to ask, if the store holds no generation
+/// parameters or no schedule, or if what the answers make is refused.
+pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     interactive()?;
 
     let pool = connect(database)
@@ -988,7 +1058,8 @@ pub async fn add(database: &Path, zone: &OperatorZone, into: Option<&Path>) -> R
     // programme cannot be authored against nothing (§ 14), and finding that out
     // at the end costs the operator every answer he has just given. Setting the
     // machine up is what puts them there; see `setup::seed_parameters`.
-    let parameters = ready(&SqliteGenerationParameterStore::new(pool.clone())).await?;
+    let parameter_store = SqliteGenerationParameterStore::new(pool.clone());
+    let parameters = ready(&parameter_store).await?;
 
     let diary = SqliteDiaryStore::new(pool.clone())
         .diary()
@@ -996,25 +1067,56 @@ pub async fn add(database: &Path, zone: &OperatorZone, into: Option<&Path>) -> R
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let template = ask_template()?;
-    let block = ask_programme(template, &diary, &history, &parameters).await?;
+    let answers = ask_programme(template, &diary, &history, &parameters).await?;
 
     println!("\nAnd the slots. A number picks from the list; anything else is read");
     println!("as an exercise, so something you have never done is one word away.");
 
-    let mut fills = Vec::with_capacity(SlotId::ALL.len());
-    for slot in SlotId::ALL {
-        fills.push(ask_fill(&history, *slot, &block).await?);
-    }
+    let fills = ask_fills(&history, answers.pattern, answers.primary_exercise).await?;
 
-    let document = render(&block, &fills);
-    let path = into.map_or_else(
-        || PathBuf::from(format!("{}.toml", block.name)),
-        Path::to_path_buf,
-    );
-    std::fs::write(&path, &document).map_err(usage)?;
-    println!("\nwritten to {}", path.display());
+    // **The days the gym loses, worked out here and recorded.** The schedule
+    // knows when there is room to train and which slots are the gym's; the
+    // programme is told its window and reads back what it loses. Resolved at
+    // authoring so the stored programme is complete on its own — a holiday
+    // coming off the calendar afterwards cannot retroactively move what it
+    // prescribed.
+    let interruptions = interruptions(&diary, &answers);
 
-    // Authored through the same path a hand-written document takes, so the
-    // interruptions come from the schedule exactly as they would have.
-    crate::prescribing::add(database, zone, &path).await
+    let programme = domain::prescription::authored::programme(
+        answers,
+        fills,
+        &interruptions,
+        zone.as_time_zone(),
+        &parameters,
+    )
+    .map_err(|error| Failure::usage(&error))?;
+
+    let (id, authored) = Authoring::new(
+        SqliteProgrammeStore::new(pool, zone.clone()),
+        parameter_store,
+    )
+    .author(&programme, &parameters)
+    .await
+    .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::programme_authored(id, authored, &programme, &parameters);
+    Ok(())
+}
+
+/// The days this programme's window loses, from the schedule.
+///
+/// Empty where nothing has been recorded about the operator's week, which is a
+/// machine that has not run `fitness schedule add` yet — not a claim that the
+/// block runs through everything. The window itself is
+/// [`Authored::window`](domain::prescription::Authored::window), which is where
+/// the reasoning about its span lives.
+fn interruptions(diary: &Diary, answers: &Authored) -> Vec<Skip> {
+    let Some((from, until)) = answers.window() else {
+        return Vec::new();
+    };
+    diary
+        .unavailable(from, until, Discipline::Gym)
+        .into_iter()
+        .map(Skip::day)
+        .collect()
 }

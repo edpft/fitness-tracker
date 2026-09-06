@@ -351,32 +351,10 @@ fn programme_command() -> ClapCommand {
         // either side of the subcommand. Both need it and neither has a default.
         .arg(timezone_argument().global(true))
         .subcommand_required(true)
-        .subcommand(
-            ClapCommand::new("add")
-                .about(
-                    "Ask what the block is and write it down, or read a document \
-                     already written. Either way it supersedes the previous one \
-                     of that name",
-                )
-                .arg(
-                    Arg::new("path")
-                        .value_parser(clap::value_parser!(PathBuf))
-                        .help(
-                            "The document to read. Omit it and the questions are \
-                             asked instead, and the answers written to a document",
-                        ),
-                )
-                .arg(
-                    Arg::new("into")
-                        .long("into")
-                        .value_parser(clap::value_parser!(PathBuf))
-                        .conflicts_with("path")
-                        .help(
-                            "Where to write the document the questions produce. \
-                             Defaults to the block's name in the working directory",
-                        ),
-                ),
-        )
+        .subcommand(ClapCommand::new("add").about(
+            "Ask what the block is and store it. It supersedes the previous \
+             programme of that name",
+        ))
         .subcommand(
             ClapCommand::new("show")
                 .about(
@@ -927,18 +905,7 @@ async fn programme_command_run(
     zone: &domain::gym::OperatorZone,
 ) -> Result<(), Failure> {
     match sub.subcommand() {
-        Some(("add", add)) => match add.get_one::<PathBuf>("path") {
-            Some(path) => prescribing::add(database, zone, path).await,
-            // No document: ask, write one, and author that.
-            None => {
-                wizard::add(
-                    database,
-                    zone,
-                    add.get_one::<PathBuf>("into").map(PathBuf::as_path),
-                )
-                .await
-            }
-        },
+        Some(("add", _)) => wizard::add(database, zone).await,
         Some(("show", show)) => {
             prescribing::standing(
                 database,

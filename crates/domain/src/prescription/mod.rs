@@ -18,6 +18,7 @@
 //! Neither is derived from the other.
 
 pub mod anchor;
+pub mod authored;
 pub mod block;
 pub mod candidates;
 pub mod delivery;
@@ -42,6 +43,11 @@ pub mod warmup;
 pub mod workout;
 
 pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
+// `authored::Shape` is deliberately not re-exported here: `shape` is a module
+// at this level and `WorkoutShape` is the shape a session has, so a bare `Shape`
+// at the crate root would read as one of those. Reach it through
+// `prescription::authored::Shape`, beside the `Authored` it belongs to.
+pub use authored::{Authored, AuthoringError};
 // `block::Block` is deliberately not re-exported here: `shape::Block` already
 // holds that name at the crate root, and the two are different things — a group
 // of items in one session, and a periodised plan. Reach the plan through

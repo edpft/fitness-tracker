@@ -7,8 +7,8 @@
 //! holiday coming off the calendar afterwards cannot retroactively move what a
 //! prescription said.
 //!
-//! This mirrors the wiring in `cli::prescribing::add`, the way
-//! `standalone_test` mirrors the wiring that resolves a test's inherited fills.
+//! This mirrors the wiring in `cli::wizard::add`, which is the only authoring
+//! path there is.
 
 mod support;
 
@@ -17,69 +17,40 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use application::{DiaryAuthor as _, DiaryStore as _, ExerciseHistory as _};
 use domain::{
     gym::OperatorZone,
-    prescription::Skip,
+    prescription::{
+        Anchor, AnchorProvenance, Authored, EntryTest, SessionRole, Skip, authored::Shape,
+    },
     schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
-use infrastructure::{Document, SqliteDiaryStore, SqliteExerciseHistory, connect};
+use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};
 use support::{corpus, programme as fixture};
 
 /// The autumn block from Monday 14 September: nine phase weeks, plus the entry
 /// test week in front of them, so ten calendar weeks ending 22 November.
-const AUTUMN: &str = r#"
-[programme]
-name             = "autumn-block"
-template         = "block"
-primary          = "knee_dominant"
-primary_exercise = "front-squat"
-gating_role      = "heavy"
-start            = "2026-09-14"
-duration_weeks   = 9
-
-[programme.weekdays]
-monday = "light"
-friday = "heavy"
-
-# What the operator expects to lift. Week one finds out; a result that differs is
-# answered by re-authoring, which decision 0012 makes a supersession.
-[programme.anchor]
-load       = "90kg"
-provenance = "asserted"
-from       = "2026-07-03"
-
-[programme.entry_test]
-reps  = 3
-light = "60kg"
-
-# A block states every slot itself. Only a test inherits, and only because a test
-# is two sessions rather than a programme.
-[fills]
-knee_dominant                = "front-squat"
-upper_push                   = "chest-dip"
-upper_pull                   = "neutral-grip-pull-up"
-hip_dominant                 = "nordic-hamstrings-curls"
-biceps                       = "preacher-curl-barbell"
-triceps                      = "overhead-triceps-extension-cable"
-wrist_flexion                = "wrist-flexion-dumbbell"
-wrist_extension              = "wrist-extension-dumbbell"
-core                         = "bent-over-cable-chop"
-handstand_hold               = "handstand-hold"
-dead_hang                    = "dead-hang"
-hip_flexor_stretch           = "couch-stretch"
-hip_external_rotator_stretch = "ninety-ninety"
-hamstring_stretch            = "standing-straddle-fold"
-groin_stretch                = "squatting-groin-stretch"
-
-[fills.plyometric]
-exercise = "pogo"
-sets     = 3
-reps     = 20
-
-[fills.power]
-exercise = "box-jump"
-sets     = 3
-reps     = 5
-"#;
+fn autumn() -> Result<Authored, Box<dyn std::error::Error>> {
+    Ok(fixture::authored(
+        "autumn-block",
+        date(2026, 9, 14),
+        Shape::Block {
+            gating: SessionRole::Heavy,
+            weeks: 9,
+            // What the operator expects to lift. Week one finds out; a result
+            // that differs is answered by re-authoring, which decision 0012
+            // makes a supersession.
+            anchor: Anchor::new(
+                "90".to_owned().try_into()?,
+                None,
+                AnchorProvenance::Asserted,
+                date(2026, 7, 3),
+            )?,
+            entry_test: Some(EntryTest::new(
+                domain::gym::RepCount::new(3)?,
+                Some("60".to_owned().try_into()?),
+            )?),
+        },
+    )?)
+}
 
 macro_rules! zone {
     ($name:literal) => {
@@ -123,13 +94,13 @@ fn ordinary() -> BTreeMap<TrainingSlot, Discipline> {
     .collect()
 }
 
-/// What `cli::prescribing::add` does between reading the document and building
-/// the programme.
+/// What `cli::wizard::add` does between the last question and building the
+/// programme.
 async fn derived(
-    document: &Document,
+    answers: &Authored,
     store: &SqliteDiaryStore,
 ) -> Result<Vec<Skip>, Box<dyn std::error::Error>> {
-    let Some((from, until)) = document.window()? else {
+    let Some((from, until)) = answers.window() else {
         return Ok(Vec::new());
     };
     Ok(store
@@ -172,8 +143,7 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
 fn the_autumn_block_derives_the_loss_of_the_fourteenth() {
     let outcome = corpus::block_on(async {
         let (store, _directory) = seeded().await?;
-        let document: Document = toml::from_str(AUTUMN)?;
-        let skips = derived(&document, &store).await?;
+        let skips = derived(&autumn()?, &store).await?;
         Ok::<_, Box<dyn std::error::Error>>(skips)
     });
 
@@ -208,8 +178,7 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
             ))
             .await?;
 
-        let document: Document = toml::from_str(AUTUMN)?;
-        let skips = derived(&document, &store).await?;
+        let skips = derived(&autumn()?, &store).await?;
         Ok::<_, Box<dyn std::error::Error>>(skips)
     });
 
@@ -226,61 +195,26 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
     );
 }
 
-/// **A document that states its own interruptions is not asked.** That is the
-/// override: the case where the diary has not been told something.
-#[test]
-fn a_stated_interruption_overrides_the_schedule() {
-    let stated = AUTUMN.replace(
-        "duration_weeks   = 9",
-        "duration_weeks   = 9\ninterruptions    = [\"2026-09-18\"]",
-    );
-
-    let outcome = corpus::block_on(async move {
-        let (store, _directory) = seeded().await?;
-        let document: Document = toml::from_str(&stated)?;
-        let skips = derived(&document, &store).await?;
-        let parameters = fixture::parameters()?;
-        let programme =
-            document.programme(&parameters, corpus::zone()?.as_time_zone(), None, &skips)?;
-        Ok::<_, Box<dyn std::error::Error>>(programme)
-    });
-
-    let programme = match outcome {
-        Ok(Ok(programme)) => programme,
-        Ok(Err(error)) => panic!("the block is authored: {error}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    };
-
-    let interruptions: Vec<Skip> = programme.calendar().interruptions().iter().collect();
-    assert_eq!(
-        interruptions,
-        vec![Skip::day(date(2026, 9, 18))],
-        "the stated Friday, and not the derived Monday"
-    );
-}
-
-/// **The window covers the entry test week, which is not in `duration_weeks`.**
+/// **The window covers the entry test week, which is not in the block's weeks.**
 ///
-/// A block's `duration_weeks` counts phase weeks and an entry test adds one in
+/// A block's stated duration counts phase weeks and an entry test adds one in
 /// front of them (decision 0016), so a nine-week block occupies ten calendar
 /// weeks. Asking the schedule over nine would leave the last week unconsulted —
 /// and the last week of a block is its exit test.
 #[test]
 fn the_window_covers_the_entry_test_week() {
-    let Ok(document) = toml::from_str::<Document>(AUTUMN) else {
-        panic!("the autumn document parses")
+    let Ok(answers) = autumn() else {
+        panic!("the autumn answers build")
     };
-    let window = match document.window() {
-        Ok(Some(window)) => window,
-        Ok(None) => panic!("the autumn document states how long it runs"),
-        Err(error) => panic!("the window is readable: {error}"),
+    let Some(window) = answers.window() else {
+        panic!("the autumn block has a window")
     };
 
     assert_eq!(window.0, date(2026, 9, 14), "the day it starts");
     assert_eq!(
         window.1,
         date(2026, 11, 22),
-        "ten calendar weeks, not the nine the document names"
+        "ten calendar weeks, not the nine the block names"
     );
 }
 
@@ -301,14 +235,8 @@ fn the_window_covers_the_entry_test_week() {
 fn the_day_the_schedule_removed_is_refused_by_the_programme() {
     let outcome = corpus::block_on(async {
         let (store, _directory) = seeded().await?;
-        let document: Document = toml::from_str(AUTUMN)?;
-        let skips = derived(&document, &store).await?;
-        let programme = document.programme(
-            &fixture::parameters()?,
-            corpus::zone()?.as_time_zone(),
-            None,
-            &skips,
-        )?;
+        let skips = derived(&autumn()?, &store).await?;
+        let programme = fixture::authoring(autumn()?, &skips)??;
         Ok::<_, Box<dyn std::error::Error>>(programme)
     });
 
@@ -355,8 +283,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
             ))
             .await?;
 
-        let document: Document = toml::from_str(AUTUMN)?;
-        let before = derived(&document, &store).await?;
+        let before = derived(&autumn()?, &store).await?;
 
         // The operator books something for the Friday of week two.
         store
@@ -368,7 +295,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
                 "a wedding".to_owned(),
             ))
             .await?;
-        let after = derived(&document, &store).await?;
+        let after = derived(&autumn()?, &store).await?;
 
         Ok::<_, Box<dyn std::error::Error>>((before, after, directory))
     });
@@ -406,16 +333,9 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
 fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
     let outcome = corpus::block_on(async {
         let (store, _directory) = seeded().await?;
-        let document: Document = toml::from_str(AUTUMN)?;
-
         // Authored while the diary says only the 14th is gone.
-        let skips = derived(&document, &store).await?;
-        let authored = document.programme(
-            &fixture::parameters()?,
-            corpus::zone()?.as_time_zone(),
-            None,
-            &skips,
-        )?;
+        let skips = derived(&autumn()?, &store).await?;
+        let authored = fixture::authoring(autumn()?, &skips)??;
 
         // Afterwards, another Monday goes.
         store
@@ -428,7 +348,7 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
             ))
             .await?;
 
-        let now = derived(&document, &store).await?;
+        let now = derived(&autumn()?, &store).await?;
         Ok::<_, Box<dyn std::error::Error>>((authored, now))
     });
 
