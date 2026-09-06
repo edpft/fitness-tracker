@@ -236,6 +236,23 @@ fn cycling_command() -> ClapCommand {
                      Omitted, the zones print without them",
                 )),
         )
+        .subcommand(
+            ClapCommand::new("deliver")
+                .about("Deliver the next cycling session to Peloton, with its cool down")
+                .arg(Arg::new("date").long("date").value_name("date").help(
+                    "Which session to deliver, as YYYY-MM-DD. \
+                     Defaults to the next riding day at or after today",
+                ))
+                .arg(
+                    Arg::new("replace")
+                        .long("replace")
+                        .action(clap::ArgAction::SetTrue)
+                        .help(
+                            "Deliver even though the stack already holds something. \
+                             Peloton replaces the whole list, so this discards it",
+                        ),
+                ),
+        )
 }
 
 /// Issue a prescription.
@@ -839,14 +856,30 @@ async fn plan_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failu
 
 /// `cycling next`, once its arguments are in hand.
 async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
-    let Some(("next", next)) = sub.subcommand() else {
-        return Err(Failure::message("no cycling command given", exit::USAGE));
-    };
-
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
         value.parse::<jiff::civil::Date>().map_err(|error| {
             Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
         })
+    };
+
+    if let Some(("deliver", delivering)) = sub.subcommand() {
+        let from = match delivering.get_one::<String>("date") {
+            Some(value) => parse_date(value)?,
+            None => jiff::Zoned::now().date(),
+        };
+        let (classes, stack) = plan::peloton()?;
+        return cycling::deliver(
+            database,
+            from,
+            delivering.get_flag("replace"),
+            &classes,
+            &stack,
+        )
+        .await;
+    }
+
+    let Some(("next", next)) = sub.subcommand() else {
+        return Err(Failure::message("no cycling command given", exit::USAGE));
     };
 
     let from = match next.get_one::<String>("date") {
@@ -876,7 +909,13 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
         None => None,
     };
 
-    cycling::next(database, from, ftp).await
+    // **The session is delivered as well as printed**, the way `gym next` is.
+    // Credentials that are absent cost the delivery and not the answer: the
+    // programme is in the store and the ride prints from it, so a machine with
+    // no Peloton credentials still says what to do (§ 36).
+    let peloton = plan::peloton().ok();
+    let to = peloton.as_ref().map(|(classes, stack)| (classes, stack));
+    cycling::next(database, from, ftp, to).await
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.

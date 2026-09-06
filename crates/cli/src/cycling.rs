@@ -27,7 +27,10 @@ use domain::{
     },
     gym::PositiveDuration,
 };
-use infrastructure::{SqliteCyclingProgrammeStore, connect};
+use infrastructure::{
+    SqliteCyclingProgrammeStore, connect,
+    peloton::{PelotonClasses, PelotonStack},
+};
 use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit};
@@ -38,13 +41,31 @@ use crate::{Failure, exit};
 /// programme, so the record of what a class actually contains stays faithful.
 const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
 
-/// Print the next cycling session at or after `from`.
+/// The next cycling session: what it is, and put where it is ridden.
+///
+/// **Porcelain, as `gym next` is.** That one collects, normalises, prescribes
+/// and then delivers to Hevy; this one prescribes and delivers to Peloton,
+/// because writing the workout to the app is most of what the tool is for. The
+/// operator, 2026-09-06: *"one of the main benefits of this tool is to write
+/// workouts to Peloton or Hevy, so that I don't have to do it manually myself,
+/// why would I say no?"*
+///
+/// **The session prints before anything is sent**, and it is read from the
+/// store rather than the network — so a Peloton that is unreachable costs the
+/// delivery and not the answer (§ 36). The programme is already authored, so a
+/// failed delivery costs a retry rather than anything derived.
 ///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no cycling programme covers the
-/// date, or if the programmes that do have no riding day left.
-pub async fn next(database: &Path, from: Date, ftp: Option<Ftp>) -> Result<(), Failure> {
+/// date, if the programmes that do have no riding day left, or if the session
+/// cannot be delivered.
+pub async fn next(
+    database: &Path,
+    from: Date,
+    ftp: Option<Ftp>,
+    to: Option<(&PelotonClasses, &PelotonStack)>,
+) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingProgrammeStore::new(pool);
 
@@ -74,7 +95,12 @@ pub async fn next(database: &Path, from: Date, ftp: Option<Ftp>) -> Result<(), F
         &session,
         ftp,
     );
-    Ok(())
+
+    let Some((classes, stack)) = to else {
+        return Ok(());
+    };
+    println!();
+    deliver_ride(&next, classes, stack, false).await
 }
 
 /// `jiff`'s `Weekday` has no `Display` — a week has no universal first day and
@@ -179,4 +205,145 @@ fn report(
         Some(ftp) => println!("  at FTP    {ftp}"),
         None => println!("  Pass --ftp to see what each zone means in watts."),
     }
+}
+
+/// Deliver the next cycling session to Peloton.
+///
+/// **The same act `deliver` performs for the gym**, and named the same. What
+/// differs is only where a session lands: Hevy holds a routine per date, and
+/// Peloton holds one stack for the rider. Naming this `stack` would have put
+/// the vendor's noun in the command surface, which is the mistake migration
+/// 0020 avoided when it made `discipline` the activity and never the vendor.
+///
+/// **One real asymmetry, and it is why this asks.** The stack is not per date
+/// and not ours: it is shared across disciplines and devices, and Peloton
+/// offers no way to add to it without replacing it. So delivering over a stack
+/// the operator filled by hand would discard it silently, and `--replace` is
+/// how he says to do it anyway. Hevy needs no such question, because a routine
+/// for a date is a place this tool put something in.
+///
+/// # Errors
+///
+/// [`Failure`] if the store is unavailable, if no cycling programme covers the
+/// date, if Peloton will not answer, or if the stack holds something and
+/// `replace` was not given.
+pub async fn deliver(
+    database: &Path,
+    from: Date,
+    replace: bool,
+    classes: &PelotonClasses,
+    stack: &PelotonStack,
+) -> Result<(), Failure> {
+    let pool = connect(database).await?;
+    let store = SqliteCyclingProgrammeStore::new(pool);
+    let (programme, next) = application::cycling::next_ride(&store, from)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+
+    println!(
+        "{} — microcycle {} of {}, session {} of {}",
+        programme.name(),
+        next.microcycle,
+        programme.duration_weeks(),
+        next.session.as_u8(),
+        programme
+            .microcycle(next.microcycle)
+            .map_or(0, CyclingMicrocycle::session_count),
+    );
+    println!("{}, {}", weekday_name(next.date.weekday()), next.date);
+    println!();
+    deliver_ride(&next, classes, stack, replace).await
+}
+
+/// Put one session's classes in the stack, in the order they are ridden.
+async fn deliver_ride(
+    next: &application::cycling::NextRide,
+    classes: &PelotonClasses,
+    stack: &PelotonStack,
+    replace: bool,
+) -> Result<(), Failure> {
+    let held = stack
+        .view()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+    if !held.is_empty() && !replace {
+        return Err(Failure::message(
+            format!(
+                "the Peloton stack already holds {} class(es), and it is shared with \
+                 everything else you queue. Delivering replaces the whole list, so this \
+                 would discard them — pass --replace to do it anyway",
+                held.count()
+            ),
+            exit::USAGE,
+        ));
+    }
+
+    // **The cool down is resolved from the session's own instructor**, which the
+    // authored programme does not carry — it stores where a ride is done and
+    // what it is called, not who teaches it. So the last class is read back to
+    // find out. Two requests, and the alternative is a migration to store a
+    // field only this command wants.
+    let last = next
+        .ride
+        .at()
+        .iter()
+        .fold(String::new(), |_, venue| venue.reference().to_owned());
+    let taught_by = classes
+        .class(&last)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?
+        .instructor;
+    let cool_down = classes
+        .cool_down_after(taught_by.as_ref().map(|who| who.id.as_str()))
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    let mut rides: Vec<String> = next
+        .ride
+        .at()
+        .iter()
+        .map(|venue| venue.reference().to_owned())
+        .collect();
+    rides.push(cool_down.id.clone());
+
+    let stacked = stack
+        .set(&rides)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    for venue in next.ride.at().iter() {
+        println!("  delivered  {venue}");
+    }
+    println!(
+        "  delivered  {} — {}",
+        cool_down.title,
+        whoever(taught_by.as_ref())
+    );
+    println!();
+
+    // **A total of zero is Peloton's answer, not a failure.** It counts a
+    // 45-minute ride as 2700 and the FTP warm-up and test pair as nothing, so
+    // the total is reported where there is one and the class count carries the
+    // rest. Forcing it through `PositiveDuration` turned a delivered session
+    // into an error after the write had already landed.
+    match PositiveDuration::from_seconds(stacked.total_seconds) {
+        Ok(total) => println!(
+            "  {} classes in the stack, {}",
+            stacked.count(),
+            clock(total)
+        ),
+        Err(_) => println!(
+            "  {} classes in the stack, and Peloton gives it no total",
+            stacked.count()
+        ),
+    }
+    Ok(())
+}
+
+/// Who taught it, or that nobody said.
+fn whoever(instructor: Option<&infrastructure::peloton::Instructor>) -> String {
+    instructor.map_or_else(
+        || "instructor unknown, so this is the one every session falls back to".to_owned(),
+        |who| who.name.clone(),
+    )
 }
