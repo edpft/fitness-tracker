@@ -152,15 +152,17 @@ impl ProvidedFrom {
         programme: ExternalProgramme,
         microcycles: Vec<u32>,
     ) -> Result<Self, InvalidProvision> {
-        for (at, microcycle) in microcycles.iter().enumerate() {
+        let mut seen: Vec<u32> = Vec::with_capacity(microcycles.len());
+        for microcycle in &microcycles {
             if *microcycle == 0 {
                 return Err(InvalidProvision::ZeroMicrocycle);
             }
-            if microcycles[..at].contains(microcycle) {
+            if seen.contains(microcycle) {
                 return Err(InvalidProvision::RepeatedMicrocycle {
                     microcycle: *microcycle,
                 });
             }
+            seen.push(*microcycle);
         }
         Ok(Self {
             programme,

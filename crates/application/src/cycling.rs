@@ -13,10 +13,10 @@
 //! last month stays reproducible and a source being unavailable costs nothing
 //! (§ 36).
 
-use domain::cycling::{CyclingProgramme, CyclingProgrammeId, PlannedRide, SessionPosition};
+use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition};
 use jiff::civil::Date;
 
-use crate::{Authored, CyclingProgrammeStore, PrescriptionError};
+use crate::{Authored, CyclingMesocycleStore, PrescriptionError};
 
 /// Author a cycling mesocycle, refusing one that would compete for a day.
 ///
@@ -34,10 +34,10 @@ use crate::{Authored, CyclingProgrammeStore, PrescriptionError};
 /// [`PrescriptionError::OverlappingProgramme`] if another cycling programme
 /// covers any of the same days, or [`PrescriptionError::Store`] if the store is
 /// unavailable.
-pub async fn author<S: CyclingProgrammeStore + Sync>(
+pub async fn author<S: CyclingMesocycleStore + Sync>(
     store: &S,
-    programme: &CyclingProgramme,
-) -> Result<(CyclingProgrammeId, Authored), PrescriptionError> {
+    programme: &CyclingMesocycle,
+) -> Result<(CyclingMesocycleId, Authored), PrescriptionError> {
     let proposed = programme.window();
     let mut authored = Authored::Created;
     for existing in store.windows().await? {
@@ -55,7 +55,7 @@ pub async fn author<S: CyclingProgrammeStore + Sync>(
 /// The next ride, and everything needed to say where it sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextRide {
-    pub programme: CyclingProgrammeId,
+    pub programme: CyclingMesocycleId,
     /// The date it is ridden.
     pub date: Date,
     /// Which microcycle of the authored programme, counting from one.
@@ -78,10 +78,10 @@ pub struct NextRide {
 /// follows it, [`PrescriptionError::NoSessionScheduled`] if the programmes that
 /// do have no riding day left, or [`PrescriptionError::Store`] if the store is
 /// unavailable.
-pub async fn next_ride<S: CyclingProgrammeStore + Sync>(
+pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     store: &S,
     from: Date,
-) -> Result<(CyclingProgramme, NextRide), PrescriptionError> {
+) -> Result<(CyclingMesocycle, NextRide), PrescriptionError> {
     let covering = store.on(from).await?;
     let covered = covering.is_some();
     // The programme covering the date answers first, and only a programme with
@@ -108,7 +108,7 @@ pub async fn next_ride<S: CyclingProgrammeStore + Sync>(
     Ok((programme, found))
 }
 
-fn ride_in(programme: &CyclingProgramme, id: CyclingProgrammeId, from: Date) -> Option<NextRide> {
+fn ride_in(programme: &CyclingMesocycle, id: CyclingMesocycleId, from: Date) -> Option<NextRide> {
     let date = programme.next_riding_day(from)?;
     let (microcycle, session, ride) = programme.on(date)?;
     Some(NextRide {

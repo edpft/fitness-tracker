@@ -8,10 +8,10 @@
 
 mod support;
 
-use application::CyclingProgrammeStore as _;
+use application::CyclingMesocycleStore as _;
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingSession, CyclingWeekdays, Interval,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Interval,
         PlannedRide, PowerZone, PublishedMicrocycle, Ride, RideVenue, SessionPosition,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
@@ -129,7 +129,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
     )?)
 }
 
-fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible<CyclingProgramme> {
+fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible<CyclingMesocycle> {
     let weeks = published
         .iter()
         .map(|number| microcycle(*number, test))
@@ -138,7 +138,7 @@ fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible
         (Weekday::Wednesday, SessionPosition::new(1)?),
         (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
-    Ok(CyclingProgramme::new(
+    Ok(CyclingMesocycle::new(
         ProgrammeName::try_from(name)?,
         jiff::Timestamp::now(),
         start,

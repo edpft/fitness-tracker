@@ -18,10 +18,10 @@
 
 use std::collections::BTreeMap;
 
-use application::{CyclingProgrammeStore, StoreError};
+use application::{CyclingMesocycleStore, StoreError};
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingProgrammeId, CyclingWeekdays, Interval,
+        CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays, Interval,
         PlannedRide, PowerZone, PublishedMicrocycle, Ride, RideVenue, SessionPosition,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
@@ -49,7 +49,7 @@ impl SqliteCyclingProgrammeStore {
     /// Every programme's latest authoring, earliest start first.
     async fn latest_of_each(
         &self,
-    ) -> Result<Vec<(CyclingProgrammeId, CyclingProgramme)>, StoreError> {
+    ) -> Result<Vec<(CyclingMesocycleId, CyclingMesocycle)>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", name AS "name!: String",
@@ -83,9 +83,9 @@ impl SqliteCyclingProgrammeStore {
                 .map_err(|_| corrupt(&"a cycling programme with no microcycle in it"))?;
             let weekdays = read_weekdays(&self.pool, row.id).await?;
 
-            let programme = CyclingProgramme::new(name, authored_at, start, microcycles, weekdays)
+            let programme = CyclingMesocycle::new(name, authored_at, start, microcycles, weekdays)
                 .map_err(|error| corrupt(&error))?;
-            programmes.push((CyclingProgrammeId::new(row.id), programme));
+            programmes.push((CyclingMesocycleId::new(row.id), programme));
         }
         Ok(programmes)
     }
@@ -287,11 +287,11 @@ fn seconds_of(duration: PositiveDuration) -> Result<i64, StoreError> {
         .map_err(|_| corrupt(&"a duration too long for the store to hold"))
 }
 
-impl CyclingProgrammeStore for SqliteCyclingProgrammeStore {
+impl CyclingMesocycleStore for SqliteCyclingProgrammeStore {
     async fn on(
         &self,
         date: Date,
-    ) -> Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError> {
+    ) -> Result<Option<(CyclingMesocycleId, CyclingMesocycle)>, StoreError> {
         Ok(self
             .latest_of_each()
             .await?
@@ -302,7 +302,7 @@ impl CyclingProgrammeStore for SqliteCyclingProgrammeStore {
     async fn following(
         &self,
         date: Date,
-    ) -> Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError> {
+    ) -> Result<Option<(CyclingMesocycleId, CyclingMesocycle)>, StoreError> {
         // Ordered by start, so the first one beginning after the date is the
         // next in the succession.
         Ok(self
@@ -321,7 +321,7 @@ impl CyclingProgrammeStore for SqliteCyclingProgrammeStore {
             .collect())
     }
 
-    async fn author(&self, programme: &CyclingProgramme) -> Result<CyclingProgrammeId, StoreError> {
+    async fn author(&self, programme: &CyclingMesocycle) -> Result<CyclingMesocycleId, StoreError> {
         let mut tx = self
             .pool
             .begin()
@@ -389,7 +389,7 @@ impl CyclingProgrammeStore for SqliteCyclingProgrammeStore {
         }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
-        Ok(CyclingProgrammeId::new(id))
+        Ok(CyclingMesocycleId::new(id))
     }
 }
 

@@ -1,13 +1,16 @@
-//! An authored cycling programme: one mesocycle, its rides, and where they are
-//! ridden.
+//! One authored cycling mesocycle: its rides, and where they are ridden.
 //!
-//! **One authored programme per mesocycle**, the way the gym authors one per
-//! SBS cycle. The autumn is four of these — a one-microcycle FTP test, then
-//! three of four — with successive start dates, and decision 0026 is why it is
-//! not one thirteen-week record: a mesocycle taken from *Power Zone Build* and
-//! one taken from *Peak Your Power Zones* are two published programmes with
-//! their own vocabulary, and a single row spanning both would mix bounded
-//! contexts.
+//! **Four of these make the autumn's cycling programme** — a one-microcycle FTP
+//! test, then three of four — and decision 0026 is why it is not one
+//! thirteen-week record: a mesocycle taken from *Build Your Power Zones* and one
+//! taken from *Peak Your Power Zones* are two published programmes with their
+//! own vocabulary, and a single row spanning both would mix bounded contexts.
+//!
+//! **It was `CyclingProgramme` until 2026-09-06**, and the level was wrong. The
+//! operator's hierarchy puts a *programme* above a mesocycle: the four of these
+//! are the cycling programme, and what holds them together is the plan they
+//! belong to rather than the successive start dates they used to be related by
+//! (issue #86).
 //!
 //! **This is a record of intent (§ 12), so it holds what is ridden and not what
 //! was offered.** A published mesocycle prescribes three sessions a microcycle
@@ -368,7 +371,7 @@ impl CyclingWeekdays {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidCyclingProgramme {
+pub enum InvalidCyclingMesocycle {
     #[error("microcycle {microcycle} has no {position}, which the programme rides every week")]
     MissingRide {
         microcycle: usize,
@@ -378,9 +381,9 @@ pub enum InvalidCyclingProgramme {
 
 /// A row identity, given by the store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CyclingProgrammeId(i64);
+pub struct CyclingMesocycleId(i64);
 
-impl CyclingProgrammeId {
+impl CyclingMesocycleId {
     pub const fn new(id: i64) -> Self {
         Self(id)
     }
@@ -390,7 +393,7 @@ impl CyclingProgrammeId {
     }
 }
 
-impl std::fmt::Display for CyclingProgrammeId {
+impl std::fmt::Display for CyclingMesocycleId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -398,7 +401,7 @@ impl std::fmt::Display for CyclingProgrammeId {
 
 /// An authored cycling mesocycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CyclingProgramme {
+pub struct CyclingMesocycle {
     name: ProgrammeName,
     authored_at: Timestamp,
     /// The Monday microcycle one begins on.
@@ -407,10 +410,10 @@ pub struct CyclingProgramme {
     weekdays: CyclingWeekdays,
 }
 
-impl CyclingProgramme {
+impl CyclingMesocycle {
     /// # Errors
     ///
-    /// [`InvalidCyclingProgramme::MissingRide`] where a microcycle does not hold
+    /// [`InvalidCyclingMesocycle::MissingRide`] where a microcycle does not hold
     /// a session the weekday map rides. That is the one thing the parts cannot
     /// guarantee between them, and leaving it unchecked would author a
     /// programme with a Wednesday nothing answers for.
@@ -420,11 +423,11 @@ impl CyclingProgramme {
         start: Date,
         microcycles: NonEmpty<CyclingMicrocycle>,
         weekdays: CyclingWeekdays,
-    ) -> Result<Self, InvalidCyclingProgramme> {
+    ) -> Result<Self, InvalidCyclingMesocycle> {
         for (at, microcycle) in microcycles.iter().enumerate() {
             for position in weekdays.positions() {
                 if microcycle.ride(position).is_none() {
-                    return Err(InvalidCyclingProgramme::MissingRide {
+                    return Err(InvalidCyclingMesocycle::MissingRide {
                         microcycle: at + 1,
                         position,
                     });

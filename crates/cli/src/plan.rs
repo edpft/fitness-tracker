@@ -27,7 +27,7 @@ use std::path::Path;
 use application::{Authored, DiaryStore as _};
 use domain::{
     cycling::{
-        Answer, CyclingMicrocycle, CyclingProgramme, CyclingWeekdays, PlannedRide,
+        Answer, CyclingMesocycle, CyclingMicrocycle, CyclingWeekdays, PlannedRide,
         PublishedMicrocycle, PublishedProgramme, SessionPosition,
     },
     gym::sequence::NonEmpty,
@@ -420,7 +420,7 @@ async fn author(
 
 async fn record(
     store: &SqliteCyclingProgrammeStore,
-    programme: &CyclingProgramme,
+    programme: &CyclingMesocycle,
 ) -> Result<(String, usize, Date, Authored), Failure> {
     let (_, authored) = application::cycling::author(store, programme)
         .await
@@ -459,7 +459,7 @@ fn build(
     microcycles: &[u32],
     sessions: &[u32],
     riding_days: &[Weekday],
-) -> Result<CyclingProgramme, Failure> {
+) -> Result<CyclingMesocycle, Failure> {
     if riding_days.len() < sessions.len() {
         return Err(Failure::message(
             format!(
@@ -518,7 +518,7 @@ fn build(
     )
     .map_err(|error| Failure::usage(&error))?;
 
-    CyclingProgramme::new(
+    CyclingMesocycle::new(
         ProgrammeName::try_from(name).map_err(|error| Failure::usage(&error))?,
         authored_at,
         start,

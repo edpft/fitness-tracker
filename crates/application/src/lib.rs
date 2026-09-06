@@ -28,7 +28,7 @@ pub use error::{
     RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    Authored, Clock, CyclingProgrammeStore, Deliverable, Delivered, Delivery, DeliveryReference,
+    Authored, Clock, CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryReference,
     DerivationStatus, DerivationStatusReporter, DestinationName, DiaryAuthor, DiaryStore,
     EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FulfilledSession,
     GenerationParameterStore, Issuance, LadderStanding, LandingRecordReader, LandingStore,

@@ -10,7 +10,7 @@
 
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingSession, CyclingWeekdays, Ftp, FtpProvenance,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Ftp, FtpProvenance,
         Interval, PlannedRide, PowerZone, PublishedMicrocycle, Ride, RideVenue, SessionPosition,
         Watts, ZoneProfile, bottom_level, diverges, mesocycles, partition, span, zones_lost,
     },
@@ -62,7 +62,7 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
 }
 
 /// Four microcycles beginning Monday 2026-09-21, ridden Wednesday and Sunday.
-fn programme() -> Result<CyclingProgramme, Box<dyn std::error::Error>> {
+fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
     let microcycles = NonEmpty::new(vec![
         microcycle(1)?,
         microcycle(2)?,
@@ -73,7 +73,7 @@ fn programme() -> Result<CyclingProgramme, Box<dyn std::error::Error>> {
         (Weekday::Wednesday, SessionPosition::new(1)?),
         (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
-    Ok(CyclingProgramme::new(
+    Ok(CyclingMesocycle::new(
         ProgrammeName::try_from("cycling-1")?,
         jiff::Timestamp::now(),
         date(2026, 9, 21),
@@ -208,7 +208,7 @@ fn a_weekday_riding_a_session_no_microcycle_holds_is_refused() {
     )])
     .expect("one day is a week");
 
-    let refused = CyclingProgramme::new(
+    let refused = CyclingMesocycle::new(
         ProgrammeName::try_from("cycling-1").expect("a name"),
         jiff::Timestamp::now(),
         date(2026, 9, 21),
@@ -687,7 +687,7 @@ fn a_date_months_after_the_start_resolves_to_the_right_microcycle() {
         SessionPosition::new(1).expect("session one"),
     )])
     .expect("one day is a week");
-    let long = CyclingProgramme::new(
+    let long = CyclingMesocycle::new(
         ProgrammeName::try_from("thirteen").expect("a name"),
         jiff::Timestamp::now(),
         date(2026, 9, 21),

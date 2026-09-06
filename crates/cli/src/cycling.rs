@@ -22,7 +22,7 @@ use std::path::Path;
 
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingSession, Ftp, PlannedRide, Ride,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, Ftp, PlannedRide, Ride,
         SessionPosition, clock,
     },
     gym::PositiveDuration,
@@ -118,7 +118,7 @@ const fn weekday_name(weekday: Weekday) -> &'static str {
 }
 
 fn report(
-    programme: &CyclingProgramme,
+    programme: &CyclingMesocycle,
     date: Date,
     microcycle: usize,
     position: SessionPosition,

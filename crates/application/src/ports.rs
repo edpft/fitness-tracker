@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, future::Future};
 
 use jiff::{Timestamp, civil::Date};
 
-use domain::cycling::{CyclingProgramme, CyclingProgrammeId};
+use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
 use domain::gym::{
     GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
     OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
@@ -857,7 +857,7 @@ pub trait ProgrammeStore {
 /// one rule.
 ///
 /// The methods are [`ProgrammeStore`]'s, minus the ones that ask about a lift.
-pub trait CyclingProgrammeStore {
+pub trait CyclingMesocycleStore {
     /// The cycling programme that answers for a date.
     ///
     /// `None` is a date no cycling programme covers — between two mesocycles, or
@@ -869,7 +869,7 @@ pub trait CyclingProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(CyclingMesocycleId, CyclingMesocycle)>, StoreError>> + Send;
 
     /// The first cycling programme to begin after a date, if there is one.
     ///
@@ -883,7 +883,7 @@ pub trait CyclingProgrammeStore {
     fn following(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(CyclingMesocycleId, CyclingMesocycle)>, StoreError>> + Send;
 
     /// Every cycling programme's name and the days it occupies, oldest first.
     ///
@@ -899,8 +899,8 @@ pub trait CyclingProgrammeStore {
     /// [`StoreError`] if the store is unavailable.
     fn author(
         &self,
-        programme: &CyclingProgramme,
-    ) -> impl Future<Output = Result<CyclingProgrammeId, StoreError>> + Send;
+        programme: &CyclingMesocycle,
+    ) -> impl Future<Output = Result<CyclingMesocycleId, StoreError>> + Send;
 }
 
 /// What was issued.
