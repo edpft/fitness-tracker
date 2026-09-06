@@ -45,9 +45,9 @@ cycling   FTP test      3 mesocycles of 4
 
 **Both disciplines prescribe a session today, and both from the store.** The gym
 runs the whole loop — authored programme in the store, prescription, delivery to
-Hevy. `cycling next` takes no arguments and reads no network: `fitness plan`
-authors the four cycling programmes and `next` prints warm-up, the intervals in
-order, time in zone, cool-down and the class link from the rows.
+Hevy. `cycling next` takes no arguments and does the same: `fitness plan` authors
+the four cycling programmes, and `next` prints the session from the rows and then
+puts it in the Peloton stack with its cool-down ride.
 
 **What is missing is everything that joins them, and one gap on the cycling
 side:**
@@ -142,8 +142,11 @@ programme that can hold a test microcycle ahead of its periodisations~~ —
 is microcycles of rides, and the test microcycle is a one-microcycle programme
 whose Sunday ride carries a duration and no zone.
 
-**6. Writing to the Peloton stack** (#70) — the highest-value work left,
-2026-09-06, because it puts the session on the bike instead of on a screen.
+~~**6. Writing to the Peloton stack** (#70)~~ — **done 2026-09-06**, and it
+needed three things nobody had: the stack takes a base64 join token rather than a
+ride id (#70), a session names its own cool-down ride by query (#79), and the
+access token survives between runs so a write costs no login (#54). `cycling
+next` delivers, as `gym next` does.
 
 **7. The planner, the span view, and `fitness next`.** The tool takes a span, the
 providers, the primary lift and a session count per discipline per microcycle,
@@ -233,34 +236,9 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 - **The zone read by date at derivation.** The § 13 defect is real — change the
   zone, re-normalise, and every workout's wall clock is rewritten — but it bites
   only if the operator trains in another zone. It should land before it can bite.
-- **The cool-down ride is resolved at delivery, not at authoring.** Every cycling
-  session ends with a separate *5 min Cool Down Ride* by the same instructor —
-  the operator, 2026-09-05: *"all cycling sessions should include a cool down
-  ride"* — and it is a third class, not five minutes appended to the second.
-  Which class it is belongs to the Peloton *sink*, which does not exist yet:
-  *"grabbing the cool down ride only needs to happen when you're delivering to
-  Peloton"*. Until then `cycling next` carries the five minutes as a generation
-  parameter and names no class for them.
-
-  Three things were established on 2026-09-05 so the delivery work does not
-  re-derive them:
-
-  - **It is found by query, not by a table** — the operator's own filters, and
-    verified against the live API: `GET /api/v2/ride/archived` with
-    `browse_category=cycling`, `duration=300`,
-    `class_type_id=a1fa617f3ba14c0a8c25468d5c88b3ea` (*Cool Down Ride*),
-    `instructor_id=<id>`, `sort_by=original_air_time&desc=true`. Its first result
-    for Matt Wilpers is the class he actually rides. A table of ids would go
-    stale by construction, because what he rides is the *most recent* one.
-  - **The instructor is in the class payload** at `ride.instructor.id`, with the
-    name beside it. Twelve instructors appear across *Boost Your Base*, *Power
-    Zone Build* and *Peak Your Power Zones*, one of which is the co-taught
-    "Denis & Matt" — a single instructor id, and so a case the query has to be
-    checked against rather than assumed away.
-  - **It joins cleanly.** A *5 min Cool Down Ride* is one `Cool Down` segment of
-    300 seconds with no ride segment, so appending it to a session adds five
-    minutes of cool-down and nothing to the zone plan. Composition scores are
-    unaffected.
+- ~~The cool-down ride~~ — **built 2026-09-06** (#79, #82). Found by query rather
+  than by a table, because what the operator rides is the most recent one; four
+  of the twelve instructors publish none and fall back to Matt Wilpers.
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **A backup of the authored side.** See the risk below; wanted by 14 September.
 
@@ -285,9 +263,10 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
   be precious with the store, and migrate it or start fresh without ceremony.
   **Once the autumn block is running, the authored side is a primary input with
   no way back** (§ 12). A backup wants to exist by then.
-- **`prescribing::deliver` hardcodes `catalogue::source("hevy")`.** The one place
-  the tool is genuinely coupled to a vendor. It should be a `--to` argument or
-  derived from the programme.
+- **`fitness deliver` names one sink and there are now two** (#84). The flat
+  command compiles in `hevy` where `gym next` and `cycling next` each reach their
+  own; a cycling `KnownDiscipline` stays blocked on there being no Peloton
+  *source* to collect from.
 - **Cutting the release at the wrong moment.** 1.0.0 is reserved for the version
   that runs the autumn, and crossing it is a release choice rather than a
   consequence of a breaking change. On 2026-08-26 a release PR merged because
