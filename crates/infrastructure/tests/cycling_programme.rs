@@ -125,7 +125,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
     ];
     Ok(CyclingMicrocycle::new(
         rides.into_iter().collect(),
-        PublishedMicrocycle::new(ProgrammeName::try_from("Power Zone Build")?, published),
+        PublishedMicrocycle::new(ProgrammeName::try_from("Build Your Power Zones")?, published),
     )?)
 }
 

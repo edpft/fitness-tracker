@@ -14,7 +14,7 @@ and how the answer is computed.
 **A programme's own shape is a fact about the programme. The answer to a request
 is a different thing and does not replace it.**
 
-Power Zone Build **is five microcycles of three sessions**. Asked for *four
+Build Your Power Zones **is five microcycles of three sessions**. Asked for *four
 microcycles of two sessions*, it answers **sessions 1 and 3 of microcycles 2 to
 5**. Microcycle 1 is what it sheds to answer; it is not a lead-in that was
 outside the mesocycle all along.
@@ -107,7 +107,7 @@ stated. It is the answer to build against, not a settled fact about training.
 
 ## Consequences
 
-- `docs/cycling-power-zone-build.md` is the transcription, read from the API
+- `docs/cycling-build-your-power-zones.md` is the transcription, read from the API
   rather than from screenshots.
 - The planner asks a provider for `(microcycles, sessions per microcycle)` and
   receives a shape; 0029 wants that answer recorded as a **set** of options
@@ -115,3 +115,12 @@ stated. It is the answer to build against, not a settled fact about training.
   decisively ahead and the set has one member.
 - The 3:1 rule is now the coincidence criterion of record. Whether SBS and Build
   cohere is a question to be answered with it, and has not been answered here.
+
+## Amended 2026-09-06
+
+The programme was called *Power Zone Build* throughout this record, in
+`skeleton.rs`, and in the transcription's filename. That is a wrong
+transcription of Peloton's own title, which is **Build Your Power Zones** —
+the odd one out beside *Boost Your Base* and *Peak Your Power Zones*, which was
+the clue. Corrected in place: nothing about the reasoning changes, and leaving a
+wrong title standing in the record it was decided in would keep it findable.

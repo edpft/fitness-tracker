@@ -57,7 +57,7 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
     ];
     Ok(CyclingMicrocycle::new(
         rides.into_iter().collect(),
-        PublishedMicrocycle::new(ProgrammeName::try_from("Power Zone Build")?, number),
+        PublishedMicrocycle::new(ProgrammeName::try_from("Build Your Power Zones")?, number),
     )?)
 }
 
@@ -98,7 +98,7 @@ fn a_microcycle_says_which_published_one_it_is() {
         programme
             .microcycle(3)
             .map(|microcycle| microcycle.from().to_string()),
-        Some("Power Zone Build µ4".to_owned()),
+        Some("Build Your Power Zones µ4".to_owned()),
         "the programme's third microcycle is the published fourth",
     );
 }

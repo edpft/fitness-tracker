@@ -3,7 +3,7 @@
 **Date**: 2026-09-05
 
 **Amends** `0032-a-provider-is-asked-for-a-shape-and-keeps-its-own.md`, whose
-answer for *Power Zone Build* at four microcycles of two sessions changes from
+answer for *Build Your Power Zones* at four microcycles of two sessions changes from
 **µ2–5** to **µ1, µ2, µ4 and µ5**. 0032's own framing survives intact — the
 provider keeps its shape and answers a request — and so does its method. What
 changes is the criterion that chose the microcycles, which was keyed on a

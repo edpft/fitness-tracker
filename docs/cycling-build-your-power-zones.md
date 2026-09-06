@@ -1,4 +1,4 @@
-# Power Zone Build, read from the Peloton API
+# Build Your Power Zones, read from the Peloton API
 
 **Transcribed 2026-09-05, and not from screenshots.** Every duration below is
 the API's own, via `api.onepeloton.com`. The skeleton — which class is which

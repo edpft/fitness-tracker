@@ -65,7 +65,7 @@ side:**
   covering one day and cycling covers the gym's days on purpose. The
   screenshot-transcribed Peak seed is deleted.
 - ~~One of Peloton's four programmes is transcribed~~ — **Build was read from the
-  Peloton API on 2026-09-05** (`docs/cycling-power-zone-build.md`, decisions 0032
+  Peloton API on 2026-09-05** (`docs/cycling-build-your-power-zones.md`, decisions 0032
   and 0033). Peak and Build are both in hand; Base is not, and is needed only if
   that pairing is chosen. Class *content* is now fetched rather than transcribed;
   the programme *skeleton* still is not available and remains the operator's.
@@ -136,8 +136,9 @@ and the tests. A stash on that branch carries the half-done application layer.
 the gym programme is *Squat 2x Int* provided by Stronger By Science; the cycling
 side is *Build Your Power Zones* entry test, then Build micros 1-2-4-5, Peak
 micros 1-2-3-4 and Peak micros 5-6-7-8 — **which settles the pairing** the file
-below still calls a programming choice. *Power Zone Build* is a wrong name
-throughout the code and the seed: Peloton calls it **Build Your Power Zones**.
+below still calls a programming choice. *Power Zone Build* was a wrong
+transcription throughout — Peloton calls it **Build Your Power Zones** — and was
+corrected everywhere on 2026-09-06.
 `Progression::Sbs` was renamed because a provider is a relation rather than a
 rung — *"Peloton and SBS are providers of programmes… within our tool, those same
 programmes are providers of mesocycles"*.

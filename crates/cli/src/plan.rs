@@ -8,7 +8,7 @@
 //!
 //! **Each provider supplies its own test microcycle from its own material**, and
 //! neither borrows a generic one. SBS's is its microcycle four — the taper and
-//! the one-repetition maximum. Peloton's is Power Zone Build's microcycle five —
+//! the one-repetition maximum. Peloton's is Build Your Power Zones's microcycle five —
 //! the FTP warm-up and test pair with the endurance riding around it.
 //!
 //! **It asks rather than takes flags** (the operator, 2026-09-05: `plan` "needs
@@ -81,12 +81,12 @@ struct Pairing {
 
 const PAIRINGS: [Pairing; 2] = [
     Pairing {
-        label: "Boost Your Base, then Power Zone Build",
-        programmes: ["Boost Your Base", "Power Zone Build"],
+        label: "Boost Your Base, then Build Your Power Zones",
+        programmes: ["Boost Your Base", "Build Your Power Zones"],
     },
     Pairing {
-        label: "Power Zone Build, then Peak Your Power Zones",
-        programmes: ["Power Zone Build", "Peak Your Power Zones"],
+        label: "Build Your Power Zones, then Peak Your Power Zones",
+        programmes: ["Build Your Power Zones", "Peak Your Power Zones"],
     },
 ];
 
@@ -261,7 +261,7 @@ fn credentials() -> Result<PelotonClasses, Failure> {
 fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
     match name {
         "Boost Your Base" => Ok(skeleton::BOOST_YOUR_BASE.placements().to_vec()),
-        "Power Zone Build" => Ok(skeleton::POWER_ZONE_BUILD.placements().to_vec()),
+        "Build Your Power Zones" => Ok(skeleton::BUILD_YOUR_POWER_ZONES.placements().to_vec()),
         "Peak Your Power Zones" => Ok(skeleton::peak_your_power_zones()),
         skeleton::POWER_ZONE_TEST => Ok(skeleton::power_zone_test()),
         other => Err(Failure::message(
