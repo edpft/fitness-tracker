@@ -181,23 +181,27 @@ fn report(
     }
 }
 
-/// Put the next cycling session in the Peloton stack.
+/// Deliver the next cycling session to Peloton.
 ///
-/// **A separate verb from `next`, as `deliver` is from `prescribe`.** Printing a
-/// session reads; stacking it writes to the operator's account, and a read
-/// command that quietly writes is the wrong shape however convenient.
+/// **The same act `deliver` performs for the gym**, and named the same. What
+/// differs is only where a session lands: Hevy holds a routine per date, and
+/// Peloton holds one stack for the rider. Naming this `stack` would have put
+/// the vendor's noun in the command surface, which is the mistake migration
+/// 0020 avoided when it made `discipline` the activity and never the vendor.
 ///
-/// **It refuses rather than discarding.** `modifyStack` replaces the whole list
-/// — there is no append and no remove — so stacking on top of a stack the
-/// operator queued by hand would throw his away without saying so. `--replace`
-/// is how he says to do it anyway.
+/// **One real asymmetry, and it is why this asks.** The stack is not per date
+/// and not ours: it is shared across disciplines and devices, and Peloton
+/// offers no way to add to it without replacing it. So delivering over a stack
+/// the operator filled by hand would discard it silently, and `--replace` is
+/// how he says to do it anyway. Hevy needs no such question, because a routine
+/// for a date is a place this tool put something in.
 ///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no cycling programme covers the
 /// date, if Peloton will not answer, or if the stack holds something and
 /// `replace` was not given.
-pub async fn stack(
+pub async fn deliver(
     database: &Path,
     from: Date,
     replace: bool,
@@ -217,8 +221,9 @@ pub async fn stack(
     if !held.is_empty() && !replace {
         return Err(Failure::message(
             format!(
-                "the stack already holds {} class(es). Stacking replaces the whole list, \
-                 so this would discard them — pass --replace to do it anyway",
+                "the Peloton stack already holds {} class(es), and it is shared with \
+                 everything else you queue. Delivering replaces the whole list, so this \
+                 would discard them — pass --replace to do it anyway",
                 held.count()
             ),
             exit::USAGE,
@@ -271,7 +276,7 @@ pub async fn stack(
     println!("{}, {}", weekday_name(next.date.weekday()), next.date);
     println!();
     for venue in next.ride.at().iter() {
-        println!("  stacked  {venue}");
+        println!("  delivered  {venue}");
     }
     println!(
         "  stacked  {} — {}",
@@ -285,9 +290,13 @@ pub async fn stack(
     // rest. Forcing it through `PositiveDuration` turned a stacked session into
     // an error after the write had already landed.
     match PositiveDuration::from_seconds(stacked.total_seconds) {
-        Ok(total) => println!("  {} classes, {}", stacked.count(), clock(total)),
+        Ok(total) => println!(
+            "  {} classes in the stack, {}",
+            stacked.count(),
+            clock(total)
+        ),
         Err(_) => println!(
-            "  {} classes, and Peloton gives the stack no total",
+            "  {} classes in the stack, and Peloton gives it no total",
             stacked.count()
         ),
     }

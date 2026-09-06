@@ -237,10 +237,10 @@ fn cycling_command() -> ClapCommand {
                 )),
         )
         .subcommand(
-            ClapCommand::new("stack")
-                .about("Put the next cycling session in the Peloton stack, with its cool down")
+            ClapCommand::new("deliver")
+                .about("Deliver the next cycling session to Peloton, with its cool down")
                 .arg(Arg::new("date").long("date").value_name("date").help(
-                    "Which session to stack, as YYYY-MM-DD. \
+                    "Which session to deliver, as YYYY-MM-DD. \
                      Defaults to the next riding day at or after today",
                 ))
                 .arg(
@@ -248,7 +248,7 @@ fn cycling_command() -> ClapCommand {
                         .long("replace")
                         .action(clap::ArgAction::SetTrue)
                         .help(
-                            "Stack even though something is already stacked. \
+                            "Deliver even though the stack already holds something. \
                              Peloton replaces the whole list, so this discards it",
                         ),
                 ),
@@ -862,16 +862,16 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
         })
     };
 
-    if let Some(("stack", stacking)) = sub.subcommand() {
-        let from = match stacking.get_one::<String>("date") {
+    if let Some(("deliver", delivering)) = sub.subcommand() {
+        let from = match delivering.get_one::<String>("date") {
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
         let (classes, stack) = plan::peloton()?;
-        return cycling::stack(
+        return cycling::deliver(
             database,
             from,
-            stacking.get_flag("replace"),
+            delivering.get_flag("replace"),
             &classes,
             &stack,
         )

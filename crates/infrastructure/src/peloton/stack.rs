@@ -1,12 +1,12 @@
 //! The rider's stack: what Peloton will play next.
 //!
-//! **Not a set of places** (issue #82), which is why this is not a
-//! [`PrescriptionDestination`](application::PrescriptionDestination). Decision
-//! 0022 gives a destination places — a date has at most one, and delivering
-//! again replaces what occupies it. A stack is one ordered queue for the rider,
-//! shared across every discipline and device, and `modifyStack` replaces it
-//! whole. There is no Wednesday slot to occupy, so there is nothing for
-//! supersession to attach to. Stacking is *make the next ride ready*.
+//! **One queue, not a place per date.** Hevy holds a routine for each date, so
+//! delivering twice replaces that date's routine and touches nothing else. The
+//! Peloton stack is a single ordered queue for the rider, shared with every
+//! discipline and every device, and it can only be replaced whole — so
+//! delivering into it can discard something this tool never put there. That is
+//! the one asymmetry between the two destinations, and it is why the command
+//! asks before replacing.
 //!
 //! **Only `addClassToStack` writes.** `modifyStack` takes a whole list, answers
 //! success, and changes nothing — whatever identifier it is given. It clears,
