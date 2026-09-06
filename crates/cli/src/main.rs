@@ -236,6 +236,23 @@ fn cycling_command() -> ClapCommand {
                      Omitted, the zones print without them",
                 )),
         )
+        .subcommand(
+            ClapCommand::new("stack")
+                .about("Put the next cycling session in the Peloton stack, with its cool down")
+                .arg(Arg::new("date").long("date").value_name("date").help(
+                    "Which session to stack, as YYYY-MM-DD. \
+                     Defaults to the next riding day at or after today",
+                ))
+                .arg(
+                    Arg::new("replace")
+                        .long("replace")
+                        .action(clap::ArgAction::SetTrue)
+                        .help(
+                            "Stack even though something is already stacked. \
+                             Peloton replaces the whole list, so this discards it",
+                        ),
+                ),
+        )
 }
 
 /// Issue a prescription.
@@ -839,14 +856,30 @@ async fn plan_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failu
 
 /// `cycling next`, once its arguments are in hand.
 async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
-    let Some(("next", next)) = sub.subcommand() else {
-        return Err(Failure::message("no cycling command given", exit::USAGE));
-    };
-
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
         value.parse::<jiff::civil::Date>().map_err(|error| {
             Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
         })
+    };
+
+    if let Some(("stack", stacking)) = sub.subcommand() {
+        let from = match stacking.get_one::<String>("date") {
+            Some(value) => parse_date(value)?,
+            None => jiff::Zoned::now().date(),
+        };
+        let (classes, stack) = plan::peloton()?;
+        return cycling::stack(
+            database,
+            from,
+            stacking.get_flag("replace"),
+            &classes,
+            &stack,
+        )
+        .await;
+    }
+
+    let Some(("next", next)) = sub.subcommand() else {
+        return Err(Failure::message("no cycling command given", exit::USAGE));
     };
 
     let from = match next.get_one::<String>("date") {

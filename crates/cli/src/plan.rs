@@ -218,7 +218,26 @@ fn choose(question: &str, options: &[&str]) -> Result<usize, Failure> {
     })
 }
 
-fn credentials() -> Result<PelotonClasses, Failure> {
+/// The Peloton adapters, from the environment.
+///
+/// **Public because `cycling stack` composes the same two.** Both need the same
+/// credentials and the same cached token, and building them twice from two
+/// places is how one of them ends up without the cache.
+///
+/// # Errors
+///
+/// [`Failure`] if either credential is absent from the environment.
+pub fn peloton() -> Result<(PelotonClasses, infrastructure::peloton::PelotonStack), Failure> {
+    let classes = credentials()?;
+    let stack = infrastructure::peloton::PelotonStack::new(
+        infrastructure::peloton::stack::GATEWAY.to_owned(),
+        auth()?,
+    );
+    Ok((classes, stack))
+}
+
+/// The authenticator, with the token cache where there is one.
+fn auth() -> Result<PelotonAuth, Failure> {
     let missing = |name: &str| Failure::message(format!("{name} is not set"), exit::USAGE);
     let email = std::env::var("PELOTON_EMAIL").map_err(|_| missing("PELOTON_EMAIL"))?;
     let password = std::env::var("PELOTON_PASSWORD").map_err(|_| missing("PELOTON_PASSWORD"))?;
@@ -232,8 +251,11 @@ fn credentials() -> Result<PelotonClasses, Failure> {
     if let Ok(path) = crate::paths::token(&crate::paths::SystemEnvironment, "peloton") {
         auth = auth.caching_in(infrastructure::peloton::TokenFile::new(path));
     }
+    Ok(auth)
+}
 
-    Ok(PelotonClasses::new(API_BASE, auth))
+fn credentials() -> Result<PelotonClasses, Failure> {
+    Ok(PelotonClasses::new(API_BASE, auth()?))
 }
 
 fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {

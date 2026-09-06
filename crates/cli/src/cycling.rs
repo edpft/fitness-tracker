@@ -180,3 +180,124 @@ fn report(
         None => println!("  Pass --ftp to see what each zone means in watts."),
     }
 }
+
+/// Put the next cycling session in the Peloton stack.
+///
+/// **A separate verb from `next`, as `deliver` is from `prescribe`.** Printing a
+/// session reads; stacking it writes to the operator's account, and a read
+/// command that quietly writes is the wrong shape however convenient.
+///
+/// **It refuses rather than discarding.** `modifyStack` replaces the whole list
+/// — there is no append and no remove — so stacking on top of a stack the
+/// operator queued by hand would throw his away without saying so. `--replace`
+/// is how he says to do it anyway.
+///
+/// # Errors
+///
+/// [`Failure`] if the store is unavailable, if no cycling programme covers the
+/// date, if Peloton will not answer, or if the stack holds something and
+/// `replace` was not given.
+pub async fn stack(
+    database: &Path,
+    from: Date,
+    replace: bool,
+    classes: &infrastructure::peloton::PelotonClasses,
+    stack: &infrastructure::peloton::PelotonStack,
+) -> Result<(), Failure> {
+    let pool = connect(database).await?;
+    let store = SqliteCyclingProgrammeStore::new(pool);
+    let (programme, next) = application::cycling::next_ride(&store, from)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+
+    let held = stack
+        .view()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+    if !held.is_empty() && !replace {
+        return Err(Failure::message(
+            format!(
+                "the stack already holds {} class(es). Stacking replaces the whole list, \
+                 so this would discard them — pass --replace to do it anyway",
+                held.count()
+            ),
+            exit::USAGE,
+        ));
+    }
+
+    // **The cool down is resolved from the session's own instructor**, which the
+    // authored programme does not carry — it stores where a ride is done and
+    // what it is called, not who teaches it. So the last class is read back to
+    // find out. Two requests, and the alternative is a migration to store a
+    // field only this command wants.
+    let last = next
+        .ride
+        .at()
+        .iter()
+        .fold(String::new(), |_, venue| venue.reference().to_owned());
+    let taught_by = classes
+        .class(&last)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?
+        .instructor;
+    let cool_down = classes
+        .cool_down_after(taught_by.as_ref().map(|who| who.id.as_str()))
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    let mut rides: Vec<String> = next
+        .ride
+        .at()
+        .iter()
+        .map(|venue| venue.reference().to_owned())
+        .collect();
+    rides.push(cool_down.id.clone());
+
+    let stacked = stack
+        .set(&rides)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    println!(
+        "{} — microcycle {} of {}, session {} of {}",
+        programme.name(),
+        next.microcycle,
+        programme.duration_weeks(),
+        next.session.as_u8(),
+        programme
+            .microcycle(next.microcycle)
+            .map_or(0, CyclingMicrocycle::session_count),
+    );
+    println!("{}, {}", weekday_name(next.date.weekday()), next.date);
+    println!();
+    for venue in next.ride.at().iter() {
+        println!("  stacked  {venue}");
+    }
+    println!(
+        "  stacked  {} — {}",
+        cool_down.title,
+        whoever(taught_by.as_ref())
+    );
+    println!();
+    // **A total of zero is Peloton's answer, not a failure.** It counts a
+    // 45-minute ride as 2700 and the FTP warm-up and test pair as nothing, so
+    // the total is reported where there is one and the class count carries the
+    // rest. Forcing it through `PositiveDuration` turned a stacked session into
+    // an error after the write had already landed.
+    match PositiveDuration::from_seconds(stacked.total_seconds) {
+        Ok(total) => println!("  {} classes, {}", stacked.count(), clock(total)),
+        Err(_) => println!(
+            "  {} classes, and Peloton gives the stack no total",
+            stacked.count()
+        ),
+    }
+    Ok(())
+}
+
+/// Who taught it, or that nobody said.
+fn whoever(instructor: Option<&infrastructure::peloton::Instructor>) -> String {
+    instructor.map_or_else(
+        || "instructor unknown, so this is the one every session falls back to".to_owned(),
+        |who| who.name.clone(),
+    )
+}
