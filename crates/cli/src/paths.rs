@@ -102,6 +102,39 @@ pub fn settings(environment: &impl Environment) -> Result<PathBuf, NoBaseDirecto
         .map(|base| base.join(APPLICATION).join(SETTINGS))
 }
 
+/// Where a source's cached access token lives.
+///
+/// **`XDG_STATE_HOME`, and not beside the settings.** A token is neither
+/// configuration nor authored data: it persists between runs, nobody edits it,
+/// and losing it costs one login rather than a fact — which is the state
+/// directory's own definition, *"data that should persist between application
+/// restarts, but that is not important or portable enough to the user that it
+/// should be stored in `$XDG_DATA_HOME`"*.
+///
+/// **Separate from the credentials file, as every tool that does this keeps
+/// them separate.** The AWS CLI writes its config and credentials as INI where
+/// the operator can edit them and caches its SSO token under `~/.aws/sso/cache`
+/// where they cannot; the split is between what a person supplies and what a
+/// flow derives, and running the two together is how a derived value ends up
+/// being hand-edited.
+///
+/// Named for the source, as `credentials.rs` is: `peloton`, not
+/// `PELOTON_EMAIL`.
+///
+/// # Errors
+///
+/// [`NoBaseDirectory`] if neither `XDG_STATE_HOME` nor `HOME` gives an absolute
+/// path.
+pub fn token(environment: &impl Environment, source: &str) -> Result<PathBuf, NoBaseDirectory> {
+    base(
+        environment,
+        "XDG_STATE_HOME",
+        &[".local", "state"],
+        "the cached token",
+    )
+    .map(|base| base.join(APPLICATION).join(format!("{source}.token.json")))
+}
+
 /// One base directory: the variable if it names an absolute path, else the
 /// fallback under `HOME`.
 ///
