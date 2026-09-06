@@ -106,8 +106,21 @@ and it should not ride along with this one.
 
 Note against roadmap open question 4, which rejected an OS keyring as the *only*
 mechanism because it needs an unlocked session and so fails under cron and over
-SSH. The operator has since chosen the keystore. That trade is real and is his
-to have made; record it rather than re-litigating it.
+SSH.
+
+**That objection won, and on evidence** (2026-09-06, #54). The operator widened
+the requirement — *"we just need a safe way of storing them, so it could also be
+the database"* — and the Peloton token went to a `0600` JSON file under
+`$XDG_STATE_HOME` instead. The XDG specification prescribes a location and says
+nothing about secrets; the freedesktop specification that does is the Secret
+Service API, which is the keyring and carries exactly the availability problem
+above. Every comparable tool surveyed writes a file — AWS, gcloud, kubectl,
+Docker, Vault — and `gh`, the one that reaches for a keyring, has open issues
+about silently falling back to plaintext and silently sending unauthenticated
+requests when it is unavailable.
+
+So `credentials.rs` still has a destination to be decided, but it is not "the
+keystore" by default.
 
 ## What this does not touch
 
