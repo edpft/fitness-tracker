@@ -222,10 +222,18 @@ fn credentials() -> Result<PelotonClasses, Failure> {
     let missing = |name: &str| Failure::message(format!("{name} is not set"), exit::USAGE);
     let email = std::env::var("PELOTON_EMAIL").map_err(|_| missing("PELOTON_EMAIL"))?;
     let password = std::env::var("PELOTON_PASSWORD").map_err(|_| missing("PELOTON_PASSWORD"))?;
-    Ok(PelotonClasses::new(
-        API_BASE,
-        PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password)),
-    ))
+    let mut auth = PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password));
+
+    // **Where the token is kept, when there is anywhere to keep it.** Without
+    // this every invocation walks the whole Auth0 flow to obtain a token the
+    // last one already had (#54). A machine with neither `XDG_STATE_HOME` nor
+    // `HOME` gets the old behaviour rather than an error: logging in again costs
+    // a few seconds, and refusing to run costs the session.
+    if let Ok(path) = crate::paths::token(&crate::paths::SystemEnvironment, "peloton") {
+        auth = auth.caching_in(infrastructure::peloton::TokenFile::new(path));
+    }
+
+    Ok(PelotonClasses::new(API_BASE, auth))
 }
 
 fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {

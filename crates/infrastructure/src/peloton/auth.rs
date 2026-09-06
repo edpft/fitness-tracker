@@ -156,6 +156,11 @@ impl Token {
 pub struct PelotonAuth {
     auth_base: String,
     credentials: PelotonCredentials,
+    /// Where the token is kept between runs, if anywhere.
+    ///
+    /// `None` is a composition that does not persist — the contract tests, and
+    /// anything that would rather log in than write to a disk it does not own.
+    cache: Option<super::token::TokenFile>,
     /// Held explicitly rather than left inside the client: the flow has to read
     /// the `_csrf` cookie back out, and a client's own jar is not readable.
     jar: Arc<Jar>,
@@ -178,10 +183,23 @@ impl PelotonAuth {
         Self {
             auth_base: auth_base.into(),
             credentials,
+            cache: None,
             jar: Arc::new(Jar::default()),
             client: OnceLock::new(),
             token: Mutex::new(None),
         }
+    }
+
+    /// Keep the token here between runs.
+    ///
+    /// **Without this every invocation walks the whole Auth0 flow** — five round
+    /// trips through the SSO domain — to obtain a token the last one already
+    /// had. Tolerable for a command run once a block; not for a sink that writes
+    /// on every prescription (#54).
+    #[must_use]
+    pub fn caching_in(mut self, cache: super::token::TokenFile) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// A bearer token, from cache, from a refresh, or from a full login.
@@ -192,20 +210,26 @@ impl PelotonAuth {
     /// which is terminal and never retried. [`SourceError::Unavailable`] or
     /// [`SourceError::Malformed`] for anything else.
     pub async fn bearer(&self) -> Result<String, SourceError> {
-        if let Some(token) = self.cached()? {
+        // In memory first, then what the last run wrote down. A process that has
+        // already logged in does not read the file again.
+        let held = self
+            .cached()?
+            .or_else(|| self.cache.as_ref().and_then(super::token::TokenFile::read));
+
+        if let Some(token) = held {
             if token.usable() {
-                return Ok(token.access);
+                return Ok(self.store(token));
             }
             if let Some(refresh) = token.refresh.clone() {
                 // A refresh that fails is not fatal: the credentials are still
                 // in hand and a full login is the documented recovery.
                 if let Ok(fresh) = self.refresh(&refresh).await {
-                    return self.store(fresh);
+                    return Ok(self.store(fresh));
                 }
             }
         }
         let fresh = self.login().await?;
-        self.store(fresh)
+        Ok(self.store(fresh))
     }
 
     fn cached(&self) -> Result<Option<Token>, SourceError> {
@@ -217,15 +241,23 @@ impl PelotonAuth {
             })
     }
 
-    fn store(&self, token: Token) -> Result<String, SourceError> {
+    /// Hold a token, in memory and on disk.
+    ///
+    /// **Neither failure is the caller's problem.** A poisoned lock and an
+    /// unwritable cache both cost the same thing — the next run logs in again —
+    /// and a token that was obtained should not be thrown away because it could
+    /// not be filed. § II calls this reconstructible state, and losing it costs
+    /// a re-fetch rather than a fact.
+    fn store(&self, token: Token) -> String {
         let access = token.access.clone();
-        {
-            let mut held = self.token.lock().map_err(|_| SourceError::Unavailable {
-                detail: "the token cache was poisoned by an earlier panic".to_owned(),
-            })?;
+        if let Some(cache) = &self.cache {
+            // Ignored deliberately: see above. Nothing downstream can act on it.
+            drop(cache.write(&token));
+        }
+        if let Ok(mut held) = self.token.lock() {
             *held = Some(token);
         }
-        Ok(access)
+        access
     }
 
     /// The HTTP client, built once.
