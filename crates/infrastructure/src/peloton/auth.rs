@@ -31,7 +31,7 @@
 
 use std::{
     sync::{Arc, Mutex, OnceLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use application::SourceError;
@@ -68,7 +68,7 @@ const AUTH0_CLIENT: &str = "eyJuYW1lIjoiYXV0aDAuanMtdWxwIiwidmVyc2lvbiI6IjkuMTQu
 /// A token that expires while a request is in flight fails the run, and the
 /// whole point of the refresh is that it does not. Sixty seconds is longer than
 /// any single call this adapter makes.
-const EXPIRY_MARGIN: Duration = Duration::from_mins(1);
+const EXPIRY_MARGIN: jiff::SignedDuration = jiff::SignedDuration::from_secs(60);
 
 /// How many redirects to walk between the login form and the code.
 ///
@@ -100,16 +100,50 @@ impl std::fmt::Debug for PelotonCredentials {
 }
 
 /// A bearer token and what is needed to replace it.
-#[derive(Clone)]
-struct Token {
+///
+/// **Wall clock, not `Instant`.** A `std::time::Instant` is monotonic and has no
+/// meaning outside the process that read it — it cannot be written down, and a
+/// token this adapter cannot write down is one that costs a full Auth0 login on
+/// every invocation (#54). A `Timestamp` is an instant anyone can agree on,
+/// which is what § II asks of every time this system stores.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Token {
     access: String,
     refresh: Option<String>,
-    expires_at: Instant,
+    expires_at: jiff::Timestamp,
 }
 
 impl Token {
-    fn usable(&self) -> bool {
-        Instant::now() + EXPIRY_MARGIN < self.expires_at
+    pub const fn new(access: String, refresh: Option<String>, expires_at: jiff::Timestamp) -> Self {
+        Self {
+            access,
+            refresh,
+            expires_at,
+        }
+    }
+
+    pub fn access(&self) -> &str {
+        &self.access
+    }
+
+    pub fn refresh(&self) -> Option<&str> {
+        self.refresh.as_deref()
+    }
+
+    pub const fn expires_at(&self) -> jiff::Timestamp {
+        self.expires_at
+    }
+
+    /// Whether it is still good, with [`EXPIRY_MARGIN`] to spare.
+    ///
+    /// A clock that cannot add a minute to now is not a clock this can reason
+    /// about, so the answer there is "spent" — a needless login is a cost, and
+    /// using a token that may already be dead is a failed run.
+    #[must_use]
+    pub fn usable(&self) -> bool {
+        jiff::Timestamp::now()
+            .checked_add(EXPIRY_MARGIN)
+            .is_ok_and(|soon| soon < self.expires_at)
     }
 }
 
@@ -456,11 +490,20 @@ impl PelotonAuth {
                 .map_err(|error| SourceError::Malformed {
                     detail: format!("the token endpoint served something unreadable: {error}"),
                 })?;
-        Ok(Token {
-            access: body.access_token,
-            refresh: body.refresh_token,
-            expires_at: Instant::now() + Duration::from_secs(body.expires_in),
-        })
+        let lifetime = i64::try_from(body.expires_in).unwrap_or(i64::MAX);
+        let expires_at = jiff::Timestamp::now()
+            .checked_add(jiff::Span::new().seconds(lifetime))
+            .map_err(|error| SourceError::Malformed {
+                detail: format!(
+                    "the token endpoint says this expires in {} seconds, which is not a time: {error}",
+                    body.expires_in
+                ),
+            })?;
+        Ok(Token::new(
+            body.access_token,
+            body.refresh_token,
+            expires_at,
+        ))
     }
 
     fn absolute(&self, location: &str) -> String {
