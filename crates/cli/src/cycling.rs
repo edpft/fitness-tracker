@@ -27,7 +27,10 @@ use domain::{
     },
     gym::PositiveDuration,
 };
-use infrastructure::{SqliteCyclingProgrammeStore, connect};
+use infrastructure::{
+    SqliteCyclingProgrammeStore, connect,
+    peloton::{PelotonClasses, PelotonStack},
+};
 use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit};
@@ -38,13 +41,31 @@ use crate::{Failure, exit};
 /// programme, so the record of what a class actually contains stays faithful.
 const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
 
-/// Print the next cycling session at or after `from`.
+/// The next cycling session: what it is, and put where it is ridden.
+///
+/// **Porcelain, as `gym next` is.** That one collects, normalises, prescribes
+/// and then delivers to Hevy; this one prescribes and delivers to Peloton,
+/// because writing the workout to the app is most of what the tool is for. The
+/// operator, 2026-09-06: *"one of the main benefits of this tool is to write
+/// workouts to Peloton or Hevy, so that I don't have to do it manually myself,
+/// why would I say no?"*
+///
+/// **The session prints before anything is sent**, and it is read from the
+/// store rather than the network — so a Peloton that is unreachable costs the
+/// delivery and not the answer (§ 36). The programme is already authored, so a
+/// failed delivery costs a retry rather than anything derived.
 ///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no cycling programme covers the
-/// date, or if the programmes that do have no riding day left.
-pub async fn next(database: &Path, from: Date, ftp: Option<Ftp>) -> Result<(), Failure> {
+/// date, if the programmes that do have no riding day left, or if the session
+/// cannot be delivered.
+pub async fn next(
+    database: &Path,
+    from: Date,
+    ftp: Option<Ftp>,
+    to: Option<(&PelotonClasses, &PelotonStack)>,
+) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingProgrammeStore::new(pool);
 
@@ -74,7 +95,12 @@ pub async fn next(database: &Path, from: Date, ftp: Option<Ftp>) -> Result<(), F
         &session,
         ftp,
     );
-    Ok(())
+
+    let Some((classes, stack)) = to else {
+        return Ok(());
+    };
+    println!();
+    deliver_ride(&next, classes, stack, false).await
 }
 
 /// `jiff`'s `Weekday` has no `Display` — a week has no universal first day and
@@ -205,8 +231,8 @@ pub async fn deliver(
     database: &Path,
     from: Date,
     replace: bool,
-    classes: &infrastructure::peloton::PelotonClasses,
-    stack: &infrastructure::peloton::PelotonStack,
+    classes: &PelotonClasses,
+    stack: &PelotonStack,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingProgrammeStore::new(pool);
@@ -214,6 +240,28 @@ pub async fn deliver(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 
+    println!(
+        "{} — microcycle {} of {}, session {} of {}",
+        programme.name(),
+        next.microcycle,
+        programme.duration_weeks(),
+        next.session.as_u8(),
+        programme
+            .microcycle(next.microcycle)
+            .map_or(0, CyclingMicrocycle::session_count),
+    );
+    println!("{}, {}", weekday_name(next.date.weekday()), next.date);
+    println!();
+    deliver_ride(&next, classes, stack, replace).await
+}
+
+/// Put one session's classes in the stack, in the order they are ridden.
+async fn deliver_ride(
+    next: &application::cycling::NextRide,
+    classes: &PelotonClasses,
+    stack: &PelotonStack,
+    replace: bool,
+) -> Result<(), Failure> {
     let held = stack
         .view()
         .await
@@ -263,32 +311,21 @@ pub async fn deliver(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
 
-    println!(
-        "{} — microcycle {} of {}, session {} of {}",
-        programme.name(),
-        next.microcycle,
-        programme.duration_weeks(),
-        next.session.as_u8(),
-        programme
-            .microcycle(next.microcycle)
-            .map_or(0, CyclingMicrocycle::session_count),
-    );
-    println!("{}, {}", weekday_name(next.date.weekday()), next.date);
-    println!();
     for venue in next.ride.at().iter() {
         println!("  delivered  {venue}");
     }
     println!(
-        "  stacked  {} — {}",
+        "  delivered  {} — {}",
         cool_down.title,
         whoever(taught_by.as_ref())
     );
     println!();
+
     // **A total of zero is Peloton's answer, not a failure.** It counts a
     // 45-minute ride as 2700 and the FTP warm-up and test pair as nothing, so
     // the total is reported where there is one and the class count carries the
-    // rest. Forcing it through `PositiveDuration` turned a stacked session into
-    // an error after the write had already landed.
+    // rest. Forcing it through `PositiveDuration` turned a delivered session
+    // into an error after the write had already landed.
     match PositiveDuration::from_seconds(stacked.total_seconds) {
         Ok(total) => println!(
             "  {} classes in the stack, {}",

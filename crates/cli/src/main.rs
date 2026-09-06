@@ -909,7 +909,13 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
         None => None,
     };
 
-    cycling::next(database, from, ftp).await
+    // **The session is delivered as well as printed**, the way `gym next` is.
+    // Credentials that are absent cost the delivery and not the answer: the
+    // programme is in the store and the ride prints from it, so a machine with
+    // no Peloton credentials still says what to do (§ 36).
+    let peloton = plan::peloton().ok();
+    let to = peloton.as_ref().map(|(classes, stack)| (classes, stack));
+    cycling::next(database, from, ftp, to).await
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.
