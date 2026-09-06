@@ -93,8 +93,9 @@ intermediate state is fine rather than waiting for both.
 
 **1. Remove TOML.** `docs/removing-toml.md` has the survey. ~1,700 lines
 deleted, and four pieces of machinery become unnecessary rather than needing to
-be ported. Settled 2026-09-03: credentials go to the OS keystore, settings to the
-database, **no TOML anywhere**. This is first because everything after it would
+be ported. Settled 2026-09-03, credentials widened 2026-09-06: settings to the
+database, credentials somewhere safe — *"it could also be the database"* —
+**no TOML anywhere**. This is first because everything after it would
 otherwise be written twice.
 
 **2. 0027's deletions** — `Entry`, `Anchor`, `declared_opening`,
@@ -122,7 +123,9 @@ a share of a number the rider does not yet have. Record what a provider answers 
 microcycles. ~~As a **set** of options, not one (0029)~~ — 0036 settled that it
 is a single answer, the lowest score, because a tie preserves no choice.
 
-**A provider supplies mesocycles, not programmes** (0036), and there are five:
+**A provider supplies mesocycles, not programmes** (0036), **and the entry test
+is one of them** — one microcycle of two sessions, not a category of its own
+(2026-09-06). Besides it there are five:
 
 ```text
 base 1   µ1-2-3-4  by sessions 2+3     composition  6.0
@@ -139,10 +142,13 @@ programme that can hold a test microcycle ahead of its periodisations~~ —
 is microcycles of rides, and the test microcycle is a one-microcycle programme
 whose Sunday ride carries a duration and no zone.
 
-**6. The planner, the span view, and `fitness next`.** The tool takes a span, the
+**6. Writing to the Peloton stack** (#70) — the highest-value work left,
+2026-09-06, because it puts the session on the bike instead of on a screen.
+
+**7. The planner, the span view, and `fitness next`.** The tool takes a span, the
 providers, the primary lift and a session count per discipline per microcycle,
 and returns every arrangement whose fatigue profiles cohere. This is the
-deliverable the other five exist for.
+deliverable the other six exist for.
 
 ### What changed the order, and when
 
