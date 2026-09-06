@@ -272,10 +272,10 @@ struct Columns {
 fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
     let anchor = programme.anchor();
     let entry_test = match programme {
-        Mesocycle::Progression(Progression::Block(block)) => block.entry_test(),
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => block.entry_test(),
         // An SBS cycle has no entry test: its test is the last session of the
         // last week, not a week in front (decision 0024).
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Sbs(_))
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided(_))
         | Mesocycle::Test(_) => None,
     };
     let entry_test_light = entry_test
@@ -320,7 +320,9 @@ fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
             Mesocycle::Progression(Progression::Linear(linear)) => linear.declared_opening(),
             // Nor may SBS: every load in the chart is a share of the maximum,
             // so there is no opening for one to be declared against.
-            Mesocycle::Progression(Progression::Block(_) | Progression::Sbs(_))
+            Mesocycle::Progression(
+                Progression::BlockPeriodisation(_) | Progression::Provided(_),
+            )
             | Mesocycle::Test(_) => None,
         }
         .map(|opening| {
@@ -402,7 +404,7 @@ fn rehydrate_periodisation(
     if template == "sbs" {
         // `stored` rather than `new`: the checks ran when it was written, and
         // re-refusing a row now would make a rule change unreadable data.
-        return Ok(Mesocycle::Progression(Progression::Sbs(Sbs::stored(
+        return Ok(Mesocycle::Progression(Progression::Provided(Sbs::stored(
             common.name,
             common.pattern,
             common.exercise,
@@ -425,7 +427,7 @@ fn rehydrate_periodisation(
             .map_err(|error| corrupt(&error))?,
         )
     } else {
-        Progression::Block(
+        Progression::BlockPeriodisation(
             BlockPeriodisation::rehydrate(
                 common.name,
                 primary,

@@ -250,7 +250,7 @@ pub fn programme(
                 weekdays,
                 zone,
             )?;
-            Ok(Mesocycle::Progression(Progression::Block(
+            Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
                 BlockPeriodisation::new(
                     name,
                     Primary::new(pattern, primary_exercise, gating),
@@ -266,7 +266,7 @@ pub fn programme(
         }
         Shape::Sbs { anchor } => {
             let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
-            Ok(Mesocycle::Progression(Progression::Sbs(Sbs::new(
+            Ok(Mesocycle::Progression(Progression::Provided(Sbs::new(
                 name,
                 pattern,
                 primary_exercise,

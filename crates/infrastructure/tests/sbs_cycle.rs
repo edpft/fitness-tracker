@@ -42,7 +42,7 @@ fn the_answers_author_an_sbs_cycle() {
     assert_eq!(programme.template(), "sbs");
     assert_eq!(programme.name().as_str(), "autumn-2026-front-squat");
     assert!(
-        matches!(programme, Mesocycle::Progression(Progression::Sbs(_))),
+        matches!(programme, Mesocycle::Progression(Progression::Provided(_))),
         "and it is a periodisation, beside linear and block",
     );
     assert_eq!(

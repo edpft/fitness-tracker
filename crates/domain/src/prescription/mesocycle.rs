@@ -63,14 +63,27 @@ pub enum Mesocycle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progression {
     Linear(Linear),
-    Block(BlockPeriodisation),
-    /// A published chart, transcribed rather than derived (decision 0024).
+    BlockPeriodisation(BlockPeriodisation),
+    /// Taken from an external programme rather than derived here.
     ///
-    /// **A third model of periodisation, not a degenerate one.** Linear climbs
-    /// at a rate and block derives its phases; this reads its loads off a table
-    /// someone else published, and what moves week to week is the *maximum*
-    /// rather than a position on a ladder.
-    Sbs(Sbs),
+    /// **Not a third way of deriving a progression — the case where we derive
+    /// none.** Linear climbs at a rate and block periodisation computes its
+    /// phases; this reads its loads off a table somebody else published, and
+    /// what moves week to week is the *maximum* rather than a position on a
+    /// ladder (decision 0024).
+    ///
+    /// **It was `Sbs` until 2026-09-06**, which named the variant after the
+    /// publisher of one chart where its siblings are named for what they do. The
+    /// operator, 2026-09-06, on there being other SBS programmes: *Squat 2x Int*
+    /// is an external programme providing mesocycles in the same way *Peak Your
+    /// Power Zones* is. Which external programme is a fact about this mesocycle,
+    /// not a variant of this enum.
+    ///
+    /// **The payload is still the SBS cycle**, so the convergence the rename
+    /// implies has not happened yet: a provided cycling mesocycle is a different
+    /// type today, and whether the two collapse into one is settled by building
+    /// both and looking rather than by predicting.
+    Provided(Sbs),
 }
 
 impl Mesocycle {
@@ -177,13 +190,15 @@ impl Mesocycle {
     pub const fn produces_maximum(&self) -> Option<Exercise> {
         match self {
             Self::Test(test) => Some(test.primary_exercise()),
-            Self::Progression(Progression::Block(block)) => Some(block.primary_exercise()),
+            Self::Progression(Progression::BlockPeriodisation(block)) => {
+                Some(block.primary_exercise())
+            }
             // **An SBS cycle always ends on a one-rep maximum.** Week 4 day 2
             // is a test and is not optional, so a cycle that runs to its end
             // leaves a measured maximum behind exactly as a block does — and
             // that maximum is what the next cycle opens from, which is what
             // makes the chart self-perpetuating (decision 0024).
-            Self::Progression(Progression::Sbs(sbs)) => Some(sbs.primary_exercise()),
+            Self::Progression(Progression::Provided(sbs)) => Some(sbs.primary_exercise()),
             Self::Progression(Progression::Linear(_)) => None,
         }
     }
@@ -215,7 +230,7 @@ impl Mesocycle {
     #[must_use]
     pub const fn claims_an_earlier_maximum(&self) -> bool {
         match self {
-            Self::Progression(Progression::Block(block)) => {
+            Self::Progression(Progression::BlockPeriodisation(block)) => {
                 block.entry_test().is_none()
                     && matches!(
                         block.entry().anchor().provenance(),
@@ -229,7 +244,7 @@ impl Mesocycle {
             // that opens the sequence, or the previous cycle's own week 4. There
             // is no case where the cycle is about to measure its own opening, so
             // no carve-out is needed for one.
-            Self::Progression(Progression::Sbs(sbs)) => matches!(
+            Self::Progression(Progression::Provided(sbs)) => matches!(
                 sbs.entry().anchor().provenance(),
                 crate::prescription::AnchorProvenance::Tested
             ),
@@ -255,56 +270,60 @@ impl Progression {
     pub const fn template(&self) -> &'static str {
         match self {
             Self::Linear(_) => "linear",
-            Self::Block(_) => "block",
-            Self::Sbs(_) => "sbs",
+            // **Still the old spellings, and deliberately.** These are
+            // persisted keys, named by the store's own CHECK constraint, and
+            // this method exists precisely so a variant can be renamed without
+            // rewriting rows. They change when the schema does.
+            Self::BlockPeriodisation(_) => "block",
+            Self::Provided(_) => "sbs",
         }
     }
 
     pub const fn name(&self) -> &ProgrammeName {
         match self {
             Self::Linear(linear) => linear.name(),
-            Self::Block(block) => block.name(),
-            Self::Sbs(sbs) => sbs.name(),
+            Self::BlockPeriodisation(block) => block.name(),
+            Self::Provided(sbs) => sbs.name(),
         }
     }
 
     pub const fn fills(&self) -> &SlotFills {
         match self {
             Self::Linear(linear) => linear.fills(),
-            Self::Block(block) => block.fills(),
-            Self::Sbs(sbs) => sbs.fills(),
+            Self::BlockPeriodisation(block) => block.fills(),
+            Self::Provided(sbs) => sbs.fills(),
         }
     }
 
     pub const fn calendar(&self) -> &Calendar {
         match self {
             Self::Linear(linear) => linear.calendar(),
-            Self::Block(block) => block.calendar(),
-            Self::Sbs(sbs) => sbs.calendar(),
+            Self::BlockPeriodisation(block) => block.calendar(),
+            Self::Provided(sbs) => sbs.calendar(),
         }
     }
 
     pub const fn authored_at(&self) -> Timestamp {
         match self {
             Self::Linear(linear) => linear.authored_at(),
-            Self::Block(block) => block.authored_at(),
-            Self::Sbs(sbs) => sbs.authored_at(),
+            Self::BlockPeriodisation(block) => block.authored_at(),
+            Self::Provided(sbs) => sbs.authored_at(),
         }
     }
 
     pub const fn primary(&self) -> PrimaryPattern {
         match self {
             Self::Linear(linear) => linear.primary(),
-            Self::Block(block) => block.primary(),
-            Self::Sbs(sbs) => sbs.primary(),
+            Self::BlockPeriodisation(block) => block.primary(),
+            Self::Provided(sbs) => sbs.primary(),
         }
     }
 
     pub const fn primary_exercise(&self) -> Exercise {
         match self {
             Self::Linear(linear) => linear.primary_exercise(),
-            Self::Block(block) => block.primary_exercise(),
-            Self::Sbs(sbs) => sbs.primary_exercise(),
+            Self::BlockPeriodisation(block) => block.primary_exercise(),
+            Self::Provided(sbs) => sbs.primary_exercise(),
         }
     }
 
@@ -313,8 +332,8 @@ impl Progression {
     pub const fn entry(&self) -> Entry {
         match self {
             Self::Linear(linear) => linear.entry(),
-            Self::Block(block) => block.entry(),
-            Self::Sbs(sbs) => sbs.entry(),
+            Self::BlockPeriodisation(block) => block.entry(),
+            Self::Provided(sbs) => sbs.entry(),
         }
     }
 
@@ -326,8 +345,8 @@ impl Progression {
     pub const fn gating_role(&self) -> SessionRole {
         match self {
             Self::Linear(linear) => linear.gating_role(),
-            Self::Block(block) => block.gating_role(),
-            Self::Sbs(sbs) => sbs.gating_role(),
+            Self::BlockPeriodisation(block) => block.gating_role(),
+            Self::Provided(sbs) => sbs.gating_role(),
         }
     }
 
@@ -335,8 +354,8 @@ impl Progression {
     pub fn window(&self) -> ProgrammeWindow {
         match self {
             Self::Linear(linear) => linear.window(),
-            Self::Block(block) => block.window(),
-            Self::Sbs(sbs) => sbs.window(),
+            Self::BlockPeriodisation(block) => block.window(),
+            Self::Provided(sbs) => sbs.window(),
         }
     }
 }

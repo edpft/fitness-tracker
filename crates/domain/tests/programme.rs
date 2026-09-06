@@ -377,7 +377,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
         panic!("a tested anchor makes a block")
     };
-    let programme = Mesocycle::Progression(Progression::Block(block));
+    let programme = Mesocycle::Progression(Progression::BlockPeriodisation(block));
     assert_eq!(programme.template(), "block");
     assert!(programme.anchor().is_some());
     assert_eq!(programme.gating_role(), Some(SessionRole::Heavy));

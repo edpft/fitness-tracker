@@ -403,7 +403,9 @@ where
             // anchor; an SBS cycle's are shares of a maximum that moves, but it
             // moves off measured results rather than off a ladder position, so
             // there is still nothing here for a miss to hold.
-            Mesocycle::Progression(Progression::Block(_) | Progression::Sbs(_))
+            Mesocycle::Progression(
+                Progression::BlockPeriodisation(_) | Progression::Provided(_),
+            )
             | Mesocycle::Test(_) => Ok(None),
         }
     }
@@ -420,10 +422,10 @@ where
         before: Date,
     ) -> Result<Option<Kg>, PrescriptionError> {
         match programme {
-            Mesocycle::Progression(Progression::Sbs(sbs)) => {
+            Mesocycle::Progression(Progression::Provided(sbs)) => {
                 Ok(Some(self.sbs_maximum(sbs, parameters, before).await?))
             }
-            Mesocycle::Progression(Progression::Linear(_) | Progression::Block(_))
+            Mesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_))
             | Mesocycle::Test(_) => Ok(None),
         }
     }
@@ -753,8 +755,8 @@ fn week_of(programme: &Mesocycle, placed: WeekKind) -> WeekKind {
         // because its first session is a taper the chart states in full. Calling
         // the week a test would send the light session looking for a predecessor
         // to inherit from, which an SBS cycle never needs.
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Sbs(_)) => placed,
-        Mesocycle::Progression(Progression::Block(block)) => {
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided(_)) => placed,
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
             };
@@ -882,8 +884,12 @@ fn primary_slot_item(
         Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_load(linear, parameters, role, week, progress, steps)
         }
-        Mesocycle::Progression(Progression::Block(block)) => block_load(block, role, week, steps),
-        Mesocycle::Progression(Progression::Sbs(sbs)) => sbs_load(sbs, role, week, steps, maximum),
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+            block_load(block, role, week, steps)
+        }
+        Mesocycle::Progression(Progression::Provided(sbs)) => {
+            sbs_load(sbs, role, week, steps, maximum)
+        }
         Mesocycle::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {

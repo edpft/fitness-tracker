@@ -322,7 +322,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 ),
             }
         }
-        Mesocycle::Progression(Progression::Sbs(sbs)) => {
+        Mesocycle::Progression(Progression::Provided(sbs)) => {
             println!(
                 "  opening maximum {}, and it does not stay fixed",
                 sbs.entry().anchor(),
@@ -358,7 +358,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 calendar.duration_weeks(),
             );
         }
-        Mesocycle::Progression(Progression::Block(block)) => {
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             match block.entry_test() {
                 Some(test) => println!(
                     "  anchor {}, expected — week one measures it at {}",
@@ -564,10 +564,10 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_standing(linear, standing, parameters);
         }
-        Mesocycle::Progression(Progression::Block(block)) => {
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_standing(block, parameters);
         }
-        Mesocycle::Progression(Progression::Sbs(sbs)) => sbs_standing(sbs),
+        Mesocycle::Progression(Progression::Provided(sbs)) => sbs_standing(sbs),
     }
 }
 

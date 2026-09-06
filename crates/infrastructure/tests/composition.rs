@@ -163,7 +163,7 @@ fn predecessor(
         // Eight phase weeks and an entry test in front, 20 July to 20 September.
         // Its exit test is the last of them, on Friday 18 September.
         Before::Block(lift) => {
-            Mesocycle::Progression(Progression::Block(BlockPeriodisation::new(
+            Mesocycle::Progression(Progression::BlockPeriodisation(BlockPeriodisation::new(
                 name("before")?,
                 primary(lift),
                 fills(lift)?,
@@ -196,7 +196,7 @@ fn block_opening_from(
     provenance: AnchorProvenance,
 ) -> Result<Mesocycle, Box<dyn std::error::Error>> {
     let start = ADJACENT.checked_add(jiff::Span::new().days(gap * 7))?;
-    Ok(Mesocycle::Progression(Progression::Block(
+    Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
         BlockPeriodisation::new(
             name("under-test")?,
             primary(B),
