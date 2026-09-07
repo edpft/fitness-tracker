@@ -19,11 +19,11 @@ pub use hevy::{
     PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
-pub use peloton::{MappedSession, PelotonClass};
+pub use peloton::{MappedSession, PelotonClass, PelotonWorkouts};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteCyclingMesocycleStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonWorkoutLandingStore,
+    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
     SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,

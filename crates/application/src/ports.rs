@@ -49,6 +49,37 @@ pub struct SourceEvent {
     pub source_record_id: SourceRecordId,
     pub provenance: Provenance,
     pub payload: RawPayload,
+    /// What decides whether this is a new serving of the record.
+    ///
+    /// **Usually the payload's own digest, and the adapter says when it is
+    /// not.** A source that serves parts belonging to somebody else — Peloton
+    /// hands back the class a workout was ridden to, and that class counts how
+    /// many strangers are riding it right now — would otherwise append a record
+    /// every time one of those counters ticked. Only the adapter knows which
+    /// parts those are, so only the adapter can answer this.
+    ///
+    /// The payload is still landed verbatim; this changes what "changed" means,
+    /// not what is stored. Build it with [`SourceEvent::new`] unless the source
+    /// has volatile parts.
+    pub revision: PayloadDigest,
+}
+
+impl SourceEvent {
+    /// An event whose whole payload is about us, so any change of bytes is a
+    /// change of record.
+    pub fn new(
+        source_record_id: SourceRecordId,
+        provenance: Provenance,
+        payload: RawPayload,
+    ) -> Self {
+        let revision = payload.digest();
+        Self {
+            source_record_id,
+            provenance,
+            payload,
+            revision,
+        }
+    }
 }
 
 /// One instalment of a source's answer, in the order the source served it.
@@ -108,8 +139,9 @@ pub trait LandingStore {
     /// them; one read out of them cannot.
     fn stream(&self) -> &LandingStream;
 
-    /// The digest of the most recent record for this source record, if there
-    /// is one.
+    /// The **revision** of the most recent record for this source record, if
+    /// there is one — what the next serving is compared against, which is the
+    /// payload's own digest for every source that has no volatile parts.
     ///
     /// Most recent, not any: a record edited to X, then Y, then back to X is
     /// the source serving three payloads, and all three are landed.

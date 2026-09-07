@@ -1,0 +1,30 @@
+-- Both landing tables get the revision their change detection now compares.
+--
+-- **What a revision is.** Two servings of one record are the same revision when
+-- the parts that are *ours* are unchanged. For a source that serves only the
+-- operator's own data that is the whole payload, and the revision is the
+-- payload's digest. Peloton is not such a source: it serves each workout with
+-- the class it was ridden to, and that class counts how many strangers are
+-- riding it this minute. Comparing whole payloads appended a record every time
+-- one of those counters ticked.
+--
+-- The `payload` columns are untouched and still hold the bytes as served,
+-- counters and all. This changes what "changed" means, not what is stored.
+--
+-- **Nullable on both tables, and the null says something true.** Rows landed
+-- before this migration were compared on their whole payload. For Hevy that is
+-- the same comparison, and for the Peloton rows a beta store may already hold it
+-- is the comparison that was actually made. `latest_digest` coalesces to
+-- `payload_digest` rather than a backfill claiming these rows recorded a
+-- revision nobody computed.
+--
+-- **An ALTER rather than an edit to 0026.** A migration that has been applied
+-- is fixed: sqlx checksums it, and changing one in place fails every store that
+-- already ran it — which is how this migration came to be written. Additive from
+-- here, per the rule that governs from 14 September.
+--
+-- `ALTER TABLE ... ADD COLUMN` is DDL and does not fire the append-only
+-- triggers, which is why this needs no dance around them. It also cannot compute
+-- a per-row value, which is the other reason the column is nullable.
+ALTER TABLE hevy_workout_landing ADD COLUMN revision_digest BLOB;
+ALTER TABLE peloton_workout_landing ADD COLUMN revision_digest BLOB;

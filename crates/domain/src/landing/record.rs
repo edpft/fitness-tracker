@@ -29,17 +29,56 @@ pub struct LandingRecord {
     provenance: Provenance,
     payload: RawPayload,
     digest: PayloadDigest,
+    revision: PayloadDigest,
 }
 
 impl LandingRecord {
     /// The digest is computed here rather than accepted as an argument, so a
     /// record whose digest does not match its payload cannot be built.
+    ///
+    /// **The revision is the digest**, which is the ordinary case: a source
+    /// whose payload is entirely about us has changed exactly when its bytes
+    /// have. See [`Self::land_revision`] for the source that does not.
     pub fn land(
         stream: LandingStream,
         fetched_at: FetchedAt,
         source_record_id: SourceRecordId,
         provenance: Provenance,
         payload: RawPayload,
+    ) -> Self {
+        let digest = payload.digest();
+        Self::land_revision(
+            stream,
+            fetched_at,
+            source_record_id,
+            provenance,
+            payload,
+            digest,
+        )
+    }
+
+    /// Land a record whose payload carries parts that are not about us.
+    ///
+    /// **Two servings are the same revision when the parts that are ours are
+    /// unchanged.** Peloton serves a workout with the class it was ridden to,
+    /// and that class carries counters belonging to Peloton's whole membership
+    /// — how many people are riding it at this moment, how many ever have, what
+    /// they rated it. Those tick for reasons that have nothing to do with the
+    /// operator, and comparing whole payloads would append a record to his
+    /// history every time a stranger pressed start.
+    ///
+    /// So the *bytes* are still landed verbatim — § II.1 is not weakened, and
+    /// nothing here parses, strips or rewrites what is stored — but *whether
+    /// this is new* is asked of the part that is ours. Which part that is, is
+    /// the adapter's to know: it is the only thing that understands the
+    /// source's shape.
+    pub fn land_revision(
+        stream: LandingStream,
+        fetched_at: FetchedAt,
+        source_record_id: SourceRecordId,
+        provenance: Provenance,
+        payload: RawPayload,
+        revision: PayloadDigest,
     ) -> Self {
         let digest = payload.digest();
         Self {
@@ -49,7 +88,15 @@ impl LandingRecord {
             provenance,
             payload,
             digest,
+            revision,
         }
+    }
+
+    /// What the next serving of this record is compared against.
+    ///
+    /// Equal to [`Self::digest`] unless the source declared volatile parts.
+    pub const fn revision(&self) -> PayloadDigest {
+        self.revision
     }
 
     pub const fn stream(&self) -> &LandingStream {
