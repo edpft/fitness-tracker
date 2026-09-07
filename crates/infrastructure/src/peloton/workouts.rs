@@ -214,7 +214,16 @@ impl PelotonWorkouts {
         })
     }
 
-    async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Vec<u8>, SourceError> {
+    /// One authenticated GET against the API root.
+    ///
+    /// Visible to the Peloton adapter so [`super::samples`] can ask for a
+    /// graph through the same client, credential and error mapping rather than
+    /// standing up a second copy of them.
+    pub(super) async fn get(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Vec<u8>, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
             .client()?
