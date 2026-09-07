@@ -111,26 +111,32 @@ This was first because everything after it would otherwise be written twice, and
 programme and a mesocycle would have meant relevelling a document reader with a
 known expiry date.
 
-**1a. A plan holds programmes** (#86), in flight on
-`refactor/a-plan-holds-programmes`. The operator's hierarchy is
-`macrocycle → plan → programme → mesocycle → microcycle → session`, and the store
-had four rows per discipline and no plan at all.
+**1a. A plan holds programmes** (#86) — **done on 2026-09-07**, on
+`refactor/a-plan-holds-programmes`, and green on the whole gate. The operator's
+hierarchy is `macrocycle → plan → programme → mesocycle → microcycle → session`,
+and the store had four rows per discipline and no plan at all.
 
-**Landed and green**: the renames (`Mesocycle`, `Progression`,
+Every rung of it now exists: the domain renames (`Mesocycle`, `Progression`,
 `BlockPeriodisation`, `PublishedProgramme`, `CyclingMesocycle`),
 `Progression::Provided` in place of `Sbs`, `domain::provider` — who published a
-programme and which of its microcycles a mesocycle took — and `Plan`,
-`Programme<M>`, `Span` and `PlanWindow` in `domain::plan`.
+programme and which of its microcycles a mesocycle took — `Plan`, `Programme<M>`,
+`Span` and `PlanWindow` in `domain::plan`, the `PlanStore` and `PlanAuthor`
+ports, and migration 0024 rebuilding the authored side around a `plan` table.
 
-**Written and verified but not committed**: migration 0024, which drops and
-rebuilds the authored side around a `plan` table. It applies to a fresh store and
-to copies of both beta stores. The operator authorised dropping the rows on
+**There is no table for the programme rung**, deliberately: the gym programme
+*is* the `gym_mesocycle` rows under a plan, in `ordinal` order.
+
+**The rows went rather than being carried.** The operator authorised that on
 2026-09-06 — *"there's nothing that can't be reconstructed after the fact"* — and
-**that authorisation expires when the autumn starts** (§ 12).
+**the authorisation expires when the autumn starts** (§ 12): a migration after
+14 September carries its rows or does not land. 0024 was applied to a fresh
+store and to copies of both beta stores before it was committed.
 
-**Still to do**, and it is mechanical rather than undecided: the two stores, the
-rest of `application`, `fitness plan` authoring a whole plan (which closes #73),
-and the tests. A stash on that branch carries the half-done application layer.
+**#73 closed with it, and not the way it was written.** `fitness plan` reads the
+plan authored under the name given, replaces its cycling programme and carries
+its gym programme through — so it and `fitness programme add` write the two
+halves of one plan in either order without either superseding the other. Merging
+the two wizards turned out not to be the thing that was wrong.
 
 **Names settled with the operator on 2026-09-06**, and worth not re-deriving:
 the gym programme is *Squat 2x Int* provided by Stronger By Science; the cycling
