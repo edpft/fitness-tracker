@@ -8,25 +8,67 @@
 
 mod support;
 
-use application::CyclingProgrammeStore as _;
+use application::{CyclingMesocycleStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingSession, CyclingWeekdays, Interval,
-        PlannedRide, PowerZone, PublishedMicrocycle, Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Interval,
+        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
-    prescription::ProgrammeName,
+    plan::{Plan, PlanName, Programme},
+    provider::{ExternalProgramme, ProgrammeName, Provider},
 };
-use infrastructure::{SqliteCyclingProgrammeStore, connect};
+use infrastructure::{
+    SqliteCyclingMesocycleStore, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqlitePlanStore, connect,
+};
 use jiff::civil::{Date, Weekday, date};
-use support::corpus;
+use support::{corpus, programme as gym};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-async fn store() -> Fallible<(SqliteCyclingProgrammeStore, tempfile::TempDir)> {
+/// The three stores one plan is written and read through.
+struct Opened {
+    plans: SqlitePlanStore,
+    cycling: SqliteCyclingMesocycleStore,
+    gym: SqliteGymMesocycleStore,
+    parameters: SqliteGenerationParameterStore,
+}
+
+async fn store() -> Fallible<(Opened, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    Ok((SqliteCyclingProgrammeStore::new(pool), directory))
+    Ok((
+        Opened {
+            plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            cycling: SqliteCyclingMesocycleStore::new(pool.clone()),
+            gym: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            parameters: SqliteGenerationParameterStore::new(pool),
+        },
+        directory,
+    ))
+}
+
+/// A plan whose cycling programme is the mesocycles handed in.
+fn plan(called: &str, mesocycles: Vec<CyclingMesocycle>) -> Fallible<Plan> {
+    Ok(Plan::new(
+        PlanName::try_from(called.to_owned())?,
+        jiff::Timestamp::now(),
+        None,
+        Some(Programme::new(mesocycles)?),
+    )?)
+}
+
+/// Author a plan through the use case, so the overlap rule runs.
+async fn author(opened: &Opened, plan: &Plan) -> Fallible<application::Authored> {
+    let (_, authored) = application::prescribe::Authoring::new(
+        opened.plans.clone(),
+        opened.gym.clone(),
+        opened.parameters.clone(),
+    )
+    .author(plan, &gym::parameters()?)
+    .await?;
+    Ok(authored)
 }
 
 macro_rules! opened {
@@ -125,11 +167,11 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
     ];
     Ok(CyclingMicrocycle::new(
         rides.into_iter().collect(),
-        PublishedMicrocycle::new(ProgrammeName::try_from("Power Zone Build")?, published),
+        published,
     )?)
 }
 
-fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible<CyclingProgramme> {
+fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMesocycle> {
     let weeks = published
         .iter()
         .map(|number| microcycle(*number, test))
@@ -138,9 +180,11 @@ fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible
         (Weekday::Wednesday, SessionPosition::new(1)?),
         (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
-    Ok(CyclingProgramme::new(
-        ProgrammeName::try_from(name)?,
-        jiff::Timestamp::now(),
+    Ok(CyclingMesocycle::new(
+        ExternalProgramme::new(
+            Provider::try_from("Peloton".to_owned())?,
+            ProgrammeName::try_from("Build Your Power Zones".to_owned())?,
+        ),
         start,
         NonEmpty::new(weeks)?,
         weekdays,
@@ -149,33 +193,39 @@ fn programme(name: &str, start: Date, published: &[u32], test: bool) -> Fallible
 
 /// Every interval, every venue and the order of both, exactly as authored.
 #[test]
-fn an_authored_programme_round_trips_exactly() {
-    let (store, _directory) = opened!();
-    let Ok(authored) = programme("autumn-cycling-1", date(2026, 9, 21), &[1, 2, 4, 5], false)
-    else {
-        panic!("the fixture programme is valid")
+fn an_authored_mesocycle_round_trips_exactly() {
+    let (opened, _directory) = opened!();
+    let Ok(authored) = programme(date(2026, 9, 21), &[1, 2, 4, 5], false) else {
+        panic!("the fixture mesocycle is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored.clone()]) else {
+        panic!("the fixture plan is valid")
     };
 
-    run!(store.author(&authored));
+    run!(author(&opened, &plan));
 
-    let Some((_, read_back)) = run!(store.on(date(2026, 9, 23))) else {
-        panic!("the programme covers the date it was authored for")
+    let Some((_, name, read_back)) = run!(opened.cycling.on(date(2026, 9, 23))) else {
+        panic!("the mesocycle covers the date it was authored for")
     };
-    assert_eq!(read_back, authored, "the whole programme, not a summary");
+    assert_eq!(name.as_str(), "autumn", "and it knows the plan it is in");
+    assert_eq!(read_back, authored, "the whole mesocycle, not a summary");
 }
 
 /// A ride with no zones and no cool-down is the FTP test, and absent must not
 /// come back as zero: they are different claims and only one is true.
 #[test]
 fn an_effort_round_trips_with_no_cool_down() {
-    let (store, _directory) = opened!();
-    let Ok(authored) = programme("autumn-cycling-test", date(2026, 9, 14), &[5], true) else {
-        panic!("the fixture programme is valid")
+    let (opened, _directory) = opened!();
+    let Ok(authored) = programme(date(2026, 9, 14), &[5], true) else {
+        panic!("the fixture mesocycle is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored]) else {
+        panic!("the fixture plan is valid")
     };
 
-    run!(store.author(&authored));
+    run!(author(&opened, &plan));
 
-    let Some((_, read_back)) = run!(store.on(date(2026, 9, 20))) else {
+    let Some((_, _, read_back)) = run!(opened.cycling.on(date(2026, 9, 20))) else {
         panic!("the test week covers its Sunday")
     };
     let Some((_, _, ride)) = read_back.on(date(2026, 9, 20)) else {
@@ -193,20 +243,25 @@ fn an_effort_round_trips_with_no_cool_down() {
     );
 }
 
-/// Versions of one programme sit on top of one another; the latest answers.
+/// Versions of one plan sit on top of one another; the latest answers.
 #[test]
 fn re_authoring_a_name_supersedes_rather_than_competing() {
-    let (store, _directory) = opened!();
-    let Ok(first) = programme("autumn-cycling-1", date(2026, 9, 21), &[1, 2, 4, 5], false) else {
-        panic!("the fixture programme is valid")
+    let (opened, _directory) = opened!();
+    let (Ok(first), Ok(corrected)) = (
+        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        programme(date(2026, 9, 21), &[1, 2, 3, 4], false),
+    ) else {
+        panic!("both fixtures are valid")
     };
-    let Ok(corrected) = programme("autumn-cycling-1", date(2026, 9, 21), &[1, 2, 3, 4], false)
-    else {
-        panic!("the corrected programme is valid")
+    let (Ok(before), Ok(after)) = (
+        plan("autumn", vec![first]),
+        plan("autumn", vec![corrected.clone()]),
+    ) else {
+        panic!("the fixture plans are valid")
     };
 
-    let (_, created) = run!(application::cycling::author(&store, &first));
-    let (_, modified) = run!(application::cycling::author(&store, &corrected));
+    let created = run!(author(&opened, &before));
+    let modified = run!(author(&opened, &after));
 
     assert_eq!(created, application::Authored::Created);
     assert_eq!(
@@ -215,64 +270,82 @@ fn re_authoring_a_name_supersedes_rather_than_competing() {
         "the same name is a re-authoring, not a rival",
     );
 
-    let Some((_, read_back)) = run!(store.on(date(2026, 9, 23))) else {
-        panic!("the programme covers the date")
+    let Some((_, _, read_back)) = run!(opened.cycling.on(date(2026, 9, 23))) else {
+        panic!("the mesocycle covers the date")
     };
     assert_eq!(read_back, corrected, "the latest authoring answers");
 }
 
-/// Two cycling programmes covering one day would make which of them answers
-/// depend on the order rows came back in.
+/// Two *plans* covering one day would make which of them answers depend on the
+/// order rows came back in.
+///
+/// **Two mesocycles of one plan are a different rule**, and `Programme::new`
+/// refuses those before a store is involved at all. What this asserts is the
+/// rule that survived #86: the gym and the bike inside one plan compete for
+/// every day on purpose, and two plans may not.
 #[test]
-fn a_second_programme_covering_the_same_days_is_refused() {
-    let (store, _directory) = opened!();
-    let Ok(first) = programme("autumn-cycling-1", date(2026, 9, 21), &[1, 2, 4, 5], false) else {
-        panic!("the fixture programme is valid")
+fn a_second_plan_covering_the_same_days_is_refused() {
+    let (opened, _directory) = opened!();
+    let (Ok(first), Ok(overlapping)) = (
+        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        programme(date(2026, 10, 12), &[1, 2, 4, 5], false),
+    ) else {
+        panic!("both fixtures are valid")
     };
-    let Ok(overlapping) = programme("autumn-cycling-2", date(2026, 10, 12), &[1, 2, 4, 5], false)
-    else {
-        panic!("the overlapping programme is valid")
+    let (Ok(autumn), Ok(winter)) = (
+        plan("autumn", vec![first]),
+        plan("winter", vec![overlapping]),
+    ) else {
+        panic!("the fixture plans are valid")
     };
 
-    run!(application::cycling::author(&store, &first));
+    run!(author(&opened, &autumn));
 
-    let Ok(refused) = corpus::block_on(application::cycling::author(&store, &overlapping)) else {
+    let Ok(refused) = corpus::block_on(author(&opened, &winter)) else {
         panic!("a runtime is available")
     };
+    let Err(error) = refused else {
+        panic!("one day, two plans")
+    };
     assert!(
-        matches!(
-            refused,
-            Err(application::PrescriptionError::OverlappingProgramme { .. })
-        ),
-        "one day, two programmes",
+        error
+            .to_string()
+            .contains("two plans may not answer for one day"),
+        "got {error}",
     );
 }
 
-/// The autumn authors four cycling programmes back to back, so a question asked
-/// after the last ride of one has its answer in the next.
+/// A plan's cycling programme runs four mesocycles back to back, so a question
+/// asked after the last ride of one has its answer in the next.
 #[test]
 fn the_next_ride_crosses_a_mesocycle_boundary() {
-    let (store, _directory) = opened!();
-    let Ok(first) = programme("autumn-cycling-1", date(2026, 9, 21), &[1, 2, 4, 5], false) else {
-        panic!("the fixture programme is valid")
+    let (opened, _directory) = opened!();
+    let (Ok(first), Ok(second)) = (
+        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        programme(date(2026, 10, 19), &[1, 2, 4, 5], false),
+    ) else {
+        panic!("both fixtures are valid")
     };
-    let Ok(second) = programme("autumn-cycling-2", date(2026, 10, 19), &[1, 2, 4, 5], false) else {
-        panic!("the second programme is valid")
+    let Ok(autumn) = plan("autumn", vec![first, second]) else {
+        panic!("the fixture plan is valid")
     };
 
-    run!(application::cycling::author(&store, &first));
-    run!(application::cycling::author(&store, &second));
+    run!(author(&opened, &autumn));
 
     // Monday 2026-10-19 opens the second mesocycle; asked from the Monday
     // after the first one's last Sunday, the answer is the second's Wednesday.
-    let (programme, next) = run!(application::cycling::next_ride(&store, date(2026, 10, 19)));
-    assert_eq!(programme.name().as_str(), "autumn-cycling-2");
+    let (_, next) = run!(application::cycling::next_ride(
+        &opened.cycling,
+        date(2026, 10, 19)
+    ));
     assert_eq!(next.date, date(2026, 10, 21));
     assert_eq!(next.microcycle, 1);
 
-    // And inside a mesocycle, the ride found is that programme's own.
-    let (programme, next) = run!(application::cycling::next_ride(&store, date(2026, 10, 12)));
-    assert_eq!(programme.name().as_str(), "autumn-cycling-1");
+    // And inside a mesocycle, the ride found is that mesocycle's own.
+    let (_, next) = run!(application::cycling::next_ride(
+        &opened.cycling,
+        date(2026, 10, 12)
+    ));
     assert_eq!(next.date, date(2026, 10, 14));
     assert_eq!(next.microcycle, 4, "the fourth week of the first mesocycle");
 }
@@ -280,8 +353,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
 /// Nothing authored is the ordinary first-run state, and it is reported rather
 /// than guessed at.
 #[test]
-fn an_unauthored_store_holds_no_cycling_programme() {
-    let (store, _directory) = opened!();
-    assert!(run!(store.on(date(2026, 9, 23))).is_none());
-    assert!(run!(store.windows()).is_empty());
+fn an_unauthored_store_holds_no_cycling_mesocycle() {
+    let (opened, _directory) = opened!();
+    assert!(run!(opened.cycling.on(date(2026, 9, 23))).is_none());
+    assert!(run!(opened.plans.windows()).is_empty());
 }

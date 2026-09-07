@@ -7,7 +7,7 @@
 //! requests: [`programme`] is the grid of zone profiles a provider is asked for,
 //! and [`session`] is one cell as a ride that can be authored.
 //!
-//! **The grid holds no identifiers.** A [`Programme`] is zone profiles and
+//! **The grid holds no identifiers.** A [`PublishedProgramme`] is zone profiles and
 //! nothing of Peloton's, because a provider answers with a shape and the domain
 //! holds no vendor's identifiers (§ II.3). What names a class travels with the
 //! ride instead, as a [`RideVenue`] the domain does not interpret.
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use application::SourceError;
 use domain::{
-    cycling::{CyclingSession, Interval, Programme, Ride, RideVenue, ZoneProfile},
+    cycling::{CyclingSession, Interval, PublishedProgramme, Ride, RideVenue, ZoneProfile},
     gym::{PositiveDuration, sequence::NonEmpty},
 };
 
@@ -62,8 +62,8 @@ pub async fn fetch(
 
 /// What the programme trains, as a grid of zone profiles.
 #[must_use]
-pub fn programme(fetched: &Fetched) -> Programme {
-    Programme::new(fetched.iter().map(|(at, classes)| {
+pub fn programme(fetched: &Fetched) -> PublishedProgramme {
+    PublishedProgramme::new(fetched.iter().map(|(at, classes)| {
         (
             *at,
             ZoneProfile::of(classes.iter().filter_map(|class| class.ride.as_ref())),

@@ -30,32 +30,34 @@ use std::{
 };
 
 use application::{
-    DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _, ProgrammeAuthor as _,
-    prescribe::Authoring,
+    DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _, PlanAuthor as _,
+    PlanStore as _, prescribe::Authoring,
 };
 use domain::{
     gym::{
         Kg, Load, OperatorZone, RepCount,
         exercise::{Exercise, RepsExercise},
     },
+    plan::{Plan, PlanName, Programme},
     // `prescription::Block` is the *slot* block — plyometric, power, strength.
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Anchor, AnchorProvenance, Authored, Block, Calendar, EntryTest, Fill, GenerationParameters,
-        InvalidBlock, LoadSteps, PerRole, PrimaryPattern, ProgrammeName, SessionRole, Skip,
-        SlotFills, SlotId, StaticFill, TestTarget, Weekdays, authored::Shape,
+        Anchor, AnchorProvenance, Anchoring, Authored, Block, Calendar, Entry, EntryTest, Fill,
+        GenerationParameters, InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern,
+        SessionRole, Skip, SlotFills, SlotId, StaticFill, TestTarget, Weekdays, authored::Shape,
         block::Block as BlockPlan, rep_max,
     },
+    provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline},
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteProgrammeStore,
-    connect,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqlitePlanStore, connect,
 };
 use jiff::civil::{Date, Weekday};
 
-use crate::{Failure, exit, output};
+use crate::{Failure, exit, output, plan::SBS_MICROCYCLES};
 
 fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
@@ -203,7 +205,7 @@ fn count(value: u32) -> Result<RepCount, Failure> {
 /// **And hand back what it found.** The questions need the parameters as well as
 /// the store: what one step up the bar is, and so what "beat it" comes to, is
 /// the plate grid in `scales` rather than anything to ask about.
-async fn ready(
+pub async fn ready(
     parameters: &SqliteGenerationParameterStore,
 ) -> Result<GenerationParameters, Failure> {
     parameters
@@ -811,7 +813,7 @@ fn ask_template() -> Result<&'static str, Failure> {
 
 /// The questions every programme answers, whatever its template.
 struct Common {
-    name: ProgrammeName,
+    plan: PlanName,
     start: Date,
     pattern: PrimaryPattern,
     scheduled: Weekdays,
@@ -819,13 +821,14 @@ struct Common {
 }
 
 fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
-    let name = ask_until("name? ", |typed| {
-        // The name is the identity a re-authoring supersedes on (decision 0012),
-        // so an empty one would make every programme the same programme.
-        ProgrammeName::try_from(typed.to_owned()).map_err(|error| {
+    // **The plan is what is named, not the mesocycle** (issue #86). A mesocycle
+    // is the *n*th gym mesocycle of a plan; the name is the plan's, and
+    // re-authoring under it is what corrects the plan as a whole.
+    let plan = ask_until("which plan? ", |typed| {
+        PlanName::try_from(typed.to_owned()).map_err(|error| {
             format!(
-                "{error} — a {template} is identified by its name, and \
-                 re-authoring under the same one is what corrects it"
+                "{error} — a plan is identified by its name, and this {template} \
+                 goes into the plan you name here"
             )
         })
     })?;
@@ -835,7 +838,7 @@ fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
     let (scheduled, gating) = ask_weekdays(diary, start)?;
 
     Ok(Common {
-        name,
+        plan,
         start,
         pattern,
         scheduled,
@@ -843,17 +846,80 @@ fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
     })
 }
 
+/// Who published this mesocycle, and which of its microcycles this is.
+///
+/// **Answered with defaults rather than looked up.** This build holds no
+/// catalogue of published gym programmes — the chart is a table in `domain` and
+/// the title is the operator's to state — so the questions carry the answers
+/// settled on 2026-09-06 and take Return for each.
+fn ask_provided(microcycles: Vec<u32>) -> Result<ProvidedFrom, Failure> {
+    println!("\nwho published this, and which of its microcycles this is");
+    let provider = ask_until("  provider? [Stronger By Science] ", |typed| {
+        let typed = if typed.is_empty() {
+            "Stronger By Science"
+        } else {
+            typed
+        };
+        Provider::try_from(typed.to_owned()).map_err(|error| error.to_string())
+    })?;
+    let programme = ask_until("  programme? [Squat 2x Int] ", |typed| {
+        let typed = if typed.is_empty() {
+            "Squat 2x Int"
+        } else {
+            typed
+        };
+        ProgrammeName::try_from(typed.to_owned()).map_err(|error| error.to_string())
+    })?;
+    ProvidedFrom::new(ExternalProgramme::new(provider, programme), microcycles)
+        .map_err(|error| Failure::usage(&error))
+}
+
 /// **Asked after the duration, not before it.** The dates are what a programme
 /// *is*; the lift is the first thing it is about, and the seventeen slots
 /// follow it. Moving it in front of `ends?` puts an exercise between two dates.
-fn ask_lift(template: &str) -> Result<RepsExercise, Failure> {
+///
+/// **Offered rather than typed, since 2026-09-07.** The pattern narrows the
+/// primary to three exercises knee-dominant or two hip-dominant, and until now
+/// this took free text — so answering it needed the operator to already know
+/// which lifts were acceptable, and a typo came back as "not in the
+/// vocabulary" rather than as a list. A word is still read as a key, so a lift
+/// off the list is one word away; what changed is that nothing has to be
+/// remembered to answer.
+pub fn ask_lift(template: &str, pattern: PrimaryPattern) -> Result<RepsExercise, Failure> {
+    let offers = domain::prescription::candidates::for_primary(pattern);
     println!("\nthe lift this {template} is about");
-    ask_until("  which exercise? ", |typed| match Exercise::named(typed) {
-        Some(Exercise::Reps(exercise)) => Ok(exercise),
-        Some(_) => Err(format!(
-            "{typed:?} is not counted in repetitions, and a primary needs one"
-        )),
-        None => Err(format!("{typed:?} is not an exercise in the vocabulary")),
+    for (at, key) in offers.iter().enumerate() {
+        println!("  {:>2}. {key}", at.saturating_add(1));
+    }
+
+    let question = format!(
+        "  which? [{}] ",
+        offers.first().copied().unwrap_or_default()
+    );
+    ask_until(&question, move |typed| {
+        let key = if typed.is_empty() {
+            (*offers
+                .first()
+                .ok_or_else(|| "nothing is offered; name an exercise".to_owned())?)
+            .to_owned()
+        } else if let Ok(number) = typed.parse::<usize>() {
+            (*offers
+                .get(number.wrapping_sub(1))
+                .ok_or_else(|| format!("there is no {number} on the list"))?)
+            .to_owned()
+        } else {
+            typed.to_owned()
+        };
+        match Exercise::named(&key) {
+            Some(Exercise::Reps(exercise)) => Ok(exercise),
+            Some(_) => Err(format!(
+                "{key:?} is not counted in repetitions, and a primary needs one"
+            )),
+            None => Err(format!(
+                "{key:?} is not an exercise — pick a number, or name one from \
+                 the vocabulary"
+            )),
+        }
     })
 }
 
@@ -862,7 +928,7 @@ async fn ask_programme(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Authored, Failure> {
+) -> Result<(PlanName, Authored), Failure> {
     match template {
         "test" => ask_test(diary, history, parameters).await,
         "sbs" => ask_climb(Climbing::Sbs, diary, history, parameters).await,
@@ -878,10 +944,10 @@ async fn ask_test(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Authored, Failure> {
+) -> Result<(PlanName, Authored), Failure> {
     println!("A test: one week, measuring.\n");
     let common = ask_common(diary, "test")?;
-    let lift = ask_lift("test")?;
+    let lift = ask_lift("test", common.pattern)?;
     let primary = lift.as_str();
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
@@ -919,17 +985,49 @@ async fn ask_test(
         parse_count("reps", typed)
     })?;
 
-    Ok(Authored {
-        name: common.name,
-        start: common.start,
-        pattern: common.pattern,
-        primary_exercise: Exercise::Reps(lift),
-        weekdays: common.scheduled,
-        shape: Shape::Test {
-            reps: count(reps)?,
-            target,
+    // **A test may be published or may be nobody's.** *Squat 2x Int Entry Test*
+    // is a week its publisher wrote; a week that exists only to measure a lift
+    // before something else begins was written by nobody, and may not claim
+    // otherwise.
+    let published = ask_until("\n  was this week published by somebody? [y/N] ", yes_or_no)?;
+    let provided = if published {
+        let microcycle = ask_until("  which of its microcycles? [1] ", |typed| {
+            if typed.is_empty() {
+                return Ok(1);
+            }
+            typed
+                .parse::<u32>()
+                .ok()
+                .filter(|number| *number > 0)
+                .ok_or_else(|| format!("{typed:?} is not a microcycle number"))
+        })?;
+        Some(ask_provided(vec![microcycle])?)
+    } else {
+        None
+    };
+
+    Ok((
+        common.plan,
+        Authored {
+            start: common.start,
+            pattern: common.pattern,
+            primary_exercise: Exercise::Reps(lift),
+            weekdays: common.scheduled,
+            shape: Shape::Test {
+                reps: count(reps)?,
+                target,
+                provided,
+            },
         },
-    })
+    ))
+}
+
+fn yes_or_no(typed: &str) -> Result<bool, String> {
+    match typed.to_lowercase().as_str() {
+        "" | "n" | "no" => Ok(false),
+        "y" | "yes" => Ok(true),
+        other => Err(format!("{other:?} is not y or n")),
+    }
 }
 
 /// Which climbing template, and so which week the span's first one is.
@@ -948,7 +1046,7 @@ async fn ask_climb(
     diary: &Diary,
     history: &SqliteExerciseHistory,
     parameters: &GenerationParameters,
-) -> Result<Authored, Failure> {
+) -> Result<(PlanName, Authored), Failure> {
     let (template, asks_anchor) = match climbing {
         // **A ladder has no test week, so nothing aims at its anchor.** The
         // anchor is the maximum its percentages are shares of, and week one
@@ -969,7 +1067,7 @@ async fn ask_climb(
     } else {
         ask_weeks(climbing, diary, common.start, &common.scheduled)?
     };
-    let lift = ask_lift(template)?;
+    let lift = ask_lift(template, common.pattern)?;
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(history, lift, scale).await?;
@@ -999,8 +1097,17 @@ async fn ask_climb(
                 opening,
             }
         }
-        // Nothing to ask: the chart states every set it runs.
-        Climbing::Sbs => Shape::Sbs { anchor },
+        // The chart states every set it runs, so there is nothing to ask about
+        // the shape — only about who published it.
+        //
+        // **Stated, because this command adds one cycle at a time.** The
+        // operator running it has the predecessor's test behind him and a number
+        // to give. `fitness plan` authors the whole chain months ahead, where
+        // only the first cycle has one — the rest inherit.
+        Climbing::Sbs => Shape::Provided {
+            from: ask_provided((1..=SBS_MICROCYCLES).collect())?,
+            anchor: Anchoring::Stated(Entry::derived(anchor)),
+        },
         Climbing::Block => {
             let entry_reps = ask_until(
                 "  the entry test attempts it at how many reps? [3] ",
@@ -1026,14 +1133,16 @@ async fn ask_climb(
         }
     };
 
-    Ok(Authored {
-        name: common.name,
-        start: common.start,
-        pattern: common.pattern,
-        primary_exercise: Exercise::Reps(lift),
-        weekdays: common.scheduled,
-        shape,
-    })
+    Ok((
+        common.plan,
+        Authored {
+            start: common.start,
+            pattern: common.pattern,
+            primary_exercise: Exercise::Reps(lift),
+            weekdays: common.scheduled,
+            shape,
+        },
+    ))
 }
 
 /// Ask, and author.
@@ -1041,6 +1150,12 @@ async fn ask_climb(
 /// **Nothing is written to disk.** The questions produced a TOML document until
 /// 2026-09-06 and that document was then read back; what it carried is now
 /// carried by [`Authored`], and the store is the only record.
+///
+/// **It writes a whole plan, not a mesocycle** (issue #86). The plan in force
+/// under the name given is read, this mesocycle is put into its gym programme,
+/// and the lot is re-authored — which is what lets `fitness plan` write the
+/// cycling side and this command write the gym side of the same plan without
+/// either superseding the other.
 ///
 /// # Errors
 ///
@@ -1067,7 +1182,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let template = ask_template()?;
-    let answers = ask_programme(template, &diary, &history, &parameters).await?;
+    let (name, answers) = ask_programme(template, &diary, &history, &parameters).await?;
 
     println!("\nAnd the slots. A number picks from the list; anything else is read");
     println!("as an exercise, so something you have never done is one word away.");
@@ -1082,7 +1197,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     // prescribed.
     let interruptions = interruptions(&diary, &answers);
 
-    let programme = domain::prescription::authored::programme(
+    let mesocycle = domain::prescription::authored::programme(
         answers,
         fills,
         &interruptions,
@@ -1091,16 +1206,242 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     )
     .map_err(|error| Failure::usage(&error))?;
 
+    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+    let existing = plans
+        .named(&name)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let plan = with_gym(name, existing.as_ref(), mesocycle.clone())?;
+
     let (id, authored) = Authoring::new(
-        SqliteProgrammeStore::new(pool, zone.clone()),
+        plans,
+        SqliteGymMesocycleStore::new(pool, zone.clone()),
         parameter_store,
     )
-    .author(&programme, &parameters)
+    .author(&plan, &parameters)
     .await
     .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    output::programme_authored(id, authored, &programme, &parameters);
+    output::programme_authored(id, authored, &plan, &mesocycle, &parameters);
     Ok(())
+}
+
+/// The plan with this mesocycle in its gym programme.
+///
+/// **A mesocycle is placed by the day it starts.** Adding one is ordinarily
+/// appending — the autumn's four go in one at a time — and re-running with a
+/// start date already in the plan replaces that mesocycle, which is how a
+/// mesocycle is corrected now that it has no name of its own to re-author under.
+///
+/// The cycling side is carried through untouched, so `fitness plan` and this
+/// command can write the two halves of one plan in either order.
+fn with_gym(
+    name: PlanName,
+    existing: Option<&Plan>,
+    mesocycle: Mesocycle,
+) -> Result<Plan, Failure> {
+    let start = mesocycle.calendar().start();
+    let mut gym: Vec<Mesocycle> = existing
+        .and_then(Plan::gym)
+        .map(|programme| {
+            programme
+                .mesocycles()
+                .filter(|held| held.calendar().start() != start)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    gym.push(mesocycle);
+    gym.sort_by_key(|held| held.calendar().start());
+
+    Plan::new(
+        name,
+        jiff::Timestamp::now(),
+        Some(Programme::new(gym).map_err(|error| Failure::usage(&error))?),
+        existing.and_then(Plan::cycling).cloned(),
+    )
+    .map_err(|error| Failure::usage(&error))
+}
+
+/// What `plan` already knows before the gym questions begin.
+///
+/// A struct rather than five arguments because they arrive together and mean one
+/// thing: the gym programme the operator has already chosen by picking a
+/// provider, a lift and a start date.
+pub struct GymOutline<'a> {
+    pub start: Date,
+    pub pattern: PrimaryPattern,
+    pub lift: RepsExercise,
+    /// Who published it, and under what name.
+    pub published: &'a ExternalProgramme,
+    /// Progressions after the entry test.
+    pub progressions: usize,
+    /// Which of the published programme's microcycles the entry test is. The
+    /// programme's to say (issue #59), not the operator's to remember.
+    pub test_microcycle: u32,
+}
+
+/// The week the plan opens on, measuring the lift the rest of it is about.
+///
+/// **The published programme's own**, not a generic week measuring a lift:
+/// *Squat 2x Int* µ4 is a taper and a one-repetition maximum, which is what the
+/// block opens on (issue #59).
+///
+/// Nothing precedes it in the plan, so there is nothing for its target to
+/// inherit from: it is declared, from the record where the record speaks.
+///
+/// **Which microcycle it is, is the programme's to say and not a question.** It
+/// asked until 2026-09-07, and there was only ever one answer: a test week is
+/// the only thing an entry test can be derived from, so offering the choice
+/// invited a wrong one. The operator: *"it doesn't make sense to ask which
+/// microcycle to derive the entry test from because it can only be derived from
+/// a test week."*
+fn ask_entry_test(
+    lift: RepsExercise,
+    published: &ExternalProgramme,
+    microcycle: u32,
+    best: Option<&Best>,
+) -> Result<Shape, Failure> {
+    println!("\nthe entry test");
+    let reps = ask_until("  attempted at how many reps? [1] ", |typed| {
+        if typed.is_empty() {
+            return Ok(1);
+        }
+        parse_count("reps", typed)
+    })?;
+    let target = match best {
+        Some(best) => {
+            println!("  {}", best.describe(lift.as_str()));
+            println!(
+                "   1. what the record stands at{:>13}",
+                format!("{}kg", best.maximum)
+            );
+            println!("   2. a number of my own");
+            let choice = ask_until("  which? [1] ", |typed| match typed {
+                "" | "1" => Ok(1),
+                "2" => Ok(2),
+                other => Err(format!("{other:?} is not one of the two")),
+            })?;
+            if choice == 1 {
+                TestTarget::Declared(best.maximum)
+            } else {
+                TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?)
+            }
+        }
+        None => TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?),
+    };
+
+    Ok(Shape::Test {
+        reps: count(reps)?,
+        target,
+        provided: Some(
+            ProvidedFrom::new(published.clone(), vec![microcycle])
+                .map_err(|error| Failure::usage(&error))?,
+        ),
+    })
+}
+
+/// The gym half of a plan: an entry test and the progressions after it.
+///
+/// **This is `plan` composing the wizard rather than restating it** (issue #73).
+/// Every question here is one `programme add` already asks; what differs is that
+/// they are asked once for the whole plan instead of once per mesocycle, and the
+/// four mesocycles are laid out from the answers rather than typed in over three
+/// months.
+///
+/// **Only the first progression states an anchor.** The rest open from the cycle
+/// before them — week 4 day 2 is a one-repetition maximum, so each leaves the
+/// next one's opening behind it — and those tests have not happened when the
+/// plan is authored. Asking for them would be asking the operator to invent
+/// three numbers; see [`Anchoring::Inherited`].
+///
+/// # Errors
+///
+/// [`Failure`] if the schedule gives the gym no days as of `start`, if there is
+/// nobody to ask, or if the answers do not assemble into a mesocycle.
+pub async fn gym_side(
+    pool: &infrastructure::SqlitePool,
+    zone: &OperatorZone,
+    parameters: &GenerationParameters,
+    outline: &GymOutline<'_>,
+) -> Result<Vec<Mesocycle>, Failure> {
+    let GymOutline {
+        start,
+        pattern,
+        lift,
+        published,
+        progressions,
+        test_microcycle,
+    } = *outline;
+    let history = SqliteExerciseHistory::new(pool.clone());
+    let diary = SqliteDiaryStore::new(pool.clone())
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    println!("\nthe gym side: asked once, for the whole plan\n");
+    let (weekdays, _) = ask_weekdays(&diary, start)?;
+
+    println!("\nAnd the slots. A number picks from the list; anything else is read");
+    println!("as an exercise, so something you have never done is one word away.");
+    let fills = ask_fills(&history, pattern, Exercise::Reps(lift)).await?;
+
+    let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
+    let best = best_of(&history, lift, scale).await?;
+
+    let entry = ask_entry_test(lift, published, test_microcycle, best.as_ref())?;
+
+    let mut shapes: Vec<(Date, Shape)> = vec![(start, entry)];
+    for cycle in 0..progressions {
+        let weeks = 1 + cycle * (SBS_MICROCYCLES as usize);
+        let at = week_after(start, weeks)?;
+        let numbers: Vec<u32> = (1..=SBS_MICROCYCLES).collect();
+        shapes.push((
+            at,
+            Shape::Provided {
+                from: ProvidedFrom::new(published.clone(), numbers)
+                    .map_err(|error| Failure::usage(&error))?,
+                // **Every one of them inherits, the first included.** It
+                // stated an anchor until 2026-09-07, and the operator asked why
+                // the entry test is given a target and then the mesocycle after
+                // it is given the same number again. It is the same number: the
+                // entry test is the week that measures it, and it runs before
+                // this begins. Stating it here would be fixing what that test is
+                // about to find out.
+                anchor: Anchoring::Inherited,
+            },
+        ));
+    }
+
+    let mut mesocycles = Vec::new();
+    for (at, shape) in shapes {
+        let answers = Authored {
+            start: at,
+            pattern,
+            primary_exercise: Exercise::Reps(lift),
+            weekdays: weekdays.clone(),
+            shape,
+        };
+        let skips = interruptions(&diary, &answers);
+        mesocycles.push(
+            domain::prescription::authored::programme(
+                answers,
+                fills.clone(),
+                &skips,
+                zone.as_time_zone(),
+                parameters,
+            )
+            .map_err(|error| Failure::usage(&error))?,
+        );
+    }
+    Ok(mesocycles)
+}
+
+/// The Monday `weeks` after this one.
+fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
+    let weeks = i64::try_from(weeks).map_err(|_| usage("a plan longer than the calendar"))?;
+    date.checked_add(jiff::Span::new().weeks(weeks))
+        .map_err(|_| usage("a plan running past the end of the calendar"))
 }
 
 /// The days this programme's window loses, from the schedule.

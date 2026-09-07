@@ -244,7 +244,7 @@ impl PrescriptionDestination for HevyRoutines {
     }
 
     async fn deliver(&self, session: &Deliverable) -> Result<Delivered, DeliveryError> {
-        let folder = self.folder_for(session.programme.as_str()).await?;
+        let folder = self.folder_for(session.plan.as_str()).await?;
         let rendered = render(session, folder);
 
         let response = self
@@ -291,7 +291,7 @@ impl PrescriptionDestination for HevyRoutines {
         session: &Deliverable,
         occupying: &DeliveryReference,
     ) -> Result<Delivered, DeliveryError> {
-        let folder = self.folder_for(session.programme.as_str()).await?;
+        let folder = self.folder_for(session.plan.as_str()).await?;
         let rendered = render(session, folder);
 
         // **The same body as `deliver` sends.** `PutRoutinesRequestBody` and

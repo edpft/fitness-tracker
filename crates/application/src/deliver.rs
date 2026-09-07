@@ -32,8 +32,8 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::DeliveryError,
     ports::{
-        Deliverable, Delivery, PrescribedWorkoutStore, PrescriptionDeliverer,
-        PrescriptionDeliveryStore, PrescriptionDestination, ProgrammeStore,
+        Deliverable, Delivery, MesocycleStore, PrescribedWorkoutStore, PrescriptionDeliverer,
+        PrescriptionDeliveryStore, PrescriptionDestination,
     },
 };
 
@@ -59,7 +59,7 @@ impl<S, P, D, T> Delivering<S, P, D, T> {
 impl<S, P, D, T> PrescriptionDeliverer for Delivering<S, P, D, T>
 where
     S: PrescribedWorkoutStore + Sync,
-    P: ProgrammeStore + Sync,
+    P: MesocycleStore + Sync,
     D: PrescriptionDeliveryStore + Sync,
     T: PrescriptionDestination + Sync,
 {
@@ -77,17 +77,17 @@ where
         // and which session of it this is. Both are facts about the calendar
         // rather than about what was issued, which is why they are derived here
         // and not stored on the prescription.
-        let (_, programme) = self
+        let (_, plan, programme) = self
             .ports
             .programmes
             .on(date)
             .await?
-            .ok_or(DeliveryError::NoProgramme { date })?;
+            .ok_or(DeliveryError::NoMesocycle { date })?;
 
         let ordinal = programme
             .calendar()
             .ordinal(date)
-            .ok_or(DeliveryError::NoProgramme { date })?;
+            .ok_or(DeliveryError::NoMesocycle { date })?;
 
         // **Asked before sent, and asked about the date rather than about this
         // prescription** (decision 0022). Without this, a second invocation
@@ -97,7 +97,7 @@ where
 
         let session = Deliverable {
             workout,
-            programme: programme.name().clone(),
+            plan,
             ordinal,
         };
 

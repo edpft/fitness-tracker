@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\"\n            FROM plan AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = p.name\n            )\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "authored_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "authored_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ef2af4ae5d06d49c754347070066a896bc308b4a01402a77e4b1a459897ca378"
+}

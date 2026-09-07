@@ -10,12 +10,13 @@
 
 use domain::{
     cycling::{
-        CyclingMicrocycle, CyclingProgramme, CyclingSession, CyclingWeekdays, Ftp, FtpProvenance,
-        Interval, PlannedRide, PowerZone, PublishedMicrocycle, Ride, RideVenue, SessionPosition,
-        Watts, ZoneProfile, bottom_level, diverges, mesocycles, partition, span, zones_lost,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Ftp, FtpProvenance,
+        Interval, PlannedRide, PowerZone, Ride, RideVenue, SessionPosition, Watts, ZoneProfile,
+        bottom_level, diverges, mesocycles, partition, span, zones_lost,
     },
     gym::{PositiveDuration, sequence::NonEmpty},
-    prescription::ProgrammeName,
+    plan::Occupies,
+    provider::{ExternalProgramme, ProgrammeName, Provider},
 };
 use jiff::civil::{Weekday, date};
 
@@ -55,14 +56,19 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
             ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3)?,
         ),
     ];
-    Ok(CyclingMicrocycle::new(
-        rides.into_iter().collect(),
-        PublishedMicrocycle::new(ProgrammeName::try_from("Power Zone Build")?, number),
-    )?)
+    Ok(CyclingMicrocycle::new(rides.into_iter().collect(), number)?)
+}
+
+/// *Build Your Power Zones*, published by Peloton.
+fn build() -> Result<ExternalProgramme, Box<dyn std::error::Error>> {
+    Ok(ExternalProgramme::new(
+        Provider::try_from("Peloton".to_owned())?,
+        ProgrammeName::try_from("Build Your Power Zones".to_owned())?,
+    ))
 }
 
 /// Four microcycles beginning Monday 2026-09-21, ridden Wednesday and Sunday.
-fn programme() -> Result<CyclingProgramme, Box<dyn std::error::Error>> {
+fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
     let microcycles = NonEmpty::new(vec![
         microcycle(1)?,
         microcycle(2)?,
@@ -73,9 +79,8 @@ fn programme() -> Result<CyclingProgramme, Box<dyn std::error::Error>> {
         (Weekday::Wednesday, SessionPosition::new(1)?),
         (Weekday::Sunday, SessionPosition::new(2)?),
     ])?;
-    Ok(CyclingProgramme::new(
-        ProgrammeName::try_from("cycling-1")?,
-        jiff::Timestamp::now(),
+    Ok(CyclingMesocycle::new(
+        build()?,
         date(2026, 9, 21),
         microcycles,
         weekdays,
@@ -91,15 +96,22 @@ fn a_microcycle_says_which_published_one_it_is() {
     let numbers: Vec<u32> = programme
         .microcycles()
         .iter()
-        .map(|microcycle| microcycle.from().microcycle())
+        .map(CyclingMicrocycle::published_ordinal)
         .collect();
     assert_eq!(numbers, vec![1, 2, 4, 5]);
     assert_eq!(
         programme
             .microcycle(3)
-            .map(|microcycle| microcycle.from().to_string()),
-        Some("Power Zone Build µ4".to_owned()),
+            .map(CyclingMicrocycle::published_ordinal),
+        Some(4),
         "the programme's third microcycle is the published fourth",
+    );
+    assert_eq!(
+        programme
+            .provided_from()
+            .map(|from| format!("{} {from}", from.programme())),
+        Some("Build Your Power Zones micros 1-2-4-5".to_owned()),
+        "and the mesocycle as a whole says which weeks of which programme it is",
     );
 }
 
@@ -208,9 +220,8 @@ fn a_weekday_riding_a_session_no_microcycle_holds_is_refused() {
     )])
     .expect("one day is a week");
 
-    let refused = CyclingProgramme::new(
-        ProgrammeName::try_from("cycling-1").expect("a name"),
-        jiff::Timestamp::now(),
+    let refused = CyclingMesocycle::new(
+        build().expect("the published programme"),
         date(2026, 9, 21),
         microcycles,
         weekdays,
@@ -243,19 +254,20 @@ fn a_weekday_map_names_each_day_and_each_session_once() {
     assert!(CyclingWeekdays::new(Vec::new()).is_err(), "no day at all");
 }
 
-/// Versions of one programme sit on top of each other; two different ones may
-/// not. The rule is the gym's, and the sets it is applied to are what differ —
-/// a cycling programme never competes with the gym block beside it.
+/// A mesocycle occupies calendar weeks from its start, and `Occupies` is what
+/// the plan reads to order the four of them and refuse two that collide.
+///
+/// **There is no overlap rule here any more.** A cycling mesocycle competed for
+/// its days against every other one until 2026-09-06; what competes now is
+/// plans, so the gym and the bike inside one plan cover the same days on
+/// purpose.
 #[test]
-fn a_cycling_programme_occupies_the_weeks_it_runs() {
+fn a_cycling_mesocycle_occupies_the_weeks_it_runs() {
     let programme = programme().expect("the fixture programme is valid");
-    let window = programme.window();
-    assert_eq!(window.calendar_weeks(), 4);
-    assert!(
-        window.covers(date(2026, 10, 18)),
-        "the last day it occupies"
-    );
-    assert!(!window.covers(date(2026, 10, 19)), "the day after");
+    let span = programme.span();
+    assert_eq!(span.calendar_weeks(), 4);
+    assert!(span.covers(date(2026, 10, 18)), "the last day it occupies");
+    assert!(!span.covers(date(2026, 10, 19)), "the day after");
 }
 
 /// The operator rides five minutes of his own after the minute Peloton builds
@@ -687,9 +699,8 @@ fn a_date_months_after_the_start_resolves_to_the_right_microcycle() {
         SessionPosition::new(1).expect("session one"),
     )])
     .expect("one day is a week");
-    let long = CyclingProgramme::new(
-        ProgrammeName::try_from("thirteen").expect("a name"),
-        jiff::Timestamp::now(),
+    let long = CyclingMesocycle::new(
+        build().expect("the published programme"),
         date(2026, 9, 21),
         microcycles,
         weekdays,

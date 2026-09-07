@@ -18,7 +18,30 @@
 //! not — the wrists, the core, the holds — these are what he has been doing,
 //! which is the same question answered from the record instead of from him.
 
-use crate::prescription::SlotId;
+use crate::prescription::{PrimaryPattern, SlotId};
+
+/// The candidates for the *primary* slot of a pattern, as vocabulary keys.
+///
+/// **A different list from [`for_slot`], and the difference is the operator's,
+/// not the vocabulary's.** `docs/slot-candidates.md` states both: a leg
+/// extension is knee-dominant for anybody, but it is not something he would put
+/// the ladder, the warm-up ramp and the back-offs on. Splitting the lists was
+/// described there on 2026-08-24 and lived only in that prose until 2026-09-07,
+/// so a wizard asking for the primary took free text and left the operator to
+/// know which answers were acceptable.
+///
+/// Order is his, and is the tie-break where the record says nothing.
+#[must_use]
+pub const fn for_primary(pattern: PrimaryPattern) -> &'static [&'static str] {
+    match pattern {
+        PrimaryPattern::KneeDominant => &[
+            "squat-barbell",
+            "front-squat",
+            "bulgarian-split-squat-barbell",
+        ],
+        PrimaryPattern::HipDominant => &["deadlift-barbell", "romanian-deadlift-barbell"],
+    }
+}
 
 /// The candidates for one slot, as vocabulary keys.
 ///
@@ -77,7 +100,10 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         SlotId::Core => &[
             "bent-over-cable-chop",
             "cable-twist-up-to-down",
-            "hammer-twists",
+            // `hammer-twists` was here until 2026-09-07. The operator: it is a
+            // forearm movement -- wrist pronation and supination -- rather than
+            // a trunk one. It belongs to no slot this template has, which is
+            // issue #93 rather than a row to move.
             "hanging-knee-raise",
             "dead-bug",
         ],

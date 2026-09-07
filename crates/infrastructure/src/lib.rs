@@ -22,9 +22,14 @@ pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteCyclingProgrammeStore,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, SqliteCyclingMesocycleStore,
     SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
-    SqliteGenerationParameterStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog,
-    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteProgrammeStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
+    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
 };
+
+/// The pool every store is built on, so a composition root can open one and
+/// hand it to several without depending on `sqlx` itself.
+pub use sqlx::SqlitePool;

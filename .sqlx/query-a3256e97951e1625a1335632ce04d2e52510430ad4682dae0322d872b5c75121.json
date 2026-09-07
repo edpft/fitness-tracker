@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\", mesocycle AS \"mesocycle!: i64\",\n                   session_role AS \"session_role!: String\",\n                   week_kind AS \"week_kind!: String\", week_index AS \"week_index: i64\",\n                   anchor_grams AS \"anchor_grams: i64\",\n                   anchor_provenance AS \"anchor_provenance: String\",\n                   anchor_from AS \"anchor_from: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   target_grams AS \"target_grams: i64\",\n                   parameters_authored_at AS \"parameters_authored_at!: String\",\n                   issued_at AS \"issued_at!: String\"\n            FROM prescribed_workout\n            WHERE issued_for = ?\n            -- **A performed issue is in force whatever came after it**, and the\n            -- ordering is where that rule lives rather than in any caller. The\n            -- window it closes: a session is delivered, a re-derivation\n            -- supersedes it while it is still merely published, and then the\n            -- operator trains the routine already on their phone. Now the\n            -- newest row is one nobody ever saw, and `compare` would measure\n            -- the performance against it while `prescribe` would go on\n            -- superseding a session that has been trained.\n            --\n            -- Otherwise the latest issue. A date may be prescribed more than\n            -- once and a correction supersedes rather than overwrites, so the\n            -- superseded rows are still here and still exactly as they were\n            -- issued.\n            ORDER BY EXISTS (\n                SELECT 1\n                FROM prescription_delivery AS d\n                JOIN gym_workout AS w ON w.performed_against = d.reference\n                WHERE d.prescription = prescribed_workout.id\n            ) DESC, issued_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "mesocycle!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "mesocycle"
+          }
+        }
+      },
+      {
+        "name": "session_role!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "session_role"
+          }
+        }
+      },
+      {
+        "name": "week_kind!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "week_kind"
+          }
+        }
+      },
+      {
+        "name": "week_index: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "week_index"
+          }
+        }
+      },
+      {
+        "name": "anchor_grams: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_grams"
+          }
+        }
+      },
+      {
+        "name": "anchor_provenance: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_provenance"
+          }
+        }
+      },
+      {
+        "name": "anchor_from: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_from"
+          }
+        }
+      },
+      {
+        "name": "anchor_failed_grams: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "anchor_failed_grams"
+          }
+        }
+      },
+      {
+        "name": "target_grams: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "target_grams"
+          }
+        }
+      },
+      {
+        "name": "parameters_authored_at!: String",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "parameters_authored_at"
+          }
+        }
+      },
+      {
+        "name": "issued_at!: String",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "issued_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a3256e97951e1625a1335632ce04d2e52510430ad4682dae0322d872b5c75121"
+}

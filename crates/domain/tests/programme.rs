@@ -17,9 +17,10 @@ use domain::{
         Kg, RepCount,
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
+    plan::Occupies,
     prescription::{
-        Anchor, AnchorProvenance, BlockWeek, Entry, EntryTest, Fill, InconsistentProgramme,
-        PerRole, Periodisation, Periodised, Primary, PrimaryPattern, Programme, ProgrammeName,
+        Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,
+        InconsistentMesocycle, Mesocycle, PerRole, Primary, PrimaryPattern, Progression,
         SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex, Weekdays,
     },
 };
@@ -35,10 +36,6 @@ fn invalid(detail: impl std::fmt::Display) -> Invalid {
 
 fn reps(count: u32) -> Result<RepCount, Invalid> {
     RepCount::new(count).map_err(invalid)
-}
-
-fn name(value: &str) -> Result<ProgrammeName, Invalid> {
-    ProgrammeName::try_from(value.to_owned()).map_err(invalid)
 }
 
 fn date(year: i16, month: i8, day: i8) -> Result<Date, Invalid> {
@@ -106,8 +103,8 @@ fn anchor(provenance: AnchorProvenance) -> Result<Anchor, Invalid> {
 fn block(
     provenance: AnchorProvenance,
     entry_test: Option<EntryTest>,
-) -> Result<Result<Periodised, InconsistentProgramme>, Invalid> {
-    let calendar = Periodised::weeks(
+) -> Result<Result<BlockPeriodisation, InconsistentMesocycle>, Invalid> {
+    let calendar = BlockPeriodisation::weeks(
         date(2026, 9, 21)?,
         10,
         entry_test.is_some(),
@@ -116,8 +113,7 @@ fn block(
         TimeZone::UTC,
     )
     .map_err(invalid)?;
-    Ok(Periodised::new(
-        name("autumn")?,
+    Ok(BlockPeriodisation::new(
         Primary::new(
             PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -145,11 +141,10 @@ fn test(
     knee_dominant: Fill<Exercise>,
     reps_at: u32,
     weekdays: Weekdays,
-) -> Result<Result<Test, InconsistentProgramme>, Invalid> {
+) -> Result<Result<Test, InconsistentMesocycle>, Invalid> {
     let week =
         Test::week(date(2026, 9, 14)?, &[] as &[Skip], weekdays, TimeZone::UTC).map_err(invalid)?;
     Ok(Test::new(
-        name("autumn-entry-test")?,
         Tested::new(
             PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -158,16 +153,17 @@ fn test(
         fills(knee_dominant)?,
         week,
         TestTarget::Inherited,
+        None,
     ))
 }
 
 // ---------------------------------------------------------------------------
 
-/// A test occupies exactly one week, and says so to the overlap rule.
+/// A test occupies exactly one week, and says so to the plan holding it.
 ///
-/// The rule that two programmes may not compete for a day reads the window, so a
-/// test claiming more than its week would refuse the block that follows it three
-/// days later.
+/// The rule that two mesocycles of one programme may not compete for a day reads
+/// the span, so a test claiming more than its week would refuse the block that
+/// follows it three days later.
 #[test]
 fn a_test_occupies_one_week() {
     let Ok(weekdays) = weekdays() else {
@@ -181,16 +177,16 @@ fn a_test_occupies_one_week() {
         panic!("a front squat single on the heavy day is a test")
     };
     assert_eq!(test.calendar().duration_weeks(), 1);
-    let window = test.window();
+    let span = Mesocycle::Test(test).span();
     let Ok(monday) = Date::new(2026, 9, 14) else {
         panic!("14 September is a date")
     };
     let Ok(next_monday) = Date::new(2026, 9, 21) else {
         panic!("21 September is a date")
     };
-    assert!(window.covers(monday), "the test covers its own Monday");
+    assert!(span.covers(monday), "the test covers its own Monday");
     assert!(
-        !window.covers(next_monday),
+        !span.covers(next_monday),
         "and stops before the block that inherits it opens"
     );
 }
@@ -242,7 +238,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
     };
     assert!(matches!(
         refused,
-        Err(InconsistentProgramme::TestNeverRunsItsSession {
+        Err(InconsistentMesocycle::TestNeverRunsItsSession {
             role: SessionRole::Heavy
         })
     ));
@@ -267,7 +263,7 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
     };
     assert!(matches!(
         refused,
-        Err(InconsistentProgramme::TestRepsTooMany { reps: 41 })
+        Err(InconsistentMesocycle::TestRepsTooMany { reps: 41 })
     ));
 }
 
@@ -276,7 +272,7 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
 /// **The rule left this type on 2026-08-22.** Whether a block may state a number
 /// outright depends on what precedes it — nothing, an unusable test, or a
 /// measurement it should have opened from — and that is a fact about the store.
-/// `Periodised` sees one programme, so it accepts all three provenances and
+/// `BlockPeriodisation` sees one programme, so it accepts all three provenances and
 /// `Authoring` refuses the one that is wrong; `tests/composition.rs` at the
 /// adapter's ring is where that rule is asserted.
 #[test]
@@ -364,7 +360,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     ) else {
         panic!("a front squat single on the heavy day is a test")
     };
-    let programme = Programme::Test(test);
+    let programme = Mesocycle::Test(test);
     assert_eq!(programme.template(), "test");
     assert_eq!(
         programme.anchor(),
@@ -376,7 +372,7 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
         panic!("a tested anchor makes a block")
     };
-    let programme = Programme::Periodisation(Periodisation::Block(block));
+    let programme = Mesocycle::Progression(Progression::BlockPeriodisation(block));
     assert_eq!(programme.template(), "block");
     assert!(programme.anchor().is_some());
     assert_eq!(programme.gating_role(), Some(SessionRole::Heavy));

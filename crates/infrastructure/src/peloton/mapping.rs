@@ -81,7 +81,7 @@ impl PelotonClass {
 /// **A free function because an authored ride carries a reference and not a
 /// row.** What a prescription holds is the class id the programme was authored
 /// against, which may name a class no table here lists — every class of *Boost
-/// Your Base* and *Power Zone Build* is exactly that. The link is a function of
+/// Your Base* and *Build Your Power Zones* is exactly that. The link is a function of
 /// the id, so it needs no table.
 #[must_use]
 pub fn url_for(class_id: &str) -> String {

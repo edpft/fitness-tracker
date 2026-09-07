@@ -11,8 +11,8 @@ use domain::{
     gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
     prescription::{
-        GenerationParameters, Linear, Periodisation, Periodised, Programme, TestTarget, WeekIndex,
-        WeekPlan,
+        BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, TestTarget,
+        WeekIndex, WeekPlan,
     },
 };
 
@@ -236,29 +236,34 @@ fn short(id: &str) -> String {
 
 /// What was authored.
 pub fn programme_authored(
-    id: domain::prescription::ProgrammeId,
+    id: domain::plan::PlanId,
     authored: application::Authored,
-    programme: &Programme,
+    plan: &domain::plan::Plan,
+    programme: &Mesocycle,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
     // Which of the two it was, first and in plain words. A name the store has
-    // not seen starts a programme; one it has corrects that programme — and a
-    // typo in the name is a new programme, so the operator has to be able to see
-    // that happen rather than infer it later from two blocks where one was meant.
+    // not seen starts a plan; one it has corrects that plan — and a typo in the
+    // name is a new plan, so the operator has to be able to see that happen
+    // rather than infer it later from two plans where one was meant.
     match authored {
         application::Authored::Created => {
-            println!("created programme \"{}\"", programme.name());
+            println!("created plan \"{}\"", plan.name());
         }
         application::Authored::Modified => {
             println!(
-                "modified programme \"{}\" — its previous version stays as history",
-                programme.name()
+                "modified plan \"{}\" — its previous version stays as history",
+                plan.name()
             );
         }
     }
     println!(
-        "  programme {id} ({}) — {}, {} primary, {} {} from {}",
+        "  plan {id}, {} gym mesocycle(s)",
+        plan.gym().map_or(0, domain::plan::Programme::count),
+    );
+    println!(
+        "  this one ({}) — {}, {} primary, {} {} from {}",
         programme.template(),
         programme.primary_exercise(),
         programme.primary(),
@@ -303,10 +308,10 @@ pub fn programme_authored(
 /// Split out because it is three unrelated reports sharing a `match`, and
 /// because what the parameters say is a separate question from what the
 /// programme does with them.
-fn authored_plan(programme: &Programme, parameters: &domain::prescription::GenerationParameters) {
+fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::GenerationParameters) {
     let calendar = programme.calendar();
     match programme {
-        Programme::Test(test) => {
+        Mesocycle::Test(test) => {
             println!(
                 "  a test at {} — no anchor, because producing one is what it does",
                 test.reps()
@@ -322,11 +327,14 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
                 ),
             }
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
-            println!(
-                "  opening maximum {}, and it does not stay fixed",
-                sbs.entry().anchor(),
-            );
+        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+            match sbs.entry().anchor() {
+                Some(anchor) => println!("  opening maximum {anchor}, and it does not stay fixed"),
+                None => println!(
+                    "  opening from whatever the mesocycle before it measures, \
+                     and it does not stay fixed"
+                ),
+            }
             println!(
                 "  four weeks, stated by the chart: 5×5 @ 80%, 4×3 @ 85%, \
                  3×1 @ 90%, 3×3 @ 75%"
@@ -337,7 +345,7 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
             );
             println!("  week 4 ends on a single, which opens the next cycle");
         }
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             println!("  anchor {}, fixed for the block", linear.anchor());
             // Where the opening came from, because "85kg" alone does not say
             // whether anybody chose it. A declared opening means the anchor's
@@ -358,7 +366,7 @@ fn authored_plan(programme: &Programme, parameters: &domain::prescription::Gener
                 calendar.duration_weeks(),
             );
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             match block.entry_test() {
                 Some(test) => println!(
                     "  anchor {}, expected — week one measures it at {}",
@@ -536,9 +544,10 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     let calendar = programme.calendar();
 
     println!(
-        "programme \"{}\" ({}) — {}, {} primary, {} {} from {}",
-        programme.name(),
+        "plan \"{}\" — mesocycle {} ({}) — {}, {} primary, {} {} from {}",
+        standing.plan,
         standing.programme_id,
+        programme.template(),
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
@@ -560,24 +569,31 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     }
 
     match programme {
-        Programme::Test(test) => test_standing(test, standing),
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Test(test) => test_standing(test, standing),
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_standing(linear, standing, parameters);
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_standing(block, parameters);
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => sbs_standing(sbs),
+        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => sbs_standing(sbs),
     }
 }
 
 /// An SBS cycle: where the chart stands, and the one caveat that matters.
 fn sbs_standing(sbs: &domain::prescription::Sbs) {
-    println!(
-        "the chart opens from {} ({})",
-        sbs.entry().anchor().load(),
-        sbs.entry().anchor().provenance(),
-    );
+    match sbs.entry().anchor() {
+        Some(anchor) => println!(
+            "the chart opens from {} ({})",
+            anchor.load(),
+            anchor.provenance(),
+        ),
+        // **Nothing to print, and that is the whole of what it says.** A cycle
+        // authored months ahead cannot state what it opens from: the test it
+        // opens from has not happened. It is resolved when a session is asked
+        // for, and refused if that test was never recorded.
+        None => println!("the chart opens from the mesocycle before it, once that has measured"),
+    }
     println!(
         "  and the maximum moves inside the cycle: each rep-max day resets it, \
          so week 3 is a share of what week 2 produced"
@@ -702,7 +718,7 @@ fn linear_standing(
 /// three literature constants — so there is no rung a miss could hold and
 /// nothing for the record to place. That is the difference between the two
 /// models, and printing an arrow here would hide it.
-fn block_standing(block: &Periodised, parameters: &GenerationParameters) {
+fn block_standing(block: &BlockPeriodisation, parameters: &GenerationParameters) {
     match block.entry_test() {
         Some(test) => println!(
             "anchor {}, expected — week one measures it at {}",

@@ -15,8 +15,8 @@ use application::{
 use domain::gym::OperatorZone;
 use infrastructure::{
     HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory, SqliteGenerationParameterStore,
-    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteProgrammeStore, connect,
+    SqliteGymMesocycleStore, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, connect,
 };
 use jiff::civil::Date;
 
@@ -67,7 +67,7 @@ pub async fn standing(
 
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
@@ -105,10 +105,10 @@ pub async fn prescribe(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
@@ -140,7 +140,7 @@ pub async fn prescribe(
 /// the store first would refuse a perfectly good date merely because nothing is
 /// planned for *today*.
 async fn resolve(
-    programmes: &SqliteProgrammeStore,
+    programmes: &SqliteGymMesocycleStore,
     zone: &OperatorZone,
     given: Option<&str>,
 ) -> Result<Date, Failure> {
@@ -170,14 +170,14 @@ pub async fn deliver(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
     let date = resolve(&programmes, zone, date).await?;
 
     let prescriptions = SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned());
     if preview {
         return preview_delivery(
             prescriptions,
-            SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+            SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
             date,
         )
         .await;
@@ -203,7 +203,7 @@ pub async fn deliver(
 
     let delivering = Delivering::new(DeliveryPorts {
         prescriptions,
-        programmes: SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
         destination,
     });
@@ -224,7 +224,7 @@ pub async fn deliver(
 /// no-op and lose the session entirely. The rendering is the real one.
 async fn preview_delivery(
     prescriptions: SqlitePrescribedWorkoutStore,
-    programmes: SqliteProgrammeStore,
+    programmes: SqliteGymMesocycleStore,
     date: Date,
 ) -> Result<(), Failure> {
     let destination = HevyRoutinePreview::new()
@@ -320,7 +320,7 @@ pub async fn compare(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone(), zone.clone());
+    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
     let comparing = Comparing::new(ComparisonPorts {
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         workouts: SqlitePerformedWorkoutReader::new(pool),

@@ -6,7 +6,7 @@
 //! letting a technology choice ripple in.
 
 use domain::landing::FailureReason;
-use domain::prescription::ProgrammeWindow;
+use domain::plan::{PlanName, PlanWindow};
 use jiff::civil::Date;
 
 /// A source did not give us what we asked for.
@@ -136,33 +136,52 @@ pub enum NormalisationError {
 /// [`NormalisationError`] draws. A slot with no history to progress from is
 /// reported as a value on the result, because a workout with ten good slots and
 /// one gap is worth issuing and a refusal to answer is not. Only a missing
-/// programme, a date the programme does not run, or an unavailable store stops
+/// mesocycle, a date the mesocycle does not run, or an unavailable store stops
 /// generation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrescriptionError {
     #[error(transparent)]
     Store(#[from] StoreError),
 
-    /// No programme covers this date.
+    /// No authored mesocycle covers this date.
     ///
     /// Two states wear one variant, and the message tells them apart: nothing
-    /// authored at all — the ordinary first-run case — and a date that falls
-    /// between two programmes or before the first. Neither is a fault, and the
-    /// CLI has something helpful to say about both.
-    #[error("no programme covers {date}, so there is nothing to prescribe for it")]
-    NoProgramme { date: Date },
+    /// authored at all — the ordinary first-run case — and a date that falls in
+    /// a gap between two mesocycles, before the first, or after the last.
+    /// Neither is a fault, and the CLI has something helpful to say about both.
+    /// A provided cycle opening from the one before it, whose predecessor has
+    /// measured nothing.
+    ///
+    /// **Refused rather than opened from the authored number**, because there is
+    /// no authored number: a cycle that inherits states none. The week-4
+    /// one-repetition maximum before it is what it opens from, and until that is
+    /// in the record there is nothing to be a share of. Recording the test
+    /// answers it.
+    #[error(
+        "the cycle beginning {start} opens from the one before it, and that one \
+         has not measured a maximum yet — record its test"
+    )]
+    NoInheritedMaximum { start: jiff::civil::Date },
 
-    /// Two programmes would answer for the same day.
+    #[error("no plan covers {date}, so there is nothing to prescribe for it")]
+    NoPlan { date: Date },
+
+    /// Two plans would answer for the same day.
     ///
     /// Refused at authoring, because which of them answered would otherwise
     /// depend on the order rows came back in.
-    #[error("{proposed} overlaps {existing}, and two programmes may not answer for one day")]
-    OverlappingProgramme {
-        proposed: ProgrammeWindow,
-        existing: ProgrammeWindow,
+    ///
+    /// **Plans, not programmes.** The gym and the bike inside one plan compete
+    /// for every day of it on purpose; what may not compete is two plans, which
+    /// is what a name identifies. Versions of one plan are the same plan
+    /// re-authored and never conflict.
+    #[error("{proposed} overlaps {existing}, and two plans may not answer for one day")]
+    OverlappingPlan {
+        proposed: PlanWindow,
+        existing: PlanWindow,
     },
 
-    /// A programme exists but the § 14 parameters it reads do not.
+    /// A plan exists but the § 14 parameters it reads do not.
     #[error("no generation parameters have been authored, so no load can be derived")]
     NoParameters,
 
@@ -179,7 +198,7 @@ pub enum PrescriptionError {
     /// could not catch. Raised at authoring rather than at the first
     /// `prescribe`, so a bad programme never reaches the store.
     #[error(transparent)]
-    InconsistentProgramme(#[from] domain::prescription::InconsistentProgramme),
+    InconsistentMesocycle(#[from] domain::prescription::InconsistentMesocycle),
 
     /// The programme's plan cannot be built from the parameters in force —
     /// most often because no load scale has been authored for the implement the
@@ -203,17 +222,18 @@ pub enum PrescriptionError {
     /// only described. It refuses the claim rather than the choice: a block with
     /// nothing to inherit may run its own entry test or declare a number.
     #[error(
-        "the block {programme} opens from a tested {primary} maximum, and \
-         {} produced no {primary} maximum for it to open from",
-        predecessor.as_ref().map_or_else(
+        "the block starting {start} in {plan} opens from a tested {primary} \
+         maximum, and {} produced no {primary} maximum for it to open from",
+        predecessor.map_or_else(
             || "nothing before it".to_owned(),
-            |name| format!("the programme before it, {name},")
+            |date| format!("the mesocycle before it, starting {date},")
         )
     )]
     NoMaximumToOpenFrom {
-        programme: domain::prescription::ProgrammeName,
+        plan: PlanName,
+        start: jiff::civil::Date,
         primary: &'static str,
-        predecessor: Option<domain::prescription::ProgrammeName>,
+        predecessor: Option<jiff::civil::Date>,
     },
     /// The maximum exists in the right lift, and the anchor is not dated to it.
     ///
@@ -221,21 +241,23 @@ pub enum PrescriptionError {
     /// the predecessor is what makes the number that programme's result rather
     /// than one the operator wrote down beside its name.
     #[error(
-        "the block {programme} opens from a maximum dated {tested}, which is \
-         not a day {predecessor} ran — so it is not that programme's result"
+        "the block starting {start} in {plan} opens from a maximum dated \
+         {tested}, which is not a day the mesocycle starting {predecessor} ran \
+         — so it is not that mesocycle's result"
     )]
     MaximumIsNotTheOneBefore {
-        programme: domain::prescription::ProgrammeName,
+        plan: PlanName,
+        start: jiff::civil::Date,
         tested: jiff::civil::Date,
-        predecessor: domain::prescription::ProgrammeName,
+        predecessor: jiff::civil::Date,
     },
     /// The maximum exists, and is too old to speak for this programme.
     #[error(
-        "the block {programme} opens from a maximum measured on {tested}, and a \
+        "the block in {plan} opens from a maximum measured on {tested}, and a \
          block starting {start} takes one from the {weeks} weeks before it"
     )]
     MaximumIsStale {
-        programme: domain::prescription::ProgrammeName,
+        plan: PlanName,
         tested: jiff::civil::Date,
         start: jiff::civil::Date,
         weeks: i64,
@@ -246,18 +268,19 @@ pub enum PrescriptionError {
     /// purpose is the attempt, and a session that cannot say what the attempt is
     /// at is not a diminished test but a week that does not answer.
     #[error(
-        "the test {programme} takes its target from the programme before it,          and there is no such programme in the same lift"
+        "the test starting {start} in {plan} takes its target from the \
+         mesocycle before it, and there is no such mesocycle in the same lift"
     )]
     NoTarget {
-        programme: domain::prescription::ProgrammeName,
+        plan: PlanName,
+        start: jiff::civil::Date,
     },
 
     /// The block in force has no session left at or after the date asked from.
     ///
-    /// Distinct from [`Self::NoProgramme`]: a programme covers the day and
-    /// simply has nothing more to run, which is a block that has finished rather
-    /// than a gap in the plan. The operator's answer is a new block, not a
-    /// correction.
+    /// Distinct from [`Self::NoPlan`]: a mesocycle covers the day and simply has
+    /// nothing more to run, which is a block that has finished rather than a gap
+    /// in the plan. The operator's answer is a new plan, not a correction.
     #[error("the programme has no session left on or after {from}")]
     NoSessionScheduled { from: Date },
 
@@ -320,10 +343,10 @@ pub enum DeliveryError {
     #[error("nothing is issued for {date}, so there is nothing to deliver")]
     NothingIssued { date: Date },
 
-    /// The prescription is issued but its programme is gone, so the session
+    /// The prescription is issued but its mesocycle is gone, so the session
     /// cannot be placed in a block. Corrupt rather than ordinary.
-    #[error("the prescription for {date} names a programme that is not in the store")]
-    NoProgramme { date: Date },
+    #[error("the prescription for {date} names a mesocycle that is not in the store")]
+    NoMesocycle { date: Date },
 
     /// The destination is unreachable, refused our credential, or rejected what
     /// we sent it.

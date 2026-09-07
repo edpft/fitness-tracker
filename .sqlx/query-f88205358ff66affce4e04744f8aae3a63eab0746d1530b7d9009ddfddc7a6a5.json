@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT ordinal AS \"ordinal!: i64\",\n               published_ordinal AS \"published_ordinal!: i64\"\n        FROM cycling_microcycle\n        WHERE mesocycle = ?\n        ORDER BY ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "ordinal!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_microcycle",
+            "name": "ordinal"
+          }
+        }
+      },
+      {
+        "name": "published_ordinal!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_microcycle",
+            "name": "published_ordinal"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f88205358ff66affce4e04744f8aae3a63eab0746d1530b7d9009ddfddc7a6a5"
+}

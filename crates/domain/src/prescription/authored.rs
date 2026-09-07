@@ -1,4 +1,4 @@
-//! What the operator answered, and the [`Programme`] it makes.
+//! What the operator answered, and the [`Mesocycle`] it makes.
 //!
 //! **This replaced a document format.** Until 2026-09-06 a programme was a TOML
 //! file: the wizard asked its questions, wrote one, and the reader parsed it
@@ -21,16 +21,16 @@ use jiff::{civil::Date, tz::TimeZone};
 use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
     prescription::{
-        anchor::{Anchor, Entry},
-        block::{EntryTest, Periodised},
+        anchor::{Anchor, Anchoring, Entry},
+        block::{BlockPeriodisation, EntryTest},
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
+        mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
         parameters::GenerationParameters,
-        programme::{InconsistentProgramme, Periodisation, Programme},
         sbs::{Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
-        succession::ProgrammeName,
         test::{Test, TestTarget, Tested},
     },
+    provider::ProvidedFrom,
 };
 
 /// Why a set of answers does not make a programme.
@@ -45,7 +45,7 @@ pub enum AuthoringError {
     #[error("these weeks do not make a calendar: {0}")]
     Calendar(#[from] InvalidCalendar),
     #[error(transparent)]
-    Programme(#[from] InconsistentProgramme),
+    Mesocycle(#[from] InconsistentMesocycle),
 }
 
 /// What every programme is asked, whatever its template.
@@ -61,7 +61,6 @@ pub enum AuthoringError {
 /// be answered so that they do not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Authored {
-    pub name: ProgrammeName,
     pub start: Date,
     pub pattern: PrimaryPattern,
     pub primary_exercise: Exercise,
@@ -91,6 +90,10 @@ pub enum Shape {
         /// What the test attempts. [`TestTarget::Inherited`] takes it from the
         /// programme this follows, which is the ordinary case (decision 0013).
         target: TestTarget,
+        /// Which microcycle of which published programme this week is, where a
+        /// publisher wrote it. `None` is a week that exists only to measure a
+        /// lift before something else begins.
+        provided: Option<ProvidedFrom>,
     },
     /// A top-set ladder climbing at a rate, for a stated span.
     Linear {
@@ -109,15 +112,22 @@ pub enum Shape {
         anchor: Anchor,
         entry_test: Option<EntryTest>,
     },
-    /// A published chart: four weeks, every set stated, its test the last
-    /// session (decision 0024).
-    Sbs { anchor: Anchor },
+    /// A mesocycle taken from an external programme rather than derived here:
+    /// four weeks, every set stated, its test the last session (decision 0024).
+    Provided {
+        /// Which microcycles of which external programme.
+        from: ProvidedFrom,
+        /// A stated maximum, or the cycle before this one. A plan holding three
+        /// of these can only state the first: the other two open from tests that
+        /// have not happened when it is authored.
+        anchor: Anchoring,
+    },
 }
 
 impl Shape {
-    /// The stable key, matching [`Programme::template`].
+    /// The stable key, matching [`Mesocycle::template`].
     ///
-    /// Here as well as on `Programme` because the wizard names the template
+    /// Here as well as on `Mesocycle` because the wizard names the template
     /// before it has a programme to ask.
     #[must_use]
     pub const fn template(&self) -> &'static str {
@@ -125,7 +135,7 @@ impl Shape {
             Self::Test { .. } => "test",
             Self::Linear { .. } => "linear",
             Self::Block { .. } => "block",
-            Self::Sbs { .. } => "sbs",
+            Self::Provided { .. } => "sbs",
         }
     }
 
@@ -139,7 +149,7 @@ impl Shape {
     pub const fn calendar_weeks(&self) -> u32 {
         match self {
             Self::Test { .. } => Test::WEEKS,
-            Self::Sbs { .. } => WEEKS,
+            Self::Provided { .. } => WEEKS,
             Self::Linear { weeks, .. } => *weeks,
             // The entry test is a week in front of the phases rather than one of
             // them (decision 0013), so a nine-week block that measures its own
@@ -199,9 +209,8 @@ pub fn programme(
     interruptions: &[Skip],
     zone: TimeZone,
     parameters: &GenerationParameters,
-) -> Result<Programme, AuthoringError> {
+) -> Result<Mesocycle, AuthoringError> {
     let Authored {
-        name,
         start,
         pattern,
         primary_exercise,
@@ -210,14 +219,18 @@ pub fn programme(
     } = authored;
 
     match shape {
-        Shape::Test { reps, target } => {
+        Shape::Test {
+            reps,
+            target,
+            provided,
+        } => {
             let calendar = Test::week(start, interruptions, weekdays, zone)?;
-            Ok(Programme::Test(Test::new(
-                name,
+            Ok(Mesocycle::Test(Test::new(
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
                 calendar,
                 target,
+                provided,
             )?))
         }
         Shape::Linear {
@@ -227,16 +240,13 @@ pub fn programme(
             opening,
         } => {
             let calendar = Calendar::new(start, weeks, interruptions, weekdays, zone)?;
-            Ok(Programme::Periodisation(Periodisation::Linear(
-                Linear::new(
-                    name,
-                    Primary::new(pattern, primary_exercise, gating),
-                    fills,
-                    Entry::new(anchor, opening),
-                    calendar,
-                    parameters,
-                )?,
-            )))
+            Ok(Mesocycle::Progression(Progression::Linear(Linear::new(
+                Primary::new(pattern, primary_exercise, gating),
+                fills,
+                Entry::new(anchor, opening),
+                calendar,
+                parameters,
+            )?)))
         }
         Shape::Block {
             gating,
@@ -244,7 +254,7 @@ pub fn programme(
             anchor,
             entry_test,
         } => {
-            let calendar = Periodised::weeks(
+            let calendar = BlockPeriodisation::weeks(
                 start,
                 weeks,
                 entry_test.is_some(),
@@ -252,9 +262,8 @@ pub fn programme(
                 weekdays,
                 zone,
             )?;
-            Ok(Programme::Periodisation(Periodisation::Block(
-                Periodised::new(
-                    name,
+            Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
+                BlockPeriodisation::new(
                     Primary::new(pattern, primary_exercise, gating),
                     fills,
                     // A block's loads are every one of them a share of its
@@ -266,16 +275,12 @@ pub fn programme(
                 )?,
             )))
         }
-        Shape::Sbs { anchor } => {
+        Shape::Provided { from, anchor } => {
             let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
-            Ok(Programme::Periodisation(Periodisation::Sbs(Sbs::new(
-                name,
-                pattern,
-                primary_exercise,
-                fills,
-                Entry::derived(anchor),
-                calendar,
-            )?)))
+            Ok(Mesocycle::Progression(Progression::Provided {
+                from,
+                cycle: Sbs::new(pattern, primary_exercise, fills, anchor, calendar)?,
+            }))
         }
     }
 }

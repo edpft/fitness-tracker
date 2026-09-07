@@ -11,14 +11,14 @@
 mod support;
 
 use application::{
-    Issuance, PrescriptionDeliveryStore as _, PrescriptionLifecycle as _, ProgrammeAuthor as _,
+    Issuance, PlanAuthor as _, PrescriptionDeliveryStore as _, PrescriptionLifecycle as _,
     WorkoutPrescriber as _,
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::prescription::{DeliveryReference, DestinationName, PrescriptionState};
 use infrastructure::{
-    SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore,
+    SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
 };
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -69,7 +69,7 @@ async fn issued() -> Fallible<(tempfile::TempDir, SqlitePool, i64)> {
     // join works against what the tool actually writes.
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
@@ -208,20 +208,21 @@ fn a_performed_prescription_is_not_derived_again() {
         // A fortnight later a start puts the same date on a different rung, so
         // a derivation that ran would not agree with what was performed.
         Authoring::new(
-            SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             SqliteGenerationParameterStore::new(pool.clone()),
         )
         .author(
-            &support::programme::as_programme(support::programme::programme_from(Date::constant(
+            &support::programme::as_plan(support::programme::programme_from(Date::constant(
                 2026, 7, 20,
-            ))?),
+            ))?)?,
             &support::programme::parameters()?,
         )
         .await?;
 
         let prescriber = Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -282,11 +283,11 @@ fn a_superseded_session_that_was_trained_is_the_one_in_force() {
     let later: i64 = run!(async {
         sqlx::query_scalar!(
             r#"INSERT INTO prescribed_workout (
-                   programme, issued_for, zone, session_role, week_kind, week_index,
+                   mesocycle, issued_for, zone, session_role, week_kind, week_index,
                    anchor_grams, anchor_provenance, anchor_from,
                    parameters_authored_at, issued_at
                )
-               SELECT programme, issued_for, zone, session_role, week_kind, week_index,
+               SELECT mesocycle, issued_for, zone, session_role, week_kind, week_index,
                       anchor_grams, anchor_provenance, anchor_from,
                       parameters_authored_at, '2099-01-01T00:00:00Z'
                FROM prescribed_workout WHERE id = ?

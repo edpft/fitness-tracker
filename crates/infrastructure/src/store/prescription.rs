@@ -19,10 +19,9 @@ use domain::{
         sequence::AtLeastTwo,
     },
     prescription::{
-        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, Prescribed,
+        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        ProgrammeId, SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind,
-        WorkoutShape,
+        SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
 };
 use jiff::civil::Date;
@@ -389,7 +388,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        let programme = workout.programme().as_i64();
+        let mesocycle = workout.programme().as_i64();
         let issued_for = workout.issued_for().to_string();
         let role = workout.session_role().as_str();
         let week_kind = workout.week().as_str();
@@ -413,7 +412,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let id = sqlx::query!(
             r#"
             INSERT INTO prescribed_workout (
-                programme, issued_for, zone, session_role,
+                mesocycle, issued_for, zone, session_role,
                 week_kind, week_index,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 target_grams, parameters_authored_at, issued_at
@@ -421,7 +420,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
-            programme,
+            mesocycle,
             issued_for,
             self.zone,
             role,
@@ -490,7 +489,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let key = date.to_string();
         let Some(row) = sqlx::query!(
             r#"
-            SELECT id AS "id!: i64", programme AS "programme!: i64",
+            SELECT id AS "id!: i64", mesocycle AS "mesocycle!: i64",
                    session_role AS "session_role!: String",
                    week_kind AS "week_kind!: String", week_index AS "week_index: i64",
                    anchor_grams AS "anchor_grams: i64",
@@ -574,7 +573,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             derived_from,
             parameters,
             parameters_at,
-            ProgrammeId::new(row.programme),
+            MesocycleId::new(row.mesocycle),
             row.issued_at
                 .parse()
                 .map_err(|_| corrupt(&"an issue time that is not an instant"))?,

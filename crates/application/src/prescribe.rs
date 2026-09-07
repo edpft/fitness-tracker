@@ -18,12 +18,14 @@ use domain::{
         exercise::{DurationExercise, Exercise, RepsExercise},
         sequence::AtLeastTwo,
     },
+    plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
-        Block, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps,
-        Periodisation, Periodised, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId, Progress,
-        RECENT_WEEKS, Sbs, SbsDay, SbsSession, SessionRole, SlotId, SupersetMember, Target, Test,
-        TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
+        Anchor, AnchorProvenance, Anchoring, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
+        GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
+        PrescriptionState, Progress, Progression, RECENT_WEEKS, Sbs, SbsDay, SbsSession,
+        SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
+        WorkoutShape, is_recent_enough,
         linear::SlotContent,
         progress_after, rep_max, rested,
         sbs::chart::{
@@ -38,8 +40,9 @@ use crate::{
     error::PrescriptionError,
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
-        LastPerformance, Performance, PrescribedWorkoutStore, Prescription, PrescriptionLifecycle,
-        ProgrammeAuthor, ProgrammeStore, UnderivableReason, UnderivableSlot, WorkoutPrescriber,
+        LastPerformance, MesocycleStore, Performance, PlanAuthor, PlanStore,
+        PrescribedWorkoutStore, Prescription, PrescriptionLifecycle, UnderivableReason,
+        UnderivableSlot, WorkoutPrescriber,
     },
 };
 
@@ -64,11 +67,11 @@ use crate::{
 ///
 /// # Errors
 ///
-/// [`PrescriptionError::NoProgramme`] where nothing covers today, and
+/// [`PrescriptionError::NoPlan`] where nothing covers today, and
 /// [`PrescriptionError::NoSessionScheduled`] where the block in force has
 /// finished. They read differently to an operator and are not merged.
 pub async fn next_session(
-    programmes: &(impl ProgrammeStore + Sync),
+    programmes: &(impl MesocycleStore + Sync),
     now: Timestamp,
     zone: &OperatorZone,
 ) -> Result<Date, PrescriptionError> {
@@ -77,8 +80,8 @@ pub async fn next_session(
     // which is the same zone by construction and is its business either way.
     let today = now.to_zoned(zone.as_time_zone()).date();
 
-    let Some((_, programme)) = programmes.on(today).await? else {
-        return Err(PrescriptionError::NoProgramme { date: today });
+    let Some((_, _, programme)) = programmes.on(today).await? else {
+        return Err(PrescriptionError::NoPlan { date: today });
     };
 
     // **The calendar answers, not this.** Which days a block runs, which weeks
@@ -146,22 +149,23 @@ impl Derived {
 impl<H, P, G, S, L> WorkoutPrescriber for Prescribing<H, P, G, S, L>
 where
     H: ExerciseHistory + Sync,
-    P: ProgrammeStore + Sync,
+    P: MesocycleStore + Sync,
     G: GenerationParameterStore + Sync,
     S: PrescribedWorkoutStore + Sync,
     L: PrescriptionLifecycle + Sync,
 {
     async fn standing(&self, on: Date) -> Result<LadderStanding, PrescriptionError> {
-        let Some((programme_id, programme)) = self.ports.programmes.on(on).await? else {
-            return Err(PrescriptionError::NoProgramme { date: on });
+        let Some((programme_id, plan, programme)) = self.ports.programmes.on(on).await? else {
+            return Err(PrescriptionError::NoPlan { date: on });
         };
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
-        let progress = self.progress_of(&programme, &parameters, on).await?;
+        let progress = self.progress_of(&plan, &programme, &parameters, on).await?;
         let target = self.inheritance(&programme, &parameters, on).await?.target;
         Ok(LadderStanding {
             target,
+            plan,
             programme_id,
             programme,
             parameters,
@@ -269,7 +273,7 @@ where
 impl<H, P, G, S, L> Prescribing<H, P, G, S, L>
 where
     H: ExerciseHistory + Sync,
-    P: ProgrammeStore + Sync,
+    P: MesocycleStore + Sync,
     G: GenerationParameterStore + Sync,
     S: PrescribedWorkoutStore + Sync,
     L: PrescriptionLifecycle + Sync,
@@ -285,8 +289,8 @@ where
         &self,
         date: Date,
     ) -> Result<(PrescribedWorkout, Vec<UnderivableSlot>), PrescriptionError> {
-        let Some((programme_id, programme)) = self.ports.programmes.on(date).await? else {
-            return Err(PrescriptionError::NoProgramme { date });
+        let Some((programme_id, plan, programme)) = self.ports.programmes.on(date).await? else {
+            return Err(PrescriptionError::NoPlan { date });
         };
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
@@ -315,7 +319,9 @@ where
         // miss holds the ladder and a stall suspends it. So the position is walked
         // out of the gating sessions performed so far (US3) and is derived on every
         // read — there is no stored counter to advance twice.
-        let progress = self.progress_of(&programme, &parameters, date).await?;
+        let progress = self
+            .progress_of(&plan, &programme, &parameters, date)
+            .await?;
 
         // What a test week takes from the programme before it: the target it is
         // an attempt at, and the load its other session runs at. Both are empty
@@ -330,12 +336,20 @@ where
         // the week actually was.
         let recorded = week_of(&programme, week);
 
+        // **Resolved once, and used for both the loads and the record.** A
+        // cycle that inherits has no authored number, so what it opens from is
+        // the predecessor's measurement — and that is what the prescription
+        // records it as descending from.
+        let opening = self.opening_anchor(&programme, &parameters).await?;
+
         let mut items = Vec::new();
         let mut underivable = Vec::new();
         let standing = Standing {
             progress,
             inheritance,
-            maximum: self.maximum_of(&programme, &parameters, date).await?,
+            maximum: self
+                .maximum_of(&plan, &programme, &parameters, date)
+                .await?,
         };
         for derived in issue_slots(&programme, &parameters, role, week, standing, &history) {
             match derived {
@@ -358,7 +372,7 @@ where
             date,
             role,
             recorded,
-            derived_from(&programme, inheritance)?,
+            derived_from(&plan, &programme, inheritance, opening)?,
             parameters,
             parameters_at,
             programme_id,
@@ -391,20 +405,23 @@ where
     /// with no meaning behind it rather than an absence.
     async fn progress_of(
         &self,
-        programme: &Programme,
+        plan: &PlanName,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Option<Progress>, PrescriptionError> {
         match programme {
-            Programme::Periodisation(Periodisation::Linear(linear)) => {
-                Ok(Some(self.progress(linear, parameters, before).await?))
+            Mesocycle::Progression(Progression::Linear(linear)) => {
+                Ok(Some(self.progress(plan, linear, parameters, before).await?))
             }
             // **Neither has a rung.** A block's loads are shares of a fixed
             // anchor; an SBS cycle's are shares of a maximum that moves, but it
             // moves off measured results rather than off a ladder position, so
             // there is still nothing here for a miss to hold.
-            Programme::Periodisation(Periodisation::Block(_) | Periodisation::Sbs(_))
-            | Programme::Test(_) => Ok(None),
+            Mesocycle::Progression(
+                Progression::BlockPeriodisation(_) | Progression::Provided { .. },
+            )
+            | Mesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -415,16 +432,17 @@ where
     /// block's is too, so there is nothing here for them to answer.
     async fn maximum_of(
         &self,
-        programme: &Programme,
+        plan: &PlanName,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Option<Kg>, PrescriptionError> {
         match programme {
-            Programme::Periodisation(Periodisation::Sbs(sbs)) => {
-                Ok(Some(self.sbs_maximum(sbs, parameters, before).await?))
+            Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+                Ok(Some(self.sbs_maximum(plan, sbs, parameters, before).await?))
             }
-            Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Block(_))
-            | Programme::Test(_) => Ok(None),
+            Mesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_))
+            | Mesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -443,13 +461,132 @@ where
     ///
     /// A session that recorded no working set advances nothing, which is right:
     /// a week nobody trained leaves the maximum where it was.
+    /// What a mesocycle's loads are shares of, resolved.
+    ///
+    /// `None` for a test, which has a target rather than an anchor, and for a
+    /// provided cycle inheriting from a predecessor that measured nothing.
+    async fn opening_anchor(
+        &self,
+        programme: &Mesocycle,
+        parameters: &GenerationParameters,
+    ) -> Result<Option<Anchor>, PrescriptionError> {
+        match programme {
+            Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+                self.opening_of(sbs, parameters).await
+            }
+            Mesocycle::Progression(periodisation) => Ok(periodisation.anchor()),
+            Mesocycle::Test(_) => Ok(None),
+        }
+    }
+
+    /// What a cycle opens from: the number it states, or the one before it.
+    ///
+    /// **An inherited opening is resolved against the record, never the plan.**
+    /// A cycle plans to leave a maximum behind — week 4 day 2 is a one-repetition
+    /// maximum and is not optional — but planning to measure is not measuring. A
+    /// predecessor nobody trained leaves nothing, and this answers `None` rather
+    /// than reaching for the number that cycle was authored with.
+    ///
+    /// **What comes back is a `Tested` anchor dated to the predecessor**, because
+    /// that is what it is: a measurement, taken on a day the record names. It is
+    /// recorded with the prescription like any other, so a session issued in
+    /// November says which test it descended from.
+    async fn opening_of(
+        &self,
+        sbs: &Sbs,
+        parameters: &GenerationParameters,
+    ) -> Result<Option<Anchor>, PrescriptionError> {
+        match sbs.entry() {
+            Anchoring::Stated(entry) => Ok(Some(entry.anchor())),
+            Anchoring::Inherited => {
+                let Some((_, before_plan, before)) = self
+                    .ports
+                    .programmes
+                    .preceding(sbs.calendar().start())
+                    .await?
+                else {
+                    return Ok(None);
+                };
+                self.left_behind(&before_plan, &before, parameters).await
+            }
+        }
+    }
+
+    /// The maximum a mesocycle actually measured, as the record has it.
+    ///
+    /// **Two things measure one** ([`Mesocycle::produces_maximum`]): a test week,
+    /// which is the whole of what it is for, and a provided cycle, whose last
+    /// session is a one-repetition maximum. A ladder measures nothing even when
+    /// its last single felt like a test.
+    ///
+    /// A provided predecessor is asked through [`Self::sbs_maximum`] rather than
+    /// read directly, so the chart converts what was lifted into what the next
+    /// cycle programmes from — the same arithmetic that moves the maximum
+    /// *inside* a cycle, applied across the join. Boxed because that call comes
+    /// back here for its own opening, and a chain of three cycles is three hops.
+    fn left_behind<'a>(
+        &'a self,
+        plan: &'a PlanName,
+        mesocycle: &'a Mesocycle,
+        parameters: &'a GenerationParameters,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<Option<Anchor>, PrescriptionError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let span = mesocycle.span();
+            let measured = match mesocycle {
+                Mesocycle::Progression(Progression::Provided { cycle: before, .. }) => {
+                    // Asked the day after it ends, so its own last session — the
+                    // one-repetition maximum — counts toward what it leaves.
+                    let after = span.end().tomorrow().unwrap_or_else(|_| span.end());
+                    Some(self.sbs_maximum(plan, before, parameters, after).await?)
+                }
+                Mesocycle::Test(test) => match test.primary_exercise() {
+                    Exercise::Reps(primary) => self.measured_in(primary, span).await?,
+                    Exercise::Duration(_) | Exercise::Distance(_) => None,
+                },
+                Mesocycle::Progression(
+                    Progression::Linear(_) | Progression::BlockPeriodisation(_),
+                ) => None,
+            };
+
+            Ok(measured.and_then(|load| {
+                Anchor::new(load, None, AnchorProvenance::Tested, span.end()).ok()
+            }))
+        })
+    }
+
+    /// The heaviest completed top set of a lift inside a span.
+    ///
+    /// A failed attempt says what could not be lifted, which is not a maximum.
+    async fn measured_in(
+        &self,
+        primary: RepsExercise,
+        span: Span,
+    ) -> Result<Option<Kg>, PrescriptionError> {
+        let performances = self.ports.history.performances(primary).await?;
+        Ok(performances
+            .iter()
+            .filter(|performance| span.covers(performance.on))
+            .filter_map(top_set_of)
+            .filter(|top| top.completed)
+            .map(|top| top.load)
+            .max())
+    }
+
     async fn sbs_maximum(
         &self,
+        plan: &PlanName,
         sbs: &Sbs,
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Kg, PrescriptionError> {
-        let mut maximum = sbs.entry().anchor().load();
+        let Some(opening) = self.opening_of(sbs, parameters).await? else {
+            return Err(PrescriptionError::NoInheritedMaximum {
+                start: sbs.calendar().start(),
+            });
+        };
+        let mut maximum = opening.load();
         let Exercise::Reps(primary) = sbs.primary_exercise() else {
             return Ok(maximum);
         };
@@ -475,7 +612,7 @@ where
             // Same two answers the ladder uses, and in the same order: the
             // prescription where the record links one, the calendar otherwise.
             let (week, role) = match &performance.fulfilled {
-                Some(fulfilled) if fulfilled.programme == *sbs.name() => {
+                Some(fulfilled) if fulfilled.plan == *plan => {
                     match sbs.calendar().place(performance.on) {
                         Ok((week, _)) => (week, fulfilled.role),
                         Err(_) => continue,
@@ -520,11 +657,11 @@ where
     /// light session is the predecessor's session whatever it was training.
     async fn inheritance(
         &self,
-        programme: &Programme,
+        programme: &Mesocycle,
         parameters: &GenerationParameters,
         date: Date,
     ) -> Result<Inheritance, PrescriptionError> {
-        let Programme::Test(test) = programme else {
+        let Mesocycle::Test(test) = programme else {
             return Ok(Inheritance {
                 target: None,
                 light: None,
@@ -541,7 +678,9 @@ where
             .programmes
             .preceding(test.calendar().start())
             .await?;
-        let Some((_, Programme::Periodisation(Periodisation::Linear(before)))) = predecessor else {
+        let Some((_, before_plan, Mesocycle::Progression(Progression::Linear(before)))) =
+            predecessor
+        else {
             // Nothing before it, or a predecessor with no ladder to read a
             // position off. A block's exit test anchors what follows through its
             // own result rather than through a target, so a test after one has
@@ -552,7 +691,9 @@ where
             });
         };
 
-        let progress = self.progress(&before, parameters, date).await?;
+        let progress = self
+            .progress(&before_plan, &before, parameters, date)
+            .await?;
         let Ok(ladder) = before.ladder(parameters) else {
             return Ok(Inheritance {
                 target: declared,
@@ -578,6 +719,7 @@ where
 
     async fn progress(
         &self,
+        plan: &PlanName,
         programme: &Linear,
         parameters: &GenerationParameters,
         before: Date,
@@ -618,7 +760,7 @@ where
             // 0018 removes the fallback by removing the calendar. Until then a
             // programme that predates the link keeps its ladder position.
             let role = match &performance.fulfilled {
-                Some(fulfilled) if fulfilled.programme == *programme.name() => fulfilled.role,
+                Some(fulfilled) if fulfilled.plan == *plan => fulfilled.role,
                 _ => match programme.calendar().place(performance.on) {
                     Ok((_, role)) => role,
                     Err(_) => continue,
@@ -699,7 +841,7 @@ struct Standing {
 /// derivation each position gets — the primary its top set and back-offs, and
 /// everything else double progression, a hold, or its authored numbers.
 fn issue_slots(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -745,16 +887,16 @@ const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
 /// test is decided by the phase plan and nothing else. A standalone test week is
 /// a test week on both its sessions: the week is what it is, and which session
 /// is the attempt is the role's business.
-fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
+fn week_of(programme: &Mesocycle, placed: WeekKind) -> WeekKind {
     match programme {
-        Programme::Test(_) => WeekKind::Test,
+        Mesocycle::Test(_) => WeekKind::Test,
         // A linear programme's weeks are all climbing weeks, and an SBS cycle's
         // are too: **week 4 is not a test week even though it ends on a test**,
         // because its first session is a taper the chart states in full. Calling
         // the week a test would send the light session looking for a predecessor
         // to inherit from, which an SBS cycle never needs.
-        Programme::Periodisation(Periodisation::Linear(_) | Periodisation::Sbs(_)) => placed,
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => placed,
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
             };
@@ -772,17 +914,31 @@ fn week_of(programme: &Programme, placed: WeekKind) -> WeekKind {
 /// session with one slot missing — it is a week whose whole purpose is
 /// unanswerable, so it is refused rather than issued incomplete.
 fn derived_from(
-    programme: &Programme,
+    plan: &PlanName,
+    programme: &Mesocycle,
     inheritance: Inheritance,
+    opening: Option<Anchor>,
 ) -> Result<DerivedFrom, PrescriptionError> {
     match programme {
-        Programme::Periodisation(periodisation) => Ok(DerivedFrom::Anchor(periodisation.anchor())),
-        Programme::Test(test) => {
+        // **The resolved anchor, not the authored one.** A ladder and a block
+        // state theirs and the two are the same value; a provided cycle that
+        // inherits states none, and what it opens from is the maximum its
+        // predecessor measured. Absent, the session is refused rather than
+        // issued against nothing.
+        Mesocycle::Progression(_) => {
+            opening
+                .map(DerivedFrom::Anchor)
+                .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
+                    start: programme.calendar().start(),
+                })
+        }
+        Mesocycle::Test(test) => {
             inheritance
                 .target
                 .map(DerivedFrom::Target)
                 .ok_or_else(|| PrescriptionError::NoTarget {
-                    programme: test.name().clone(),
+                    plan: plan.clone(),
+                    start: test.calendar().start(),
                 })
         }
     }
@@ -848,7 +1004,7 @@ enum PrimaryLoad {
 
 /// The primary slot: a warm-up ramp, and then whatever this template asks for.
 fn primary_slot_item(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     week: WeekKind,
@@ -879,16 +1035,16 @@ fn primary_slot_item(
     };
 
     let plan = match programme {
-        Programme::Periodisation(Periodisation::Linear(linear)) => {
+        Mesocycle::Progression(Progression::Linear(linear)) => {
             linear_load(linear, parameters, role, week, progress, steps)
         }
-        Programme::Periodisation(Periodisation::Block(block)) => {
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_load(block, role, week, steps)
         }
-        Programme::Periodisation(Periodisation::Sbs(sbs)) => {
+        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
             sbs_load(sbs, role, week, steps, maximum)
         }
-        Programme::Test(test) => test_load(test, parameters, role, inheritance, steps),
+        Mesocycle::Test(test) => test_load(test, parameters, role, inheritance, steps),
     };
     let plan = match plan {
         Ok(plan) => plan,
@@ -990,8 +1146,13 @@ fn sbs_load(
 
     // **What the record says the cycle is at**, falling back to the opening
     // anchor only when nothing has been read — which is week one, and a cycle
-    // whose primary has no load scale.
-    let maximum = maximum.unwrap_or_else(|| sbs.entry().anchor().load());
+    // whose primary has no load scale. A cycle that inherits has no authored
+    // number to fall back to: resolving it needs the store, which is the
+    // caller's business, so an unresolved one is underivable here rather than
+    // opened from a guess.
+    let Some(maximum) = maximum.or_else(|| sbs.entry().anchor().map(Anchor::load)) else {
+        return Err(UnderivableReason::NoOpeningMaximum);
+    };
     let increment = steps.step_at(maximum);
 
     match day {
@@ -1030,7 +1191,7 @@ fn sbs_load(
 }
 
 fn block_load(
-    block: &Periodised,
+    block: &BlockPeriodisation,
     role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
@@ -1135,7 +1296,7 @@ fn test_load(
 /// slot in it is then reported, the failure with its own reason and the rest as
 /// withheld.
 fn group(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1187,7 +1348,7 @@ fn group(
 
 /// Any slot that is not the primary: double progression, a hold, or static.
 fn accessory_slot(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1204,7 +1365,7 @@ fn accessory_slot(
 /// Separate from [`accessory_slot`] because a supersetted position needs the
 /// exercise without the item wrapped around it.
 fn accessory_exercise(
-    programme: &Programme,
+    programme: &Mesocycle,
     parameters: &GenerationParameters,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1391,24 +1552,27 @@ fn progressed_load(
     }
 }
 
-/// Storing an authored programme and its parameters.
-pub struct Authoring<P, G> {
-    programmes: P,
+/// Storing an authored plan and the parameters it was generated against.
+pub struct Authoring<P, M, G> {
+    plans: P,
+    mesocycles: M,
     parameters: G,
 }
 
-impl<P, G> Authoring<P, G> {
-    pub const fn new(programmes: P, parameters: G) -> Self {
+impl<P, M, G> Authoring<P, M, G> {
+    pub const fn new(plans: P, mesocycles: M, parameters: G) -> Self {
         Self {
-            programmes,
+            plans,
+            mesocycles,
             parameters,
         }
     }
 }
 
-impl<P, G> Authoring<P, G>
+impl<P, M, G> Authoring<P, M, G>
 where
-    P: ProgrammeStore + Sync,
+    P: Sync,
+    M: MesocycleStore + Sync,
     G: Sync,
 {
     /// Whether a claimed earlier maximum is one that exists.
@@ -1417,7 +1581,7 @@ where
     /// previous test, an entry test of its own, or a declared number. Only the
     /// first says something about the past, so only the first is checked here —
     /// and it can only be checked here, because whether such a test happened is a
-    /// fact about the store rather than a claim the document can settle about
+    /// fact about the store rather than a claim the plan can settle about
     /// itself.
     ///
     /// The operator's ten compositions are what a claimed test has to survive:
@@ -1447,12 +1611,22 @@ where
     /// is free to run its own entry test or to declare a number; what it may not
     /// do is say a measurement happened when none did.
     ///
+    /// **The predecessor is usually the previous element of a list.** Inside a
+    /// plan the mesocycle before this one is known without asking anything, and
+    /// only the mesocycle that *opens* the plan has to put the question to the
+    /// store — where the answer belongs to the plan that ran before.
+    ///
     /// # Errors
     ///
     /// [`PrescriptionError`] if the store is unavailable, if no test of this lift
     /// ran before this block, if the anchor is not dated to it, or if it is too
     /// old to still speak.
-    async fn claimed_maximum_exists(&self, programme: &Programme) -> Result<(), PrescriptionError> {
+    async fn claimed_maximum_exists(
+        &self,
+        plan: &PlanName,
+        preceding: Option<&Mesocycle>,
+        programme: &Mesocycle,
+    ) -> Result<(), PrescriptionError> {
         if !programme.claims_an_earlier_maximum() {
             return Ok(());
         }
@@ -1462,13 +1636,22 @@ where
             return Ok(());
         };
 
-        let before = match self.programmes.preceding(start).await? {
-            Some((_, before)) if before.produces_maximum() == Some(wanted) => before,
+        let found = match preceding {
+            Some(before) => Some(before.clone()),
+            None => self
+                .mesocycles
+                .preceding(start)
+                .await?
+                .map(|(_, _, before)| before),
+        };
+        let before = match found {
+            Some(before) if before.produces_maximum() == Some(wanted) => before,
             found => {
                 return Err(PrescriptionError::NoMaximumToOpenFrom {
-                    programme: programme.name().clone(),
+                    plan: plan.clone(),
+                    start,
                     primary: wanted.as_str(),
-                    predecessor: found.map(|(_, before)| before.name().clone()),
+                    predecessor: found.map(|before| before.calendar().start()),
                 });
             }
         };
@@ -1477,16 +1660,17 @@ where
         // nowhere: a date inside the predecessor with no bound on age would
         // accept a maximum from a block that finished in June, and a recent date
         // with no bound on origin would accept one written down last week.
-        if !before.window().covers(anchor.from()) {
+        if !before.span().covers(anchor.from()) {
             return Err(PrescriptionError::MaximumIsNotTheOneBefore {
-                programme: programme.name().clone(),
+                plan: plan.clone(),
+                start,
                 tested: anchor.from(),
-                predecessor: before.name().clone(),
+                predecessor: before.calendar().start(),
             });
         }
         if !is_recent_enough(anchor.from(), start) {
             return Err(PrescriptionError::MaximumIsStale {
-                programme: programme.name().clone(),
+                plan: plan.clone(),
                 tested: anchor.from(),
                 start,
                 weeks: RECENT_WEEKS,
@@ -1494,48 +1678,63 @@ where
         }
         Ok(())
     }
+
+    /// Every gym mesocycle of a plan, each checked against what precedes it.
+    async fn claims_are_sound(&self, plan: &Plan) -> Result<(), PrescriptionError> {
+        let Some(gym) = plan.gym() else {
+            return Ok(());
+        };
+        let mesocycles: Vec<&Mesocycle> = gym.mesocycles().collect();
+        for (at, mesocycle) in mesocycles.iter().enumerate() {
+            let preceding = at.checked_sub(1).and_then(|before| mesocycles.get(before));
+            self.claimed_maximum_exists(plan.name(), preceding.copied(), mesocycle)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
-impl<P, G> ProgrammeAuthor for Authoring<P, G>
+impl<P, M, G> PlanAuthor for Authoring<P, M, G>
 where
-    P: ProgrammeStore + Sync,
+    P: PlanStore + Sync,
+    M: MesocycleStore + Sync,
     G: GenerationParameterStore + Sync,
 {
     async fn author(
         &self,
-        programme: &Programme,
+        plan: &Plan,
         parameters: &GenerationParameters,
-    ) -> Result<(ProgrammeId, Authored), PrescriptionError> {
-        // Refused before anything is written. Two programmes covering one day
-        // would make which of them answers depend on the order rows came back
-        // in, which is the silent ambiguity § 12's discipline exists to stop.
-        // Versions of one programme never conflict — `overlaps` knows that a
-        // shared name means a re-authoring rather than a rival.
-        let proposed = programme.window();
+    ) -> Result<(PlanId, Authored), PrescriptionError> {
+        // Refused before anything is written. Two plans covering one day would
+        // make which of them answers depend on the order rows came back in,
+        // which is the silent ambiguity § 12's discipline exists to stop.
+        // Versions of one plan never conflict — `overlaps` knows that a shared
+        // name means a re-authoring rather than a rival.
+        let proposed = plan.window();
         let mut authored = Authored::Created;
-        for existing in self.programmes.windows().await? {
+        for existing in self.plans.windows().await? {
             if existing.name() == proposed.name() {
                 authored = Authored::Modified;
                 continue;
             }
             if proposed.overlaps(&existing) {
-                return Err(PrescriptionError::OverlappingProgramme { proposed, existing });
+                return Err(PrescriptionError::OverlappingPlan { proposed, existing });
             }
         }
 
         // **And a block claiming to open from an earlier test has to be right
         // about that** (decision 0016). This is the only rule in the system that
-        // reads another programme in order to refuse this one, and it has to:
+        // reads another mesocycle in order to refuse this one, and it has to:
         // whether a measurement happened is a fact about what came before, not
-        // something the document can settle about itself.
-        self.claimed_maximum_exists(programme).await?;
+        // something the plan can settle about itself.
+        self.claims_are_sound(plan).await?;
 
-        // Parameters first: a programme names the version it was authored
-        // against, and one stored without them would reference nothing.
+        // Parameters first: a plan names the version it was authored against,
+        // and one stored without them would reference nothing.
         self.parameters
-            .author(programme.authored_at(), parameters)
+            .author(plan.authored_at(), parameters)
             .await?;
-        Ok((self.programmes.author(programme).await?, authored))
+        Ok((self.plans.author(plan).await?, authored))
     }
 }
 

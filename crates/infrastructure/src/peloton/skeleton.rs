@@ -100,9 +100,9 @@ const BOOST_YOUR_BASE_PLACEMENTS: [Placement; 24] = [
     at(8, 3, "d7dc5f2e61324a00968d7f84c07ec211"),
 ];
 
-/// *Power Zone Build* — five microcycles of three. The last session is two
+/// *Build Your Power Zones* — five microcycles of three. The last session is two
 /// classes, because the test carries no warm-up of its own.
-const POWER_ZONE_BUILD_PLACEMENTS: [Placement; 16] = [
+const BUILD_YOUR_POWER_ZONES_PLACEMENTS: [Placement; 16] = [
     at(1, 1, "9f8f3af689cc4f0db9afa013d4676ed6"),
     at(1, 2, "44867a5486184a09b8ca135a6d8c7494"),
     at(1, 3, "e825140788a84d31b3948419e50bedb5"),
@@ -126,9 +126,9 @@ pub const BOOST_YOUR_BASE: Skeleton = Skeleton {
     placements: &BOOST_YOUR_BASE_PLACEMENTS,
 };
 
-pub const POWER_ZONE_BUILD: Skeleton = Skeleton {
-    name: "Power Zone Build",
-    placements: &POWER_ZONE_BUILD_PLACEMENTS,
+pub const BUILD_YOUR_POWER_ZONES: Skeleton = Skeleton {
+    name: "Build Your Power Zones",
+    placements: &BUILD_YOUR_POWER_ZONES_PLACEMENTS,
 };
 
 /// *Peak Your Power Zones*, derived from the table that already holds it.
@@ -158,7 +158,7 @@ pub fn peak_your_power_zones() -> Vec<Placement> {
         .collect()
 }
 
-/// How many microcycles *Power Zone Build* runs, and so which of them the test
+/// How many microcycles *Build Your Power Zones* runs, and so which of them the test
 /// programme was copied from: its last.
 const BUILD_MICROCYCLES: u8 = 5;
 
@@ -185,7 +185,7 @@ const BUILD_MICROCYCLES: u8 = 5;
 /// it; the classes really are the same classes.
 #[must_use]
 pub fn power_zone_test() -> Vec<Placement> {
-    POWER_ZONE_BUILD_PLACEMENTS
+    BUILD_YOUR_POWER_ZONES_PLACEMENTS
         .iter()
         .filter(|placed| placed.microcycle == BUILD_MICROCYCLES)
         .map(|placed| at(1, placed.session, placed.class_id))
@@ -203,4 +203,4 @@ pub const POWER_ZONE_TEST: &str = "Power Zone test";
 /// Peak and the test programme are absent from this list and reached through
 /// [`peak_your_power_zones`] and [`power_zone_test`], because their placements
 /// are derived rather than stated. A caller wanting all of them joins them.
-pub const SKELETONS: [Skeleton; 2] = [BOOST_YOUR_BASE, POWER_ZONE_BUILD];
+pub const SKELETONS: [Skeleton; 2] = [BOOST_YOUR_BASE, BUILD_YOUR_POWER_ZONES];

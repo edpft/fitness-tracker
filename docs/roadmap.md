@@ -65,7 +65,7 @@ side:**
   covering one day and cycling covers the gym's days on purpose. The
   screenshot-transcribed Peak seed is deleted.
 - ~~One of Peloton's four programmes is transcribed~~ — **Build was read from the
-  Peloton API on 2026-09-05** (`docs/cycling-power-zone-build.md`, decisions 0032
+  Peloton API on 2026-09-05** (`docs/cycling-build-your-power-zones.md`, decisions 0032
   and 0033). Peak and Build are both in hand; Base is not, and is needed only if
   that pairing is chosen. Class *content* is now fetched rather than transcribed;
   the programme *skeleton* still is not available and remains the operator's.
@@ -110,6 +110,51 @@ This was first because everything after it would otherwise be written twice, and
 #86 is the first thing that would have: relevelling `Programme` into a plan, a
 programme and a mesocycle would have meant relevelling a document reader with a
 known expiry date.
+
+**1a. A plan holds programmes** (#86) — **done on 2026-09-07**, on
+`refactor/a-plan-holds-programmes`, and green on the whole gate. The operator's
+hierarchy is `macrocycle → plan → programme → mesocycle → microcycle → session`,
+and the store had four rows per discipline and no plan at all.
+
+Every rung of it now exists: the domain renames (`Mesocycle`, `Progression`,
+`BlockPeriodisation`, `PublishedProgramme`, `CyclingMesocycle`),
+`Progression::Provided` in place of `Sbs`, `domain::provider` — who published a
+programme and which of its microcycles a mesocycle took — `Plan`, `Programme<M>`,
+`Span` and `PlanWindow` in `domain::plan`, the `PlanStore` and `PlanAuthor`
+ports, and migration 0024 rebuilding the authored side around a `plan` table.
+
+**There is no table for the programme rung**, deliberately: the gym programme
+*is* the `gym_mesocycle` rows under a plan, in `ordinal` order.
+
+**The rows went rather than being carried.** The operator authorised that on
+2026-09-06 — *"there's nothing that can't be reconstructed after the fact"* — and
+**the authorisation expires when the autumn starts** (§ 12): a migration after
+14 September carries its rows or does not land. 0024 was applied to a fresh
+store and to copies of both beta stores before it was committed.
+
+**#73 closed with it, on the second attempt.** `fitness plan` now authors both
+programmes: the gym questions are asked once for the whole plan through
+`wizard::gym_side`, and four gym mesocycles are laid out from the answers rather
+than typed in over three months.
+
+**What had blocked it was the anchor, not the wizard**, and nobody had written
+that down. Authoring the gym side whole means giving every mesocycle a number its
+loads are shares of, and the cycles beginning 19 October and 16 November open
+from week-4 maxima nobody has lifted yet. So `Anchoring` is `Stated | Inherited`
+(0025): a cycle may defer to whatever the one before it measured, resolved
+against the record when a session is asked for and refused where the record is
+silent. It is the move the chart already makes inside a cycle, one level up.
+
+**Names settled with the operator on 2026-09-06**, and worth not re-deriving:
+the gym programme is *Squat 2x Int* provided by Stronger By Science; the cycling
+side is *Build Your Power Zones* entry test, then Build micros 1-2-4-5, Peak
+micros 1-2-3-4 and Peak micros 5-6-7-8 — **which settles the pairing** the file
+below still calls a programming choice. *Power Zone Build* was a wrong
+transcription throughout — Peloton calls it **Build Your Power Zones** — and was
+corrected everywhere on 2026-09-06.
+`Progression::Sbs` was renamed because a provider is a relation rather than a
+rung — *"Peloton and SBS are providers of programmes… within our tool, those same
+programmes are providers of mesocycles"*.
 
 **2. 0027's deletions** — `Entry`, `Anchor`, `declared_opening`,
 `TestTarget::Declared`, and the anchor columns.

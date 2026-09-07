@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, future::Future};
 
 use jiff::{Timestamp, civil::Date};
 
-use domain::cycling::{CyclingProgramme, CyclingProgrammeId};
+use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
 use domain::gym::{
     GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
     OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
@@ -24,9 +24,10 @@ use domain::landing::{
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
 };
+use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
-    GenerationParameters, PrescribedWorkout, PrescriptionState, Programme, ProgrammeId,
-    ProgrammeName, ProgrammeWindow, Progress, SessionRole, SlotId,
+    GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState, Progress,
+    SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
 
@@ -569,13 +570,13 @@ pub struct Performance {
 /// session it was, and which of that programme's sessions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FulfilledSession {
-    /// The programme that prescribed it, **by name**.
+    /// The plan that prescribed it, **by name**.
     ///
-    /// The name is a programme's identity across re-authorings and the row id
-    /// is not: re-authoring writes a new `programme` row, so a `ProgrammeId`
-    /// held here would stop matching every session prescribed before the last
-    /// correction. `latest_of_each` picks by name for the same reason.
-    pub programme: ProgrammeName,
+    /// The name is a plan's identity across re-authorings and a row id is not:
+    /// re-authoring writes new rows, so a `MesocycleId` held here would stop
+    /// matching every session prescribed before the last correction. The store
+    /// picks the latest authoring by name for the same reason.
+    pub plan: PlanName,
     pub role: SessionRole,
 }
 
@@ -635,6 +636,12 @@ pub enum UnderivableReason {
     /// The programme's span and duration do not make a ladder.
     #[error("the programme's span and duration do not make a ladder")]
     NoLadder,
+    /// A provided cycle opening from the one before it, resolved to nothing.
+    ///
+    /// The predecessor measured no maximum, so there is no number for the
+    /// chart's percentages to be shares of.
+    #[error("the cycle before this one has not measured the maximum this opens from")]
+    NoOpeningMaximum,
     /// No scale has been authored for the implement this exercise is loaded on.
     ///
     /// Reported rather than defaulted to the barbell's steps: a prescription
@@ -784,18 +791,23 @@ pub trait GenerationParameterStore {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
-/// The authored programme.
-pub trait ProgrammeStore {
-    /// The programme that answers for a date, with the identity the store gave
-    /// it.
+/// A gym mesocycle, read out of the plan that holds it.
+///
+/// **The plan's name travels with it.** A mesocycle has no name of its own since
+/// #86 — identity is the plan's — and everything downstream that used to hold a
+/// programme name for matching or reporting holds the plan's now.
+pub trait MesocycleStore {
+    /// The mesocycle that answers for a date, with the identity the store gave
+    /// it and the plan it belongs to.
     ///
-    /// **By date rather than by recency** (decision 0012). Programmes succeed
-    /// one another, so "the latest authored" is the wrong question: it would
-    /// answer a September date from the block authored for October. Two
-    /// programmes never cover one day, so at most one can match.
+    /// **By date rather than by recency** (decision 0012). Mesocycles succeed one
+    /// another, so "the latest authored" is the wrong question: it would answer a
+    /// September date from the block authored for October. Two mesocycles of one
+    /// plan never cover one day, and two plans never overlap, so at most one can
+    /// match.
     ///
-    /// `None` is a date no programme covers — between two blocks, or before the
-    /// first. A real state, not a fault.
+    /// `None` is a date no plan covers — between two mesocycles, before the
+    /// first, or in a week nothing was authored for. A real state, not a fault.
     ///
     /// # Errors
     ///
@@ -803,17 +815,21 @@ pub trait ProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
 
-    /// The programme immediately before a date, if there is one.
+    /// The mesocycle immediately before a date, if there is one.
     ///
     /// **What a standalone test inherits from** (decision 0013). A test's target
-    /// is where the predecessor's progression stands, and its light session is
-    /// the predecessor's session — so deriving a test week needs the programme
-    /// that finished before it, which [`Self::on`] by definition does not
-    /// return.
+    /// is where the predecessor's progression stands, so deriving a test week
+    /// needs the mesocycle that finished before it, which [`Self::on`] by
+    /// definition does not return.
     ///
-    /// The latest one to have *finished* by the date, so a programme still
+    /// **Usually the previous element of a list rather than a query.** Inside a
+    /// plan `Programme::preceding` answers it without a store at all; this is for
+    /// the mesocycle at the very start of a plan, whose predecessor belongs to
+    /// the plan before.
+    ///
+    /// The latest one to have *finished* by the date, so a mesocycle still
     /// running is not it. `None` is a test with nothing before it, which is why
     /// [`TestTarget::Declared`](domain::prescription::TestTarget::Declared)
     /// exists.
@@ -824,43 +840,67 @@ pub trait ProgrammeStore {
     fn preceding(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(ProgrammeId, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
+}
 
-    /// Every programme's name and the days it occupies, oldest first.
+/// The authored plan: what is written, and what the overlap rule reads.
+pub trait PlanStore {
+    /// Every plan's name and the days it occupies, oldest first.
     ///
-    /// What the overlap rule reads. It is here rather than inside [`Self::author`]
-    /// because refusing an overlapping programme is a rule about authored data,
-    /// and the core owns it — the store only reports what it holds.
+    /// What the overlap rule reads. It is here rather than inside
+    /// [`Self::author`] because refusing an overlapping plan is a rule about
+    /// authored data and the core owns it — the store only reports what it holds.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn windows(&self) -> impl Future<Output = Result<Vec<ProgrammeWindow>, StoreError>> + Send;
+    fn windows(&self) -> impl Future<Output = Result<Vec<PlanWindow>, StoreError>> + Send;
 
+    /// The plan in force under a name, if there is one.
+    ///
+    /// **What makes a plan authorable in pieces while still being written
+    /// whole.** `fitness plan` writes the cycling side and `fitness programme
+    /// add` the gym side; each reads what is already there under the name, puts
+    /// its own discipline's programme into it, and re-authors the lot. Without
+    /// this the second command would supersede the first's work.
+    ///
+    /// `None` is a name nothing has been authored under — the ordinary
+    /// first-run case, not a fault.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn named(
+        &self,
+        name: &PlanName,
+    ) -> impl Future<Output = Result<Option<Plan>, StoreError>> + Send;
+
+    /// Write a plan whole: both programmes and every mesocycle in them.
+    ///
+    /// **One authoring, not eight.** A plan is what the operator authors, so a
+    /// half-written one is not a state the store should be able to hold.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn author(
-        &self,
-        programme: &Programme,
-    ) -> impl Future<Output = Result<ProgrammeId, StoreError>> + Send;
+    fn author(&self, plan: &Plan) -> impl Future<Output = Result<PlanId, StoreError>> + Send;
 }
 
-/// The authored cycling programme.
+/// A cycling mesocycle, read out of the plan that holds it.
 ///
 /// **A second store rather than a second template**, and not for the schema's
-/// sake. [`ProgrammeStore`]'s succession rule refuses two programmes covering
-/// one day, and cycling covers the same days as the gym on purpose — so the two
-/// disciplines are two sets, and the one rule is applied to each of them
-/// separately. Sharing a table would mean either refusing the arrangement the
-/// tool exists to produce, or growing a discipline column and no longer being
-/// one rule.
+/// sake. The overlap rule refuses two *plans* competing for a day; inside a plan
+/// the gym and the bike compete for every day on purpose, which is the whole
+/// point of the tool. Sharing a table would mean either refusing the arrangement
+/// it exists to produce, or growing a discipline column and no longer being one
+/// rule.
 ///
-/// The methods are [`ProgrammeStore`]'s, minus the ones that ask about a lift.
-pub trait CyclingProgrammeStore {
-    /// The cycling programme that answers for a date.
+/// The methods are [`MesocycleStore`]'s, minus the ones that ask about a lift,
+/// plus the one that looks forward across a mesocycle boundary.
+pub trait CyclingMesocycleStore {
+    /// The cycling mesocycle that answers for a date, and the plan holding it.
     ///
-    /// `None` is a date no cycling programme covers — between two mesocycles, or
+    /// `None` is a date no cycling mesocycle covers — between two of them, or
     /// before the first. A real state, not a fault.
     ///
     /// # Errors
@@ -869,13 +909,15 @@ pub trait CyclingProgrammeStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
+    ) -> impl Future<
+        Output = Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>,
+    > + Send;
 
-    /// The first cycling programme to begin after a date, if there is one.
+    /// The first cycling mesocycle to begin after a date, if there is one.
     ///
     /// **What makes the next ride findable across a mesocycle boundary.** The
-    /// autumn authors four cycling programmes back to back, and a question asked
-    /// in the last days of one has its answer in the next.
+    /// autumn's cycling programme is four mesocycles back to back, and a question
+    /// asked in the last days of one has its answer in the next.
     ///
     /// # Errors
     ///
@@ -883,24 +925,9 @@ pub trait CyclingProgrammeStore {
     fn following(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(CyclingProgrammeId, CyclingProgramme)>, StoreError>> + Send;
-
-    /// Every cycling programme's name and the days it occupies, oldest first.
-    ///
-    /// What the overlap rule reads, and it reads cycling only.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn windows(&self) -> impl Future<Output = Result<Vec<ProgrammeWindow>, StoreError>> + Send;
-
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn author(
-        &self,
-        programme: &CyclingProgramme,
-    ) -> impl Future<Output = Result<CyclingProgrammeId, StoreError>> + Send;
+    ) -> impl Future<
+        Output = Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>,
+    > + Send;
 }
 
 /// What was issued.
@@ -1019,8 +1046,9 @@ pub struct Prescription {
 /// needs all three and needs no workout at all.
 #[derive(Debug, Clone)]
 pub struct LadderStanding {
-    pub programme_id: ProgrammeId,
-    pub programme: Programme,
+    pub plan: PlanName,
+    pub programme_id: MesocycleId,
+    pub programme: Mesocycle,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.
     /// Where the record puts the programme, for the one template that has a
@@ -1107,38 +1135,39 @@ pub trait PrescriptionLifecycle {
     ) -> impl Future<Output = Result<PrescriptionState, StoreError>> + Send;
 }
 
-/// Store an authored programme and its parameters.
 /// Which of the two things authoring did (decision 0012).
 ///
 /// Reported rather than inferred by the operator from a changed row count: a
-/// typo in the name would otherwise create a phantom programme silently, and
-/// the difference between correcting a block and starting one is exactly what
-/// they need to see.
+/// typo in the name would otherwise create a phantom plan silently, and the
+/// difference between correcting the autumn and starting a second one is exactly
+/// what they need to see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Authored {
-    /// The name was not in the store. A new programme.
+    /// The name was not in the store. A new plan.
     Created,
-    /// The name was, so this supersedes that programme's previous version.
+    /// The name was, so this supersedes that plan's previous version.
     Modified,
 }
 
-pub trait ProgrammeAuthor {
+/// Store an authored plan and the parameters it was generated against.
+pub trait PlanAuthor {
     /// Takes `domain` types.
     ///
-    /// What the operator answered is assembled into one by
-    /// `domain::prescription::authored`, so nothing here knows how a programme
-    /// was typed in. It was a TOML document converted in `infrastructure` until
+    /// What the operator answered is assembled by
+    /// `domain::prescription::authored`, so nothing here knows how a plan was
+    /// typed in. It was a TOML document converted in `infrastructure` until
     /// 2026-09-06, and this said so.
     ///
     /// # Errors
     ///
-    /// [`PrescriptionError`] if the store is unavailable, or the programme is
-    /// inconsistent in a way the types could not catch.
+    /// [`PrescriptionError`] if the store is unavailable, if the plan competes
+    /// for days another plan holds, or if a mesocycle claims a maximum that was
+    /// never measured.
     fn author(
         &self,
-        programme: &Programme,
+        plan: &Plan,
         parameters: &GenerationParameters,
-    ) -> impl Future<Output = Result<(ProgrammeId, Authored), PrescriptionError>> + Send;
+    ) -> impl Future<Output = Result<(PlanId, Authored), PrescriptionError>> + Send;
 }
 
 // --- Delivery ---------------------------------------------------------------
@@ -1164,7 +1193,7 @@ pub use domain::prescription::{DeliveryReference, DestinationName, SessionOrdina
 #[derive(Debug, Clone)]
 pub struct Deliverable {
     pub workout: PrescribedWorkout,
-    pub programme: ProgrammeName,
+    pub plan: PlanName,
     /// Which session of the programme this is. What an ordered list of them is
     /// ordered by; how it is rendered is the destination's business.
     pub ordinal: SessionOrdinal,
@@ -1400,7 +1429,7 @@ pub trait DiaryStore {
     /// The whole diary: every ordinary pattern, and every alteration that
     /// departs from one.
     ///
-    /// **Whole rather than by date**, unlike [`ProgrammeStore::on`]. `Diary`
+    /// **Whole rather than by date**, unlike [`MesocycleStore::on`]. `Diary`
     /// owns the rule that resolves a date — the week in force, as amended by
     /// any alteration covering it — and answering a date here would put that rule in
     /// a second place, where the two could disagree.

@@ -132,7 +132,7 @@ fn notes(session: &Deliverable) -> String {
         "{} · {} · {}",
         session.workout.issued_for(),
         week,
-        session.programme
+        session.plan
     )
 }
 

@@ -8,7 +8,7 @@
 //!
 //! **This transcribes; it does not plan.** Asking a programme for a smaller
 //! shape is `fitness plan`, and the logic for it lives in
-//! `domain::cycling::Programme`. This is here to read a programme that is not
+//! `domain::cycling::PublishedProgramme`. This is here to read a programme that is not
 //! yet in `peloton::skeleton` and check that every class tiles.
 //!
 //! ```text

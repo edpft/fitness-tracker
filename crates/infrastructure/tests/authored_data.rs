@@ -7,8 +7,10 @@
 
 mod support;
 
-use application::{GenerationParameterStore as _, ProgrammeStore as _};
-use infrastructure::{SqliteGenerationParameterStore, SqliteProgrammeStore, connect};
+use application::{GenerationParameterStore as _, MesocycleStore as _, PlanStore as _};
+use infrastructure::{
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
+};
 use sqlx::SqlitePool;
 use support::{corpus, programme};
 
@@ -159,15 +161,39 @@ fn parameters_missing_a_role_are_corrupt_not_defaulted() {
 
 // --- The programme ---------------------------------------------------------
 
-async fn programme_store()
--> Result<(SqliteProgrammeStore, SqlitePool, tempfile::TempDir), Box<dyn std::error::Error>> {
+async fn programme_store() -> Result<
+    (
+        SqlitePlanStore,
+        SqliteGymMesocycleStore,
+        SqlitePool,
+        tempfile::TempDir,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
     Ok((
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         pool,
         directory,
     ))
+}
+
+/// A plan holding one gym mesocycle, or a panic saying which fixture is broken.
+///
+/// **A mesocycle is not authored on its own** since #86: the plan is what is
+/// written, so every round trip here goes through one.
+macro_rules! plan_of {
+    ($called:expr, $($mesocycle:expr),+ $(,)?) => {
+        match programme::named_plan(
+            $called,
+            vec![$(programme::as_programme($mesocycle)),+],
+        ) {
+            Ok(plan) => plan,
+            Err(error) => panic!("the fixture plan is consistent: {error}"),
+        }
+    };
 }
 
 macro_rules! programmes {
@@ -190,9 +216,9 @@ const fn inside_the_block() -> jiff::civil::Date {
 }
 
 #[test]
-fn an_unauthored_store_has_no_programme() {
-    let (store, _pool, _directory) = programmes!();
-    assert_eq!(run!(store.on(inside_the_block())), None);
+fn an_unauthored_store_has_no_mesocycle() {
+    let (_plans, store, _pool, _directory) = programmes!();
+    assert!(run!(store.on(inside_the_block())).is_none());
 }
 
 /// The eleven fills survive the round trip, in all four shapes.
@@ -203,17 +229,17 @@ fn an_unauthored_store_has_no_programme() {
 /// `SlotFills` covers every one of them at once.
 #[test]
 fn a_programme_round_trips_with_every_fill_shape() {
-    let (store, _pool, _directory) = programmes!();
+    let (plans, store, _pool, _directory) = programmes!();
     let Ok(authored) = programme::programme() else {
         panic!("the fixture programme is consistent")
     };
 
-    let id = run!(store.author(&programme::as_programme(authored.clone())));
+    run!(plans.author(&plan_of!("fixture", authored.clone())));
 
-    let Some((read_id, read_back)) = run!(store.on(inside_the_block())) else {
+    let Some((read_id, _, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
-    assert_eq!(read_id, id);
+    assert!(read_id.as_i64() > 0, "the store gave it an identity");
 
     // The single, the alternating single, the same-both-ways superset and the
     // alternating superset, all in one comparison.
@@ -250,7 +276,7 @@ fn a_programme_round_trips_with_every_fill_shape() {
 /// only on the rows.
 #[test]
 fn the_interrupted_weeks_round_trip() {
-    let (store, _pool, _directory) = programmes!();
+    let (plans, store, _pool, _directory) = programmes!();
     let (Ok(away), Ok(after)) = (
         jiff::civil::Date::new(2026, 7, 20),
         jiff::civil::Date::new(2026, 7, 27),
@@ -265,8 +291,8 @@ fn the_interrupted_weeks_round_trip() {
         panic!("a week inside the block can be skipped")
     };
 
-    let _id = run!(store.author(&programme::as_programme(authored.clone())));
-    let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
+    run!(plans.author(&plan_of!("fixture", authored.clone())));
+    let Some((_, _, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
 
@@ -293,13 +319,13 @@ fn the_interrupted_weeks_round_trip() {
 /// The weekday mapping round trips, including which role each day carries.
 #[test]
 fn the_weekday_mapping_round_trips() {
-    let (store, _pool, _directory) = programmes!();
+    let (plans, store, _pool, _directory) = programmes!();
     let Ok(authored) = programme::programme() else {
         panic!("the fixture programme is consistent")
     };
-    run!(store.author(&programme::as_programme(authored.clone())));
+    run!(plans.author(&plan_of!("fixture", authored.clone())));
 
-    let Some((_, read_back)) = run!(store.on(inside_the_block())) else {
+    let Some((_, _, read_back)) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
 
@@ -310,29 +336,29 @@ fn the_weekday_mapping_round_trips() {
     assert_eq!(read_days, authored_days);
 }
 
-/// Authoring supersedes by date, and the earlier programme is kept.
+/// Authoring supersedes by name, and the earlier plan is kept.
 ///
-/// **Two constructions rather than one authored twice.** A `Linear` stamps
-/// its own `authored_at`, so re-authoring the same value would be one version
-/// claiming two rows — which `UNIQUE (name, authored_at)` refuses. Building the
-/// fixture again is what re-authoring a document actually does.
+/// **Two constructions rather than one authored twice.** A `Plan` stamps its own
+/// `authored_at`, so re-authoring the same value would be one version claiming
+/// two rows — which `UNIQUE (name, authored_at)` refuses. Building the fixture
+/// again is what re-authoring actually does.
 #[test]
-fn authoring_a_programme_supersedes_and_retains() {
-    let (store, pool, _directory) = programmes!();
+fn authoring_a_plan_supersedes_and_retains() {
+    let (plans, _store, pool, _directory) = programmes!();
     let (Ok(first), Ok(again)) = (programme::programme(), programme::programme()) else {
         panic!("the fixture programme is consistent")
     };
 
-    let first_id = run!(store.author(&programme::as_programme(first)));
-    let second_id = run!(store.author(&programme::as_programme(again)));
+    let first_id = run!(plans.author(&plan_of!("fixture", first)));
+    let second_id = run!(plans.author(&plan_of!("fixture", again)));
     assert_ne!(first_id, second_id, "each authoring gets its own identity");
 
     let count = run!(async {
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM programme")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM plan")
             .fetch_one(&pool)
             .await
     });
-    assert_eq!(count, 2, "the superseded programme is kept");
+    assert_eq!(count, 2, "the superseded plan is kept");
 }
 
 /// The three inconsistencies the types cannot catch are refused at authoring.
@@ -431,7 +457,6 @@ fn a_block_authored_with_days_away_skips_them() {
 /// one.
 fn fixture_block() -> Result<domain::prescription::Authored, programme::ProgrammeFixtureError> {
     programme::authored(
-        "summer-2026-front-squat",
         jiff::civil::Date::constant(2026, 7, 6),
         domain::prescription::authored::Shape::Linear {
             gating: domain::prescription::SessionRole::Heavy,
@@ -471,86 +496,84 @@ fn a_week_outside_the_block_does_not_author() {
     }
 }
 
-/// Two programmes over different weeks are both real, and the date decides.
+/// Two plans over different weeks are both real, and the date decides.
 ///
 /// **What succession is for** (decision 0012). Before this, the store answered
-/// with whatever was authored last, so the second programme would have taken
-/// over the first one's dates as well as its own.
+/// with whatever was authored last, so the second plan would have taken over the
+/// first one's dates as well as its own.
 #[test]
-fn two_programmes_succeed_one_another_and_the_date_chooses() {
-    let (store, _pool, _directory) = programmes!();
+fn two_plans_succeed_one_another_and_the_date_chooses() {
+    let (plans, store, _pool, _directory) = programmes!();
     let (Ok(summer), Ok(autumn)) = (
-        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
-        // Eight weeks from 6 July ends on 31 August, so the autumn block opens
+        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
+        // Eight weeks from 6 July ends on 31 August, so the autumn plan opens
         // the Monday after and the two are adjacent rather than overlapping.
-        programme::programme_named_from("autumn", jiff::civil::Date::constant(2026, 8, 31)),
+        programme::programme_from(jiff::civil::Date::constant(2026, 8, 31)),
     ) else {
         panic!("the fixtures are consistent")
     };
 
-    let summer_id = run!(store.author(&programme::as_programme(summer)));
-    let autumn_id = run!(store.author(&programme::as_programme(autumn)));
+    run!(plans.author(&plan_of!("summer", summer)));
+    run!(plans.author(&plan_of!("autumn", autumn)));
 
     let in_summer = run!(store.on(jiff::civil::Date::constant(2026, 7, 20)));
     let in_autumn = run!(store.on(jiff::civil::Date::constant(2026, 9, 14)));
-    let (Some((first, _)), Some((second, _))) = (in_summer, in_autumn) else {
-        panic!("both programmes answer for their own weeks")
+    let (Some((_, first, _)), Some((_, second, _))) = (in_summer, in_autumn) else {
+        panic!("both plans answer for their own weeks")
     };
 
-    assert_eq!(first, summer_id, "July belongs to the summer block");
+    assert_eq!(first.as_str(), "summer", "July belongs to the summer plan");
     assert_eq!(
-        second, autumn_id,
-        "September belongs to the autumn block, which was authored last"
+        second.as_str(),
+        "autumn",
+        "September belongs to the autumn plan, which was authored last"
     );
 }
 
-/// A day no programme covers is nothing, not the nearest programme.
+/// A day no mesocycle covers is nothing, not the nearest one.
 #[test]
-fn a_day_between_programmes_belongs_to_neither() {
-    let (store, _pool, _directory) = programmes!();
-    let Ok(summer) =
-        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6))
-    else {
+fn a_day_between_mesocycles_belongs_to_neither() {
+    let (plans, store, _pool, _directory) = programmes!();
+    let Ok(summer) = programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)) else {
         panic!("the fixture is consistent")
     };
-    run!(store.author(&programme::as_programme(summer)));
+    run!(plans.author(&plan_of!("summer", summer)));
 
     // Eight weeks from 6 July is over on 31 August.
-    assert_eq!(
-        run!(store.on(jiff::civil::Date::constant(2026, 9, 7))),
-        None,
-        "a date past the block belongs to no programme"
+    assert!(
+        run!(store.on(jiff::civil::Date::constant(2026, 9, 7))).is_none(),
+        "a date past the block belongs to no mesocycle"
     );
-    assert_eq!(
-        run!(store.on(jiff::civil::Date::constant(2026, 6, 29))),
-        None,
+    assert!(
+        run!(store.on(jiff::civil::Date::constant(2026, 6, 29))).is_none(),
         "and so does one before it"
     );
 }
 
-/// Every programme's window comes back, and versions of one collapse to one.
+/// Every plan's window comes back, and versions of one collapse to one.
 #[test]
-fn windows_report_one_entry_per_programme() {
-    let (store, _pool, _directory) = programmes!();
+fn windows_report_one_entry_per_plan() {
+    let (plans, _store, _pool, _directory) = programmes!();
     let (Ok(summer), Ok(again), Ok(autumn)) = (
-        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
-        programme::programme_named_from("summer", jiff::civil::Date::constant(2026, 7, 6)),
-        programme::programme_named_from("autumn", jiff::civil::Date::constant(2026, 8, 31)),
+        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
+        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
+        programme::programme_from(jiff::civil::Date::constant(2026, 8, 31)),
     ) else {
         panic!("the fixtures are consistent")
     };
-    run!(store.author(&programme::as_programme(summer)));
-    run!(store.author(&programme::as_programme(again)));
-    run!(store.author(&programme::as_programme(autumn)));
+    run!(plans.author(&plan_of!("summer", summer)));
+    run!(plans.author(&plan_of!("summer", again)));
+    run!(plans.author(&plan_of!("autumn", autumn)));
 
-    let windows = run!(store.windows());
-    let names: Vec<String> = windows
+    let windows = run!(plans.windows());
+    let mut names: Vec<String> = windows
         .iter()
         .map(|window| window.name().to_string())
         .collect();
+    names.sort();
     assert_eq!(
         names,
-        vec!["summer".to_owned(), "autumn".to_owned()],
-        "three authorings of two programmes are two windows, oldest block first"
+        vec!["autumn".to_owned(), "summer".to_owned()],
+        "three authorings of two plans are two windows"
     );
 }

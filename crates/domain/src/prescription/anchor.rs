@@ -216,3 +216,55 @@ impl Entry {
         self.declared_opening
     }
 }
+
+/// Where a provided mesocycle's chart opens: a number, or the cycle before it.
+///
+/// **Named for the manner rather than the value**, because `Opening` is taken by
+/// the ladder's and means a load.
+///
+/// **Stated, or taken from whatever ran before it.** Every other progression
+/// carries a number: a ladder climbs from one and a block's every load is a
+/// share of one, and both are knowable when the mesocycle is authored. A
+/// provided cycle is the case where it is not. Week 4 day 2 is a one-repetition
+/// maximum and is not optional, so a cycle that runs to its end leaves a
+/// measured maximum behind — and that maximum is what the next cycle opens
+/// from, which is what makes the chart self-perpetuating (decision 0024).
+///
+/// **So a plan holding three of them cannot state two of the three.** Authoring
+/// the autumn on 7 September means saying what the cycle beginning 19 October
+/// opens from, which is a test that has not happened. The operator, 2026-09-07,
+/// agreeing that the anchor should defer: *"the SBS programme already does this
+/// for the rep maxes"* — within a cycle each rep-max day resets what the
+/// following week is a share of, and this is that same move one level up.
+///
+/// [`Self::Inherited`] is therefore an absence with a reason, not a missing
+/// number: it makes no claim about a past test, it defers to one. What it
+/// resolves to is read off the record when a session is asked for, and a
+/// predecessor that never measured resolves to nothing rather than to a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchoring {
+    /// The number, stated when the mesocycle was authored.
+    Stated(Entry),
+    /// Whatever the mesocycle before this one measured.
+    Inherited,
+}
+
+impl Anchoring {
+    /// The entry as authored, where one was.
+    #[must_use]
+    pub const fn stated(self) -> Option<Entry> {
+        match self {
+            Self::Stated(entry) => Some(entry),
+            Self::Inherited => None,
+        }
+    }
+
+    /// The anchor as authored, where one was.
+    #[must_use]
+    pub const fn anchor(self) -> Option<Anchor> {
+        match self {
+            Self::Stated(entry) => Some(entry.anchor()),
+            Self::Inherited => None,
+        }
+    }
+}

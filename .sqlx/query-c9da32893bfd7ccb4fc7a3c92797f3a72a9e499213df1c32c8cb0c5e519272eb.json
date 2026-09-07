@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT weekday AS \"weekday!: String\", role AS \"role!: String\"\n        FROM gym_weekday\n        WHERE mesocycle = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_weekday",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "role!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_weekday",
+            "name": "role"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c9da32893bfd7ccb4fc7a3c92797f3a72a9e499213df1c32c8cb0c5e519272eb"
+}

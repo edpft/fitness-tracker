@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO gym_weekday (mesocycle, weekday, role)\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "2052ee44681008572179ee2efac53be1521c6ae0ae342042e5531c5d4e709670"
+}

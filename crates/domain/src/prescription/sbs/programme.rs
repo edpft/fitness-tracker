@@ -2,7 +2,7 @@
 //!
 //! **Almost nothing is authored, and that is the point of a published
 //! programme.** [`Linear`](crate::prescription::linear::Linear) takes a climb
-//! rate and a duration; [`Periodised`](crate::prescription::block::Periodised)
+//! rate and a duration; [`BlockPeriodisation`](crate::prescription::block::BlockPeriodisation)
 //! takes a duration that shapes its phases. This takes neither, because the
 //! chart states every set, every repetition and every percentage itself
 //! ([`chart`](super::chart)). What an operator supplies is which lift, which
@@ -12,16 +12,13 @@
 //! chart is four weeks. Offering a duration would invite a five-week SBS cycle,
 //! which is not a thing that exists.
 
-use jiff::Timestamp;
-
 use crate::{
     gym::exercise::Exercise,
     prescription::{
-        anchor::Entry,
+        anchor::Anchoring,
         linear::{Primary, PrimaryPattern, SlotFills},
-        programme::{InconsistentProgramme, check_primary},
+        mesocycle::{InconsistentMesocycle, check_primary},
         schedule::{Calendar, SessionRole},
-        succession::{ProgrammeName, ProgrammeWindow},
     },
 };
 
@@ -41,11 +38,9 @@ pub const GATING: SessionRole = SessionRole::Heavy;
 /// A cycle of the SBS chart, as authored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sbs {
-    /// What identifies this programme across re-authorings (decision 0012).
-    name: ProgrammeName,
     primary: Primary,
     fills: SlotFills,
-    /// The maximum week 1 programmes from.
+    /// Where week 1 programmes from: a maximum, or the cycle before this one.
     ///
     /// **The opening only.** Unlike every other programme here, this number does
     /// not stand for the whole cycle: each repetition-maximum day resets it
@@ -53,9 +48,8 @@ pub struct Sbs {
     /// week 3 is a share of was established in week 2. The anchor is where the
     /// cycle *starts*, and is the last number in it that was not derived from a
     /// performance.
-    entry: Entry,
+    entry: Anchoring,
     calendar: Calendar,
-    authored_at: Timestamp,
 }
 
 impl Sbs {
@@ -63,18 +57,17 @@ impl Sbs {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a gating role the programme never runs, a
+    /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary not counted in repetitions, a primary exercise that does not fill
     /// the slot named as primary, a calendar that is not four weeks, or a test
     /// that does not precede the cycle it anchors.
     pub fn new(
-        name: ProgrammeName,
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Entry,
+        entry: Anchoring,
         calendar: Calendar,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
 
         // A cycle that never runs its gating session would never advance — and
@@ -82,7 +75,7 @@ impl Sbs {
         // where the maximum is *set*. A cycle without one would prescribe every
         // week off the opening maximum for ever.
         if !calendar.weekdays().runs(GATING) {
-            return Err(InconsistentProgramme::GatingRoleNeverRuns { gating: GATING });
+            return Err(InconsistentMesocycle::GatingRoleNeverRuns { gating: GATING });
         }
         check_primary(pattern, exercise, &fills, GATING)?;
 
@@ -90,7 +83,7 @@ impl Sbs {
         // programme run longer or shorter — it is a different programme, and
         // there is no rule here for what its extra weeks would prescribe.
         if calendar.duration_weeks() != WEEKS {
-            return Err(InconsistentProgramme::ChartIsFourWeeks {
+            return Err(InconsistentMesocycle::ChartIsFourWeeks {
                 given: calendar.duration_weeks(),
             });
         }
@@ -98,20 +91,24 @@ impl Sbs {
         // The same rule the linear template applies, for the same reason: a
         // cycle containing the test that anchors it would read that session
         // twice, once as its own opening and once as work inside it.
-        if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
+        //
+        // **An inherited opening cannot break it.** It names no date, and the
+        // mesocycle it defers to is by construction the one before this one —
+        // so there is nothing here to be out of order.
+        if let Some(anchor) = entry.anchor()
+            && anchor.from() >= calendar.start()
+        {
+            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
-                tested: entry.anchor().from(),
+                tested: anchor.from(),
             });
         }
 
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             calendar,
-            authored_at: Timestamp::now(),
         })
     }
 
@@ -121,26 +118,18 @@ impl Sbs {
     /// written, and re-refusing it now would make a rule change unreadable data.
     #[must_use]
     pub const fn stored(
-        name: ProgrammeName,
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Entry,
+        entry: Anchoring,
         calendar: Calendar,
-        authored_at: Timestamp,
     ) -> Self {
         Self {
-            name,
             primary: Primary::new(pattern, exercise, GATING),
             fills,
             entry,
             calendar,
-            authored_at,
         }
-    }
-
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
     }
 
     pub const fn fills(&self) -> &SlotFills {
@@ -151,11 +140,8 @@ impl Sbs {
         &self.calendar
     }
 
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
-    }
-
-    pub const fn entry(&self) -> Entry {
+    /// Where this cycle opens, stated or inherited.
+    pub const fn entry(&self) -> Anchoring {
         self.entry
     }
 
@@ -170,16 +156,5 @@ impl Sbs {
     /// The session whose result moves the maximum. Always [`GATING`].
     pub const fn gating_role(&self) -> SessionRole {
         GATING
-    }
-
-    /// The days this cycle occupies, for the rule that two programmes may not
-    /// compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 }

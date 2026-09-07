@@ -19,8 +19,8 @@ use application::{
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use infrastructure::{
-    SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePerformedWorkoutReader,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteProgrammeStore,
+    SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -28,7 +28,7 @@ use support::{corpus, programme, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
-    SqliteProgrammeStore,
+    SqliteGymMesocycleStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore,
@@ -51,7 +51,7 @@ async fn ready() -> Fallible<(Prescriber, Comparer, tempfile::TempDir, SqlitePoo
     let (directory, pool) = store::with_programme(programme::programme_from(BLOCK_START)?).await?;
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),

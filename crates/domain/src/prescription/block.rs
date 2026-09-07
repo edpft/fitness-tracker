@@ -96,19 +96,18 @@
 //!
 //! [`Anchor`]: crate::prescription::Anchor
 
-use jiff::{Timestamp, civil::Date, tz::TimeZone};
+use jiff::{civil::Date, tz::TimeZone};
 
 use crate::gym::{Kg, RepCount, exercise::Exercise};
 
 use crate::prescription::{
     anchor::Entry,
     linear::{Primary, PrimaryPattern, SlotFills},
+    mesocycle::{InconsistentMesocycle, check_primary},
     parameters::Percentage,
     prilepin,
-    programme::{InconsistentProgramme, check_primary},
     repmax::{PER_REPETITION, rep_max},
     schedule::{Calendar, InvalidCalendar, SessionRole, Skip, WeekIndex, WeekKind, Weekdays},
-    succession::{ProgrammeName, ProgrammeWindow},
 };
 
 /// Why a block could not be planned.
@@ -528,8 +527,7 @@ const fn phase_weeks_of(calendar: &Calendar, entry_test: Option<EntryTest>) -> u
 /// One number, one meaning: a block whose stored plan disagreed with its
 /// calendar would prescribe one thing and be reported as another.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Periodised {
-    name: ProgrammeName,
+pub struct BlockPeriodisation {
     primary: Primary,
     fills: SlotFills,
     /// The maximum every load in this block is a share of.
@@ -551,35 +549,31 @@ pub struct Periodised {
     /// **Every week the block occupies**, the entry test's included. What the
     /// operator's table counts is [`Self::phase_weeks`].
     calendar: Calendar,
-    authored_at: Timestamp,
 }
 
-impl Periodised {
+impl BlockPeriodisation {
     /// Build, running the checks the type system cannot.
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a gating role the programme never runs, a
+    /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary that cannot carry a top set, a primary that does not fill its own
     /// slot, an entry test that does not precede the block, an anchor that was
     /// not tested, or a duration that does not make a block.
     pub fn new(
-        name: ProgrammeName,
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: Calendar,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(primary, &fills, entry, entry_test, &calendar)?;
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             entry_test,
             calendar,
-            authored_at: Timestamp::now(),
         })
     }
 
@@ -618,23 +612,19 @@ impl Periodised {
     ///
     /// As [`Self::new`].
     pub fn rehydrate(
-        name: ProgrammeName,
         primary: Primary,
         fills: SlotFills,
         entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: Calendar,
-        authored_at: Timestamp,
-    ) -> Result<Self, InconsistentProgramme> {
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(primary, &fills, entry, entry_test, &calendar)?;
         Ok(Self {
-            name,
             primary,
             fills,
             entry,
             entry_test,
             calendar,
-            authored_at,
         })
     }
 
@@ -644,9 +634,9 @@ impl Periodised {
         entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: &Calendar,
-    ) -> Result<(), InconsistentProgramme> {
+    ) -> Result<(), InconsistentMesocycle> {
         if !calendar.weekdays().runs(primary.gating_role()) {
-            return Err(InconsistentProgramme::GatingRoleNeverRuns {
+            return Err(InconsistentMesocycle::GatingRoleNeverRuns {
                 gating: primary.gating_role(),
             });
         }
@@ -660,7 +650,7 @@ impl Periodised {
         // The entry test precedes the block it anchors — 0009's rule, which 0013
         // keeps and makes the weaker half of a stronger one.
         if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentProgramme::EntryTestIsNotBeforeTheBlock {
+            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
                 tested: entry.anchor().from(),
             });
@@ -736,10 +726,6 @@ impl Periodised {
         }
     }
 
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
-    }
-
     pub const fn primary(&self) -> PrimaryPattern {
         self.primary.pattern()
     }
@@ -762,21 +748,6 @@ impl Periodised {
 
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
-    }
-
-    /// The days this block occupies, for the rule that two programmes may not
-    /// compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 
     /// Whether this slot is the primary one.

@@ -29,18 +29,18 @@
 //!
 //! [`Fill::Alternating`]: crate::prescription::Fill::Alternating
 
-use jiff::{Timestamp, civil::Date, tz::TimeZone};
+use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
     prescription::{
         linear::{PrimaryPattern, SlotFills},
-        programme::{InconsistentProgramme, check_primary},
+        mesocycle::{InconsistentMesocycle, check_primary},
         repmax::rep_max,
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
         shape::SlotId,
-        succession::{ProgrammeName, ProgrammeWindow},
     },
+    provider::ProvidedFrom,
 };
 
 /// What the test is an attempt at.
@@ -106,9 +106,6 @@ impl Tested {
 /// A standalone test week.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Test {
-    /// What identifies this test across re-authorings (decision 0012). A test
-    /// is a programme, so it names itself and competes for its days like one.
-    name: ProgrammeName,
     /// The lift being tested, the slot it fills — which is the *next*
     /// programme's primary pattern, not the predecessor's — and what the attempt
     /// is performed at.
@@ -129,7 +126,13 @@ pub struct Test {
     /// One week, always: [`Test::new`] builds it and nothing else may.
     calendar: Calendar,
     target: TestTarget,
-    authored_at: Timestamp,
+    /// Which microcycle of which published programme this week is, where it is
+    /// one.
+    ///
+    /// **Optional, unlike a progression's.** *Squat 2x Int Entry Test* is a week
+    /// its publisher wrote; a week that exists only to measure a lift before
+    /// something else begins was written by nobody, and may not claim otherwise.
+    provided: Option<ProvidedFrom>,
 }
 
 impl Test {
@@ -171,26 +174,25 @@ impl Test {
     ///
     /// # Errors
     ///
-    /// [`InconsistentProgramme`] for a calendar longer than a test's one week, a
+    /// [`InconsistentMesocycle`] for a calendar longer than a test's one week, a
     /// tested exercise not counted in repetitions, one that does not fill the
     /// slot the pattern names, a repetition count the maximum table cannot
     /// convert, or a weekday map that never runs the session the test is taken
     /// on.
     pub fn new(
-        name: ProgrammeName,
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
-    ) -> Result<Self, InconsistentProgramme> {
+        provided: Option<ProvidedFrom>,
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
-            name,
             tested,
             fills,
             calendar,
             target,
-            authored_at: Timestamp::now(),
+            provided,
         })
     }
 
@@ -204,21 +206,19 @@ impl Test {
     ///
     /// As [`Self::new`].
     pub fn rehydrate(
-        name: ProgrammeName,
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
-        authored_at: Timestamp,
-    ) -> Result<Self, InconsistentProgramme> {
+        provided: Option<ProvidedFrom>,
+    ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
-            name,
             tested,
             fills,
             calendar,
             target,
-            authored_at,
+            provided,
         })
     }
 
@@ -227,12 +227,12 @@ impl Test {
         tested: Tested,
         fills: &SlotFills,
         calendar: &Calendar,
-    ) -> Result<(), InconsistentProgramme> {
+    ) -> Result<(), InconsistentMesocycle> {
         // 1. A test is one week. `Self::week` is the only builder that says so,
         //    and a calendar can also arrive from the store, so this is what
         //    holds for a row somebody wrote by hand.
         if calendar.duration_weeks() != Self::WEEKS {
-            return Err(InconsistentProgramme::TestIsNotOneWeek {
+            return Err(InconsistentMesocycle::TestIsNotOneWeek {
                 weeks: calendar.duration_weeks(),
             });
         }
@@ -242,7 +242,7 @@ impl Test {
         //    and it is the same mistake: a plan whose whole purpose falls on a
         //    day it does not train.
         if !calendar.weekdays().runs(Self::ROLE) {
-            return Err(InconsistentProgramme::TestNeverRunsItsSession { role: Self::ROLE });
+            return Err(InconsistentMesocycle::TestNeverRunsItsSession { role: Self::ROLE });
         }
 
         // 3. The tested lift has to be countable in repetitions and has to fill
@@ -258,15 +258,16 @@ impl Test {
         //    block held; the number belongs to the test, so the check follows
         //    it.
         if rep_max(tested.reps()).is_none() {
-            return Err(InconsistentProgramme::TestRepsTooMany {
+            return Err(InconsistentMesocycle::TestRepsTooMany {
                 reps: tested.reps().as_u32(),
             });
         }
         Ok(())
     }
 
-    pub const fn name(&self) -> &ProgrammeName {
-        &self.name
+    /// Which microcycle of which published programme this week is.
+    pub const fn provided(&self) -> Option<&ProvidedFrom> {
+        self.provided.as_ref()
     }
 
     /// What is being tested, whole.
@@ -299,21 +300,6 @@ impl Test {
 
     pub const fn target(&self) -> TestTarget {
         self.target
-    }
-
-    pub const fn authored_at(&self) -> Timestamp {
-        self.authored_at
-    }
-
-    /// The days this test occupies, for the rule that two programmes may not
-    /// compete for one of them.
-    #[must_use]
-    pub fn window(&self) -> ProgrammeWindow {
-        ProgrammeWindow::new(
-            self.name.clone(),
-            self.calendar.start(),
-            self.calendar.calendar_weeks(),
-        )
     }
 
     /// Whether this slot is the one being tested.

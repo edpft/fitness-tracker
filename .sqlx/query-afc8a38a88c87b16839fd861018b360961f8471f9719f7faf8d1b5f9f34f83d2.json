@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO gym_slot_fill (\n                mesocycle, slot, role, position, exercise, static_sets, static_reps\n            )\n            -- `position` ordered the members of a supersetted slot. Every slot\n            -- now holds one exercise, so it is always zero; the column stays\n            -- because dropping it is a migration this change does not need.\n            VALUES (?, ?, ?, 0, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "afc8a38a88c87b16839fd861018b360961f8471f9719f7faf8d1b5f9f34f83d2"
+}

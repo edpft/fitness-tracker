@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT microcycle AS \"microcycle!: i64\"\n        FROM gym_microcycle\n        WHERE mesocycle = ?\n        ORDER BY position ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "microcycle!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_microcycle",
+            "name": "microcycle"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "df02a32ba0e7ceece0cfaba3d4c8961771fb2b4ea53f3ff890410087a9d13d74"
+}

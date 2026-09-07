@@ -24,9 +24,9 @@ pub mod candidates;
 pub mod delivery;
 pub mod ladder;
 pub mod linear;
+pub mod mesocycle;
 pub mod parameters;
 pub mod prilepin;
-pub mod programme;
 pub mod progression;
 pub mod project;
 pub mod repmax;
@@ -42,7 +42,7 @@ pub mod test;
 pub mod warmup;
 pub mod workout;
 
-pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
+pub use anchor::{Anchor, AnchorProvenance, Anchoring, Entry, InvalidAnchor, UnknownProvenance};
 // `authored::Shape` is deliberately not re-exported here: `shape` is a module
 // at this level and `WorkoutShape` is the shape a session has, so a bare `Shape`
 // at the crate root would read as one of those. Reach it through
@@ -52,7 +52,7 @@ pub use authored::{Authored, AuthoringError};
 // holds that name at the crate root, and the two are different things — a group
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
-pub use block::{BlockWeek, EntryTest, InvalidBlock, Periodised, Phase, WeekPlan};
+pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
 pub use delivery::{
     DeliveryReference, DestinationName, InvalidDelivery, PrescriptionState, SessionOrdinal,
 };
@@ -60,11 +60,11 @@ pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,
 };
+pub use mesocycle::{InconsistentMesocycle, Mesocycle, Progression, check_primary};
 pub use parameters::{
     AccessoryScheme, BackOff, GenerationParameters, InvalidPercentage, Percentage, ResetProtocol,
     Scales, TopSetReps, WarmupStep,
 };
-pub use programme::{InconsistentProgramme, Periodisation, Programme, check_primary};
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
@@ -82,11 +82,8 @@ pub use shape::{
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
-pub use succession::{
-    InvalidProgrammeName, ProgrammeName, ProgrammeWindow, RECENT_WEEKS, is_recent_enough,
-    weeks_between,
-};
+pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, TestTarget, Tested};
 pub use warmup::ramp as warmup_ramp;
-pub use workout::{DerivedFrom, PrescribedWorkout, ProgrammeId};
+pub use workout::{DerivedFrom, MesocycleId, PrescribedWorkout};

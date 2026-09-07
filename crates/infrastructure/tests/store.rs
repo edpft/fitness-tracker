@@ -679,10 +679,11 @@ fn the_schema_refuses_a_success_that_reports_no_counts() {
 /// because what matters is what the file ends up being — and a table added later
 /// without `STRICT` fails here rather than in six months.
 ///
-/// **`programme_slot_fill` is the one exception and it is not an oversight.**
+/// **`gym_slot_fill` is the one exception and it is not an oversight.**
 /// `STRICT` implies `NOT NULL` on every primary-key column, and its nullable
-/// `role` is how `0004` says "this slot does not alternate by session role". It
-/// is listed by name so that adding a second exception has to be deliberate.
+/// `role` is how `0024` says "this slot does not alternate by session role" —
+/// as `0004` did before it, under the name `programme_slot_fill`. It is listed
+/// by name so that adding a second exception has to be deliberate.
 /// `_sqlx_migrations` is sqlx's own table and not ours to declare.
 #[test]
 fn every_table_enforces_its_declared_types() {
@@ -699,7 +700,7 @@ fn every_table_enforces_its_declared_types() {
         .await
         .expect("the schema lists its tables");
 
-        assert_eq!(lax, vec!["programme_slot_fill".to_owned()]);
+        assert_eq!(lax, vec!["gym_slot_fill".to_owned()]);
     });
 }
 

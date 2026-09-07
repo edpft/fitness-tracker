@@ -21,20 +21,20 @@
 //! it: [`Ride::Effort`](session::Ride::Effort) carries a duration and no zone
 //! for the same reason `WeekPlan::WorkUp` carries repetitions and no load.
 
-pub mod programme;
+pub mod mesocycle;
 pub mod session;
 pub mod shape;
 pub mod zone;
 
-pub use programme::{
-    CyclingMicrocycle, CyclingProgramme, CyclingProgrammeId, CyclingWeekdays,
-    InvalidCyclingProgramme, InvalidMicrocycle, InvalidSessionPosition, InvalidVenue,
-    InvalidWeekdays, PlannedRide, PublishedMicrocycle, RideVenue, SessionPosition,
+pub use mesocycle::{
+    CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays,
+    InvalidCyclingMesocycle, InvalidMicrocycle, InvalidSessionPosition, InvalidVenue,
+    InvalidWeekdays, PlannedRide, RideVenue, SessionPosition,
 };
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{
-    Answer, Programme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle, mesocycles,
-    partition, span, zones_lost,
+    Answer, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,
+    mesocycles, partition, span, zones_lost,
 };
 pub use zone::{
     Ftp, FtpProvenance, InvalidFtp, PowerZone, UnknownZone, WattRange, Watts, ZoneBand,

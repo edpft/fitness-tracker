@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO cycling_interval (\n                    mesocycle, microcycle, session, position, zone, seconds\n                )\n                VALUES (?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "cdb9a24760f358de4c80e7f720d7b85cafd1c8398f20aa1ac229d77b29b66dbf"
+}
