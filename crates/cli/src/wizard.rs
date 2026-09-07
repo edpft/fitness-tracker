@@ -1276,6 +1276,9 @@ pub struct GymOutline<'a> {
     pub published: &'a ExternalProgramme,
     /// Progressions after the entry test.
     pub progressions: usize,
+    /// Which of the published programme's microcycles the entry test is. The
+    /// programme's to say (issue #59), not the operator's to remember.
+    pub test_microcycle: u32,
 }
 
 /// The week the plan opens on, measuring the lift the rest of it is about.
@@ -1286,9 +1289,17 @@ pub struct GymOutline<'a> {
 ///
 /// Nothing precedes it in the plan, so there is nothing for its target to
 /// inherit from: it is declared, from the record where the record speaks.
+///
+/// **Which microcycle it is, is the programme's to say and not a question.** It
+/// asked until 2026-09-07, and there was only ever one answer: a test week is
+/// the only thing an entry test can be derived from, so offering the choice
+/// invited a wrong one. The operator: *"it doesn't make sense to ask which
+/// microcycle to derive the entry test from because it can only be derived from
+/// a test week."*
 fn ask_entry_test(
     lift: RepsExercise,
     published: &ExternalProgramme,
+    microcycle: u32,
     best: Option<&Best>,
 ) -> Result<Shape, Failure> {
     println!("\nthe entry test");
@@ -1298,17 +1309,6 @@ fn ask_entry_test(
         }
         parse_count("reps", typed)
     })?;
-    let microcycle = ask_until("  which of its microcycles is it? [4] ", |typed| {
-        if typed.is_empty() {
-            return Ok(SBS_MICROCYCLES);
-        }
-        typed
-            .parse::<u32>()
-            .ok()
-            .filter(|number| *number > 0)
-            .ok_or_else(|| format!("{typed:?} is not a microcycle number"))
-    })?;
-
     let target = match best {
         Some(best) => {
             println!("  {}", best.describe(lift.as_str()));
@@ -1371,6 +1371,7 @@ pub async fn gym_side(
         lift,
         published,
         progressions,
+        test_microcycle,
     } = *outline;
     let history = SqliteExerciseHistory::new(pool.clone());
     let diary = SqliteDiaryStore::new(pool.clone())
@@ -1388,15 +1389,7 @@ pub async fn gym_side(
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(&history, lift, scale).await?;
 
-    let entry = ask_entry_test(lift, published, best.as_ref())?;
-
-    let opening = ask_anchor(
-        "what does the first cycle programme from?",
-        lift.as_str(),
-        best.as_ref(),
-        scale,
-        start,
-    )?;
+    let entry = ask_entry_test(lift, published, test_microcycle, best.as_ref())?;
 
     let mut shapes: Vec<(Date, Shape)> = vec![(start, entry)];
     for cycle in 0..progressions {
@@ -1408,13 +1401,14 @@ pub async fn gym_side(
             Shape::Provided {
                 from: ProvidedFrom::new(published.clone(), numbers)
                     .map_err(|error| Failure::usage(&error))?,
-                // The first states what it opens from; the rest take whatever
-                // the cycle before them measures.
-                anchor: if cycle == 0 {
-                    Anchoring::Stated(Entry::derived(opening))
-                } else {
-                    Anchoring::Inherited
-                },
+                // **Every one of them inherits, the first included.** It
+                // stated an anchor until 2026-09-07, and the operator asked why
+                // the entry test is given a target and then the mesocycle after
+                // it is given the same number again. It is the same number: the
+                // entry test is the week that measures it, and it runs before
+                // this begins. Stating it here would be fixing what that test is
+                // about to find out.
+                anchor: Anchoring::Inherited,
             },
         ));
     }

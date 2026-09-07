@@ -100,7 +100,10 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         SlotId::Core => &[
             "bent-over-cable-chop",
             "cable-twist-up-to-down",
-            "hammer-twists",
+            // `hammer-twists` was here until 2026-09-07. The operator: it is a
+            // forearm movement -- wrist pronation and supination -- rather than
+            // a trunk one. It belongs to no slot this template has, which is
+            // issue #93 rather than a row to move.
             "hanging-knee-raise",
             "dead-bug",
         ],

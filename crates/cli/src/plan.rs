@@ -76,14 +76,18 @@ struct GymProvider {
     /// `sbs-n`: a name below the plan is the publisher's (issue #86).
     programme: &'static str,
     pattern: PrimaryPattern,
+    /// Which of its microcycles the entry test is taken from. *Squat 2x Int* µ4
+    /// is a taper and a one-repetition maximum, which is what a block opens on.
+    test_microcycle: u32,
 }
 
 /// The gym providers this build holds.
 const GYM_PROVIDERS: [GymProvider; 1] = [GymProvider {
-    label: "Stronger By Science, two-day intermediate squat",
+    label: "Stronger By Science, Squat 2x Int",
     provider: "Stronger By Science",
     programme: "Squat 2x Int",
     pattern: PrimaryPattern::KneeDominant,
+    test_microcycle: SBS_MICROCYCLES,
 }];
 
 /// Progressions after the entry test. Three of four, against thirteen weeks of
@@ -365,19 +369,28 @@ fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offere
 /// The microcycle is the programme's own first and only one, so there is nothing
 /// to choose there — which is the point of it being a programme rather than a
 /// microcycle of Build.
+/// Whether any session ridden in this microcycle measures FTP.
+///
+/// **The class says so, not the programme.** Peloton marks the test rides
+/// themselves, which is what makes this answerable for a microcycle chosen out
+/// of the middle of a programme — Build's µ5 is a test week whether it is ridden
+/// as Build's fifth or as our fourth.
+fn measures(read: &Read, microcycle: u32, sessions: &[u32]) -> bool {
+    sessions.iter().any(|session| {
+        read.fetched
+            .get(&(microcycle, *session))
+            .is_some_and(|classes| classes.iter().any(|class| class.is_ftp_test))
+    })
+}
+
 fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
     let number = read.programme.microcycles().first().copied()?;
 
-    let measures = |session: u32| {
-        read.fetched
-            .get(&(number, session))
-            .is_some_and(|classes| classes.iter().any(|class| class.is_ftp_test))
-    };
     let mut taken: Vec<u32> = read
         .programme
         .sessions()
         .into_iter()
-        .filter(|session| measures(*session))
+        .filter(|session| measures(read, number, &[*session]))
         .collect();
     for session in read.programme.sessions() {
         if taken.len() >= sessions {
@@ -455,6 +468,7 @@ async fn author(
             lift,
             published: &published,
             progressions: PROGRESSIONS,
+            test_microcycle: provider.test_microcycle,
         },
     )
     .await?;
@@ -675,7 +689,7 @@ fn report(
     }
 
     println!("\n{}, {} — {lift}\n", gym.provider, gym.programme);
-    println!("  {:>2}  {:<12}{:<24}cycling", "µ", "w/c", "gym");
+    println!("  {:>2}  {:<12}{:<32}cycling", "µ", "w/c", "gym");
     // **A standalone programme on both sides**, and neither row names a
     // microcycle of the block that follows it: the gym's is a `test` programme
     // and cycling's is *Power Zone test*.
@@ -684,7 +698,7 @@ fn report(
     } else {
         "—".to_owned()
     };
-    println!("   0  {start}  {:<24}{test}", "entry test — the 1RM test");
+    println!("   0  {start}  {:<32}{test}", "Entry test — the 1RM test");
 
     let usable: Vec<&Offered> = offered.iter().filter(|one| one.answer.is_some()).collect();
     for (cycle, one) in usable.iter().take(3).enumerate() {
@@ -700,6 +714,12 @@ fn report(
             } else {
                 named
             };
+            // **The cycling column marks its tests too, since 2026-09-07.** The
+            // gym's 1RM lands on every µ4 and was called out; an FTP test falls
+            // wherever the chosen microcycles happen to include one — Build's µ5
+            // is one, and a pairing taking µ1-2-4-5 rides it in its fourth week
+            // — and went unmarked. The flag is the class's own, the same one the
+            // standalone test week is assembled from.
             // **Our microcycle number, not the publisher's.** An answer of
             // Peak's µ5-6-7-8 is our mesocycle's µ1-4: the external programme is
             // one eight-microcycle block and splitting it into two mesocycles is
@@ -708,7 +728,13 @@ fn report(
             // both numbers since 0024 — `ordinal` ours, `published_ordinal`
             // theirs — and this printed the wrong one until 2026-09-07. What
             // they answer is the table above, which still names them.
-            println!("  {ordinal:>2}  {date}  {named:<28}{} µ{within}", one.name);
+            let ridden = answer.microcycles.get(index).copied().unwrap_or_default();
+            let riding = if measures(one.from, ridden, &answer.sessions) {
+                format!("{} µ{within} — the FTP test", one.name)
+            } else {
+                format!("{} µ{within}", one.name)
+            };
+            println!("  {ordinal:>2}  {date}  {named:<32}{riding}");
         }
     }
 
