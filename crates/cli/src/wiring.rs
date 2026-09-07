@@ -27,9 +27,9 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, PelotonWorkoutLandingStore, PelotonWorkouts, SqliteExtractionRunLog,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    HevyWorkoutTranslator, PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore,
+    PelotonWorkoutSamples, PelotonWorkouts, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
     peloton::auth::{PelotonAuth, PelotonCredentials},
 };
 
@@ -125,9 +125,73 @@ pub async fn run(
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
         PelotonWorkoutLandingStore::STREAM => peloton_workouts(command, database).await,
+        PelotonWorkoutSampleLandingStore::STREAM => peloton_samples(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
+    }
+}
+
+/// Peloton's performance graphs, landed into the table shaped for them.
+///
+/// **Landing only**, as its sibling is: there is no cycling workout entity yet
+/// and so nothing to translate a graph into (#56).
+///
+/// A walk here is a page of the workout list plus one request per workout on
+/// it, so the whole history is roughly one request per workout — minutes rather
+/// than seconds. It takes the same lock as any other stream and holds it for
+/// that long, which is why it is a stream of its own: a slow walk of the graphs
+/// cannot block a quick one of the workouts.
+async fn peloton_samples(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = PelotonWorkoutSampleLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::Extract(access) => {
+            let SourceAccess::EmailPassword {
+                base_url,
+                auth_base_url,
+                email,
+                password,
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
+                    given: "an API key",
+                });
+            };
+
+            let auth = PelotonAuth::new(auth_base_url, PelotonCredentials::new(email, password));
+            let extraction = Extraction::new(ExtractionPorts {
+                source: PelotonWorkoutSamples::new(base_url, auth),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+
+            let summary = extraction.extract().await?;
+            Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotYetDerived {
+            stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
     }
 }
 
@@ -276,7 +340,9 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
 #[cfg(test)]
 mod tests {
-    use super::{HevyWorkoutLandingStore, PelotonWorkoutLandingStore};
+    use super::{
+        HevyWorkoutLandingStore, PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore,
+    };
     use crate::catalogue::KNOWN;
 
     /// Every catalogue entry must be reachable, and must name the same stream
@@ -294,6 +360,7 @@ mod tests {
         let wired = [
             HevyWorkoutLandingStore::STREAM,
             PelotonWorkoutLandingStore::STREAM,
+            PelotonWorkoutSampleLandingStore::STREAM,
         ];
 
         for known in &KNOWN {

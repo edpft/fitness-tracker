@@ -190,7 +190,12 @@ pub const SOURCES: [KnownSource; 2] = [
 ];
 
 /// Every stream this build can collect.
-pub const KNOWN: [KnownStream; 2] = [
+///
+/// **Peloton serves two**, which is the case this table was shaped for: one
+/// source, one credential, one API root, and two kinds of thing that resume,
+/// run and lock independently. A graph is a request per workout against a
+/// different endpoint, so it is a second stream rather than a wider payload.
+pub const KNOWN: [KnownStream; 3] = [
     KnownStream {
         source: &SOURCES[0],
         entity: "workouts",
@@ -198,6 +203,10 @@ pub const KNOWN: [KnownStream; 2] = [
     KnownStream {
         source: &SOURCES[1],
         entity: "workouts",
+    },
+    KnownStream {
+        source: &SOURCES[1],
+        entity: "workout_samples",
     },
 ];
 

@@ -19,15 +19,15 @@ pub use hevy::{
     PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
-pub use peloton::{MappedSession, PelotonClass, PelotonWorkouts};
+pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use settings::{Settings, SettingsError};
 pub use store::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonWorkoutLandingStore,
-    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    PelotonWorkoutSampleLandingStore, SqliteCyclingMesocycleStore, SqliteDiaryStore,
+    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog,
+    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };
 
 /// The pool every store is built on, so a composition root can open one and
