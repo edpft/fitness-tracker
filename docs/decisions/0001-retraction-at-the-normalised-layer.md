@@ -5,6 +5,19 @@
 **Amends**: the constitution, § II.3 and § 10. Version 1.0.0 → 1.0.1.
 **Raised by**: `specs/002-hevy-workout-normalisation`, question Q1.
 
+**Amended 2026-09-07.** The text this quotes is gone. Constitution 3.1.0 turned
+§ II.3's per-record rule into a per-source one: an entity may now compose the
+complementary responses a source serves about one thing, because Peloton hands
+back a ride's start, duration and device from one endpoint and its samples from
+another. **This decision still stands, and its reasoning is why the amendment
+was safe.** What the rule protects is stated below and unchanged — reconciling
+accounts belongs to the layer that can see every source — and the amendment
+narrows the rule to exactly that, where the old text also happened to forbid
+composing responses that cannot disagree. A retraction still composes nothing.
+
+Read "exactly one raw landing record" below as the wording in force at the time.
+Nothing about retraction changes.
+
 ## What was decided
 
 A source event withdrawing a record it previously served leaves that record with

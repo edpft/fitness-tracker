@@ -1,7 +1,17 @@
 <!--
 Sync Impact Report
-- Version: 3.0.0, amended 2026-09-06. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 3.1.0, amended 2026-09-07. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 3.1.0 — § II.3's per-record rule became a per-source rule, and § 3.1 was added. A normalised
+  entity may compose the complementary responses one source serves about one thing; what stays
+  forbidden is reconciling records that could disagree, and composing across sources. MINOR: the
+  rule forbids strictly less than it did, so everything that conformed still conforms. Forced by
+  Peloton, which serves a ride's start, duration and device from one endpoint and its sample
+  streams from another — the graph names no workout and carries no time, no zone and no device,
+  so neither response is an entity alone and the old text made an indoor ride unbuildable. The
+  operator chose amendment over joining the two at the canonical layer or landing both responses
+  as one record, 2026-09-07. No decision record: the options were put and one was chosen, which
+  is not a change of direction.
 - 3.0.0 — § 40 redefined. Sign-off is on the design, given in conversation, rather than on the
   merge; a change whose design is settled may be merged by whoever wrote it once the checks
   pass. MAJOR: the rule said human sign-off before merge "is not delegated", and it now is.
@@ -90,11 +100,15 @@ Obligations, common to both:
 
 ### Derivations
 
-**3. Normalised layer.** A function of raw, deterministic translation, and the edit overlay. Per-source and derived per-record: each normalised entity's content is a function of exactly one raw landing record, never of two, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
+**3. Normalised layer.** A function of raw, deterministic translation, and the edit overlay. Per-source: each normalised entity's content is a function of what one source served about one thing, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
 
 **A retraction leaves the record it names with no normalised entity.** Where a source serves an event withdrawing a record it previously served, nothing here stands for that record: a withdrawn record is not something the source is still saying, and an entity for it would be this layer asserting what no source does.
 
-The per-record rule above is not in tension with that, because it is about composition. What it forbids is building one entity out of several records — the work of reconciling accounts, which belongs to the layer that can see every source. A retraction composes nothing: it carries no content, contributes no value, and can only remove, so what an entity says is still exactly what one landing record said. A source's successive records about one thing are versions of one entity rather than entities in their own right, and this layer may act on that where doing so needs nothing it cannot see.
+The per-source rule above is not in tension with that, because it is about composition. What it forbids is reconciling accounts — preferring one record's claim over another's — which belongs to the layer that can see every source. A retraction composes nothing: it carries no content, contributes no value, and can only remove. A source's successive records about one thing are versions of one entity rather than entities in their own right, and this layer may act on that where doing so needs nothing it cannot see.
+
+**3.1. A source that serves one thing at more than one endpoint is still one account.** Where the responses are complementary rather than competing, the entity composes them and this layer is the right place for it. Peloton serves a ride's start, duration and device from its workout list, and that ride's sample streams from a performance graph; the graph names no workout, states no time, no zone and no device, and neither response is an entity on its own. Nothing is being reconciled, because the two do not overlap: there are no rival claims to prefer between, and no judgement that would need a view of other sources.
+
+The test is whether the records *could* disagree. Complementary responses about one thing compose here. Records that assert the same thing do not: two of those are one source contradicting itself, § 10 says the later supersedes, and choosing between them is not this layer's work. Composing across sources remains forbidden outright — that is § 4's, and no amount of complementarity moves it.
 
 What the source once said stays in raw (§ II.1), the retraction is itself a landing record like any other, and re-deriving from raw reproduces exactly this result (§ 7). A retraction naming a record never landed removes nothing and is not an error.
 
@@ -251,4 +265,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 3.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-06
+**Version**: 3.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-07
