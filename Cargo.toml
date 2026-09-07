@@ -37,7 +37,7 @@ jiff = { version = "0.2.35", features = ["tzdb-bundle-always"] }
 sha2 = "0.11.0"
 # PKCE: a code verifier must be unguessable, and its challenge is the
 # base64url of its SHA-256. Neither is something to improvise.
-base64 = "0.22.1"
+base64 = "0.23.1"
 rand = "0.9.2"
 thiserror = "2.0.20"
 
