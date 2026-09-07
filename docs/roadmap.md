@@ -132,14 +132,18 @@ ports, and migration 0024 rebuilding the authored side around a `plan` table.
 14 September carries its rows or does not land. 0024 was applied to a fresh
 store and to copies of both beta stores before it was committed.
 
-**#73 is not closed by it**, and an earlier line here said it was. `fitness plan`
-reads the plan authored under the name given, replaces its cycling programme and
-carries its gym programme through — so it and `fitness programme add` write the
-two halves of one plan in either order without either superseding the other. That
-removes the *half-written* state #73 opens on, and no more: `plan` still asks for
-the gym provider and the lift only to print the layout, builds no gym mesocycle,
-and leaves the caller running `programme add` afterwards. Composing the wizards
-is still to do.
+**#73 closed with it, on the second attempt.** `fitness plan` now authors both
+programmes: the gym questions are asked once for the whole plan through
+`wizard::gym_side`, and four gym mesocycles are laid out from the answers rather
+than typed in over three months.
+
+**What had blocked it was the anchor, not the wizard**, and nobody had written
+that down. Authoring the gym side whole means giving every mesocycle a number its
+loads are shares of, and the cycles beginning 19 October and 16 November open
+from week-4 maxima nobody has lifted yet. So `Anchoring` is `Stated | Inherited`
+(0025): a cycle may defer to whatever the one before it measured, resolved
+against the record when a session is asked for and refused where the record is
+silent. It is the move the chart already makes inside a cycle, one level up.
 
 **Names settled with the operator on 2026-09-06**, and worth not re-deriving:
 the gym programme is *Squat 2x Int* provided by Stronger By Science; the cycling
