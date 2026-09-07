@@ -574,6 +574,31 @@ fn init_without_a_terminal_or_a_zone_refuses_and_creates_nothing() {
     );
 }
 
+/// **`plan` reaches its wizard rather than panicking on the way there.**
+///
+/// It takes a zone like every other authoring command, and until 2026-09-07 it
+/// did not *declare* one: `--timezone` was read off matches that had no such
+/// argument, and clap's answer to that is a panic rather than an error. Nothing
+/// caught it because nothing ran `plan` at all — the wizard needs a terminal, so
+/// the suite had quietly agreed not to try.
+///
+/// Refusing for want of somebody to ask is the whole assertion. It proves the
+/// arguments parsed, the zone resolved and the command dispatched, which is
+/// every step that was broken.
+#[test]
+fn plan_without_a_terminal_refuses_rather_than_panicking() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["plan", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("nobody to ask"),
+        "{}",
+        stderr(&output)
+    );
+}
+
 /// A zone that is not an identifier is caught while the operator is still
 /// thinking about it, rather than on first use.
 #[test]

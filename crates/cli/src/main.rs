@@ -217,6 +217,7 @@ fn plan_command() -> ClapCommand {
                 .default_value("2")
                 .help("Gym sessions per microcycle"),
         )
+        .arg(timezone_argument())
 }
 
 fn cycling_command() -> ClapCommand {
