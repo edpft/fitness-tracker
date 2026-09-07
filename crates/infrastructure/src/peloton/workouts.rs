@@ -31,7 +31,8 @@ use std::{sync::OnceLock, time::Duration};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
-    Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
+    Endpoint, EventKind, EventProvenance, EventTime, PayloadDigest, RawPayload, SourceRecordId,
+    Watermark,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -59,6 +60,68 @@ const PAGE_SIZE: u32 = 50;
 /// (§ II.1); the source serves them together when asked, and asking is what
 /// makes a re-derivation possible without going back to the network.
 const JOINS: &str = "ride";
+
+/// The fields of a class that belong to Peloton's membership rather than to the
+/// operator.
+///
+/// **Found by running the thing twice.** Two extractions minutes apart landed a
+/// second copy of one workout, and the whole difference was
+/// `total_in_progress_workouts` going from 10 to 13 — three strangers starting
+/// that class. Twenty of the fifty classes on the first page are being ridden by
+/// somebody at any moment, and `total_workouts` climbs for every popular class
+/// forever, so comparing whole payloads would make "0 records landed" stop
+/// meaning "nothing changed".
+///
+/// These are excluded from the *revision* only. The bytes are landed exactly as
+/// served, counters and all — § II.1 is not weakened by this, and a later
+/// derivation can read them if it ever wants to.
+///
+/// The list is Peloton's shape and so lives here, in Peloton's adapter, for the
+/// reason a source's identifiers do.
+const VOLATILE_CLASS_FIELDS: [&str; 11] = [
+    "difficulty_estimate",
+    "difficulty_rating_avg",
+    "difficulty_rating_count",
+    "explicit_rating",
+    "overall_estimate",
+    "overall_rating_avg",
+    "overall_rating_count",
+    "rating",
+    "total_in_progress_workouts",
+    "total_ratings",
+    "total_workouts",
+];
+
+/// What the next serving of this workout is compared against.
+///
+/// The payload with the class's global counters removed, re-serialised and
+/// hashed. **Canonical because `serde_json::Map` is a `BTreeMap`** — this build
+/// does not enable `preserve_order` — so keys come out in one order whatever
+/// order they arrived in, and the same workout hashes the same next week. The
+/// test at the foot of this file pins that.
+///
+/// Falls back to the payload's own digest when the bytes will not parse or will
+/// not re-serialise. That is the safe direction: an unreadable payload compares
+/// on everything, so it lands again rather than being wrongly judged unchanged.
+fn revision_of(payload: &RawPayload) -> PayloadDigest {
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(payload.as_bytes()) else {
+        return payload.digest();
+    };
+
+    if let Some(ride) = value
+        .get_mut("ride")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for field in VOLATILE_CLASS_FIELDS {
+            ride.remove(field);
+        }
+    }
+
+    serde_json::to_vec(&value)
+        .ok()
+        .and_then(|bytes| RawPayload::try_from(bytes.as_slice()).ok())
+        .map_or_else(|| payload.digest(), |stable| stable.digest())
+}
 
 /// Who the session belongs to. The list endpoint is addressed by user, so the
 /// walk needs this before it can ask for anything.
@@ -272,6 +335,10 @@ impl WorkoutEventSource for PelotonWorkouts {
                     detail: error.to_string(),
                 })?;
 
+            let payload = RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
+                detail: error.to_string(),
+            })?;
+
             events.push(SourceEvent {
                 source_record_id,
                 // **Always `Updated`.** This source has no event kinds: it
@@ -280,9 +347,8 @@ impl WorkoutEventSource for PelotonWorkouts {
                 // would be inventing a fact the source never stated.
                 provenance: EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
                     .into(),
-                payload: RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
-                    detail: error.to_string(),
-                })?,
+                revision: revision_of(&payload),
+                payload,
             });
         }
 
@@ -294,8 +360,8 @@ impl WorkoutEventSource for PelotonWorkouts {
 
 #[cfg(test)]
 mod tests {
-    use super::{ME_ENDPOINT, WorkoutPage, event_time, workouts_path};
-    use domain::landing::Endpoint;
+    use super::{ME_ENDPOINT, RawPayload, WorkoutPage, event_time, revision_of, workouts_path};
+    use domain::landing::{Endpoint, InvalidPayload};
 
     /// The path the provenance records must be a path, whatever the user id is.
     #[test]
@@ -329,6 +395,76 @@ mod tests {
         assert_eq!(second.page(), 1);
         assert_eq!(second.next().page(), 2);
         assert_eq!(second.user, "u");
+    }
+
+    /// **The bug this exists to stop.** Two extractions minutes apart landed a
+    /// second copy of one workout because three strangers had started the class
+    /// it names. The payloads differ; the revision must not.
+    #[test]
+    fn a_strangers_counter_does_not_make_a_new_revision() {
+        let before = payload(10, 34_353).expect("a payload");
+        let after = payload(13, 34_360).expect("a payload");
+
+        assert_ne!(
+            before.digest(),
+            after.digest(),
+            "the bytes really do differ, or this test proves nothing"
+        );
+        assert_eq!(revision_of(&before), revision_of(&after));
+    }
+
+    /// What the operator actually did still counts as a change.
+    #[test]
+    fn a_change_that_is_ours_is_a_new_revision() {
+        let ridden = payload(10, 34_353).expect("a payload");
+        let edited = RawPayload::try_from(
+            br#"{"id":"w1","total_work":9999,"ride":{"id":"r1","title":"45 min Ride","total_in_progress_workouts":10,"total_workouts":34353}}"#
+                .as_slice(),
+        )
+        .expect("a payload");
+
+        assert_ne!(revision_of(&ridden), revision_of(&edited));
+    }
+
+    /// **Canonical, or the revision is worthless.** `serde_json::Map` is a
+    /// `BTreeMap` in this build — `preserve_order` is off — so the same fields
+    /// hash the same however the source ordered them. If that ever changes,
+    /// every record re-lands on the next run and this fails first.
+    #[test]
+    fn key_order_does_not_change_the_revision() {
+        let one = RawPayload::try_from(
+            br#"{"id":"w1","ride":{"id":"r1","title":"t","total_workouts":1}}"#.as_slice(),
+        )
+        .expect("a payload");
+        let other = RawPayload::try_from(
+            br#"{"ride":{"total_workouts":1,"title":"t","id":"r1"},"id":"w1"}"#.as_slice(),
+        )
+        .expect("a payload");
+
+        assert_ne!(one.digest(), other.digest(), "the bytes differ");
+        assert_eq!(revision_of(&one), revision_of(&other));
+    }
+
+    /// A payload that will not parse compares on everything, so it lands again
+    /// rather than being wrongly judged unchanged.
+    #[test]
+    fn an_unreadable_payload_falls_back_to_its_own_digest() {
+        let bytes = RawPayload::try_from(b"not json at all".as_slice()).expect("a payload");
+        assert_eq!(revision_of(&bytes), bytes.digest());
+    }
+
+    /// One workout, with the two counters that move on their own.
+    ///
+    /// Returns a `Result` rather than unwrapping: the test exemptions for panic
+    /// do not reach a free function, only a `#[test]` one, so the call sites
+    /// below do the expecting.
+    fn payload(in_progress: u32, total: u32) -> Result<RawPayload, InvalidPayload> {
+        RawPayload::try_from(
+            format!(
+                r#"{{"id":"w1","total_work":1234,"ride":{{"id":"r1","title":"45 min Ride","total_in_progress_workouts":{in_progress},"total_workouts":{total}}}}}"#
+            )
+            .into_bytes(),
+        )
     }
 
     /// Unix seconds, which is what this source serves.

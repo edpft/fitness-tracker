@@ -56,9 +56,13 @@ impl LandingStore for HevyWorkoutLandingStore {
         // Most recent, not any. A workout edited to X, then Y, then back to X
         // is the source serving three payloads, and the third differs from the
         // second even though it matches the first.
+        // **Coalesced, because a null revision means "the payload's own".**
+        // Rows landed before 0027 were compared on the whole payload, which for
+        // this source is the same comparison: Hevy serves a workout that is
+        // entirely the operator's.
         let row = sqlx::query!(
             r#"
-            SELECT payload_digest AS "payload_digest!: Vec<u8>"
+            SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
             FROM hevy_workout_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
@@ -125,14 +129,17 @@ impl LandingStore for HevyWorkoutLandingStore {
             let payload = record.payload().as_bytes();
             let digest = record.digest();
             let digest = digest.as_bytes().as_slice();
+            let revision = record.revision();
+            let revision = revision.as_bytes().as_slice();
 
             sqlx::query!(
                 r#"
                 INSERT INTO hevy_workout_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
-                    event_time, payload, payload_digest, run_id, serve_ordinal
+                    event_time, payload, payload_digest, revision_digest,
+                    run_id, serve_ordinal
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
                 endpoint,
                 fetched_at,
@@ -141,6 +148,7 @@ impl LandingStore for HevyWorkoutLandingStore {
                 event_time,
                 payload,
                 digest,
+                revision,
                 run_id,
                 ordinal
             )

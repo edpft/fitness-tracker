@@ -55,7 +55,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
         let id = id.as_str();
         let row = sqlx::query!(
             r#"
-            SELECT payload_digest AS "payload_digest!: Vec<u8>"
+            SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
             FROM peloton_workout_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
@@ -118,14 +118,19 @@ impl LandingStore for PelotonWorkoutLandingStore {
             let payload = record.payload().as_bytes();
             let digest = record.digest();
             let digest = digest.as_bytes().as_slice();
+            // Not the payload's digest: this source serves a class alongside
+            // the workout, and the class's counters are not the operator's.
+            let revision = record.revision();
+            let revision = revision.as_bytes().as_slice();
 
             sqlx::query!(
                 r#"
                 INSERT INTO peloton_workout_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
-                    event_time, payload, payload_digest, run_id, serve_ordinal
+                    event_time, payload, payload_digest, revision_digest,
+                    run_id, serve_ordinal
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
                 endpoint,
                 fetched_at,
@@ -134,6 +139,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
                 event_time,
                 payload,
                 digest,
+                revision,
                 run_id,
                 ordinal
             )
