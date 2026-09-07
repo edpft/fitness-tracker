@@ -27,8 +27,10 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, SqliteExtractionRunLog, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    HevyWorkoutTranslator, PelotonWorkoutLandingStore, PelotonWorkouts, SqliteExtractionRunLog,
+    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
+    peloton::auth::{PelotonAuth, PelotonCredentials},
 };
 
 use crate::{catalogue::KnownStream, config::SourceAccess};
@@ -57,7 +59,12 @@ pub enum Outcome {
     Refused(Box<RefusalReport>),
     Reported {
         extraction: Box<StreamStatus>,
-        derivation: Box<DerivationStatus>,
+        /// `None` for a stream that lands and does not yet derive. Optional
+        /// rather than a zeroed report: "nothing normalises this" and "the
+        /// normalised layer is empty" are different facts, and printing the
+        /// second when the first is true would report a problem that does not
+        /// exist.
+        derivation: Option<Box<DerivationStatus>>,
     },
     Reset {
         previous: Option<Watermark>,
@@ -87,6 +94,13 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
+    #[error(
+        "{stream} lands but nothing derives from it yet: there is no cycling workout entity and \
+         no translator (issue #56). `fitness extract {stream}` and `fitness status` work"
+    )]
+    NotYetDerived { stream: String },
+    #[error("{stream} is reached with a login, and {given} was resolved instead")]
+    WrongCredential { stream: String, given: &'static str },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
 }
@@ -110,9 +124,69 @@ pub async fn run(
 ) -> Result<Outcome, WiringError> {
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
+        PelotonWorkoutLandingStore::STREAM => peloton_workouts(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
+    }
+}
+
+/// Peloton's workout list, landed into the table shaped for it.
+///
+/// **Landing only.** There is no cycling workout entity yet and so no
+/// translator, which makes `normalise` an error here rather than a no-op: a
+/// derivation that silently produces nothing is indistinguishable from one that
+/// ran and found nothing to do.
+async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = PelotonWorkoutLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::Extract(access) => {
+            let SourceAccess::EmailPassword {
+                base_url,
+                auth_base_url,
+                email,
+                password,
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: PelotonWorkoutLandingStore::STREAM.to_owned(),
+                    given: "an API key",
+                });
+            };
+
+            let auth = PelotonAuth::new(auth_base_url, PelotonCredentials::new(email, password));
+            let extraction = Extraction::new(ExtractionPorts {
+                source: PelotonWorkouts::new(base_url, auth),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+
+            let summary = extraction.extract().await?;
+            Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotYetDerived {
+            stream: PelotonWorkoutLandingStore::STREAM.to_owned(),
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
     }
 }
 
@@ -125,8 +199,15 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
     match command {
         Command::Extract(access) => {
+            let SourceAccess::ApiKey { base_url, api_key } = access else {
+                return Err(WiringError::WrongCredential {
+                    stream: HevyWorkoutLandingStore::STREAM.to_owned(),
+                    given: "a login",
+                });
+            };
+
             let extraction = Extraction::new(ExtractionPorts {
-                source: HevyWorkoutEvents::new(access.base_url, access.api_key),
+                source: HevyWorkoutEvents::new(base_url, api_key),
                 landing,
                 resumption,
                 runs,
@@ -179,7 +260,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: Box::new(derivation),
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {
@@ -195,7 +276,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
 #[cfg(test)]
 mod tests {
-    use super::HevyWorkoutLandingStore;
+    use super::{HevyWorkoutLandingStore, PelotonWorkoutLandingStore};
     use crate::catalogue::KNOWN;
 
     /// Every catalogue entry must be reachable, and must name the same stream
@@ -210,7 +291,10 @@ mod tests {
     /// front of an operator.
     #[test]
     fn every_catalogue_entry_is_wired_to_adapters_that_name_it() {
-        let wired = [HevyWorkoutLandingStore::STREAM];
+        let wired = [
+            HevyWorkoutLandingStore::STREAM,
+            PelotonWorkoutLandingStore::STREAM,
+        ];
 
         for known in &KNOWN {
             assert!(

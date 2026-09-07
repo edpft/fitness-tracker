@@ -123,13 +123,27 @@ pub fn timezone(
 /// Resolved only for commands that contact one. `status` and `reset` must keep
 /// working with no credential and no network: a staleness report that is
 /// itself unavailable whenever things go wrong reports nothing worth having.
+///
+/// **One variant per [`Credential`], and the base URLs sit inside them** rather
+/// than beside them, so a composition root cannot reach for an authorisation
+/// root that a key-based source has never had.
 #[derive(Debug, Clone)]
-pub struct SourceAccess {
-    pub base_url: String,
-    pub api_key: String,
+pub enum SourceAccess {
+    ApiKey {
+        base_url: String,
+        api_key: String,
+    },
+    EmailPassword {
+        base_url: String,
+        auth_base_url: String,
+        email: String,
+        password: String,
+    },
 }
 
 impl SourceAccess {
+    /// Resolve a key-based source.
+    ///
     /// The credential is passed in rather than read here so that this is
     /// testable without touching the process environment.
     ///
@@ -163,7 +177,58 @@ impl SourceAccess {
             }
         };
 
-        Ok(Self { base_url, api_key })
+        Ok(Self::ApiKey { base_url, api_key })
+    }
+
+    /// Resolve a login-based source.
+    ///
+    /// **Both halves come from the environment and neither from the credentials
+    /// file.** That file holds one key per source (`infrastructure::credentials`)
+    /// and a login is two values, so storing it there would mean inventing a
+    /// second shape for a file whose whole point is that it has one. Until
+    /// something needs it stored, the environment is where a login lives.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError`] if either half is absent or unreadable.
+    pub fn resolve_login(
+        known: &KnownSource,
+        base_url: String,
+        auth_base_url: String,
+        email: Result<String, VarError>,
+        password: Result<String, VarError>,
+    ) -> Result<Self, ConfigError> {
+        let email = required(email, || known.email_variable(), known.credential_url())?;
+        let password = required(
+            password,
+            || known.password_variable(),
+            known.credential_url(),
+        )?;
+
+        Ok(Self::EmailPassword {
+            base_url,
+            auth_base_url,
+            email,
+            password,
+        })
+    }
+}
+
+/// One environment variable that has to be there and has to be text.
+fn required(
+    value: Result<String, VarError>,
+    variable: impl Fn() -> String,
+    credential_url: &'static str,
+) -> Result<String, ConfigError> {
+    match value {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        Ok(_) | Err(VarError::NotPresent) => Err(ConfigError::MissingApiKey {
+            variable: variable(),
+            credential_url,
+        }),
+        Err(VarError::NotUnicode(_)) => Err(ConfigError::UnreadableApiKey {
+            variable: variable(),
+        }),
     }
 }
 
@@ -288,7 +353,7 @@ mod tests {
             Some("from-the-file"),
         )
         .expect("a key is available");
-        assert_eq!(from_environment.api_key, "from-the-environment");
+        assert_eq!(key_of(&from_environment), "from-the-environment");
 
         let from_file = SourceAccess::resolve(
             known,
@@ -297,7 +362,15 @@ mod tests {
             Some("from-the-file"),
         )
         .expect("a key is available");
-        assert_eq!(from_file.api_key, "from-the-file");
+        assert_eq!(key_of(&from_file), "from-the-file");
+    }
+
+    /// The key a resolution produced, for tests that assert on it.
+    fn key_of(access: &SourceAccess) -> &str {
+        match access {
+            SourceAccess::ApiKey { api_key, .. } => api_key,
+            SourceAccess::EmailPassword { .. } => "<a login, not a key>",
+        }
     }
 
     /// A blank stored key is no more a key than a blank variable is.

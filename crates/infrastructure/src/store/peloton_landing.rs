@@ -1,4 +1,11 @@
-//! Raw landing for `hevy.workouts`.
+//! Raw landing for `peloton.workouts`.
+//!
+//! **A copy of [`super::landing`] rather than a generalisation of it**, and
+//! deliberately. The table name is a string inside `sqlx::query!` and cannot be
+//! a parameter, so "one store, two tables" would mean building the SQL at
+//! runtime and losing the compile-time checking that makes these queries safe.
+//! What the two share is the shape of a landing record, which is § II.1's and
+//! already lives in `domain`.
 
 use application::{LandingStore, StoreError};
 use domain::landing::{
@@ -9,27 +16,20 @@ use sqlx::SqlitePool;
 
 use super::{count_from_storage, digest_from_row, run_id_for_storage, store_error};
 
-/// The landing table for Hevy workouts.
-///
-/// Bound to one table, so there is no stream argument to pass wrongly. A store
-/// for another stream is a different type with a different table, not this one
-/// pointed elsewhere.
+/// The landing table for Peloton workouts.
 #[derive(Debug, Clone)]
-pub struct HevyWorkoutLandingStore {
+pub struct PelotonWorkoutLandingStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl HevyWorkoutLandingStore {
+impl PelotonWorkoutLandingStore {
     /// Which stream this table holds.
     ///
-    /// Declared here, beside the queries that name `hevy_workout_landing`,
-    /// because this is the one link in the chain no type can check: the table
-    /// is a string inside `sqlx::query!`. Everything downstream — what a run
-    /// locks, what it logs, which resumption point it advances, how each
-    /// record is tagged — derives from this constant rather than being passed
-    /// in beside it, so this is the only place the pairing can be got wrong.
-    pub const STREAM: &'static str = "hevy.workouts";
+    /// Declared beside the queries that name `peloton_workout_landing`, for the
+    /// reason given on [`super::landing::HevyWorkoutLandingStore::STREAM`]:
+    /// this is the one link no type can check.
+    pub const STREAM: &'static str = "peloton.workouts";
 
     /// # Errors
     ///
@@ -43,7 +43,7 @@ impl HevyWorkoutLandingStore {
     }
 }
 
-impl LandingStore for HevyWorkoutLandingStore {
+impl LandingStore for PelotonWorkoutLandingStore {
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -53,13 +53,10 @@ impl LandingStore for HevyWorkoutLandingStore {
         id: &SourceRecordId,
     ) -> Result<Option<PayloadDigest>, StoreError> {
         let id = id.as_str();
-        // Most recent, not any. A workout edited to X, then Y, then back to X
-        // is the source serving three payloads, and the third differs from the
-        // second even though it matches the first.
         let row = sqlx::query!(
             r#"
             SELECT payload_digest AS "payload_digest!: Vec<u8>"
-            FROM hevy_workout_landing
+            FROM peloton_workout_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
             LIMIT 1
@@ -90,12 +87,10 @@ impl LandingStore for HevyWorkoutLandingStore {
             .map_err(|error| store_error(&error))?;
 
         let run_id = run_id_for_storage(run)?;
-        // The serve ordinal continues across pages within a run, so the order
-        // the source served events in survives a walk that commits per page.
         let next = sqlx::query!(
             r#"
             SELECT COALESCE(MAX(serve_ordinal), -1) AS "highest!: i64"
-            FROM hevy_workout_landing
+            FROM peloton_workout_landing
             WHERE run_id = ?
             "#,
             run_id
@@ -110,11 +105,9 @@ impl LandingStore for HevyWorkoutLandingStore {
         for record in &records {
             ordinal = ordinal.saturating_add(1);
 
-            // This table is the landing table for an HTTP events feed, and its
-            // columns say so. A record that reached us some other way belongs
-            // in a table shaped for that, not in this one with three columns
-            // left blank — so the destructuring is deliberately exhaustive,
-            // and a second variant will fail to compile here.
+            // Exhaustive for the same reason it is on Hevy's table: these
+            // columns are an HTTP feed's, and a second `Provenance` variant
+            // must fail to compile here rather than land with blanks.
             let Provenance::Event(event) = record.provenance();
 
             let endpoint = event.endpoint().as_str();
@@ -128,7 +121,7 @@ impl LandingStore for HevyWorkoutLandingStore {
 
             sqlx::query!(
                 r#"
-                INSERT INTO hevy_workout_landing (
+                INSERT INTO peloton_workout_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
                     event_time, payload, payload_digest, run_id, serve_ordinal
                 )
@@ -160,7 +153,7 @@ impl LandingStore for HevyWorkoutLandingStore {
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM hevy_workout_landing"#)
+        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM peloton_workout_landing"#)
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
@@ -171,13 +164,13 @@ impl LandingStore for HevyWorkoutLandingStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{HevyWorkoutLandingStore, LandingStream};
+    use super::{LandingStream, PelotonWorkoutLandingStore};
 
     /// The constant every run's identity is derived from must name a stream.
     #[test]
     fn the_declared_stream_is_a_stream() {
         let stream =
-            LandingStream::try_from(HevyWorkoutLandingStore::STREAM).expect("a stream name");
-        assert_eq!(stream.to_string(), "hevy.workouts");
+            LandingStream::try_from(PelotonWorkoutLandingStore::STREAM).expect("a stream name");
+        assert_eq!(stream.to_string(), "peloton.workouts");
     }
 }

@@ -298,7 +298,8 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
   than by a table, because what the operator rides is the most recent one; four
   of the twelve instructors publish none and fall back to Matt Wilpers.
 - **Slot amendments** — needed the next time equipment moves, not before.
-- **A backup of the authored side.** See the risk below; wanted by 14 September.
+- **The Peloton class library, cached** (#94). `fitness plan` fetches sixty-five
+  classes on every authoring and keeps none of them.
 
 ## Deliberately out of scope
 
@@ -314,13 +315,18 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 
 ## Risks
 
-- **The store is the only copy of authored data, and that stops being cheap on
-  14 September.** Raw landing re-fetches from Hevy and everything derived
-  rebuilds; programmes and prescriptions do not. Today they are beta-testing
-  artefacts and losing them costs a re-extract and some re-authoring — so do not
-  be precious with the store, and migrate it or start fresh without ceremony.
-  **Once the autumn block is running, the authored side is a primary input with
-  no way back** (§ 12). A backup wants to exist by then.
+- **A migration after 14 September carries its rows or does not land** (§ 12).
+  Raw landing re-fetches from Hevy and everything derived rebuilds; programmes
+  and prescriptions do not. `local.db` is the **beta** store and stays
+  disposable — migrate it or start fresh without ceremony. The autumn runs on
+  the XDG store, which is empty until it is authored into, and from then on 0024
+  is not the precedent to copy: it dropped sixteen tables and carried nothing.
+  Nothing in `nix flake check` enforces this.
+
+  **A backup is not the remedy, and #68 was closed as a non-issue on
+  2026-09-07.** Production authors a plan once and then performs it, amending a
+  schedule or a slot; the repeated re-authoring that made the store look fragile
+  was beta testing.
 - **`fitness deliver` names one sink and there are now two** (#67). The flat
   command compiles in `hevy` where `gym next` and `cycling next` each reach their
   own; a cycling `KnownDiscipline` stays blocked on there being no Peloton

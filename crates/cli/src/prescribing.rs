@@ -198,7 +198,17 @@ pub async fn deliver(
     )
     .map_err(|error| Failure::usage(&error))?;
 
-    let destination = HevyRoutines::new(access.base_url, access.api_key)
+    // `resolve` above builds the key-based kind, so the other arm is a
+    // contradiction rather than a case: it would mean this source's catalogue
+    // entry and the call that read its credential disagree.
+    let config::SourceAccess::ApiKey { base_url, api_key } = access else {
+        return Err(Failure::message(
+            format!("{} is reached with an API key", known.name()),
+            exit::STORE,
+        ));
+    };
+
+    let destination = HevyRoutines::new(base_url, api_key)
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let delivering = Delivering::new(DeliveryPorts {

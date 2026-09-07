@@ -27,7 +27,7 @@ use application::{ExtractionError, NormalisationError, SourceError, StatusError,
 use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
-use catalogue::KnownStream;
+use catalogue::{Credential, KnownStream};
 use config::{ConfigError, SourceAccess};
 use wiring::{Command, Outcome, WiringError};
 
@@ -524,9 +524,12 @@ impl From<WiringError> for Failure {
             // invocation — a stream named but not wired, or an adapter
             // declaring a stream name that is not one — so neither reads as a
             // usage error the operator could act on.
-            WiringError::Unwired { .. } | WiringError::Stream(_) => {
-                Self::message(error.to_string(), exit::STORE)
-            }
+            WiringError::Unwired { .. }
+            | WiringError::Stream(_)
+            | WiringError::WrongCredential { .. } => Self::message(error.to_string(), exit::STORE),
+            // A usage error, and the one of these the operator can act on: the
+            // stream is real, the command is not one it answers to yet.
+            WiringError::NotYetDerived { .. } => Self::message(error.to_string(), exit::USAGE),
         }
     }
 }
@@ -1077,12 +1080,31 @@ fn source_access(
         .or_else(|| std::env::var(known.base_url_variable()).ok())
         .unwrap_or_else(|| known.default_base_url().to_owned());
 
-    Ok(SourceAccess::resolve(
-        known.source(),
-        base_url,
-        std::env::var(known.api_key_variable()),
-        credentials.key(known.source().name()),
-    )?)
+    let source = known.source();
+    // The kind of credential decides how it is read. Both paths derive their
+    // variables from the source's name, so a third source adds an arm here and
+    // nothing else.
+    Ok(match source.credential() {
+        Credential::ApiKey => SourceAccess::resolve(
+            source,
+            base_url,
+            std::env::var(source.api_key_variable()),
+            credentials.key(source.name()),
+        )?,
+        Credential::EmailPassword {
+            default_auth_base_url,
+        } => {
+            let auth_base_url = std::env::var(source.auth_base_url_variable())
+                .unwrap_or_else(|_| default_auth_base_url.to_owned());
+            SourceAccess::resolve_login(
+                source,
+                base_url,
+                auth_base_url,
+                std::env::var(source.email_variable()),
+                std::env::var(source.password_variable()),
+            )?
+        }
+    })
 }
 
 fn report(stream: &LandingStream, outcome: Outcome) {
@@ -1093,7 +1115,7 @@ fn report(stream: &LandingStream, outcome: Outcome) {
         Outcome::Reported {
             extraction,
             derivation,
-        } => output::status(&extraction, &derivation),
+        } => output::status(&extraction, derivation.as_deref()),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }
 }

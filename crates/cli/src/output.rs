@@ -48,7 +48,7 @@ pub fn run_succeeded(summary: &RunSummary) {
 }
 
 /// Never having run is a fact to report, not an error to raise.
-pub fn status(standing: &StreamStatus, derivation: &DerivationStatus) {
+pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
     println!(
         "{:<16} {:<22} {:>11} {:>15} {:>13}",
         "stream", "last succeeded", "events seen", "records landed", "records held"
@@ -76,7 +76,13 @@ pub fn status(standing: &StreamStatus, derivation: &DerivationStatus) {
         None => println!("\nresumption point: unset — the next run collects the full history"),
     }
 
-    derivation_status(derivation);
+    match derivation {
+        Some(derivation) => derivation_status(derivation),
+        // Not a zeroed report. A stream that lands and does not yet derive has
+        // no derivation to be behind on, and printing "0 of 168" would name a
+        // problem that does not exist.
+        None => println!("\nnothing derives from this stream yet"),
+    }
 }
 
 /// The derivation's half of § 38.
@@ -1115,10 +1121,12 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
         if *outcome == CredentialOutcome::Outstanding
             && let Some(known) = crate::catalogue::source(source)
         {
+            // Every variable this source needs, not just a key: a login has
+            // two, and naming one of them would read as the whole answer.
             println!(
                 "            connect it later with `fitness init --force`, or set {} — \
-                 keys come from {}",
-                known.api_key_variable(),
+                 credentials come from {}",
+                known.required_variables().join(" and "),
                 known.credential_url()
             );
         }
