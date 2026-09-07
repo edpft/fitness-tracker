@@ -15,7 +15,7 @@
 use crate::{
     gym::exercise::Exercise,
     prescription::{
-        anchor::Entry,
+        anchor::Anchoring,
         linear::{Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         schedule::{Calendar, SessionRole},
@@ -40,7 +40,7 @@ pub const GATING: SessionRole = SessionRole::Heavy;
 pub struct Sbs {
     primary: Primary,
     fills: SlotFills,
-    /// The maximum week 1 programmes from.
+    /// Where week 1 programmes from: a maximum, or the cycle before this one.
     ///
     /// **The opening only.** Unlike every other programme here, this number does
     /// not stand for the whole cycle: each repetition-maximum day resets it
@@ -48,7 +48,7 @@ pub struct Sbs {
     /// week 3 is a share of was established in week 2. The anchor is where the
     /// cycle *starts*, and is the last number in it that was not derived from a
     /// performance.
-    entry: Entry,
+    entry: Anchoring,
     calendar: Calendar,
 }
 
@@ -65,7 +65,7 @@ impl Sbs {
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Entry,
+        entry: Anchoring,
         calendar: Calendar,
     ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
@@ -91,10 +91,16 @@ impl Sbs {
         // The same rule the linear template applies, for the same reason: a
         // cycle containing the test that anchors it would read that session
         // twice, once as its own opening and once as work inside it.
-        if entry.anchor().from() >= calendar.start() {
+        //
+        // **An inherited opening cannot break it.** It names no date, and the
+        // mesocycle it defers to is by construction the one before this one —
+        // so there is nothing here to be out of order.
+        if let Some(anchor) = entry.anchor()
+            && anchor.from() >= calendar.start()
+        {
             return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
                 start: calendar.start(),
-                tested: entry.anchor().from(),
+                tested: anchor.from(),
             });
         }
 
@@ -115,7 +121,7 @@ impl Sbs {
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Entry,
+        entry: Anchoring,
         calendar: Calendar,
     ) -> Self {
         Self {
@@ -134,7 +140,8 @@ impl Sbs {
         &self.calendar
     }
 
-    pub const fn entry(&self) -> Entry {
+    /// Where this cycle opens, stated or inherited.
+    pub const fn entry(&self) -> Anchoring {
         self.entry
     }
 

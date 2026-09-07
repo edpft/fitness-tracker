@@ -29,3 +29,7 @@ pub use store::{
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
     SqliteResumptionPointStore, connect,
 };
+
+/// The pool every store is built on, so a composition root can open one and
+/// hand it to several without depending on `sqlx` itself.
+pub use sqlx::SqlitePool;

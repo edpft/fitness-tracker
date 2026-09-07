@@ -328,10 +328,13 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
             }
         }
         Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
-            println!(
-                "  opening maximum {}, and it does not stay fixed",
-                sbs.entry().anchor(),
-            );
+            match sbs.entry().anchor() {
+                Some(anchor) => println!("  opening maximum {anchor}, and it does not stay fixed"),
+                None => println!(
+                    "  opening from whatever the mesocycle before it measures, \
+                     and it does not stay fixed"
+                ),
+            }
             println!(
                 "  four weeks, stated by the chart: 5×5 @ 80%, 4×3 @ 85%, \
                  3×1 @ 90%, 3×3 @ 75%"
@@ -579,11 +582,18 @@ pub fn programme_standing(standing: &application::LadderStanding) {
 
 /// An SBS cycle: where the chart stands, and the one caveat that matters.
 fn sbs_standing(sbs: &domain::prescription::Sbs) {
-    println!(
-        "the chart opens from {} ({})",
-        sbs.entry().anchor().load(),
-        sbs.entry().anchor().provenance(),
-    );
+    match sbs.entry().anchor() {
+        Some(anchor) => println!(
+            "the chart opens from {} ({})",
+            anchor.load(),
+            anchor.provenance(),
+        ),
+        // **Nothing to print, and that is the whole of what it says.** A cycle
+        // authored months ahead cannot state what it opens from: the test it
+        // opens from has not happened. It is resolved when a session is asked
+        // for, and refused if that test was never recorded.
+        None => println!("the chart opens from the mesocycle before it, once that has measured"),
+    }
     println!(
         "  and the maximum moves inside the cycle: each rep-max day resets it, \
          so week 3 is a share of what week 2 produced"

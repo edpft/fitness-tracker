@@ -18,13 +18,14 @@ use domain::{
         exercise::{DurationExercise, Exercise, RepsExercise},
         sequence::AtLeastTwo,
     },
-    plan::{Occupies, Plan, PlanId, PlanName},
+    plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
-        Block, BlockPeriodisation, BlockWeek, DerivedFrom, GatingTopSet, GenerationParameters,
-        Linear, LoadSteps, Mesocycle, Position, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, PrescriptionState, Progress, Progression,
-        RECENT_WEEKS, Sbs, SbsDay, SbsSession, SessionRole, SlotId, SupersetMember, Target, Test,
-        TestTarget, WeekKind, WeekPlan, WorkoutShape, is_recent_enough,
+        Anchor, AnchorProvenance, Anchoring, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
+        GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
+        PrescriptionState, Progress, Progression, RECENT_WEEKS, Sbs, SbsDay, SbsSession,
+        SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
+        WorkoutShape, is_recent_enough,
         linear::SlotContent,
         progress_after, rep_max, rested,
         sbs::chart::{
@@ -335,6 +336,12 @@ where
         // the week actually was.
         let recorded = week_of(&programme, week);
 
+        // **Resolved once, and used for both the loads and the record.** A
+        // cycle that inherits has no authored number, so what it opens from is
+        // the predecessor's measurement — and that is what the prescription
+        // records it as descending from.
+        let opening = self.opening_anchor(&programme, &parameters).await?;
+
         let mut items = Vec::new();
         let mut underivable = Vec::new();
         let standing = Standing {
@@ -365,7 +372,7 @@ where
             date,
             role,
             recorded,
-            derived_from(&plan, &programme, inheritance)?,
+            derived_from(&plan, &programme, inheritance, opening)?,
             parameters,
             parameters_at,
             programme_id,
@@ -454,6 +461,119 @@ where
     ///
     /// A session that recorded no working set advances nothing, which is right:
     /// a week nobody trained leaves the maximum where it was.
+    /// What a mesocycle's loads are shares of, resolved.
+    ///
+    /// `None` for a test, which has a target rather than an anchor, and for a
+    /// provided cycle inheriting from a predecessor that measured nothing.
+    async fn opening_anchor(
+        &self,
+        programme: &Mesocycle,
+        parameters: &GenerationParameters,
+    ) -> Result<Option<Anchor>, PrescriptionError> {
+        match programme {
+            Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+                self.opening_of(sbs, parameters).await
+            }
+            Mesocycle::Progression(periodisation) => Ok(periodisation.anchor()),
+            Mesocycle::Test(_) => Ok(None),
+        }
+    }
+
+    /// What a cycle opens from: the number it states, or the one before it.
+    ///
+    /// **An inherited opening is resolved against the record, never the plan.**
+    /// A cycle plans to leave a maximum behind — week 4 day 2 is a one-repetition
+    /// maximum and is not optional — but planning to measure is not measuring. A
+    /// predecessor nobody trained leaves nothing, and this answers `None` rather
+    /// than reaching for the number that cycle was authored with.
+    ///
+    /// **What comes back is a `Tested` anchor dated to the predecessor**, because
+    /// that is what it is: a measurement, taken on a day the record names. It is
+    /// recorded with the prescription like any other, so a session issued in
+    /// November says which test it descended from.
+    async fn opening_of(
+        &self,
+        sbs: &Sbs,
+        parameters: &GenerationParameters,
+    ) -> Result<Option<Anchor>, PrescriptionError> {
+        match sbs.entry() {
+            Anchoring::Stated(entry) => Ok(Some(entry.anchor())),
+            Anchoring::Inherited => {
+                let Some((_, before_plan, before)) = self
+                    .ports
+                    .programmes
+                    .preceding(sbs.calendar().start())
+                    .await?
+                else {
+                    return Ok(None);
+                };
+                self.left_behind(&before_plan, &before, parameters).await
+            }
+        }
+    }
+
+    /// The maximum a mesocycle actually measured, as the record has it.
+    ///
+    /// **Two things measure one** ([`Mesocycle::produces_maximum`]): a test week,
+    /// which is the whole of what it is for, and a provided cycle, whose last
+    /// session is a one-repetition maximum. A ladder measures nothing even when
+    /// its last single felt like a test.
+    ///
+    /// A provided predecessor is asked through [`Self::sbs_maximum`] rather than
+    /// read directly, so the chart converts what was lifted into what the next
+    /// cycle programmes from — the same arithmetic that moves the maximum
+    /// *inside* a cycle, applied across the join. Boxed because that call comes
+    /// back here for its own opening, and a chain of three cycles is three hops.
+    fn left_behind<'a>(
+        &'a self,
+        plan: &'a PlanName,
+        mesocycle: &'a Mesocycle,
+        parameters: &'a GenerationParameters,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<Option<Anchor>, PrescriptionError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let span = mesocycle.span();
+            let measured = match mesocycle {
+                Mesocycle::Progression(Progression::Provided { cycle: before, .. }) => {
+                    // Asked the day after it ends, so its own last session — the
+                    // one-repetition maximum — counts toward what it leaves.
+                    let after = span.end().tomorrow().unwrap_or_else(|_| span.end());
+                    Some(self.sbs_maximum(plan, before, parameters, after).await?)
+                }
+                Mesocycle::Test(test) => match test.primary_exercise() {
+                    Exercise::Reps(primary) => self.measured_in(primary, span).await?,
+                    Exercise::Duration(_) | Exercise::Distance(_) => None,
+                },
+                Mesocycle::Progression(
+                    Progression::Linear(_) | Progression::BlockPeriodisation(_),
+                ) => None,
+            };
+
+            Ok(measured.and_then(|load| {
+                Anchor::new(load, None, AnchorProvenance::Tested, span.end()).ok()
+            }))
+        })
+    }
+
+    /// The heaviest completed top set of a lift inside a span.
+    ///
+    /// A failed attempt says what could not be lifted, which is not a maximum.
+    async fn measured_in(
+        &self,
+        primary: RepsExercise,
+        span: Span,
+    ) -> Result<Option<Kg>, PrescriptionError> {
+        let performances = self.ports.history.performances(primary).await?;
+        Ok(performances
+            .iter()
+            .filter(|performance| span.covers(performance.on))
+            .filter_map(top_set_of)
+            .filter(|top| top.completed)
+            .map(|top| top.load)
+            .max())
+    }
+
     async fn sbs_maximum(
         &self,
         plan: &PlanName,
@@ -461,7 +581,12 @@ where
         parameters: &GenerationParameters,
         before: Date,
     ) -> Result<Kg, PrescriptionError> {
-        let mut maximum = sbs.entry().anchor().load();
+        let Some(opening) = self.opening_of(sbs, parameters).await? else {
+            return Err(PrescriptionError::NoInheritedMaximum {
+                start: sbs.calendar().start(),
+            });
+        };
+        let mut maximum = opening.load();
         let Exercise::Reps(primary) = sbs.primary_exercise() else {
             return Ok(maximum);
         };
@@ -792,9 +917,21 @@ fn derived_from(
     plan: &PlanName,
     programme: &Mesocycle,
     inheritance: Inheritance,
+    opening: Option<Anchor>,
 ) -> Result<DerivedFrom, PrescriptionError> {
     match programme {
-        Mesocycle::Progression(periodisation) => Ok(DerivedFrom::Anchor(periodisation.anchor())),
+        // **The resolved anchor, not the authored one.** A ladder and a block
+        // state theirs and the two are the same value; a provided cycle that
+        // inherits states none, and what it opens from is the maximum its
+        // predecessor measured. Absent, the session is refused rather than
+        // issued against nothing.
+        Mesocycle::Progression(_) => {
+            opening
+                .map(DerivedFrom::Anchor)
+                .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
+                    start: programme.calendar().start(),
+                })
+        }
         Mesocycle::Test(test) => {
             inheritance
                 .target
@@ -1009,8 +1146,13 @@ fn sbs_load(
 
     // **What the record says the cycle is at**, falling back to the opening
     // anchor only when nothing has been read — which is week one, and a cycle
-    // whose primary has no load scale.
-    let maximum = maximum.unwrap_or_else(|| sbs.entry().anchor().load());
+    // whose primary has no load scale. A cycle that inherits has no authored
+    // number to fall back to: resolving it needs the store, which is the
+    // caller's business, so an unresolved one is underivable here rather than
+    // opened from a guess.
+    let Some(maximum) = maximum.or_else(|| sbs.entry().anchor().map(Anchor::load)) else {
+        return Err(UnderivableReason::NoOpeningMaximum);
+    };
     let increment = steps.step_at(maximum);
 
     match day {

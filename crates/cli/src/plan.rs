@@ -35,7 +35,7 @@ use domain::{
         Answer, CyclingMesocycle, CyclingMicrocycle, CyclingWeekdays, PlannedRide,
         PublishedProgramme, SessionPosition,
     },
-    gym::{OperatorZone, sequence::NonEmpty},
+    gym::{OperatorZone, exercise::RepsExercise, sequence::NonEmpty},
     plan::{Plan, PlanName, Programme},
     prescription::PrimaryPattern,
     provider::{ExternalProgramme, ProgrammeName, Provider},
@@ -85,6 +85,10 @@ const GYM_PROVIDERS: [GymProvider; 1] = [GymProvider {
     programme: "Squat 2x Int",
     pattern: PrimaryPattern::KneeDominant,
 }];
+
+/// Progressions after the entry test. Three of four, against thirteen weeks of
+/// cycling (decision 0034).
+const PROGRESSIONS: usize = 3;
 
 /// Microcycles in a mesocycle, and where the test sits in an SBS one.
 ///
@@ -199,10 +203,14 @@ pub async fn generate(
         .take(3)
         .collect();
     author(
+        &pool,
+        zone,
         SqlitePlanStore::new(pool.clone(), zone.clone()),
         SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
-        SqliteGenerationParameterStore::new(pool),
+        SqliteGenerationParameterStore::new(pool.clone()),
         start,
+        gym,
+        lift,
         &riding_days,
         test.as_ref()
             .map(|sessions| (&testing, sessions.as_slice())),
@@ -383,26 +391,37 @@ fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
     Some(taken)
 }
 
-/// Write the cycling side of a plan: the test microcycle, then the three
-/// mesocycles.
+/// Write the plan: both programmes, and every mesocycle in them.
+///
+/// **Both halves or neither** (issue #73). It printed thirteen weeks and wrote
+/// the cycling five of them until 2026-09-07, leaving the gym side to
+/// `fitness programme add` afterwards — which meant the command that exists to
+/// author a hybrid plan authored half of one. The gym questions are the wizard's
+/// own, asked through [`wizard::gym_side`] rather than restated here.
+#[expect(clippy::too_many_arguments, reason = "one plan's worth of answers")]
 async fn author(
+    pool: &infrastructure::SqlitePool,
+    zone: &OperatorZone,
     plans: SqlitePlanStore,
     gym: SqliteGymMesocycleStore,
     parameter_store: SqliteGenerationParameterStore,
     start: Date,
+    provider: &GymProvider,
+    lift: RepsExercise,
     riding_days: &[Weekday],
     test: Option<(&Read, &[u32])>,
     taken: &[&Offered<'_>],
 ) -> Result<(), Failure> {
     println!();
-    let write = wizard::ask_until(
-        "Author the cycling side of this? [y/N] ",
-        |typed| match typed.to_lowercase().as_str() {
-            "" | "n" | "no" => Ok(false),
-            "y" | "yes" => Ok(true),
-            other => Err(format!("{other:?} is not y or n")),
-        },
-    )?;
+    let write =
+        wizard::ask_until(
+            "Author this plan — both programmes? [y/N] ",
+            |typed| match typed.to_lowercase().as_str() {
+                "" | "n" | "no" => Ok(false),
+                "y" | "yes" => Ok(true),
+                other => Err(format!("{other:?} is not y or n")),
+            },
+        )?;
     if !write {
         println!("  nothing written.");
         return Ok(());
@@ -415,6 +434,30 @@ async fn author(
         PlanName::try_from(typed.to_owned())
             .map_err(|error| format!("{error} — a plan is identified by its name"))
     })?;
+
+    // **Before the first question, not after the last.** A plan cannot be
+    // authored against no parameters (§ 14), and finding that out at the end
+    // costs every answer just given.
+    let parameters = wizard::ready(&parameter_store).await?;
+
+    let published = ExternalProgramme::new(
+        Provider::try_from(provider.provider.to_owned()).map_err(|error| Failure::usage(&error))?,
+        ProgrammeName::try_from(provider.programme.to_owned())
+            .map_err(|error| Failure::usage(&error))?,
+    );
+    let gym_side = wizard::gym_side(
+        pool,
+        zone,
+        &parameters,
+        &wizard::GymOutline {
+            start,
+            pattern: provider.pattern,
+            lift,
+            published: &published,
+            progressions: PROGRESSIONS,
+        },
+    )
+    .await?;
 
     let mut at = start;
     let mut mesocycles = Vec::new();
@@ -450,9 +493,8 @@ async fn author(
         .named(&name)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let plan = with_cycling(name, existing.as_ref(), mesocycles)?;
+    let plan = with_both(name, existing.as_ref(), gym_side.clone(), mesocycles)?;
 
-    let parameters = wizard::ready(&parameter_store).await?;
     let (_, authored) = application::prescribe::Authoring::new(plans, gym, parameter_store)
         .author(&plan, &parameters)
         .await
@@ -464,29 +506,47 @@ async fn author(
         Authored::Modified => "re-authored",
     };
     println!("  {verb} {}:", plan.name());
-    for (from, weeks, on) in &reported {
-        println!("    {from}: {weeks} weeks from {on}");
+    println!("    gym");
+    for mesocycle in &gym_side {
+        println!(
+            "      {}: {} weeks from {}",
+            mesocycle.template(),
+            mesocycle.calendar().duration_weeks(),
+            mesocycle.calendar().start()
+        );
     }
-    println!("\n  fitness cycling next now answers without a start date.");
+    println!("    cycling");
+    for (from, weeks, on) in &reported {
+        println!("      {from}: {weeks} weeks from {on}");
+    }
+    println!("\n  fitness prescribe and fitness cycling next both answer now.");
     Ok(())
 }
 
-/// The plan with these mesocycles as its cycling programme.
+/// The plan with these mesocycles as its two programmes.
 ///
 /// **The cycling side is replaced whole, and the gym side carried through.**
 /// This command generates the four together — a test week and three mesocycles
 /// laid against one another — so there is no sense in which one of them could be
 /// amended alone. What must survive is the gym programme, which
 /// `fitness programme add` wrote and this command knows nothing about.
-fn with_cycling(
+fn with_both(
     name: PlanName,
     existing: Option<&Plan>,
+    gym: Vec<domain::prescription::Mesocycle>,
     mesocycles: Vec<CyclingMesocycle>,
 ) -> Result<Plan, Failure> {
+    // **Both sides replaced, since this command now authors both.** It carried
+    // the gym programme through until 2026-09-07, when it wrote only cycling and
+    // `programme add` wrote the other half; re-running it then would leave a gym
+    // programme from an older answer beside a cycling one from this run. What
+    // `programme add` adds afterwards still survives — it reads the plan back
+    // and appends to whichever half it is adding to.
+    let _ = existing;
     Plan::new(
         name,
         jiff::Timestamp::now(),
-        existing.and_then(Plan::gym).cloned(),
+        Some(Programme::new(gym).map_err(|error| Failure::usage(&error))?),
         Some(Programme::new(mesocycles).map_err(|error| Failure::usage(&error))?),
     )
     .map_err(|error| Failure::usage(&error))

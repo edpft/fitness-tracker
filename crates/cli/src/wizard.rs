@@ -43,10 +43,10 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Anchor, AnchorProvenance, Authored, Block, Calendar, EntryTest, Fill, GenerationParameters,
-        InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern, SessionRole, Skip, SlotFills,
-        SlotId, StaticFill, TestTarget, Weekdays, authored::Shape, block::Block as BlockPlan,
-        rep_max,
+        Anchor, AnchorProvenance, Anchoring, Authored, Block, Calendar, Entry, EntryTest, Fill,
+        GenerationParameters, InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern,
+        SessionRole, Skip, SlotFills, SlotId, StaticFill, TestTarget, Weekdays, authored::Shape,
+        block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline},
@@ -1099,9 +1099,14 @@ async fn ask_climb(
         }
         // The chart states every set it runs, so there is nothing to ask about
         // the shape — only about who published it.
+        //
+        // **Stated, because this command adds one cycle at a time.** The
+        // operator running it has the predecessor's test behind him and a number
+        // to give. `fitness plan` authors the whole chain months ahead, where
+        // only the first cycle has one — the rest inherit.
         Climbing::Sbs => Shape::Provided {
             from: ask_provided((1..=SBS_MICROCYCLES).collect())?,
-            anchor,
+            anchor: Anchoring::Stated(Entry::derived(anchor)),
         },
         Climbing::Block => {
             let entry_reps = ask_until(
@@ -1256,6 +1261,193 @@ fn with_gym(
         existing.and_then(Plan::cycling).cloned(),
     )
     .map_err(|error| Failure::usage(&error))
+}
+
+/// What `plan` already knows before the gym questions begin.
+///
+/// A struct rather than five arguments because they arrive together and mean one
+/// thing: the gym programme the operator has already chosen by picking a
+/// provider, a lift and a start date.
+pub struct GymOutline<'a> {
+    pub start: Date,
+    pub pattern: PrimaryPattern,
+    pub lift: RepsExercise,
+    /// Who published it, and under what name.
+    pub published: &'a ExternalProgramme,
+    /// Progressions after the entry test.
+    pub progressions: usize,
+}
+
+/// The week the plan opens on, measuring the lift the rest of it is about.
+///
+/// **The published programme's own**, not a generic week measuring a lift:
+/// *Squat 2x Int* µ4 is a taper and a one-repetition maximum, which is what the
+/// block opens on (issue #59).
+///
+/// Nothing precedes it in the plan, so there is nothing for its target to
+/// inherit from: it is declared, from the record where the record speaks.
+fn ask_entry_test(
+    lift: RepsExercise,
+    published: &ExternalProgramme,
+    best: Option<&Best>,
+) -> Result<Shape, Failure> {
+    println!("\nthe entry test");
+    let reps = ask_until("  attempted at how many reps? [1] ", |typed| {
+        if typed.is_empty() {
+            return Ok(1);
+        }
+        parse_count("reps", typed)
+    })?;
+    let microcycle = ask_until("  which of its microcycles is it? [4] ", |typed| {
+        if typed.is_empty() {
+            return Ok(SBS_MICROCYCLES);
+        }
+        typed
+            .parse::<u32>()
+            .ok()
+            .filter(|number| *number > 0)
+            .ok_or_else(|| format!("{typed:?} is not a microcycle number"))
+    })?;
+
+    let target = match best {
+        Some(best) => {
+            println!("  {}", best.describe(lift.as_str()));
+            println!(
+                "   1. what the record stands at{:>13}",
+                format!("{}kg", best.maximum)
+            );
+            println!("   2. a number of my own");
+            let choice = ask_until("  which? [1] ", |typed| match typed {
+                "" | "1" => Ok(1),
+                "2" => Ok(2),
+                other => Err(format!("{other:?} is not one of the two")),
+            })?;
+            if choice == 1 {
+                TestTarget::Declared(best.maximum)
+            } else {
+                TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?)
+            }
+        }
+        None => TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?),
+    };
+
+    Ok(Shape::Test {
+        reps: count(reps)?,
+        target,
+        provided: Some(
+            ProvidedFrom::new(published.clone(), vec![microcycle])
+                .map_err(|error| Failure::usage(&error))?,
+        ),
+    })
+}
+
+/// The gym half of a plan: an entry test and the progressions after it.
+///
+/// **This is `plan` composing the wizard rather than restating it** (issue #73).
+/// Every question here is one `programme add` already asks; what differs is that
+/// they are asked once for the whole plan instead of once per mesocycle, and the
+/// four mesocycles are laid out from the answers rather than typed in over three
+/// months.
+///
+/// **Only the first progression states an anchor.** The rest open from the cycle
+/// before them — week 4 day 2 is a one-repetition maximum, so each leaves the
+/// next one's opening behind it — and those tests have not happened when the
+/// plan is authored. Asking for them would be asking the operator to invent
+/// three numbers; see [`Anchoring::Inherited`].
+///
+/// # Errors
+///
+/// [`Failure`] if the schedule gives the gym no days as of `start`, if there is
+/// nobody to ask, or if the answers do not assemble into a mesocycle.
+pub async fn gym_side(
+    pool: &infrastructure::SqlitePool,
+    zone: &OperatorZone,
+    parameters: &GenerationParameters,
+    outline: &GymOutline<'_>,
+) -> Result<Vec<Mesocycle>, Failure> {
+    let GymOutline {
+        start,
+        pattern,
+        lift,
+        published,
+        progressions,
+    } = *outline;
+    let history = SqliteExerciseHistory::new(pool.clone());
+    let diary = SqliteDiaryStore::new(pool.clone())
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    println!("\nthe gym side: asked once, for the whole plan\n");
+    let (weekdays, _) = ask_weekdays(&diary, start)?;
+
+    println!("\nAnd the slots. A number picks from the list; anything else is read");
+    println!("as an exercise, so something you have never done is one word away.");
+    let fills = ask_fills(&history, pattern, Exercise::Reps(lift)).await?;
+
+    let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
+    let best = best_of(&history, lift, scale).await?;
+
+    let entry = ask_entry_test(lift, published, best.as_ref())?;
+
+    let opening = ask_anchor(
+        "what does the first cycle programme from?",
+        lift.as_str(),
+        best.as_ref(),
+        scale,
+        start,
+    )?;
+
+    let mut shapes: Vec<(Date, Shape)> = vec![(start, entry)];
+    for cycle in 0..progressions {
+        let weeks = 1 + cycle * (SBS_MICROCYCLES as usize);
+        let at = week_after(start, weeks)?;
+        let numbers: Vec<u32> = (1..=SBS_MICROCYCLES).collect();
+        shapes.push((
+            at,
+            Shape::Provided {
+                from: ProvidedFrom::new(published.clone(), numbers)
+                    .map_err(|error| Failure::usage(&error))?,
+                // The first states what it opens from; the rest take whatever
+                // the cycle before them measures.
+                anchor: if cycle == 0 {
+                    Anchoring::Stated(Entry::derived(opening))
+                } else {
+                    Anchoring::Inherited
+                },
+            },
+        ));
+    }
+
+    let mut mesocycles = Vec::new();
+    for (at, shape) in shapes {
+        let answers = Authored {
+            start: at,
+            pattern,
+            primary_exercise: Exercise::Reps(lift),
+            weekdays: weekdays.clone(),
+            shape,
+        };
+        let skips = interruptions(&diary, &answers);
+        mesocycles.push(
+            domain::prescription::authored::programme(
+                answers,
+                fills.clone(),
+                &skips,
+                zone.as_time_zone(),
+                parameters,
+            )
+            .map_err(|error| Failure::usage(&error))?,
+        );
+    }
+    Ok(mesocycles)
+}
+
+/// The Monday `weeks` after this one.
+fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
+    let weeks = i64::try_from(weeks).map_err(|_| usage("a plan longer than the calendar"))?;
+    date.checked_add(jiff::Span::new().weeks(weeks))
+        .map_err(|_| usage("a plan running past the end of the calendar"))
 }
 
 /// The days this programme's window loses, from the schedule.

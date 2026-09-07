@@ -636,6 +636,12 @@ pub enum UnderivableReason {
     /// The programme's span and duration do not make a ladder.
     #[error("the programme's span and duration do not make a ladder")]
     NoLadder,
+    /// A provided cycle opening from the one before it, resolved to nothing.
+    ///
+    /// The predecessor measured no maximum, so there is no number for the
+    /// chart's percentages to be shares of.
+    #[error("the cycle before this one has not measured the maximum this opens from")]
+    NoOpeningMaximum,
     /// No scale has been authored for the implement this exercise is loaded on.
     ///
     /// Reported rather than defaulted to the barbell's steps: a prescription

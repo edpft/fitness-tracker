@@ -149,6 +149,20 @@ pub enum PrescriptionError {
     /// authored at all — the ordinary first-run case — and a date that falls in
     /// a gap between two mesocycles, before the first, or after the last.
     /// Neither is a fault, and the CLI has something helpful to say about both.
+    /// A provided cycle opening from the one before it, whose predecessor has
+    /// measured nothing.
+    ///
+    /// **Refused rather than opened from the authored number**, because there is
+    /// no authored number: a cycle that inherits states none. The week-4
+    /// one-repetition maximum before it is what it opens from, and until that is
+    /// in the record there is nothing to be a share of. Recording the test
+    /// answers it.
+    #[error(
+        "the cycle beginning {start} opens from the one before it, and that one \
+         has not measured a maximum yet — record its test"
+    )]
+    NoInheritedMaximum { start: jiff::civil::Date },
+
     #[error("no plan covers {date}, so there is nothing to prescribe for it")]
     NoPlan { date: Date },
 

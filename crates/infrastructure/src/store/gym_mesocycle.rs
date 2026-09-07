@@ -33,9 +33,9 @@ use domain::{
     gym::{Kg, OperatorZone, RepCount, exercise::Exercise},
     plan::{Occupies, PlanName},
     prescription::{
-        Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Entry, Linear, Mesocycle,
-        MesocycleId, PerRole, Progression, Sbs, SessionRole, Skip, SlotId, Test, TestTarget,
-        Tested,
+        Anchor, AnchorProvenance, Anchoring, BlockPeriodisation, Calendar, Entry, Linear,
+        Mesocycle, MesocycleId, PerRole, Progression, Sbs, SessionRole, Skip, SlotId, Test,
+        TestTarget, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -451,7 +451,7 @@ fn rehydrate_test(
 fn rehydrate_periodisation(
     common: Common,
     template: &str,
-    entry: Entry,
+    entry: Option<Entry>,
     gating_role: Option<String>,
     entry_test: Option<EntryTest>,
 ) -> Result<Mesocycle, StoreError> {
@@ -470,6 +470,10 @@ fn rehydrate_periodisation(
             .ok_or_else(|| corrupt(&"a provided cycle that names no programme"))?;
         // `stored` rather than `new`: the checks ran when it was written, and
         // re-refusing a row now would make a rule change unreadable data.
+        // **A null anchor is the inherited case, not a corrupt row.** Only a
+        // provided cycle may leave it out: it opens from whatever the mesocycle
+        // before it measured, which is not knowable when the plan is authored.
+        let entry = entry.map_or(Anchoring::Inherited, Anchoring::Stated);
         return Ok(Mesocycle::Progression(Progression::Provided {
             from,
             cycle: Sbs::stored(
@@ -481,6 +485,10 @@ fn rehydrate_periodisation(
             ),
         }));
     }
+
+    // A ladder and a block are every load a share of their anchor, so an absent
+    // one here is a row the `CHECK` should have refused.
+    let entry = entry.ok_or_else(|| corrupt(&"a programme that climbs from no anchor"))?;
     Ok(Mesocycle::Progression(if template == "linear" {
         Progression::Linear(
             Linear::rehydrate(primary, common.fills, entry, common.calendar)
@@ -531,17 +539,22 @@ fn read_entry_test(
 /// The anchor and its opening, from the columns a programme that climbs must
 /// carry.
 ///
-/// Every one of them is nullable in the schema and non-null by `CHECK` for these
-/// templates, so a `None` here is a row that got past the database — corrupt,
-/// and reported as such rather than defaulted.
+/// **`None` is an absent anchor, which only a provided cycle may have.** It
+/// inherits: what it opens from is whatever the mesocycle before it measured, so
+/// there is no number to store (issue #86). The `CHECK` still refuses a null
+/// anchor for a ladder or a block, where an absent one is a row that got past
+/// the database — corrupt, and reported as such by the caller rather than
+/// defaulted.
 fn read_entry(
     grams: Option<i64>,
     failed_grams: Option<i64>,
     provenance: Option<String>,
     from: Option<String>,
     opening_grams: Option<i64>,
-) -> Result<Entry, StoreError> {
-    let grams = grams.ok_or_else(|| corrupt(&"a programme that climbs from no anchor"))?;
+) -> Result<Option<Entry>, StoreError> {
+    let Some(grams) = grams else {
+        return Ok(None);
+    };
     let load = u64::try_from(grams)
         .map(Kg::from_grams)
         .map_err(|_| corrupt(&"an anchor stored as a negative mass"))?;
@@ -572,7 +585,7 @@ fn read_entry(
                 .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
         })
         .transpose()?;
-    Ok(Entry::new(anchor, declared_opening))
+    Ok(Some(Entry::new(anchor, declared_opening)))
 }
 
 impl MesocycleStore for SqliteGymMesocycleStore {

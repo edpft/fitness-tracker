@@ -42,7 +42,7 @@ pub mod test;
 pub mod warmup;
 pub mod workout;
 
-pub use anchor::{Anchor, AnchorProvenance, Entry, InvalidAnchor, UnknownProvenance};
+pub use anchor::{Anchor, AnchorProvenance, Anchoring, Entry, InvalidAnchor, UnknownProvenance};
 // `authored::Shape` is deliberately not re-exported here: `shape` is a module
 // at this level and `WorkoutShape` is the shape a session has, so a bare `Shape`
 // at the crate root would read as one of those. Reach it through

@@ -21,7 +21,7 @@ use jiff::{civil::Date, tz::TimeZone};
 use crate::{
     gym::{Kg, RepCount, exercise::Exercise},
     prescription::{
-        anchor::{Anchor, Entry},
+        anchor::{Anchor, Anchoring, Entry},
         block::{BlockPeriodisation, EntryTest},
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
@@ -117,7 +117,10 @@ pub enum Shape {
     Provided {
         /// Which microcycles of which external programme.
         from: ProvidedFrom,
-        anchor: Anchor,
+        /// A stated maximum, or the cycle before this one. A plan holding three
+        /// of these can only state the first: the other two open from tests that
+        /// have not happened when it is authored.
+        anchor: Anchoring,
     },
 }
 
@@ -276,13 +279,7 @@ pub fn programme(
             let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
             Ok(Mesocycle::Progression(Progression::Provided {
                 from,
-                cycle: Sbs::new(
-                    pattern,
-                    primary_exercise,
-                    fills,
-                    Entry::derived(anchor),
-                    calendar,
-                )?,
+                cycle: Sbs::new(pattern, primary_exercise, fills, anchor, calendar)?,
             }))
         }
     }

@@ -137,7 +137,7 @@ impl Mesocycle {
     pub const fn anchor(&self) -> Option<Anchor> {
         match self {
             Self::Test(_) => None,
-            Self::Progression(periodisation) => Some(periodisation.anchor()),
+            Self::Progression(periodisation) => periodisation.anchor(),
         }
     }
 
@@ -224,10 +224,19 @@ impl Mesocycle {
             // that opens the sequence, or the previous cycle's own week 4. There
             // is no case where the cycle is about to measure its own opening, so
             // no carve-out is needed for one.
-            Self::Progression(Progression::Provided { cycle: sbs, .. }) => matches!(
-                sbs.entry().anchor().provenance(),
-                crate::prescription::AnchorProvenance::Tested
-            ),
+            // **An inherited opening makes no claim at all**, so there is
+            // nothing here to be right or wrong about: it does not assert that a
+            // test happened, it defers to whichever one did. What it resolves to
+            // is read off the record when a session is asked for.
+            Self::Progression(Progression::Provided { cycle: sbs, .. }) => {
+                match sbs.entry().anchor() {
+                    Some(anchor) => matches!(
+                        anchor.provenance(),
+                        crate::prescription::AnchorProvenance::Tested
+                    ),
+                    None => false,
+                }
+            }
             Self::Progression(Progression::Linear(_)) | Self::Test(_) => false,
         }
     }
@@ -293,17 +302,26 @@ impl Progression {
 
     /// The entry test both models open from, and the opening where one is
     /// declared rather than derived.
-    pub const fn entry(&self) -> Entry {
+    ///
+    /// **`None` only for a provided cycle that inherits.** A ladder and a block
+    /// both carry their number: it is knowable when they are authored, and every
+    /// load they prescribe is a share of it. A provided cycle opening from the
+    /// one before it has no number of its own until that one has been performed.
+    #[must_use]
+    pub const fn entry(&self) -> Option<Entry> {
         match self {
-            Self::Linear(linear) => linear.entry(),
-            Self::BlockPeriodisation(block) => block.entry(),
-            Self::Provided { cycle: sbs, .. } => sbs.entry(),
+            Self::Linear(linear) => Some(linear.entry()),
+            Self::BlockPeriodisation(block) => Some(block.entry()),
+            Self::Provided { cycle: sbs, .. } => sbs.entry().stated(),
         }
     }
 
     #[must_use]
-    pub const fn anchor(&self) -> Anchor {
-        self.entry().anchor()
+    pub const fn anchor(&self) -> Option<Anchor> {
+        match self.entry() {
+            Some(entry) => Some(entry.anchor()),
+            None => None,
+        }
     }
 
     pub const fn gating_role(&self) -> SessionRole {
