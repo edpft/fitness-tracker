@@ -711,7 +711,13 @@ async fn authored_command(
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
         "cycling" => Some(cycling_command_run(sub, database).await),
-        "plan" => Some(plan_command_run(sub, database).await),
+        "plan" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            Some(plan_command_run(sub, database, &zone).await)
+        }
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
@@ -810,7 +816,11 @@ async fn discipline_command_run(
 }
 
 /// `plan`, once its arguments are in hand.
-async fn plan_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+async fn plan_command_run(
+    sub: &ArgMatches,
+    database: &Path,
+    zone: &domain::gym::OperatorZone,
+) -> Result<(), Failure> {
     let count = |name: &str| -> Result<usize, Failure> {
         sub.get_one::<String>(name)
             .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))?
@@ -829,7 +839,13 @@ async fn plan_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failu
             exit::USAGE,
         ));
     }
-    plan::generate(database, count("microcycles")?, count("cycling-sessions")?).await
+    plan::generate(
+        database,
+        zone,
+        count("microcycles")?,
+        count("cycling-sessions")?,
+    )
+    .await
 }
 
 /// `cycling next`, once its arguments are in hand.

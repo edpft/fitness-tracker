@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO gym_interruption (mesocycle, start_date, days)\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9afb18bbc477f27559a11a71c8667fdca737545de40b1410fab8a45e334398d4"
+}

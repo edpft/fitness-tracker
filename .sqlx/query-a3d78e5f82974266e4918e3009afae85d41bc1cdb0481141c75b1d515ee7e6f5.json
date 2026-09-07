@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT start_date AS \"start_date!: String\", days AS \"days!: i64\"\n        FROM programme_interruption\n        WHERE programme = ?\n        ORDER BY start_date ASC\n        ",
+  "query": "\n        SELECT start_date AS \"start_date!: String\", days AS \"days!: i64\"\n        FROM gym_interruption\n        WHERE mesocycle = ?\n        ORDER BY start_date ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme_interruption",
+            "table": "gym_interruption",
             "name": "start_date"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme_interruption",
+            "table": "gym_interruption",
             "name": "days"
           }
         }
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "456b240c1f67c380f69fc5fd9536d354f21f67994d57588e95a1679a41d2a89e"
+  "hash": "a3d78e5f82974266e4918e3009afae85d41bc1cdb0481141c75b1d515ee7e6f5"
 }

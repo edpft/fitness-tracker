@@ -153,6 +153,7 @@ fn test(
         fills(knee_dominant)?,
         week,
         TestTarget::Inherited,
+        None,
     ))
 }
 

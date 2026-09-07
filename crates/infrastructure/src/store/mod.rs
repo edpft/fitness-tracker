@@ -6,16 +6,17 @@
 //! integration tests at the port boundaries run against a temporary file
 //! inside the nix sandbox, with no service to start and no network.
 
-pub mod cycling;
+pub mod cycling_mesocycle;
 pub mod delivery;
+pub mod gym_mesocycle;
 pub mod history;
 pub mod landing;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod parameters;
+pub mod plan;
 pub mod pool;
 pub mod prescription;
-pub mod programme;
 pub mod refusals;
 pub mod resumption;
 pub mod run_log;
@@ -24,16 +25,17 @@ pub mod schedule;
 use application::StoreError;
 use domain::{gym::NormalisationRunId, landing::RunId};
 
-pub use cycling::SqliteCyclingProgrammeStore;
+pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
+pub use gym_mesocycle::SqliteGymMesocycleStore;
 pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};
 pub use parameters::SqliteGenerationParameterStore;
+pub use plan::SqlitePlanStore;
 pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;
-pub use programme::SqliteProgrammeStore;
 pub use refusals::SqliteRefusalStore;
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;

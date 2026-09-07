@@ -40,6 +40,7 @@ use crate::{
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
         shape::SlotId,
     },
+    provider::ProvidedFrom,
 };
 
 /// What the test is an attempt at.
@@ -125,6 +126,13 @@ pub struct Test {
     /// One week, always: [`Test::new`] builds it and nothing else may.
     calendar: Calendar,
     target: TestTarget,
+    /// Which microcycle of which published programme this week is, where it is
+    /// one.
+    ///
+    /// **Optional, unlike a progression's.** *Squat 2x Int Entry Test* is a week
+    /// its publisher wrote; a week that exists only to measure a lift before
+    /// something else begins was written by nobody, and may not claim otherwise.
+    provided: Option<ProvidedFrom>,
 }
 
 impl Test {
@@ -176,6 +184,7 @@ impl Test {
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
+        provided: Option<ProvidedFrom>,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
@@ -183,6 +192,7 @@ impl Test {
             fills,
             calendar,
             target,
+            provided,
         })
     }
 
@@ -200,6 +210,7 @@ impl Test {
         fills: SlotFills,
         calendar: Calendar,
         target: TestTarget,
+        provided: Option<ProvidedFrom>,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
@@ -207,6 +218,7 @@ impl Test {
             fills,
             calendar,
             target,
+            provided,
         })
     }
 
@@ -251,6 +263,11 @@ impl Test {
             });
         }
         Ok(())
+    }
+
+    /// Which microcycle of which published programme this week is.
+    pub const fn provided(&self) -> Option<&ProvidedFrom> {
+        self.provided.as_ref()
     }
 
     /// What is being tested, whole.

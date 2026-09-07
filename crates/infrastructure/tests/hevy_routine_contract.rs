@@ -80,7 +80,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
 
     Ok(Deliverable {
         workout,
-        programme: support::programme::name("summer-2026-front-squat")?,
+        plan: support::programme::name("summer-2026-front-squat")?,
         ordinal: SessionOrdinal::new(7)?,
     })
 }

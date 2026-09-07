@@ -236,29 +236,34 @@ fn short(id: &str) -> String {
 
 /// What was authored.
 pub fn programme_authored(
-    id: domain::prescription::MesocycleId,
+    id: domain::plan::PlanId,
     authored: application::Authored,
+    plan: &domain::plan::Plan,
     programme: &Mesocycle,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
     // Which of the two it was, first and in plain words. A name the store has
-    // not seen starts a programme; one it has corrects that programme — and a
-    // typo in the name is a new programme, so the operator has to be able to see
-    // that happen rather than infer it later from two blocks where one was meant.
+    // not seen starts a plan; one it has corrects that plan — and a typo in the
+    // name is a new plan, so the operator has to be able to see that happen
+    // rather than infer it later from two plans where one was meant.
     match authored {
         application::Authored::Created => {
-            println!("created programme \"{}\"", programme.name());
+            println!("created plan \"{}\"", plan.name());
         }
         application::Authored::Modified => {
             println!(
-                "modified programme \"{}\" — its previous version stays as history",
-                programme.name()
+                "modified plan \"{}\" — its previous version stays as history",
+                plan.name()
             );
         }
     }
     println!(
-        "  programme {id} ({}) — {}, {} primary, {} {} from {}",
+        "  plan {id}, {} gym mesocycle(s)",
+        plan.gym().map_or(0, domain::plan::Programme::count),
+    );
+    println!(
+        "  this one ({}) — {}, {} primary, {} {} from {}",
         programme.template(),
         programme.primary_exercise(),
         programme.primary(),
@@ -322,7 +327,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 ),
             }
         }
-        Mesocycle::Progression(Progression::Provided(sbs)) => {
+        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
             println!(
                 "  opening maximum {}, and it does not stay fixed",
                 sbs.entry().anchor(),
@@ -536,9 +541,10 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     let calendar = programme.calendar();
 
     println!(
-        "programme \"{}\" ({}) — {}, {} primary, {} {} from {}",
-        programme.name(),
+        "plan \"{}\" — mesocycle {} ({}) — {}, {} primary, {} {} from {}",
+        standing.plan,
         standing.programme_id,
+        programme.template(),
         programme.primary_exercise(),
         programme.primary(),
         calendar.duration_weeks(),
@@ -567,7 +573,7 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_standing(block, parameters);
         }
-        Mesocycle::Progression(Progression::Provided(sbs)) => sbs_standing(sbs),
+        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => sbs_standing(sbs),
     }
 }
 

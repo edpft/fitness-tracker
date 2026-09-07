@@ -6,7 +6,7 @@
 mod support;
 
 use application::{
-    ExtractionRunLog as _, Issuance, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
+    ExtractionRunLog as _, Issuance, LandingStore as _, NormalisationSummary, PlanAuthor as _,
     UnderivableReason, WorkoutNormaliser, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -15,8 +15,8 @@ use domain::prescription::{Block, PrescribedItem, SessionRole, SlotId, WeekKind}
 use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -24,7 +24,7 @@ use support::{corpus, programme};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
-    SqliteProgrammeStore,
+    SqliteGymMesocycleStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore,
@@ -59,11 +59,12 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
 
-    let programmes = SqliteProgrammeStore::new(pool.clone(), corpus::zone()?);
+    let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
+    let programmes = SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?);
     let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    Authoring::new(programmes, parameters)
+    Authoring::new(plans, programmes, parameters)
         .author(
-            &programme::as_programme(programme::programme()?),
+            &programme::as_plan(programme::programme()?)?,
             &programme::parameters()?,
         )
         .await?;
@@ -71,7 +72,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),

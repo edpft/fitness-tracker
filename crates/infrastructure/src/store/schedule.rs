@@ -26,7 +26,7 @@ use sqlx::SqlitePool;
 
 use super::{
     corrupt,
-    programme::{weekday_key, weekday_of},
+    gym_mesocycle::{weekday_key, weekday_of},
     store_error,
 };
 

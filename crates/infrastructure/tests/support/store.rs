@@ -5,15 +5,15 @@
 //! a second copy is a second thing to keep in step with the ports.
 
 use application::{
-    ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
+    ExtractionRunLog as _, LandingStore as _, NormalisationSummary, PlanAuthor as _,
     WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::Authoring,
 };
 use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
-    SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymWorkoutStore,
-    SqliteNormalisationRunLog, SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore, SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
 
@@ -61,13 +61,11 @@ pub async fn with_programme(
     let _summary: NormalisationSummary = normalisation.normalise().await?;
 
     Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(
-        &programme::as_programme(programme),
-        &programme::parameters()?,
-    )
+    .author(&programme::as_plan(programme)?, &programme::parameters()?)
     .await?;
 
     Ok((directory, pool))

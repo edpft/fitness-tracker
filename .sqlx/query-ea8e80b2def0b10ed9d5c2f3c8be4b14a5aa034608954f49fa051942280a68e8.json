@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO cycling_microcycle (mesocycle, ordinal, published_ordinal)\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ea8e80b2def0b10ed9d5c2f3c8be4b14a5aa034608954f49fa051942280a68e8"
+}

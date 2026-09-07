@@ -30,7 +30,6 @@ use support::{corpus, programme as fixture};
 /// test week in front of them, so ten calendar weeks ending 22 November.
 fn autumn() -> Result<Authored, Box<dyn std::error::Error>> {
     Ok(fixture::authored(
-        "autumn-block",
         date(2026, 9, 14),
         Shape::Block {
             gating: SessionRole::Heavy,

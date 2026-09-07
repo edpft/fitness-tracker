@@ -4,17 +4,31 @@
 //! that is the point of removing it: a chart that states every set has nothing
 //! for an `opening`, an `entry_test`, a `duration_weeks` or a `gating_role` to
 //! mean, and each of those had a test proving the reader refused one.
-//! `Shape::Sbs` has nowhere to put any of them, so there is nothing left to
-//! refuse and nothing left to test.
+//! `Shape::Provided` has nowhere to put any of them, so there is nothing left
+//! to refuse and nothing left to test.
 //!
 //! What the *chart* prescribes is proved in `domain/tests/sbs.rs` against the
 //! workbook. This is about the programme built around it.
 
 mod support;
 
-use domain::prescription::{Anchor, AnchorProvenance, Mesocycle, Progression, authored::Shape};
+use domain::{
+    prescription::{Anchor, AnchorProvenance, Mesocycle, Progression, authored::Shape},
+    provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
+};
 use jiff::civil::Date;
 use support::programme;
+
+/// *Squat 2x Int*, published by Stronger By Science: the whole four-week chart.
+fn provided() -> Result<ProvidedFrom, Box<dyn std::error::Error>> {
+    Ok(ProvidedFrom::new(
+        ExternalProgramme::new(
+            Provider::try_from("Stronger By Science".to_owned())?,
+            ProgrammeName::try_from("Squat 2x Int".to_owned())?,
+        ),
+        vec![1, 2, 3, 4],
+    )?)
+}
 
 /// The cycle the autumn opens with: four weeks from Monday 14 September.
 fn cycle(anchored_on: (i16, i8, i8)) -> Result<Mesocycle, Box<dyn std::error::Error>> {
@@ -28,9 +42,11 @@ fn cycle(anchored_on: (i16, i8, i8)) -> Result<Mesocycle, Box<dyn std::error::Er
         Date::new(year, month, day)?,
     )?;
     let answers = programme::authored(
-        "autumn-2026-front-squat",
         Date::new(2026, 9, 14)?,
-        Shape::Sbs { anchor },
+        Shape::Provided {
+            from: provided()?,
+            anchor,
+        },
     )?;
     Ok(programme::authoring(answers, &[])??)
 }
@@ -40,9 +56,16 @@ fn the_answers_author_an_sbs_cycle() {
     let programme = cycle((2026, 9, 11)).expect("the answers author");
 
     assert_eq!(programme.template(), "sbs");
-    assert_eq!(programme.name().as_str(), "autumn-2026-front-squat");
+    let Mesocycle::Progression(Progression::Provided { from, .. }) = &programme else {
+        panic!("a provided cycle knows where it came from")
+    };
+    assert_eq!(from.programme().name().as_str(), "Squat 2x Int");
+    assert_eq!(from.to_string(), "micros 1-2-3-4");
     assert!(
-        matches!(programme, Mesocycle::Progression(Progression::Provided(_))),
+        matches!(
+            programme,
+            Mesocycle::Progression(Progression::Provided { .. })
+        ),
         "and it is a periodisation, beside linear and block",
     );
     assert_eq!(

@@ -90,6 +90,10 @@ pub enum Shape {
         /// What the test attempts. [`TestTarget::Inherited`] takes it from the
         /// programme this follows, which is the ordinary case (decision 0013).
         target: TestTarget,
+        /// Which microcycle of which published programme this week is, where a
+        /// publisher wrote it. `None` is a week that exists only to measure a
+        /// lift before something else begins.
+        provided: Option<ProvidedFrom>,
     },
     /// A top-set ladder climbing at a rate, for a stated span.
     Linear {
@@ -212,13 +216,18 @@ pub fn programme(
     } = authored;
 
     match shape {
-        Shape::Test { reps, target } => {
+        Shape::Test {
+            reps,
+            target,
+            provided,
+        } => {
             let calendar = Test::week(start, interruptions, weekdays, zone)?;
             Ok(Mesocycle::Test(Test::new(
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
                 calendar,
                 target,
+                provided,
             )?))
         }
         Shape::Linear {

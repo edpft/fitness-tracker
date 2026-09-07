@@ -850,6 +850,25 @@ pub trait PlanStore {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn windows(&self) -> impl Future<Output = Result<Vec<PlanWindow>, StoreError>> + Send;
 
+    /// The plan in force under a name, if there is one.
+    ///
+    /// **What makes a plan authorable in pieces while still being written
+    /// whole.** `fitness plan` writes the cycling side and `fitness programme
+    /// add` the gym side; each reads what is already there under the name, puts
+    /// its own discipline's programme into it, and re-authors the lot. Without
+    /// this the second command would supersede the first's work.
+    ///
+    /// `None` is a name nothing has been authored under — the ordinary
+    /// first-run case, not a fault.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn named(
+        &self,
+        name: &PlanName,
+    ) -> impl Future<Output = Result<Option<Plan>, StoreError>> + Send;
+
     /// Write a plan whole: both programmes and every mesocycle in them.
     ///
     /// **One authoring, not eight.** A plan is what the operator authors, so a

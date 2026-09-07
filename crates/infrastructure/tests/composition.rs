@@ -23,19 +23,22 @@
 
 mod support;
 
-use application::{Authored, PrescriptionError, ProgrammeAuthor as _, prescribe::Authoring};
+use application::{Authored, PlanAuthor as _, PrescriptionError, prescribe::Authoring};
 use domain::{
     gym::{
         Kg, RepCount,
         exercise::{Exercise, RepsExercise},
     },
+    plan::Plan,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Entry, EntryTest, Fill,
-        GenerationParameters, Linear, Mesocycle, Primary, PrimaryPattern, ProgrammeName,
-        Progression, SessionRole, Skip, SlotFills, Test, TestTarget, Tested, Weekdays,
+        GenerationParameters, Linear, Mesocycle, Primary, PrimaryPattern, Progression, SessionRole,
+        Skip, SlotFills, Test, TestTarget, Tested, Weekdays,
     },
 };
-use infrastructure::{SqliteGenerationParameterStore, SqliteProgrammeStore, connect};
+use infrastructure::{
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
+};
 use jiff::civil::Date;
 use sqlx::SqlitePool;
 use support::{corpus, programme};
@@ -71,8 +74,13 @@ impl Before {
     }
 }
 
-fn name(value: &str) -> Result<ProgrammeName, Box<dyn std::error::Error>> {
-    Ok(ProgrammeName::try_from(value.to_owned())?)
+/// A plan holding one gym mesocycle.
+///
+/// **Two plans rather than two programmes** since #86. These rows are about what
+/// a block may open from, and what precedes it is the plan that ran before —
+/// which is exactly the case `MesocycleStore::preceding` is for.
+fn plan(called: &str, mesocycle: Mesocycle) -> Result<Plan, Box<dyn std::error::Error>> {
+    Ok(programme::named_plan(called, vec![mesocycle])?)
 }
 
 fn weekdays() -> Result<Weekdays, Box<dyn std::error::Error>> {
@@ -119,7 +127,6 @@ fn predecessor(
     Ok(match before {
         // One week, 14 to 20 September, testing on the Friday.
         Before::Test(lift) => Mesocycle::Test(Test::new(
-            name("before")?,
             Tested::new(
                 PrimaryPattern::KneeDominant,
                 Exercise::Reps(lift),
@@ -133,10 +140,10 @@ fn predecessor(
                 corpus::zone()?.as_time_zone(),
             )?,
             TestTarget::Declared(Kg::try_from("90".to_owned())?),
+            None,
         )?),
         // Three weeks, 31 August to 20 September. It tests nothing, ever.
         Before::Linear(lift) => Mesocycle::Progression(Progression::Linear(Linear::new(
-            name("before")?,
             primary(lift),
             fills(lift)?,
             // Its own opening, from before its own start. What matters for
@@ -164,7 +171,6 @@ fn predecessor(
         // Its exit test is the last of them, on Friday 18 September.
         Before::Block(lift) => {
             Mesocycle::Progression(Progression::BlockPeriodisation(BlockPeriodisation::new(
-                name("before")?,
                 primary(lift),
                 fills(lift)?,
                 // Dated before its own start, since it tests its own entry and
@@ -198,7 +204,6 @@ fn block_opening_from(
     let start = ADJACENT.checked_add(jiff::Span::new().days(gap * 7))?;
     Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
         BlockPeriodisation::new(
-            name("under-test")?,
             primary(B),
             fills(B)?,
             // Dated to the predecessor's test day, and labelled as measured —
@@ -236,19 +241,27 @@ async fn composes_with(
     let under_test = block_opening_from(gap, provenance)?;
     let zone = corpus::zone()?;
 
+    // Both plans are built before either is authored. A `?` inside the argument
+    // list leaves its `Result` alive across the `await`, and `Box<dyn Error>` is
+    // not `Send`, so the future stops being one.
+    let first = plan("before", before_this)?;
+    let second = plan("under-test", under_test)?;
+
     let (_, _): (_, Authored) = Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), zone.clone()),
+        SqlitePlanStore::new(pool.clone(), zone.clone()),
+        SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(&before_this, &parameters)
+    .author(&first, &parameters)
     .await?;
 
     accepted(
         Authoring::new(
-            SqliteProgrammeStore::new(pool.clone(), zone),
+            SqlitePlanStore::new(pool.clone(), zone.clone()),
+            SqliteGymMesocycleStore::new(pool.clone(), zone),
             SqliteGenerationParameterStore::new(pool),
         )
-        .author(&under_test, &parameters)
+        .author(&second, &parameters)
         .await,
     )
 }
@@ -397,11 +410,13 @@ async fn authors_alone(provenance: AnchorProvenance) -> Result<bool, Box<dyn std
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     let parameters = programme::parameters()?;
     let under_test = block_opening_from(0, provenance)?;
+    let only = plan("under-test", under_test)?;
     let authored = Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool),
     )
-    .author(&under_test, &parameters)
+    .author(&only, &parameters)
     .await;
     accepted(authored)
 }

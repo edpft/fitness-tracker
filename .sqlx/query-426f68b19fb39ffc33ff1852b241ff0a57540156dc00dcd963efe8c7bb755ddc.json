@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT zone AS \"zone!: i64\", seconds AS \"seconds!: i64\"\n        FROM cycling_interval\n        WHERE programme = ? AND microcycle = ? AND session = ?\n        ORDER BY position\n        ",
+  "query": "\n        SELECT zone AS \"zone!: i64\", seconds AS \"seconds!: i64\"\n        FROM cycling_interval\n        WHERE mesocycle = ? AND microcycle = ? AND session = ?\n        ORDER BY position\n        ",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "918b47f272c4f87a0c9ca4e4a2390db4a58cc138804478fddf7f82c158a020c2"
+  "hash": "426f68b19fb39ffc33ff1852b241ff0a57540156dc00dcd963efe8c7bb755ddc"
 }

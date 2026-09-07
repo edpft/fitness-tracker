@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE programme = ? AND microcycle = ?\n        ORDER BY session\n        ",
+  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE mesocycle = ? AND microcycle = ?\n        ORDER BY session\n        ",
   "describe": {
     "columns": [
       {
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "458bbaadda55412fe28f758eaee508b55209aa673facd72d5f91ac533ca616d4"
+  "hash": "fb66a72396e3954304f289e38f30167a379826904dab86511e0d1900dc01bdb6"
 }

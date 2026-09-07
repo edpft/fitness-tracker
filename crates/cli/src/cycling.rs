@@ -28,7 +28,7 @@ use domain::{
     gym::PositiveDuration,
 };
 use infrastructure::{
-    SqliteCyclingProgrammeStore, connect,
+    SqliteCyclingMesocycleStore, connect,
     peloton::{PelotonClasses, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -67,12 +67,12 @@ pub async fn next(
     to: Option<(&PelotonClasses, &PelotonStack)>,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingProgrammeStore::new(pool);
+    let store = SqliteCyclingMesocycleStore::new(pool);
 
     let (programme, next) = application::cycling::next_ride(&store, from)
         .await
         .map_err(|error| match error {
-            application::PrescriptionError::NoProgramme { .. } => Failure::message(
+            application::PrescriptionError::NoPlan { .. } => Failure::message(
                 format!(
                     "no cycling programme covers {from}. \
                      Author one first: fitness plan"
@@ -133,11 +133,16 @@ fn report(
     let week = programme.microcycle(microcycle);
     let sessions = week.map_or(0, CyclingMicrocycle::session_count);
     let published = week.map_or_else(String::new, |one| {
-        format!("{} session {}", one.from(), planned.published_session())
+        format!(
+            "{} µ{} session {}",
+            programme.programme(),
+            one.published_ordinal(),
+            planned.published_session()
+        )
     });
     println!(
         "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
-        programme.name(),
+        programme.programme(),
         programme.duration_weeks(),
         position_number = position.as_u8(),
     );
@@ -235,14 +240,14 @@ pub async fn deliver(
     stack: &PelotonStack,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingProgrammeStore::new(pool);
+    let store = SqliteCyclingMesocycleStore::new(pool);
     let (programme, next) = application::cycling::next_ride(&store, from)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 
     println!(
         "{} — microcycle {} of {}, session {} of {}",
-        programme.name(),
+        programme.programme(),
         next.microcycle,
         programme.duration_weeks(),
         next.session.as_u8(),

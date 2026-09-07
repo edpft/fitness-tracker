@@ -27,11 +27,11 @@ use domain::{
         exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
         sequence::{AtLeastTwo, NonEmpty},
     },
+    plan::{Plan, PlanName, Programme},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
-        GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, ProgrammeName,
-        Progression, ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep,
-        Weekdays,
+        GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, Progression,
+        ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -317,9 +317,47 @@ pub const FIXTURE_NAME: &str = "fixture";
 
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the text is not a usable programme name.
-pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
-    ProgrammeName::try_from(text.to_owned()).map_err(invalid)
+/// [`ProgrammeFixtureError`] if the text is not a usable plan name.
+pub fn name(text: &str) -> Result<PlanName, ProgrammeFixtureError> {
+    PlanName::try_from(text.to_owned()).map_err(invalid)
+}
+
+/// One plan holding one gym mesocycle, under the fixture's name.
+///
+/// **What every suite that used to author a programme now authors.** A
+/// mesocycle is not written on its own since #86: the plan is, and a test that
+/// wants one mesocycle in the store wants a plan holding it.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the name is unusable or the mesocycles do not
+/// make a programme.
+pub fn plan(mesocycles: Vec<Mesocycle>) -> Result<Plan, ProgrammeFixtureError> {
+    named_plan(FIXTURE_NAME, mesocycles)
+}
+
+/// The same, under a name the caller chose. What a test about succession wants.
+///
+/// # Errors
+///
+/// As [`plan`].
+pub fn named_plan(called: &str, mesocycles: Vec<Mesocycle>) -> Result<Plan, ProgrammeFixtureError> {
+    Plan::new(
+        name(called)?,
+        jiff::Timestamp::now(),
+        Some(Programme::new(mesocycles).map_err(invalid)?),
+        None,
+    )
+    .map_err(invalid)
+}
+
+/// A plan holding the one linear programme handed in.
+///
+/// # Errors
+///
+/// As [`plan`].
+pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
+    plan(vec![as_programme(linear)])
 }
 
 /// A set of answers, as the wizard would hand them over.
@@ -335,13 +373,8 @@ pub fn name(text: &str) -> Result<ProgrammeName, ProgrammeFixtureError> {
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] if the name or the weekday list is invalid.
-pub fn authored(
-    called: &str,
-    start: Date,
-    shape: Shape,
-) -> Result<Authored, ProgrammeFixtureError> {
+pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureError> {
     Ok(Authored {
-        name: name(called)?,
         start,
         pattern: PrimaryPattern::KneeDominant,
         primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
@@ -392,7 +425,6 @@ pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
 pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Linear::new(
-        name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -414,19 +446,8 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
 /// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
 pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
-    programme_named_from(FIXTURE_NAME, start)
-}
-
-/// A programme with its own name and start, for succeeding another one.
-///
-/// # Errors
-///
-/// [`ProgrammeFixtureError`] if the name is unusable or the programme is
-/// inconsistent.
-pub fn programme_named_from(called: &str, start: Date) -> Result<Linear, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Linear::new(
-        name(called)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -457,7 +478,6 @@ pub fn gating_on_a_role_it_never_runs()
     let monday_only =
         Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)]).map_err(invalid)?;
     Ok(Linear::new(
-        name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
@@ -480,7 +500,6 @@ pub fn primary_not_counted_in_reps()
 -> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
-        name(FIXTURE_NAME)?,
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Distance(DistanceExercise::Running),
@@ -503,7 +522,6 @@ pub fn primary_does_not_fill_its_slot()
 -> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
-        name(FIXTURE_NAME)?,
         // Names the knee-dominant slot as primary, but the primary exercise is a
         // deadlift, and the knee-dominant fill is a front squat.
         Primary::new(

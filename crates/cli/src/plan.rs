@@ -15,27 +15,33 @@
 //! to be a wizard"), because choosing the providers, the primary lift and the
 //! cycling pairing is not a thing to remember the spelling of.
 //!
-//! **It authors the cycling side, and only that.** Four programmes are written —
-//! the FTP test microcycle, then the three mesocycles — after which
-//! `cycling next` needs no flags and reads no network. The gym side is still
-//! authored by `fitness programme add`; composing that wizard in here is issue
-//! #73, and until it lands this command deliberately writes half of what it
-//! prints.
+//! **It authors the cycling side of a plan, and only that.** Four mesocycles are
+//! written — the FTP test microcycle, then the three of four — after which
+//! `cycling next` needs no flags and reads no network.
+//!
+//! **The plan is written whole even so** (issue #86). What is already authored
+//! under the name given is read, its cycling programme is replaced by these four
+//! and its gym programme carried through untouched, and the lot is re-authored.
+//! So this command and `fitness programme add` write the two halves of one plan
+//! in either order, without either superseding the other — which is what closes
+//! the half-written intermediate state #73 named, without merging the two
+//! wizards.
 
 use std::path::Path;
 
-use application::{Authored, DiaryStore as _};
+use application::{Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
         Answer, CyclingMesocycle, CyclingMicrocycle, CyclingWeekdays, PlannedRide,
-        PublishedMicrocycle, PublishedProgramme, SessionPosition,
+        PublishedProgramme, SessionPosition,
     },
-    gym::sequence::NonEmpty,
-    prescription::ProgrammeName,
+    gym::{OperatorZone, sequence::NonEmpty},
+    plan::{Plan, PlanName, Programme},
+    provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::Discipline,
 };
 use infrastructure::{
-    SqliteCyclingProgrammeStore, SqliteDiaryStore,
+    SqliteDiaryStore, SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,
     peloton::{
         auth::{PelotonAuth, PelotonCredentials},
         class::PelotonClasses,
@@ -50,11 +56,17 @@ use crate::{Failure, exit, wizard};
 const AUTH_BASE: &str = "https://auth.onepeloton.com";
 const API_BASE: &str = "https://api.onepeloton.com";
 
+/// Who publishes the cycling programmes this build reads.
+const PELOTON: &str = "Peloton";
+
 /// The gym providers this build holds.
 const GYM_PROVIDERS: [&str; 1] = ["Stronger By Science, two-day intermediate"];
 
 /// Microcycles in a mesocycle, and where the test sits in an SBS one.
-const SBS_MICROCYCLES: usize = 4;
+///
+/// Counted as a microcycle *number* because that is what the wizard asks for;
+/// the report below widens it to index with.
+pub const SBS_MICROCYCLES: u32 = 4;
 
 /// One published programme, read once.
 struct Read {
@@ -96,7 +108,12 @@ const PAIRINGS: [Pairing; 2] = [
 ///
 /// [`Failure`] if there is nobody to ask, if the credentials are absent, if
 /// Peloton will not answer, or if the store refuses what would be authored.
-pub async fn generate(database: &Path, microcycles: usize, sessions: usize) -> Result<(), Failure> {
+pub async fn generate(
+    database: &Path,
+    zone: &OperatorZone,
+    microcycles: usize,
+    sessions: usize,
+) -> Result<(), Failure> {
     wizard::interactive()?;
 
     println!("A hybrid programme: one gym provider, one cycling provider.\n");
@@ -156,9 +173,10 @@ pub async fn generate(database: &Path, microcycles: usize, sessions: usize) -> R
         .filter(|one| one.answer.is_some())
         .take(3)
         .collect();
-    let store = SqliteCyclingProgrammeStore::new(pool);
     author(
-        &store,
+        SqlitePlanStore::new(pool.clone(), zone.clone()),
+        SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+        SqliteGenerationParameterStore::new(pool),
         start,
         &riding_days,
         test.as_ref()
@@ -340,9 +358,12 @@ fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
     Some(taken)
 }
 
-/// Write the cycling side: the test microcycle, then the three mesocycles.
+/// Write the cycling side of a plan: the test microcycle, then the three
+/// mesocycles.
 async fn author(
-    store: &SqliteCyclingProgrammeStore,
+    plans: SqlitePlanStore,
+    gym: SqliteGymMesocycleStore,
+    parameter_store: SqliteGenerationParameterStore,
     start: Date,
     riding_days: &[Weekday],
     test: Option<(&Read, &[u32])>,
@@ -362,75 +383,88 @@ async fn author(
         return Ok(());
     }
 
-    let stem = wizard::ask_until(
-        "Name these programmes (a stem, e.g. autumn-cycling): ",
-        |typed| {
-            if typed.is_empty() {
-                Err("a programme is identified by its name — give a stem".to_owned())
-            } else {
-                Ok(typed.to_owned())
-            }
-        },
-    )?;
+    // **The plan is named, not the mesocycles** (issue #86). It was a stem here
+    // until 2026-09-06 — `autumn-cycling-1`, `-2`, `-3` — because four rows
+    // needed four names and nothing held them together.
+    let name = wizard::ask_until("Which plan do these belong to? ", |typed| {
+        PlanName::try_from(typed.to_owned())
+            .map_err(|error| format!("{error} — a plan is identified by its name"))
+    })?;
 
-    let authored_at = jiff::Timestamp::now();
     let mut at = start;
-    let mut written = Vec::new();
+    let mut mesocycles = Vec::new();
 
     if let Some((read, sessions)) = test {
-        let programme = build(
-            &format!("{stem}-test"),
-            authored_at,
-            at,
-            read,
-            &[1],
-            sessions,
-            riding_days,
-        )?;
+        mesocycles.push(build(at, read, &[1], sessions, riding_days)?);
         at = week_after(at, 1)?;
-        written.push(record(store, &programme).await?);
     }
-
-    for (cycle, one) in taken.iter().enumerate() {
+    for one in taken {
         let Some(answer) = &one.answer else { continue };
-        let programme = build(
-            &format!("{stem}-{}", cycle + 1),
-            authored_at,
+        mesocycles.push(build(
             at,
             one.from,
             &answer.microcycles,
             &answer.sessions,
             riding_days,
-        )?;
+        )?);
         at = week_after(at, answer.microcycles.len())?;
-        written.push(record(store, &programme).await?);
     }
 
+    let reported: Vec<(String, usize, Date)> = mesocycles
+        .iter()
+        .map(|mesocycle| {
+            (
+                mesocycle.programme().name().to_string(),
+                mesocycle.duration_weeks(),
+                mesocycle.start(),
+            )
+        })
+        .collect();
+
+    let existing = plans
+        .named(&name)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let plan = with_cycling(name, existing.as_ref(), mesocycles)?;
+
+    let parameters = wizard::ready(&parameter_store).await?;
+    let (_, authored) = application::prescribe::Authoring::new(plans, gym, parameter_store)
+        .author(&plan, &parameters)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+
     println!();
-    for (name, weeks, from, authored) in &written {
-        let verb = match authored {
-            Authored::Created => "authored",
-            Authored::Modified => "re-authored",
-        };
-        println!("  {verb} {name}: {weeks} weeks from {from}");
+    let verb = match authored {
+        Authored::Created => "authored",
+        Authored::Modified => "re-authored",
+    };
+    println!("  {verb} {}:", plan.name());
+    for (from, weeks, on) in &reported {
+        println!("    {from}: {weeks} weeks from {on}");
     }
     println!("\n  fitness cycling next now answers without a start date.");
     Ok(())
 }
 
-async fn record(
-    store: &SqliteCyclingProgrammeStore,
-    programme: &CyclingMesocycle,
-) -> Result<(String, usize, Date, Authored), Failure> {
-    let (_, authored) = application::cycling::author(store, programme)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
-    Ok((
-        programme.name().to_string(),
-        programme.duration_weeks(),
-        programme.start(),
-        authored,
-    ))
+/// The plan with these mesocycles as its cycling programme.
+///
+/// **The cycling side is replaced whole, and the gym side carried through.**
+/// This command generates the four together — a test week and three mesocycles
+/// laid against one another — so there is no sense in which one of them could be
+/// amended alone. What must survive is the gym programme, which
+/// `fitness programme add` wrote and this command knows nothing about.
+fn with_cycling(
+    name: PlanName,
+    existing: Option<&Plan>,
+    mesocycles: Vec<CyclingMesocycle>,
+) -> Result<Plan, Failure> {
+    Plan::new(
+        name,
+        jiff::Timestamp::now(),
+        existing.and_then(Plan::gym).cloned(),
+        Some(Programme::new(mesocycles).map_err(|error| Failure::usage(&error))?),
+    )
+    .map_err(|error| Failure::usage(&error))
 }
 
 fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
@@ -452,8 +486,6 @@ fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
 /// The sessions are mapped onto the schedule's cycling days in the order both
 /// are given: the week's earlier ride to the week's earlier day.
 fn build(
-    name: &str,
-    authored_at: jiff::Timestamp,
     start: Date,
     read: &Read,
     microcycles: &[u32],
@@ -500,13 +532,7 @@ fn build(
                 .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
             rides.insert(*position, PlannedRide::new(ride, at, *session));
         }
-        weeks.push(
-            CyclingMicrocycle::new(
-                rides,
-                PublishedMicrocycle::new(read.published.clone(), *number),
-            )
-            .map_err(|error| Failure::usage(&error))?,
-        );
+        weeks.push(CyclingMicrocycle::new(rides, *number).map_err(|error| Failure::usage(&error))?);
     }
 
     let weekdays = CyclingWeekdays::new(
@@ -519,8 +545,10 @@ fn build(
     .map_err(|error| Failure::usage(&error))?;
 
     CyclingMesocycle::new(
-        ProgrammeName::try_from(name).map_err(|error| Failure::usage(&error))?,
-        authored_at,
+        ExternalProgramme::new(
+            Provider::try_from(PELOTON.to_owned()).map_err(|error| Failure::usage(&error))?,
+            read.published.clone(),
+        ),
         start,
         NonEmpty::new(weeks).map_err(|error| Failure::usage(&error))?,
         weekdays,
@@ -577,11 +605,11 @@ fn report(
     for (cycle, one) in usable.iter().take(3).enumerate() {
         let Some(answer) = &one.answer else { continue };
         for (index, micro) in answer.microcycles.iter().enumerate() {
-            let ordinal = cycle * SBS_MICROCYCLES + index + 1;
+            let ordinal = cycle * SBS_MICROCYCLES as usize + index + 1;
             let date =
                 start.saturating_add(jiff::Span::new().weeks(i64::try_from(ordinal).unwrap_or(0)));
             let within = index + 1;
-            let gym = if within == SBS_MICROCYCLES {
+            let gym = if within == SBS_MICROCYCLES as usize {
                 format!("sbs-{} µ{within} — 1RM test", cycle + 1)
             } else {
                 format!("sbs-{} µ{within}", cycle + 1)
@@ -590,7 +618,7 @@ fn report(
         }
     }
 
-    if microcycles != SBS_MICROCYCLES {
+    if microcycles != SBS_MICROCYCLES as usize {
         println!(
             "\n  ! {microcycles}-microcycle mesocycles against 4-microcycle SBS cycles \
              will not line up"

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO cycling_weekday (mesocycle, weekday, session)\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c3b1b64430d0814348c09f10bb59b18972926f1bd0556ba3a68d404bda6e78cf"
+}

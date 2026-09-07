@@ -37,7 +37,8 @@ use domain::{
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, EventTime, LandingRecordId, Provenance},
-    prescription::{ProgrammeName, SessionRole},
+    plan::PlanName,
+    prescription::SessionRole,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -120,12 +121,12 @@ fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
 /// together. A half-present pair is a store something else has written to, and
 /// it is reported rather than papered over with a default role.
 fn fulfilled_of(
-    programme: Option<String>,
+    plan: Option<String>,
     role: Option<String>,
 ) -> Result<Option<FulfilledSession>, StoreError> {
-    match (programme, role) {
-        (Some(programme), Some(role)) => Ok(Some(FulfilledSession {
-            programme: ProgrammeName::try_from(programme).map_err(|error| StoreError::Corrupt {
+    match (plan, role) {
+        (Some(plan), Some(role)) => Ok(Some(FulfilledSession {
+            plan: PlanName::try_from(plan).map_err(|error| StoreError::Corrupt {
                 detail: error.to_string(),
             })?,
             role: SessionRole::try_from(role).map_err(|error| StoreError::Corrupt {
@@ -181,7 +182,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
             r#"
             SELECT w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.landing_record_id AS "landed_as!: i64",
-                   prescriber.name AS "programme: String",
+                   prescriber.name AS "plan: String",
                    session.session_role AS "session_role: String",
                    s.load_kind AS "load_kind!: String", s.load_grams AS "load_grams!: i64",
                    s.outcome AS "outcome!: String", s.reps AS "reps: i64"
@@ -200,16 +201,17 @@ impl ExerciseHistory for SqliteExerciseHistory {
             -- read as sets performed twice. `MIN(d.prescription)` makes the pick
             -- deterministic rather than trusting that.
             --
-            -- The programme is carried by name: re-authoring writes a new
-            -- `programme` row, and a session prescribed before the last
-            -- correction belongs to the same programme all the same.
+            -- The plan is carried by name: re-authoring writes new rows, and a
+            -- session prescribed before the last correction belongs to the same
+            -- plan all the same.
             LEFT JOIN (
                 SELECT d.reference AS reference, MIN(d.prescription) AS prescription
                 FROM prescription_delivery AS d
                 GROUP BY d.reference
             ) AS link ON link.reference = w.performed_against
             LEFT JOIN prescribed_workout AS session ON session.id = link.prescription
-            LEFT JOIN programme AS prescriber ON prescriber.id = session.programme
+            LEFT JOIN gym_mesocycle AS m ON m.id = session.mesocycle
+            LEFT JOIN plan AS prescriber ON prescriber.id = m.plan
             WHERE e.exercise = ?
               AND s.set_kind = 'working'
               AND NOT EXISTS (
@@ -250,7 +252,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                 _ => performances.push(Performance {
                     on: day,
                     landed_as: id,
-                    fulfilled: fulfilled_of(row.programme, row.session_role)?,
+                    fulfilled: fulfilled_of(row.plan, row.session_role)?,
                     sets: vec![summary],
                 }),
             }

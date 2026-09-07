@@ -19,7 +19,7 @@
 mod support;
 
 use application::{
-    ExtractionRunLog as _, LandingStore as _, NormalisationSummary, ProgrammeAuthor as _,
+    ExtractionRunLog as _, LandingStore as _, NormalisationSummary, PlanAuthor as _,
     WorkoutNormaliser as _, WorkoutPrescriber as _,
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -31,8 +31,8 @@ use domain::prescription::{
 use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -40,7 +40,7 @@ use support::{corpus, programme};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
-    SqliteProgrammeStore,
+    SqliteGymMesocycleStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore,
@@ -57,16 +57,20 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
 
     let test = test_programme()?;
     Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(&test, &parameters)
+    .author(
+        &programme::named_plan("entry-test", vec![test])?,
+        &parameters,
+    )
     .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -119,13 +123,11 @@ async fn corpus_store() -> Result<
 
     let parameters = programme::parameters()?;
     Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(
-        &programme::as_programme(programme::programme()?),
-        &parameters,
-    )
+    .author(&programme::as_plan(programme::programme()?)?, &parameters)
     .await?;
 
     Ok((parameters, directory, pool))
@@ -141,13 +143,15 @@ async fn corpus_store() -> Result<
 /// before it was authored with.
 fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
-        "entry-test",
         Date::constant(2026, 8, 31),
         Shape::Test {
             reps: domain::gym::RepCount::new(1)?,
             // What the programme before it stands at, which is the ordinary case
             // (decision 0013).
             target: domain::prescription::TestTarget::Inherited,
+            // A week that exists only to measure a lift before something else
+            // begins was written by nobody.
+            provided: None,
         },
     )?;
     Ok(programme::authoring(answers, &[])??)
@@ -309,7 +313,6 @@ fn a_test_week_issues_every_slot() {
 /// presence of the entry test and by nothing else.
 fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
-        "autumn",
         Date::constant(2026, 8, 31),
         Shape::Block {
             gating: SessionRole::Heavy,
@@ -338,16 +341,17 @@ async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::er
     let parameters = programme::parameters()?;
     let block = autumn_block()?;
     Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(&block, &parameters)
+    .author(&programme::named_plan("autumn", vec![block])?, &parameters)
     .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),

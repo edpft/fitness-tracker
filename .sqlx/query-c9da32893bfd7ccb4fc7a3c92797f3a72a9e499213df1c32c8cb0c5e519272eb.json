@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT weekday AS \"weekday!: String\", session AS \"session!: i64\"\n        FROM cycling_weekday\n        WHERE programme = ?\n        ORDER BY session\n        ",
+  "query": "\n        SELECT weekday AS \"weekday!: String\", role AS \"role!: String\"\n        FROM gym_weekday\n        WHERE mesocycle = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -9,19 +9,19 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "cycling_weekday",
+            "table": "gym_weekday",
             "name": "weekday"
           }
         }
       },
       {
-        "name": "session!: i64",
+        "name": "role!: String",
         "ordinal": 1,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "cycling_weekday",
-            "name": "session"
+            "table": "gym_weekday",
+            "name": "role"
           }
         }
       }
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "6c32d098c17d33d387f8adf373ea61c3ebd127d4fc551f910258e2a8f6590dd8"
+  "hash": "c9da32893bfd7ccb4fc7a3c92797f3a72a9e499213df1c32c8cb0c5e519272eb"
 }

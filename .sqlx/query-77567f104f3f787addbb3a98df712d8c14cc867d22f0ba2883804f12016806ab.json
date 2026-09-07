@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   template AS \"template!: String\",\n                   primary_pattern AS \"primary_pattern!: String\",\n                   primary_exercise AS \"primary_exercise!: String\",\n                   anchor_grams AS \"anchor_grams: i64\",\n                   anchor_provenance AS \"anchor_provenance: String\",\n                   anchor_from AS \"anchor_from: String\",\n                   anchor_failed_grams AS \"anchor_failed_grams: i64\",\n                   opening_grams AS \"opening_grams: i64\",\n                   gating_role AS \"gating_role: String\",\n                   start_date AS \"start_date!: String\",\n                   duration_weeks AS \"duration_weeks!: i64\",\n                   test_reps AS \"test_reps: i64\",\n                   test_target_grams AS \"test_target_grams: i64\",\n                   entry_test_reps AS \"entry_test_reps: i64\",\n                   entry_test_light_grams AS \"entry_test_light_grams: i64\"\n            FROM programme AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM programme AS q WHERE q.name = p.name\n            )\n            ORDER BY start_date ASC, id ASC\n            ",
+  "query": "\n        SELECT m.id AS \"id!: i64\", m.plan AS \"plan!: i64\",\n               pl.name AS \"plan_name!: String\",\n               m.template AS \"template!: String\",\n               m.provider AS \"provider: String\",\n               m.provided_programme AS \"provided_programme: String\",\n               m.primary_pattern AS \"primary_pattern!: String\",\n               m.primary_exercise AS \"primary_exercise!: String\",\n               m.anchor_grams AS \"anchor_grams: i64\",\n               m.anchor_provenance AS \"anchor_provenance: String\",\n               m.anchor_from AS \"anchor_from: String\",\n               m.anchor_failed_grams AS \"anchor_failed_grams: i64\",\n               m.opening_grams AS \"opening_grams: i64\",\n               m.gating_role AS \"gating_role: String\",\n               m.start_date AS \"start_date!: String\",\n               m.duration_weeks AS \"duration_weeks!: i64\",\n               m.test_reps AS \"test_reps: i64\",\n               m.test_target_grams AS \"test_target_grams: i64\",\n               m.entry_test_reps AS \"entry_test_reps: i64\",\n               m.entry_test_light_grams AS \"entry_test_light_grams: i64\"\n        FROM gym_mesocycle AS m\n        JOIN plan AS pl ON pl.id = m.plan\n        WHERE pl.authored_at = (\n            SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = pl.name\n        )\n        ORDER BY m.start_date ASC, m.id ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -9,30 +9,30 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "id"
           }
         }
       },
       {
-        "name": "name!: String",
+        "name": "plan!: i64",
         "ordinal": 1,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
-            "name": "name"
+            "table": "gym_mesocycle",
+            "name": "plan"
           }
         }
       },
       {
-        "name": "authored_at!: String",
+        "name": "plan_name!: String",
         "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
-            "name": "authored_at"
+            "table": "plan",
+            "name": "name"
           }
         }
       },
@@ -42,161 +42,183 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "template"
           }
         }
       },
       {
-        "name": "primary_pattern!: String",
+        "name": "provider: String",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "name": "provided_programme: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_mesocycle",
+            "name": "provided_programme"
+          }
+        }
+      },
+      {
+        "name": "primary_pattern!: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_mesocycle",
             "name": "primary_pattern"
           }
         }
       },
       {
         "name": "primary_exercise!: String",
-        "ordinal": 5,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "primary_exercise"
           }
         }
       },
       {
         "name": "anchor_grams: i64",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "anchor_grams"
           }
         }
       },
       {
         "name": "anchor_provenance: String",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "anchor_provenance"
           }
         }
       },
       {
         "name": "anchor_from: String",
-        "ordinal": 8,
+        "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "anchor_from"
           }
         }
       },
       {
         "name": "anchor_failed_grams: i64",
-        "ordinal": 9,
+        "ordinal": 11,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "anchor_failed_grams"
           }
         }
       },
       {
         "name": "opening_grams: i64",
-        "ordinal": 10,
+        "ordinal": 12,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "opening_grams"
           }
         }
       },
       {
         "name": "gating_role: String",
-        "ordinal": 11,
+        "ordinal": 13,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "gating_role"
           }
         }
       },
       {
         "name": "start_date!: String",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "start_date"
           }
         }
       },
       {
         "name": "duration_weeks!: i64",
-        "ordinal": 13,
+        "ordinal": 15,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "duration_weeks"
           }
         }
       },
       {
         "name": "test_reps: i64",
-        "ordinal": 14,
+        "ordinal": 16,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "test_reps"
           }
         }
       },
       {
         "name": "test_target_grams: i64",
-        "ordinal": 15,
+        "ordinal": 17,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "test_target_grams"
           }
         }
       },
       {
         "name": "entry_test_reps: i64",
-        "ordinal": 16,
+        "ordinal": 18,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "entry_test_reps"
           }
         }
       },
       {
         "name": "entry_test_light_grams: i64",
-        "ordinal": 17,
+        "ordinal": 19,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "gym_mesocycle",
             "name": "entry_test_light_grams"
           }
         }
@@ -210,6 +232,8 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       true,
@@ -226,5 +250,5 @@
       true
     ]
   },
-  "hash": "e5a406d00e6ddf9130f0f60c7c676eeb0eed650c68f46838663420b5c15f92b4"
+  "hash": "77567f104f3f787addbb3a98df712d8c14cc867d22f0ba2883804f12016806ab"
 }

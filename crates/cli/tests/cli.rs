@@ -108,10 +108,10 @@ fn the_settings_file_is_read_from_the_config_directory() {
 
     let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
 
-    // No programme is authored, so it gets that far and no further — which is
+    // No plan is authored, so it gets that far and no further — which is
     // exactly what proves the zone was found without being passed.
     assert!(
-        stderr(&output).contains("no programme covers"),
+        stderr(&output).contains("no plan covers"),
         "{}",
         stderr(&output)
     );
@@ -520,10 +520,10 @@ fn what_init_writes_is_what_the_next_run_reads() {
 
     let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
 
-    // No programme is authored, so it gets exactly that far — which is what
+    // No plan is authored, so it gets exactly that far — which is what
     // proves the zone was read back rather than asked for again.
     assert!(
-        stderr(&output).contains("no programme covers"),
+        stderr(&output).contains("no plan covers"),
         "{}",
         stderr(&output)
     );

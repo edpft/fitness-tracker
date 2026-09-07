@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT slot AS \"slot!: String\", role AS \"role: String\",\n               exercise AS \"exercise!: String\",\n               static_sets AS \"static_sets: i64\", static_reps AS \"static_reps: i64\"\n        FROM programme_slot_fill\n        WHERE programme = ?\n        ORDER BY slot ASC, position ASC\n        ",
+  "query": "\n        SELECT slot AS \"slot!: String\", role AS \"role: String\",\n               exercise AS \"exercise!: String\",\n               static_sets AS \"static_sets: i64\", static_reps AS \"static_reps: i64\"\n        FROM gym_slot_fill\n        WHERE mesocycle = ?\n        ORDER BY slot ASC, position ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme_slot_fill",
+            "table": "gym_slot_fill",
             "name": "slot"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme_slot_fill",
+            "table": "gym_slot_fill",
             "name": "role"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme_slot_fill",
+            "table": "gym_slot_fill",
             "name": "exercise"
           }
         }
@@ -42,7 +42,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme_slot_fill",
+            "table": "gym_slot_fill",
             "name": "static_sets"
           }
         }
@@ -53,7 +53,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "programme_slot_fill",
+            "table": "gym_slot_fill",
             "name": "static_reps"
           }
         }
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "09a0e4f0ae4bb5332f9b2767ab18c0ab90052b12d8b78e8fbc4205dea1785c29"
+  "hash": "2908ba4d8376822d6027b9d3f1328238fc5210e2c7da6703c11aae5295861a77"
 }

@@ -15,7 +15,7 @@ use std::sync::{
 
 use application::{
     Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, Issuance,
-    PrescribedWorkoutId, PrescriptionDeliverer as _, PrescriptionDestination, ProgrammeAuthor as _,
+    PlanAuthor as _, PrescribedWorkoutId, PrescriptionDeliverer as _, PrescriptionDestination,
     WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
@@ -23,8 +23,8 @@ use application::{
 use infrastructure::{
     HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteProgrammeStore, SqliteRefusalStore, connect,
+    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -114,7 +114,7 @@ impl PrescriptionDestination for Counting {
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
-    SqliteProgrammeStore,
+    SqliteGymMesocycleStore,
     SqliteGenerationParameterStore,
     SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore,
@@ -163,11 +163,12 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
     application::WorkoutNormaliser::normalise(&normalisation).await?;
 
     Authoring::new(
-        SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(
-        &programme::as_programme(programme::programme()?),
+        &programme::as_plan(programme::programme()?)?,
         &programme::parameters()?,
     )
     .await?;
@@ -175,7 +176,7 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
     Ok(Ready {
         prescriber: Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteProgrammeStore::new(pool.clone(), corpus::zone()?),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -194,7 +195,7 @@ fn delivering<'a>(
     destination: &'a Counting,
 ) -> Delivering<
     SqlitePrescribedWorkoutStore,
-    SqliteProgrammeStore,
+    SqliteGymMesocycleStore,
     SqlitePrescriptionDeliveryStore,
     &'a Counting,
 > {
@@ -203,7 +204,7 @@ fn delivering<'a>(
             ready.pool.clone(),
             "Europe/London".to_owned(),
         ),
-        programmes: SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+        programmes: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
         deliveries: SqlitePrescriptionDeliveryStore::new(ready.pool.clone()),
         destination,
     })
@@ -326,11 +327,12 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
 
     let (issued, second) = run!(async {
         Authoring::new(
-            SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
             SqliteGenerationParameterStore::new(ready.pool.clone()),
         )
         .author(
-            &programme::as_programme(programme::programme_from(Date::constant(2026, 7, 20))?),
+            &programme::as_plan(programme::programme_from(Date::constant(2026, 7, 20))?)?,
             &programme::parameters()?,
         )
         .await?;
@@ -390,11 +392,12 @@ fn a_replacement_moves_the_delivery_record() {
 
     let replacing = run!(async {
         Authoring::new(
-            SqliteProgrammeStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
+            SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
             SqliteGenerationParameterStore::new(ready.pool.clone()),
         )
         .author(
-            &programme::as_programme(programme::programme_from(Date::constant(2026, 7, 20))?),
+            &programme::as_plan(programme::programme_from(Date::constant(2026, 7, 20))?)?,
             &programme::parameters()?,
         )
         .await?;
