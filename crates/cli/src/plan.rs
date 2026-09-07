@@ -37,6 +37,7 @@ use domain::{
     },
     gym::{OperatorZone, sequence::NonEmpty},
     plan::{Plan, PlanName, Programme},
+    prescription::PrimaryPattern,
     provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::Discipline,
 };
@@ -59,8 +60,31 @@ const API_BASE: &str = "https://api.onepeloton.com";
 /// Who publishes the cycling programmes this build reads.
 const PELOTON: &str = "Peloton";
 
+/// A gym provider this build holds, and what choosing it settles.
+///
+/// **Choosing the programme chooses the pattern.** Stronger By Science publish a
+/// two-day intermediate per pattern — *Squat 2x Int* and a deadlift programme
+/// this build does not hold — so the pattern is not a question of its own here,
+/// and asking it would invite an answer contradicting the programme just chosen.
+/// The operator, 2026-09-07: *"The SBS programme is, in theory, squat pattern
+/// specific, they have a different intermediate 2-day deadlift programme, so, by
+/// choosing it, I'm effectively choosing a squat pattern."*
+struct GymProvider {
+    label: &'static str,
+    provider: &'static str,
+    /// The publisher's own name for it, which is what the layout says. Not
+    /// `sbs-n`: a name below the plan is the publisher's (issue #86).
+    programme: &'static str,
+    pattern: PrimaryPattern,
+}
+
 /// The gym providers this build holds.
-const GYM_PROVIDERS: [&str; 1] = ["Stronger By Science, two-day intermediate"];
+const GYM_PROVIDERS: [GymProvider; 1] = [GymProvider {
+    label: "Stronger By Science, two-day intermediate squat",
+    provider: "Stronger By Science",
+    programme: "Squat 2x Int",
+    pattern: PrimaryPattern::KneeDominant,
+}];
 
 /// Microcycles in a mesocycle, and where the test sits in an SBS one.
 ///
@@ -122,17 +146,11 @@ pub async fn generate(
             .parse::<Date>()
             .map_err(|_| format!("{typed:?} is not a date — try 2026-09-14"))
     })?;
+    let labels = GYM_PROVIDERS.map(|one| one.label);
     let gym = GYM_PROVIDERS
-        .get(choose("Gym provider", &GYM_PROVIDERS)?)
-        .copied()
-        .unwrap_or("Stronger By Science, two-day intermediate");
-    let lift = wizard::ask_until("Primary lift: ", |typed| {
-        if typed.is_empty() {
-            Err("a programme trains something — name the lift".to_owned())
-        } else {
-            Ok(typed.to_owned())
-        }
-    })?;
+        .get(choose("Gym provider", &labels)?)
+        .ok_or_else(|| Failure::message("no gym provider chosen", exit::USAGE))?;
+    let lift = wizard::ask_lift(gym.programme, gym.pattern)?;
     let pairing = PAIRINGS
         .get(choose("Cycling pairing", &PAIRINGS.map(|one| one.label))?)
         .copied()
@@ -166,7 +184,14 @@ pub async fn generate(
     }
     let test = test_microcycle(&testing, sessions);
 
-    report(&offered, gym, &lift, start, test.is_some(), microcycles);
+    report(
+        &offered,
+        gym,
+        lift.as_str(),
+        start,
+        test.is_some(),
+        microcycles,
+    );
 
     let taken: Vec<&Offered> = offered
         .iter()
@@ -558,7 +583,7 @@ fn build(
 
 fn report(
     offered: &[Offered],
-    gym: &str,
+    gym: &GymProvider,
     lift: &str,
     start: Date,
     tests: bool,
@@ -589,7 +614,7 @@ fn report(
         }
     }
 
-    println!("\n{gym}, {lift}\n");
+    println!("\n{}, {} — {lift}\n", gym.provider, gym.programme);
     println!("  {:>2}  {:<12}{:<24}cycling", "µ", "w/c", "gym");
     // **A standalone programme on both sides**, and neither row names a
     // microcycle of the block that follows it: the gym's is a `test` programme
@@ -604,17 +629,26 @@ fn report(
     let usable: Vec<&Offered> = offered.iter().filter(|one| one.answer.is_some()).collect();
     for (cycle, one) in usable.iter().take(3).enumerate() {
         let Some(answer) = &one.answer else { continue };
-        for (index, micro) in answer.microcycles.iter().enumerate() {
+        for index in 0..answer.microcycles.len() {
             let ordinal = cycle * SBS_MICROCYCLES as usize + index + 1;
             let date =
                 start.saturating_add(jiff::Span::new().weeks(i64::try_from(ordinal).unwrap_or(0)));
             let within = index + 1;
-            let gym = if within == SBS_MICROCYCLES as usize {
-                format!("sbs-{} µ{within} — 1RM test", cycle + 1)
+            let named = format!("{} {} µ{within}", gym.programme, cycle + 1);
+            let named = if within == SBS_MICROCYCLES as usize {
+                format!("{named} — 1RM test")
             } else {
-                format!("sbs-{} µ{within}", cycle + 1)
+                named
             };
-            println!("  {ordinal:>2}  {date}  {gym:<24}{} µ{micro}", one.name);
+            // **Our microcycle number, not the publisher's.** An answer of
+            // Peak's µ5-6-7-8 is our mesocycle's µ1-4: the external programme is
+            // one eight-microcycle block and splitting it into two mesocycles is
+            // ours, so numbering the second from five would say the mesocycle
+            // begins four weeks into itself. `cycling_microcycle` has carried
+            // both numbers since 0024 — `ordinal` ours, `published_ordinal`
+            // theirs — and this printed the wrong one until 2026-09-07. What
+            // they answer is the table above, which still names them.
+            println!("  {ordinal:>2}  {date}  {named:<28}{} µ{within}", one.name);
         }
     }
 

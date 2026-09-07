@@ -877,14 +877,49 @@ fn ask_provided(microcycles: Vec<u32>) -> Result<ProvidedFrom, Failure> {
 /// **Asked after the duration, not before it.** The dates are what a programme
 /// *is*; the lift is the first thing it is about, and the seventeen slots
 /// follow it. Moving it in front of `ends?` puts an exercise between two dates.
-fn ask_lift(template: &str) -> Result<RepsExercise, Failure> {
+///
+/// **Offered rather than typed, since 2026-09-07.** The pattern narrows the
+/// primary to three exercises knee-dominant or two hip-dominant, and until now
+/// this took free text — so answering it needed the operator to already know
+/// which lifts were acceptable, and a typo came back as "not in the
+/// vocabulary" rather than as a list. A word is still read as a key, so a lift
+/// off the list is one word away; what changed is that nothing has to be
+/// remembered to answer.
+pub fn ask_lift(template: &str, pattern: PrimaryPattern) -> Result<RepsExercise, Failure> {
+    let offers = domain::prescription::candidates::for_primary(pattern);
     println!("\nthe lift this {template} is about");
-    ask_until("  which exercise? ", |typed| match Exercise::named(typed) {
-        Some(Exercise::Reps(exercise)) => Ok(exercise),
-        Some(_) => Err(format!(
-            "{typed:?} is not counted in repetitions, and a primary needs one"
-        )),
-        None => Err(format!("{typed:?} is not an exercise in the vocabulary")),
+    for (at, key) in offers.iter().enumerate() {
+        println!("  {:>2}. {key}", at.saturating_add(1));
+    }
+
+    let question = format!(
+        "  which? [{}] ",
+        offers.first().copied().unwrap_or_default()
+    );
+    ask_until(&question, move |typed| {
+        let key = if typed.is_empty() {
+            (*offers
+                .first()
+                .ok_or_else(|| "nothing is offered; name an exercise".to_owned())?)
+            .to_owned()
+        } else if let Ok(number) = typed.parse::<usize>() {
+            (*offers
+                .get(number.wrapping_sub(1))
+                .ok_or_else(|| format!("there is no {number} on the list"))?)
+            .to_owned()
+        } else {
+            typed.to_owned()
+        };
+        match Exercise::named(&key) {
+            Some(Exercise::Reps(exercise)) => Ok(exercise),
+            Some(_) => Err(format!(
+                "{key:?} is not counted in repetitions, and a primary needs one"
+            )),
+            None => Err(format!(
+                "{key:?} is not an exercise — pick a number, or name one from \
+                 the vocabulary"
+            )),
+        }
     })
 }
 
@@ -912,7 +947,7 @@ async fn ask_test(
 ) -> Result<(PlanName, Authored), Failure> {
     println!("A test: one week, measuring.\n");
     let common = ask_common(diary, "test")?;
-    let lift = ask_lift("test")?;
+    let lift = ask_lift("test", common.pattern)?;
     let primary = lift.as_str();
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
@@ -1032,7 +1067,7 @@ async fn ask_climb(
     } else {
         ask_weeks(climbing, diary, common.start, &common.scheduled)?
     };
-    let lift = ask_lift(template)?;
+    let lift = ask_lift(template, common.pattern)?;
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(history, lift, scale).await?;
