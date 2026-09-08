@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT kind AS \"kind!: String\",\n                      (SELECT role FROM bike_plus_ride) AS \"role!: String\"\n               FROM cycling_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "kind!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "role!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "role"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "90455fedb36124d9f217137396b91cf0052a42e1329a63f39f67b793685f8f3d"
+}

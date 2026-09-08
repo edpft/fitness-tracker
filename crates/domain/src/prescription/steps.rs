@@ -26,7 +26,8 @@
 
 use std::fmt;
 
-use crate::gym::{Kg, NonEmpty};
+use crate::gym::Kg;
+use crate::sequence::NonEmpty;
 
 /// One band of a scale: a step size, and the load it starts applying at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

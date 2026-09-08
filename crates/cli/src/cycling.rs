@@ -25,7 +25,7 @@ use domain::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, Ftp, PlannedRide, Ride,
         SessionPosition, clock,
     },
-    gym::PositiveDuration,
+    measure::PositiveDuration,
 };
 use infrastructure::{
     SqliteCyclingMesocycleStore, connect,

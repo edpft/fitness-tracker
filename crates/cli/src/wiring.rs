@@ -22,13 +22,19 @@ use application::{
     status::ExtractionStatus,
 };
 use domain::{
-    gym::OperatorZone,
     landing::{FetchedAt, Watermark},
+    normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    FileRunLock, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
+    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    peloton::{
+        PelotonSessionTranslator,
+        auth::{PelotonAuth, PelotonCredentials},
+    },
 };
 
 use crate::{catalogue::KnownStream, config::SourceAccess};
@@ -53,11 +59,23 @@ pub enum Command {
 /// What happened, in terms the output module can print.
 pub enum Outcome {
     Extracted(Box<RunSummary>),
+    /// Two walks under one entry, reported as two, because they are two runs
+    /// against two endpoints and a single merged number would hide one of them
+    /// failing to land anything (§ 38).
+    ExtractedBoth {
+        first: Box<RunSummary>,
+        second: Box<RunSummary>,
+    },
     Derived(Box<NormalisationSummary>),
     Refused(Box<RefusalReport>),
     Reported {
         extraction: Box<StreamStatus>,
-        derivation: Box<DerivationStatus>,
+        /// `None` for a stream that lands and does not yet derive. Optional
+        /// rather than a zeroed report: "nothing normalises this" and "the
+        /// normalised layer is empty" are different facts, and printing the
+        /// second when the first is true would report a problem that does not
+        /// exist.
+        derivation: Option<Box<DerivationStatus>>,
     },
     Reset {
         previous: Option<Watermark>,
@@ -87,6 +105,8 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
+    #[error("{stream} is reached with a login, and {given} was resolved instead")]
+    WrongCredential { stream: String, given: &'static str },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
 }
@@ -110,10 +130,166 @@ pub async fn run(
 ) -> Result<Outcome, WiringError> {
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
+        PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
     }
+}
+
+/// Peloton's rides: both walks, one entity, one command.
+///
+/// **Two walks behind one entry.** The ride list gives a ride's start, duration
+/// and device; the performance graph gives its samples, one request per ride
+/// against a different endpoint. Neither is an entity on its own and neither is
+/// useful without the other, so the operator can no longer ask for one:
+/// *"if one command needs to be run before another, those commands aren't
+/// meaningfully separate and it shouldn't be possible to run them in the wrong
+/// order"*.
+///
+/// They stay two landing tables and two resumption points. A landing record
+/// holds one response as served (§ II.1), and the graph walk is minutes where
+/// the list walk is seconds — so a graph walk that fails part-way must not cost
+/// the list its watermark. What went is the choice, not the separation.
+///
+/// The list is walked first, and that is the one ordering that still matters:
+/// the graph walk enumerates rides itself, so running it second means the
+/// graphs it fetches are for rides this same command has just landed.
+async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = PelotonRideLandingStore::new(pool.clone())?;
+    let samples_landing = PelotonRideSampleLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+
+    match command {
+        Command::Extract(access) => {
+            collect_rides(access, landing, samples_landing, resumption, runs, database).await
+        }
+        Command::Normalise(zone) => {
+            // No lock, as on the gym side: a derivation reads raw and writes
+            // only its own tables.
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: PelotonSessionAccountReader::new(pool.clone())?,
+                    translator: PelotonSessionTranslator,
+                    workouts: SqliteCyclingSessionStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        PelotonRideLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+
+            let summary = normalisation.normalise().await?;
+            Ok(Outcome::Derived(Box::new(summary)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
+        Command::Status => {
+            let derivation = DerivationStanding::new(
+                PelotonRawExtent::new(
+                    PelotonRideLandingStore::new(pool.clone())?,
+                    PelotonRideSampleLandingStore::new(pool.clone())?,
+                ),
+                SqliteCyclingSessionStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: Some(Box::new(derivation)),
+            })
+        }
+        Command::Reset => {
+            // Both, because both are behind one entry: resetting one and not
+            // the other would leave the two walks at different points in
+            // history, which is the state this entry exists to prevent.
+            let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(
+                samples_landing,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool),
+            )
+            .reset()
+            .await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
+/// Both Peloton walks, in the one order that matters.
+///
+/// The list is walked first: the graph walk enumerates rides itself, so running
+/// it second means the graphs it fetches are for rides this same command has
+/// just landed.
+///
+/// Two `PelotonAuth`s rather than one shared, because each caches the token it
+/// fetches to the same file — so the second login costs nothing and neither
+/// walk holds the other's state.
+async fn collect_rides(
+    access: SourceAccess,
+    landing: PelotonRideLandingStore,
+    samples_landing: PelotonRideSampleLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<Outcome, WiringError> {
+    let SourceAccess::EmailPassword {
+        base_url,
+        auth_base_url,
+        email,
+        password,
+    } = access
+    else {
+        return Err(WiringError::WrongCredential {
+            stream: PelotonRideLandingStore::STREAM.to_owned(),
+            given: "an API key",
+        });
+    };
+
+    let credentials = PelotonCredentials::new(email, password);
+    let rides = Extraction::new(ExtractionPorts {
+        source: PelotonWorkouts::new(
+            base_url.clone(),
+            PelotonAuth::new(auth_base_url.clone(), credentials.clone()),
+        ),
+        landing,
+        resumption: resumption.clone(),
+        runs: runs.clone(),
+        lock: FileRunLock::beside(database),
+        clock: SystemClock,
+    });
+    let ridden = rides.extract().await?;
+
+    let graphs = Extraction::new(ExtractionPorts {
+        source: PelotonWorkoutSamples::new(base_url, PelotonAuth::new(auth_base_url, credentials)),
+        landing: samples_landing,
+        resumption,
+        runs,
+        lock: FileRunLock::beside(database),
+        clock: SystemClock,
+    });
+    let sampled = graphs.extract().await?;
+
+    Ok(Outcome::ExtractedBoth {
+        first: Box::new(ridden),
+        second: Box::new(sampled),
+    })
 }
 
 /// Hevy's workout events feed, landed into the table shaped for it.
@@ -125,8 +301,15 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
     match command {
         Command::Extract(access) => {
+            let SourceAccess::ApiKey { base_url, api_key } = access else {
+                return Err(WiringError::WrongCredential {
+                    stream: HevyWorkoutLandingStore::STREAM.to_owned(),
+                    given: "a login",
+                });
+            };
+
             let extraction = Extraction::new(ExtractionPorts {
-                source: HevyWorkoutEvents::new(access.base_url, access.api_key),
+                source: HevyWorkoutEvents::new(base_url, api_key),
                 landing,
                 resumption,
                 runs,
@@ -143,10 +326,13 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             // resumption point — the two commands can run at once.
             let normalisation = Normalisation::new(
                 NormalisationPorts {
-                    raw: HevyWorkoutLandingReader::new(pool.clone())?,
-                    translator: HevyWorkoutTranslator,
-                    workouts: SqliteGymWorkoutStore::new(pool.clone())?,
-                    refusals: SqliteRefusalStore::new(pool.clone())?,
+                    raw: HevySessionAccountReader::new(pool.clone())?,
+                    translator: HevySessionTranslator,
+                    workouts: SqliteGymSessionStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        HevyWorkoutLandingStore::STREAM,
+                    )?,
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
@@ -158,7 +344,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
         }
         Command::Refusals => {
             let reporter = Refusals::new(
-                SqliteRefusalStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             );
             Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
@@ -169,8 +355,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             // records behind is a system with a silent problem.
             let derivation = DerivationStanding::new(
                 HevyWorkoutLandingStore::new(pool.clone())?,
-                SqliteGymWorkoutStore::new(pool.clone())?,
-                SqliteRefusalStore::new(pool.clone())?,
+                SqliteGymSessionStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             )
             .derivation_status()
@@ -179,7 +365,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: Box::new(derivation),
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {
@@ -195,8 +381,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
 #[cfg(test)]
 mod tests {
-    use super::HevyWorkoutLandingStore;
-    use crate::catalogue::KNOWN;
+    use super::{HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore};
+    use crate::catalogue::{KNOWN, lookup};
 
     /// Every catalogue entry must be reachable, and must name the same stream
     /// its adapters do.
@@ -210,7 +396,11 @@ mod tests {
     /// front of an operator.
     #[test]
     fn every_catalogue_entry_is_wired_to_adapters_that_name_it() {
-        let wired = [HevyWorkoutLandingStore::STREAM];
+        let wired = [
+            HevyWorkoutLandingStore::STREAM,
+            PelotonRideLandingStore::STREAM,
+            PelotonRideSampleLandingStore::STREAM,
+        ];
 
         for known in &KNOWN {
             assert!(
@@ -219,10 +409,23 @@ mod tests {
                 known.name()
             );
         }
+
+        // **Streams that land behind another entry rather than under their own
+        // name.** Peloton's graphs are collected by the same command that
+        // collects its rides, because neither derives anything without the
+        // other — so this one is wired, lands, resumes and locks, and cannot be
+        // asked for. Anything else wired but uncollectable is a mistake.
+        let landed_behind_another = [PelotonRideSampleLandingStore::STREAM];
         assert_eq!(
             wired.len(),
-            KNOWN.len(),
+            KNOWN.len() + landed_behind_another.len(),
             "an adapter is wired but uncollectable"
         );
+        for hidden in landed_behind_another {
+            assert!(
+                lookup(hidden).is_none(),
+                "{hidden} lands behind another entry and must not be nameable"
+            );
+        }
     }
 }

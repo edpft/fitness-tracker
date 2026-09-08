@@ -18,7 +18,7 @@
 
 use application::{PlanStore, StoreError};
 use domain::{
-    gym::OperatorZone,
+    normalised::OperatorZone,
     plan::{Plan, PlanId, PlanName, PlanWindow, Programme},
 };
 use sqlx::SqlitePool;

@@ -31,14 +31,16 @@ use application::{
 };
 use domain::{
     gym::{
-        AtLeastTwo, Distance, Duration, GymWorkout, Load, Metres, NonEmpty, OperatorZone,
-        Performed, PerformedExercise, RepCount, Rir, Set, SetKind, SignedKg, WorkoutItem,
-        WorkoutStart,
+        GymWorkout, Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind,
+        SignedKg, WorkoutItem,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, EventTime, LandingRecordId, Provenance},
+    measure::{Distance, Duration, Metres, RepCount},
+    normalised::{OperatorZone, StartedAt},
     plan::PlanName,
     prescription::SessionRole,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -505,7 +507,7 @@ fn sets_of<M>(
 }
 
 impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
-    async fn between(&self, from: Date, to: Date) -> Result<Vec<GymWorkout>, StoreError> {
+    async fn between(&self, from: Date, to: Date) -> Result<Vec<PerformedGymSession>, StoreError> {
         // **The window is widened in SQL and narrowed in Rust.** Which day a
         // workout was trained on depends on the zone *on its row*, so the exact
         // comparison cannot be a `WHERE` clause without assuming every session
@@ -525,27 +527,29 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
             })?
             .to_string();
 
-        let workouts = sqlx::query!(
+        // **Every session whose *first* workout falls in the window.** A day is
+        // a property of the session, and taking it from the session's start is
+        // what stops a session that ran past midnight being reported twice or
+        // filed under the wrong day. Joining the parts back on is what makes
+        // this a session reader rather than a workout reader with a column
+        // added.
+        let sessions = sqlx::query!(
             r#"
-            SELECT w.landing_record_id AS "landed_as!: i64",
+            SELECT s.landing_record_id AS "session!: i64",
+                   w.landing_record_id AS "landed_as!: i64",
                    w.source_record_id AS "source_record_id!: String",
                    w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
                    w.event_time AS "event_time: String",
-                   w.performed_against AS "performed_against: String"
-            FROM gym_workout AS w
-            WHERE w.started_at_utc >= ? AND w.started_at_utc < ?
-              AND NOT EXISTS (
-                    SELECT 1
-                    FROM gym_workout AS superseding
-                    JOIN hevy_workout_landing AS later
-                        ON later.id = superseding.landing_record_id
-                    JOIN hevy_workout_landing AS this
-                        ON this.id = w.landing_record_id
-                    WHERE superseding.source_record_id = w.source_record_id
-                      AND later.serve_ordinal > this.serve_ordinal
-              )
-            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
+                   w.performed_against AS "performed_against: String",
+                   first.started_at_utc AS "session_started_at!: String",
+                   first.zone AS "session_zone!: String"
+            FROM gym_session AS s
+            JOIN gym_workout AS first ON first.landing_record_id = s.landing_record_id
+            JOIN gym_workout AS w ON w.session = s.landing_record_id
+            WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
+            ORDER BY first.started_at_utc ASC, s.landing_record_id ASC,
+                     w.started_at_utc ASC, w.landing_record_id ASC
             "#,
             lower,
             upper
@@ -554,13 +558,23 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut assembled = Vec::new();
-        for row in workouts {
-            let day = day_of(&row.on_utc, &row.zone)?;
+        // Grouped in Rust rather than in a second query per session: the rows
+        // arrive in session order and in performed order within a session, so
+        // this is a fold over a sequence the database already sorted.
+        let mut assembled: Vec<PerformedGymSession> = Vec::new();
+        let mut parts: Vec<GymWorkout> = Vec::new();
+        let mut current: Option<i64> = None;
+
+        for row in sessions {
+            let day = day_of(&row.session_started_at, &row.session_zone)?;
             if day < from || day > to {
                 continue;
             }
-            assembled.push(
+            if current != Some(row.session) {
+                push_session(&mut assembled, std::mem::take(&mut parts))?;
+                current = Some(row.session);
+            }
+            parts.push(
                 self.assemble(WorkoutRow {
                     landed_as: row.landed_as,
                     source_record_id: row.source_record_id,
@@ -574,6 +588,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                 .await?,
             );
         }
+        push_session(&mut assembled, parts)?;
 
         Ok(assembled)
     }
@@ -581,7 +596,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
     async fn fulfilling(
         &self,
         prescription: PrescribedWorkoutId,
-    ) -> Result<Option<(DeliveryReference, GymWorkout)>, StoreError> {
+    ) -> Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError> {
         let id = prescription.as_i64();
 
         // **Any delivery of this prescription will do.** A reference a
@@ -593,27 +608,18 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
         // (§ 10): the later-served landing of one source record is the one that
         // counts, and a comparison against a retracted version of a workout
         // would compare against something the record has superseded.
+        // **The part names the prescription; the session is what answered it.**
+        // A session split across several routines carries a routine id on each
+        // part, and only the part logged against this prescription names it —
+        // so the match is on the part and the answer is the session it belongs
+        // to.
         let row = sqlx::query!(
             r#"
-            SELECT w.landing_record_id AS "landed_as!: i64",
-                   w.source_record_id AS "source_record_id!: String",
-                   w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
-                   w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
-                   w.event_time AS "event_time: String",
+            SELECT w.session AS "session!: i64",
                    w.performed_against AS "performed_against!: String"
             FROM gym_workout AS w
             JOIN prescription_delivery AS d ON d.reference = w.performed_against
-            WHERE d.prescription = ?
-              AND NOT EXISTS (
-                    SELECT 1
-                    FROM gym_workout AS superseding
-                    JOIN hevy_workout_landing AS later
-                        ON later.id = superseding.landing_record_id
-                    JOIN hevy_workout_landing AS this
-                        ON this.id = w.landing_record_id
-                    WHERE superseding.source_record_id = w.source_record_id
-                      AND later.serve_ordinal > this.serve_ordinal
-              )
+            WHERE d.prescription = ? AND w.session IS NOT NULL
             ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
             LIMIT 1
             "#,
@@ -633,27 +639,79 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                     detail: error.to_string(),
                 }
             })?;
-        let workout = self
-            .assemble(WorkoutRow {
-                landed_as: row.landed_as,
-                source_record_id: row.source_record_id,
-                on_utc: row.on_utc,
-                zone: row.zone,
-                endpoint: row.endpoint,
-                event_kind: row.event_kind,
-                event_time: row.event_time,
-                performed_against: Some(row.performed_against),
-            })
-            .await?;
 
-        Ok(Some((reference, workout)))
+        let session = self.session(row.session).await?;
+        Ok(Some((reference, session)))
     }
 }
 
+/// Close off a session from the parts collected for it.
+///
+/// A session with no parts is not written and cannot be read back — the
+/// derivation writes the session row and its workouts in one transaction — so an
+/// empty run here is the fold's first turn rather than a state to represent.
+fn push_session(
+    assembled: &mut Vec<PerformedGymSession>,
+    parts: Vec<GymWorkout>,
+) -> Result<(), StoreError> {
+    if parts.is_empty() {
+        return Ok(());
+    }
+    let workouts = NonEmpty::new(parts).map_err(|_| StoreError::Corrupt {
+        detail: "a gym session with no workouts".to_owned(),
+    })?;
+    assembled.push(PerformedGymSession::new(workouts));
+    Ok(())
+}
+
 impl SqlitePerformedWorkoutReader {
+    /// One session, by the landing record it is keyed on, with its workouts in
+    /// the order they were performed.
+    async fn session(&self, session: i64) -> Result<PerformedGymSession, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT w.landing_record_id AS "landed_as!: i64",
+                   w.source_record_id AS "source_record_id!: String",
+                   w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
+                   w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
+                   w.event_time AS "event_time: String",
+                   w.performed_against AS "performed_against: String"
+            FROM gym_workout AS w
+            WHERE w.session = ?
+            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
+            "#,
+            session
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut parts = Vec::with_capacity(rows.len());
+        for row in rows {
+            parts.push(
+                self.assemble(WorkoutRow {
+                    landed_as: row.landed_as,
+                    source_record_id: row.source_record_id,
+                    on_utc: row.on_utc,
+                    zone: row.zone,
+                    endpoint: row.endpoint,
+                    event_kind: row.event_kind,
+                    event_time: row.event_time,
+                    performed_against: row.performed_against,
+                })
+                .await?,
+            );
+        }
+
+        let workouts = NonEmpty::new(parts).map_err(|_| StoreError::Corrupt {
+            detail: "a gym session with no workouts".to_owned(),
+        })?;
+        Ok(PerformedGymSession::new(workouts))
+    }
+
     /// One row, plus the items it took five tables to write, as an entity.
     ///
-    /// Shared by both queries so that a column read one way in one and another
+    /// Shared by every query so that a column read one way in one and another
     /// way in the other is not a thing that can happen.
     async fn assemble(&self, row: WorkoutRow) -> Result<GymWorkout, StoreError> {
         let items = self.items_of(row.landed_as).await?;
@@ -811,14 +869,14 @@ impl SqlitePerformedWorkoutReader {
 }
 
 /// The stored instant and zone, as the domain's start.
-fn start_of(started_at_utc: &str, zone: &str) -> Result<WorkoutStart, StoreError> {
+fn start_of(started_at_utc: &str, zone: &str) -> Result<StartedAt, StoreError> {
     let instant: jiff::Timestamp = started_at_utc.parse().map_err(|_| StoreError::Corrupt {
         detail: format!("{started_at_utc:?} is not an instant"),
     })?;
     let zone = OperatorZone::try_from(zone).map_err(|error| StoreError::Corrupt {
         detail: error.to_string(),
     })?;
-    Ok(WorkoutStart::new(instant, zone))
+    Ok(StartedAt::new(instant, zone))
 }
 
 /// Provenance, mandatory and never inferred (§ II.3).

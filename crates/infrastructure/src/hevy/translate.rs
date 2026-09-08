@@ -1,4 +1,10 @@
-//! Turning a landed Hevy payload into a gym workout.
+//! Turning Hevy's account of one session into a performed gym session.
+//!
+//! **A session, not a workout** (§ 3.1). Hevy files one workout per record and
+//! the operator split single sessions across several routines, so an account is
+//! one or more records and the entity is what they were performed as. Which
+//! records belong together is [`super::sessions`]'s question; this builds the
+//! entity from the answer.
 //!
 //! Deterministic and total: the record's values plus the mapping plus the
 //! declared zone resolve the entity with no further input. There is no clock,
@@ -14,21 +20,26 @@
 //! the run is a template the mapping does not cover — a defect in our own
 //! vocabulary rather than in the data.
 
-use application::{NormalisationError, Translation, ports::WorkoutTranslator};
+use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone, Performed,
-        PerformedExercise, Refusal, RefusalLocus, RefusalReason, RepCount, Rir, Set, SetKind,
-        SignedKg, Superset, WorkoutItem, WorkoutStart, exercise::Exercise, sequence::AtLeastTwo,
+        GymWorkout, Kg, Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind,
+        SignedKg, Superset, WorkoutItem, exercise::Exercise,
     },
-    landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
+    landing::{EventKind, LandedRecord, Provenance},
+    measure::{Distance, Duration, Metres, RepCount},
+    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use std::fmt;
+
+use crate::scribe::Scribe;
 
 use jiff::Timestamp;
 
 use super::{
+    account::SessionAccount,
     mapping::{LoadReading, Mapped, lookup},
     payload::{ExerciseEntry, PerformedSet, WorkoutEnvelope, number},
 };
@@ -40,70 +51,145 @@ use super::{
 /// configuration and a test can pin both sides of a switchover without building
 /// two of them.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct HevyWorkoutTranslator;
+pub struct HevySessionTranslator;
 
-impl WorkoutTranslator for HevyWorkoutTranslator {
+impl Translator for HevySessionTranslator {
+    type Account = SessionAccount;
+    type Entity = PerformedGymSession;
+
     fn translate(
         &self,
-        record: &LandedRecord,
+        account: &SessionAccount,
         zone: &OperatorZone,
-    ) -> Result<Translation, NormalisationError> {
-        let mut scribe = Scribe::new(record);
+    ) -> Result<Translation<PerformedGymSession>, NormalisationError> {
+        // Anchored to the session's first workout, for a session-wide refusal
+        // that belongs to no one part. A refusal has to point the operator at
+        // something they can look up, and a session is not something the source
+        // names.
+        let mut session = Scribe::new(account.workouts().first());
 
         // The event kind comes from provenance, which the adapter recorded when
         // the record landed. Reading it again from the body would be a second
         // answer to a question that already has one.
-        let Provenance::Event(event) = record.provenance();
-        match event.kind() {
-            EventKind::Deleted => {
-                return Ok(Translation::Retraction {
-                    of: record.source_record_id().clone(),
-                });
+        //
+        // **A retraction of any part withdraws the whole session.** A session
+        // missing one of the workouts it was performed as is not that session,
+        // and keeping the rest would assert something the source has stopped
+        // saying. The use case does the withdrawing, off `composes`.
+        for record in account.workouts().iter() {
+            let Provenance::Event(event) = record.provenance();
+            match event.kind() {
+                EventKind::Deleted => {
+                    return Ok(Translation::Retraction {
+                        of: record.source_record_id().clone(),
+                    });
+                }
+                EventKind::Unrecognised(kind) => {
+                    return Ok(session.only(
+                        RefusalLocus::Record,
+                        RefusalReason::UnreadablePayload {
+                            detail: format!("event kind {kind:?} is not one we translate"),
+                        },
+                    ));
+                }
+                EventKind::Updated => {}
             }
-            EventKind::Unrecognised(kind) => {
-                return Ok(scribe.only(
-                    RefusalLocus::Record,
-                    RefusalReason::UnreadablePayload {
-                        detail: format!("event kind {kind:?} is not one we translate"),
-                    },
-                ));
-            }
-            EventKind::Updated => {}
         }
 
+        // **Every workout, or none**, as [`crate::peloton::translate`] does it.
+        // § 37's ladder stops at the record: a refused set does not cost its
+        // exercise and a refused exercise does not cost its workout, but a
+        // session written without a part that refused would be a session
+        // understating what was performed — and the run's arithmetic could not
+        // say what became of that record, which is what § 38 exists to catch.
+        //
+        // **Each part keeps its own refusals.** They are raised against the
+        // record they happened in rather than against the session's first, so
+        // an operator is pointed at the workout they can open.
+        let mut workouts = Vec::with_capacity(account.workouts().count());
+        let mut refusals: Vec<Refusal> = Vec::new();
+        let mut refused = false;
+
+        for record in account.workouts().iter() {
+            let mut scribe = Scribe::new(record);
+            match Self::workout(record, zone, &mut scribe)? {
+                Some(workout) => workouts.push(workout),
+                None => refused = true,
+            }
+            refusals.extend(scribe.into_refusals());
+        }
+
+        if refused {
+            // Non-empty by construction: `workout` notes a reason on every path
+            // that returns nothing. The fallback answers the type rather than
+            // asserting that with a panic (§ 26).
+            return Ok(NonEmpty::new(refusals).map_or_else(
+                |_| session.only(RefusalLocus::Record, RefusalReason::NothingTranslatable),
+                Translation::Refused,
+            ));
+        }
+
+        let Ok(workouts) = NonEmpty::new(workouts) else {
+            return Ok(session.only(RefusalLocus::Record, RefusalReason::NothingTranslatable));
+        };
+
+        Ok(Translation::Entity {
+            entity: Box::new(PerformedGymSession::new(workouts)),
+            refusals,
+        })
+    }
+}
+
+impl HevySessionTranslator {
+    /// One record as one workout, or nothing with the reason noted.
+    ///
+    /// Every `None` path notes at least one refusal, which is what lets the
+    /// caller refuse the session without inventing a reason for it.
+    fn workout(
+        record: &LandedRecord,
+        zone: &OperatorZone,
+        scribe: &mut Scribe,
+    ) -> Result<Option<GymWorkout>, NormalisationError> {
         let envelope = match WorkoutEnvelope::read(record.payload().as_bytes()) {
             Ok(envelope) => envelope,
             Err(error) => {
-                return Ok(scribe.only(
+                scribe.note(
                     RefusalLocus::Record,
                     RefusalReason::UnreadablePayload {
                         detail: error.detail,
                     },
-                ));
+                );
+                return Ok(None);
             }
         };
         let Some(workout) = envelope.workout else {
-            return Ok(scribe.only(
+            scribe.note(
                 RefusalLocus::Record,
                 RefusalReason::UnreadablePayload {
                     detail: "an updated event carrying no workout".to_owned(),
                 },
-            ));
+            );
+            return Ok(None);
         };
 
         let Ok(instant) = workout.start_time.parse::<Timestamp>() else {
-            return Ok(scribe.only(
+            scribe.note(
                 RefusalLocus::Record,
                 RefusalReason::UnreadableValue {
                     field: "start_time",
                     detail: workout.start_time.clone(),
                 },
-            ));
+            );
+            return Ok(None);
         };
 
-        let items = Self::items(&workout.exercises, &mut scribe, record)?;
+        let items = Self::items(&workout.exercises, scribe, record)?;
         let Ok(items) = NonEmpty::new(items) else {
-            return Ok(scribe.nothing_translatable());
+            // A workout whose every entry refused. The entry-level reasons are
+            // already on the scribe; this only covers a record with no entries
+            // at all, which would otherwise refuse silently.
+            scribe.note(RefusalLocus::Record, RefusalReason::NothingTranslatable);
+            return Ok(None);
         };
 
         // **An empty routine id is no routine id.** `DeliveryReference` refuses
@@ -116,21 +202,16 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
             .as_ref()
             .and_then(|id| DeliveryReference::try_from(id.clone()).ok());
 
-        Ok(Translation::Workout {
-            workout: Box::new(GymWorkout::new(
-                items,
-                WorkoutStart::new(instant, zone.clone()),
-                record.provenance().clone(),
-                record.source_record_id().clone(),
-                record.id(),
-                performed_against,
-            )),
-            refusals: scribe.into_refusals(),
-        })
+        Ok(Some(GymWorkout::new(
+            items,
+            StartedAt::new(instant, zone.clone()),
+            record.provenance().clone(),
+            record.source_record_id().clone(),
+            record.id(),
+            performed_against,
+        )))
     }
-}
 
-impl HevyWorkoutTranslator {
     /// The workout's ordered items, with groupings resolved.
     fn items(
         entries: &[ExerciseEntry<'_>],
@@ -480,75 +561,5 @@ fn flush(
         })),
         (Some(only), None) => items.push(WorkoutItem::Exercise(only)),
         _ => {}
-    }
-}
-
-/// Collects refusals as translation walks a record.
-///
-/// A small mutable thing rather than a returned list at every level: a refusal
-/// can be raised four layers down, and threading `Vec<Refusal>` through each of
-/// them would put the plumbing in front of the reading.
-struct Scribe {
-    landed_as: LandingRecordId,
-    source_record_id: SourceRecordId,
-    refusals: Vec<Refusal>,
-}
-
-impl Scribe {
-    fn new(record: &LandedRecord) -> Self {
-        Self {
-            landed_as: record.id(),
-            source_record_id: record.source_record_id().clone(),
-            refusals: Vec::new(),
-        }
-    }
-
-    fn note(&mut self, locus: RefusalLocus, reason: RefusalReason) {
-        self.note_for(locus, None, reason);
-    }
-
-    /// A refusal that knows which exercise it belonged to.
-    fn note_for(&mut self, locus: RefusalLocus, exercise: Option<Exercise>, reason: RefusalReason) {
-        self.refusals.push(Refusal {
-            landed_as: self.landed_as,
-            source_record_id: self.source_record_id.clone(),
-            locus,
-            exercise,
-            reason,
-        });
-    }
-
-    /// A record that produced nothing but this one reason.
-    fn only(&mut self, locus: RefusalLocus, reason: RefusalReason) -> Translation {
-        self.note(locus, reason);
-        self.nothing_translatable()
-    }
-
-    /// Every item refused, so the record yields no workout — a workout holds a
-    /// non-empty sequence of items by construction. Not a run failure.
-    fn nothing_translatable(&mut self) -> Translation {
-        if self.refusals.is_empty() {
-            self.note(RefusalLocus::Record, RefusalReason::NothingTranslatable);
-        }
-        let refusals = std::mem::take(&mut self.refusals);
-        NonEmpty::new(refusals).map_or_else(
-            |_| {
-                Translation::Refused(NonEmpty::of(
-                    Refusal {
-                        landed_as: self.landed_as,
-                        source_record_id: self.source_record_id.clone(),
-                        locus: RefusalLocus::Record,
-                        exercise: None,
-                        reason: RefusalReason::NothingTranslatable,
-                    },
-                    Vec::new(),
-                ))
-            },
-            Translation::Refused,
-        )
-    }
-
-    fn into_refusals(self) -> Vec<Refusal> {
-        self.refusals
     }
 }

@@ -1,0 +1,40 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"rides!: i64\",\n                      (SELECT COUNT(*) FROM cycling_session) AS \"sessions!: i64\",\n                      (SELECT duration_seconds FROM bike_plus_ride) AS \"duration!: i64\"\n               FROM bike_plus_ride",
+  "describe": {
+    "columns": [
+      {
+        "name": "rides!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "sessions!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "duration_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8607a6b6e6c127ea05a3a78e0f60583d2d9d0fbd96fb5f58707d587563f08b4d"
+}

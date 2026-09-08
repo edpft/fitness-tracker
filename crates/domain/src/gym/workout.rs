@@ -6,24 +6,31 @@
 //! on a watch and the same session recorded here are two observations of one
 //! event, reconciled at the canonical layer.
 //!
-//! There is deliberately no session above this. The source's workout boundary is
-//! not the session boundary — two days in the corpus landed four back-to-back
-//! records each, one training session fragmented by an attempt to make parts
-//! reusable — but a session stands for more than one normalised entity, which
-//! makes it composition at the canonical layer rather than anything this layer
-//! can build.
+//! **The session is above this, and it is the entity.** The source's workout
+//! boundary is not the session boundary — 21 days in the corpus landed more than
+//! one record each, three of them four, one training session split across
+//! several Hevy routines so the parts could be composed. This module said for a
+//! while that composing them was canonical-layer work, and constitution 3.2.0
+//! settled it the other way: [`super::PerformedGymSession`] is the normalised
+//! entity and a `GymWorkout` is a part of one.
+//!
+//! A part is still real. It has its own start, its own provenance and its own
+//! [`GymWorkout::performed_against`], and every one of those is the part's
+//! rather than the session's — which is why this type kept every field it had
+//! when the session arrived above it.
 
 use std::fmt;
 
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::prescription::DeliveryReference;
 
+use crate::measure::{Distance, Duration, RepCount};
+use crate::normalised::StartedAt;
+use crate::sequence::{AtLeastTwo, NonEmpty};
+
 use super::{
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
-    measure::{Distance, Duration, RepCount},
-    sequence::{AtLeastTwo, NonEmpty},
     set::Set,
-    time::WorkoutStart,
 };
 
 /// One exercise together with the sets performed of it.
@@ -126,17 +133,23 @@ impl WorkoutItem {
     }
 }
 
-/// One workout, as one source recorded it.
+/// One workout, as one source recorded it. A part of a session, not a session.
 ///
 /// Identified by the landing record it came from, not by the source's record
 /// id. Two records sharing a source id are the same source contradicting
-/// itself, and § 10 puts that at the canonical layer — so both produce a
-/// workout here and both stand. Keying on the source id would collapse the pair
-/// silently, which is the one thing this layer must not do.
+/// itself, and keying on the source id would collapse the pair silently —
+/// which is the one thing this layer must not do.
+///
+/// **Which of them stands is decided before this type exists.** § 10 says the
+/// later serving supersedes, and a session cannot leave that until later: two
+/// servings of one workout are one workout told twice, and grouping them would
+/// invent a session of two parts nobody trained. So the adapter sets the earlier
+/// serving aside while it groups, counts it, and builds a workout only from the
+/// serving that stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GymWorkout {
     items: NonEmpty<WorkoutItem>,
-    started_at: WorkoutStart,
+    started_at: StartedAt,
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: LandingRecordId,
@@ -160,7 +173,7 @@ impl GymWorkout {
     /// that exists is a workout that knows where it came from (§ II.3).
     pub const fn new(
         items: NonEmpty<WorkoutItem>,
-        started_at: WorkoutStart,
+        started_at: StartedAt,
         provenance: Provenance,
         source_record_id: SourceRecordId,
         landed_as: LandingRecordId,
@@ -185,7 +198,7 @@ impl GymWorkout {
         &self.items
     }
 
-    pub const fn started_at(&self) -> &WorkoutStart {
+    pub const fn started_at(&self) -> &StartedAt {
         &self.started_at
     }
 
@@ -193,12 +206,12 @@ impl GymWorkout {
         &self.provenance
     }
 
-    pub const fn source_record_id(&self) -> &SourceRecordId {
-        &self.source_record_id
-    }
-
     pub const fn landed_as(&self) -> LandingRecordId {
         self.landed_as
+    }
+
+    pub const fn source_record_id(&self) -> &SourceRecordId {
+        &self.source_record_id
     }
 
     /// Every performed exercise, flattened across items in their recorded

@@ -1,37 +1,47 @@
-//! The normalised layer for `hevy.workouts`, and the reader raw is derived
+//! The normalised layer for `hevy.workouts`, and the account raw is derived
 //! from.
 //!
 //! Two adapters in one file because they are two halves of the same trip: one
 //! reads the input, the other writes the derivation, and neither can do the
-//! other's job. `HevyWorkoutLandingReader` has no `append` — that is what makes
+//! other's job. `HevySessionAccountReader` has no `append` — that is what makes
 //! "a derivation never writes to raw" a fact about the type rather than a
 //! promise about the code.
+//!
+//! **The reader reads one table and groups what it finds into sessions.** Hevy
+//! serves a workout whole, so unlike its Peloton counterpart there is no second
+//! endpoint to join — but the operator split single sessions across several
+//! routines, and § 3.1 composes those into one entity.
+//!
+//! **The grouping rule is not here.** Which of Hevy's records belong to one
+//! session lives in [`crate::hevy::sessions`]. This adapter reads rows and hands
+//! them over. What it keeps is the half only it can do: reaching a store, so
+//! that what the translator receives is whole and cannot go back for more.
 
-use application::{LandingRecordReader, NormalisedWorkoutStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    gym::{
-        GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount,
-        WorkoutItem,
-    },
+    gym::{GymWorkout, Load, PerformedExercise, PerformedGymSession, Set, SetKind, WorkoutItem},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
+    normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
+
+use crate::hevy::{SessionAccount, group};
 
 use super::{
     corrupt, count_for_storage, count_from_storage, normalisation_run_for_storage, store_error,
 };
 
-/// Raw, read-only, for Hevy workouts.
+/// Raw, read-only, for Hevy gym sessions.
 #[derive(Debug, Clone)]
-pub struct HevyWorkoutLandingReader {
+pub struct HevySessionAccountReader {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl HevyWorkoutLandingReader {
+impl HevySessionAccountReader {
     /// # Errors
     ///
     /// [`InvalidStream`] if the landing store's stream constant is not a stream
@@ -45,12 +55,15 @@ impl HevyWorkoutLandingReader {
     }
 }
 
-impl LandingRecordReader for HevyWorkoutLandingReader {
+impl AccountReader for HevySessionAccountReader {
+    /// One session: the workouts it was split across, in the order performed.
+    type Account = SessionAccount;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn records(&self) -> Result<Vec<LandedRecord>, StoreError> {
+    async fn accounts(&self) -> Result<Vec<SessionAccount>, StoreError> {
         // Oldest first, by the store's own sequence — which is the order the
         // source served them, because raw is append-only. Defined so a
         // derivation is reproducible, not because the derivation depends on
@@ -103,18 +116,18 @@ impl LandingRecordReader for HevyWorkoutLandingReader {
             ));
         }
 
-        Ok(records)
+        Ok(group(records))
     }
 }
 
-/// The normalised layer for Hevy workouts.
+/// The normalised layer for Hevy gym sessions.
 #[derive(Debug, Clone)]
-pub struct SqliteGymWorkoutStore {
+pub struct SqliteGymSessionStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl SqliteGymWorkoutStore {
+impl SqliteGymSessionStore {
     /// # Errors
     ///
     /// [`InvalidStream`] if the landing store's stream constant is not a stream
@@ -127,7 +140,9 @@ impl SqliteGymWorkoutStore {
     }
 }
 
-impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
+impl NormalisedEntityStore for SqliteGymSessionStore {
+    type Entity = PerformedGymSession;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -135,7 +150,7 @@ impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
     async fn replace(
         &self,
         run: NormalisationRunId,
-        workouts: Vec<GymWorkout>,
+        sessions: Vec<PerformedGymSession>,
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let mut tx = self
@@ -163,18 +178,26 @@ impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
+        // Last, because the workouts above point at it.
+        sqlx::query!("DELETE FROM gym_session")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
 
-        let written = workouts.len();
-        for workout in &workouts {
-            write_workout(&mut tx, run_id, workout).await?;
+        let written = sessions.len();
+        for session in &sessions {
+            write_session(&mut tx, run_id, session).await?;
         }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }
 
+    /// **Sessions, not workouts.** What this store holds is entities, and the
+    /// count is what a `status` line reports as derived — so counting the parts
+    /// would report 167 where the layer holds 146.
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT count(*) AS "count!: i64" FROM gym_workout"#)
+        let row = sqlx::query!(r#"SELECT count(*) AS "count!: i64" FROM gym_session"#)
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
@@ -182,10 +205,35 @@ impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
     }
 }
 
+/// One session and every workout it was performed as.
+async fn write_session(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    session: &PerformedGymSession,
+) -> Result<(), StoreError> {
+    let session_id = session.landed_as().as_i64();
+
+    sqlx::query!(
+        "INSERT INTO gym_session (landing_record_id, run_id) VALUES (?, ?)",
+        session_id,
+        run_id
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    for workout in session.workouts().iter() {
+        write_workout(tx, run_id, workout, session_id).await?;
+    }
+
+    Ok(())
+}
+
 async fn write_workout(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
     workout: &GymWorkout,
+    session: i64,
 ) -> Result<(), StoreError> {
     let landing_record_id = workout.landed_as().as_i64();
     let source_record_id = workout.source_record_id().as_str();
@@ -207,9 +255,9 @@ async fn write_workout(
         r#"
         INSERT INTO gym_workout (
             landing_record_id, source_record_id, started_at_utc, zone,
-            endpoint, event_kind, event_time, run_id, performed_against
+            endpoint, event_kind, event_time, run_id, performed_against, session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         landing_record_id,
         source_record_id,
@@ -219,7 +267,8 @@ async fn write_workout(
         event_kind,
         event_time,
         run_id,
-        performed_against
+        performed_against,
+        session
     )
     .execute(&mut **tx)
     .await
@@ -450,7 +499,7 @@ impl SetWrite<'_, '_> {
 }
 
 /// A distance on its way into the store, checked rather than saturated.
-fn metres_for_storage(metres: domain::gym::Metres) -> Result<i64, StoreError> {
+fn metres_for_storage(metres: domain::measure::Metres) -> Result<i64, StoreError> {
     i64::try_from(metres.as_millimetres()).map_err(|_| StoreError::Corrupt {
         detail: "a distance larger than the store can hold".to_owned(),
     })

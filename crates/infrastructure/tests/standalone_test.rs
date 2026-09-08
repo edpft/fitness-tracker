@@ -29,9 +29,9 @@ use domain::prescription::{
     WeekKind, authored::Shape,
 };
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
@@ -110,10 +110,10 @@ async fn corpus_store() -> Result<
 
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
-            refusals: SqliteRefusalStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
@@ -145,7 +145,7 @@ fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::erro
     let answers = programme::authored(
         Date::constant(2026, 8, 31),
         Shape::Test {
-            reps: domain::gym::RepCount::new(1)?,
+            reps: domain::measure::RepCount::new(1)?,
             // What the programme before it stands at, which is the ordinary case
             // (decision 0013).
             target: domain::prescription::TestTarget::Inherited,
@@ -327,7 +327,7 @@ fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error:
                 Date::constant(2026, 7, 3),
             )?,
             entry_test: Some(EntryTest::new(
-                domain::gym::RepCount::new(3)?,
+                domain::measure::RepCount::new(3)?,
                 Some("60".to_owned().try_into()?),
             )?),
         },

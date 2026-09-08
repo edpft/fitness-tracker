@@ -4,7 +4,7 @@
 //! The projection itself is a `domain` function and its property is asserted
 //! there, over sessions generated against the template
 //! (`domain/tests/projection.rs`). What needs an adapter suite is reading a
-//! whole `GymWorkout` back out of the five tables it was written to, and what
+//! whole session back out of the six tables it was written to, and what
 //! the projection loses when it does.
 //!
 //! **Nothing here compares the record against a regenerated prescription.** The
@@ -26,11 +26,13 @@ use application::{
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::{
-    gym::{GymWorkout, Kg, Load, NonEmpty, RepCount},
+    gym::{Kg, Load, PerformedGymSession},
+    measure::RepCount,
     prescription::{
         PrescribedExercise, PrescribedItem, PrescribedSet, ProjectionGap, SlotId, Target,
         WorkoutShape, project, satisfies,
     },
+    sequence::NonEmpty,
 };
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
@@ -92,7 +94,7 @@ macro_rules! run {
 /// workout, and does not on these dates.
 macro_rules! performance {
     ($reader:expr, $date:expr) => {{
-        let workouts: Vec<GymWorkout> = run!($reader.between($date, $date));
+        let workouts: Vec<PerformedGymSession> = run!($reader.between($date, $date));
         match workouts.into_iter().next() {
             Some(workout) => workout,
             None => panic!("{} has a performed session", $date),
@@ -111,7 +113,7 @@ macro_rules! performance {
 #[test]
 fn a_failed_attempt_projects_a_gap() {
     let (reader, _prescriber, _directory) = ready!();
-    let performed: GymWorkout = performance!(&reader, Date::constant(2026, 7, 3));
+    let performed: PerformedGymSession = performance!(&reader, Date::constant(2026, 7, 3));
     let projection = project(&performed);
 
     let unknown: Vec<&ProjectionGap> = projection

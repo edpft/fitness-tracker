@@ -26,9 +26,10 @@ mod support;
 use application::{Authored, PlanAuthor as _, PrescriptionError, prescribe::Authoring};
 use domain::{
     gym::{
-        Kg, RepCount,
+        Kg,
         exercise::{Exercise, RepsExercise},
     },
+    measure::RepCount,
     plan::Plan,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Entry, EntryTest, Fill,

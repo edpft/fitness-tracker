@@ -1,6 +1,6 @@
 //! Deriving the normalised layer from raw.
 //!
-//! Reads every landing record for one stream, translates each, and replaces the
+//! Reads every account for one stream, translates each, and replaces the
 //! stream's normalised layer with the result. It contacts nothing: a derivation
 //! works with every source down, which is § 36 satisfied by construction rather
 //! than by degrading gracefully.
@@ -14,19 +14,19 @@
 //! has re-created it — which § 10 reserves for the canonical layer.
 
 use domain::{
-    gym::{
-        GymWorkout, NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone,
-        Refusal, RefusalCount, WorkoutCount,
+    landing::{LandingStream, RecordCount, SourceRecordId},
+    normalised::{
+        NormalisationFailure, NormalisationOutcome, NormalisationRunId, NormalisedEntity,
+        OperatorZone, Refusal, RefusalCount, WorkoutCount,
     },
-    landing::{LandingRecordId, LandingStream, RecordCount, SourceRecordId},
 };
 
 use crate::{
     error::NormalisationError,
     ports::{
-        Clock, DerivationStatus, DerivationStatusReporter, LandingRecordReader, LandingStore,
-        NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore, RefusalReport,
-        RefusalReporter, RefusalStore, Translation, WorkoutNormaliser, WorkoutTranslator,
+        AccountReader, Clock, DerivationStatus, DerivationStatusReporter, NormalisationRunLog,
+        NormalisationSummary, NormalisedEntityStore, RawExtent, RefusalReport, RefusalReporter,
+        RefusalStore, SourceAccount, Translation, Translator, WorkoutNormaliser,
     },
 };
 
@@ -61,7 +61,7 @@ pub struct NormalisationPorts<R, T, W, F, G, C> {
 
 impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader,
+    R: AccountReader,
 {
     /// No stream argument: the reader is bound to one table and is asked which,
     /// so a derivation cannot be built holding a stream its ports disagree
@@ -86,27 +86,39 @@ where
 
 /// What translating the whole corpus produced, before it is written.
 ///
-/// Collections only. A count carried alongside the thing it counts is a second
-/// answer that can disagree with the first, so every number the summary reports
-/// is read back off these.
-///
-/// `refused` is a list of records rather than a length, and it is *not*
-/// `refusals.len()`: a refusal is one omission, and a record that translated
-/// perfectly well can carry several of them. What it holds is the records that
-/// yielded no workout at all.
-#[derive(Debug, Default)]
-struct Derived {
-    workouts: Vec<GymWorkout>,
+/// `refused` counts accounts, and is *not* `refusals.len()`: a refusal is one
+/// omission, and an account that translated perfectly well can carry several of
+/// them. What it counts is the accounts that yielded no entity at all.
+#[derive(Debug)]
+struct Derived<E> {
+    entities: Vec<E>,
     refusals: Vec<Refusal>,
     retracted: Vec<SourceRecordId>,
-    refused: Vec<LandingRecordId>,
+    refused: usize,
+    superseded: usize,
+    composed: usize,
+}
+
+impl<E> Default for Derived<E> {
+    /// By hand, because deriving it would demand `E: Default` — and there is
+    /// no such thing as a default gym workout.
+    fn default() -> Self {
+        Self {
+            entities: Vec::new(),
+            refusals: Vec::new(),
+            retracted: Vec::new(),
+            refused: 0,
+            superseded: 0,
+            composed: 0,
+        }
+    }
 }
 
 impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader + Sync,
-    T: WorkoutTranslator + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    R: AccountReader + Sync,
+    T: Translator<Account = R::Account> + Sync,
+    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
     C: Clock + Sync,
@@ -139,9 +151,10 @@ where
 
 impl<R, T, W, F, G, C> WorkoutNormaliser for Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader + Sync,
-    T: WorkoutTranslator + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    R: AccountReader + Sync,
+    T: Translator<Account = R::Account> + Sync,
+    T::Entity: NormalisedEntity + Send,
+    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
     C: Clock + Sync,
@@ -154,23 +167,42 @@ where
         // No lock. A derivation reads raw and writes only its own tables, so it
         // neither takes the extraction lock nor advances the resumption point —
         // a record landed after this began is simply picked up by the next one.
-        let records = match self.raw.records().await {
-            Ok(records) => records,
+        let accounts = match self.raw.accounts().await {
+            Ok(accounts) => accounts,
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
 
-        let records_read = RecordCount::from(records.len());
+        // Records, not accounts. A session composes several of them and the
+        // reconciliation below is a statement about records (§ 38).
+        let records_read =
+            RecordCount::from(accounts.iter().map(SourceAccount::records).sum::<usize>());
         let mut derived = Derived::default();
 
-        for record in &records {
-            match self.translator.translate(record, &self.zone) {
-                Ok(Translation::Workout { workout, refusals }) => {
-                    derived.workouts.push(*workout);
+        for account in &accounts {
+            match self.translator.translate(account, &self.zone) {
+                Ok(Translation::Entity { entity, refusals }) => {
+                    derived.entities.push(*entity);
                     derived.refusals.extend(refusals);
+                    // Every record in an account that translated is either
+                    // composed into the entity or superseded by a later
+                    // serving. Counted here rather than off the entity, which
+                    // knows how many *rides* it holds and not how many
+                    // responses each of those took.
+                    derived.superseded = derived.superseded.saturating_add(account.superseded());
+                    derived.composed = derived
+                        .composed
+                        .saturating_add(account.records().saturating_sub(account.superseded()));
                 }
                 Ok(Translation::Retraction { of }) => derived.retracted.push(of),
                 Ok(Translation::Refused(refusals)) => {
-                    derived.refused.push(record.id());
+                    // A superseded serving inside a refused account is counted
+                    // as superseded rather than refused: what happened to it is
+                    // that a later serving replaced it, which is true whatever
+                    // became of the account.
+                    derived.superseded = derived.superseded.saturating_add(account.superseded());
+                    derived.refused = derived
+                        .refused
+                        .saturating_add(account.records().saturating_sub(account.superseded()));
                     derived.refusals.extend(refusals.iter().cloned());
                 }
                 // The only thing that stops a derivation is a gap in our own
@@ -180,18 +212,32 @@ where
             }
         }
 
-        // The second pass. A retraction removes the workout it names wherever
-        // that workout sat in the sequence, and one naming a record that was
-        // never landed removes nothing and is not an error.
-        let before = derived.workouts.len();
-        derived
-            .workouts
-            .retain(|workout| !derived.retracted.contains(workout.source_record_id()));
-        let workouts_retracted = WorkoutCount::from(before.saturating_sub(derived.workouts.len()));
-        let retractions_read = RecordCount::from(derived.retracted.len());
-        let records_refused = RecordCount::from(derived.refused.len());
+        // The second pass. A retraction removes the entity composing the record
+        // it names, wherever that entity sat in the sequence, and one naming a
+        // record that was never landed removes nothing and is not an error.
+        //
+        // **Any of the entity's records, not just its first.** A session is
+        // composed of several (§ 3.1), and a source withdrawing one of them is
+        // no longer saying part of what the session asserts.
+        // Accumulated as accounts translated, which is before the retraction
+        // pass — a record composed into an entity a retraction then removed was
+        // still composed rather than refused, and every record must be
+        // accounted for exactly once.
+        let records_composed = RecordCount::from(derived.composed);
 
-        let written = match self.workouts.replace(run, derived.workouts).await {
+        let before = derived.entities.len();
+        derived.entities.retain(|entity| {
+            !entity
+                .composes()
+                .iter()
+                .any(|id| derived.retracted.contains(id))
+        });
+        let workouts_retracted = WorkoutCount::from(before.saturating_sub(derived.entities.len()));
+        let retractions_read = RecordCount::from(derived.retracted.len());
+        let records_refused = RecordCount::from(derived.refused);
+        let records_superseded = RecordCount::from(derived.superseded);
+
+        let written = match self.workouts.replace(run, derived.entities).await {
             Ok(written) => written,
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
@@ -204,6 +250,8 @@ where
             run_id: run,
             records_read,
             workouts_written: written,
+            records_composed,
+            records_superseded,
             workouts_retracted,
             retractions_read,
             records_refused,
@@ -219,6 +267,8 @@ where
                     finished_at,
                     records_read: summary.records_read,
                     workouts_written: summary.workouts_written,
+                    records_composed: summary.records_composed,
+                    records_superseded: summary.records_superseded,
                     workouts_retracted: summary.workouts_retracted,
                     retractions_read: summary.retractions_read,
                     records_refused: summary.records_refused,
@@ -299,7 +349,7 @@ pub struct DerivationStanding<L, W, F, G> {
 
 impl<L, W, F, G> DerivationStanding<L, W, F, G>
 where
-    W: NormalisedWorkoutStore,
+    W: NormalisedEntityStore,
 {
     pub fn new(raw: L, workouts: W, refusals: F, runs: G) -> Self {
         Self {
@@ -314,8 +364,8 @@ where
 
 impl<L, W, F, G> DerivationStatusReporter for DerivationStanding<L, W, F, G>
 where
-    L: LandingStore + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    L: RawExtent + Sync,
+    W: NormalisedEntityStore + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
 {
@@ -325,7 +375,7 @@ where
         let workouts_held = self.workouts.count().await?;
         let refusals_held = RefusalCount::from(self.refusals.all().await?.len());
 
-        let held = self.raw.count().await?.as_usize();
+        let held = self.raw.records().await?.as_usize();
         let read = last_success.as_ref().map_or(0, |run| match run.outcome() {
             NormalisationOutcome::Succeeded { records_read, .. } => records_read.as_usize(),
             NormalisationOutcome::InFlight | NormalisationOutcome::Failed { .. } => 0,
@@ -343,17 +393,22 @@ where
 impl NormalisationSummary {
     /// Whether every record is accounted for.
     ///
-    /// Each landing record has exactly one outcome, so the four must add to the
-    /// number read: a record became a workout that stands, a workout that a
-    /// retraction later withdrew, a retraction of its own, or a refusal. A
+    /// Each landing record has exactly one outcome, so the three must add to
+    /// the number read: a record was composed into an entity — one that stands
+    /// or one a retraction then withdrew — or a later serving of the same thing
+    /// replaced it, or it was a retraction of its own, or it was refused. A
     /// record that went missing shows up here as arithmetic that does not
     /// reconcile, which is why the numbers are reported rather than merely
     /// computed.
+    ///
+    /// **`workouts_written` is deliberately not in the sum.** It counts
+    /// entities where everything else counts records, and one cycling session
+    /// is up to six of them.
     pub const fn reconciles(&self) -> bool {
         let accounted = self
-            .workouts_written
+            .records_composed
             .as_usize()
-            .saturating_add(self.workouts_retracted.as_usize())
+            .saturating_add(self.records_superseded.as_usize())
             .saturating_add(self.retractions_read.as_usize())
             .saturating_add(self.records_refused.as_usize());
         accounted == self.records_read.as_usize()

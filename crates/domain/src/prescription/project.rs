@@ -43,12 +43,12 @@
 //! generation has:
 //!
 //! ```compile_fail
-//! use domain::{gym::GymWorkout, prescription::{PrescribedWorkout, project}};
+//! use domain::{gym::PerformedGymSession, prescription::{PrescribedWorkout, project}};
 //!
 //! // Standing in for `PrescribedWorkoutStore::issue`, which takes the same thing.
 //! fn issue(_: &PrescribedWorkout) {}
 //!
-//! fn reverse_engineer_a_prescription(performed: &GymWorkout) {
+//! fn reverse_engineer_a_prescription(performed: &PerformedGymSession) {
 //!     let projection = project(performed);
 //!     // The shape is instructional content and nothing more, so this does not
 //!     // compile — which is FR-034 held by construction rather than by a rule
@@ -66,14 +66,14 @@
 //!
 //! ```
 //! use domain::{
-//!     gym::GymWorkout,
+//!     gym::PerformedGymSession,
 //!     prescription::{PrescribedWorkout, WorkoutShape, project},
 //! };
 //!
 //! fn issue(_: &PrescribedWorkout) {}
 //! fn compare_against(_: &WorkoutShape) {}
 //!
-//! fn read_a_performance(performed: &GymWorkout) {
+//! fn read_a_performance(performed: &PerformedGymSession) {
 //!     let projection = project(performed);
 //!     // A shape is welcome wherever a shape is wanted. It is only `issue` that
 //!     // refuses it, and refusing it is the whole point.
@@ -91,9 +91,10 @@ use std::collections::VecDeque;
 use std::fmt;
 
 use crate::gym::{
-    GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, Spans, WorkoutItem,
-    sequence::{AtLeastTwo, NonEmpty},
+    Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind, WorkoutItem,
 };
+use crate::measure::Spans;
+use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::{
     linear::{Position, PrimaryPattern},
@@ -174,13 +175,19 @@ pub struct Projection {
 /// divergence rather than the projection refusing.
 pub const ISSUE_ORDER: [Position; 10] = PrimaryPattern::KneeDominant.sequence();
 
-/// Read a performed workout as a prescription shape.
+/// Read a performed session as a prescription shape.
 ///
 /// **Total.** Reads no store, makes no request and consults no overlay, which is
 /// why it is a function and not a port. The first item always takes the first
 /// group, so the shape is never empty and nothing here can fail.
+///
+/// **The session entire, seams included** (§ 3.1). A session the operator split
+/// across four Hevy routines was one sequence of items as it was performed, and
+/// reading only the first routine would compare a quarter of a session against
+/// the whole of what was issued. Where the parts of that sequence came from is
+/// provenance, not shape, so nothing here can see the joins.
 #[must_use]
-pub fn project(workout: &GymWorkout) -> Projection {
+pub fn project(session: &PerformedGymSession) -> Projection {
     let mut positions: VecDeque<Position> = ISSUE_ORDER.into_iter().collect();
     let mut gaps = Vec::new();
 
@@ -191,15 +198,10 @@ pub fn project(workout: &GymWorkout) -> Projection {
         .pop_front()
         .and_then(|position| position.slots().next())
         .unwrap_or(SlotId::Plyometric);
-    let head = one_slot(
-        workout.items().first(),
-        head_slot,
-        ItemPosition(0),
-        &mut gaps,
-    );
+    let head = one_slot(session.first_item(), head_slot, ItemPosition(0), &mut gaps);
 
     let mut tail = Vec::new();
-    for (offset, item) in workout.items().iter().enumerate().skip(1) {
+    for (offset, item) in session.items().enumerate().skip(1) {
         let at = ItemPosition(offset);
         match assign(item, &mut positions, at, &mut gaps) {
             Some(projected) => tail.push(projected),

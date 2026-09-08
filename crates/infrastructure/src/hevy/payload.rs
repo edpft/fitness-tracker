@@ -48,6 +48,14 @@ pub struct Workout<'a> {
     /// at 18:00 UTC through British Summer Time and 19:00–20:00 through
     /// Greenwich Mean Time, a clean one-hour shift.
     pub start_time: String,
+    /// When it finished, in the same form.
+    ///
+    /// **Read only by [`super::sessions`]**, to measure the break between one
+    /// workout and the next. Optional because a deleted event has no workout
+    /// body at all, and because a payload that omits it should leave a workout
+    /// ungrouped rather than stop a derivation.
+    #[serde(default)]
+    pub end_time: Option<String>,
     /// The routine this workout was logged against, where there was one.
     ///
     /// **The join between what was prescribed and what was performed.** A

@@ -148,18 +148,22 @@ where
         event: &SourceEvent,
         fetched_at: domain::landing::FetchedAt,
     ) -> Result<Option<LandingRecord>, ExtractionError> {
-        let digest = event.payload.digest();
+        // **The revision, not the payload's digest.** For most sources they are
+        // the same value; where they differ, the difference is the part of the
+        // payload that is not about us, and comparing on it would land a record
+        // because a stranger's counter ticked. See `SourceEvent::revision`.
         let held = self.landing.latest_digest(&event.source_record_id).await?;
-        if held == Some(digest) {
+        if held == Some(event.revision) {
             return Ok(None);
         }
 
-        Ok(Some(LandingRecord::land(
+        Ok(Some(LandingRecord::land_revision(
             self.stream.clone(),
             fetched_at,
             event.source_record_id.clone(),
             event.provenance.clone(),
             event.payload.clone(),
+            event.revision,
         )))
     }
 

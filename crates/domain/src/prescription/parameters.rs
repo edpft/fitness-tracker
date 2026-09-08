@@ -15,9 +15,10 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::gym::{
-    Duration, Kg, RepCount,
+    Kg,
     exercise::{Exercise, Implement},
 };
+use crate::measure::{Duration, RepCount};
 
 use super::{steps::LoadSteps, target::Target};
 
@@ -309,7 +310,7 @@ pub struct AccessoryScheme {
 /// Everything consulted when generating, in force as one version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationParameters {
-    pub warmup: crate::gym::NonEmpty<WarmupStep>,
+    pub warmup: crate::sequence::NonEmpty<WarmupStep>,
     /// The primary's back-off sets. Per role, because the two roles differ.
     pub back_off: super::schedule::PerRole<BackOff>,
     /// The light session's top set, as a proportion of that week's heavy one.

@@ -7,7 +7,7 @@ use domain::landing::{
 };
 use sqlx::SqlitePool;
 
-use super::{count_from_storage, run_id_for_storage, store_error};
+use super::{count_from_storage, digest_from_row, run_id_for_storage, store_error};
 
 /// The landing table for Hevy workouts.
 ///
@@ -43,14 +43,6 @@ impl HevyWorkoutLandingStore {
     }
 }
 
-/// A stored digest is 32 bytes. Anything else means the file holds something
-/// this program did not write.
-fn digest_from_row(bytes: &[u8]) -> Result<PayloadDigest, StoreError> {
-    PayloadDigest::try_from(bytes).map_err(|error| StoreError::Corrupt {
-        detail: error.to_string(),
-    })
-}
-
 impl LandingStore for HevyWorkoutLandingStore {
     fn stream(&self) -> &LandingStream {
         &self.stream
@@ -64,9 +56,13 @@ impl LandingStore for HevyWorkoutLandingStore {
         // Most recent, not any. A workout edited to X, then Y, then back to X
         // is the source serving three payloads, and the third differs from the
         // second even though it matches the first.
+        // **Coalesced, because a null revision means "the payload's own".**
+        // Rows landed before 0027 were compared on the whole payload, which for
+        // this source is the same comparison: Hevy serves a workout that is
+        // entirely the operator's.
         let row = sqlx::query!(
             r#"
-            SELECT payload_digest AS "payload_digest!: Vec<u8>"
+            SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
             FROM hevy_workout_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
@@ -133,14 +129,17 @@ impl LandingStore for HevyWorkoutLandingStore {
             let payload = record.payload().as_bytes();
             let digest = record.digest();
             let digest = digest.as_bytes().as_slice();
+            let revision = record.revision();
+            let revision = revision.as_bytes().as_slice();
 
             sqlx::query!(
                 r#"
                 INSERT INTO hevy_workout_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
-                    event_time, payload, payload_digest, run_id, serve_ordinal
+                    event_time, payload, payload_digest, revision_digest,
+                    run_id, serve_ordinal
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
                 endpoint,
                 fetched_at,
@@ -149,6 +148,7 @@ impl LandingStore for HevyWorkoutLandingStore {
                 event_time,
                 payload,
                 digest,
+                revision,
                 run_id,
                 ordinal
             )
@@ -174,6 +174,17 @@ impl LandingStore for HevyWorkoutLandingStore {
             .map_err(|error| store_error(&error))?;
 
         Ok(RecordCount::from(count_from_storage(Some(row.total))?))
+    }
+}
+
+/// How much raw this stream holds, for the derivation's status.
+///
+/// A second, narrower answer to a question [`application::LandingStore`] can
+/// also answer, and separate because reporting how far behind a derivation is
+/// needs the count and must not be handed an `append`.
+impl application::RawExtent for HevyWorkoutLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        application::LandingStore::count(self).await
     }
 }
 

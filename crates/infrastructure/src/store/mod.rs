@@ -14,6 +14,9 @@ pub mod landing;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod parameters;
+pub mod peloton_landing;
+pub mod peloton_normalised;
+pub mod peloton_samples_landing;
 pub mod plan;
 pub mod pool;
 pub mod prescription;
@@ -23,7 +26,10 @@ pub mod run_log;
 pub mod schedule;
 
 use application::StoreError;
-use domain::{gym::NormalisationRunId, landing::RunId};
+use domain::{
+    landing::{PayloadDigest, RunId},
+    normalised::NormalisationRunId,
+};
 
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
@@ -31,8 +37,13 @@ pub use gym_mesocycle::SqliteGymMesocycleStore;
 pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
-pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};
+pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use parameters::SqliteGenerationParameterStore;
+pub use peloton_landing::PelotonRideLandingStore;
+pub use peloton_normalised::{
+    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionStore,
+};
+pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;
 pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;
@@ -105,6 +116,16 @@ fn count_for_storage(count: usize) -> Result<i64, StoreError> {
 
 /// A count read back out of the store. Negative means the file holds something
 /// this program did not write.
+/// A stored digest is 32 bytes. Anything else means the file holds something
+/// this program did not write.
+///
+/// Shared by every landing table: the rule is the digest's, not one table's.
+fn digest_from_row(bytes: &[u8]) -> Result<PayloadDigest, StoreError> {
+    PayloadDigest::try_from(bytes).map_err(|error| StoreError::Corrupt {
+        detail: error.to_string(),
+    })
+}
+
 fn count_from_storage(value: Option<i64>) -> Result<usize, StoreError> {
     let value = value.unwrap_or_default();
     usize::try_from(value).map_err(|_| StoreError::Corrupt {

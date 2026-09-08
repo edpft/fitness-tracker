@@ -34,10 +34,12 @@ visible.
   interval, not an instant, and it crosses a date boundary. It attaches to the
   following day, because what it bears on is the next day's training.
 
-**The session is not gym-specific.** Peloton offers warm-up and cool-down rides
-as separate rides, so an FTP test is two of them — a warm-up and the test. That
-is the same composition as a gym session made of several workouts, and it comes
-from the source's own design rather than from a logging habit.
+**The session is not gym-specific**, and this turned out to be the load-bearing
+sentence. Peloton offers warm-up and cool-down rides as separate rides, so an
+FTP test is three of them — a warm-up, the test and usually a cool-down. That is
+the same composition as a gym session made of several workouts, and it comes
+from the source's own design rather than from a logging habit. Both are now
+sessions at the normalised layer (constitution 3.2.0).
 
 **It is a gym workout, not a strength workout.** 208 sets in the corpus are
 running, skipping, sled work, stretching and isometric holds. What the entity is
@@ -96,7 +98,7 @@ struct Superset { members: AtLeastTwo<PerformedExercise> }  // two or more, back
 enum WorkoutItem { Exercise(PerformedExercise), Superset(Superset) }
 
 struct Workout { items: NonEmpty<WorkoutItem> }            // ordered
-struct Session { workouts: NonEmpty<Workout> }             // canonical layer
+struct Session { workouts: NonEmpty<Workout> }             // the entity (3.2.0)
 ```
 
 ---
@@ -229,16 +231,26 @@ faithful to what happens, but it would require exercise identity to move onto
 the set. Rejected on that basis.
 
 **A session sits above the workout.** The source's workout boundary is not the
-session boundary. 2025-10-06 and 2025-10-10 each landed four back-to-back
-records — one training session, fragmented by an attempt to make workout parts
-reusable — and 21 days carry more than one record. Without the container, every
-session count, frequency figure and streak over those days is inflated (§ 10).
+session boundary. 2025-10-03, 2025-10-06 and 2025-10-10 each landed four
+back-to-back records — one training session, split across four Hevy routines so
+the parts could be composed — and 21 of the 140 days carry more than one record.
+Without the container, every session count, frequency figure and streak over
+those days is inflated (§ 10).
 
-§ 4 licenses it: a canonical entity "names the normalised entities it stands
-for", plural. Composition is structure at the canonical layer, not a
-correspondence, so § 10's supersession and co-observation cases are silent on it
-rather than contradicted — the first governs records *sharing a source
-identity*, which four distinct workouts do not.
+**Amended 2026-09-08: the session is the normalised entity, not a canonical
+one.** This section put composition at § 4, on the grounds that a canonical
+entity "names the normalised entities it stands for", plural. The operator
+reversed it, having been shown that the cycling side had the same problem and
+that he had split those October sessions deliberately: *"that Hevy call was
+wrong and I hadn't noticed it until now… the domain model is the session, which
+could contain more than one record from a provider or contain data from more
+than one provider endpoint"*. It became constitution 3.2.0, and § 3.1 now says
+so directly.
+
+The old reasoning was not wrong about § 10 — supersession governs records
+*sharing a source identity*, which four distinct workouts do not — it was wrong
+about which layer owns the composition. Cycling has been rebuilt on the new rule
+(#103); the gym has not, and that is issue #104.
 
 **Identity is one level: the exercise.** A set belongs to an exercise, and that
 is the whole of it.

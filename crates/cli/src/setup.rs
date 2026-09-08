@@ -31,7 +31,7 @@ use std::{
 use application::GenerationParameterStore as _;
 use infrastructure::{Credentials, Settings, SqliteGenerationParameterStore, connect, credentials};
 
-use crate::{Failure, config, exit, paths};
+use crate::{Failure, catalogue::Credential, config, exit, paths};
 
 /// What `init` found or made.
 pub struct Prepared {
@@ -184,6 +184,27 @@ fn keys(
 
     for source in &crate::catalogue::SOURCES {
         let name = source.name().to_owned();
+
+        // **A login is never prompted for and never stored here.** The
+        // credentials file holds one key per source, and a login is two values
+        // — so taking one would mean inventing a second shape for a file whose
+        // whole point is that it has one. The environment answers for it or
+        // nothing does, and either way there is nothing to ask.
+        if let Credential::EmailPassword { .. } = source.credential() {
+            let answered = source
+                .required_variables()
+                .iter()
+                .all(|variable| std::env::var_os(variable).is_some());
+            outcomes.push((
+                name,
+                if answered {
+                    CredentialOutcome::InEnvironment
+                } else {
+                    CredentialOutcome::Outstanding
+                },
+            ));
+            continue;
+        }
 
         // Already answered by the environment. Copying it into a file would
         // duplicate a value that has an owner, and the copy is the one that goes

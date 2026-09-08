@@ -11,7 +11,8 @@
 //! walks a whole four weeks and is the one that would catch a wrong table.
 
 use domain::{
-    gym::{Kg, RepCount},
+    gym::Kg,
+    measure::RepCount,
     prescription::{
         SbsDay, SbsSession, advance, day, maximum_after,
         parameters::Percentage,

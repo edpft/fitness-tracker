@@ -28,8 +28,8 @@
 use std::fmt;
 
 use crate::{
-    gym::sequence::{NonEmpty, TooShort},
     newtype::string_name,
+    sequence::{NonEmpty, TooShort},
 };
 
 /// The longest a published programme's name may be.

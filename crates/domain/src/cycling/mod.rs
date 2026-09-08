@@ -22,6 +22,8 @@
 //! for the same reason `WeekPlan::WorkUp` carries repetitions and no load.
 
 pub mod mesocycle;
+pub mod performed;
+pub mod ride;
 pub mod session;
 pub mod shape;
 pub mod zone;
@@ -30,6 +32,11 @@ pub use mesocycle::{
     CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays,
     InvalidCyclingMesocycle, InvalidMicrocycle, InvalidSessionPosition, InvalidVenue,
     InvalidWeekdays, PlannedRide, RideVenue, SessionPosition,
+};
+pub use performed::PerformedSession;
+pub use ride::{
+    BeatsPerMinute, BikePlusRide, Cadence, ComposedFrom, HeartRateSample, HeartRateSeries,
+    Resistance, RideRecord, RideSample, Speed,
 };
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{

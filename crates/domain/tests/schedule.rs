@@ -8,7 +8,7 @@
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
-    gym::OperatorZone,
+    normalised::OperatorZone,
     schedule::{Alteration, Diary, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};

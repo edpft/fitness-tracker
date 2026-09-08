@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM bike_plus_ride_sample",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "82c56e0d01d88ee0423b9bb0c1b4b0392e6d1068f69ed262e125494ba8e7ca84"
+}

@@ -8,8 +8,10 @@
 
 use application::{NormalisationRunLog, StoreError};
 use domain::{
-    gym::{NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount, WorkoutCount},
     landing::{FetchedAt, LandingStream, RecordCount},
+    normalised::{
+        NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount, WorkoutCount,
+    },
 };
 use sqlx::SqlitePool;
 
@@ -66,6 +68,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 finished_at,
                 records_read,
                 workouts_written,
+                records_composed,
+                records_superseded,
                 workouts_retracted,
                 retractions_read,
                 records_refused,
@@ -74,6 +78,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 let finished_at = finished_at.to_string();
                 let records_read = count_for_storage(records_read.as_usize())?;
                 let workouts_written = count_for_storage(workouts_written.as_usize())?;
+                let records_composed = count_for_storage(records_composed.as_usize())?;
+                let records_superseded = count_for_storage(records_superseded.as_usize())?;
                 let workouts_retracted = count_for_storage(workouts_retracted.as_usize())?;
                 let retractions_read = count_for_storage(retractions_read.as_usize())?;
                 let records_refused = count_for_storage(records_refused.as_usize())?;
@@ -83,13 +89,16 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                     r#"
                     UPDATE normalisation_run
                     SET finished_at = ?, outcome = 'succeeded',
-                        records_read = ?, workouts_written = ?, workouts_retracted = ?,
+                        records_read = ?, workouts_written = ?, records_composed = ?,
+                        records_superseded = ?, workouts_retracted = ?,
                         retractions_read = ?, records_refused = ?, refusals_recorded = ?
                     WHERE id = ?
                     "#,
                     finished_at,
                     records_read,
                     workouts_written,
+                    records_composed,
+                    records_superseded,
                     workouts_retracted,
                     retractions_read,
                     records_refused,
@@ -139,6 +148,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                    finished_at AS "finished_at!: String",
                    records_read AS "records_read: i64",
                    workouts_written AS "workouts_written: i64",
+                   records_composed AS "records_composed: i64",
+                   records_superseded AS "records_superseded: i64",
                    workouts_retracted AS "workouts_retracted: i64",
                    retractions_read AS "retractions_read: i64",
                    records_refused AS "records_refused: i64",
@@ -167,6 +178,12 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                     .map_err(|error| corrupt(&error))?,
                 records_read: RecordCount::from(count_from_storage(row.records_read)?),
                 workouts_written: WorkoutCount::from(count_from_storage(row.workouts_written)?),
+                // Null on a run recorded before the column existed. Reading it
+                // as the record count would make an unreconciled past run look
+                // reconciled, so it reads as nothing composed and the check
+                // fails honestly.
+                records_composed: RecordCount::from(count_from_storage(row.records_composed)?),
+                records_superseded: RecordCount::from(count_from_storage(row.records_superseded)?),
                 workouts_retracted: WorkoutCount::from(count_from_storage(row.workouts_retracted)?),
                 retractions_read: RecordCount::from(count_from_storage(row.retractions_read)?),
                 records_refused: RecordCount::from(count_from_storage(row.records_refused)?),
@@ -181,7 +198,7 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
 /// found nothing.
 #[cfg(test)]
 mod tests {
-    use domain::gym::NormalisationFailure;
+    use domain::normalised::NormalisationFailure;
 
     #[test]
     fn a_failure_reason_round_trips_through_its_stored_form() {

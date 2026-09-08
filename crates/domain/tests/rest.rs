@@ -6,14 +6,15 @@
 
 use domain::{
     gym::{
-        Duration, Kg, Load, NonEmpty, RepCount,
+        Kg, Load,
         exercise::{DurationExercise, RepsExercise},
-        sequence::AtLeastTwo,
     },
+    measure::{Duration, RepCount},
     prescription::{
         BlockRest, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
         RestScheme, SlotId, SupersetMember, Target, WorkoutShape, rested,
     },
+    sequence::{AtLeastTwo, NonEmpty},
 };
 
 type Built<T> = Result<T, Box<dyn std::error::Error>>;

@@ -67,31 +67,31 @@ fn served(kind: EventKind, when: Option<EventTime>) -> Fallible<Provenance> {
 
 /// An update event carrying a body, in the shape the source serves.
 pub fn updated(id: &str, body: &str, when: &str) -> Fallible<SourceEvent> {
-    Ok(SourceEvent {
-        source_record_id: SourceRecordId::try_from(id)?,
-        provenance: served(EventKind::Updated, Some(event_at(when)?))?,
-        payload: RawPayload::try_from(body.as_bytes())?,
-    })
+    Ok(SourceEvent::new(
+        SourceRecordId::try_from(id)?,
+        served(EventKind::Updated, Some(event_at(when)?))?,
+        RawPayload::try_from(body.as_bytes())?,
+    ))
 }
 
 /// A deletion, which names its workout at the top level and carries no body.
 pub fn deleted(id: &str, when: &str) -> Fallible<SourceEvent> {
-    Ok(SourceEvent {
-        source_record_id: SourceRecordId::try_from(id)?,
-        provenance: served(EventKind::Deleted, Some(event_at(when)?))?,
-        payload: RawPayload::try_from(
+    Ok(SourceEvent::new(
+        SourceRecordId::try_from(id)?,
+        served(EventKind::Deleted, Some(event_at(when)?))?,
+        RawPayload::try_from(
             format!(r#"{{"type":"deleted","id":"{id}","deleted_at":"{when}"}}"#).into_bytes(),
         )?,
-    })
+    ))
 }
 
 /// An event the source served without a timestamp.
 pub fn untimed(id: &str, body: &str) -> Fallible<SourceEvent> {
-    Ok(SourceEvent {
-        source_record_id: SourceRecordId::try_from(id)?,
-        provenance: served(EventKind::Updated, None)?,
-        payload: RawPayload::try_from(body.as_bytes())?,
-    })
+    Ok(SourceEvent::new(
+        SourceRecordId::try_from(id)?,
+        served(EventKind::Updated, None)?,
+        RawPayload::try_from(body.as_bytes())?,
+    ))
 }
 
 fn guard<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

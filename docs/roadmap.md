@@ -49,6 +49,31 @@ Hevy. `cycling next` takes no arguments and does the same: `fitness plan` author
 the four cycling programmes, and `next` prints the session from the rows and then
 puts it in the Peloton stack with its cool-down ride.
 
+**The cycling record derives, and the entity is the session.** `fitness
+normalise peloton.rides` fills the normalised layer with 150 cycling sessions —
+144 rides and 6 FTP tests — from 903 landed records, with 357,969 samples
+(issue #101, 2026-09-08). The FTP work below now has a performed record to read
+rather than an assertion to take, and reads it as *tests* rather than as rides
+it would have to recognise.
+
+**A session, not a ride, and that is a rule rather than a cycling detail**
+(constitution 3.2.0). Peloton files a session as two or three workouts — a
+warm-up, a ride, a cool-down — and *"we would never consider these to be two
+separate things that could be planned separately but Peloton does split them"*.
+The same is true of the gym: the operator split single sessions across several
+Hevy routines so he could compose them — 21 of his 140 training days carry more
+than one record, three of them four — and `GymWorkout` called that canonical-
+layer work. **Done on 2026-09-08** (#104, PR 105), so the rule now holds for both
+disciplines: `fitness normalise hevy.workouts` writes 140 sessions from 167
+records, and `compare` stops refusing those 21 days as an ambiguous day.
+
+#104 had deferred this past 14 September over a boundary question that turned out
+not to exist. It reported the same-day gaps as 7 to 46 minutes, measured start to
+*start* — counting the previous workout as part of the gap. End to start they run
+3 seconds to 8m20s, with 34 hours to the next day, which is what
+`docs/gym-workout-domain-model.md` had said all along. Cycling's thirty minutes
+carried over unchanged.
+
 **What is missing is everything that joins them, and one gap on the cycling
 side:**
 
@@ -298,29 +323,40 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
   than by a table, because what the operator rides is the most recent one; four
   of the twelve instructors publish none and fall back to Matt Wilpers.
 - **Slot amendments** — needed the next time equipment moves, not before.
-- **A backup of the authored side.** See the risk below; wanted by 14 September.
+- **The Peloton class library, cached** (#94). `fitness plan` fetches sixty-five
+  classes on every authoring and keeps none of them.
 
 ## Deliberately out of scope
 
-- **A second data source.** Withings body weight is the strongest candidate — the
+- **A third data source.** Withings body weight is the strongest candidate — the
   degenerate entity § II.3 names, and it would exercise § 6's comparability
-  classes, which nothing has touched. The architecture claims source
-  independence and has never been tested against a second source, so this gets
-  more expensive the longer it waits. It competes for the same weeks and does not
-  help the operator train.
+  classes across *sources*, which nothing has yet. It competes for the same weeks
+  and does not help the operator train.
+
+  This used to say "a second data source", and that the architecture "has never
+  been tested against a second source". Peloton is the second, and as of
+  2026-09-08 it derives: the normalised layer holds two entities, the ports are
+  generic over which, and the vocabulary the derivation needs is no longer inside
+  `domain::gym`. What is still untested is a source that observes something
+  another source already observes.
 - **The macro layer** — nutrition, the family calendar, and anything that
   *decides* how a week is spent. Slots are recorded **and allocated**; what waits
   is choosing the split.
 
 ## Risks
 
-- **The store is the only copy of authored data, and that stops being cheap on
-  14 September.** Raw landing re-fetches from Hevy and everything derived
-  rebuilds; programmes and prescriptions do not. Today they are beta-testing
-  artefacts and losing them costs a re-extract and some re-authoring — so do not
-  be precious with the store, and migrate it or start fresh without ceremony.
-  **Once the autumn block is running, the authored side is a primary input with
-  no way back** (§ 12). A backup wants to exist by then.
+- **A migration after 14 September carries its rows or does not land** (§ 12).
+  Raw landing re-fetches from Hevy and everything derived rebuilds; programmes
+  and prescriptions do not. `local.db` is the **beta** store and stays
+  disposable — migrate it or start fresh without ceremony. The autumn runs on
+  the XDG store, which is empty until it is authored into, and from then on 0024
+  is not the precedent to copy: it dropped sixteen tables and carried nothing.
+  Nothing in `nix flake check` enforces this.
+
+  **A backup is not the remedy, and #68 was closed as a non-issue on
+  2026-09-07.** Production authors a plan once and then performs it, amending a
+  schedule or a slot; the repeated re-authoring that made the store look fragile
+  was beta testing.
 - **`fitness deliver` names one sink and there are now two** (#67). The flat
   command compiles in `hevy` where `gym next` and `cycling next` each reach their
   own; a cycling `KnownDiscipline` stays blocked on there being no Peloton

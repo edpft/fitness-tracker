@@ -32,7 +32,8 @@
 use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
-    gym::{Kg, RepCount, exercise::Exercise},
+    gym::{Kg, exercise::Exercise},
+    measure::RepCount,
     prescription::{
         linear::{PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},

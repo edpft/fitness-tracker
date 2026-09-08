@@ -38,6 +38,37 @@ pub struct KnownSource {
     /// Where an operator goes to get a credential, quoted back at them when
     /// the variable is unset.
     credential_url: &'static str,
+    /// What this source accepts as proof of who is asking.
+    credential: Credential,
+}
+
+/// What a source takes to let us in.
+///
+/// **A kind, not a widening of one.** The first source presented a single key
+/// on every request, and it was tempting to make the second one fit by treating
+/// its password as "the key" and its authorisation root as an optional extra
+/// field. That would leave Hevy carrying an auth root it does not have, set to
+/// `None`, and would say that an email-and-password login is an API key with
+/// something missing. It is not: it is a different way of proving who is
+/// asking, and it names itself here.
+///
+/// The variables each kind reads are still derived from the source's name, so
+/// a third source is an entry rather than a constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Credential {
+    /// One key, presented on every request. `HEVY_API_KEY`.
+    ApiKey,
+    /// An email and a password, exchanged at an authorisation root for a token
+    /// that the API root then accepts. `PELOTON_EMAIL`, `PELOTON_PASSWORD`.
+    ///
+    /// The authorisation root is carried by the variant because only this kind
+    /// has one — Auth0 lives at `auth.onepeloton.com` and the API at
+    /// `api.onepeloton.com`, and neither answers for the other.
+    EmailPassword {
+        /// A default for the same reason [`KnownSource::default_base_url`] is:
+        /// the contract tests point it at a stub.
+        default_auth_base_url: &'static str,
+    },
 }
 
 impl KnownSource {
@@ -53,11 +84,42 @@ impl KnownSource {
         self.credential_url
     }
 
+    /// What this source accepts as proof of who is asking.
+    pub const fn credential(&self) -> Credential {
+        self.credential
+    }
+
     /// Where the credential comes from. Env-only, with no flag anywhere: a
     /// secret passed on the command line lands in shell history and in `ps`
     /// output for every other user on the machine.
     pub fn api_key_variable(&self) -> String {
         self.variable("API_KEY")
+    }
+
+    /// The account this source is reached as.
+    pub fn email_variable(&self) -> String {
+        self.variable("EMAIL")
+    }
+
+    /// The password that account logs in with.
+    pub fn password_variable(&self) -> String {
+        self.variable("PASSWORD")
+    }
+
+    /// Where the authorisation root comes from when no flag overrides it.
+    pub fn auth_base_url_variable(&self) -> String {
+        self.variable("AUTH_BASE_URL")
+    }
+
+    /// Every variable this source needs set, in the order an operator would
+    /// set them. What `init` reports and what a missing-credential error lists.
+    pub fn required_variables(&self) -> Vec<String> {
+        match self.credential {
+            Credential::ApiKey => vec![self.api_key_variable()],
+            Credential::EmailPassword { .. } => {
+                vec![self.email_variable(), self.password_variable()]
+            }
+        }
     }
 
     /// Where the base URL comes from when no flag overrides it.
@@ -92,10 +154,6 @@ impl KnownStream {
         self.source.default_base_url
     }
 
-    pub fn api_key_variable(&self) -> String {
-        self.source.api_key_variable()
-    }
-
     pub fn base_url_variable(&self) -> String {
         self.source.base_url_variable()
     }
@@ -114,17 +172,51 @@ impl KnownStream {
 const SEPARATOR: char = domain::landing::STREAM_SEPARATOR;
 
 /// Every system this build can talk to.
-pub const SOURCES: [KnownSource; 1] = [KnownSource {
-    name: "hevy",
-    default_base_url: "https://api.hevyapp.com",
-    credential_url: "https://hevy.com/settings?developer",
-}];
+pub const SOURCES: [KnownSource; 2] = [
+    KnownSource {
+        name: "hevy",
+        default_base_url: "https://api.hevyapp.com",
+        credential_url: "https://hevy.com/settings?developer",
+        credential: Credential::ApiKey,
+    },
+    KnownSource {
+        name: "peloton",
+        default_base_url: "https://api.onepeloton.com",
+        credential_url: "https://members.onepeloton.com",
+        credential: Credential::EmailPassword {
+            default_auth_base_url: "https://auth.onepeloton.com",
+        },
+    },
+];
 
 /// Every stream this build can collect.
-pub const KNOWN: [KnownStream; 1] = [KnownStream {
-    source: &SOURCES[0],
-    entity: "workouts",
-}];
+///
+/// **Peloton has one entry and two walks behind it.** It used to have two
+/// entries — the ride list and the performance graphs — and the operator named
+/// the flaw, 2026-09-08: *"if one command needs to be run before another, those
+/// commands aren't meaningfully separate and it shouldn't be possible to run
+/// them in the wrong order"*. Collecting the graphs without the rides derives
+/// nothing, and collecting the rides without the graphs derives nothing either,
+/// so they were never two things an operator could usefully choose between.
+///
+/// They are still two walks, two tables and two resumption points, because a
+/// landing record holds one response as served (§ II.1) and the two endpoints
+/// answer separately. What is gone is the ability to ask for one of them.
+///
+/// The names are ours rather than Peloton's, which is the operator's other
+/// correction: *"workouts was right for Hevy but it isn't the right term for
+/// Peloton and `workout_samples` is the thing that proves it, their name suffixed
+/// to ours"*. One Hevy record is a workout; one Peloton record is a ride.
+pub const KNOWN: [KnownStream; 2] = [
+    KnownStream {
+        source: &SOURCES[0],
+        entity: "workouts",
+    },
+    KnownStream {
+        source: &SOURCES[1],
+        entity: "rides",
+    },
+];
 
 /// A kind of training, and the one source and one sink it has.
 ///
@@ -165,11 +257,18 @@ impl KnownDiscipline {
 }
 
 /// Every kind of training this build has a daily loop for.
-pub const DISCIPLINES: [KnownDiscipline; 1] = [KnownDiscipline {
-    name: "gym",
-    collects: &KNOWN[0],
-    delivers_to: &SOURCES[0],
-}];
+pub const DISCIPLINES: [KnownDiscipline; 2] = [
+    KnownDiscipline {
+        name: "gym",
+        collects: &KNOWN[0],
+        delivers_to: &SOURCES[0],
+    },
+    KnownDiscipline {
+        name: "cycling",
+        collects: &KNOWN[1],
+        delivers_to: &SOURCES[1],
+    },
+];
 
 /// The discipline of that name, if this build knows it.
 pub fn discipline(name: &str) -> Option<&'static KnownDiscipline> {
@@ -201,7 +300,7 @@ pub fn known_names() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DISCIPLINES, KNOWN, discipline, lookup, source};
+    use super::{Credential, DISCIPLINES, KNOWN, discipline, lookup, source};
 
     /// Every entry names a stream the domain accepts, and can be found by the
     /// name it prints. A typo here would otherwise surface as an invocation
@@ -263,8 +362,49 @@ mod tests {
     #[test]
     fn the_environment_variables_are_named_after_the_source() {
         let hevy = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
-        assert_eq!(hevy.api_key_variable(), "HEVY_API_KEY");
+        assert_eq!(hevy.source().api_key_variable(), "HEVY_API_KEY");
         assert_eq!(hevy.base_url_variable(), "HEVY_API_BASE_URL");
+    }
+
+    /// The second kind of credential, and what it derives.
+    ///
+    /// Peloton has no API key at all, so the thing to pin is that
+    /// `required_variables` says so rather than naming one that does not exist.
+    #[test]
+    fn a_login_source_names_both_of_its_variables() {
+        let peloton = source("peloton").expect("peloton is a known source");
+        assert_eq!(
+            peloton.required_variables(),
+            vec!["PELOTON_EMAIL".to_owned(), "PELOTON_PASSWORD".to_owned()]
+        );
+        assert_eq!(peloton.auth_base_url_variable(), "PELOTON_AUTH_BASE_URL");
+        assert_eq!(
+            peloton.credential(),
+            Credential::EmailPassword {
+                default_auth_base_url: "https://auth.onepeloton.com"
+            }
+        );
+
+        let hevy = source("hevy").expect("hevy is a known source");
+        assert_eq!(hevy.required_variables(), vec!["HEVY_API_KEY".to_owned()]);
+        assert_eq!(hevy.credential(), Credential::ApiKey);
+    }
+
+    /// **Both roots are bare.** The auth root is a second base URL and gets the
+    /// same rule: the adapter owns the path it calls, so a root that already
+    /// carried one would compose a doubled path that no stub could catch.
+    #[test]
+    fn the_authorisation_root_carries_no_path_segment() {
+        let peloton = source("peloton").expect("peloton is a known source");
+        let Credential::EmailPassword {
+            default_auth_base_url,
+        } = peloton.credential()
+        else {
+            panic!("peloton is reached with a login");
+        };
+        assert!(!default_auth_base_url.ends_with('/'));
+        assert_eq!(default_auth_base_url.matches('/').count(), 2);
+        assert_ne!(default_auth_base_url, peloton.default_base_url());
     }
 
     /// **A destination is reached through the source, not through a stream.**
@@ -279,7 +419,7 @@ mod tests {
 
         let stream = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
         assert_eq!(stream.source().name(), hevy.name());
-        assert_eq!(stream.api_key_variable(), hevy.api_key_variable());
+        assert_eq!(stream.source().api_key_variable(), hevy.api_key_variable());
     }
 
     /// The base URL is the root. A base that already carried `/v1` composed

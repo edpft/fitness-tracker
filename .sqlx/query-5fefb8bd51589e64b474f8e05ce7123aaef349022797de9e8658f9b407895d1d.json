@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT kind AS \"kind!: String\",\n                      (SELECT GROUP_CONCAT(role, \",\") FROM (\n                         SELECT role FROM bike_plus_ride ORDER BY started_at_utc\n                       )) AS \"roles!: String\"\n               FROM cycling_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "kind!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "roles!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "5fefb8bd51589e64b474f8e05ce7123aaef349022797de9e8658f9b407895d1d"
+}

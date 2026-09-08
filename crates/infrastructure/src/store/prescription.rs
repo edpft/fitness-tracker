@@ -14,15 +14,16 @@
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
 use domain::{
     gym::{
-        Distance, Duration, Kg, Load, Metres, NonEmpty, RepCount, Rir, SignedKg, Spans,
+        Kg, Load, Rir, SignedKg,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
-        sequence::AtLeastTwo,
     },
+    measure::{Distance, Duration, Metres, RepCount, Spans},
     prescription::{
         Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
         SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};

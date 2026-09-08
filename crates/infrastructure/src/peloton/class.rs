@@ -35,7 +35,8 @@
 use application::SourceError;
 use domain::{
     cycling::{Interval, PowerZone, Ride},
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
+    sequence::NonEmpty,
 };
 use serde::Deserialize;
 
@@ -45,7 +46,7 @@ use serde::Deserialize;
 /// off the browse endpoint's own `class_types` list on 2026-09-05, beside
 /// *Cool Down Walking*, *Cool Down Running* and their kin — which is why it is
 /// stated rather than derived from the word "cool down".
-const COOL_DOWN_RIDE_CLASS_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
+pub(crate) const COOL_DOWN_RIDE_CLASS_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
 
 /// Whose cool-down ride is used when a class's own instructor has none.
 ///

@@ -14,9 +14,10 @@ use domain::{
         Interval, PlannedRide, PowerZone, Ride, RideVenue, SessionPosition, Watts, ZoneProfile,
         bottom_level, diverges, mesocycles, partition, span, zones_lost,
     },
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
     plan::Occupies,
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    sequence::NonEmpty,
 };
 use jiff::civil::{Weekday, date};
 

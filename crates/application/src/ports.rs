@@ -15,14 +15,16 @@ use std::{collections::BTreeMap, future::Future};
 use jiff::{Timestamp, civil::Date};
 
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
-use domain::gym::{
-    GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
-    OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
-};
+use domain::gym::{Load, Performed, PerformedGymSession, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
+};
+use domain::measure::RepCount;
+use domain::normalised::{
+    NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
+    RefusalCount, WorkoutCount,
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
@@ -30,6 +32,7 @@ use domain::prescription::{
     SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
+use domain::sequence::NonEmpty;
 
 use crate::error::{
     DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
@@ -49,6 +52,37 @@ pub struct SourceEvent {
     pub source_record_id: SourceRecordId,
     pub provenance: Provenance,
     pub payload: RawPayload,
+    /// What decides whether this is a new serving of the record.
+    ///
+    /// **Usually the payload's own digest, and the adapter says when it is
+    /// not.** A source that serves parts belonging to somebody else — Peloton
+    /// hands back the class a workout was ridden to, and that class counts how
+    /// many strangers are riding it right now — would otherwise append a record
+    /// every time one of those counters ticked. Only the adapter knows which
+    /// parts those are, so only the adapter can answer this.
+    ///
+    /// The payload is still landed verbatim; this changes what "changed" means,
+    /// not what is stored. Build it with [`SourceEvent::new`] unless the source
+    /// has volatile parts.
+    pub revision: PayloadDigest,
+}
+
+impl SourceEvent {
+    /// An event whose whole payload is about us, so any change of bytes is a
+    /// change of record.
+    pub fn new(
+        source_record_id: SourceRecordId,
+        provenance: Provenance,
+        payload: RawPayload,
+    ) -> Self {
+        let revision = payload.digest();
+        Self {
+            source_record_id,
+            provenance,
+            payload,
+            revision,
+        }
+    }
 }
 
 /// One instalment of a source's answer, in the order the source served it.
@@ -108,8 +142,9 @@ pub trait LandingStore {
     /// them; one read out of them cannot.
     fn stream(&self) -> &LandingStream;
 
-    /// The digest of the most recent record for this source record, if there
-    /// is one.
+    /// The **revision** of the most recent record for this source record, if
+    /// there is one — what the next serving is compared against, which is the
+    /// payload's own digest for every source that has no volatile parts.
     ///
     /// Most recent, not any: a record edited to X, then Y, then back to X is
     /// the source serving three payloads, and all three are landed.
@@ -302,27 +337,83 @@ pub trait ResumptionPointResetter {
 // a signature, and nothing takes an overlay — § 9 forbids consulting one, and
 // the strongest form of that is a port that could not be handed one.
 
-/// What one landing record became.
+/// What one source's account of one thing became.
 ///
-/// The three outcomes a record can have, as a sum. A record that produced no
-/// workout and no reason does not compile, and a retraction cannot carry
+/// The three outcomes an account can have, as a sum. One that produced no
+/// entity and no reason does not compile, and a retraction cannot carry
 /// refusals — the two mistakes most worth making impossible, since either would
-/// let a record go silently missing.
+/// let an account go silently missing.
+///
+/// Generic over the entity because the normalised layer holds more than one and
+/// the derivation is indifferent to which: it counts, retracts and writes
+/// without ever looking inside. A concrete `Box<GymWorkout>` here was the one
+/// place the whole pipeline knew what a normalised entity was.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Translation {
-    /// A workout, with whatever it would not accept listed beside it. A
-    /// refusal inside a record does not stop the rest of it translating, so
+pub enum Translation<E> {
+    /// An entity, with whatever the domain would not accept listed beside it. A
+    /// refusal inside an account does not stop the rest of it translating, so
     /// both travel together.
-    Workout {
-        workout: Box<GymWorkout>,
+    Entity {
+        entity: Box<E>,
         refusals: Vec<Refusal>,
     },
     /// The source withdrew a record it previously served. Carries no refusals,
     /// because nothing was rejected.
     Retraction { of: SourceRecordId },
-    /// Nothing translated, and here is why. Non-empty, so "no workout and no
+    /// Nothing translated, and here is why. Non-empty, so "no entity and no
     /// reason" is not a state that exists.
     Refused(NonEmpty<Refusal>),
+}
+
+/// How much raw there is for a derivation to read.
+///
+/// **Narrower than [`LandingStore`] on purpose.** Reporting how far behind the
+/// normalised layer is needs one number and no ability to write, and since
+/// § 3.1 a derivation may read more than one landing table — Peloton's rides
+/// and their graphs are two — so the thing being counted is no longer a store.
+/// A port that is exactly the question keeps `status` from being handed an
+/// `append` it must not use, and lets two tables answer as one.
+pub trait RawExtent {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn records(&self) -> impl Future<Output = Result<RecordCount, StoreError>> + Send;
+}
+
+/// How many landing records an account is composed from.
+///
+/// **So a run's numbers stay about records while its work is about sessions.**
+/// § 38 wants a lost record visible, and `NormalisationSummary::reconciles`
+/// checks that every record read had exactly one outcome — which stops meaning
+/// anything if `records_read` silently becomes a count of sessions. One session
+/// of three rides reads six records and, refused, refuses six.
+pub trait SourceAccount {
+    fn records(&self) -> usize;
+
+    /// How many of those records a later serving replaced.
+    ///
+    /// **§ 10, applied where composition made it matter.** Two records sharing
+    /// a source identity are one source contradicting itself, and § 3.1 is
+    /// explicit that they do not compose — so an account built from several
+    /// records must set the earlier serving aside rather than treat it as a
+    /// second part. The operator's store holds 51 such records, every one of
+    /// them a workout landed twice before the revision digest learned to ignore
+    /// a class's public counters; composing them would have made one ride into
+    /// a session of two.
+    ///
+    /// They are counted rather than dropped. A record with no outcome is what
+    /// § 38's reconciliation exists to catch.
+    fn superseded(&self) -> usize {
+        0
+    }
+}
+
+impl SourceAccount for LandedRecord {
+    /// One. A source that says it all in one record is the degenerate case, not
+    /// a different kind of thing.
+    fn records(&self) -> usize {
+        1
+    }
 }
 
 /// Raw, read-only, for one stream.
@@ -331,10 +422,33 @@ pub enum Translation {
 /// what makes "a derivation never writes to raw" a fact about the type rather
 /// than a promise about the code: this reader has no `append`, so a derivation
 /// holding one could not mutate an input if it tried.
-pub trait LandingRecordReader {
+///
+/// **An account, not a record**, and the constitution's word for the same
+/// reason it needed one. § 3.1: a normalised entity is a *session*, and
+/// composes what one source says about it — several records from one endpoint,
+/// complementary responses across endpoints, or both. Peloton files a cycling
+/// session as two or three workouts and serves each one's samples from a second
+/// endpoint, so five landing records can be one session and none of them is an
+/// entity alone.
+///
+/// Assembling an account is this adapter's work rather than the translator's,
+/// because it is the only thing here that can reach a store. What the
+/// translator gets is already whole, and cannot go back for more. Where
+/// assembling it needs to know what the source's records *mean* — which of them
+/// are parts of one session — that knowledge belongs to that source's adapter,
+/// and this port is what it implements.
+pub trait AccountReader {
+    /// Everything one source says about one session. `LandedRecord` where a
+    /// source says it all in one record.
+    ///
+    /// `Send + Sync` because a derivation holds the whole corpus while it
+    /// awaits the write: these are read-only values, so the bound costs an
+    /// adapter nothing.
+    type Account: SourceAccount + Send + Sync;
+
     fn stream(&self) -> &LandingStream;
 
-    /// Every record for this stream, oldest first, in the order the source
+    /// Every account for this stream, oldest first, in the order the source
     /// served them.
     ///
     /// The order is defined so that a derivation is reproducible, not because
@@ -346,7 +460,7 @@ pub trait LandingRecordReader {
     ///
     /// [`StoreError`] if the store is unavailable or holds something
     /// unreadable.
-    fn records(&self) -> impl Future<Output = Result<Vec<LandedRecord>, StoreError>> + Send;
+    fn accounts(&self) -> impl Future<Output = Result<Vec<Self::Account>, StoreError>> + Send;
 }
 
 /// Turns one source's payload into our entity.
@@ -356,7 +470,12 @@ pub trait LandingRecordReader {
 /// request, reads no clock and consults no overlay, which is what
 /// "deterministic translation" means and is visible here as a signature with
 /// nothing to be non-deterministic with.
-pub trait WorkoutTranslator {
+pub trait Translator {
+    /// What this source says about one thing. Matches the reader that feeds it.
+    type Account;
+    /// The normalised entity it produces.
+    type Entity;
+
     /// # Errors
     ///
     /// [`NormalisationError::UnmappedExercise`] and nothing else. A gap in our
@@ -365,13 +484,17 @@ pub trait WorkoutTranslator {
     /// translation.
     fn translate(
         &self,
-        record: &LandedRecord,
+        account: &Self::Account,
         zone: &OperatorZone,
-    ) -> Result<Translation, NormalisationError>;
+    ) -> Result<Translation<Self::Entity>, NormalisationError>;
 }
 
 /// The normalised layer for one stream.
-pub trait NormalisedWorkoutStore {
+pub trait NormalisedEntityStore {
+    /// What this stream derives. One store holds one entity, because a table
+    /// holds one shape.
+    type Entity;
+
     fn stream(&self) -> &LandingStream;
 
     /// Replace this stream's normalised layer entirely.
@@ -389,7 +512,7 @@ pub trait NormalisedWorkoutStore {
     fn replace(
         &self,
         run: NormalisationRunId,
-        workouts: Vec<GymWorkout>,
+        entities: Vec<Self::Entity>,
     ) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
 
     /// # Errors
@@ -456,14 +579,29 @@ pub trait NormalisationRunLog {
 
 /// What a derivation did.
 ///
-/// Numbers that must add up: `records_read` equals `workouts_written` plus
-/// `workouts_retracted` plus `retractions_read` plus `records_refused`, so
-/// a record going missing is visible without reading a row.
+/// Numbers that must add up: `records_read` equals `records_composed` plus
+/// `records_superseded` plus `retractions_read` plus `records_refused`, so a
+/// record going missing is visible without reading a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NormalisationSummary {
     pub run_id: NormalisationRunId,
     pub records_read: RecordCount,
+    /// How many entities the derivation wrote. **Entities, not records** — one
+    /// cycling session is written from up to six of them.
     pub workouts_written: WorkoutCount,
+    /// How many landing records those entities were composed from, including
+    /// the ones a retraction then withdrew.
+    ///
+    /// **Only here so the arithmetic stays about records.** Since § 3.1 made
+    /// the session the unit, `workouts_written` counts a different thing from
+    /// the numbers beside it, and without this the reconciliation in
+    /// [`NormalisationSummary::reconciles`] would compare 149 sessions against
+    /// 477 records and fail on every healthy run. Grouping records into
+    /// sessions is precisely where one could go missing unnoticed, so the check
+    /// is worth keeping rather than dropping.
+    pub records_composed: RecordCount,
+    /// How many records a later serving of the same thing replaced.
+    pub records_superseded: RecordCount,
     /// How many workouts the retractions actually removed. Distinct from
     /// `retractions_read`, which is how many withdrawal events were served: one
     /// naming a record that was never landed removes nothing.
@@ -724,12 +862,16 @@ pub trait ExerciseHistory {
     fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
-/// Whole performed workouts, for projecting into a prescription shape.
+/// Whole performed sessions, for projecting into a prescription shape.
 ///
 /// Separate from [`ExerciseHistory`] because it answers a different question at
 /// a different grain, and merging them would give one port two reasons to
 /// change. It returns the domain entity untouched, because projection operates
-/// on the workout entire — its items, its groupings, its ordering.
+/// on the session entire — its items, its groupings, its ordering.
+///
+/// **Sessions, not workouts, since § 3.1.** A session the operator split across
+/// four Hevy routines is one prescription performed, and reading it as four
+/// would compare a quarter of it against the whole of what was issued.
 pub trait PerformedWorkoutReader {
     /// Oldest first, § 10 applied.
     ///
@@ -740,9 +882,14 @@ pub trait PerformedWorkoutReader {
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<GymWorkout>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<PerformedGymSession>, StoreError>> + Send;
 
-    /// The workout performed against a prescription, and the reference it named.
+    /// The session performed against a prescription, and the reference it named.
+    ///
+    /// **The reference is one part's and the session is the whole.** A session
+    /// split across several routines carries a routine id on each part, and the
+    /// one that matters is the one naming the prescription — so this finds the
+    /// workout and returns the session it belongs to.
     ///
     /// **Keyed on the prescription rather than on a date**, which is the whole
     /// point: a session prescribed for Friday and performed on Saturday morning
@@ -761,7 +908,7 @@ pub trait PerformedWorkoutReader {
     fn fulfilling(
         &self,
         prescription: PrescribedWorkoutId,
-    ) -> impl Future<Output = Result<Option<(DeliveryReference, GymWorkout)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError>> + Send;
 }
 
 /// The § 14 parameters, in force as one version.

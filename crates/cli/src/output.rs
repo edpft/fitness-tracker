@@ -8,8 +8,8 @@ use application::{
     DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
 };
 use domain::{
-    gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
+    normalised::{Refusal, RefusalKind},
     prescription::{
         BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, TestTarget,
         WeekIndex, WeekPlan,
@@ -48,7 +48,7 @@ pub fn run_succeeded(summary: &RunSummary) {
 }
 
 /// Never having run is a fact to report, not an error to raise.
-pub fn status(standing: &StreamStatus, derivation: &DerivationStatus) {
+pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
     println!(
         "{:<16} {:<22} {:>11} {:>15} {:>13}",
         "stream", "last succeeded", "events seen", "records landed", "records held"
@@ -76,7 +76,13 @@ pub fn status(standing: &StreamStatus, derivation: &DerivationStatus) {
         None => println!("\nresumption point: unset — the next run collects the full history"),
     }
 
-    derivation_status(derivation);
+    match derivation {
+        Some(derivation) => derivation_status(derivation),
+        // Not a zeroed report. A stream that lands and does not yet derive has
+        // no derivation to be behind on, and printing "0 of 168" would name a
+        // problem that does not exist.
+        None => println!("\nnothing derives from this stream yet"),
+    }
 }
 
 /// The derivation's half of § 38.
@@ -149,11 +155,15 @@ pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
 }
 
-/// The four numbers that must add up.
+/// The numbers that must add up.
 ///
-/// `records read` equals workouts plus withdrawals plus retractions plus
-/// records refused. A record that went missing shows up as arithmetic that does
-/// not reconcile, without anyone having to query a table.
+/// `records read` equals `records composed` plus `records superseded` plus
+/// retractions plus `records refused`. A record that went missing shows up as
+/// arithmetic that does not reconcile, without anyone having to query a table.
+///
+/// **`workouts written` is deliberately outside that sum**, and says so by
+/// standing apart from the record counts: since a session composes several
+/// records, it counts a different thing from everything beside it.
 ///
 /// Refusals are reported and do not affect the exit code. A run that recorded
 /// 26 of them succeeded — it found 26 things wrong with the data and said so,
@@ -162,6 +172,12 @@ pub fn derivation_succeeded(summary: &NormalisationSummary) {
     println!("derivation {} succeeded", summary.run_id);
     println!("  records read       {:>5}", summary.records_read);
     println!("  workouts written   {:>5}", summary.workouts_written);
+    if summary.records_composed != summary.records_read {
+        println!("    from records     {:>5}", summary.records_composed);
+    }
+    if summary.records_superseded.as_usize() > 0 {
+        println!("  records superseded {:>5}", summary.records_superseded);
+    }
     if summary.workouts_retracted.as_usize() > 0 {
         println!("  workouts withdrawn {:>5}", summary.workouts_retracted);
     }
@@ -956,7 +972,7 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
-fn set_line<M: std::fmt::Display + domain::gym::Spans>(
+fn set_line<M: std::fmt::Display + domain::measure::Spans>(
     set: &domain::prescription::PrescribedSet<M>,
 ) -> String {
     use domain::prescription::Prescribed;
@@ -1115,10 +1131,12 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
         if *outcome == CredentialOutcome::Outstanding
             && let Some(known) = crate::catalogue::source(source)
         {
+            // Every variable this source needs, not just a key: a login has
+            // two, and naming one of them would read as the whole answer.
             println!(
                 "            connect it later with `fitness init --force`, or set {} — \
-                 keys come from {}",
-                known.api_key_variable(),
+                 credentials come from {}",
+                known.required_variables().join(" and "),
                 known.credential_url()
             );
         }

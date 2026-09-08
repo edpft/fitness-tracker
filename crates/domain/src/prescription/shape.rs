@@ -22,11 +22,9 @@
 
 use std::fmt;
 
-use crate::gym::{
-    Distance, Duration, RepCount,
-    exercise::{DistanceExercise, DurationExercise, RepsExercise},
-    sequence::{AtLeastTwo, NonEmpty},
-};
+use crate::gym::exercise::{DistanceExercise, DurationExercise, RepsExercise};
+use crate::measure::{Distance, Duration, RepCount};
+use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::target::PrescribedSet;
 
