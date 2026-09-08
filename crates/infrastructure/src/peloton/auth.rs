@@ -36,7 +36,7 @@ use std::{
 
 use application::SourceError;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::RngCore as _;
+use rand::Rng as _;
 use reqwest::{Client, StatusCode, cookie::CookieStore as _, cookie::Jar, redirect::Policy};
 use sha2::{Digest as _, Sha256};
 
