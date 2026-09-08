@@ -27,6 +27,21 @@ use crate::measure::{Duration, Metres};
 use crate::normalised::{NormalisedEntity, StartedAt};
 
 use super::ride::BikePlusRide;
+use super::zone::{Ftp, FtpProvenance, InvalidFtp, Watts};
+
+/// What the twenty-minute protocol multiplies a test's average power by.
+///
+/// **A published protocol's constant, not a parameter.** The twenty-minute test
+/// is ridden as hard as can be held for twenty minutes, which is by definition
+/// longer than an hour's power; 95% is the correction the protocol states, and
+/// it is what Peloton's own reported FTP agrees with. § 14.1 is the test — it
+/// would not be true of anything if no test were being interpreted — so it is
+/// one fixed decision rather than something to configure.
+///
+/// Changing it does not restate old values more accurately: § 6 makes a
+/// derivation choice part of a series' method, so a different multiplier is a
+/// different series and never a correction to this one.
+const TWENTY_MINUTE_SHARE: u32 = 95;
 
 /// A session performed on a Peloton Bike+.
 ///
@@ -138,6 +153,48 @@ impl PerformedSession {
                 .map(|ride| ride.distance().as_millimetres())
                 .sum(),
         )
+    }
+
+    /// The FTP this session measured, where it measured one.
+    ///
+    /// **Only a test measures one**, so a ride answers [`None`] — which is the
+    /// variant doing the work that recognising a test from a class title or a
+    /// duration would otherwise do.
+    ///
+    /// **The effort's stated average, never a mean of its samples.** Peloton
+    /// states the average and it is not the mean of the series beside it; only
+    /// the stated figure reproduces all six of the operator's known values.
+    /// [`BikePlusRide::average_power`] carries the reasoning.
+    ///
+    /// Rounded rather than truncated, in whole watts, because that is what
+    /// reproduces the record: 209 W truncates to 198 where the operator's own
+    /// value, and Peloton's, is 199.
+    ///
+    /// The arithmetic is integral throughout. A float would make the value
+    /// depend on rounding mode for a number that is persisted and compared
+    /// against rows written by earlier versions (§ 7).
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidFtp`] where the effort averaged no power at all, which is a
+    /// ride nobody pedalled rather than a threshold.
+    pub fn measured_ftp(&self) -> Option<Result<Ftp, InvalidFtp>> {
+        let Self::Test { effort, .. } = self else {
+            return None;
+        };
+        let average = effort.average_power().as_u32();
+        // In `u64` so the multiplication cannot overflow, and back in `u32`
+        // because a share of a value is smaller than it — the conversion cannot
+        // fail, and the average is the only sensible thing to say if it did.
+        let hundredths = u64::from(average) * u64::from(TWENTY_MINUTE_SHARE) + 50;
+        let watts = u32::try_from(hundredths / 100).unwrap_or(average);
+        Some(Ftp::new(
+            Watts::from_u32(watts),
+            self.started_at().wall_clock().date(),
+            // Arithmetic over a measurement, not a measurement: the twenty
+            // minutes were ridden, the hour they stand for was not.
+            FtpProvenance::Estimated,
+        ))
     }
 
     /// The stable key for which variant this is. Persisted.

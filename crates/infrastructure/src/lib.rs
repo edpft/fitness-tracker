@@ -26,10 +26,10 @@ pub use store::{
     HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, connect,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePerformedWorkoutReader,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };
 
 /// The pool every store is built on, so a composition root can open one and

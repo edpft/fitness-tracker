@@ -27,7 +27,7 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    cycling::{BikePlusRide, HeartRateSeries, PerformedSession},
+    cycling::{BikePlusRide, Ftp, FtpProvenance, HeartRateSeries, PerformedSession, Watts},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -35,6 +35,7 @@ use domain::{
     measure::Duration,
     normalised::{NormalisationRunId, WorkoutCount},
 };
+use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::collections::BTreeMap;
 
@@ -256,6 +257,13 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
+        // **Rebuilt with the sessions it is derived from**, in their
+        // transaction, so it cannot be left standing against a layer that no
+        // longer says what it was computed from (issue #56).
+        sqlx::query!("DELETE FROM ftp")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
         sqlx::query!("DELETE FROM cycling_session")
             .execute(&mut *tx)
             .await
@@ -311,6 +319,8 @@ async fn write_session(
     .await
     .map_err(|error| store_error(&error))?;
 
+    write_ftp(tx, run_id, session, session_id).await?;
+
     for (ride, role) in rides.iter().zip(roles_of(session)) {
         write_ride(tx, run_id, ride, session_id, role).await?;
     }
@@ -344,6 +354,50 @@ fn roles_of(session: &PerformedSession) -> Vec<&'static str> {
 ///
 /// Its own function so the writes above read as what they are — empty, then
 /// write each — rather than as a hundred lines of column lists.
+/// The FTP a test session measured, where it measured one.
+///
+/// **§ 13's interpretive parameter, derived rather than asked for.** The value
+/// is the effort's stated average power times 0.95, dated to the day the test
+/// was ridden, and it is written here so that it is rebuilt in the same
+/// transaction as the sessions it is a function of.
+///
+/// An ordinary ride measures nothing and writes nothing: the variant says so,
+/// so nothing here recognises a test from a class, a title or a duration.
+async fn write_ftp(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    session: &PerformedSession,
+    session_id: i64,
+) -> Result<(), StoreError> {
+    let Some(measured) = session.measured_ftp() else {
+        return Ok(());
+    };
+    let ftp = measured.map_err(|error| StoreError::Corrupt {
+        detail: error.to_string(),
+    })?;
+
+    let effect_from = ftp.from().to_string();
+    let watts = i64::from(ftp.watts().as_u32());
+    let provenance = ftp.provenance().as_str().to_owned();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO ftp (effect_from, watts, provenance, measured_by, run_id)
+        VALUES (?, ?, ?, ?, ?)
+        "#,
+        effect_from,
+        watts,
+        provenance,
+        session_id,
+        run_id,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    Ok(())
+}
+
 async fn write_ride(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
@@ -464,6 +518,69 @@ fn seconds_for_storage(duration: Duration) -> Result<i64, StoreError> {
     i64::try_from(duration.as_seconds()).map_err(|_| StoreError::Corrupt {
         detail: "a duration larger than the store can hold".to_owned(),
     })
+}
+
+/// The FTP series, as the cycling derivation left it.
+///
+/// **A reader over a table nothing else writes**: every row is a function of a
+/// test session, written by [`SqliteCyclingSessionStore`] in the same
+/// transaction, so this can never be asked about a value the record no longer
+/// supports.
+#[derive(Debug, Clone)]
+pub struct SqliteFtpHistory {
+    pool: SqlitePool,
+}
+
+impl SqliteFtpHistory {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl application::FtpHistory for SqliteFtpHistory {
+    async fn in_force_on(&self, date: Date) -> Result<Option<Ftp>, StoreError> {
+        // The latest value dated on or before the day. Dates are ISO-8601, so
+        // the store's string ordering is the calendar's.
+        let on = date.to_string();
+        let row = sqlx::query!(
+            r#"
+            SELECT effect_from AS "effect_from!: String",
+                   watts       AS "watts!: i64",
+                   provenance  AS "provenance!: String"
+              FROM ftp
+             WHERE effect_from <= ?
+             ORDER BY effect_from DESC
+             LIMIT 1
+            "#,
+            on,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let corrupt = |detail: String| StoreError::Corrupt { detail };
+        let watts = u32::try_from(row.watts)
+            .map(Watts::from_u32)
+            .map_err(|_| corrupt(format!("an FTP of {} watts", row.watts)))?;
+        let from: Date = row
+            .effect_from
+            .parse()
+            .map_err(|_| corrupt(format!("{:?} does not date an FTP", row.effect_from)))?;
+        let provenance = match row.provenance.as_str() {
+            "tested" => FtpProvenance::Tested,
+            "estimated" => FtpProvenance::Estimated,
+            "asserted" => FtpProvenance::Asserted,
+            other => return Err(corrupt(format!("{other:?} does not name a provenance"))),
+        };
+
+        Ftp::new(watts, from, provenance)
+            .map(Some)
+            .map_err(|error| corrupt(error.to_string()))
+    }
 }
 
 /// Both of Peloton's landing tables, counted as one.

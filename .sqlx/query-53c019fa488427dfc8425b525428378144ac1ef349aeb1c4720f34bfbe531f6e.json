@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"held!: i64\" FROM ftp",
+  "describe": {
+    "columns": [
+      {
+        "name": "held!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53c019fa488427dfc8425b525428378144ac1ef349aeb1c4720f34bfbe531f6e"
+}

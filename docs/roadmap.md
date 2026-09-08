@@ -305,14 +305,18 @@ settings (2026-09-03, no TOML); zone minimums are independent floors
 load); Peloton is reachable and serves class content and the performed record but
 not programme structure (2026-09-05, 0033).
 
-**Due, not merely reopened** (0033 reopened it, 0034 dates it): the FTP work.
-The block cannot start without a fresh value — every zone in twelve weeks of
-prescription is a share of a number whose most recent reading is nearly eight
-weeks stale by 14 September. It was taken off the list on 2026-09-03
-because the need arrived with Peloton ingestion; Peloton ingestion now exists,
-and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
-**172 on 2026-07-22**, each the twenty-minute test's average output × 0.95. An
-*asserted* FTP is no longer the only path and is probably the wrong one.
+~~**Due, not merely reopened**: the FTP work.~~ **Done 2026-09-08** (issue #56).
+`fitness normalise peloton.rides` writes the six values — 143, 183, 199, 174,
+155 and **172 on 2026-07-22** — each the twenty-minute test's *stated* average
+power × 0.95, effect-dated to the test that measured it, and `cycling next`
+reads the one in force on the session's date without `--ftp`.
+
+**Stated, not derived, and it changed two of the six.** Peloton states an
+average beside the per-second series and it is not the mean of them: across the
+record the mean disagrees on 33 of 231 rides, once by 10 watts. Only the stated
+figure reproduces all six values. The operator asked the question that found it:
+*"don't they use average output instead of deriving it from total output divided
+by duration?"*
 
 ## Deferred, and none of it on the critical path
 
@@ -322,6 +326,18 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 - ~~The cool-down ride~~ — **built 2026-09-06** (#79, #82). Found by query rather
   than by a table, because what the operator rides is the most recent one; four
   of the twelve instructors publish none and fall back to Matt Wilpers.
+- **Incremental normalisation.** The operator, 2026-09-08: *"it doesn't make
+  sense to me for normalisation and derivation to be fully dynamic when the data
+  they are running on is incremental."* He is right that nothing requires the
+  rebuild — § II says a derivation is *"defined by what it is a function of, not
+  by how it is stored"*, so equalling a full re-derivation is the duty and
+  performing one is an implementation choice. Extraction is already incremental
+  because it avoids network; normalisation has none, and a full pass costs ~12
+  seconds on 905 records and 644,719 sample rows, against 0.19s for the gym's
+  168. What it would cost is the three cases where a new record changes an
+  entity already derived — supersession, a cool-down landing after the ride it
+  joins, and retraction — plus knowing when a zone or translator change forces
+  the full pass anyway. **Revisit when that 12 seconds is 12 minutes.**
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **The Peloton class library, cached** (#94). `fitness plan` fetches sixty-five
   classes on every authoring and keeps none of them.

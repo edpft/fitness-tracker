@@ -31,7 +31,7 @@ pub use ports::{
     AccountReader, Authored, Clock, CyclingMesocycleStore, Deliverable, Delivered, Delivery,
     DeliveryReference, DerivationStatus, DerivationStatusReporter, DestinationName, DiaryAuthor,
     DiaryStore, EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter,
-    FulfilledSession, GenerationParameterStore, Issuance, LadderStanding, LandingStore,
+    FtpHistory, FulfilledSession, GenerationParameterStore, Issuance, LadderStanding, LandingStore,
     LastPerformance, MesocycleStore, NormalisationRunLog, NormalisationSummary,
     NormalisedEntityStore, Performance, PerformedSetSummary, PerformedWorkoutReader, PlanAuthor,
     PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
