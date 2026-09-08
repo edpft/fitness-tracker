@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) AS \"total!: i64\" FROM peloton_workout_landing",
+  "query": "SELECT COUNT(*) AS \"total!: i64\" FROM peloton_ride_sample_landing",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "144364a641a67d119486730259a22a9e8173c28c3bf7ad37d43b25168404a6c3"
+  "hash": "00f66e3b862bf48f38a9dd21c94e28b6a32caa3783071290451fa6494caa5cb7"
 }

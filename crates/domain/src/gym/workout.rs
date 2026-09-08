@@ -198,6 +198,10 @@ impl GymWorkout {
         self.landed_as
     }
 
+    pub const fn source_record_id(&self) -> &SourceRecordId {
+        &self.source_record_id
+    }
+
     /// Every performed exercise, flattened across items in their recorded
     /// order. What an entry count is over.
     pub fn exercises(&self) -> impl Iterator<Item = &PerformedExercise> {
@@ -219,8 +223,10 @@ impl GymWorkout {
 }
 
 impl NormalisedEntity for GymWorkout {
-    fn source_record_id(&self) -> &SourceRecordId {
-        &self.source_record_id
+    /// One, for now. A gym session composed of several Hevy routines is the
+    /// change constitution 3.2.0 also calls for, and is its own piece of work.
+    fn composes(&self) -> Vec<&SourceRecordId> {
+        vec![&self.source_record_id]
     }
 }
 

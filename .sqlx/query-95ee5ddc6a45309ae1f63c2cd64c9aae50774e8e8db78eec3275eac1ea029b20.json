@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\",\n                   endpoint AS \"endpoint!: String\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   event_kind AS \"event_kind!: String\",\n                   event_time AS \"event_time: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM peloton_workout_landing\n            ORDER BY id ASC\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   endpoint AS \"endpoint!: String\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   event_kind AS \"event_kind!: String\",\n                   event_time AS \"event_time: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM peloton_ride_sample_landing\n            ORDER BY id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "id"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "endpoint"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "fetched_at"
           }
         }
@@ -42,7 +42,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "source_record_id"
           }
         }
@@ -53,7 +53,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "event_kind"
           }
         }
@@ -64,7 +64,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "event_time"
           }
         }
@@ -75,7 +75,7 @@
         "type_info": "Blob",
         "origin": {
           "Table": {
-            "table": "peloton_workout_landing",
+            "table": "peloton_ride_sample_landing",
             "name": "payload"
           }
         }
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "0cffda1a6399b600ef1e6cbd87359b37e8180fbdc5a9c88775a560f18ac760a3"
+  "hash": "95ee5ddc6a45309ae1f63c2cd64c9aae50774e8e8db78eec3275eac1ea029b20"
 }

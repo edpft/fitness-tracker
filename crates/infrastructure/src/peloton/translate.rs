@@ -33,8 +33,8 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     cycling::{
-        BeatsPerMinute, BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries, RideRecord,
-        RideSample,
+        BeatsPerMinute, BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries,
+        PerformedSession, RideRecord, RideSample,
     },
     landing::{EventKind, Provenance},
     measure::{Duration, Metres},
@@ -43,11 +43,12 @@ use domain::{
 };
 use jiff::Timestamp;
 
-use crate::{scribe::Scribe, store::PelotonWorkoutSampleLandingStore};
+use crate::{scribe::Scribe, store::PelotonRideSampleLandingStore};
 
 use super::{
-    account::RideAccount,
+    account::{LandedRide, SessionAccount},
     payload::{PerformanceGraph, WorkoutRecord, number},
+    sessions::{RideRole, is_low_impact, role_of},
 };
 
 /// What Peloton calls a ride.
@@ -72,128 +73,225 @@ const HEART_RATE: &str = "heart_rate";
 /// Stateless, as its Hevy counterpart is: the zone arrives per call, so the
 /// same translator answers for any declared configuration.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct PelotonRideTranslator;
+pub struct PelotonSessionTranslator;
 
-impl Translator for PelotonRideTranslator {
-    type Account = RideAccount;
-    type Entity = BikePlusRide;
+impl Translator for PelotonSessionTranslator {
+    type Account = SessionAccount;
+    type Entity = PerformedSession;
 
     fn translate(
         &self,
-        account: &RideAccount,
+        account: &SessionAccount,
         zone: &OperatorZone,
-    ) -> Result<Translation<BikePlusRide>, NormalisationError> {
-        let record = &account.ride;
-        let mut scribe = Scribe::new(record);
+    ) -> Result<Translation<PerformedSession>, NormalisationError> {
+        // Anchored to the session's first ride: a refusal has to point the
+        // operator at something they can look up, and a session is not
+        // something the source names.
+        let mut scribe = Scribe::new(&account.rides().first().ride);
 
-        // Provenance rather than the body, for the reason the Hevy translator
-        // gives: the adapter answered this question when the record landed.
-        // This source states no event kinds — a workout that is deleted simply
-        // stops being served — so `Updated` is the only kind it writes, and the
-        // other arms are what the type makes us say out loud.
-        let Provenance::Event(event) = record.provenance();
-        match event.kind() {
-            EventKind::Deleted => {
-                return Ok(Translation::Retraction {
-                    of: record.source_record_id().clone(),
-                });
+        // A retraction is the source withdrawing a record, and this source
+        // never does — a workout that is deleted simply stops being served. The
+        // arm exists because the type makes us say so, and it withdraws the
+        // whole session, because a session missing one of its rides is not that
+        // session.
+        for landed in account.rides().iter() {
+            let Provenance::Event(event) = landed.ride.provenance();
+            match event.kind() {
+                EventKind::Deleted => {
+                    return Ok(Translation::Retraction {
+                        of: landed.ride.source_record_id().clone(),
+                    });
+                }
+                EventKind::Unrecognised(kind) => {
+                    return Ok(scribe.only(
+                        RefusalLocus::Record,
+                        RefusalReason::UnreadablePayload {
+                            detail: format!("event kind {kind:?} is not one we translate"),
+                        },
+                    ));
+                }
+                EventKind::Updated => {}
             }
-            EventKind::Unrecognised(kind) => {
-                return Ok(scribe.only(
-                    RefusalLocus::Record,
-                    RefusalReason::UnreadablePayload {
-                        detail: format!("event kind {kind:?} is not one we translate"),
-                    },
-                ));
-            }
-            EventKind::Updated => {}
         }
 
-        let workout = match WorkoutRecord::read(record.payload().as_bytes()) {
-            Ok(workout) => workout,
-            Err(error) => {
-                return Ok(scribe.only(
-                    RefusalLocus::Record,
-                    RefusalReason::UnreadablePayload {
-                        detail: error.detail,
-                    },
-                ));
+        // Every ride, or none. A session with one ride missing is not a session
+        // with a gap in it — it is a different session, and asserting it would
+        // be this layer inventing what the source did not say.
+        let mut rides = Vec::with_capacity(account.rides().count());
+        for landed in account.rides().iter() {
+            match ride_from(landed, zone) {
+                Ok((ride, noted)) => {
+                    for reason in noted {
+                        scribe.note(RefusalLocus::Record, reason);
+                    }
+                    rides.push(ride);
+                }
+                Err(reason) => return Ok(scribe.only(RefusalLocus::Record, reason)),
             }
-        };
-
-        if let Some(reason) = not_a_bike_plus_ride(&workout) {
-            return Ok(scribe.only(RefusalLocus::Record, reason));
         }
 
-        let (instant, duration) = match span_of(&workout) {
-            Ok(span) => span,
-            Err(reason) => return Ok(scribe.only(RefusalLocus::Record, reason)),
-        };
+        let rides_in_order: Vec<&LandedRide> = account.rides().iter().collect();
+        let roles: Vec<RideRole> = rides_in_order
+            .iter()
+            .map(|landed| effective_role(landed, &rides_in_order))
+            .collect();
 
-        // Everything above is the workout record's. Everything below needs the
-        // graph, which is the second half of the account (§ 3.1).
-        let Some(landed_graph) = account.samples.as_ref() else {
+        let Some(session) = session_from(roles.as_slice(), rides) else {
             return Ok(scribe.only(
                 RefusalLocus::Record,
-                RefusalReason::CompanionNotLanded {
-                    stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
+                RefusalReason::Unmodelled {
+                    detail: described(roles.as_slice()),
                 },
             ));
         };
-
-        let graph = match PerformanceGraph::read(landed_graph.payload().as_bytes()) {
-            Ok(graph) => graph,
-            Err(error) => {
-                return Ok(scribe.only(
-                    RefusalLocus::Record,
-                    RefusalReason::UnreadablePayload {
-                        detail: error.detail,
-                    },
-                ));
-            }
-        };
-
-        let distance = match distance_of(&graph) {
-            Ok(distance) => distance,
-            Err(reason) => return Ok(scribe.only(RefusalLocus::Record, reason)),
-        };
-
-        let samples = match samples_of(&graph) {
-            Ok(samples) => samples,
-            Err(reason) => return Ok(scribe.only(RefusalLocus::Record, reason)),
-        };
-        let Ok(samples) = NonEmpty::new(samples) else {
-            return Ok(scribe.only(
-                RefusalLocus::Record,
-                RefusalReason::NoReadingsInSeries {
-                    series: "bike sample",
-                },
-            ));
-        };
-
-        // The one part of the graph a ride can do without. A refusal here does
-        // not cost the ride, exactly as a refused set does not cost its
-        // exercise: the operator wore nothing, or wore something that failed,
-        // and the four series the bike produced are unaffected either way.
-        let heart_rate = heart_rate_of(&graph, &mut scribe);
 
         Ok(Translation::Entity {
-            entity: Box::new(BikePlusRide::new(RideRecord {
-                started_at: StartedAt::new(instant, zone.clone()),
-                duration,
-                distance,
-                samples,
-                heart_rate,
-                provenance: record.provenance().clone(),
-                source_record_id: record.source_record_id().clone(),
-                landed_as: ComposedFrom {
-                    ride: record.id(),
-                    samples: landed_graph.id(),
-                },
-            })),
+            entity: Box::new(session),
             refusals: scribe.into_refusals(),
         })
     }
+}
+
+/// The role a ride plays in the session it sits in.
+///
+/// **Position matters as well as declaration.** A low-impact class is an
+/// ordinary ride when it stands alone and a cool-down when a session ends with
+/// it — which is the operator's own reading of the FTP test he finished with
+/// one: *"looks like I picked the wrong type of ride for a Cool Down"*. So the
+/// class says what it is and the sequence says what it was for.
+fn effective_role(landed: &LandedRide, rides: &[&LandedRide]) -> RideRole {
+    let role = role_of(&landed.ride);
+    let is_last = rides
+        .last()
+        .is_some_and(|last| last.ride.id() == landed.ride.id());
+    if role == RideRole::Main && is_last && rides.len() > 1 && is_low_impact(&landed.ride) {
+        return RideRole::CoolDown;
+    }
+    role
+}
+
+/// The session those roles make, if they make one this model holds.
+///
+/// The two variants and nothing else. Both anomalies in the operator's record
+/// fall out here — a warm-up and a cool-down with no ride between them
+/// (2023-12-21, his first session) and two main rides back to back (2023-12-24,
+/// from the Discover programme) — and he called both anomalies rather than
+/// shapes to model.
+fn session_from(roles: &[RideRole], mut rides: Vec<BikePlusRide>) -> Option<PerformedSession> {
+    let mut take = |index: usize| -> BikePlusRide { rides.remove(index) };
+    match roles {
+        [RideRole::Main] => Some(PerformedSession::Ride {
+            main: take(0),
+            cool_down: None,
+        }),
+        [RideRole::Main, RideRole::CoolDown] => {
+            let main = take(0);
+            Some(PerformedSession::Ride {
+                main,
+                cool_down: Some(take(0)),
+            })
+        }
+        [RideRole::WarmUp, RideRole::Effort] => {
+            let warm_up = take(0);
+            Some(PerformedSession::Test {
+                warm_up,
+                effort: take(0),
+                cool_down: None,
+            })
+        }
+        [RideRole::WarmUp, RideRole::Effort, RideRole::CoolDown] => {
+            let warm_up = take(0);
+            let effort = take(0);
+            Some(PerformedSession::Test {
+                warm_up,
+                effort,
+                cool_down: Some(take(0)),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// What the refused shape was, in words an operator can act on.
+fn described(roles: &[RideRole]) -> String {
+    if roles == [RideRole::NotARide] {
+        return "not a ride on a Bike+, so part of no cycling session".to_owned();
+    }
+    let named: Vec<&str> = roles
+        .iter()
+        .map(|role| match role {
+            RideRole::WarmUp => "warm-up",
+            RideRole::Effort => "FTP test",
+            RideRole::Main => "main",
+            RideRole::CoolDown => "cool-down",
+            RideRole::NotARide => "not a ride",
+        })
+        .collect();
+    format!("a session of {}", named.join(" then "))
+}
+
+/// One ride, from the workout record and the graph that carries its samples.
+fn ride_from(
+    landed: &LandedRide,
+    zone: &OperatorZone,
+) -> Result<(BikePlusRide, Vec<RefusalReason>), RefusalReason> {
+    let record = &landed.ride;
+    let workout = WorkoutRecord::read(record.payload().as_bytes()).map_err(|error| {
+        RefusalReason::UnreadablePayload {
+            detail: error.detail,
+        }
+    })?;
+
+    if let Some(reason) = not_a_bike_plus_ride(&workout) {
+        return Err(reason);
+    }
+
+    let (instant, duration) = span_of(&workout)?;
+
+    // Everything above is the workout record's. Everything below needs the
+    // graph, which is the other half of what the source says about this ride.
+    let landed_graph =
+        landed
+            .samples
+            .as_ref()
+            .ok_or_else(|| RefusalReason::CompanionNotLanded {
+                stream: PelotonRideSampleLandingStore::STREAM.to_owned(),
+            })?;
+
+    let graph = PerformanceGraph::read(landed_graph.payload().as_bytes()).map_err(|error| {
+        RefusalReason::UnreadablePayload {
+            detail: error.detail,
+        }
+    })?;
+
+    let distance = distance_of(&graph)?;
+    let samples = samples_of(&graph)?;
+    let samples = NonEmpty::new(samples).map_err(|_| RefusalReason::NoReadingsInSeries {
+        series: "bike sample",
+    })?;
+
+    // The one part of the graph a ride can do without: the operator wore
+    // nothing, or wore something that failed, and the four series the bike
+    // produced are unaffected either way. A problem with it is carried back
+    // rather than raised, so it costs the declaration and not the ride.
+    let (heart_rate, noted) = heart_rate_of(&graph);
+
+    Ok((
+        BikePlusRide::new(RideRecord {
+            started_at: StartedAt::new(instant, zone.clone()),
+            duration,
+            distance,
+            samples,
+            heart_rate,
+            provenance: record.provenance().clone(),
+            source_record_id: record.source_record_id().clone(),
+            landed_as: ComposedFrom {
+                ride: record.id(),
+                samples: landed_graph.id(),
+            },
+        }),
+        noted,
+    ))
 }
 
 /// When the ride started, and how long it lasted.
@@ -422,23 +520,23 @@ where
 /// Peloton held a value forward for as well as the ones it zeroed — so it is
 /// recorded rather than recomputed, and a value that is not a duration is
 /// refused without costing the series.
-fn heart_rate_of(graph: &PerformanceGraph<'_>, scribe: &mut Scribe) -> Option<HeartRateSeries> {
-    let metric = graph.metric(HEART_RATE)?;
+fn heart_rate_of(graph: &PerformanceGraph<'_>) -> (Option<HeartRateSeries>, Vec<RefusalReason>) {
+    let mut noted = Vec::new();
+    let Some(metric) = graph.metric(HEART_RATE) else {
+        return (None, noted);
+    };
     let offsets = &graph.seconds_since_pedaling_start;
 
     if metric.values.len() != offsets.len() {
-        scribe.note(
-            RefusalLocus::Record,
-            RefusalReason::UnreadableValue {
-                field: "values",
-                detail: format!(
-                    "heart_rate has {} readings for {} seconds",
-                    metric.values.len(),
-                    offsets.len()
-                ),
-            },
-        );
-        return None;
+        noted.push(RefusalReason::UnreadableValue {
+            field: "values",
+            detail: format!(
+                "heart_rate has {} readings for {} seconds",
+                metric.values.len(),
+                offsets.len()
+            ),
+        });
+        return (None, noted);
     }
 
     let mut samples = Vec::new();
@@ -459,28 +557,24 @@ fn heart_rate_of(graph: &PerformanceGraph<'_>, scribe: &mut Scribe) -> Option<He
     }
 
     let Ok(samples) = NonEmpty::new(samples) else {
-        scribe.note(
-            RefusalLocus::Record,
-            RefusalReason::NoReadingsInSeries {
-                series: "heart rate",
-            },
-        );
-        return None;
+        noted.push(RefusalReason::NoReadingsInSeries {
+            series: "heart rate",
+        });
+        return (None, noted);
     };
 
     let declared_missing = number(metric.missing_data_duration).and_then(|stated| {
-        Duration::try_from(stated.to_owned())
-            .map_err(|error| {
-                scribe.note(
-                    RefusalLocus::Record,
-                    RefusalReason::UnreadableValue {
-                        field: "missing_data_duration",
-                        detail: error.to_string(),
-                    },
-                );
-            })
-            .ok()
+        match Duration::try_from(stated.to_owned()) {
+            Ok(duration) => Some(duration),
+            Err(error) => {
+                noted.push(RefusalReason::UnreadableValue {
+                    field: "missing_data_duration",
+                    detail: error.to_string(),
+                });
+                None
+            }
+        }
     });
 
-    Some(HeartRateSeries::new(samples, declared_missing))
+    (Some(HeartRateSeries::new(samples, declared_missing)), noted)
 }

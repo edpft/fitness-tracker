@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) AS \"total!: i64\" FROM bike_plus_ride",
+  "query": "SELECT COUNT(*) AS \"total!: i64\" FROM cycling_session",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "f094cf468a0f22449d8792403111ad073aafccdf5a4b389d8aaea5a6ea94deed"
+  "hash": "e923475b7f225c9b49e0d0235c48da045253c56868ca4469c85b30ec31a9a8c9"
 }

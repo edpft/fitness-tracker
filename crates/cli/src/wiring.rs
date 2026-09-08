@@ -27,12 +27,12 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, PelotonRideAccountReader, PelotonWorkoutLandingStore,
-    PelotonWorkoutSampleLandingStore, PelotonWorkoutSamples, PelotonWorkouts,
-    SqliteBikePlusRideStore, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    HevyWorkoutTranslator, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymWorkoutStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
     peloton::{
-        PelotonRideTranslator,
+        PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
     },
 };
@@ -59,6 +59,13 @@ pub enum Command {
 /// What happened, in terms the output module can print.
 pub enum Outcome {
     Extracted(Box<RunSummary>),
+    /// Two walks under one entry, reported as two, because they are two runs
+    /// against two endpoints and a single merged number would hide one of them
+    /// failing to land anything (§ 38).
+    ExtractedBoth {
+        first: Box<RunSummary>,
+        second: Box<RunSummary>,
+    },
     Derived(Box<NormalisationSummary>),
     Refused(Box<RefusalReport>),
     Reported {
@@ -98,23 +105,6 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
-    /// A stream that lands but has no derivation of its own.
-    ///
-    /// **Which is not the same as nothing deriving from it.** A Bike+ ride
-    /// composes a workout record and a performance graph (§ 3.1), and is
-    /// derived under the stream that *names* the ride — so the graphs are read
-    /// by `normalise peloton.workouts` and this is the message for asking the
-    /// other way round. A second command deriving the same entity would be two
-    /// answers to one question.
-    #[error(
-        "{stream} lands, and {derived_by} is what derives from it: an entity composed from two \
-         of a source's responses is derived under the stream that names it. Run `fitness \
-         normalise {derived_by}`"
-    )]
-    NotYetDerived {
-        stream: String,
-        derived_by: &'static str,
-    },
     #[error("{stream} is reached with a login, and {given} was resolved instead")]
     WrongCredential { stream: String, given: &'static str },
     #[error(transparent)]
@@ -140,132 +130,53 @@ pub async fn run(
 ) -> Result<Outcome, WiringError> {
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
-        PelotonWorkoutLandingStore::STREAM => peloton_workouts(command, database).await,
-        PelotonWorkoutSampleLandingStore::STREAM => peloton_samples(command, database).await,
+        PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
     }
 }
 
-/// Peloton's performance graphs, landed into the table shaped for them.
+/// Peloton's rides: both walks, one entity, one command.
 ///
-/// **Landing only**, as its sibling is: there is no cycling workout entity yet
-/// and so nothing to translate a graph into (#56).
+/// **Two walks behind one entry.** The ride list gives a ride's start, duration
+/// and device; the performance graph gives its samples, one request per ride
+/// against a different endpoint. Neither is an entity on its own and neither is
+/// useful without the other, so the operator can no longer ask for one:
+/// *"if one command needs to be run before another, those commands aren't
+/// meaningfully separate and it shouldn't be possible to run them in the wrong
+/// order"*.
 ///
-/// A walk here is a page of the workout list plus one request per workout on
-/// it, so the whole history is roughly one request per workout — minutes rather
-/// than seconds. It takes the same lock as any other stream and holds it for
-/// that long, which is why it is a stream of its own: a slow walk of the graphs
-/// cannot block a quick one of the workouts.
-async fn peloton_samples(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+/// They stay two landing tables and two resumption points. A landing record
+/// holds one response as served (§ II.1), and the graph walk is minutes where
+/// the list walk is seconds — so a graph walk that fails part-way must not cost
+/// the list its watermark. What went is the choice, not the separation.
+///
+/// The list is walked first, and that is the one ordering that still matters:
+/// the graph walk enumerates rides itself, so running it second means the
+/// graphs it fetches are for rides this same command has just landed.
+async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
-    let landing = PelotonWorkoutSampleLandingStore::new(pool.clone())?;
-    let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
-
-    match command {
-        Command::Extract(access) => {
-            let SourceAccess::EmailPassword {
-                base_url,
-                auth_base_url,
-                email,
-                password,
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
-                    given: "an API key",
-                });
-            };
-
-            let auth = PelotonAuth::new(auth_base_url, PelotonCredentials::new(email, password));
-            let extraction = Extraction::new(ExtractionPorts {
-                source: PelotonWorkoutSamples::new(base_url, auth),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-
-            let summary = extraction.extract().await?;
-            Ok(Outcome::Extracted(Box::new(summary)))
-        }
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotYetDerived {
-            stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
-            derived_by: PelotonWorkoutLandingStore::STREAM,
-        }),
-        Command::Status => {
-            let reader = ExtractionStatus::new(landing, resumption, runs);
-            Ok(Outcome::Reported {
-                extraction: Box::new(reader.status().await?),
-                derivation: None,
-            })
-        }
-        Command::Reset => {
-            let previous = resumption.read(landing.stream()).await?;
-            let reader = ExtractionStatus::new(landing, resumption, runs);
-            reader.reset().await?;
-            Ok(Outcome::Reset { previous })
-        }
-    }
-}
-
-/// Peloton's workout list, landed into the table shaped for it and derived into
-/// Bike+ rides.
-///
-/// **The derivation reads two landing tables**, which is what constitution
-/// 3.1.0 allowed: a ride's start and duration come from this stream and its
-/// samples from `peloton.workout_samples`, and neither response is an entity
-/// alone. So a ride is derived under *this* stream's name — the one the source
-/// names a record by — and `normalise peloton.workout_samples` stays an error
-/// rather than becoming a second way to ask for the same thing.
-async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let pool = connect(database).await?;
-    let landing = PelotonWorkoutLandingStore::new(pool.clone())?;
+    let landing = PelotonRideLandingStore::new(pool.clone())?;
+    let samples_landing = PelotonRideSampleLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::Extract(access) => {
-            let SourceAccess::EmailPassword {
-                base_url,
-                auth_base_url,
-                email,
-                password,
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: PelotonWorkoutLandingStore::STREAM.to_owned(),
-                    given: "an API key",
-                });
-            };
-
-            let auth = PelotonAuth::new(auth_base_url, PelotonCredentials::new(email, password));
-            let extraction = Extraction::new(ExtractionPorts {
-                source: PelotonWorkouts::new(base_url, auth),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-
-            let summary = extraction.extract().await?;
-            Ok(Outcome::Extracted(Box::new(summary)))
+            collect_rides(access, landing, samples_landing, resumption, runs, database).await
         }
         Command::Normalise(zone) => {
             // No lock, as on the gym side: a derivation reads raw and writes
             // only its own tables.
             let normalisation = Normalisation::new(
                 NormalisationPorts {
-                    raw: PelotonRideAccountReader::new(pool.clone())?,
-                    translator: PelotonRideTranslator,
-                    workouts: SqliteBikePlusRideStore::new(pool.clone())?,
+                    raw: PelotonSessionAccountReader::new(pool.clone())?,
+                    translator: PelotonSessionTranslator,
+                    workouts: SqliteCyclingSessionStore::new(pool.clone())?,
                     refusals: SqliteRefusalStore::new(
                         pool.clone(),
-                        PelotonWorkoutLandingStore::STREAM,
+                        PelotonRideLandingStore::STREAM,
                     )?,
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
@@ -278,16 +189,19 @@ async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, 
         }
         Command::Refusals => {
             let reporter = Refusals::new(
-                SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+                SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             );
             Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
         }
         Command::Status => {
             let derivation = DerivationStanding::new(
-                PelotonWorkoutLandingStore::new(pool.clone())?,
-                SqliteBikePlusRideStore::new(pool.clone())?,
-                SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+                PelotonRawExtent::new(
+                    PelotonRideLandingStore::new(pool.clone())?,
+                    PelotonRideSampleLandingStore::new(pool.clone())?,
+                ),
+                SqliteCyclingSessionStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             )
             .derivation_status()
@@ -300,12 +214,82 @@ async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, 
             })
         }
         Command::Reset => {
+            // Both, because both are behind one entry: resetting one and not
+            // the other would leave the two walks at different points in
+            // history, which is the state this entry exists to prevent.
             let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(
+                samples_landing,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool),
+            )
+            .reset()
+            .await?;
             let reader = ExtractionStatus::new(landing, resumption, runs);
             reader.reset().await?;
             Ok(Outcome::Reset { previous })
         }
     }
+}
+
+/// Both Peloton walks, in the one order that matters.
+///
+/// The list is walked first: the graph walk enumerates rides itself, so running
+/// it second means the graphs it fetches are for rides this same command has
+/// just landed.
+///
+/// Two `PelotonAuth`s rather than one shared, because each caches the token it
+/// fetches to the same file — so the second login costs nothing and neither
+/// walk holds the other's state.
+async fn collect_rides(
+    access: SourceAccess,
+    landing: PelotonRideLandingStore,
+    samples_landing: PelotonRideSampleLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<Outcome, WiringError> {
+    let SourceAccess::EmailPassword {
+        base_url,
+        auth_base_url,
+        email,
+        password,
+    } = access
+    else {
+        return Err(WiringError::WrongCredential {
+            stream: PelotonRideLandingStore::STREAM.to_owned(),
+            given: "an API key",
+        });
+    };
+
+    let credentials = PelotonCredentials::new(email, password);
+    let rides = Extraction::new(ExtractionPorts {
+        source: PelotonWorkouts::new(
+            base_url.clone(),
+            PelotonAuth::new(auth_base_url.clone(), credentials.clone()),
+        ),
+        landing,
+        resumption: resumption.clone(),
+        runs: runs.clone(),
+        lock: FileRunLock::beside(database),
+        clock: SystemClock,
+    });
+    let ridden = rides.extract().await?;
+
+    let graphs = Extraction::new(ExtractionPorts {
+        source: PelotonWorkoutSamples::new(base_url, PelotonAuth::new(auth_base_url, credentials)),
+        landing: samples_landing,
+        resumption,
+        runs,
+        lock: FileRunLock::beside(database),
+        clock: SystemClock,
+    });
+    let sampled = graphs.extract().await?;
+
+    Ok(Outcome::ExtractedBoth {
+        first: Box::new(ridden),
+        second: Box::new(sampled),
+    })
 }
 
 /// Hevy's workout events feed, landed into the table shaped for it.
@@ -397,10 +381,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        HevyWorkoutLandingStore, PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore,
-    };
-    use crate::catalogue::KNOWN;
+    use super::{HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore};
+    use crate::catalogue::{KNOWN, lookup};
 
     /// Every catalogue entry must be reachable, and must name the same stream
     /// its adapters do.
@@ -416,8 +398,8 @@ mod tests {
     fn every_catalogue_entry_is_wired_to_adapters_that_name_it() {
         let wired = [
             HevyWorkoutLandingStore::STREAM,
-            PelotonWorkoutLandingStore::STREAM,
-            PelotonWorkoutSampleLandingStore::STREAM,
+            PelotonRideLandingStore::STREAM,
+            PelotonRideSampleLandingStore::STREAM,
         ];
 
         for known in &KNOWN {
@@ -427,10 +409,23 @@ mod tests {
                 known.name()
             );
         }
+
+        // **Streams that land behind another entry rather than under their own
+        // name.** Peloton's graphs are collected by the same command that
+        // collects its rides, because neither derives anything without the
+        // other — so this one is wired, lands, resumes and locks, and cannot be
+        // asked for. Anything else wired but uncollectable is a mistake.
+        let landed_behind_another = [PelotonRideSampleLandingStore::STREAM];
         assert_eq!(
             wired.len(),
-            KNOWN.len(),
+            KNOWN.len() + landed_behind_another.len(),
             "an adapter is wired but uncollectable"
         );
+        for hidden in landed_behind_another {
+            assert!(
+                lookup(hidden).is_none(),
+                "{hidden} lands behind another entry and must not be nameable"
+            );
+        }
     }
 }

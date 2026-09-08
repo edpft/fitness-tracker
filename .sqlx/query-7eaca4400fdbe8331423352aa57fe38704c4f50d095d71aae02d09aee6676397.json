@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT COALESCE(MAX(serve_ordinal), -1) AS \"highest!: i64\"\n            FROM peloton_workout_landing\n            WHERE run_id = ?\n            ",
+  "query": "\n            SELECT COALESCE(MAX(serve_ordinal), -1) AS \"highest!: i64\"\n            FROM peloton_ride_landing\n            WHERE run_id = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "ffdb603794c260b135b8016f713a01fb00d0daf53509b2a0b4d2326c3b5c9f46"
+  "hash": "7eaca4400fdbe8331423352aa57fe38704c4f50d095d71aae02d09aee6676397"
 }

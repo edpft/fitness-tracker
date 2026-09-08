@@ -6,14 +6,17 @@
 //! other's job. The reader has no `append`, so a derivation holding one could
 //! not mutate raw if it tried.
 //!
-//! **The reader reads two tables**, which is the whole of what constitution
-//! 3.1.0 allowed. A ride's start and duration are in `peloton_workout_landing`
-//! and its samples are in `peloton_workout_sample_landing`, because Peloton
-//! serves them from two endpoints; the graph names no workout, states no time,
-//! no zone and no device, and neither response is an entity alone. Composing
-//! them here rather than in the translator is deliberate: this is the only
-//! thing at this end that can reach a store, so what the translator receives is
-//! whole and cannot go back for more.
+//! **The reader reads two tables and groups what it finds into sessions.** A
+//! ride's start and duration are in one table and its samples in the other,
+//! because Peloton serves them from two endpoints; and a session is one, two or
+//! three of those rides, because Peloton files a warm-up, a ride and a
+//! cool-down separately. Constitution § 3.1 composes both.
+//!
+//! **The grouping rule is not here.** Which of Peloton's records belong to one
+//! session is Peloton knowledge — a class type, a series, a `workout_type` —
+//! and it lives in [`crate::peloton::sessions`]. This adapter reads rows and
+//! hands them over. What it keeps is the half only it can do: reaching a store,
+//! so that what the translator receives is whole and cannot go back for more.
 //!
 //! **Reading both tables is not a stream reaching into another stream.** The
 //! *extraction* adapters are kept apart on purpose — a walk of the graphs must
@@ -24,32 +27,32 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    cycling::{BikePlusRide, HeartRateSeries},
+    cycling::{BikePlusRide, HeartRateSeries, PerformedSession},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     measure::Duration,
-    normalised::{NormalisationRunId, NormalisedEntity, WorkoutCount},
+    normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::collections::BTreeMap;
 
-use crate::peloton::RideAccount;
+use crate::peloton::{LandedRide, SessionAccount, group};
 
 use super::{
-    PelotonWorkoutLandingStore, corrupt, count_from_storage, normalisation_run_for_storage,
-    store_error,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, corrupt, count_from_storage,
+    normalisation_run_for_storage, store_error,
 };
 
-/// Raw, read-only, for Peloton rides — both halves of one.
+/// Raw, read-only, for Peloton sessions.
 #[derive(Debug, Clone)]
-pub struct PelotonRideAccountReader {
+pub struct PelotonSessionAccountReader {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl PelotonRideAccountReader {
+impl PelotonSessionAccountReader {
     /// # Errors
     ///
     /// [`InvalidStream`] if the landing store's stream constant is not a stream
@@ -58,7 +61,7 @@ impl PelotonRideAccountReader {
     pub fn new(pool: SqlitePool) -> Result<Self, InvalidStream> {
         Ok(Self {
             pool,
-            stream: LandingStream::try_from(PelotonWorkoutLandingStore::STREAM)?,
+            stream: LandingStream::try_from(PelotonRideLandingStore::STREAM)?,
         })
     }
 }
@@ -105,15 +108,16 @@ impl Row {
     }
 }
 
-impl AccountReader for PelotonRideAccountReader {
-    /// A workout record and, where one has landed, its graph.
-    type Account = RideAccount;
+impl AccountReader for PelotonSessionAccountReader {
+    /// One session: its rides in order, each with the graph that carries its
+    /// samples.
+    type Account = SessionAccount;
 
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<RideAccount>, StoreError> {
+    async fn accounts(&self) -> Result<Vec<SessionAccount>, StoreError> {
         // The graphs first, keyed by the workout they belong to. **The latest
         // landed graph wins** where a workout has more than one: a graph
         // carries no identity of its own, so there is no pairing to preserve —
@@ -122,9 +126,8 @@ impl AccountReader for PelotonRideAccountReader {
         // nothing it cannot see. It cannot arise in the operator's account, and
         // the alternative is refusing a ride over a duplicate of a payload that
         // is byte-identical.
-        let samples_stream =
-            LandingStream::try_from(super::PelotonWorkoutSampleLandingStore::STREAM)
-                .map_err(|error| corrupt(&error))?;
+        let samples_stream = LandingStream::try_from(super::PelotonRideSampleLandingStore::STREAM)
+            .map_err(|error| corrupt(&error))?;
 
         let graph_rows = sqlx::query!(
             r#"
@@ -135,7 +138,7 @@ impl AccountReader for PelotonRideAccountReader {
                    event_kind AS "event_kind!: String",
                    event_time AS "event_time: String",
                    payload AS "payload!: Vec<u8>"
-            FROM peloton_workout_sample_landing
+            FROM peloton_ride_sample_landing
             ORDER BY id ASC
             "#
         )
@@ -170,7 +173,7 @@ impl AccountReader for PelotonRideAccountReader {
                    event_kind AS "event_kind!: String",
                    event_time AS "event_time: String",
                    payload AS "payload!: Vec<u8>"
-            FROM peloton_workout_landing
+            FROM peloton_ride_landing
             ORDER BY id ASC
             "#
         )
@@ -178,7 +181,7 @@ impl AccountReader for PelotonRideAccountReader {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut accounts = Vec::with_capacity(rows.len());
+        let mut rides = Vec::with_capacity(rows.len());
         for row in rows {
             let samples = graphs.get(&row.source_record_id).cloned();
             let ride = Row {
@@ -191,21 +194,21 @@ impl AccountReader for PelotonRideAccountReader {
                 payload: row.payload,
             }
             .into_record(&self.stream)?;
-            accounts.push(RideAccount { ride, samples });
+            rides.push(LandedRide { ride, samples });
         }
 
-        Ok(accounts)
+        Ok(group(rides))
     }
 }
 
-/// The normalised layer for Peloton rides.
+/// The normalised layer for Peloton sessions.
 #[derive(Debug, Clone)]
-pub struct SqliteBikePlusRideStore {
+pub struct SqliteCyclingSessionStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl SqliteBikePlusRideStore {
+impl SqliteCyclingSessionStore {
     /// # Errors
     ///
     /// [`InvalidStream`] if the landing store's stream constant is not a stream
@@ -213,13 +216,13 @@ impl SqliteBikePlusRideStore {
     pub fn new(pool: SqlitePool) -> Result<Self, InvalidStream> {
         Ok(Self {
             pool,
-            stream: LandingStream::try_from(PelotonWorkoutLandingStore::STREAM)?,
+            stream: LandingStream::try_from(PelotonRideLandingStore::STREAM)?,
         })
     }
 }
 
-impl NormalisedEntityStore for SqliteBikePlusRideStore {
-    type Entity = BikePlusRide;
+impl NormalisedEntityStore for SqliteCyclingSessionStore {
+    type Entity = PerformedSession;
 
     fn stream(&self) -> &LandingStream {
         &self.stream
@@ -228,7 +231,7 @@ impl NormalisedEntityStore for SqliteBikePlusRideStore {
     async fn replace(
         &self,
         run: NormalisationRunId,
-        rides: Vec<BikePlusRide>,
+        sessions: Vec<PerformedSession>,
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let mut tx = self
@@ -253,10 +256,14 @@ impl NormalisedEntityStore for SqliteBikePlusRideStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
+        sqlx::query!("DELETE FROM cycling_session")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
 
-        let written = rides.len();
-        for ride in rides {
-            write_ride(&mut tx, run_id, &ride).await?;
+        let written = sessions.len();
+        for session in sessions {
+            write_session(&mut tx, run_id, &session).await?;
         }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
@@ -264,7 +271,7 @@ impl NormalisedEntityStore for SqliteBikePlusRideStore {
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM bike_plus_ride"#)
+        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM cycling_session"#)
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
@@ -272,14 +279,77 @@ impl NormalisedEntityStore for SqliteBikePlusRideStore {
     }
 }
 
+/// One session and its rides, inside the caller's transaction.
+async fn write_session(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    session: &PerformedSession,
+) -> Result<(), StoreError> {
+    let rides = session.rides();
+    // The first ride's landing record. A session is ours and the source names
+    // none, so its key is the earliest record it composes.
+    let session_id = rides
+        .first()
+        .ok_or_else(|| StoreError::Corrupt {
+            detail: "a session with no rides".to_owned(),
+        })?
+        .landed_as()
+        .ride
+        .as_i64();
+    let kind = session.kind();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO cycling_session (landing_record_id, kind, run_id)
+        VALUES (?, ?, ?)
+        "#,
+        session_id,
+        kind,
+        run_id,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    for (ride, role) in rides.iter().zip(roles_of(session)) {
+        write_ride(tx, run_id, ride, session_id, role).await?;
+    }
+    Ok(())
+}
+
+/// What each of a session's rides was for, in the session's own order.
+///
+/// Read off the variant rather than stored on the ride, because the variant is
+/// what knows: a `Test`'s first ride is its warm-up by construction.
+fn roles_of(session: &PerformedSession) -> Vec<&'static str> {
+    match session {
+        PerformedSession::Ride { cool_down, .. } => {
+            let mut roles = vec!["main"];
+            if cool_down.is_some() {
+                roles.push("cool-down");
+            }
+            roles
+        }
+        PerformedSession::Test { cool_down, .. } => {
+            let mut roles = vec!["warm-up", "effort"];
+            if cool_down.is_some() {
+                roles.push("cool-down");
+            }
+            roles
+        }
+    }
+}
+
 /// One ride and its two series, inside the caller's transaction.
 ///
-/// Its own function so the replacement above reads as what it is — empty, then
+/// Its own function so the writes above read as what they are — empty, then
 /// write each — rather than as a hundred lines of column lists.
 async fn write_ride(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
     ride: &BikePlusRide,
+    session_id: i64,
+    role: &'static str,
 ) -> Result<(), StoreError> {
     let landed = ride.landed_as();
     let ride_id = landed.ride.as_i64();
@@ -310,9 +380,9 @@ async fn write_ride(
             landing_record_id, samples_record_id, source_record_id,
             started_at_utc, zone, duration_seconds, distance_millimetres,
             heart_rate_declared_missing_seconds,
-            endpoint, event_kind, event_time, run_id
+            endpoint, event_kind, event_time, run_id, session, role
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         ride_id,
         samples_id,
@@ -326,6 +396,8 @@ async fn write_ride(
         event_kind,
         event_time,
         run_id,
+        session_id,
+        role,
     )
     .execute(&mut **tx)
     .await
@@ -390,4 +462,36 @@ fn seconds_for_storage(duration: Duration) -> Result<i64, StoreError> {
     i64::try_from(duration.as_seconds()).map_err(|_| StoreError::Corrupt {
         detail: "a duration larger than the store can hold".to_owned(),
     })
+}
+
+/// Both of Peloton's landing tables, counted as one.
+///
+/// **What a Peloton derivation actually reads.** A cycling session composes
+/// rides from one table and their sample graphs from the other, so "how far
+/// behind is the normalised layer" is a question about both — and answering it
+/// from the ride table alone would report a derivation that has read 903
+/// records as having read 477, and never show it falling behind.
+#[derive(Debug, Clone)]
+pub struct PelotonRawExtent {
+    rides: PelotonRideLandingStore,
+    samples: PelotonRideSampleLandingStore,
+}
+
+impl PelotonRawExtent {
+    pub const fn new(
+        rides: PelotonRideLandingStore,
+        samples: PelotonRideSampleLandingStore,
+    ) -> Self {
+        Self { rides, samples }
+    }
+}
+
+impl application::RawExtent for PelotonRawExtent {
+    async fn records(&self) -> Result<domain::landing::RecordCount, StoreError> {
+        let rides = application::LandingStore::count(&self.rides).await?;
+        let samples = application::LandingStore::count(&self.samples).await?;
+        Ok(domain::landing::RecordCount::from(
+            rides.as_usize().saturating_add(samples.as_usize()),
+        ))
+    }
 }

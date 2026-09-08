@@ -1,5 +1,15 @@
 //! The Peloton Bike+ ride: what one ride was, and the series the bike produced.
 //!
+//! **A part of a session, not the entity.** Constitution 3.2.0 makes the
+//! session the normalised unit, and a cycling session is ridden as one, two or
+//! three of these — a warm-up, a main ride, a cool-down. Peloton files each as
+//! its own workout; nobody would plan them separately. See
+//! [`super::performed`], which is the entity these compose.
+//!
+//! What follows is about the ride, and every word of it still holds: the
+//! session is the unit, and a Bike+ ride is what a session on a Bike+ is made
+//! of.
+//!
 //! **It is a Bike+ ride, not an indoor ride recorded by a Bike+.** The
 //! operator, 2026-09-07: *"we're not building an indoor ride entity, we're
 //! building a Peloton Bike+ entity because we can't separate the recording
@@ -44,7 +54,7 @@ use std::fmt;
 
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::measure::{Duration, InvalidQuantity, Metres};
-use crate::normalised::{NormalisedEntity, StartedAt};
+use crate::normalised::StartedAt;
 use crate::sequence::NonEmpty;
 
 use super::zone::Watts;
@@ -475,10 +485,8 @@ impl BikePlusRide {
     pub const fn landed_as(&self) -> ComposedFrom {
         self.landed_as
     }
-}
 
-impl NormalisedEntity for BikePlusRide {
-    fn source_record_id(&self) -> &SourceRecordId {
+    pub const fn source_record_id(&self) -> &SourceRecordId {
         &self.source_record_id
     }
 }

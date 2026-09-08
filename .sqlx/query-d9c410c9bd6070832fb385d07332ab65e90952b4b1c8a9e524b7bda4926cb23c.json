@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM cycling_session",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d9c410c9bd6070832fb385d07332ab65e90952b4b1c8a9e524b7bda4926cb23c"
+}

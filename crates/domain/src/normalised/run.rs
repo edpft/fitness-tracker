@@ -172,6 +172,13 @@ pub enum NormalisationOutcome {
         finished_at: FetchedAt,
         records_read: RecordCount,
         workouts_written: WorkoutCount,
+        /// How many landing records those entities were composed from. Its own
+        /// number since § 3.1 made the session the unit: one session is written
+        /// from up to six records, so the entity count no longer reconciles
+        /// against the record count and this is what does.
+        records_composed: RecordCount,
+        /// How many records a later serving of the same thing replaced (§ 10).
+        records_superseded: RecordCount,
         workouts_retracted: WorkoutCount,
         retractions_read: RecordCount,
         records_refused: RecordCount,

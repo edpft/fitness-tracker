@@ -529,7 +529,6 @@ impl From<WiringError> for Failure {
             | WiringError::WrongCredential { .. } => Self::message(error.to_string(), exit::STORE),
             // A usage error, and the one of these the operator can act on: the
             // stream is real, the command is not one it answers to yet.
-            WiringError::NotYetDerived { .. } => Self::message(error.to_string(), exit::USAGE),
         }
     }
 }
@@ -1110,6 +1109,10 @@ fn source_access(
 fn report(stream: &LandingStream, outcome: Outcome) {
     match outcome {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
+        Outcome::ExtractedBoth { first, second } => {
+            output::run_succeeded(&first);
+            output::run_succeeded(&second);
+        }
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         Outcome::Refused(report) => output::refusals(stream, &report),
         Outcome::Reported {

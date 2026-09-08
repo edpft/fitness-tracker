@@ -49,6 +49,39 @@ pub struct WorkoutRecord {
     /// Unix seconds.
     #[serde(default)]
     pub end_time: Option<i64>,
+    /// `class` for a class the operator took, `freestyle` for Just Ride and
+    /// Entertainment rides.
+    ///
+    /// **Freestyle is what says a ride was not part of a programmed session**,
+    /// and the source says it rather than us inferring it: a freestyle workout
+    /// carries no class at all, so there is nothing to say what it was for.
+    #[serde(default)]
+    pub workout_type: Option<String>,
+    /// The class it was ridden to, where it was a class.
+    ///
+    /// Landed inline because the walk asks for it (`joins=ride`), so a
+    /// derivation needs no second request to know what a ride was.
+    #[serde(default)]
+    pub ride: Option<ClassRecord>,
+}
+
+/// The class a ride was ridden to, as far as a session needs it.
+///
+/// **What a class *is* travels in `series_id` and `class_type_ids`**, not in
+/// the title. Peloton publishes many different FTP warm-up and FTP test
+/// classes — the operator's six tests used five distinct test classes over 31
+/// months — so no list of class ids could recognise them, and matching on the
+/// words in a title would make our model depend on Peloton's copywriting. The
+/// series is Peloton's own statement that two classes are the same kind of
+/// thing, and it is stable across all of it.
+#[derive(Debug, Deserialize)]
+pub struct ClassRecord {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub series_id: Option<String>,
+    #[serde(default)]
+    pub class_type_ids: Vec<String>,
 }
 
 impl WorkoutRecord {
