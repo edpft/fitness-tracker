@@ -363,6 +363,7 @@ async fn write_ride(
         i64::try_from(ride.distance().as_millimetres()).map_err(|_| StoreError::Corrupt {
             detail: "a distance larger than the store can hold".to_owned(),
         })?;
+    let average_power = i64::from(ride.average_power().as_u32());
     let declared_missing = ride
         .heart_rate()
         .and_then(HeartRateSeries::declared_missing)
@@ -379,10 +380,10 @@ async fn write_ride(
         INSERT INTO bike_plus_ride (
             landing_record_id, samples_record_id, source_record_id,
             started_at_utc, zone, duration_seconds, distance_millimetres,
-            heart_rate_declared_missing_seconds,
+            average_power_watts, heart_rate_declared_missing_seconds,
             endpoint, event_kind, event_time, run_id, session, role
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         ride_id,
         samples_id,
@@ -391,6 +392,7 @@ async fn write_ride(
         zone,
         duration,
         distance,
+        average_power,
         declared_missing,
         endpoint,
         event_kind,

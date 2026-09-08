@@ -96,6 +96,15 @@ fn class_of(series: &str, class_types: &[&str]) -> String {
     format!(r#"{{"title":"a class","series_id":"{series}","class_type_ids":[{types}]}}"#)
 }
 
+/// The average power every fixture graph states.
+///
+/// **Deliberately not the mean of any fixture's samples.** Peloton states its
+/// own average and it is not the mean of the series beside it — on the
+/// operator's record the two disagree on 33 of 231 rides, once by 10 watts — so
+/// a fixture whose stated average happened to equal its sample mean would pass
+/// whether the translator read the source's figure or computed one.
+const STATED_AVERAGE_POWER: u32 = 199;
+
 /// One performance graph, with four bike series and optionally a heart rate.
 ///
 /// `offsets` is given explicitly because the source's index is sparse and that
@@ -129,6 +138,9 @@ fn graph(
     format!(
         r#"{{"seconds_since_pedaling_start":[{}],
              "summaries":[{{"slug":"distance","display_unit":"{unit}","value":{distance}}}],
+             "average_summaries":[
+               {{"slug":"avg_output","display_unit":"watts","value":{STATED_AVERAGE_POWER}}}
+             ],
              "metrics":[
                {{"slug":"output","display_unit":"watts","values":[{}]}},
                {{"slug":"cadence","display_unit":"rpm","values":[{cadence}]}},
@@ -501,6 +513,85 @@ fn an_unknown_distance_unit_refuses_the_ride() {
             matches!(
                 refusals.first().map(|refusal| &refusal.reason),
                 Some(RefusalReason::UnreadableValue { .. })
+            ),
+            "{refusals:?}"
+        );
+    });
+}
+
+/// The average power is the source's, not one computed from the samples.
+///
+/// **The distinction decides FTP figures.** Every FTP value in the operator's
+/// record is a twenty-minute test's average output times 0.95, and only
+/// Peloton's stated average reproduces all six of them: a mean of the samples
+/// gets two of the six wrong. Peloton computes over what it measured, and its
+/// series is sparse — one ride states 134 watts where its 1,076 samples across
+/// an index running to 1,800 average 124.
+#[test]
+fn the_average_power_is_the_one_the_source_stated() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        // A mean of 100, against a graph that states 199.
+        let (pool, _directory) = landed(
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
+            vec![("ride-1", graph(&[1, 2], &[50, 150], None, "2.0", "km"))],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1);
+
+        let row =
+            sqlx::query!(r#"SELECT average_power_watts AS "watts!: i64" FROM bike_plus_ride"#)
+                .fetch_one(&pool)
+                .await
+                .expect("the ride");
+        assert_eq!(
+            row.watts,
+            i64::from(STATED_AVERAGE_POWER),
+            "the source's average, not the samples' mean of 100"
+        );
+    });
+}
+
+/// A graph that states no average refuses the ride rather than being given one.
+///
+/// Inventing the number is the error the stated figure exists to avoid, so
+/// there is nothing to fall back to (§ 37).
+#[test]
+fn a_graph_stating_no_average_power_refuses_the_ride() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        // Written out rather than taken from `graph`, which always states one.
+        let without = r#"{"seconds_since_pedaling_start":[1,2],
+             "summaries":[{"slug":"distance","display_unit":"km","value":2.0}],
+             "metrics":[
+               {"slug":"output","display_unit":"watts","values":[93,132]},
+               {"slug":"cadence","display_unit":"rpm","values":[80,80]},
+               {"slug":"resistance","display_unit":"%","values":[35,35]},
+               {"slug":"speed","display_unit":"kph","values":[25.4,25.4]}
+             ]}"#
+        .to_owned();
+
+        let (pool, _directory) = landed(
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
+            vec![("ride-1", without)],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 0);
+
+        // The store folds the field name into the detail on the way back, so
+        // the name is read there rather than off `field`.
+        let refusals = refusals(&pool).await.expect("refusals");
+        assert!(
+            matches!(
+                refusals.first().map(|refusal| &refusal.reason),
+                Some(RefusalReason::UnreadableValue { detail, .. })
+                    if detail.starts_with("avg_output")
             ),
             "{refusals:?}"
         );

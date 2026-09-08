@@ -405,16 +405,33 @@ pub struct ComposedFrom {
 /// canonical layer, and keying on the source id here would collapse the pair
 /// silently.
 ///
-/// **The summary is distance and nothing else.** The operator, 2026-09-07:
-/// *"just keep distance in our normalised entity, if we find we want total
-/// output or AVG output at some later date, we have the raw data but, for now,
-/// I don't see why we'd need them and we could derive them"*. § 5 puts derived
-/// metrics in the analytical layer and raw keeps everything.
+/// **The summary is distance and the average power.** It was distance alone
+/// until 2026-09-08. The operator, 2026-09-07: *"just keep distance in our
+/// normalised entity, if we find we want total output or AVG output at some
+/// later date, we have the raw data but, for now, I don't see why we'd need
+/// them and we could derive them"*. FTP is that later date, and the second half
+/// of the sentence turned out not to hold: the average is not ours to derive.
+///
+/// **Peloton states it, and a figure we compute is a different figure.** The
+/// graph carries `avg_output` beside the per-second series, and across the
+/// operator's 231 rides that state one, the mean of those samples disagrees
+/// with it on 33 and `total_work / duration` on 59 — one ride by 10 watts,
+/// because its series holds 1,076 values across an index running to 1,800 and
+/// an unweighted mean reads the 724 absent seconds as though they had not
+/// happened. § 6 makes FTP method-dependent, and Peloton's average *is* the
+/// method: taking a mean of their samples substitutes our arithmetic for the
+/// algorithm that produced the number the source reports, which is a different
+/// series that happens to sit close to it.
+///
+/// So this is not a derived metric stored beside its inputs, which § 5 would
+/// forbid. It is one more thing the source said about the ride, carried in the
+/// layer that exists to say what each source said.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BikePlusRide {
     started_at: StartedAt,
     duration: Duration,
     distance: Metres,
+    average_power: Watts,
     samples: NonEmpty<RideSample>,
     heart_rate: Option<HeartRateSeries>,
     provenance: Provenance,
@@ -435,6 +452,13 @@ pub struct RideRecord {
     /// (§ 5) and shorter again.
     pub duration: Duration,
     pub distance: Metres,
+    /// The average power the source stated for the ride.
+    ///
+    /// **Stated, never averaged here**, and it is not the mean of
+    /// [`Self::samples`] — see [`BikePlusRide`] for the record that settled it.
+    /// A ride whose graph states none is refused rather than given one we
+    /// worked out.
+    pub average_power: Watts,
     pub samples: NonEmpty<RideSample>,
     pub heart_rate: Option<HeartRateSeries>,
     pub provenance: Provenance,
@@ -450,6 +474,7 @@ impl BikePlusRide {
             started_at: record.started_at,
             duration: record.duration,
             distance: record.distance,
+            average_power: record.average_power,
             samples: record.samples,
             heart_rate: record.heart_rate,
             provenance: record.provenance,
@@ -468,6 +493,11 @@ impl BikePlusRide {
 
     pub const fn distance(&self) -> Metres {
         self.distance
+    }
+
+    /// What the source said this ride averaged, in watts.
+    pub const fn average_power(&self) -> Watts {
+        self.average_power
     }
 
     pub const fn samples(&self) -> &NonEmpty<RideSample> {
@@ -495,10 +525,11 @@ impl fmt::Display for BikePlusRide {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} — {}, {}, {} samples",
+            "{} — {}, {}, {} average, {} samples",
             self.started_at,
             self.duration,
             self.distance,
+            self.average_power,
             self.samples.count()
         )
     }
