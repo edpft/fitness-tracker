@@ -17,9 +17,9 @@ use jiff::{Timestamp, civil::Date};
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
 use domain::gym::{GymWorkout, Load, Performed, exercise::RepsExercise};
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
-    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
-    SourceRecordId, Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream,
+    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
+    Watermark,
 };
 use domain::measure::RepCount;
 use domain::normalised::{
@@ -337,25 +337,30 @@ pub trait ResumptionPointResetter {
 // a signature, and nothing takes an overlay — § 9 forbids consulting one, and
 // the strongest form of that is a port that could not be handed one.
 
-/// What one landing record became.
+/// What one source's account of one thing became.
 ///
-/// The three outcomes a record can have, as a sum. A record that produced no
-/// workout and no reason does not compile, and a retraction cannot carry
+/// The three outcomes an account can have, as a sum. One that produced no
+/// entity and no reason does not compile, and a retraction cannot carry
 /// refusals — the two mistakes most worth making impossible, since either would
-/// let a record go silently missing.
+/// let an account go silently missing.
+///
+/// Generic over the entity because the normalised layer holds more than one and
+/// the derivation is indifferent to which: it counts, retracts and writes
+/// without ever looking inside. A concrete `Box<GymWorkout>` here was the one
+/// place the whole pipeline knew what a normalised entity was.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Translation {
-    /// A workout, with whatever it would not accept listed beside it. A
-    /// refusal inside a record does not stop the rest of it translating, so
+pub enum Translation<E> {
+    /// An entity, with whatever the domain would not accept listed beside it. A
+    /// refusal inside an account does not stop the rest of it translating, so
     /// both travel together.
-    Workout {
-        workout: Box<GymWorkout>,
+    Entity {
+        entity: Box<E>,
         refusals: Vec<Refusal>,
     },
     /// The source withdrew a record it previously served. Carries no refusals,
     /// because nothing was rejected.
     Retraction { of: SourceRecordId },
-    /// Nothing translated, and here is why. Non-empty, so "no workout and no
+    /// Nothing translated, and here is why. Non-empty, so "no entity and no
     /// reason" is not a state that exists.
     Refused(NonEmpty<Refusal>),
 }
@@ -366,10 +371,30 @@ pub enum Translation {
 /// what makes "a derivation never writes to raw" a fact about the type rather
 /// than a promise about the code: this reader has no `append`, so a derivation
 /// holding one could not mutate an input if it tried.
-pub trait LandingRecordReader {
+///
+/// **An account, not a record**, and the constitution's word for the same
+/// reason it needed one. § 3.1: *"a source that serves one thing at more than
+/// one endpoint is still one account"* — Peloton states a ride's start and
+/// duration in its workout list and that ride's samples in a performance graph,
+/// and neither response is an entity alone. So what a derivation reads is
+/// whatever one source says about one thing, which for most streams is a single
+/// landing record and is not required to be.
+///
+/// Assembling an account is this adapter's work rather than the translator's,
+/// because it is the only thing here that can reach a store. What the
+/// translator gets is already whole, and cannot go back for more.
+pub trait AccountReader {
+    /// Everything one source says about one thing. `LandedRecord` where a
+    /// source says it all at once.
+    ///
+    /// `Send + Sync` because a derivation holds the whole corpus while it
+    /// awaits the write: these are read-only values, so the bound costs an
+    /// adapter nothing.
+    type Account: Send + Sync;
+
     fn stream(&self) -> &LandingStream;
 
-    /// Every record for this stream, oldest first, in the order the source
+    /// Every account for this stream, oldest first, in the order the source
     /// served them.
     ///
     /// The order is defined so that a derivation is reproducible, not because
@@ -381,7 +406,7 @@ pub trait LandingRecordReader {
     ///
     /// [`StoreError`] if the store is unavailable or holds something
     /// unreadable.
-    fn records(&self) -> impl Future<Output = Result<Vec<LandedRecord>, StoreError>> + Send;
+    fn accounts(&self) -> impl Future<Output = Result<Vec<Self::Account>, StoreError>> + Send;
 }
 
 /// Turns one source's payload into our entity.
@@ -391,7 +416,12 @@ pub trait LandingRecordReader {
 /// request, reads no clock and consults no overlay, which is what
 /// "deterministic translation" means and is visible here as a signature with
 /// nothing to be non-deterministic with.
-pub trait WorkoutTranslator {
+pub trait Translator {
+    /// What this source says about one thing. Matches the reader that feeds it.
+    type Account;
+    /// The normalised entity it produces.
+    type Entity;
+
     /// # Errors
     ///
     /// [`NormalisationError::UnmappedExercise`] and nothing else. A gap in our
@@ -400,13 +430,17 @@ pub trait WorkoutTranslator {
     /// translation.
     fn translate(
         &self,
-        record: &LandedRecord,
+        account: &Self::Account,
         zone: &OperatorZone,
-    ) -> Result<Translation, NormalisationError>;
+    ) -> Result<Translation<Self::Entity>, NormalisationError>;
 }
 
 /// The normalised layer for one stream.
-pub trait NormalisedWorkoutStore {
+pub trait NormalisedEntityStore {
+    /// What this stream derives. One store holds one entity, because a table
+    /// holds one shape.
+    type Entity;
+
     fn stream(&self) -> &LandingStream;
 
     /// Replace this stream's normalised layer entirely.
@@ -424,7 +458,7 @@ pub trait NormalisedWorkoutStore {
     fn replace(
         &self,
         run: NormalisationRunId,
-        workouts: Vec<GymWorkout>,
+        entities: Vec<Self::Entity>,
     ) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
 
     /// # Errors

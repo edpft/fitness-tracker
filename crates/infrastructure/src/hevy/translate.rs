@@ -14,19 +14,21 @@
 //! the run is a template the mapping does not cover — a defect in our own
 //! vocabulary rather than in the data.
 
-use application::{NormalisationError, Translation, ports::WorkoutTranslator};
+use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
         GymWorkout, Kg, Load, Performed, PerformedExercise, Rir, Set, SetKind, SignedKg, Superset,
         WorkoutItem, exercise::Exercise,
     },
-    landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
+    landing::{EventKind, LandedRecord, Provenance},
     measure::{Distance, Duration, Metres, RepCount},
-    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
 };
 use std::fmt;
+
+use crate::scribe::Scribe;
 
 use jiff::Timestamp;
 
@@ -44,12 +46,15 @@ use super::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HevyWorkoutTranslator;
 
-impl WorkoutTranslator for HevyWorkoutTranslator {
+impl Translator for HevyWorkoutTranslator {
+    type Account = LandedRecord;
+    type Entity = GymWorkout;
+
     fn translate(
         &self,
         record: &LandedRecord,
         zone: &OperatorZone,
-    ) -> Result<Translation, NormalisationError> {
+    ) -> Result<Translation<GymWorkout>, NormalisationError> {
         let mut scribe = Scribe::new(record);
 
         // The event kind comes from provenance, which the adapter recorded when
@@ -118,8 +123,8 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
             .as_ref()
             .and_then(|id| DeliveryReference::try_from(id.clone()).ok());
 
-        Ok(Translation::Workout {
-            workout: Box::new(GymWorkout::new(
+        Ok(Translation::Entity {
+            entity: Box::new(GymWorkout::new(
                 items,
                 StartedAt::new(instant, zone.clone()),
                 record.provenance().clone(),
@@ -482,75 +487,5 @@ fn flush(
         })),
         (Some(only), None) => items.push(WorkoutItem::Exercise(only)),
         _ => {}
-    }
-}
-
-/// Collects refusals as translation walks a record.
-///
-/// A small mutable thing rather than a returned list at every level: a refusal
-/// can be raised four layers down, and threading `Vec<Refusal>` through each of
-/// them would put the plumbing in front of the reading.
-struct Scribe {
-    landed_as: LandingRecordId,
-    source_record_id: SourceRecordId,
-    refusals: Vec<Refusal>,
-}
-
-impl Scribe {
-    fn new(record: &LandedRecord) -> Self {
-        Self {
-            landed_as: record.id(),
-            source_record_id: record.source_record_id().clone(),
-            refusals: Vec::new(),
-        }
-    }
-
-    fn note(&mut self, locus: RefusalLocus, reason: RefusalReason) {
-        self.note_for(locus, None, reason);
-    }
-
-    /// A refusal that knows which exercise it belonged to.
-    fn note_for(&mut self, locus: RefusalLocus, exercise: Option<Exercise>, reason: RefusalReason) {
-        self.refusals.push(Refusal {
-            landed_as: self.landed_as,
-            source_record_id: self.source_record_id.clone(),
-            locus,
-            exercise,
-            reason,
-        });
-    }
-
-    /// A record that produced nothing but this one reason.
-    fn only(&mut self, locus: RefusalLocus, reason: RefusalReason) -> Translation {
-        self.note(locus, reason);
-        self.nothing_translatable()
-    }
-
-    /// Every item refused, so the record yields no workout — a workout holds a
-    /// non-empty sequence of items by construction. Not a run failure.
-    fn nothing_translatable(&mut self) -> Translation {
-        if self.refusals.is_empty() {
-            self.note(RefusalLocus::Record, RefusalReason::NothingTranslatable);
-        }
-        let refusals = std::mem::take(&mut self.refusals);
-        NonEmpty::new(refusals).map_or_else(
-            |_| {
-                Translation::Refused(NonEmpty::of(
-                    Refusal {
-                        landed_as: self.landed_as,
-                        source_record_id: self.source_record_id.clone(),
-                        locus: RefusalLocus::Record,
-                        exercise: None,
-                        reason: RefusalReason::NothingTranslatable,
-                    },
-                    Vec::new(),
-                ))
-            },
-            Translation::Refused,
-        )
-    }
-
-    fn into_refusals(self) -> Vec<Refusal> {
-        self.refusals
     }
 }

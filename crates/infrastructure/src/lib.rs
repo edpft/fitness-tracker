@@ -10,6 +10,7 @@ pub mod credentials;
 pub mod hevy;
 pub mod lock;
 pub mod peloton;
+pub mod scribe;
 pub mod settings;
 pub mod store;
 

@@ -96,11 +96,42 @@ pub enum RefusalReason {
     UnrecognisedIntensity { value: String },
     /// A quantity that would not parse, or that the type rejects.
     UnreadableValue { field: &'static str, detail: String },
-    /// Every item refused, so the record yields no workout. A workout holds a
-    /// non-empty sequence of items by construction.
+    /// Every item refused, so the record yields no entity. An entity holds a
+    /// non-empty sequence by construction.
     NothingTranslatable,
-    /// The payload itself could not be read as a workout.
+    /// The payload itself could not be read.
     UnreadablePayload { detail: String },
+    /// A real case, correctly recorded, that this model has no entity for.
+    ///
+    /// The operator's Peloton account holds 141 workouts that are not Bike+
+    /// rides — stretching, yoga, strength, cardio — and *"they are separate
+    /// entities, we're not modelling them right now"*. Forcing them into an
+    /// existing type would be worse than refusing them and dropping them would
+    /// be worse still (§ 37), so they are refused, counted, and listed as
+    /// evidence for a later feature.
+    ///
+    /// The detail is the source's own words for what it was, kept verbatim:
+    /// comparing it against a list we control would make the source's
+    /// vocabulary ours.
+    Unmodelled { detail: String },
+    /// The entity composes more than one of the source's responses (§ 3.1) and
+    /// one of them has not been collected.
+    ///
+    /// Not a defect in the data and not a limitation of the model: the two
+    /// streams resume, run and lock independently, so a ride collected since
+    /// the last walk of the graphs genuinely has no samples here yet. What
+    /// fixes it is collecting the other stream, which is why it reads as
+    /// something to put right at the source.
+    CompanionNotLanded { stream: String },
+    /// The source served a series and every reading in it was a sensor saying
+    /// nothing.
+    ///
+    /// Distinct from the series being absent, which is not a refusal at all —
+    /// nothing was worn, and § 37 wants that visible as an absence rather than
+    /// as an empty series.
+    NoReadingsInSeries { series: &'static str },
+    /// The source served an entity missing a series it cannot be built without.
+    MissingSeries { series: &'static str },
 }
 
 impl RefusalReason {
@@ -114,10 +145,16 @@ impl RefusalReason {
             | Self::UnrecognisedIntensity { .. }
             | Self::UnreadableValue { .. }
             | Self::UnreadablePayload { .. }
+            | Self::NoReadingsInSeries { .. }
+            | Self::MissingSeries { .. }
+            // Fixed by collecting the other stream, which is a thing to do at
+            // the source rather than a gap in the model.
+            | Self::CompanionNotLanded { .. }
             // Not a problem in itself — it is the consequence of the others,
             // recorded so the record is still accounted for. It sits with wrong
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
+            Self::Unmodelled { .. } => RefusalKind::Unmodelled,
         }
     }
 
@@ -133,6 +170,10 @@ impl RefusalReason {
             Self::UnreadableValue { .. } => "unreadable-value",
             Self::NothingTranslatable => "nothing-translatable",
             Self::UnreadablePayload { .. } => "unreadable-payload",
+            Self::Unmodelled { .. } => "unmodelled",
+            Self::CompanionNotLanded { .. } => "companion-not-landed",
+            Self::NoReadingsInSeries { .. } => "no-readings-in-series",
+            Self::MissingSeries { .. } => "missing-series",
         }
     }
 
@@ -142,8 +183,14 @@ impl RefusalReason {
         match self {
             Self::UnknownSetKind { kind } => Some(kind.clone()),
             Self::UnrecognisedIntensity { value } => Some(value.clone()),
-            Self::UnreadablePayload { detail } => Some(detail.clone()),
+            Self::UnreadablePayload { detail } | Self::Unmodelled { detail } => {
+                Some(detail.clone())
+            }
             Self::UnreadableValue { field, detail } => Some(format!("{field}: {detail}")),
+            Self::CompanionNotLanded { stream } => Some(stream.clone()),
+            Self::NoReadingsInSeries { series } | Self::MissingSeries { series } => {
+                Some((*series).to_owned())
+            }
             _ => None,
         }
     }
@@ -162,6 +209,14 @@ impl fmt::Display for RefusalReason {
             Self::UnreadableValue { field, detail } => write!(f, "unreadable {field}: {detail}"),
             Self::NothingTranslatable => f.write_str("nothing in the record translated"),
             Self::UnreadablePayload { detail } => write!(f, "unreadable payload: {detail}"),
+            Self::Unmodelled { detail } => write!(f, "{detail} is not something we model yet"),
+            Self::CompanionNotLanded { stream } => {
+                write!(f, "nothing landed for it in {stream}")
+            }
+            Self::NoReadingsInSeries { series } => {
+                write!(f, "every {series} reading was a sensor saying nothing")
+            }
+            Self::MissingSeries { series } => write!(f, "no {series} series was served"),
         }
     }
 }
@@ -178,8 +233,12 @@ pub struct Refusal {
     ///
     /// A position alone is not enough to act on: "exercise 4, set 2" sends the
     /// operator back to the payload to find out what exercise 4 was, which is
-    /// the trip a refusal exists to save them. `None` only where the record
-    /// failed before any exercise was resolved.
+    /// the trip a refusal exists to save them.
+    ///
+    /// `None` where the record failed before any exercise was resolved, and
+    /// `None` throughout for an entity that has no vocabulary below itself: a
+    /// Bike+ ride is refused whole or not at all, because a series with a hole
+    /// we invented would be worse than no ride.
     pub exercise: Option<Exercise>,
     pub reason: RefusalReason,
 }

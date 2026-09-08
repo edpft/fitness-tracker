@@ -19,7 +19,7 @@ use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use application::{
     NormalisationError, StoreError,
     ports::{
-        Clock, LandingRecordReader, NormalisationRunLog, NormalisedWorkoutStore, RefusalStore,
+        AccountReader, Clock, NormalisationRunLog, NormalisedEntityStore, RefusalStore,
         WorkoutNormaliser as _,
     },
 };
@@ -30,8 +30,8 @@ use domain::{
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     normalised::{
-        NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
-        RefusalCount, WorkoutCount,
+        NormalisationOutcome, NormalisationRun, NormalisationRunId, NormalisedEntity, OperatorZone,
+        Refusal, RefusalCount, WorkoutCount,
     },
 };
 
@@ -202,12 +202,14 @@ impl InMemoryRaw {
     }
 }
 
-impl LandingRecordReader for InMemoryRaw {
+impl AccountReader for InMemoryRaw {
+    type Account = LandedRecord;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn records(&self) -> Result<Vec<LandedRecord>, StoreError> {
+    async fn accounts(&self) -> Result<Vec<LandedRecord>, StoreError> {
         Ok(self.records.clone())
     }
 }
@@ -239,7 +241,9 @@ impl InMemoryWorkouts {
     }
 }
 
-impl NormalisedWorkoutStore for InMemoryWorkouts {
+impl NormalisedEntityStore for InMemoryWorkouts {
+    type Entity = GymWorkout;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }

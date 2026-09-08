@@ -1,6 +1,6 @@
 //! Deriving the normalised layer from raw.
 //!
-//! Reads every landing record for one stream, translates each, and replaces the
+//! Reads every account for one stream, translates each, and replaces the
 //! stream's normalised layer with the result. It contacts nothing: a derivation
 //! works with every source down, which is § 36 satisfied by construction rather
 //! than by degrading gracefully.
@@ -14,20 +14,19 @@
 //! has re-created it — which § 10 reserves for the canonical layer.
 
 use domain::{
-    gym::GymWorkout,
-    landing::{LandingRecordId, LandingStream, RecordCount, SourceRecordId},
+    landing::{LandingStream, RecordCount, SourceRecordId},
     normalised::{
-        NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone, Refusal,
-        RefusalCount, WorkoutCount,
+        NormalisationFailure, NormalisationOutcome, NormalisationRunId, NormalisedEntity,
+        OperatorZone, Refusal, RefusalCount, WorkoutCount,
     },
 };
 
 use crate::{
     error::NormalisationError,
     ports::{
-        Clock, DerivationStatus, DerivationStatusReporter, LandingRecordReader, LandingStore,
-        NormalisationRunLog, NormalisationSummary, NormalisedWorkoutStore, RefusalReport,
-        RefusalReporter, RefusalStore, Translation, WorkoutNormaliser, WorkoutTranslator,
+        AccountReader, Clock, DerivationStatus, DerivationStatusReporter, LandingStore,
+        NormalisationRunLog, NormalisationSummary, NormalisedEntityStore, RefusalReport,
+        RefusalReporter, RefusalStore, Translation, Translator, WorkoutNormaliser,
     },
 };
 
@@ -62,7 +61,7 @@ pub struct NormalisationPorts<R, T, W, F, G, C> {
 
 impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader,
+    R: AccountReader,
 {
     /// No stream argument: the reader is bound to one table and is asked which,
     /// so a derivation cannot be built holding a stream its ports disagree
@@ -87,27 +86,35 @@ where
 
 /// What translating the whole corpus produced, before it is written.
 ///
-/// Collections only. A count carried alongside the thing it counts is a second
-/// answer that can disagree with the first, so every number the summary reports
-/// is read back off these.
-///
-/// `refused` is a list of records rather than a length, and it is *not*
-/// `refusals.len()`: a refusal is one omission, and a record that translated
-/// perfectly well can carry several of them. What it holds is the records that
-/// yielded no workout at all.
-#[derive(Debug, Default)]
-struct Derived {
-    workouts: Vec<GymWorkout>,
+/// `refused` counts accounts, and is *not* `refusals.len()`: a refusal is one
+/// omission, and an account that translated perfectly well can carry several of
+/// them. What it counts is the accounts that yielded no entity at all.
+#[derive(Debug)]
+struct Derived<E> {
+    entities: Vec<E>,
     refusals: Vec<Refusal>,
     retracted: Vec<SourceRecordId>,
-    refused: Vec<LandingRecordId>,
+    refused: usize,
+}
+
+impl<E> Default for Derived<E> {
+    /// By hand, because deriving it would demand `E: Default` — and there is
+    /// no such thing as a default gym workout.
+    fn default() -> Self {
+        Self {
+            entities: Vec::new(),
+            refusals: Vec::new(),
+            retracted: Vec::new(),
+            refused: 0,
+        }
+    }
 }
 
 impl<R, T, W, F, G, C> Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader + Sync,
-    T: WorkoutTranslator + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    R: AccountReader + Sync,
+    T: Translator<Account = R::Account> + Sync,
+    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
     C: Clock + Sync,
@@ -140,9 +147,10 @@ where
 
 impl<R, T, W, F, G, C> WorkoutNormaliser for Normalisation<R, T, W, F, G, C>
 where
-    R: LandingRecordReader + Sync,
-    T: WorkoutTranslator + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    R: AccountReader + Sync,
+    T: Translator<Account = R::Account> + Sync,
+    T::Entity: NormalisedEntity + Send,
+    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
     C: Clock + Sync,
@@ -155,23 +163,23 @@ where
         // No lock. A derivation reads raw and writes only its own tables, so it
         // neither takes the extraction lock nor advances the resumption point —
         // a record landed after this began is simply picked up by the next one.
-        let records = match self.raw.records().await {
-            Ok(records) => records,
+        let accounts = match self.raw.accounts().await {
+            Ok(accounts) => accounts,
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
 
-        let records_read = RecordCount::from(records.len());
+        let records_read = RecordCount::from(accounts.len());
         let mut derived = Derived::default();
 
-        for record in &records {
-            match self.translator.translate(record, &self.zone) {
-                Ok(Translation::Workout { workout, refusals }) => {
-                    derived.workouts.push(*workout);
+        for account in &accounts {
+            match self.translator.translate(account, &self.zone) {
+                Ok(Translation::Entity { entity, refusals }) => {
+                    derived.entities.push(*entity);
                     derived.refusals.extend(refusals);
                 }
                 Ok(Translation::Retraction { of }) => derived.retracted.push(of),
                 Ok(Translation::Refused(refusals)) => {
-                    derived.refused.push(record.id());
+                    derived.refused = derived.refused.saturating_add(1);
                     derived.refusals.extend(refusals.iter().cloned());
                 }
                 // The only thing that stops a derivation is a gap in our own
@@ -184,15 +192,15 @@ where
         // The second pass. A retraction removes the workout it names wherever
         // that workout sat in the sequence, and one naming a record that was
         // never landed removes nothing and is not an error.
-        let before = derived.workouts.len();
+        let before = derived.entities.len();
         derived
-            .workouts
-            .retain(|workout| !derived.retracted.contains(workout.source_record_id()));
-        let workouts_retracted = WorkoutCount::from(before.saturating_sub(derived.workouts.len()));
+            .entities
+            .retain(|entity| !derived.retracted.contains(entity.source_record_id()));
+        let workouts_retracted = WorkoutCount::from(before.saturating_sub(derived.entities.len()));
         let retractions_read = RecordCount::from(derived.retracted.len());
-        let records_refused = RecordCount::from(derived.refused.len());
+        let records_refused = RecordCount::from(derived.refused);
 
-        let written = match self.workouts.replace(run, derived.workouts).await {
+        let written = match self.workouts.replace(run, derived.entities).await {
             Ok(written) => written,
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
@@ -300,7 +308,7 @@ pub struct DerivationStanding<L, W, F, G> {
 
 impl<L, W, F, G> DerivationStanding<L, W, F, G>
 where
-    W: NormalisedWorkoutStore,
+    W: NormalisedEntityStore,
 {
     pub fn new(raw: L, workouts: W, refusals: F, runs: G) -> Self {
         Self {
@@ -316,7 +324,7 @@ where
 impl<L, W, F, G> DerivationStatusReporter for DerivationStanding<L, W, F, G>
 where
     L: LandingStore + Sync,
-    W: NormalisedWorkoutStore + Sync,
+    W: NormalisedEntityStore + Sync,
     F: RefusalStore + Sync,
     G: NormalisationRunLog + Sync,
 {

@@ -12,10 +12,12 @@
 //! and a [`crate::cycling::BikePlusRide`] are declared by the discipline they
 //! belong to; this is the vocabulary they are derived with.
 
+pub mod entity;
 pub mod refusal;
 pub mod run;
 pub mod time;
 
+pub use entity::NormalisedEntity;
 pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
 pub use run::{
     NormalisationFailure, NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount,

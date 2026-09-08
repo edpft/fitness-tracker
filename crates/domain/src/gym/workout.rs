@@ -19,7 +19,7 @@ use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::prescription::DeliveryReference;
 
 use crate::measure::{Distance, Duration, RepCount};
-use crate::normalised::StartedAt;
+use crate::normalised::{NormalisedEntity, StartedAt};
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::{
@@ -194,10 +194,6 @@ impl GymWorkout {
         &self.provenance
     }
 
-    pub const fn source_record_id(&self) -> &SourceRecordId {
-        &self.source_record_id
-    }
-
     pub const fn landed_as(&self) -> LandingRecordId {
         self.landed_as
     }
@@ -219,6 +215,12 @@ impl GymWorkout {
             .iter()
             .filter(|item| matches!(item, WorkoutItem::Superset(_)))
             .count()
+    }
+}
+
+impl NormalisedEntity for GymWorkout {
+    fn source_record_id(&self) -> &SourceRecordId {
+        &self.source_record_id
     }
 }
 
