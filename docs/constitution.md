@@ -1,7 +1,21 @@
 <!--
 Sync Impact Report
-- Version: 3.1.0, amended 2026-09-07. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 3.2.0, amended 2026-09-08. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 3.2.0 — § 3.1 redefined and § II.3's example list corrected. A normalised entity is a
+  *session*, composing what one source says about it: several records from one endpoint,
+  complementary responses across endpoints, or both. MINOR: it widens what may compose, so
+  everything that conformed still conforms. 3.1.0, eight days earlier, allowed only the second
+  of those, and the operator settled the wider rule on 2026-09-08 — "the domain model is the
+  session, which could contain more than one record from a provider or contain data from more
+  than one provider endpoint". Peloton forced it: a cycling session is two or three of its
+  workouts, and *"we would never consider [an FTP warm up and test] to be two separate things
+  that could be planned separately but Peloton does split them"*. **It also reverses a call
+  made in code rather than here**: `GymWorkout`'s own doc said the source's workout boundary
+  is not the session boundary and put composing them at the canonical layer. The operator, on
+  being shown it: "that Hevy call was wrong and I hadn't noticed it until now" — he had split
+  one gym session across several Hevy routines in order to compose it. No decision record: he
+  stated the rule and there was no second position.
 - 3.1.0 — § II.3's per-record rule became a per-source rule, and § 3.1 was added. A normalised
   entity may compose the complementary responses one source serves about one thing; what stays
   forbidden is reconciling records that could disagree, and composing across sources. MINOR: the
@@ -106,13 +120,15 @@ Obligations, common to both:
 
 The per-source rule above is not in tension with that, because it is about composition. What it forbids is reconciling accounts — preferring one record's claim over another's — which belongs to the layer that can see every source. A retraction composes nothing: it carries no content, contributes no value, and can only remove. A source's successive records about one thing are versions of one entity rather than entities in their own right, and this layer may act on that where doing so needs nothing it cannot see.
 
-**3.1. A source that serves one thing at more than one endpoint is still one account.** Where the responses are complementary rather than competing, the entity composes them and this layer is the right place for it. Peloton serves a ride's start, duration and device from its workout list, and that ride's sample streams from a performance graph; the graph names no workout, states no time, no zone and no device, and neither response is an entity on its own. Nothing is being reconciled, because the two do not overlap: there are no rival claims to prefer between, and no judgement that would need a view of other sources.
+**3.1. A normalised entity is a session, and composes what one source says about it.** A session is the unit: what was done in one go, however many records the source filed it as and however many endpoints it served them from. Peloton files a cycling session as two or three workouts — a warm-up, a ride, a cool-down — and serves each one's samples from a second endpoint; Hevy files a gym session as however many routines it was split across. In neither case is the source's record boundary the session boundary, and in both the entity is the session.
 
-The test is whether the records *could* disagree. Complementary responses about one thing compose here. Records that assert the same thing do not: two of those are one source contradicting itself, § 10 says the later supersedes, and choosing between them is not this layer's work. Composing across sources remains forbidden outright — that is § 4's, and no amount of complementarity moves it.
+The test is whether the records *could* disagree. Complementary accounts of one session compose here, whether they are parts of it or different aspects of one part. Records that assert the same thing do not: two of those are one source contradicting itself, § 10 says the later supersedes, and choosing between them is not this layer's work. Composing across sources remains forbidden outright — that is § 4's, and no amount of complementarity moves it.
+
+Which records belong to one session is deterministic translation (§ 9): source identity plus recorded values, with no further input. Where the source does not make it recoverable, there is no session to build and § 37 governs.
 
 What the source once said stays in raw (§ II.1), the retraction is itself a landing record like any other, and re-deriving from raw reproduces exactly this result (§ 7). A retraction naming a record never landed removes nothing and is not an error.
 
-It models domain entities — a strength workout of ordered exercises and sets; a cycling workout of summary and samples; a body measurement — whose definitions are declared, version-controlled and owned here, extending § 8 from identity to structure. Sources are translated into these entities, never the reverse: no source's format shapes the domain, and a new or historical source is an adapter question, not a modelling one. A standalone reading is the degenerate entity. Component observations keep the source's native temporal resolution — never resampled, aggregated or interpolated — and belong to their parent entity. Two sources recording one real-world event produce two entities here, and that is correct.
+It models domain entities — a gym session of ordered exercises and sets; a cycling session of the rides it was ridden as, each with its summary and samples; a body measurement — whose definitions are declared, version-controlled and owned here, extending § 8 from identity to structure. Sources are translated into these entities, never the reverse: no source's format shapes the domain, and a new or historical source is an adapter question, not a modelling one. A standalone reading is the degenerate entity. Component observations keep the source's native temporal resolution — never resampled, aggregated or interpolated — and belong to their parent entity. Two sources recording one real-world event produce two entities here, and that is correct.
 
 - **Provenance is mandatory:** the source that produced the observation, whatever version or algorithm identifier the source exposes, and the identifier by which the source names this record — which is what makes same-source supersession mechanically detectable at § 4. Provenance records what a source actually tells us; it is not inferred or invented.
 - **Units canonicalised** (kg, metres, seconds, bpm, watts).
@@ -265,4 +281,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 3.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-07
+**Version**: 3.2.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-08
