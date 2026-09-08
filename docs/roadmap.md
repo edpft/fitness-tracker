@@ -63,9 +63,16 @@ separate things that could be planned separately but Peloton does split them"*.
 The same is true of the gym: the operator split single sessions across several
 Hevy routines so he could compose them — 21 of his 140 training days carry more
 than one record, three of them four — and `GymWorkout` called that canonical-
-layer work. **That is #104**, and it is deliberately not in this piece:
-`gym_workout` is what the anchor resolution, the exercise history and `compare`
-all read, and the autumn opens on 14 September.
+layer work. **Done on 2026-09-08** (#104, PR 105), so the rule now holds for both
+disciplines: `fitness normalise hevy.workouts` writes 140 sessions from 167
+records, and `compare` stops refusing those 21 days as an ambiguous day.
+
+#104 had deferred this past 14 September over a boundary question that turned out
+not to exist. It reported the same-day gaps as 7 to 46 minutes, measured start to
+*start* — counting the previous workout as part of the gap. End to start they run
+3 seconds to 8m20s, with 34 hours to the next day, which is what
+`docs/gym-workout-domain-model.md` had said all along. Cycling's thirty minutes
+carried over unchanged.
 
 **What is missing is everything that joins them, and one gap on the cycling
 side:**

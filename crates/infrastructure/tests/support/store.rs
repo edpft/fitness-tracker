@@ -11,9 +11,9 @@ use application::{
     prescribe::Authoring,
 };
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore, SqliteRefusalStore, connect,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePlanStore, SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
 
@@ -49,9 +49,9 @@ pub async fn with_programme(
 
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,

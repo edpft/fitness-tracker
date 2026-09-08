@@ -98,7 +98,7 @@ struct Superset { members: AtLeastTwo<PerformedExercise> }  // two or more, back
 enum WorkoutItem { Exercise(PerformedExercise), Superset(Superset) }
 
 struct Workout { items: NonEmpty<WorkoutItem> }            // ordered
-struct Session { workouts: NonEmpty<Workout> }             // canonical layer
+struct Session { workouts: NonEmpty<Workout> }             // the entity (3.2.0)
 ```
 
 ---

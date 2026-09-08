@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, future::Future};
 use jiff::{Timestamp, civil::Date};
 
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
-use domain::gym::{GymWorkout, Load, Performed, exercise::RepsExercise};
+use domain::gym::{Load, Performed, PerformedGymSession, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
@@ -862,12 +862,16 @@ pub trait ExerciseHistory {
     fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
-/// Whole performed workouts, for projecting into a prescription shape.
+/// Whole performed sessions, for projecting into a prescription shape.
 ///
 /// Separate from [`ExerciseHistory`] because it answers a different question at
 /// a different grain, and merging them would give one port two reasons to
 /// change. It returns the domain entity untouched, because projection operates
-/// on the workout entire — its items, its groupings, its ordering.
+/// on the session entire — its items, its groupings, its ordering.
+///
+/// **Sessions, not workouts, since § 3.1.** A session the operator split across
+/// four Hevy routines is one prescription performed, and reading it as four
+/// would compare a quarter of it against the whole of what was issued.
 pub trait PerformedWorkoutReader {
     /// Oldest first, § 10 applied.
     ///
@@ -878,9 +882,14 @@ pub trait PerformedWorkoutReader {
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<GymWorkout>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<PerformedGymSession>, StoreError>> + Send;
 
-    /// The workout performed against a prescription, and the reference it named.
+    /// The session performed against a prescription, and the reference it named.
+    ///
+    /// **The reference is one part's and the session is the whole.** A session
+    /// split across several routines carries a routine id on each part, and the
+    /// one that matters is the one naming the prescription — so this finds the
+    /// workout and returns the session it belongs to.
     ///
     /// **Keyed on the prescription rather than on a date**, which is the whole
     /// point: a session prescribed for Friday and performed on Saturday morning
@@ -899,7 +908,7 @@ pub trait PerformedWorkoutReader {
     fn fulfilling(
         &self,
         prescription: PrescribedWorkoutId,
-    ) -> impl Future<Output = Result<Option<(DeliveryReference, GymWorkout)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError>> + Send;
 }
 
 /// The § 14 parameters, in force as one version.

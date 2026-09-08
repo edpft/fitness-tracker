@@ -16,17 +16,17 @@ pub mod store;
 
 pub use credentials::{CredentialError, Credentials};
 pub use hevy::{
-    HevyRoutinePreview, HevyRoutines, HevyWorkoutEvents, HevyWorkoutTranslator, PageCount,
+    HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyWorkoutEvents, PageCount,
     PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
     SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
     SqliteResumptionPointStore, connect,

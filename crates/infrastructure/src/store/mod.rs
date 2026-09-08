@@ -37,7 +37,7 @@ pub use gym_mesocycle::SqliteGymMesocycleStore;
 pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
-pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};
+pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{

@@ -29,9 +29,9 @@ use domain::prescription::{
     WeekKind, authored::Shape,
 };
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
@@ -110,9 +110,9 @@ async fn corpus_store() -> Result<
 
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,

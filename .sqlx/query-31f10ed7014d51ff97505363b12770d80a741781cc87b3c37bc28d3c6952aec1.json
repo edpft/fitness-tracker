@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO gym_workout (\n            landing_record_id, source_record_id, started_at_utc, zone,\n            endpoint, event_kind, event_time, run_id, performed_against, session\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "31f10ed7014d51ff97505363b12770d80a741781cc87b3c37bc28d3c6952aec1"
+}

@@ -16,8 +16,8 @@
 
 use domain::{
     gym::{
-        GymWorkout, Kg, Load, Performed, PerformedExercise, Set, SetKind, SignedKg, Superset,
-        WorkoutItem,
+        GymWorkout, Kg, Load, Performed, PerformedExercise, PerformedGymSession, Set, SetKind,
+        SignedKg, Superset, WorkoutItem,
         exercise::{DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
@@ -118,28 +118,51 @@ fn item_for(position: Position) -> BoxedStrategy<WorkoutItem> {
         .boxed()
 }
 
-/// A session performed against one variant of the template.
-fn performed(primary: PrimaryPattern) -> impl Strategy<Value = GymWorkout> {
+/// A session performed against one variant of the template, split across one to
+/// four records.
+///
+/// **The split is part of the property.** The operator logged single sessions
+/// against several Hevy routines — 21 of his 140 days, three of them four
+/// records — and § 3.1 makes those one entity. Projection reads the session's
+/// items in the order performed and cannot see where the seams were, so a
+/// session that landed as four records must project exactly as the same session
+/// landed as one. Generating the split is what tests that rather than assuming
+/// it.
+fn performed(primary: PrimaryPattern) -> impl Strategy<Value = PerformedGymSession> {
     let items: Vec<BoxedStrategy<WorkoutItem>> =
         primary.sequence().into_iter().map(item_for).collect();
-    (items, 0_i64..1_000_000_000).prop_filter_map("a workout is buildable", |(items, seconds)| {
-        let zone = OperatorZone::try_from("Europe/London").ok()?;
-        let instant = jiff::Timestamp::from_second(seconds).ok()?;
-        let provenance = Provenance::Event(EventProvenance::new(
-            Endpoint::try_from("/v1/workouts/events").ok()?,
-            EventKind::Updated,
-            None,
-        ));
-        Some(GymWorkout::new(
-            NonEmpty::new(items).ok()?,
-            StartedAt::new(instant, zone),
-            provenance,
-            SourceRecordId::try_from("synthetic").ok()?,
-            LandingRecordId::FIRST,
-            // Performed freehand: no session was delivered for it.
-            None,
-        ))
-    })
+    (items, 0_i64..1_000_000_000, 1_usize..=4).prop_filter_map(
+        "a session is buildable",
+        |(items, seconds, parts)| {
+            let zone = OperatorZone::try_from("Europe/London").ok()?;
+            let provenance = Provenance::Event(EventProvenance::new(
+                Endpoint::try_from("/v1/workouts/events").ok()?,
+                EventKind::Updated,
+                None,
+            ));
+
+            // Ceiling division, so every chunk holds at least one item and the
+            // last is never empty — a workout's items are `NonEmpty`.
+            let per_part = items.len().div_ceil(parts).max(1);
+            let mut workouts = Vec::new();
+            for (index, chunk) in items.chunks(per_part).enumerate() {
+                let index = i64::try_from(index).ok()?;
+                // Each part starts after the one before it, which is the order
+                // grouping would have put them in.
+                let instant = jiff::Timestamp::from_second(seconds + index * 600).ok()?;
+                workouts.push(GymWorkout::new(
+                    NonEmpty::new(chunk.to_vec()).ok()?,
+                    StartedAt::new(instant, zone.clone()),
+                    provenance.clone(),
+                    SourceRecordId::try_from(format!("synthetic-{index}").as_str()).ok()?,
+                    LandingRecordId::FIRST,
+                    // Performed freehand: no session was delivered for it.
+                    None,
+                ));
+            }
+            Some(PerformedGymSession::new(NonEmpty::new(workouts).ok()?))
+        },
+    )
 }
 
 proptest! {
@@ -151,9 +174,9 @@ proptest! {
     /// unfilled.
     #[test]
     fn a_session_performed_against_the_template_projects_completely(
-        workout in performed(PrimaryPattern::KneeDominant)
+        session in performed(PrimaryPattern::KneeDominant)
     ) {
-        let projection = project(&workout);
+        let projection = project(&session);
 
         let unassignable = projection
             .gaps
@@ -163,7 +186,7 @@ proptest! {
         prop_assert_eq!(unassignable, 0, "every item took a position");
         prop_assert_eq!(
             projection.shape.items().count(),
-            workout.items().count(),
+            session.items().count(),
             "every item survives into the shape"
         );
 
@@ -185,12 +208,12 @@ proptest! {
     /// variant broke without the reader decoding a shrunk enum.
     #[test]
     fn the_hip_dominant_variant_projects_the_same(
-        workout in performed(PrimaryPattern::HipDominant)
+        session in performed(PrimaryPattern::HipDominant)
     ) {
-        let projection = project(&workout);
+        let projection = project(&session);
         prop_assert_eq!(
             projection.shape.items().count(),
-            workout.items().count()
+            session.items().count()
         );
     }
 }

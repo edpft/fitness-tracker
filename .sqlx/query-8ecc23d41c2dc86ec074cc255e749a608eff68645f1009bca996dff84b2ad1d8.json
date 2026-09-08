@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM gym_session",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "8ecc23d41c2dc86ec074cc255e749a608eff68645f1009bca996dff84b2ad1d8"
+}

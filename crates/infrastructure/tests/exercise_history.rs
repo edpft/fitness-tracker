@@ -17,8 +17,8 @@ use application::{
 };
 use domain::gym::{Performed, exercise::RepsExercise};
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
-    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
+    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymSessionStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
@@ -45,9 +45,9 @@ async fn derived_corpus() -> Result<(SqlitePool, tempfile::TempDir), Box<dyn std
 
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,

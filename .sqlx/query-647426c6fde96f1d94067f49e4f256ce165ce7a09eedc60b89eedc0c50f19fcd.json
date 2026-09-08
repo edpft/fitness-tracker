@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.session AS \"session!: i64\",\n                   w.performed_against AS \"performed_against!: String\"\n            FROM gym_workout AS w\n            JOIN prescription_delivery AS d ON d.reference = w.performed_against\n            WHERE d.prescription = ? AND w.session IS NOT NULL\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "performed_against!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "performed_against"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "647426c6fde96f1d94067f49e4f256ce165ce7a09eedc60b89eedc0c50f19fcd"
+}

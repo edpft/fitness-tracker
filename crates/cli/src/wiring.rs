@@ -26,10 +26,10 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, PelotonRawExtent, PelotonRideLandingStore,
+    FileRunLock, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
+    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
     peloton::{
         PelotonSessionTranslator,
@@ -326,9 +326,9 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             // resumption point — the two commands can run at once.
             let normalisation = Normalisation::new(
                 NormalisationPorts {
-                    raw: HevyWorkoutLandingReader::new(pool.clone())?,
-                    translator: HevyWorkoutTranslator,
-                    workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+                    raw: HevySessionAccountReader::new(pool.clone())?,
+                    translator: HevySessionTranslator,
+                    workouts: SqliteGymSessionStore::new(pool.clone())?,
                     refusals: SqliteRefusalStore::new(
                         pool.clone(),
                         HevyWorkoutLandingStore::STREAM,
@@ -355,7 +355,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             // records behind is a system with a silent problem.
             let derivation = DerivationStanding::new(
                 HevyWorkoutLandingStore::new(pool.clone())?,
-                SqliteGymWorkoutStore::new(pool.clone())?,
+                SqliteGymSessionStore::new(pool.clone())?,
                 SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             )

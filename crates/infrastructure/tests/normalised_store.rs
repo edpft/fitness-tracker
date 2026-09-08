@@ -13,8 +13,8 @@ use application::{
     normalise::{Normalisation, NormalisationPorts, Refusals},
 };
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
-    SqliteExtractionRunLog, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
+    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
     connect,
 };
 use sqlx::SqlitePool;
@@ -50,9 +50,9 @@ async fn landed() -> Result<(SqlitePool, tempfile::TempDir), Box<dyn std::error:
 async fn derive(pool: &SqlitePool) -> Result<NormalisationSummary, Box<dyn std::error::Error>> {
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
@@ -133,6 +133,24 @@ fn the_stored_layer_holds_what_the_derivation_produced() {
             .fetch_one(&pool)
             .await?
             .n;
+        let sessions = sqlx::query!(r#"SELECT count(*) AS "n!: i64" FROM gym_session"#)
+            .fetch_one(&pool)
+            .await?
+            .n;
+        // Every workout points at a session, and at one that exists. The column
+        // is nullable only because SQLite cannot add a `NOT NULL` one to a table
+        // with rows, so this is the constraint the schema could not carry.
+        let orphaned = sqlx::query!(
+            r#"
+            SELECT count(*) AS "n!: i64" FROM gym_workout AS w
+            WHERE w.session IS NULL
+               OR NOT EXISTS (SELECT 1 FROM gym_session AS s
+                              WHERE s.landing_record_id = w.session)
+            "#
+        )
+        .fetch_one(&pool)
+        .await?
+        .n;
         let entries = sqlx::query!(r#"SELECT count(*) AS "n!: i64" FROM performed_exercise"#)
             .fetch_one(&pool)
             .await?
@@ -151,19 +169,30 @@ fn the_stored_layer_holds_what_the_derivation_produced() {
             .await?
             .n;
 
-        Ok::<_, Box<dyn std::error::Error>>((summary, workouts, entries, sets, supersets, refusals))
+        Ok::<_, Box<dyn std::error::Error>>((
+            summary, workouts, sessions, orphaned, entries, sets, supersets, refusals,
+        ))
     });
 
-    let Ok(Ok((summary, workouts, entries, sets, supersets, refusals))) = outcome else {
+    let Ok(Ok((summary, workouts, sessions, orphaned, entries, sets, supersets, refusals))) =
+        outcome
+    else {
         panic!("the corpus lands and derives")
     };
 
     assert_eq!(workouts, 163, "workouts");
+    assert_eq!(sessions, 136, "sessions, one per training day");
+    assert_eq!(
+        orphaned, 0,
+        "every workout belongs to a session that exists"
+    );
     assert_eq!(entries, 1_135, "performed exercises");
     assert_eq!(sets, 3_779, "performed sets");
     assert_eq!(supersets, 334, "supersets");
     assert_eq!(refusals, 2, "refusals");
-    assert_eq!(summary.workouts_written.as_usize(), 163);
+    // Entities, so sessions. Everything above it is still counted in parts, and
+    // that both numbers survive the round trip is the point of this test.
+    assert_eq!(summary.workouts_written.as_usize(), 136);
     assert!(summary.reconciles(), "{summary:?}");
 }
 

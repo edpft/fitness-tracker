@@ -13,6 +13,7 @@ pub mod exercise;
 pub mod intensity;
 pub mod load;
 pub mod outcome;
+pub mod performed;
 pub mod set;
 pub mod workout;
 
@@ -22,5 +23,6 @@ pub use exercise::{
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{InvalidLoad, Kg, Load, SignedKg};
 pub use outcome::Performed;
+pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};
 pub use workout::{GymWorkout, PerformedExercise, Superset, WorkoutItem};

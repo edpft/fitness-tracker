@@ -50,6 +50,45 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
     assert_eq!(entries, 1_135, "every landed exercise entry translates");
     assert_eq!(supersets, 334, "every well-formed grouping is a superset");
 
+    // **Composition changes the entity count and nothing else** (§ 3.1). The
+    // corpus holds 163 workouts over 136 training days, 21 of which carry more
+    // than one record and three of which carry four — one session each, split
+    // across several Hevy routines. Every per-workout figure above is unchanged
+    // by grouping them, which is what says the session gained parts rather than
+    // the derivation losing or duplicating any.
+    assert_eq!(
+        produced.sessions.len(),
+        136,
+        "sessions, one per training day"
+    );
+    let composed: usize = produced
+        .sessions
+        .iter()
+        .map(domain::gym::PerformedGymSession::part_count)
+        .sum();
+    assert_eq!(
+        composed, 163,
+        "every workout is part of exactly one session"
+    );
+    assert_eq!(
+        produced
+            .sessions
+            .iter()
+            .filter(|session| session.part_count() > 1)
+            .count(),
+        21,
+        "the days he split across several routines"
+    );
+    assert_eq!(
+        produced
+            .sessions
+            .iter()
+            .filter(|session| session.part_count() == 4)
+            .count(),
+        3,
+        "and the three he split across four"
+    );
+
     // Every set in the corpus translates. The one that did not — 95 kg for zero
     // reps — is a failed attempt now rather than a refusal (US2), so what is left
     // refused is the two malformed groupings and nothing else.
@@ -495,7 +534,20 @@ fn every_record_is_accounted_for() {
     let summary = produced.summary;
 
     assert_eq!(summary.records_read.as_usize(), 164, "records read");
-    assert_eq!(summary.workouts_written.as_usize(), 163, "workouts written");
+    // **Entities, where every other number here counts records.** 163 workouts
+    // compose 136 sessions, so this is the one figure grouping moves — and
+    // `records_composed` is what keeps the reconciliation below about records.
+    assert_eq!(summary.workouts_written.as_usize(), 136, "sessions written");
+    assert_eq!(
+        summary.records_composed.as_usize(),
+        163,
+        "records composed into them"
+    );
+    assert_eq!(
+        summary.records_superseded.as_usize(),
+        0,
+        "the corpus serves no workout twice"
+    );
     assert_eq!(summary.retractions_read.as_usize(), 1, "retractions served");
     assert_eq!(
         summary.workouts_retracted.as_usize(),
