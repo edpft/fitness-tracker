@@ -56,7 +56,16 @@ fn a_tombstone_for_a_workout_never_landed_withdraws_nothing() {
 /// it with no entity — and does so whichever order the two records arrive in.
 ///
 /// Latest-wins would pass the first of these and fail the second, which is why
-/// both are here.
+/// both are here. It is also why a deletion is exempt from supersession: the
+/// events feed serves `updated` and `deleted` under one source identifier, so
+/// letting the later of the two win by landing id would make the retraction fire
+/// in one order and not the other.
+///
+/// **And it withdraws the session, not just the workout** (§ 3.1). The synthetic
+/// update copies a real workout's body, times included, so it groups into that
+/// workout's session — and a session missing one of the records it composes is
+/// not that session. Both parts go. That is the rule this test now demonstrates
+/// rather than a side effect it tolerates.
 #[test]
 fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
     let Ok(fixture) = corpus::derivation() else {
@@ -70,6 +79,21 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
         panic!("the synthetic record builds")
     };
 
+    // The workout whose body was copied. Its times are the synthetic record's
+    // times, so the two group into one session — which is what makes this a test
+    // of a retraction reaching a session rather than a lone record.
+    let Some(donor) = fixture
+        .records
+        .iter()
+        .find(|record| {
+            let domain::landing::Provenance::Event(event) = record.provenance();
+            *event.kind() == domain::landing::EventKind::Updated
+        })
+        .map(domain::landing::LandedRecord::id)
+    else {
+        panic!("the corpus holds an update")
+    };
+
     for reversed in [false, true] {
         let produced = derived!(withdrawable, reversed);
 
@@ -78,10 +102,12 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
             165,
             "the corpus plus one synthetic update"
         );
+        // One entity withdrawn, and it held two workouts: the synthetic one the
+        // tombstone names and the donor whose session it joined.
         assert_eq!(
             produced.workouts.len(),
-            163,
-            "the workout the retraction names is the one absent (reversed: {reversed})"
+            162,
+            "the session the retraction reaches into goes whole (reversed: {reversed})"
         );
         assert_eq!(produced.summary.workouts_retracted.as_usize(), 1);
         assert_eq!(produced.summary.retractions_read.as_usize(), 1);
@@ -93,8 +119,10 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
             .any(|workout| workout.source_record_id().as_str() == TOMBSTONE);
         assert!(!withdrawn, "the withdrawn workout has no entity");
 
-        // Every other workout is untouched. A retraction removes the record it
-        // names and nothing else.
+        // **Exactly the donor's session, and nothing beyond it.** A retraction
+        // removes the entity composing the record it names; every workout that
+        // was not part of that entity is untouched, which is the half of the
+        // rule that composition could most easily have broken.
         let mut theirs: Vec<_> = produced
             .workouts
             .iter()
@@ -103,22 +131,33 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
         let mut ours: Vec<_> = baseline
             .workouts
             .iter()
+            .filter(|workout| workout.landed_as() != donor)
             .map(domain::gym::GymWorkout::landed_as)
             .collect();
         theirs.sort_unstable();
         ours.sort_unstable();
-        assert_eq!(theirs, ours, "no other workout is affected");
+        assert_eq!(theirs, ours, "only the donor's session is affected");
     }
 }
 
-/// § 10 stays where it is. Two records sharing a source identifier are the same
-/// source contradicting itself, and the later supersedes — but that is a
-/// question for the layer that can see every source, so both stand here.
+/// § 10, and composition is what forced it down a layer.
+///
+/// **This test asserted the opposite until the session became the entity.** Two
+/// records sharing a source identifier are one source contradicting itself, and
+/// while each record was its own entity both could stand: nothing joined them,
+/// so nothing was claimed by keeping both. A session cannot do that. A
+/// re-serving states the same times as the serving it replaces, so it would
+/// group beside it and read as a second part — one workout told twice becoming
+/// a session of two, which is a session nobody trained.
+///
+/// So the later serving stands, the earlier is set aside, and it is *counted*
+/// rather than dropped: a record with no outcome is what § 38's reconciliation
+/// exists to catch.
 ///
 /// Synthetic, because the corpus holds 164 distinct identifiers and not one
 /// re-serve.
 #[test]
-fn two_records_for_one_workout_both_stand() {
+fn a_re_serving_supersedes_rather_than_composing() {
     let Ok(fixture) = corpus::derivation() else {
         panic!("the corpus fixture loads")
     };
@@ -130,8 +169,8 @@ fn two_records_for_one_workout_both_stand() {
 
     assert_eq!(
         produced.workouts.len(),
-        164,
-        "both records produce a workout"
+        163,
+        "the later serving stands and the earlier does not"
     );
     let Some(first) = fixture.records.first() else {
         panic!("the corpus is not empty")
@@ -142,10 +181,17 @@ fn two_records_for_one_workout_both_stand() {
         .iter()
         .filter(|workout| workout.source_record_id().as_str() == shared)
         .count();
+    assert_eq!(sharing, 1, "one workout, not a session of two");
+
+    // The record is accounted for as superseded rather than going missing,
+    // which is the whole reason it is counted instead of dropped.
     assert_eq!(
-        sharing, 2,
-        "neither is marked current and neither is removed"
+        produced.summary.records_read.as_usize(),
+        165,
+        "the corpus plus the re-serve"
     );
+    assert_eq!(produced.summary.records_superseded.as_usize(), 1);
+    assert!(produced.summary.reconciles(), "{:?}", produced.summary);
 }
 
 /// Scenario 9. FR-017 and the one exception to FR-024.

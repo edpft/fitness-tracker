@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO gym_session (landing_record_id, run_id) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "04fb1d4f0439cc7d77b405dd50f54804f631fa935af815a0691f3d8030b5a2ed"
+}

@@ -28,7 +28,7 @@
 //! be regenerated rather than what can.
 
 use domain::{
-    gym::GymWorkout,
+    gym::PerformedGymSession,
     prescription::{DeliveryReference, Divergence, ProjectionGap, project, satisfies},
 };
 use jiff::civil::Date;
@@ -50,9 +50,14 @@ pub enum Pairing {
     /// The performance names the session, through the id the destination gave
     /// it on delivery. Nothing is assumed.
     Published(DeliveryReference),
-    /// Nothing named the session, so the workout trained on the day it was
+    /// Nothing named the session, so the session trained on the day it was
     /// prescribed for was taken to be it. An assumption, and a defensible one
     /// only while a day holds a single session.
+    ///
+    /// **Which, since § 3.1, is nearly always.** A day the operator split
+    /// across four Hevy routines used to hold four entities and was refused as
+    /// ambiguous; it now holds one session, and the assumption this makes is
+    /// the one it always claimed to be making.
     Dated,
 }
 
@@ -142,9 +147,13 @@ where
     /// **The first of them, and a second is refused rather than picked between.**
     /// Two sessions on one day is the case where a date says nothing about which
     /// one answered the prescription, and choosing quietly is how a comparison
-    /// comes to be run against the wrong workout. Publishing the session
+    /// comes to be run against the wrong session. Publishing the session
     /// resolves it, which is the remedy the error names.
-    async fn trained_on(&self, date: Date) -> Result<GymWorkout, ComparisonError> {
+    ///
+    /// **Two sessions, not two records.** Every one of the operator's 21
+    /// multi-record days used to land here and be refused; they are one session
+    /// each, and this now fires only where he genuinely trained twice.
+    async fn trained_on(&self, date: Date) -> Result<PerformedGymSession, ComparisonError> {
         let mut trained = self.ports.workouts.between(date, date).await?;
         if trained.len() > 1 {
             return Err(ComparisonError::AmbiguousDay {

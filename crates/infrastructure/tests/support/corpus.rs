@@ -24,7 +24,7 @@ use application::{
     },
 };
 use domain::{
-    gym::GymWorkout,
+    gym::{GymWorkout, PerformedGymSession},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -203,26 +203,29 @@ impl InMemoryRaw {
 }
 
 impl AccountReader for InMemoryRaw {
-    type Account = LandedRecord;
+    /// Grouped by the real rule, not held apart. A fixture that handed each
+    /// record over on its own would test a session-shaped pipeline against
+    /// one-record accounts and never see a composed session at all.
+    type Account = infrastructure::hevy::SessionAccount;
 
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<LandedRecord>, StoreError> {
-        Ok(self.records.clone())
+    async fn accounts(&self) -> Result<Vec<Self::Account>, StoreError> {
+        Ok(infrastructure::hevy::group(self.records.clone()))
     }
 }
 
 /// The normalised layer, in memory. Replaced wholesale, exactly as the real one
 /// is.
 #[derive(Clone)]
-pub struct InMemoryWorkouts {
+pub struct InMemorySessions {
     stream: LandingStream,
-    written: Arc<Mutex<Vec<GymWorkout>>>,
+    written: Arc<Mutex<Vec<PerformedGymSession>>>,
 }
 
-impl InMemoryWorkouts {
+impl InMemorySessions {
     pub fn new(stream: LandingStream) -> Self {
         Self {
             stream,
@@ -233,7 +236,7 @@ impl InMemoryWorkouts {
     /// # Errors
     ///
     /// [`FixtureError`] if another test thread poisoned the lock.
-    pub fn workouts(&self) -> Result<Vec<GymWorkout>, FixtureError> {
+    pub fn sessions(&self) -> Result<Vec<PerformedGymSession>, FixtureError> {
         self.written
             .lock()
             .map(|held| held.clone())
@@ -241,8 +244,8 @@ impl InMemoryWorkouts {
     }
 }
 
-impl NormalisedEntityStore for InMemoryWorkouts {
-    type Entity = GymWorkout;
+impl NormalisedEntityStore for InMemorySessions {
+    type Entity = PerformedGymSession;
 
     fn stream(&self) -> &LandingStream {
         &self.stream
@@ -251,7 +254,7 @@ impl NormalisedEntityStore for InMemoryWorkouts {
     async fn replace(
         &self,
         _run: NormalisationRunId,
-        workouts: Vec<GymWorkout>,
+        workouts: Vec<PerformedGymSession>,
     ) -> Result<WorkoutCount, StoreError> {
         let count = workouts.len();
         {
@@ -430,6 +433,14 @@ pub struct Derivation {
 
 /// What one derivation produced, for a test to assert over.
 pub struct Produced {
+    /// The entities the derivation wrote.
+    pub sessions: Vec<PerformedGymSession>,
+    /// Their parts, flattened in the order performed.
+    ///
+    /// Most assertions in this suite are about a workout — its items, its sets,
+    /// its provenance — and those are still the workout's rather than the
+    /// session's. Kept so that a test about a part says so, and a test about a
+    /// session reaches for `sessions`.
     pub workouts: Vec<GymWorkout>,
     pub refusals: Vec<Refusal>,
     pub summary: application::NormalisationSummary,
@@ -464,14 +475,14 @@ impl Derivation {
             let raw = InMemoryRaw::new(self.stream.clone(), self.records.clone());
             if reversed { raw.reversed() } else { raw }
         };
-        let workouts = InMemoryWorkouts::new(self.stream.clone());
+        let sessions = InMemorySessions::new(self.stream.clone());
         let refusals = InMemoryRefusals::new(self.stream.clone());
 
         let normalisation = application::normalise::Normalisation::new(
             application::normalise::NormalisationPorts {
                 raw,
-                translator: infrastructure::hevy::HevyWorkoutTranslator,
-                workouts: workouts.clone(),
+                translator: infrastructure::hevy::HevySessionTranslator,
+                workouts: sessions.clone(),
                 refusals: refusals.clone(),
                 runs: InMemoryRunLog::default(),
                 clock: FixedClock,
@@ -486,8 +497,13 @@ impl Derivation {
                 detail: "the fixture lock was poisoned".to_owned(),
             })
         };
+        let sessions = sessions.sessions().map_err(store_broke)?;
         Ok(Produced {
-            workouts: workouts.workouts().map_err(store_broke)?,
+            workouts: sessions
+                .iter()
+                .flat_map(|session| session.workouts().iter().cloned())
+                .collect(),
+            sessions,
             refusals: refusals.refusals().map_err(store_broke)?,
             summary,
         })

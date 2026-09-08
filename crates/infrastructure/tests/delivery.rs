@@ -21,9 +21,9 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use infrastructure::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, HevyWorkoutTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog, SqlitePlanStore,
+    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore, connect,
 };
 use jiff::civil::Date;
@@ -151,9 +151,9 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
 
     let normalisation = application::normalise::Normalisation::new(
         application::normalise::NormalisationPorts {
-            raw: HevyWorkoutLandingReader::new(pool.clone())?,
-            translator: HevyWorkoutTranslator,
-            workouts: SqliteGymWorkoutStore::new(pool.clone())?,
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator,
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,

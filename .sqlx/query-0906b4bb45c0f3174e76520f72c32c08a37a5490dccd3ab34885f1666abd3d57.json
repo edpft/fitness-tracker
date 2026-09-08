@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against!: String\"\n            FROM gym_workout AS w\n            JOIN prescription_delivery AS d ON d.reference = w.performed_against\n            WHERE d.prescription = ?\n              AND NOT EXISTS (\n                    SELECT 1\n                    FROM gym_workout AS superseding\n                    JOIN hevy_workout_landing AS later\n                        ON later.id = superseding.landing_record_id\n                    JOIN hevy_workout_landing AS this\n                        ON this.id = w.landing_record_id\n                    WHERE superseding.source_record_id = w.source_record_id\n                      AND later.serve_ordinal > this.serve_ordinal\n              )\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\"\n            FROM gym_workout AS w\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -81,7 +81,7 @@
         }
       },
       {
-        "name": "performed_against!: String",
+        "name": "performed_against: String",
         "ordinal": 7,
         "type_info": "Text",
         "origin": {
@@ -106,5 +106,5 @@
       true
     ]
   },
-  "hash": "c66ef4aa975f80539c8d34e67639d5f4eee2c6b2845f79ee1e8e2c7724ba8ec8"
+  "hash": "0906b4bb45c0f3174e76520f72c32c08a37a5490dccd3ab34885f1666abd3d57"
 }
