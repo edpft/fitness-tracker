@@ -35,7 +35,8 @@
 use application::SourceError;
 use domain::{
     cycling::{Interval, PowerZone, Ride},
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
+    sequence::NonEmpty,
 };
 use serde::Deserialize;
 

@@ -26,11 +26,13 @@ use application::{
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::{
-    gym::{GymWorkout, Kg, Load, NonEmpty, RepCount},
+    gym::{GymWorkout, Kg, Load},
+    measure::RepCount,
     prescription::{
         PrescribedExercise, PrescribedItem, PrescribedSet, ProjectionGap, SlotId, Target,
         WorkoutShape, project, satisfies,
     },
+    sequence::NonEmpty,
 };
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,

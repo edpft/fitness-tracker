@@ -12,13 +12,8 @@
 pub mod exercise;
 pub mod intensity;
 pub mod load;
-pub mod measure;
 pub mod outcome;
-pub mod refusal;
-pub mod run;
-pub mod sequence;
 pub mod set;
-pub mod time;
 pub mod workout;
 
 pub use exercise::{
@@ -26,17 +21,6 @@ pub use exercise::{
 };
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{InvalidLoad, Kg, Load, SignedKg};
-pub use measure::{
-    Distance, Duration, InvalidQuantity, Metres, PositiveDistance, PositiveDuration, RepCount,
-    Spans,
-};
 pub use outcome::Performed;
-pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
-pub use run::{
-    NormalisationFailure, NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount,
-    UnknownNormalisationFailure, WorkoutCount,
-};
-pub use sequence::{AtLeastTwo, NonEmpty, TooShort};
 pub use set::{Set, SetKind};
-pub use time::{OperatorZone, UnknownTimeZone, WorkoutStart};
 pub use workout::{GymWorkout, PerformedExercise, Superset, WorkoutItem};

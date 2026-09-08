@@ -750,7 +750,7 @@ async fn authored_command(
 /// outgrew the match it lived in.
 async fn deliver_command_run(
     sub: &ArgMatches,
-    zone: &domain::gym::OperatorZone,
+    zone: &domain::normalised::OperatorZone,
     database: &Path,
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
@@ -823,7 +823,7 @@ async fn discipline_command_run(
 async fn plan_command_run(
     sub: &ArgMatches,
     database: &Path,
-    zone: &domain::gym::OperatorZone,
+    zone: &domain::normalised::OperatorZone,
 ) -> Result<(), Failure> {
     let count = |name: &str| -> Result<usize, Failure> {
         sub.get_one::<String>(name)
@@ -922,7 +922,7 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
 async fn programme_command_run(
     sub: &ArgMatches,
     database: &Path,
-    zone: &domain::gym::OperatorZone,
+    zone: &domain::normalised::OperatorZone,
 ) -> Result<(), Failure> {
     match sub.subcommand() {
         Some(("add", _)) => wizard::add(database, zone).await,

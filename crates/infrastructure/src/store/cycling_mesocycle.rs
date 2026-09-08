@@ -29,9 +29,10 @@ use domain::{
         CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays, Interval,
         PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
     plan::{Occupies, PlanName},
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    sequence::NonEmpty,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;

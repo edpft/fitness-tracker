@@ -13,11 +13,13 @@ use std::collections::BTreeMap;
 
 use application::{GenerationParameterStore, StoreError};
 use domain::{
-    gym::{Duration, Kg, NonEmpty, RepCount, exercise::Implement},
+    gym::{Kg, exercise::Implement},
+    measure::{Duration, RepCount},
     prescription::{
         BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol,
         RestScheme, Scales, SessionRole, Step, Target, TopSetReps, WarmupStep,
     },
+    sequence::NonEmpty,
 };
 use jiff::Timestamp;
 use sqlx::SqlitePool;
@@ -485,7 +487,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
                     reps: scheme_reps(row.hypertrophy_low, row.hypertrophy_high)?,
                     sets: reps_from_storage(row.hypertrophy_sets)?,
                 },
-                static_hold: domain::gym::Duration::from_seconds(
+                static_hold: domain::measure::Duration::from_seconds(
                     u64::try_from(row.static_hold_seconds)
                         .map_err(|_| corrupt(&"a negative static hold"))?,
                 ),

@@ -1,8 +1,9 @@
 //! The ramp's repetition counts follow the top set's (decision 0030).
 
 use domain::{
-    gym::{RepCount, sequence::NonEmpty},
+    measure::RepCount,
     prescription::{Percentage, WarmupStep, warmup::ramp},
+    sequence::NonEmpty,
 };
 
 /// The operator's own ramp, which decision 0030 makes the floor: 4 at 40%, 3 at

@@ -49,6 +49,12 @@ Hevy. `cycling next` takes no arguments and does the same: `fitness plan` author
 the four cycling programmes, and `next` prints the session from the rows and then
 puts it in the Peloton stack with its cool-down ride.
 
+**The cycling record derives.** `normalise peloton.workouts` fills the
+normalised layer with Bike+ rides — 309 rows from 477 landed records, 366,650
+samples, heart rate on 233 of the 285 distinct rides — and refuses the 168
+records that are not rides as `unmodelled` (issue #101, 2026-09-08). The FTP
+work below now has a performed record to read rather than an assertion to take.
+
 **What is missing is everything that joins them, and one gap on the cycling
 side:**
 
@@ -303,12 +309,17 @@ and the record holds six effect-dated FTP values — 143, 183, 199, 174, 155 and
 
 ## Deliberately out of scope
 
-- **A second data source.** Withings body weight is the strongest candidate — the
+- **A third data source.** Withings body weight is the strongest candidate — the
   degenerate entity § II.3 names, and it would exercise § 6's comparability
-  classes, which nothing has touched. The architecture claims source
-  independence and has never been tested against a second source, so this gets
-  more expensive the longer it waits. It competes for the same weeks and does not
-  help the operator train.
+  classes across *sources*, which nothing has yet. It competes for the same weeks
+  and does not help the operator train.
+
+  This used to say "a second data source", and that the architecture "has never
+  been tested against a second source". Peloton is the second, and as of
+  2026-09-08 it derives: the normalised layer holds two entities, the ports are
+  generic over which, and the vocabulary the derivation needs is no longer inside
+  `domain::gym`. What is still untested is a source that observes something
+  another source already observes.
 - **The macro layer** — nutrition, the family calendar, and anything that
   *decides* how a week is spent. Slots are recorded **and allocated**; what waits
   is choosing the split.

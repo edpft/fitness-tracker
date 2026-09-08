@@ -45,8 +45,8 @@ use std::collections::BTreeMap;
 use jiff::civil::{Date, Weekday};
 
 use crate::{
-    gym::sequence::NonEmpty,
     provider::{ExternalProgramme, InvalidProvision, ProvidedFrom},
+    sequence::NonEmpty,
 };
 
 use super::session::CyclingSession;

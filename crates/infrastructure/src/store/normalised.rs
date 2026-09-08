@@ -7,16 +7,14 @@
 //! "a derivation never writes to raw" a fact about the type rather than a
 //! promise about the code.
 
-use application::{LandingRecordReader, NormalisedWorkoutStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    gym::{
-        GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount,
-        WorkoutItem,
-    },
+    gym::{GymWorkout, Load, PerformedExercise, Set, SetKind, WorkoutItem},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
+    normalised::{NormalisationRunId, NormalisedEntity, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
@@ -45,12 +43,17 @@ impl HevyWorkoutLandingReader {
     }
 }
 
-impl LandingRecordReader for HevyWorkoutLandingReader {
+impl AccountReader for HevyWorkoutLandingReader {
+    /// One record. Hevy serves a workout whole, so an account and a record are
+    /// the same thing here — which is the case the port's associated type
+    /// exists to stop being the only one.
+    type Account = LandedRecord;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn records(&self) -> Result<Vec<LandedRecord>, StoreError> {
+    async fn accounts(&self) -> Result<Vec<LandedRecord>, StoreError> {
         // Oldest first, by the store's own sequence — which is the order the
         // source served them, because raw is append-only. Defined so a
         // derivation is reproducible, not because the derivation depends on
@@ -127,7 +130,9 @@ impl SqliteGymWorkoutStore {
     }
 }
 
-impl NormalisedWorkoutStore for SqliteGymWorkoutStore {
+impl NormalisedEntityStore for SqliteGymWorkoutStore {
+    type Entity = GymWorkout;
+
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -450,7 +455,7 @@ impl SetWrite<'_, '_> {
 }
 
 /// A distance on its way into the store, checked rather than saturated.
-fn metres_for_storage(metres: domain::gym::Metres) -> Result<i64, StoreError> {
+fn metres_for_storage(metres: domain::measure::Metres) -> Result<i64, StoreError> {
     i64::try_from(metres.as_millimetres()).map_err(|_| StoreError::Corrupt {
         detail: "a distance larger than the store can hold".to_owned(),
     })

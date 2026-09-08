@@ -27,11 +27,13 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    gym::{Duration, Kg, NonEmpty, RepCount, exercise::Implement},
+    gym::{Kg, exercise::Implement},
+    measure::{Duration, RepCount},
     prescription::{
         AccessoryScheme, BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage,
         ResetProtocol, RestScheme, Scales, Step, Target, TopSetReps, WarmupStep,
     },
+    sequence::NonEmpty,
 };
 
 /// A value in this file that will not build.

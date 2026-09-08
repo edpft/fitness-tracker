@@ -13,16 +13,14 @@ mod support;
 
 use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{
-    gym::{
-        Duration, Kg, Load, RepCount, SignedKg,
-        exercise::RepsExercise,
-        sequence::{AtLeastTwo, NonEmpty},
-    },
+    gym::{Kg, Load, SignedKg, exercise::RepsExercise},
+    measure::{Duration, RepCount},
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SessionRole, SlotId, SupersetMember,
         Target, WeekIndex, WeekKind, WorkoutShape,
     },
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use infrastructure::HevyRoutines;
 use serde_json::Value;

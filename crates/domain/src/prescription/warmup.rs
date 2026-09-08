@@ -35,7 +35,8 @@
 //! **Only a maximal top set gets this.** A percentage day states a submaximal
 //! load, so its ramp has nothing to rehearse and keeps the stored counts.
 
-use crate::gym::{RepCount, sequence::NonEmpty};
+use crate::measure::RepCount;
+use crate::sequence::NonEmpty;
 
 use super::parameters::WarmupStep;
 

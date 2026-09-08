@@ -35,11 +35,13 @@ use domain::{
         Answer, CyclingMesocycle, CyclingMicrocycle, CyclingWeekdays, PlannedRide,
         PublishedProgramme, SessionPosition,
     },
-    gym::{OperatorZone, exercise::RepsExercise, sequence::NonEmpty},
+    gym::exercise::RepsExercise,
+    normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
     prescription::PrimaryPattern,
     provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::Discipline,
+    sequence::NonEmpty,
 };
 use infrastructure::{
     SqliteDiaryStore, SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,

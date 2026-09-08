@@ -22,7 +22,8 @@ use std::collections::BTreeMap;
 use application::SourceError;
 use domain::{
     cycling::{CyclingSession, Interval, PublishedProgramme, Ride, RideVenue, ZoneProfile},
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
+    sequence::NonEmpty,
 };
 
 use super::{

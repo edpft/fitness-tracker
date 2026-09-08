@@ -35,9 +35,9 @@ use jiff::{Timestamp, civil::Date};
 
 use crate::{
     cycling::CyclingMesocycle,
-    gym::sequence::{NonEmpty, TooShort},
     newtype::string_name,
     prescription::Mesocycle,
+    sequence::{NonEmpty, TooShort},
 };
 
 /// The days something occupies, without saying what.

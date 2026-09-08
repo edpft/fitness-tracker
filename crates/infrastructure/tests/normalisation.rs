@@ -419,7 +419,7 @@ fn absence_is_absence() {
 /// Scenario 7. § II.3's wall clock, across both switchovers.
 ///
 /// That no timestamp lacks a zone is a fact about the type rather than
-/// something to test — `WorkoutStart` has no constructor taking an instant
+/// something to test — `StartedAt` has no constructor taking an instant
 /// alone. What can fail, and so is what is asserted, is the wall clock.
 #[test]
 fn the_wall_clock_survives_both_switchovers() {
@@ -462,7 +462,7 @@ fn a_different_declared_zone_moves_the_wall_clock_and_not_the_instant() {
     let Ok(fixture) = corpus::derivation() else {
         panic!("the corpus fixture loads")
     };
-    let Ok(elsewhere) = domain::gym::OperatorZone::try_from("Australia/Sydney") else {
+    let Ok(elsewhere) = domain::normalised::OperatorZone::try_from("Australia/Sydney") else {
         panic!("Sydney is an IANA zone")
     };
 

@@ -18,12 +18,13 @@ use std::fmt;
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::prescription::DeliveryReference;
 
+use crate::measure::{Distance, Duration, RepCount};
+use crate::normalised::{NormalisedEntity, StartedAt};
+use crate::sequence::{AtLeastTwo, NonEmpty};
+
 use super::{
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
-    measure::{Distance, Duration, RepCount},
-    sequence::{AtLeastTwo, NonEmpty},
     set::Set,
-    time::WorkoutStart,
 };
 
 /// One exercise together with the sets performed of it.
@@ -136,7 +137,7 @@ impl WorkoutItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GymWorkout {
     items: NonEmpty<WorkoutItem>,
-    started_at: WorkoutStart,
+    started_at: StartedAt,
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: LandingRecordId,
@@ -160,7 +161,7 @@ impl GymWorkout {
     /// that exists is a workout that knows where it came from (§ II.3).
     pub const fn new(
         items: NonEmpty<WorkoutItem>,
-        started_at: WorkoutStart,
+        started_at: StartedAt,
         provenance: Provenance,
         source_record_id: SourceRecordId,
         landed_as: LandingRecordId,
@@ -185,16 +186,12 @@ impl GymWorkout {
         &self.items
     }
 
-    pub const fn started_at(&self) -> &WorkoutStart {
+    pub const fn started_at(&self) -> &StartedAt {
         &self.started_at
     }
 
     pub const fn provenance(&self) -> &Provenance {
         &self.provenance
-    }
-
-    pub const fn source_record_id(&self) -> &SourceRecordId {
-        &self.source_record_id
     }
 
     pub const fn landed_as(&self) -> LandingRecordId {
@@ -218,6 +215,12 @@ impl GymWorkout {
             .iter()
             .filter(|item| matches!(item, WorkoutItem::Superset(_)))
             .count()
+    }
+}
+
+impl NormalisedEntity for GymWorkout {
+    fn source_record_id(&self) -> &SourceRecordId {
+        &self.source_record_id
     }
 }
 

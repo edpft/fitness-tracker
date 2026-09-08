@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT distance_millimetres AS \"distance!: i64\" FROM bike_plus_ride",
+  "describe": {
+    "columns": [
+      {
+        "name": "distance!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "distance_millimetres"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6f611ec2e388df870a2e9be70d6ca70073af2b7adfe8b852109d9293d007aaf3"
+}

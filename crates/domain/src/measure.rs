@@ -1,7 +1,10 @@
-//! What a set is counted in.
+//! What an observation is counted in.
 //!
 //! Three measures, because there are three things you can count: repetitions,
-//! elapsed time, and ground covered.
+//! elapsed time, and ground covered. A set is counted in one of them, and so is
+//! a ride — a duration and a distance mean the same thing whichever discipline
+//! recorded them, which is why these sit at the crate root rather than inside
+//! the entity that needed them first.
 //!
 //! An exercise's measure is fixed by which vocabulary it belongs to, so a set
 //! and its exercise cannot disagree and nothing needs validating.
@@ -22,6 +25,12 @@ pub enum InvalidQuantity {
     ZeroReps,
     #[error("a range spans a positive amount, and zero is not one")]
     ZeroExtent,
+    #[error("{unit} is bounded, and this is outside it")]
+    OutOfRange { unit: &'static str },
+    /// Zero beats per minute. A sensor saying nothing, not a rate — see
+    /// [`crate::cycling::BeatsPerMinute`].
+    #[error("a heart rate of zero is a sensor that said nothing")]
+    NotBeating,
 }
 
 /// How many times the movement was performed.

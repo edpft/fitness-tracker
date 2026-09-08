@@ -53,7 +53,7 @@ async fn derive(pool: &SqlitePool) -> Result<NormalisationSummary, Box<dyn std::
             raw: HevyWorkoutLandingReader::new(pool.clone())?,
             translator: HevyWorkoutTranslator,
             workouts: SqliteGymWorkoutStore::new(pool.clone())?,
-            refusals: SqliteRefusalStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
@@ -219,7 +219,7 @@ fn refusals_survive_the_round_trip() {
         derive(&pool).await?;
 
         let reporter = Refusals::new(
-            SqliteRefusalStore::new(pool.clone())?,
+            SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             SqliteNormalisationRunLog::new(pool.clone()),
         );
         Ok::<_, Box<dyn std::error::Error>>(reporter.refusals().await?)

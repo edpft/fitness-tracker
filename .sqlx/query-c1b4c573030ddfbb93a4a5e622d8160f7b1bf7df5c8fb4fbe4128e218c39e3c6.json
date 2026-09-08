@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT heart_rate_declared_missing_seconds AS \"missing: i64\",\n                      (SELECT COUNT(*) FROM bike_plus_ride_heart_rate) AS \"held!: i64\"\n               FROM bike_plus_ride",
+  "describe": {
+    "columns": [
+      {
+        "name": "missing: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "heart_rate_declared_missing_seconds"
+          }
+        }
+      },
+      {
+        "name": "held!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "c1b4c573030ddfbb93a4a5e622d8160f7b1bf7df5c8fb4fbe4128e218c39e3c6"
+}

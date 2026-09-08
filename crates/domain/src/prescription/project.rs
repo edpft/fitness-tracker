@@ -90,10 +90,9 @@
 use std::collections::VecDeque;
 use std::fmt;
 
-use crate::gym::{
-    GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, Spans, WorkoutItem,
-    sequence::{AtLeastTwo, NonEmpty},
-};
+use crate::gym::{GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, WorkoutItem};
+use crate::measure::Spans;
+use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::{
     linear::{Position, PrimaryPattern},

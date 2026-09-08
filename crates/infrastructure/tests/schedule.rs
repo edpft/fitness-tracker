@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
-    gym::OperatorZone,
+    normalised::OperatorZone,
     schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};

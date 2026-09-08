@@ -98,7 +98,8 @@
 
 use jiff::{civil::Date, tz::TimeZone};
 
-use crate::gym::{Kg, RepCount, exercise::Exercise};
+use crate::gym::{Kg, exercise::Exercise};
+use crate::measure::RepCount;
 
 use crate::prescription::{
     anchor::Entry,

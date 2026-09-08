@@ -14,9 +14,10 @@ use domain::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Interval,
         PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
-    gym::{PositiveDuration, sequence::NonEmpty},
+    measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    sequence::NonEmpty,
 };
 use infrastructure::{
     SqliteCyclingMesocycleStore, SqliteGenerationParameterStore, SqliteGymMesocycleStore,

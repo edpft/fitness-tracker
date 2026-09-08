@@ -22,15 +22,19 @@ use application::{
     status::ExtractionStatus,
 };
 use domain::{
-    gym::OperatorZone,
     landing::{FetchedAt, Watermark},
+    normalised::OperatorZone,
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,
-    HevyWorkoutTranslator, PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore,
-    PelotonWorkoutSamples, PelotonWorkouts, SqliteExtractionRunLog, SqliteGymWorkoutStore,
+    HevyWorkoutTranslator, PelotonRideAccountReader, PelotonWorkoutLandingStore,
+    PelotonWorkoutSampleLandingStore, PelotonWorkoutSamples, PelotonWorkouts,
+    SqliteBikePlusRideStore, SqliteExtractionRunLog, SqliteGymWorkoutStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
-    peloton::auth::{PelotonAuth, PelotonCredentials},
+    peloton::{
+        PelotonRideTranslator,
+        auth::{PelotonAuth, PelotonCredentials},
+    },
 };
 
 use crate::{catalogue::KnownStream, config::SourceAccess};
@@ -94,11 +98,23 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
+    /// A stream that lands but has no derivation of its own.
+    ///
+    /// **Which is not the same as nothing deriving from it.** A Bike+ ride
+    /// composes a workout record and a performance graph (§ 3.1), and is
+    /// derived under the stream that *names* the ride — so the graphs are read
+    /// by `normalise peloton.workouts` and this is the message for asking the
+    /// other way round. A second command deriving the same entity would be two
+    /// answers to one question.
     #[error(
-        "{stream} lands but nothing derives from it yet: there is no cycling workout entity and \
-         no translator (issue #56). `fitness extract {stream}` and `fitness status` work"
+        "{stream} lands, and {derived_by} is what derives from it: an entity composed from two \
+         of a source's responses is derived under the stream that names it. Run `fitness \
+         normalise {derived_by}`"
     )]
-    NotYetDerived { stream: String },
+    NotYetDerived {
+        stream: String,
+        derived_by: &'static str,
+    },
     #[error("{stream} is reached with a login, and {given} was resolved instead")]
     WrongCredential { stream: String, given: &'static str },
     #[error(transparent)]
@@ -178,6 +194,7 @@ async fn peloton_samples(command: Command, database: &Path) -> Result<Outcome, W
         }
         Command::Normalise(_) | Command::Refusals => Err(WiringError::NotYetDerived {
             stream: PelotonWorkoutSampleLandingStore::STREAM.to_owned(),
+            derived_by: PelotonWorkoutLandingStore::STREAM,
         }),
         Command::Status => {
             let reader = ExtractionStatus::new(landing, resumption, runs);
@@ -195,17 +212,20 @@ async fn peloton_samples(command: Command, database: &Path) -> Result<Outcome, W
     }
 }
 
-/// Peloton's workout list, landed into the table shaped for it.
+/// Peloton's workout list, landed into the table shaped for it and derived into
+/// Bike+ rides.
 ///
-/// **Landing only.** There is no cycling workout entity yet and so no
-/// translator, which makes `normalise` an error here rather than a no-op: a
-/// derivation that silently produces nothing is indistinguishable from one that
-/// ran and found nothing to do.
+/// **The derivation reads two landing tables**, which is what constitution
+/// 3.1.0 allowed: a ride's start and duration come from this stream and its
+/// samples from `peloton.workout_samples`, and neither response is an entity
+/// alone. So a ride is derived under *this* stream's name — the one the source
+/// names a record by — and `normalise peloton.workout_samples` stays an error
+/// rather than becoming a second way to ask for the same thing.
 async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = PelotonWorkoutLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::Extract(access) => {
@@ -235,14 +255,48 @@ async fn peloton_workouts(command: Command, database: &Path) -> Result<Outcome, 
             let summary = extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotYetDerived {
-            stream: PelotonWorkoutLandingStore::STREAM.to_owned(),
-        }),
+        Command::Normalise(zone) => {
+            // No lock, as on the gym side: a derivation reads raw and writes
+            // only its own tables.
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: PelotonRideAccountReader::new(pool.clone())?,
+                    translator: PelotonRideTranslator,
+                    workouts: SqliteBikePlusRideStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        PelotonWorkoutLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+
+            let summary = normalisation.normalise().await?;
+            Ok(Outcome::Derived(Box::new(summary)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                PelotonWorkoutLandingStore::new(pool.clone())?,
+                SqliteBikePlusRideStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {
@@ -291,7 +345,10 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
                     raw: HevyWorkoutLandingReader::new(pool.clone())?,
                     translator: HevyWorkoutTranslator,
                     workouts: SqliteGymWorkoutStore::new(pool.clone())?,
-                    refusals: SqliteRefusalStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        HevyWorkoutLandingStore::STREAM,
+                    )?,
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
@@ -303,7 +360,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
         }
         Command::Refusals => {
             let reporter = Refusals::new(
-                SqliteRefusalStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             );
             Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
@@ -315,7 +372,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             let derivation = DerivationStanding::new(
                 HevyWorkoutLandingStore::new(pool.clone())?,
                 SqliteGymWorkoutStore::new(pool.clone())?,
-                SqliteRefusalStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             )
             .derivation_status()

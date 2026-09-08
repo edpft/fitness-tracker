@@ -1,4 +1,4 @@
-//! When a workout started, in a way that survives a time zone.
+//! When something started, in a way that survives a time zone.
 //!
 //! § II.3: timestamps carry an IANA identifier and are never naive. 8pm stays
 //! 8pm — wall-clock time is what is entered and what is displayed. Which
@@ -73,18 +73,18 @@ impl fmt::Display for OperatorZone {
 
 crate::newtype::from_str_via_string!(OperatorZone, UnknownTimeZone);
 
-/// When a workout started.
+/// When an observation started.
 ///
 /// There is no constructor taking an instant alone, which is how "never naive"
 /// stops being a rule to remember and becomes a shape the type will not let you
 /// build.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkoutStart {
+pub struct StartedAt {
     instant: Timestamp,
     zone: OperatorZone,
 }
 
-impl WorkoutStart {
+impl StartedAt {
     pub const fn new(instant: Timestamp, zone: OperatorZone) -> Self {
         Self { instant, zone }
     }
@@ -106,7 +106,7 @@ impl WorkoutStart {
     }
 }
 
-impl fmt::Display for WorkoutStart {
+impl fmt::Display for StartedAt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.wall_clock())
     }

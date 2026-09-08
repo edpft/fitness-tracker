@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT started_at_utc AS \"started!: String\", zone AS \"zone!: String\",\n                      duration_seconds AS \"duration!: i64\",\n                      distance_millimetres AS \"distance!: i64\",\n                      heart_rate_declared_missing_seconds AS \"missing: i64\"\n               FROM bike_plus_ride",
+  "describe": {
+    "columns": [
+      {
+        "name": "started!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "distance_millimetres"
+          }
+        }
+      },
+      {
+        "name": "missing: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "heart_rate_declared_missing_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2d2a9e6f149d536e2fa307426c71ea0031aed71de7210ecf3b9f59c274fb3e8d"
+}

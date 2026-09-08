@@ -28,6 +28,8 @@
 
 use std::{fmt, num::NonZeroU32};
 
+use crate::measure::InvalidQuantity;
+
 /// One of the seven power zones.
 ///
 /// A closed enum rather than a validated integer: there are exactly seven, they
@@ -291,11 +293,33 @@ impl Watts {
     }
 }
 
+impl TryFrom<String> for Watts {
+    type Error = InvalidQuantity;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse().map(Self).map_err(|_| {
+            if value.starts_with('-') {
+                InvalidQuantity::Negative {
+                    unit: "power",
+                    value,
+                }
+            } else {
+                InvalidQuantity::NotANumber {
+                    unit: "watts",
+                    value,
+                }
+            }
+        })
+    }
+}
+
 impl fmt::Display for Watts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}W", self.0)
     }
 }
+
+crate::newtype::from_str_via_string!(Watts, InvalidQuantity);
 
 /// How an FTP was arrived at.
 ///

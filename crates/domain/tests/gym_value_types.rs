@@ -6,10 +6,11 @@
 //! hand-picked example works.
 
 use domain::gym::{
-    Distance, Kg, Load, Metres, NonEmpty, Performed, RepCount, Rir, SetKind, SignedKg,
+    Kg, Load, Performed, Rir, SetKind, SignedKg,
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
-    sequence::AtLeastTwo,
 };
+use domain::measure::{Distance, Metres, RepCount};
+use domain::sequence::{AtLeastTwo, NonEmpty};
 use proptest::prelude::*;
 
 /// A load's text form is what gets persisted and compared against rows written
