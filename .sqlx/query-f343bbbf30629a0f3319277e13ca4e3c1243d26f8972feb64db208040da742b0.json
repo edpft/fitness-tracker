@@ -1,0 +1,28 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(DISTINCT source_record_id) AS \"sources!: i64\",\n                      COUNT(*) AS \"rides!: i64\" FROM bike_plus_ride",
+  "describe": {
+    "columns": [
+      {
+        "name": "sources!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "rides!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f343bbbf30629a0f3319277e13ca4e3c1243d26f8972feb64db208040da742b0"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "DELETE FROM normalisation_refusal",
+  "query": "DELETE FROM bike_plus_ride_heart_rate",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,5 +8,5 @@
     },
     "nullable": []
   },
-  "hash": "2ea97437a48d12ea16961841939be28b143724b7583c390e03a567e6a7c56d69"
+  "hash": "080489bcc78432a7122ed8223375b0e6a99daf2288490cc88280ccaeddb033f4"
 }

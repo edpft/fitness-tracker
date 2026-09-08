@@ -113,7 +113,7 @@ async fn corpus_store() -> Result<
             raw: HevyWorkoutLandingReader::new(pool.clone())?,
             translator: HevyWorkoutTranslator,
             workouts: SqliteGymWorkoutStore::new(pool.clone())?,
-            refusals: SqliteRefusalStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },

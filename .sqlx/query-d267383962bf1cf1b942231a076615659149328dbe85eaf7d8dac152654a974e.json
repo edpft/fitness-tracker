@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT source_record_id AS \"source!: String\", started_at_utc AS \"started!: String\",\n                  duration_seconds AS \"duration!: i64\", distance_millimetres AS \"distance!: i64\"\n           FROM bike_plus_ride ORDER BY landing_record_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "source!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "started!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "distance_millimetres"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d267383962bf1cf1b942231a076615659149328dbe85eaf7d8dac152654a974e"
+}

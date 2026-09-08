@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT at_seconds AS \"at!: i64\", power_watts AS \"power!: i64\",\n                      speed_millimetres_per_hour AS \"speed!: i64\"\n               FROM bike_plus_ride_sample ORDER BY at_seconds",
+  "describe": {
+    "columns": [
+      {
+        "name": "at!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_sample",
+            "name": "at_seconds"
+          }
+        }
+      },
+      {
+        "name": "power!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_sample",
+            "name": "power_watts"
+          }
+        }
+      },
+      {
+        "name": "speed!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_sample",
+            "name": "speed_millimetres_per_hour"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f1dca7fdcb090c9064185f1a1d3a6feb0d9bd16882e19bf632f5e85c49defbe8"
+}

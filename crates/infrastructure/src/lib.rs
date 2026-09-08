@@ -23,12 +23,13 @@ pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonWorkoutLandingStore,
-    PelotonWorkoutSampleLandingStore, SqliteCyclingMesocycleStore, SqliteDiaryStore,
-    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymWorkoutStore, SqliteNormalisationRunLog,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonRideAccountReader,
+    PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore, SqliteBikePlusRideStore,
+    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
+    SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, connect,
 };
 
 /// The pool every store is built on, so a composition root can open one and

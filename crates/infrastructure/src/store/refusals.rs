@@ -18,7 +18,15 @@ use sqlx::SqlitePool;
 
 use super::{corrupt, normalisation_run_for_storage, store_error};
 
-/// Refusals for Hevy workouts.
+/// Refusals for one stream.
+///
+/// **The stream is a constructor argument, and this is the one store where it
+/// has to be.** Every other one is bound to a table and is asked which stream
+/// it is about; refusals from every stream share a table, because what a
+/// refusal *is* does not vary by source and a column per landing table would
+/// grow with the catalogue. So the stream cannot be read off the table, and is
+/// taken from the landing store the derivation is already bound to rather than
+/// named again here — which keeps a run's identity derived rather than passed.
 #[derive(Debug, Clone)]
 pub struct SqliteRefusalStore {
     pool: SqlitePool,
@@ -28,12 +36,12 @@ pub struct SqliteRefusalStore {
 impl SqliteRefusalStore {
     /// # Errors
     ///
-    /// [`InvalidStream`] if the landing store's stream constant is not a stream
+    /// [`InvalidStream`] if the stream constant it is given is not a stream
     /// name.
-    pub fn new(pool: SqlitePool) -> Result<Self, InvalidStream> {
+    pub fn new(pool: SqlitePool, stream: &str) -> Result<Self, InvalidStream> {
         Ok(Self {
             pool,
-            stream: LandingStream::try_from(super::HevyWorkoutLandingStore::STREAM)?,
+            stream: LandingStream::try_from(stream)?,
         })
     }
 }
@@ -114,8 +122,39 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
             field: "value",
             detail,
         }),
+        "unmodelled" => Ok(RefusalReason::Unmodelled { detail }),
+        "companion-not-landed" => Ok(RefusalReason::CompanionNotLanded { stream: detail }),
+        // The series is a `&'static str` on the way out and text on the way
+        // back, so what is read is the name and not the identity. Both series a
+        // ride can refuse are named here; anything else is a version that knew
+        // something this one does not, which is the arm below.
+        "no-readings-in-series" => Ok(RefusalReason::NoReadingsInSeries {
+            series: series_named(&detail)?,
+        }),
+        "missing-series" => Ok(RefusalReason::MissingSeries {
+            series: series_named(&detail)?,
+        }),
         other => Err(StoreError::Corrupt {
             detail: format!("{other:?} is not a refusal reason this version knows"),
+        }),
+    }
+}
+
+/// A series name, back as the `&'static str` the reason carries.
+///
+/// The set is closed on purpose. A refusal is read against the derivation that
+/// produced it, and a name this version does not have is a row written by a
+/// version that knew a series this one does not.
+fn series_named(detail: &str) -> Result<&'static str, StoreError> {
+    match detail {
+        "heart rate" => Ok("heart rate"),
+        "bike sample" => Ok("bike sample"),
+        "output" => Ok("output"),
+        "cadence" => Ok("cadence"),
+        "resistance" => Ok("resistance"),
+        "speed" => Ok("speed"),
+        other => Err(StoreError::Corrupt {
+            detail: format!("{other:?} is not a series this version knows"),
         }),
     }
 }
@@ -137,7 +176,10 @@ impl RefusalStore for SqliteRefusalStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        sqlx::query!("DELETE FROM normalisation_refusal")
+        // This stream's, and only this stream's. Emptying the table would be
+        // one derivation deleting what another had just recorded.
+        let stream = self.stream.to_string();
+        sqlx::query!("DELETE FROM normalisation_refusal WHERE stream = ?", stream)
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
@@ -155,13 +197,14 @@ impl RefusalStore for SqliteRefusalStore {
             sqlx::query!(
                 r#"
                 INSERT INTO normalisation_refusal (
-                    run_id, landing_record_id, source_record_id,
+                    run_id, stream, landing_record_id, source_record_id,
                     locus_kind, entry_index, set_index, group_id,
                     exercise, reason, kind, detail
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
                 run_id,
+                stream,
                 landing_record_id,
                 source_record_id,
                 locus_kind,
@@ -183,6 +226,7 @@ impl RefusalStore for SqliteRefusalStore {
     }
 
     async fn all(&self) -> Result<Vec<Refusal>, StoreError> {
+        let stream = self.stream.to_string();
         let rows = sqlx::query!(
             r#"
             SELECT landing_record_id AS "landing_record_id!: i64",
@@ -195,8 +239,10 @@ impl RefusalStore for SqliteRefusalStore {
                    reason AS "reason!: String",
                    detail AS "detail: String"
             FROM normalisation_refusal
+            WHERE stream = ?
             ORDER BY id ASC
-            "#
+            "#,
+            stream
         )
         .fetch_all(&self.pool)
         .await

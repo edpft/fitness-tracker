@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT at_seconds AS \"at!: i64\", beats_per_minute AS \"bpm!: i64\"\n               FROM bike_plus_ride_heart_rate ORDER BY at_seconds",
+  "describe": {
+    "columns": [
+      {
+        "name": "at!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_heart_rate",
+            "name": "at_seconds"
+          }
+        }
+      },
+      {
+        "name": "bpm!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_heart_rate",
+            "name": "beats_per_minute"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8a37c10b001e82652a13810ff98bc4cb935efa6521d1815047a6e33b9dbfecdf"
+}
