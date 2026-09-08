@@ -153,6 +153,17 @@ fn graph(
     )
 }
 
+/// A graph stating an average of the caller's choosing.
+///
+/// `graph` states [`STATED_AVERAGE_POWER`] for every ride; a test needs to
+/// state the average whose arithmetic is under test.
+fn graph_averaging(offsets: &[u32], power: &[u32], average: u32) -> String {
+    graph(offsets, power, None, "2.0", "km").replace(
+        &format!(r#""value":{STATED_AVERAGE_POWER}"#),
+        &format!(r#""value":{average}"#),
+    )
+}
+
 fn record(stream: &LandingStream, endpoint: &str, id: &str, payload: &str) -> Built<LandingRecord> {
     Ok(LandingRecord::land(
         stream.clone(),
@@ -516,6 +527,78 @@ fn an_unknown_distance_unit_refuses_the_ride() {
             ),
             "{refusals:?}"
         );
+    });
+}
+
+/// The FTP table is derived with the sessions, and re-derived with them.
+///
+/// **Both halves matter** (issue #56). The value is what the test measured, and
+/// running the derivation again leaves the same row rather than a second one —
+/// which is what makes rebuilding the table safe and freezing a row
+/// unnecessary.
+#[test]
+fn a_test_session_writes_the_ftp_it_measured_and_rewrites_it() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        // 209 W stated, which is the operator's 2024-09-15 test: it rounds to
+        // 199 and truncates to 198, so it tells the two apart.
+        let (pool, _directory) = landed(
+            vec![
+                ("warm-up", workout("warm-up", Kind::WarmUp, 100, 400)),
+                ("effort", workout("effort", Kind::Test, 400, 1600)),
+            ],
+            vec![
+                ("warm-up", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                ("effort", graph_averaging(&[1, 2], &[93, 132], 209)),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        for pass in 1..=2 {
+            let summary = derive(&pool).await.expect("a derivation");
+            assert_eq!(summary.workouts_written.as_usize(), 1, "pass {pass}");
+
+            let rows = sqlx::query!(
+                r#"SELECT effect_from AS "from!: String",
+                          watts       AS "watts!: i64",
+                          provenance  AS "provenance!: String"
+                     FROM ftp"#
+            )
+            .fetch_all(&pool)
+            .await
+            .expect("the series");
+
+            assert_eq!(rows.len(), 1, "one row, not one per pass (pass {pass})");
+            assert_eq!(rows[0].watts, 199, "209 W rounds to 199");
+            assert_eq!(rows[0].provenance, "estimated");
+            // The day the test was ridden: 400 seconds after the epoch is the
+            // warm-up's start, which is the session's.
+            assert_eq!(rows[0].from, "1970-01-01");
+        }
+    });
+}
+
+/// An ordinary ride measures no FTP, so the series stays empty.
+#[test]
+fn a_ride_writes_no_ftp() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
+            vec![("ride-1", graph(&[1, 2], &[93, 132], None, "2.0", "km"))],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1);
+
+        let row = sqlx::query!(r#"SELECT COUNT(*) AS "held!: i64" FROM ftp"#)
+            .fetch_one(&pool)
+            .await
+            .expect("a count");
+        assert_eq!(row.held, 0);
     });
 }
 

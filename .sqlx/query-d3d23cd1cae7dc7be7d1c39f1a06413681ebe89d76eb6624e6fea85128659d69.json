@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM ftp",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d3d23cd1cae7dc7be7d1c39f1a06413681ebe89d76eb6624e6fea85128659d69"
+}

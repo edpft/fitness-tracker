@@ -10,11 +10,14 @@
 
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Ftp, FtpProvenance,
-        Interval, PlannedRide, PowerZone, Ride, RideVenue, SessionPosition, Watts, ZoneProfile,
-        bottom_level, diverges, mesocycles, partition, span, zones_lost,
+        BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle, CyclingSession,
+        CyclingWeekdays, Ftp, FtpProvenance, Interval, PerformedSession, PlannedRide, PowerZone,
+        Resistance, Ride, RideRecord, RideSample, RideVenue, SessionPosition, Speed, Watts,
+        ZoneProfile, bottom_level, diverges, mesocycles, partition, span, zones_lost,
     },
-    measure::PositiveDuration,
+    landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, SourceRecordId},
+    measure::{Duration, Metres, PositiveDuration},
+    normalised::{OperatorZone, StartedAt},
     plan::Occupies,
     provider::{ExternalProgramme, ProgrammeName, Provider},
     sequence::NonEmpty,
@@ -713,4 +716,89 @@ fn a_date_months_after_the_start_resolves_to_the_right_microcycle() {
     assert_eq!(long.microcycle_of(date(2026, 12, 14)), Some(13));
     assert_eq!(long.microcycle_of(date(2026, 12, 20)), Some(13));
     assert_eq!(long.microcycle_of(date(2026, 12, 21)), None);
+}
+
+/// A ride stating an average, with one sample that deliberately disagrees.
+///
+/// Fallible and unwrapped at each call site, as the helper above is.
+fn ridden(
+    started: jiff::civil::Date,
+    average: u32,
+) -> Result<BikePlusRide, Box<dyn std::error::Error>> {
+    let instant = started.to_zoned(jiff::tz::TimeZone::UTC)?.timestamp();
+    let sample = RideSample {
+        at: Duration::from_seconds(1),
+        // Not the average. Peloton states its own and it is not the mean of
+        // the series beside it, so a fixture agreeing with itself would pass
+        // whether the derivation read the stated figure or computed one.
+        power: Watts::from_u32(1),
+        cadence: Cadence::from_revolutions_per_minute(90),
+        resistance: Resistance::from_percentage(45)?,
+        speed: Speed::from_millimetres_per_hour(33_100_000),
+    };
+    Ok(BikePlusRide::new(RideRecord {
+        started_at: StartedAt::new(instant, OperatorZone::try_from("UTC".to_owned())?),
+        duration: Duration::from_seconds(1200),
+        distance: Metres::from_millimetres(11_000_000),
+        average_power: Watts::from_u32(average),
+        samples: NonEmpty::of(sample, vec![]),
+        heart_rate: None,
+        provenance: EventProvenance::new(
+            Endpoint::try_from("/api/user/u/workouts")?,
+            EventKind::Updated,
+            None,
+        )
+        .into(),
+        source_record_id: SourceRecordId::try_from("ride-1")?,
+        landed_as: ComposedFrom {
+            ride: LandingRecordId::FIRST,
+            samples: LandingRecordId::FIRST,
+        },
+    }))
+}
+
+/// The six FTP values the operator's record holds, from the six tests.
+///
+/// **The whole point of part 3 of issue #56.** Each is the twenty-minute
+/// test's stated average power times 0.95, and 2026-07-22's 172 is what
+/// Peloton's own `/api/me` reports. 2024-09-15 is the one that distinguishes
+/// the arithmetic: 209 W rounds to 199 and truncates to 198.
+#[test]
+fn a_test_measures_the_ftp_the_record_holds() {
+    let expected = [
+        (date(2023, 12, 27), 151, 143),
+        (date(2024, 1, 27), 193, 183),
+        (date(2024, 9, 15), 209, 199),
+        (date(2025, 8, 16), 183, 174),
+        (date(2026, 5, 10), 163, 155),
+        (date(2026, 7, 22), 181, 172),
+    ];
+
+    for (day, average, watts) in expected {
+        let session = PerformedSession::Test {
+            warm_up: ridden(day, 100).expect("a warm-up"),
+            effort: ridden(day, average).expect("an effort"),
+            cool_down: None,
+        };
+        let ftp = session
+            .measured_ftp()
+            .expect("a test measures one")
+            .expect("a threshold");
+        assert_eq!(ftp.watts(), Watts::from_u32(watts), "on {day}");
+        assert_eq!(ftp.from(), day, "dated to the test");
+        assert_eq!(ftp.provenance(), FtpProvenance::Estimated);
+    }
+}
+
+/// A ride measures nothing, and the variant is what says so.
+///
+/// Nothing has to recognise a test from a class, a title or a duration —
+/// grouping already did that from Peloton's `series_id`.
+#[test]
+fn an_ordinary_ride_measures_no_ftp() {
+    let session = PerformedSession::Ride {
+        main: ridden(date(2026, 7, 22), 181).expect("a ride"),
+        cool_down: None,
+    };
+    assert!(session.measured_ftp().is_none());
 }

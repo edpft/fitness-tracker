@@ -234,7 +234,8 @@ fn cycling_command() -> ClapCommand {
                 ))
                 .arg(Arg::new("ftp").long("ftp").value_name("watts").help(
                     "Functional threshold power, to convert each zone into watts. \
-                     Omitted, the zones print without them",
+                     Omitted, the value in force on the session's date is read \
+                     from the FTP tests in the record",
                 )),
         )
         .subcommand(

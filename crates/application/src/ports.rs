@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, future::Future};
 
 use jiff::{Timestamp, civil::Date};
 
-use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
+use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, Ftp};
 use domain::gym::{Load, Performed, PerformedGymSession, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -1031,6 +1031,35 @@ pub trait PlanStore {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn author(&self, plan: &Plan) -> impl Future<Output = Result<PlanId, StoreError>> + Send;
+}
+
+/// The FTP series, read by the date a value was in force.
+///
+/// **§ 13's effect-dating, as a port rather than as a flag.** The value that
+/// applies to a session is the one in force on that session's date, and a later
+/// test supersedes without touching what came before. The operator, 2026-09-08,
+/// on why the series exists at all rather than only today's number: *"the main
+/// reason we need it is to interpret historical data, to know what zone 2 was
+/// when a specific ride was ridden."*
+///
+/// A reader and nothing more. What writes the series is the cycling derivation,
+/// because every value in it is a function of a test that was ridden.
+pub trait FtpHistory {
+    /// The value in force on a date, or [`None`] where no test precedes it.
+    ///
+    /// **In force, not nearest.** A test on the day itself counts; one the week
+    /// after does not, however much closer it is — a session prescribed in
+    /// September was a share of what was known in September, and § 13 is
+    /// explicit that the value in force at the time is the one that applies.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn in_force_on(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<Ftp>, StoreError>> + Send;
 }
 
 /// A cycling mesocycle, read out of the plan that holds it.

@@ -13,13 +13,17 @@
 //! a sink to deliver to. Cycling has neither built: decision 0025 settled that
 //! Peloton should be both, and until it is, this command prescribes and stops.
 //!
-//! **The FTP is still an argument.** It is optional and its absence is not
-//! filled in — a session prints its zones either way, and prints watts only when
-//! told what a zone is a share of. A default here would be a number nobody
-//! decided. Taking it from the record instead is issue #56.
+//! **The FTP comes from the record** (issue #56, 2026-09-08). Every value in it
+//! is a twenty-minute test's stated average power times 0.95, and the one that
+//! applies is the one in force on the session's date — § 13's effect-dating,
+//! resolved here rather than typed on every run. `--ftp` survives as an
+//! override and asserts what it is given; without it and without a test, the
+//! zones still print, because a session that cannot say what a zone is in watts
+//! is still the session to ride.
 
 use std::path::Path;
 
+use application::FtpHistory;
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, Ftp, PlannedRide, Ride,
@@ -28,7 +32,7 @@ use domain::{
     measure::PositiveDuration,
 };
 use infrastructure::{
-    SqliteCyclingMesocycleStore, connect,
+    SqliteCyclingMesocycleStore, SqliteFtpHistory, connect,
     peloton::{PelotonClasses, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -67,7 +71,7 @@ pub async fn next(
     to: Option<(&PelotonClasses, &PelotonStack)>,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool);
+    let store = SqliteCyclingMesocycleStore::new(pool.clone());
 
     let (programme, next) = application::cycling::next_ride(&store, from)
         .await
@@ -81,6 +85,14 @@ pub async fn next(
             ),
             other => Failure::message(other.to_string(), exit::USAGE),
         })?;
+
+    // **In force on the session's date, not on today's.** The next ride may be
+    // a fortnight away, and a test ridden between now and then is the one that
+    // applies to it. An override stands whatever the record says.
+    let ftp = match ftp {
+        Some(asserted) => Some(asserted),
+        None => SqliteFtpHistory::new(pool).in_force_on(next.date).await?,
+    };
 
     let extra = PositiveDuration::from_seconds(EXTRA_COOL_DOWN_SECONDS)
         .map_err(|error| Failure::usage(&error))?;
@@ -208,7 +220,10 @@ fn report(
 
     match ftp {
         Some(ftp) => println!("  at FTP    {ftp}"),
-        None => println!("  Pass --ftp to see what each zone means in watts."),
+        None => println!(
+            "  No FTP test precedes this session, so the zones print without watts. \
+             Ride one and collect it, or pass --ftp."
+        ),
     }
 }
 

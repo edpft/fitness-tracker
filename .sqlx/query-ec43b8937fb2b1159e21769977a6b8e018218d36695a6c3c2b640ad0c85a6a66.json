@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO ftp (effect_from, watts, provenance, measured_by, run_id)\n        VALUES (?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "ec43b8937fb2b1159e21769977a6b8e018218d36695a6c3c2b640ad0c85a6a66"
+}
