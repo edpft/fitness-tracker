@@ -61,8 +61,9 @@ it would have to recognise.
 warm-up, a ride, a cool-down — and *"we would never consider these to be two
 separate things that could be planned separately but Peloton does split them"*.
 The same is true of the gym: the operator split single sessions across several
-Hevy routines so he could compose them, and `GymWorkout` calls that canonical-
-layer work. **That is the next piece**, and it is deliberately not in this one —
+Hevy routines so he could compose them — 21 of his 140 training days carry more
+than one record, three of them four — and `GymWorkout` called that canonical-
+layer work. **That is #104**, and it is deliberately not in this piece:
 `gym_workout` is what the anchor resolution, the exercise history and `compare`
 all read, and the autumn opens on 14 September.
 
