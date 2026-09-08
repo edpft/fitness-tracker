@@ -6,6 +6,16 @@ on:
     - cron: '0 3 * * 1'
   workflow_dispatch:
 
+# The caller has to ask for these. The repository's default workflow
+# permissions are read-only, and a reusable workflow cannot grant itself
+# more than its caller holds — so `nix-flake-update.yml`, which needs to
+# push a branch and open a pull request, failed at startup with no jobs
+# and no log every Monday from 2026-08-17 on. `release.yml` and
+# `auto-merge.yml` declare the same pair for the same reason.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   # Runs `nix flake check` against the new inputs before opening anything, so
   # a broken update never becomes a pull request. That pull request will show
