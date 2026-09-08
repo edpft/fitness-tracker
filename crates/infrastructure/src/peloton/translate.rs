@@ -34,7 +34,7 @@ use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     cycling::{
         BeatsPerMinute, BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries,
-        PerformedSession, RideRecord, RideSample,
+        PerformedSession, RideRecord, RideSample, Watts,
     },
     landing::{EventKind, Provenance},
     measure::{Duration, Metres},
@@ -67,6 +67,16 @@ const RESISTANCE: &str = "resistance";
 const SPEED: &str = "speed";
 /// The fifth series, which is not the bike's.
 const HEART_RATE: &str = "heart_rate";
+
+/// Peloton's name for the average power it computed over the ride.
+///
+/// Read from `average_summaries` rather than from the `output` metric's own
+/// `average_value`: the two disagree on 6 of the operator's 231 rides, and this
+/// is the one his summary panel shows.
+const AVERAGE_POWER: &str = "avg_output";
+/// The unit that average is stated in, which is checked rather than assumed —
+/// the distance beside it arrives in whichever unit an account preference says.
+const WATTS: &str = "watts";
 
 /// The Peloton adapter's translator.
 ///
@@ -265,6 +275,7 @@ fn ride_from(
     })?;
 
     let distance = distance_of(&graph)?;
+    let average_power = average_power_of(&graph)?;
     let samples = samples_of(&graph)?;
     let samples = NonEmpty::new(samples).map_err(|_| RefusalReason::NoReadingsInSeries {
         series: "bike sample",
@@ -281,6 +292,7 @@ fn ride_from(
             started_at: StartedAt::new(instant, zone.clone()),
             duration,
             distance,
+            average_power,
             samples,
             heart_rate,
             provenance: record.provenance().clone(),
@@ -387,6 +399,34 @@ fn distance_of(graph: &PerformanceGraph<'_>) -> Result<Metres, RefusalReason> {
     // value of five decimal places is a metre value of two.
     Metres::try_from(shift_point(&kilometres, 3).ok_or_else(|| unreadable(kilometres.clone()))?)
         .map_err(|error| unreadable(error.to_string()))
+}
+
+/// What the source says the ride averaged, in watts.
+///
+/// **Peloton's figure, not a mean of the samples.** The graph carries both, and
+/// they are different numbers: across the operator's 231 rides the mean of the
+/// per-second series disagrees with this on 33, once by 10 watts, because the
+/// series is sparse and an unweighted mean reads an absent second as one that
+/// did not happen. § 6 makes power method-dependent and this is the method's
+/// own answer, so a ride that states none is refused rather than given ours.
+fn average_power_of(graph: &PerformanceGraph<'_>) -> Result<Watts, RefusalReason> {
+    let unreadable = |detail: String| RefusalReason::UnreadableValue {
+        field: "avg_output",
+        detail,
+    };
+
+    let average = graph
+        .average(AVERAGE_POWER)
+        .ok_or_else(|| unreadable("the graph stated no average output".to_owned()))?;
+    let value = number(average.value)
+        .ok_or_else(|| unreadable("the graph's average output has no value".to_owned()))?;
+    match average.display_unit.as_deref() {
+        Some(WATTS) => {}
+        Some(other) => return Err(unreadable(format!("{value} in unknown unit {other:?}"))),
+        None => return Err(unreadable(format!("{value} in no stated unit"))),
+    }
+
+    Watts::try_from(value.to_owned()).map_err(|error| unreadable(error.to_string()))
 }
 
 /// A decimal string multiplied by a power of ten, exactly.

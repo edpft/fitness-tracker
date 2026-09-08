@@ -150,6 +150,16 @@ pub struct PerformanceGraph<'a> {
     pub metrics: Vec<Metric<'a>>,
     #[serde(borrow, default)]
     pub summaries: Vec<Summary<'a>>,
+    /// The ride's averages, as the source computed them.
+    ///
+    /// **Peloton states two of each and they are not always the same number.**
+    /// `avg_output` here, and `average_value` on the matching entry in
+    /// [`Self::metrics`], disagree on 6 of the operator's 231 rides, the metric
+    /// sitting a watt above this one every time. That is one source
+    /// contradicting itself about one ride, so this reads the figure Peloton's
+    /// own summary panel shows and leaves the other where it landed.
+    #[serde(borrow, default)]
+    pub average_summaries: Vec<Summary<'a>>,
 }
 
 impl<'a> PerformanceGraph<'a> {
@@ -172,6 +182,13 @@ impl<'a> PerformanceGraph<'a> {
     /// The total of that name, if the graph served one.
     pub fn summary(&self, slug: &str) -> Option<&Summary<'a>> {
         self.summaries
+            .iter()
+            .find(|summary| summary.slug.as_deref() == Some(slug))
+    }
+
+    /// The average of that name, if the graph served one.
+    pub fn average(&self, slug: &str) -> Option<&Summary<'a>> {
+        self.average_summaries
             .iter()
             .find(|summary| summary.slug.as_deref() == Some(slug))
     }

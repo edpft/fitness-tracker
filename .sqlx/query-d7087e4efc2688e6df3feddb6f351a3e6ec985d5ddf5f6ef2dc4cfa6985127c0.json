@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO bike_plus_ride (\n            landing_record_id, samples_record_id, source_record_id,\n            started_at_utc, zone, duration_seconds, distance_millimetres,\n            average_power_watts, heart_rate_declared_missing_seconds,\n            endpoint, event_kind, event_time, run_id, session, role\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "d7087e4efc2688e6df3feddb6f351a3e6ec985d5ddf5f6ef2dc4cfa6985127c0"
+}
