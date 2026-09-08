@@ -23,9 +23,9 @@ pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use settings::{Settings, SettingsError};
 pub use store::{
-    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonRideAccountReader,
-    PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore, SqliteBikePlusRideStore,
-    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    HevyWorkoutLandingReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
+    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymWorkoutStore,
     SqliteNormalisationRunLog, SqlitePerformedWorkoutReader, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,

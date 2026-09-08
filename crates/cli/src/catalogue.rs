@@ -191,22 +191,30 @@ pub const SOURCES: [KnownSource; 2] = [
 
 /// Every stream this build can collect.
 ///
-/// **Peloton serves two**, which is the case this table was shaped for: one
-/// source, one credential, one API root, and two kinds of thing that resume,
-/// run and lock independently. A graph is a request per workout against a
-/// different endpoint, so it is a second stream rather than a wider payload.
-pub const KNOWN: [KnownStream; 3] = [
+/// **Peloton has one entry and two walks behind it.** It used to have two
+/// entries — the ride list and the performance graphs — and the operator named
+/// the flaw, 2026-09-08: *"if one command needs to be run before another, those
+/// commands aren't meaningfully separate and it shouldn't be possible to run
+/// them in the wrong order"*. Collecting the graphs without the rides derives
+/// nothing, and collecting the rides without the graphs derives nothing either,
+/// so they were never two things an operator could usefully choose between.
+///
+/// They are still two walks, two tables and two resumption points, because a
+/// landing record holds one response as served (§ II.1) and the two endpoints
+/// answer separately. What is gone is the ability to ask for one of them.
+///
+/// The names are ours rather than Peloton's, which is the operator's other
+/// correction: *"workouts was right for Hevy but it isn't the right term for
+/// Peloton and `workout_samples` is the thing that proves it, their name suffixed
+/// to ours"*. One Hevy record is a workout; one Peloton record is a ride.
+pub const KNOWN: [KnownStream; 2] = [
     KnownStream {
         source: &SOURCES[0],
         entity: "workouts",
     },
     KnownStream {
         source: &SOURCES[1],
-        entity: "workouts",
-    },
-    KnownStream {
-        source: &SOURCES[1],
-        entity: "workout_samples",
+        entity: "rides",
     },
 ];
 
@@ -249,11 +257,18 @@ impl KnownDiscipline {
 }
 
 /// Every kind of training this build has a daily loop for.
-pub const DISCIPLINES: [KnownDiscipline; 1] = [KnownDiscipline {
-    name: "gym",
-    collects: &KNOWN[0],
-    delivers_to: &SOURCES[0],
-}];
+pub const DISCIPLINES: [KnownDiscipline; 2] = [
+    KnownDiscipline {
+        name: "gym",
+        collects: &KNOWN[0],
+        delivers_to: &SOURCES[0],
+    },
+    KnownDiscipline {
+        name: "cycling",
+        collects: &KNOWN[1],
+        delivers_to: &SOURCES[1],
+    },
+];
 
 /// The discipline of that name, if this build knows it.
 pub fn discipline(name: &str) -> Option<&'static KnownDiscipline> {

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT kind AS \"kind!: String\" FROM cycling_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "kind!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d080ea6440394d85eeeb5c91e450cadefbdd47a9f2160856a031c5a0bec7524a"
+}

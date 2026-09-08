@@ -155,11 +155,15 @@ pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
 }
 
-/// The four numbers that must add up.
+/// The numbers that must add up.
 ///
-/// `records read` equals workouts plus withdrawals plus retractions plus
-/// records refused. A record that went missing shows up as arithmetic that does
-/// not reconcile, without anyone having to query a table.
+/// `records read` equals `records composed` plus `records superseded` plus
+/// retractions plus `records refused`. A record that went missing shows up as
+/// arithmetic that does not reconcile, without anyone having to query a table.
+///
+/// **`workouts written` is deliberately outside that sum**, and says so by
+/// standing apart from the record counts: since a session composes several
+/// records, it counts a different thing from everything beside it.
 ///
 /// Refusals are reported and do not affect the exit code. A run that recorded
 /// 26 of them succeeded — it found 26 things wrong with the data and said so,
@@ -168,6 +172,12 @@ pub fn derivation_succeeded(summary: &NormalisationSummary) {
     println!("derivation {} succeeded", summary.run_id);
     println!("  records read       {:>5}", summary.records_read);
     println!("  workouts written   {:>5}", summary.workouts_written);
+    if summary.records_composed != summary.records_read {
+        println!("    from records     {:>5}", summary.records_composed);
+    }
+    if summary.records_superseded.as_usize() > 0 {
+        println!("  records superseded {:>5}", summary.records_superseded);
+    }
     if summary.workouts_retracted.as_usize() > 0 {
         println!("  workouts withdrawn {:>5}", summary.workouts_retracted);
     }

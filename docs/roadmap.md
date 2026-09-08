@@ -49,11 +49,23 @@ Hevy. `cycling next` takes no arguments and does the same: `fitness plan` author
 the four cycling programmes, and `next` prints the session from the rows and then
 puts it in the Peloton stack with its cool-down ride.
 
-**The cycling record derives.** `normalise peloton.workouts` fills the
-normalised layer with Bike+ rides — 309 rows from 477 landed records, 366,650
-samples, heart rate on 233 of the 285 distinct rides — and refuses the 168
-records that are not rides as `unmodelled` (issue #101, 2026-09-08). The FTP
-work below now has a performed record to read rather than an assertion to take.
+**The cycling record derives, and the entity is the session.** `fitness
+normalise peloton.rides` fills the normalised layer with 150 cycling sessions —
+144 rides and 6 FTP tests — from 903 landed records, with 357,969 samples
+(issue #101, 2026-09-08). The FTP work below now has a performed record to read
+rather than an assertion to take, and reads it as *tests* rather than as rides
+it would have to recognise.
+
+**A session, not a ride, and that is a rule rather than a cycling detail**
+(constitution 3.2.0). Peloton files a session as two or three workouts — a
+warm-up, a ride, a cool-down — and *"we would never consider these to be two
+separate things that could be planned separately but Peloton does split them"*.
+The same is true of the gym: the operator split single sessions across several
+Hevy routines so he could compose them — 21 of his 140 training days carry more
+than one record, three of them four — and `GymWorkout` called that canonical-
+layer work. **That is #104**, and it is deliberately not in this piece:
+`gym_workout` is what the anchor resolution, the exercise history and `compare`
+all read, and the autumn opens on 14 September.
 
 **What is missing is everything that joins them, and one gap on the cycling
 side:**

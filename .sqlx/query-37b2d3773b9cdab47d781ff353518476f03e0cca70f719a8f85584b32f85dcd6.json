@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO cycling_session (landing_record_id, kind, run_id)\n        VALUES (?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "37b2d3773b9cdab47d781ff353518476f03e0cca70f719a8f85584b32f85dcd6"
+}

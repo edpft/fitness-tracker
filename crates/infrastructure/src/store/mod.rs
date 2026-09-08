@@ -39,9 +39,11 @@ pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevyWorkoutLandingReader, SqliteGymWorkoutStore};
 pub use parameters::SqliteGenerationParameterStore;
-pub use peloton_landing::PelotonWorkoutLandingStore;
-pub use peloton_normalised::{PelotonRideAccountReader, SqliteBikePlusRideStore};
-pub use peloton_samples_landing::PelotonWorkoutSampleLandingStore;
+pub use peloton_landing::PelotonRideLandingStore;
+pub use peloton_normalised::{
+    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionStore,
+};
+pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;
 pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;

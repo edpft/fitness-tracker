@@ -177,6 +177,17 @@ impl LandingStore for HevyWorkoutLandingStore {
     }
 }
 
+/// How much raw this stream holds, for the derivation's status.
+///
+/// A second, narrower answer to a question [`application::LandingStore`] can
+/// also answer, and separate because reporting how far behind a derivation is
+/// needs the count and must not be handed an `append`.
+impl application::RawExtent for HevyWorkoutLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        application::LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HevyWorkoutLandingStore, LandingStream};

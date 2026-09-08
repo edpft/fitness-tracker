@@ -1,4 +1,4 @@
-//! The Peloton Bike+ ride, from two landed responses to rows in the store.
+//! The cycling session, from Peloton's landed records to rows in the store.
 //!
 //! At this ring because the suite needs the Peloton translator and the real
 //! tables, and `application` may not depend on the ring above it. What it
@@ -21,9 +21,9 @@ use domain::{
     normalised::{OperatorZone, RefusalKind, RefusalReason},
 };
 use infrastructure::{
-    PelotonRideAccountReader, PelotonWorkoutLandingStore, PelotonWorkoutSampleLandingStore,
-    SqliteBikePlusRideStore, SqliteExtractionRunLog, SqliteNormalisationRunLog, SqliteRefusalStore,
-    connect, peloton::PelotonRideTranslator,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
+    SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteNormalisationRunLog,
+    SqliteRefusalStore, connect, peloton::PelotonSessionTranslator,
 };
 use sqlx::SqlitePool;
 
@@ -39,16 +39,61 @@ impl application::Clock for FixedClock {
     }
 }
 
+/// Peloton's own id for the *Cool Down Ride* class type.
+const COOL_DOWN: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
+/// Peloton's own id for the *Low Impact Ride* class type.
+const LOW_IMPACT: &str = "59a49f882ea9475faa3110d50a8fb3f3";
+/// The series every Power Zone class the operator rides belongs to.
+const POWER_ZONE_SERIES: &str = "0f63c48726fa4533a928cae5358d94d7";
+/// Peloton's series for its FTP test rides.
+const FTP_TEST_SERIES: &str = "7609c9f02ed644e58104af7a8337125c";
+/// Peloton's series for the warm-up ridden before one.
+const FTP_WARM_UP_SERIES: &str = "ad6c6bc2e8ce4304bb6839f690038271";
+
+/// What a ride was, in the terms the source states it.
+#[derive(Debug, Clone, Copy)]
+enum Kind {
+    Main,
+    CoolDown,
+    LowImpact,
+    WarmUp,
+    Test,
+    /// Just Ride and Entertainment: no class at all.
+    Freestyle,
+}
+
 /// One workout record, as Peloton's list serves it.
 ///
 /// Only the fields the translator reads are varied; the rest of a real payload
 /// is landed verbatim and never looked at, so leaving it out changes nothing
 /// this suite asserts.
-fn workout(id: &str, discipline: &str, device: &str, start: i64, end: i64) -> String {
+fn workout(id: &str, kind: Kind, start: i64, end: i64) -> String {
+    ridden(id, kind, "cycling", "home_bike_plus", start, end)
+}
+
+fn ridden(id: &str, kind: Kind, discipline: &str, device: &str, start: i64, end: i64) -> String {
+    let (workout_type, class) = match kind {
+        Kind::Freestyle => ("freestyle", "null".to_owned()),
+        Kind::Main => ("class", class_of(POWER_ZONE_SERIES, &[])),
+        Kind::CoolDown => ("class", class_of(POWER_ZONE_SERIES, &[COOL_DOWN])),
+        Kind::LowImpact => ("class", class_of(POWER_ZONE_SERIES, &[LOW_IMPACT])),
+        Kind::WarmUp => ("class", class_of(FTP_WARM_UP_SERIES, &[])),
+        Kind::Test => ("class", class_of(FTP_TEST_SERIES, &[])),
+    };
     format!(
         r#"{{"id":"{id}","fitness_discipline":"{discipline}","device_type":"{device}",
-            "is_outdoor":false,"start_time":{start},"end_time":{end},"distance":1.3213}}"#
+            "is_outdoor":false,"start_time":{start},"end_time":{end},"distance":1.3213,
+            "workout_type":"{workout_type}","ride":{class}}}"#
     )
+}
+
+fn class_of(series: &str, class_types: &[&str]) -> String {
+    let types = class_types
+        .iter()
+        .map(|id| format!("\"{id}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(r#"{{"title":"a class","series_id":"{series}","class_type_ids":[{types}]}}"#)
 }
 
 /// One performance graph, with four bike series and optionally a heart rate.
@@ -114,8 +159,8 @@ async fn landed(
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
 
-    let rides = PelotonWorkoutLandingStore::new(pool.clone())?;
-    let samples = PelotonWorkoutSampleLandingStore::new(pool.clone())?;
+    let rides = PelotonRideLandingStore::new(pool.clone())?;
+    let samples = PelotonRideSampleLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     append(&rides, &runs, "/api/user/u/workouts", workouts).await?;
@@ -142,10 +187,10 @@ async fn append<S: application::LandingStore + Sync>(
 async fn derive(pool: &SqlitePool) -> Built<NormalisationSummary> {
     let normalisation = Normalisation::new(
         NormalisationPorts {
-            raw: PelotonRideAccountReader::new(pool.clone())?,
-            translator: PelotonRideTranslator,
-            workouts: SqliteBikePlusRideStore::new(pool.clone())?,
-            refusals: SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+            raw: PelotonSessionAccountReader::new(pool.clone())?,
+            translator: PelotonSessionTranslator,
+            workouts: SqliteCyclingSessionStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
@@ -156,7 +201,7 @@ async fn derive(pool: &SqlitePool) -> Built<NormalisationSummary> {
 
 async fn refusals(pool: &SqlitePool) -> Built<Vec<domain::normalised::Refusal>> {
     let reporter = Refusals::new(
-        SqliteRefusalStore::new(pool.clone(), PelotonWorkoutLandingStore::STREAM)?,
+        SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
         SqliteNormalisationRunLog::new(pool.clone()),
     );
     Ok(reporter.refusals().await?.refusals)
@@ -182,10 +227,7 @@ fn a_ride_composes_a_workout_record_and_its_graph() {
     runtime.block_on(async {
         let offsets = [4_u32, 5, 6, 8];
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![(
                 "ride-1",
                 graph(
@@ -201,8 +243,10 @@ fn a_ride_composes_a_workout_record_and_its_graph() {
         .expect("a landed corpus");
 
         let summary = derive(&pool).await.expect("a derivation");
-        assert_eq!(summary.records_read.as_usize(), 1);
+        // Two records for one session of one ride: the workout and its graph.
+        assert_eq!(summary.records_read.as_usize(), 2);
         assert_eq!(summary.workouts_written.as_usize(), 1);
+        assert_eq!(summary.records_composed.as_usize(), 2);
         assert!(summary.reconciles(), "every record has exactly one outcome");
 
         let ride = sqlx::query!(
@@ -273,10 +317,7 @@ fn deriving_twice_produces_the_same_layer() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![(
                 "ride-1",
                 graph(&[1, 2], &[93, 132], Some((&[132, 131], "3")), "2.0", "km"),
@@ -334,9 +375,17 @@ fn what_is_not_a_bike_plus_ride_refuses_as_unmodelled() {
             vec![
                 // A yoga class taken on the bike's screen. `device_type` says
                 // `home_bike_plus` and the bike is not the instrument.
-                ("yoga", workout("yoga", "yoga", "home_bike_plus", 100, 400)),
+                (
+                    "yoga",
+                    ridden("yoga", Kind::Main, "yoga", "home_bike_plus", 100, 400),
+                ),
                 // A cycling workout the operator's Garmin synced in.
-                ("garmin", workout("garmin", "cycling", "garmin", 100, 400)),
+                // A day later, so the two are separate sessions and each
+                // refuses for its own reason.
+                (
+                    "garmin",
+                    ridden("garmin", Kind::Main, "cycling", "garmin", 90_000, 90_300),
+                ),
             ],
             vec![],
         )
@@ -377,7 +426,7 @@ fn a_ride_with_no_graph_landed_refuses_rather_than_deriving_half_of_one() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![("ride-1", workout("ride-1", "cycling", "home_bike_plus", 100, 400))],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![],
         )
         .await
@@ -391,7 +440,7 @@ fn a_ride_with_no_graph_landed_refuses_rather_than_deriving_half_of_one() {
         assert!(
             matches!(
                 refusals.first().map(|refusal| &refusal.reason),
-                Some(RefusalReason::CompanionNotLanded { stream }) if stream == "peloton.workout_samples"
+                Some(RefusalReason::CompanionNotLanded { stream }) if stream == "peloton.ride_samples"
             ),
             "{refusals:?}"
         );
@@ -407,10 +456,7 @@ fn the_distance_is_converted_by_the_unit_the_graph_declares() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             // The same ride as the kilometre case, stated in miles.
             vec![("ride-1", graph(&[1], &[93], None, "1.3213", "mi"))],
         )
@@ -441,10 +487,7 @@ fn an_unknown_distance_unit_refuses_the_ride() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![("ride-1", graph(&[1], &[93], None, "2.0", "furlongs"))],
         )
         .await
@@ -471,10 +514,7 @@ fn a_ride_with_no_heart_rate_series_is_still_a_ride() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![("ride-1", graph(&[1, 2], &[93, 132], None, "2.0", "km"))],
         )
         .await
@@ -500,10 +540,7 @@ fn a_heart_rate_series_of_nothing_but_dropouts_refuses_without_costing_the_ride(
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![(
                 "ride-1",
                 graph(&[1, 2], &[93, 132], Some((&[0, 0], "2")), "2.0", "km"),
@@ -535,10 +572,7 @@ fn an_unreadable_missing_data_declaration_does_not_cost_the_series() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
-            vec![(
-                "ride-1",
-                workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-            )],
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
             vec![(
                 "ride-1",
                 graph(&[1, 2], &[93, 132], Some((&[132, 131], "-1")), "2.0", "km"),
@@ -567,24 +601,25 @@ fn an_unreadable_missing_data_declaration_does_not_cost_the_series() {
     });
 }
 
-/// Two servings of one workout are two entities, exactly as they are on the gym
-/// side: § 10 puts "the same source contradicting itself" at the canonical
-/// layer, and collapsing the pair here is the one thing this layer must not do.
-/// The operator's account holds 24 such pairs.
+/// Two servings of one ride are one ride told twice, not a session of two.
+///
+/// **This is the case that made `records_superseded` necessary.** § 10 says the
+/// later supersedes and § 3.1 says the two do not compose, but until an entity
+/// composed several records neither had to be acted on: one record made one
+/// workout and both stood. Group them and one ride becomes a `main + main`
+/// session, which is not a thing that happened.
+///
+/// The operator's store holds 51 such records — every one a workout landed
+/// twice before the revision digest learned to ignore how many strangers were
+/// riding the class at that moment.
 #[test]
-fn a_workout_served_twice_derives_twice() {
+fn a_ride_served_twice_is_one_ride_and_the_earlier_serving_is_counted() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = landed(
             vec![
-                (
-                    "ride-1",
-                    workout("ride-1", "cycling", "home_bike_plus", 100, 400),
-                ),
-                (
-                    "ride-1",
-                    workout("ride-1", "cycling", "home_bike_plus", 100, 401),
-                ),
+                ("ride-1", workout("ride-1", Kind::Main, 100, 400)),
+                ("ride-1", workout("ride-1", Kind::Main, 100, 401)),
             ],
             vec![("ride-1", graph(&[1], &[93], None, "2.0", "km"))],
         )
@@ -592,15 +627,272 @@ fn a_workout_served_twice_derives_twice() {
         .expect("a landed corpus");
 
         let summary = derive(&pool).await.expect("a derivation");
-        assert_eq!(summary.workouts_written.as_usize(), 2);
+        assert_eq!(summary.workouts_written.as_usize(), 1, "one session");
+        assert_eq!(summary.records_superseded.as_usize(), 1, "the earlier one");
+        assert!(
+            summary.reconciles(),
+            "the superseded record still has an outcome"
+        );
 
         let row = sqlx::query!(
-            r#"SELECT COUNT(DISTINCT source_record_id) AS "sources!: i64",
-                      COUNT(*) AS "rides!: i64" FROM bike_plus_ride"#
+            r#"SELECT COUNT(*) AS "rides!: i64",
+                      (SELECT COUNT(*) FROM cycling_session) AS "sessions!: i64",
+                      (SELECT duration_seconds FROM bike_plus_ride) AS "duration!: i64"
+               FROM bike_plus_ride"#
         )
         .fetch_one(&pool)
         .await
         .expect("a count");
-        assert_eq!((row.sources, row.rides), (1, 2));
+        assert_eq!((row.sessions, row.rides), (1, 1));
+        // The later serving, which is the one the source is still standing by.
+        assert_eq!(row.duration, 301);
+    });
+}
+
+/// A main ride and the cool-down ridden down from it: 114 of the operator's
+/// sessions, and the commonest shape in his record.
+#[test]
+fn a_main_ride_and_its_cool_down_are_one_session() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("main", workout("main", Kind::Main, 100, 1900)),
+                // 70 seconds later: choosing the next class, not a new session.
+                ("cool", workout("cool", Kind::CoolDown, 1970, 2270)),
+            ],
+            vec![
+                ("main", graph(&[1], &[93], None, "10.0", "km")),
+                ("cool", graph(&[1], &[40], None, "1.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1, "one session");
+        assert!(summary.reconciles());
+
+        let row = sqlx::query!(
+            r#"SELECT kind AS "kind!: String",
+                      (SELECT GROUP_CONCAT(role, ",") FROM (
+                         SELECT role FROM bike_plus_ride ORDER BY started_at_utc
+                       )) AS "roles!: String"
+               FROM cycling_session"#
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("a session");
+        assert_eq!(row.kind, "ride");
+        assert_eq!(row.roles, "main,cool-down");
+    });
+}
+
+/// The FTP test: a warm-up class, the effort, and a cool-down. Three of
+/// Peloton's workouts, one thing nobody would plan separately.
+///
+/// The warm-up and the effort are recognised by `series_id` — Peloton's own
+/// statement that two classes are the same kind of thing. The operator:
+/// *"Peloton publishes lots of different FTP warm up and FTP test rides"*, so
+/// there is no list of class ids that would work, and his six tests used five
+/// distinct test classes over 31 months.
+#[test]
+fn a_warm_up_an_effort_and_a_cool_down_are_a_test_session() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm", workout("warm", Kind::WarmUp, 100, 700)),
+                ("test", workout("test", Kind::Test, 821, 2021)),
+                // 310 seconds later — the real gap in his 2026-07-22 test, and
+                // the one case a five-minute rule would have split.
+                ("cool", workout("cool", Kind::CoolDown, 2331, 2631)),
+            ],
+            vec![
+                ("warm", graph(&[1], &[80], None, "3.0", "km")),
+                ("test", graph(&[1], &[250], None, "12.0", "km")),
+                ("cool", graph(&[1], &[40], None, "1.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1);
+        assert!(summary.reconciles());
+
+        let row = sqlx::query!(
+            r#"SELECT kind AS "kind!: String",
+                      (SELECT GROUP_CONCAT(role, ",") FROM (
+                         SELECT role FROM bike_plus_ride ORDER BY started_at_utc
+                       )) AS "roles!: String"
+               FROM cycling_session"#
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("a session");
+        assert_eq!(row.kind, "test");
+        assert_eq!(row.roles, "warm-up,effort,cool-down");
+    });
+}
+
+/// A test the operator finished with a low-impact ride instead of a cool-down.
+///
+/// His 2023-12-27 test, and his reading of it: *"looks like I picked the wrong
+/// type of ride for a Cool Down, not something we should try to model
+/// explicitly, though I guess we'll need to allow the cool down to be a low
+/// impact ride too so we don't lose this FTP test"*. So the class says what it
+/// is and the sequence says what it was for.
+#[test]
+fn a_session_ending_in_a_low_impact_ride_ends_in_a_cool_down() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm", workout("warm", Kind::WarmUp, 100, 700)),
+                ("test", workout("test", Kind::Test, 821, 2021)),
+                ("extra", workout("extra", Kind::LowImpact, 2109, 2709)),
+            ],
+            vec![
+                ("warm", graph(&[1], &[80], None, "3.0", "km")),
+                ("test", graph(&[1], &[250], None, "12.0", "km")),
+                ("extra", graph(&[1], &[60], None, "2.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1, "the test is kept");
+
+        let row = sqlx::query!(r#"SELECT kind AS "kind!: String" FROM cycling_session"#)
+            .fetch_one(&pool)
+            .await
+            .expect("a session");
+        assert_eq!(row.kind, "test");
+    });
+}
+
+/// A low-impact ride on its own is an ordinary ride, not a cool-down with
+/// nothing to cool down from. The same class, read by where it sat.
+#[test]
+fn a_low_impact_ride_alone_is_a_main_ride() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![("solo", workout("solo", Kind::LowImpact, 100, 1300))],
+            vec![("solo", graph(&[1], &[60], None, "6.0", "km"))],
+        )
+        .await
+        .expect("a landed corpus");
+
+        derive(&pool).await.expect("a derivation");
+        let row = sqlx::query!(
+            r#"SELECT kind AS "kind!: String",
+                      (SELECT role FROM bike_plus_ride) AS "role!: String"
+               FROM cycling_session"#
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("a session");
+        assert_eq!((row.kind.as_str(), row.role.as_str()), ("ride", "main"));
+    });
+}
+
+/// A freestyle ride belongs to no session, even when it sits inside one's span.
+///
+/// The operator has two: a two-minute Just Ride he started by mistake after an
+/// endurance ride, and a mobility video watched on the bike after a cool-down —
+/// *"conceptually the same as a main ride + cool down + stretch or yoga"*. Both
+/// carry no class at all, so "not part of a session" is something Peloton
+/// states rather than something we infer.
+#[test]
+fn a_freestyle_ride_is_refused_and_does_not_join_the_session_beside_it() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("main", workout("main", Kind::Main, 100, 1900)),
+                ("cool", workout("cool", Kind::CoolDown, 1970, 2270)),
+                ("extra", workout("extra", Kind::Freestyle, 2300, 2420)),
+            ],
+            vec![
+                ("main", graph(&[1], &[93], None, "10.0", "km")),
+                ("cool", graph(&[1], &[40], None, "1.0", "km")),
+                ("extra", graph(&[1], &[20], None, "0.5", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1, "the session stands");
+        assert_eq!(summary.records_refused.as_usize(), 2, "the freestyle pair");
+        assert!(summary.reconciles());
+
+        let refusals = refusals(&pool).await.expect("refusals");
+        assert!(
+            refusals
+                .iter()
+                .all(|refusal| refusal.kind() == RefusalKind::Unmodelled),
+            "{refusals:?}"
+        );
+    });
+}
+
+/// A shape neither variant holds. The operator's 2023-12-24 — an Intro ride
+/// followed by a Beginner ride, from the Discover programme — which he called
+/// *"conceptually, a single session but an anomaly"*. Refused, not forced.
+#[test]
+fn a_session_of_two_main_rides_is_refused_as_unmodelled() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("intro", workout("intro", Kind::Main, 100, 1000)),
+                ("beginner", workout("beginner", Kind::Main, 1205, 2405)),
+            ],
+            vec![
+                ("intro", graph(&[1], &[93], None, "5.0", "km")),
+                ("beginner", graph(&[1], &[93], None, "7.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 0);
+        assert_eq!(summary.records_refused.as_usize(), 4);
+        assert!(summary.reconciles());
+
+        let refusals = refusals(&pool).await.expect("refusals");
+        assert_eq!(
+            refusals.first().and_then(|refusal| refusal.reason.detail()),
+            Some("a session of main then main".to_owned())
+        );
+    });
+}
+
+/// Two hours apart is two sessions, however alike they look.
+#[test]
+fn rides_a_long_way_apart_are_separate_sessions() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("morning", workout("morning", Kind::Main, 100, 1900)),
+                ("evening", workout("evening", Kind::Main, 40_000, 41_800)),
+            ],
+            vec![
+                ("morning", graph(&[1], &[93], None, "10.0", "km")),
+                ("evening", graph(&[1], &[93], None, "10.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 2);
+        assert!(summary.reconciles());
     });
 }

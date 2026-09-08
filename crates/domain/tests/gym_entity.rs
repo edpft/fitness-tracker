@@ -19,7 +19,7 @@ use domain::{
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
     measure::{Distance, Duration, Metres, RepCount},
-    normalised::{NormalisedEntity, OperatorZone, StartedAt},
+    normalised::{OperatorZone, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use proptest::prelude::*;

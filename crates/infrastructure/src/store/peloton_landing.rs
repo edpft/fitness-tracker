@@ -18,18 +18,18 @@ use super::{count_from_storage, digest_from_row, run_id_for_storage, store_error
 
 /// The landing table for Peloton workouts.
 #[derive(Debug, Clone)]
-pub struct PelotonWorkoutLandingStore {
+pub struct PelotonRideLandingStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl PelotonWorkoutLandingStore {
+impl PelotonRideLandingStore {
     /// Which stream this table holds.
     ///
-    /// Declared beside the queries that name `peloton_workout_landing`, for the
+    /// Declared beside the queries that name `peloton_ride_landing`, for the
     /// reason given on [`super::landing::HevyWorkoutLandingStore::STREAM`]:
     /// this is the one link no type can check.
-    pub const STREAM: &'static str = "peloton.workouts";
+    pub const STREAM: &'static str = "peloton.rides";
 
     /// # Errors
     ///
@@ -43,7 +43,7 @@ impl PelotonWorkoutLandingStore {
     }
 }
 
-impl LandingStore for PelotonWorkoutLandingStore {
+impl LandingStore for PelotonRideLandingStore {
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -56,7 +56,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
         let row = sqlx::query!(
             r#"
             SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
-            FROM peloton_workout_landing
+            FROM peloton_ride_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
             LIMIT 1
@@ -90,7 +90,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
         let next = sqlx::query!(
             r#"
             SELECT COALESCE(MAX(serve_ordinal), -1) AS "highest!: i64"
-            FROM peloton_workout_landing
+            FROM peloton_ride_landing
             WHERE run_id = ?
             "#,
             run_id
@@ -125,7 +125,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
 
             sqlx::query!(
                 r#"
-                INSERT INTO peloton_workout_landing (
+                INSERT INTO peloton_ride_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
                     event_time, payload, payload_digest, revision_digest,
                     run_id, serve_ordinal
@@ -159,7 +159,7 @@ impl LandingStore for PelotonWorkoutLandingStore {
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM peloton_workout_landing"#)
+        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM peloton_ride_landing"#)
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
@@ -168,15 +168,26 @@ impl LandingStore for PelotonWorkoutLandingStore {
     }
 }
 
+/// How much raw this stream holds, for the derivation's status.
+///
+/// A second, narrower answer to a question [`application::LandingStore`] can
+/// also answer, and separate because reporting how far behind a derivation is
+/// needs the count and must not be handed an `append`.
+impl application::RawExtent for PelotonRideLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        application::LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LandingStream, PelotonWorkoutLandingStore};
+    use super::{LandingStream, PelotonRideLandingStore};
 
     /// The constant every run's identity is derived from must name a stream.
     #[test]
     fn the_declared_stream_is_a_stream() {
         let stream =
-            LandingStream::try_from(PelotonWorkoutLandingStore::STREAM).expect("a stream name");
-        assert_eq!(stream.to_string(), "peloton.workouts");
+            LandingStream::try_from(PelotonRideLandingStore::STREAM).expect("a stream name");
+        assert_eq!(stream.to_string(), "peloton.rides");
     }
 }

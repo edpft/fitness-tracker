@@ -17,9 +17,9 @@ use jiff::{Timestamp, civil::Date};
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
 use domain::gym::{GymWorkout, Load, Performed, exercise::RepsExercise};
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream,
-    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
-    Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
+    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
+    SourceRecordId, Watermark,
 };
 use domain::measure::RepCount;
 use domain::normalised::{
@@ -365,6 +365,57 @@ pub enum Translation<E> {
     Refused(NonEmpty<Refusal>),
 }
 
+/// How much raw there is for a derivation to read.
+///
+/// **Narrower than [`LandingStore`] on purpose.** Reporting how far behind the
+/// normalised layer is needs one number and no ability to write, and since
+/// § 3.1 a derivation may read more than one landing table — Peloton's rides
+/// and their graphs are two — so the thing being counted is no longer a store.
+/// A port that is exactly the question keeps `status` from being handed an
+/// `append` it must not use, and lets two tables answer as one.
+pub trait RawExtent {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn records(&self) -> impl Future<Output = Result<RecordCount, StoreError>> + Send;
+}
+
+/// How many landing records an account is composed from.
+///
+/// **So a run's numbers stay about records while its work is about sessions.**
+/// § 38 wants a lost record visible, and `NormalisationSummary::reconciles`
+/// checks that every record read had exactly one outcome — which stops meaning
+/// anything if `records_read` silently becomes a count of sessions. One session
+/// of three rides reads six records and, refused, refuses six.
+pub trait SourceAccount {
+    fn records(&self) -> usize;
+
+    /// How many of those records a later serving replaced.
+    ///
+    /// **§ 10, applied where composition made it matter.** Two records sharing
+    /// a source identity are one source contradicting itself, and § 3.1 is
+    /// explicit that they do not compose — so an account built from several
+    /// records must set the earlier serving aside rather than treat it as a
+    /// second part. The operator's store holds 51 such records, every one of
+    /// them a workout landed twice before the revision digest learned to ignore
+    /// a class's public counters; composing them would have made one ride into
+    /// a session of two.
+    ///
+    /// They are counted rather than dropped. A record with no outcome is what
+    /// § 38's reconciliation exists to catch.
+    fn superseded(&self) -> usize {
+        0
+    }
+}
+
+impl SourceAccount for LandedRecord {
+    /// One. A source that says it all in one record is the degenerate case, not
+    /// a different kind of thing.
+    fn records(&self) -> usize {
+        1
+    }
+}
+
 /// Raw, read-only, for one stream.
 ///
 /// A separate trait from [`LandingStore`] rather than a widening of it. That is
@@ -373,24 +424,27 @@ pub enum Translation<E> {
 /// holding one could not mutate an input if it tried.
 ///
 /// **An account, not a record**, and the constitution's word for the same
-/// reason it needed one. § 3.1: *"a source that serves one thing at more than
-/// one endpoint is still one account"* — Peloton states a ride's start and
-/// duration in its workout list and that ride's samples in a performance graph,
-/// and neither response is an entity alone. So what a derivation reads is
-/// whatever one source says about one thing, which for most streams is a single
-/// landing record and is not required to be.
+/// reason it needed one. § 3.1: a normalised entity is a *session*, and
+/// composes what one source says about it — several records from one endpoint,
+/// complementary responses across endpoints, or both. Peloton files a cycling
+/// session as two or three workouts and serves each one's samples from a second
+/// endpoint, so five landing records can be one session and none of them is an
+/// entity alone.
 ///
 /// Assembling an account is this adapter's work rather than the translator's,
 /// because it is the only thing here that can reach a store. What the
-/// translator gets is already whole, and cannot go back for more.
+/// translator gets is already whole, and cannot go back for more. Where
+/// assembling it needs to know what the source's records *mean* — which of them
+/// are parts of one session — that knowledge belongs to that source's adapter,
+/// and this port is what it implements.
 pub trait AccountReader {
-    /// Everything one source says about one thing. `LandedRecord` where a
-    /// source says it all at once.
+    /// Everything one source says about one session. `LandedRecord` where a
+    /// source says it all in one record.
     ///
     /// `Send + Sync` because a derivation holds the whole corpus while it
     /// awaits the write: these are read-only values, so the bound costs an
     /// adapter nothing.
-    type Account: Send + Sync;
+    type Account: SourceAccount + Send + Sync;
 
     fn stream(&self) -> &LandingStream;
 
@@ -525,14 +579,29 @@ pub trait NormalisationRunLog {
 
 /// What a derivation did.
 ///
-/// Numbers that must add up: `records_read` equals `workouts_written` plus
-/// `workouts_retracted` plus `retractions_read` plus `records_refused`, so
-/// a record going missing is visible without reading a row.
+/// Numbers that must add up: `records_read` equals `records_composed` plus
+/// `records_superseded` plus `retractions_read` plus `records_refused`, so a
+/// record going missing is visible without reading a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NormalisationSummary {
     pub run_id: NormalisationRunId,
     pub records_read: RecordCount,
+    /// How many entities the derivation wrote. **Entities, not records** — one
+    /// cycling session is written from up to six of them.
     pub workouts_written: WorkoutCount,
+    /// How many landing records those entities were composed from, including
+    /// the ones a retraction then withdrew.
+    ///
+    /// **Only here so the arithmetic stays about records.** Since § 3.1 made
+    /// the session the unit, `workouts_written` counts a different thing from
+    /// the numbers beside it, and without this the reconciliation in
+    /// [`NormalisationSummary::reconciles`] would compare 149 sessions against
+    /// 477 records and fail on every healthy run. Grouping records into
+    /// sessions is precisely where one could go missing unnoticed, so the check
+    /// is worth keeping rather than dropping.
+    pub records_composed: RecordCount,
+    /// How many records a later serving of the same thing replaced.
+    pub records_superseded: RecordCount,
     /// How many workouts the retractions actually removed. Distinct from
     /// `retractions_read`, which is how many withdrawal events were served: one
     /// naming a record that was never landed removes nothing.

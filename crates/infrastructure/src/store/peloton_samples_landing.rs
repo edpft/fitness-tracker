@@ -19,21 +19,21 @@ use super::{count_from_storage, digest_from_row, run_id_for_storage, store_error
 /// The landing table for Peloton performance graphs.
 ///
 /// One graph per workout, filed under the same identifier
-/// `peloton_workout_landing` files the workout under — which is what makes the
+/// `peloton_ride_landing` files the workout under — which is what makes the
 /// two joinable without either depending on the other.
 #[derive(Debug, Clone)]
-pub struct PelotonWorkoutSampleLandingStore {
+pub struct PelotonRideSampleLandingStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl PelotonWorkoutSampleLandingStore {
+impl PelotonRideSampleLandingStore {
     /// Which stream this table holds.
     ///
-    /// Declared beside the queries that name `peloton_workout_sample_landing`, for the
+    /// Declared beside the queries that name `peloton_ride_sample_landing`, for the
     /// reason given on [`super::landing::HevyWorkoutLandingStore::STREAM`]:
     /// this is the one link no type can check.
-    pub const STREAM: &'static str = "peloton.workout_samples";
+    pub const STREAM: &'static str = "peloton.ride_samples";
 
     /// # Errors
     ///
@@ -47,7 +47,7 @@ impl PelotonWorkoutSampleLandingStore {
     }
 }
 
-impl LandingStore for PelotonWorkoutSampleLandingStore {
+impl LandingStore for PelotonRideSampleLandingStore {
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -60,7 +60,7 @@ impl LandingStore for PelotonWorkoutSampleLandingStore {
         let row = sqlx::query!(
             r#"
             SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
-            FROM peloton_workout_sample_landing
+            FROM peloton_ride_sample_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
             LIMIT 1
@@ -94,7 +94,7 @@ impl LandingStore for PelotonWorkoutSampleLandingStore {
         let next = sqlx::query!(
             r#"
             SELECT COALESCE(MAX(serve_ordinal), -1) AS "highest!: i64"
-            FROM peloton_workout_sample_landing
+            FROM peloton_ride_sample_landing
             WHERE run_id = ?
             "#,
             run_id
@@ -131,7 +131,7 @@ impl LandingStore for PelotonWorkoutSampleLandingStore {
 
             sqlx::query!(
                 r#"
-                INSERT INTO peloton_workout_sample_landing (
+                INSERT INTO peloton_ride_sample_landing (
                     endpoint, fetched_at, source_record_id, event_kind,
                     event_time, payload, payload_digest, revision_digest,
                     run_id, serve_ordinal
@@ -166,7 +166,7 @@ impl LandingStore for PelotonWorkoutSampleLandingStore {
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
         let row =
-            sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM peloton_workout_sample_landing"#)
+            sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM peloton_ride_sample_landing"#)
                 .fetch_one(&self.pool)
                 .await
                 .map_err(|error| store_error(&error))?;
@@ -175,15 +175,26 @@ impl LandingStore for PelotonWorkoutSampleLandingStore {
     }
 }
 
+/// How much raw this stream holds, for the derivation's status.
+///
+/// A second, narrower answer to a question [`application::LandingStore`] can
+/// also answer, and separate because reporting how far behind a derivation is
+/// needs the count and must not be handed an `append`.
+impl application::RawExtent for PelotonRideSampleLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        application::LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LandingStream, PelotonWorkoutSampleLandingStore};
+    use super::{LandingStream, PelotonRideSampleLandingStore};
 
     /// The constant every run's identity is derived from must name a stream.
     #[test]
     fn the_declared_stream_is_a_stream() {
-        let stream = LandingStream::try_from(PelotonWorkoutSampleLandingStore::STREAM)
-            .expect("a stream name");
-        assert_eq!(stream.to_string(), "peloton.workout_samples");
+        let stream =
+            LandingStream::try_from(PelotonRideSampleLandingStore::STREAM).expect("a stream name");
+        assert_eq!(stream.to_string(), "peloton.ride_samples");
     }
 }

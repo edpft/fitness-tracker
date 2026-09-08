@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\",\n                   started_at AS \"started_at!: String\",\n                   finished_at AS \"finished_at!: String\",\n                   records_read AS \"records_read: i64\",\n                   workouts_written AS \"workouts_written: i64\",\n                   workouts_retracted AS \"workouts_retracted: i64\",\n                   retractions_read AS \"retractions_read: i64\",\n                   records_refused AS \"records_refused: i64\",\n                   refusals_recorded AS \"refusals_recorded: i64\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   started_at AS \"started_at!: String\",\n                   finished_at AS \"finished_at!: String\",\n                   records_read AS \"records_read: i64\",\n                   workouts_written AS \"workouts_written: i64\",\n                   records_composed AS \"records_composed: i64\",\n                   records_superseded AS \"records_superseded: i64\",\n                   workouts_retracted AS \"workouts_retracted: i64\",\n                   retractions_read AS \"retractions_read: i64\",\n                   records_refused AS \"records_refused: i64\",\n                   refusals_recorded AS \"refusals_recorded: i64\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,30 @@
         }
       },
       {
-        "name": "workouts_retracted: i64",
+        "name": "records_composed: i64",
         "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_run",
+            "name": "records_composed"
+          }
+        }
+      },
+      {
+        "name": "records_superseded: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalisation_run",
+            "name": "records_superseded"
+          }
+        }
+      },
+      {
+        "name": "workouts_retracted: i64",
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +93,7 @@
       },
       {
         "name": "retractions_read: i64",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "records_refused: i64",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +115,7 @@
       },
       {
         "name": "refusals_recorded: i64",
-        "ordinal": 8,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -115,8 +137,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "2a94ef046bcab0de5ad93fc9fe0df7e51a21c4a8484a3589e337cd48769d8d17"
+  "hash": "eab543b90656a2cd4a848efcae27d5e45e1496a17a50a481652b7968cfe1746f"
 }
