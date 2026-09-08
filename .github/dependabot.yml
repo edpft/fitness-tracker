@@ -12,3 +12,20 @@ updates:
       interval: daily
     commit-message:
       prefix: "chore"
+
+  # flake.lock, since 2026-04-07. Dependabot opens one pull request per stale
+  # input rather than one moving all of them at once, and — unlike a workflow
+  # opening them as github-actions — its pull requests are exempt from the bot
+  # approval gate, so they get CI and auto-merge without anyone clicking
+  # approve. That is what `update-flake-lock.yml` could not manage.
+  #
+  # It will not rewrite a version pinned inside flake.nix — a `/v0.5` moving
+  # to `/v0.6`. Nothing here pins a version: nixpkgs names a branch, which
+  # flake.lock pins by revision, and that revision is exactly what Dependabot
+  # updates. So the limitation has nothing to catch.
+  - package-ecosystem: nix
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "chore"
