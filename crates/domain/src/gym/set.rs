@@ -6,7 +6,8 @@
 
 use std::fmt;
 
-use super::{intensity::Rir, load::Load, measure::Duration, outcome::Performed};
+use super::{intensity::Rir, load::Load, outcome::Performed};
+use crate::measure::Duration;
 
 /// Working or warm-up, and nothing else.
 ///

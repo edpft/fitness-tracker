@@ -26,8 +26,8 @@ pub mod schedule;
 
 use application::StoreError;
 use domain::{
-    gym::NormalisationRunId,
     landing::{PayloadDigest, RunId},
+    normalised::NormalisationRunId,
 };
 
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;

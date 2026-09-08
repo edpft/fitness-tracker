@@ -23,10 +23,10 @@ use std::collections::BTreeMap;
 
 use domain::{
     gym::{
-        Kg, RepCount,
+        Kg,
         exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
-        sequence::{AtLeastTwo, NonEmpty},
     },
+    measure::RepCount,
     plan::{Plan, PlanName, Programme},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
@@ -35,6 +35,7 @@ use domain::{
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{civil::Date, tz::TimeZone};
 
@@ -175,7 +176,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
             sets: reps(3)?,
         },
-        static_hold: domain::gym::Duration::from_seconds(60),
+        static_hold: domain::measure::Duration::from_seconds(60),
         first_reset: ResetProtocol {
             drop: pct("-10%")?,
             reclimb_per_week: kg("5")?,
@@ -540,9 +541,9 @@ pub fn primary_does_not_fill_its_slot()
 /// A block that rests the same however its work is grouped.
 const fn flat(seconds: u64) -> domain::prescription::BlockRest {
     domain::prescription::BlockRest {
-        between_sets: domain::prescription::Target::Exactly(domain::gym::Duration::from_seconds(
-            seconds,
-        )),
+        between_sets: domain::prescription::Target::Exactly(
+            domain::measure::Duration::from_seconds(seconds),
+        ),
         after_superset: None,
     }
 }
@@ -556,8 +557,8 @@ fn grouped(
 ) -> Result<domain::prescription::BlockRest, ProgrammeFixtureError> {
     let span = |low: u64, high: u64| {
         domain::prescription::Target::between(
-            domain::gym::Duration::from_seconds(low),
-            domain::gym::Duration::from_seconds(high),
+            domain::measure::Duration::from_seconds(low),
+            domain::measure::Duration::from_seconds(high),
         )
         .ok_or_else(|| invalid("a rest range that does not span"))
     };

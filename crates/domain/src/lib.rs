@@ -11,8 +11,11 @@
 pub mod cycling;
 pub mod gym;
 pub mod landing;
+pub mod measure;
 mod newtype;
+pub mod normalised;
 pub mod plan;
 pub mod prescription;
 pub mod provider;
 pub mod schedule;
+pub mod sequence;

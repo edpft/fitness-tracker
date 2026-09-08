@@ -31,7 +31,8 @@
 
 use std::fmt;
 
-use crate::gym::{PositiveDuration, sequence::NonEmpty};
+use crate::measure::PositiveDuration;
+use crate::sequence::NonEmpty;
 
 use super::zone::{Ftp, PowerZone};
 

@@ -24,7 +24,7 @@
 //! one for the end of a group. Two blocks state both; the others state one,
 //! because the operator rests the same however their work is grouped.
 
-use crate::gym::{Duration, Spans};
+use crate::measure::{Duration, Spans};
 
 use super::{
     shape::{Block, PrescribedExercise, PrescribedItem, SlotId, WorkoutShape},
@@ -165,10 +165,10 @@ fn exercise_rested(
 /// first time the ramp asks for something, and what it asks for is the bottom of
 /// the block's range rather than the whole of it.
 fn sets_rested<M: Spans + Copy>(
-    sets: &crate::gym::NonEmpty<PrescribedSet<M>>,
+    sets: &crate::sequence::NonEmpty<PrescribedSet<M>>,
     rest: Target<Duration>,
     block: BlockRest,
-) -> crate::gym::NonEmpty<PrescribedSet<M>> {
+) -> crate::sequence::NonEmpty<PrescribedSet<M>> {
     let last_warmup = sets
         .iter()
         .enumerate()

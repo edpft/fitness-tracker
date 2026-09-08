@@ -145,7 +145,7 @@ fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::erro
     let answers = programme::authored(
         Date::constant(2026, 8, 31),
         Shape::Test {
-            reps: domain::gym::RepCount::new(1)?,
+            reps: domain::measure::RepCount::new(1)?,
             // What the programme before it stands at, which is the ordinary case
             // (decision 0013).
             target: domain::prescription::TestTarget::Inherited,
@@ -327,7 +327,7 @@ fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error:
                 Date::constant(2026, 7, 3),
             )?,
             entry_test: Some(EntryTest::new(
-                domain::gym::RepCount::new(3)?,
+                domain::measure::RepCount::new(3)?,
                 Some("60".to_owned().try_into()?),
             )?),
         },

@@ -14,7 +14,8 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use domain::gym::{PerformedExercise, RefusalLocus, RefusalReason};
+use domain::gym::PerformedExercise;
+use domain::normalised::{RefusalLocus, RefusalReason};
 use support::{corpus, derived};
 
 fn by_reason(produced: &corpus::Produced) -> BTreeMap<&'static str, usize> {
@@ -81,7 +82,7 @@ fn every_refusal_says_what_to_do_about_it() {
 fn a_malformed_grouping_does_not_cost_its_members() {
     let produced = derived!();
 
-    let malformed: Vec<&domain::gym::Refusal> = produced
+    let malformed: Vec<&domain::normalised::Refusal> = produced
         .refusals
         .iter()
         .filter(|refusal| {

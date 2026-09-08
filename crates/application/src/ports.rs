@@ -15,14 +15,16 @@ use std::{collections::BTreeMap, future::Future};
 use jiff::{Timestamp, civil::Date};
 
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId};
-use domain::gym::{
-    GymWorkout, Load, NonEmpty, NormalisationOutcome, NormalisationRun, NormalisationRunId,
-    OperatorZone, Performed, Refusal, RefusalCount, RepCount, WorkoutCount, exercise::RepsExercise,
-};
+use domain::gym::{GymWorkout, Load, Performed, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
+};
+use domain::measure::RepCount;
+use domain::normalised::{
+    NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
+    RefusalCount, WorkoutCount,
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
@@ -30,6 +32,7 @@ use domain::prescription::{
     SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
+use domain::sequence::NonEmpty;
 
 use crate::error::{
     DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,

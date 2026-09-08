@@ -6,14 +6,15 @@
 //! rather than a wrong generator.
 
 use domain::gym::{
-    Duration, Load, RepCount, Rir, SignedKg,
+    Load, Rir, SignedKg,
     exercise::{DurationExercise, RepsExercise},
-    sequence::{AtLeastTwo, NonEmpty},
 };
+use domain::measure::{Duration, RepCount};
 use domain::prescription::{
     Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, SlotId,
     SupersetMember, Target, WorkoutShape,
 };
+use domain::sequence::{AtLeastTwo, NonEmpty};
 use proptest::prelude::*;
 
 fn load() -> impl Strategy<Value = Load> {

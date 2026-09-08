@@ -29,7 +29,7 @@
 //! perfectly linear. It is accurate enough to prescribe from and should not be
 //! mistaken for physiology.
 
-use crate::gym::RepCount;
+use crate::measure::RepCount;
 
 use super::parameters::Percentage;
 

@@ -37,7 +37,8 @@ use std::fmt;
 
 use application::{Deliverable, Unexpressed};
 use domain::{
-    gym::{Exercise, Kg, Load, Rir, Spans},
+    gym::{Exercise, Kg, Load, Rir},
+    measure::Spans,
     prescription::{
         Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, SessionRole, Target,
         WeekKind,
@@ -348,7 +349,7 @@ fn annotate<M: std::fmt::Display + Spans>(prescription: &Prescribed<M>) -> Optio
     }
 }
 
-fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> SetOutcome {
+fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::measure::RepCount>) -> SetOutcome {
     let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
@@ -381,7 +382,7 @@ fn reps_set(exercise: Exercise, set: &PrescribedSet<domain::gym::RepCount>) -> S
     }
 }
 
-fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) -> SetOutcome {
+fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::measure::Duration>) -> SetOutcome {
     let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
@@ -412,13 +413,13 @@ fn duration_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Duration>) 
     }
 }
 
-fn distance_set(exercise: Exercise, set: &PrescribedSet<domain::gym::Distance>) -> SetOutcome {
+fn distance_set(exercise: Exercise, set: &PrescribedSet<domain::measure::Distance>) -> SetOutcome {
     let (template_id, kg) = match resolve(exercise, set.prescription.load()) {
         Ok(resolved) => resolved,
         Err(message) => return SetOutcome::Refused { message },
     };
 
-    let metres = |distance: &domain::gym::Distance| distance.metres.as_millimetres() / 1_000;
+    let metres = |distance: &domain::measure::Distance| distance.metres.as_millimetres() / 1_000;
 
     let (distance, ranged) = match set.prescription.measure() {
         Some(Target::Exactly(target)) => (Some(metres(target)), None),

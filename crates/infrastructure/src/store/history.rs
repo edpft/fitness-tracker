@@ -31,14 +31,15 @@ use application::{
 };
 use domain::{
     gym::{
-        AtLeastTwo, Distance, Duration, GymWorkout, Load, Metres, NonEmpty, OperatorZone,
-        Performed, PerformedExercise, RepCount, Rir, Set, SetKind, SignedKg, WorkoutItem,
-        WorkoutStart,
+        GymWorkout, Load, Performed, PerformedExercise, Rir, Set, SetKind, SignedKg, WorkoutItem,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, EventTime, LandingRecordId, Provenance},
+    measure::{Distance, Duration, Metres, RepCount},
+    normalised::{OperatorZone, StartedAt},
     plan::PlanName,
     prescription::SessionRole,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -811,14 +812,14 @@ impl SqlitePerformedWorkoutReader {
 }
 
 /// The stored instant and zone, as the domain's start.
-fn start_of(started_at_utc: &str, zone: &str) -> Result<WorkoutStart, StoreError> {
+fn start_of(started_at_utc: &str, zone: &str) -> Result<StartedAt, StoreError> {
     let instant: jiff::Timestamp = started_at_utc.parse().map_err(|_| StoreError::Corrupt {
         detail: format!("{started_at_utc:?} is not an instant"),
     })?;
     let zone = OperatorZone::try_from(zone).map_err(|error| StoreError::Corrupt {
         detail: error.to_string(),
     })?;
-    Ok(WorkoutStart::new(instant, zone))
+    Ok(StartedAt::new(instant, zone))
 }
 
 /// Provenance, mandatory and never inferred (§ II.3).

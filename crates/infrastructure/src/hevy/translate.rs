@@ -17,12 +17,14 @@
 use application::{NormalisationError, Translation, ports::WorkoutTranslator};
 use domain::{
     gym::{
-        Distance, Duration, GymWorkout, Kg, Load, Metres, NonEmpty, OperatorZone, Performed,
-        PerformedExercise, Refusal, RefusalLocus, RefusalReason, RepCount, Rir, Set, SetKind,
-        SignedKg, Superset, WorkoutItem, WorkoutStart, exercise::Exercise, sequence::AtLeastTwo,
+        GymWorkout, Kg, Load, Performed, PerformedExercise, Rir, Set, SetKind, SignedKg, Superset,
+        WorkoutItem, exercise::Exercise,
     },
     landing::{EventKind, LandedRecord, LandingRecordId, Provenance, SourceRecordId},
+    measure::{Distance, Duration, Metres, RepCount},
+    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use std::fmt;
 
@@ -119,7 +121,7 @@ impl WorkoutTranslator for HevyWorkoutTranslator {
         Ok(Translation::Workout {
             workout: Box::new(GymWorkout::new(
                 items,
-                WorkoutStart::new(instant, zone.clone()),
+                StartedAt::new(instant, zone.clone()),
                 record.provenance().clone(),
                 record.source_record_id().clone(),
                 record.id(),

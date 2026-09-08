@@ -14,9 +14,10 @@
 
 use domain::{
     gym::{
-        Kg, RepCount,
+        Kg,
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
+    measure::RepCount,
     plan::Occupies,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,

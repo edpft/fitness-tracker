@@ -8,8 +8,10 @@
 
 use application::{NormalisationRunLog, StoreError};
 use domain::{
-    gym::{NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount, WorkoutCount},
     landing::{FetchedAt, LandingStream, RecordCount},
+    normalised::{
+        NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount, WorkoutCount,
+    },
 };
 use sqlx::SqlitePool;
 
@@ -181,7 +183,7 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
 /// found nothing.
 #[cfg(test)]
 mod tests {
-    use domain::gym::NormalisationFailure;
+    use domain::normalised::NormalisationFailure;
 
     #[test]
     fn a_failure_reason_round_trips_through_its_stored_form() {

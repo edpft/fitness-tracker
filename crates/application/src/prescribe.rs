@@ -14,10 +14,11 @@ use std::{borrow::Cow, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Kg, Load, NonEmpty, OperatorZone, RepCount,
+        Kg, Load,
         exercise::{DurationExercise, Exercise, RepsExercise},
-        sequence::AtLeastTwo,
     },
+    measure::RepCount,
+    normalised::OperatorZone,
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Anchoring, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
@@ -33,6 +34,7 @@ use domain::{
         },
         warmup_ramp,
     },
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
 
@@ -1868,7 +1870,8 @@ mod ramp_tests {
 
     use super::{PrimaryLoad, primary_sets};
     use domain::{
-        gym::{Kg, RepCount},
+        gym::Kg,
+        measure::RepCount,
         prescription::{LoadSteps, SessionRole, seed::seed},
     };
 

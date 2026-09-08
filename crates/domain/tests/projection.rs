@@ -16,12 +16,15 @@
 
 use domain::{
     gym::{
-        AtLeastTwo, Duration, GymWorkout, Kg, Load, NonEmpty, OperatorZone, Performed,
-        PerformedExercise, RepCount, Set, SetKind, SignedKg, Superset, WorkoutItem, WorkoutStart,
+        GymWorkout, Kg, Load, Performed, PerformedExercise, Set, SetKind, SignedKg, Superset,
+        WorkoutItem,
         exercise::{DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
+    measure::{Duration, RepCount},
+    normalised::{OperatorZone, StartedAt},
     prescription::{Position, PrimaryPattern, ProjectionGap, SlotId, project},
+    sequence::{AtLeastTwo, NonEmpty},
 };
 use proptest::prelude::*;
 
@@ -129,7 +132,7 @@ fn performed(primary: PrimaryPattern) -> impl Strategy<Value = GymWorkout> {
         ));
         Some(GymWorkout::new(
             NonEmpty::new(items).ok()?,
-            WorkoutStart::new(instant, zone),
+            StartedAt::new(instant, zone),
             provenance,
             SourceRecordId::try_from("synthetic").ok()?,
             LandingRecordId::FIRST,

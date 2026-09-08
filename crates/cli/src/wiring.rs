@@ -22,8 +22,8 @@ use application::{
     status::ExtractionStatus,
 };
 use domain::{
-    gym::OperatorZone,
     landing::{FetchedAt, Watermark},
+    normalised::OperatorZone,
 };
 use infrastructure::{
     FileRunLock, HevyWorkoutEvents, HevyWorkoutLandingReader, HevyWorkoutLandingStore,

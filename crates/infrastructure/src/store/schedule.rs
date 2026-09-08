@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
-    gym::OperatorZone,
+    normalised::OperatorZone,
     schedule::{Alteration, Diary, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use jiff::{Timestamp, civil::Date};

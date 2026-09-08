@@ -14,11 +14,12 @@
 //! has re-created it — which § 10 reserves for the canonical layer.
 
 use domain::{
-    gym::{
-        GymWorkout, NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone,
-        Refusal, RefusalCount, WorkoutCount,
-    },
+    gym::GymWorkout,
     landing::{LandingRecordId, LandingStream, RecordCount, SourceRecordId},
+    normalised::{
+        NormalisationFailure, NormalisationOutcome, NormalisationRunId, OperatorZone, Refusal,
+        RefusalCount, WorkoutCount,
+    },
 };
 
 use crate::{

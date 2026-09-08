@@ -66,7 +66,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 
 use jiff::civil::{Date, Weekday};
 
-use crate::gym::OperatorZone;
+use crate::normalised::OperatorZone;
 
 /// Roughly when in the day, as the operator says it.
 ///

@@ -24,13 +24,14 @@ use application::{
     },
 };
 use domain::{
-    gym::{
-        GymWorkout, NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone,
-        Refusal, RefusalCount, WorkoutCount,
-    },
+    gym::GymWorkout,
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
+    },
+    normalised::{
+        NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
+        RefusalCount, WorkoutCount,
     },
 };
 

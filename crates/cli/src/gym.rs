@@ -32,7 +32,7 @@ use crate::{
     Failure, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing, wiring,
     wiring::Command,
 };
-use domain::gym::OperatorZone;
+use domain::normalised::OperatorZone;
 
 /// Run the discipline's daily loop: collect, derive, prescribe, deliver.
 ///

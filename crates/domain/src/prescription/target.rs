@@ -14,7 +14,8 @@
 
 use std::fmt;
 
-use crate::gym::{Duration, Load, Rir, Spans};
+use crate::gym::{Load, Rir};
+use crate::measure::{Duration, Spans};
 
 /// How much of the measure to do.
 ///

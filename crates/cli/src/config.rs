@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use domain::gym::OperatorZone;
+use domain::normalised::OperatorZone;
 use jiff::civil::Date;
 
 use infrastructure::Settings;

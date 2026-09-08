@@ -126,7 +126,7 @@ struct Ready {
     /// Carried rather than re-read. Building it can fail, and a free function
     /// here may not panic — the test exemptions reach `#[test]` bodies and not
     /// the helpers beside them.
-    zone: domain::gym::OperatorZone,
+    zone: domain::normalised::OperatorZone,
     _directory: tempfile::TempDir,
 }
 

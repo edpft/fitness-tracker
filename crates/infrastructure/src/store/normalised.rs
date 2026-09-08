@@ -9,14 +9,12 @@
 
 use application::{LandingRecordReader, NormalisedWorkoutStore, StoreError};
 use domain::{
-    gym::{
-        GymWorkout, Load, NormalisationRunId, PerformedExercise, Set, SetKind, WorkoutCount,
-        WorkoutItem,
-    },
+    gym::{GymWorkout, Load, PerformedExercise, Set, SetKind, WorkoutItem},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
+    normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
@@ -450,7 +448,7 @@ impl SetWrite<'_, '_> {
 }
 
 /// A distance on its way into the store, checked rather than saturated.
-fn metres_for_storage(metres: domain::gym::Metres) -> Result<i64, StoreError> {
+fn metres_for_storage(metres: domain::measure::Metres) -> Result<i64, StoreError> {
     i64::try_from(metres.as_millimetres()).map_err(|_| StoreError::Corrupt {
         detail: "a distance larger than the store can hold".to_owned(),
     })

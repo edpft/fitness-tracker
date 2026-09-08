@@ -8,10 +8,11 @@
 use application::{RefusalStore, StoreError};
 use domain::{
     gym::{
-        Exercise, NormalisationRunId, Refusal, RefusalCount, RefusalLocus, RefusalReason,
+        Exercise,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{InvalidStream, LandingRecordId, LandingStream, SourceRecordId},
+    normalised::{NormalisationRunId, Refusal, RefusalCount, RefusalLocus, RefusalReason},
 };
 use sqlx::SqlitePool;
 
@@ -228,7 +229,7 @@ impl RefusalStore for SqliteRefusalStore {
 /// written.
 #[cfg(test)]
 mod tests {
-    use domain::gym::RefusalKind;
+    use domain::normalised::RefusalKind;
 
     use super::reason_from_row;
 

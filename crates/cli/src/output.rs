@@ -8,8 +8,8 @@ use application::{
     DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
 };
 use domain::{
-    gym::{Refusal, RefusalKind},
     landing::{LandingStream, RunOutcome, Watermark},
+    normalised::{Refusal, RefusalKind},
     prescription::{
         BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, TestTarget,
         WeekIndex, WeekPlan,
@@ -962,7 +962,7 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
-fn set_line<M: std::fmt::Display + domain::gym::Spans>(
+fn set_line<M: std::fmt::Display + domain::measure::Spans>(
     set: &domain::prescription::PrescribedSet<M>,
 ) -> String {
     use domain::prescription::Prescribed;

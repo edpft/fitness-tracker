@@ -12,7 +12,7 @@ use application::{
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Prescribing, PrescriptionPorts},
 };
-use domain::gym::OperatorZone;
+use domain::normalised::OperatorZone;
 use infrastructure::{
     HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,

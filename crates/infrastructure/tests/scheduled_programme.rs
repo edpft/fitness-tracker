@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{DiaryAuthor as _, DiaryStore as _, ExerciseHistory as _};
 use domain::{
-    gym::OperatorZone,
+    normalised::OperatorZone,
     prescription::{
         Anchor, AnchorProvenance, Authored, EntryTest, SessionRole, Skip, authored::Shape,
     },
@@ -44,7 +44,7 @@ fn autumn() -> Result<Authored, Box<dyn std::error::Error>> {
                 date(2026, 7, 3),
             )?,
             entry_test: Some(EntryTest::new(
-                domain::gym::RepCount::new(3)?,
+                domain::measure::RepCount::new(3)?,
                 Some("60".to_owned().try_into()?),
             )?),
         },

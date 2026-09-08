@@ -17,7 +17,7 @@
 
 use std::fmt;
 
-use super::exercise::Exercise;
+use crate::gym::exercise::Exercise;
 use crate::landing::{LandingRecordId, SourceRecordId};
 
 /// Where in a record the refused thing sat.

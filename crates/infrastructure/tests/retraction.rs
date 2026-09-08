@@ -15,7 +15,7 @@
 mod support;
 
 use application::NormalisationError;
-use domain::gym::RefusalReason;
+use domain::normalised::RefusalReason;
 use support::{corpus, derived};
 
 /// The record already in raw: a tombstone for a workout never landed.

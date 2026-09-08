@@ -14,7 +14,8 @@
 use std::fmt;
 
 use crate::{
-    gym::{RepCount, exercise::Exercise},
+    gym::exercise::Exercise,
+    measure::RepCount,
     prescription::{
         schedule::{PerRole, SessionRole},
         shape::SlotId,
