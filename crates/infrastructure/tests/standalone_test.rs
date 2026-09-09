@@ -484,8 +484,10 @@ fn the_phases_start_behind_the_entry_test() {
 
 /// What the test is an attempt at, and what the taper before it is a share of.
 ///
-/// The number the operator asserted for the autumn plan's opening week: *"I
-/// asserted that I think i'm going to hit 95 for 1 in that test."*
+/// The number the operator declared for the autumn plan's opening week: *"I
+/// asserted that I think i'm going to hit 95 for 1 in that test."* An anchor is
+/// tested or declared, and this is the second — the estimate the wizard showed
+/// him was a guide to declare against, not a source in its own right.
 const TARGET_GRAMS: u64 = 95_000;
 
 /// The chart's µ4 first session is `3 × 3 @ 75%`, and the barbell steps in
@@ -596,9 +598,12 @@ macro_rules! primary_of {
 /// The other session of a published test week is the chart's taper, off the
 /// target.
 ///
-/// **The regression this file exists for.** The plan's opening week has nothing
-/// before it, so the light session was refused as underivable and the whole of
-/// 2026-09-14 was issued and delivered without the lift the block is about.
+/// **The default output of `fitness plan`, and the defect this file exists
+/// for.** Its opening mesocycle is always a standalone test week with nothing
+/// before it, and the weekday map always gives that week a light session — so
+/// the primary was refused as underivable while the fifteen accessories around
+/// it were issued and delivered. A session missing the lift the plan is about,
+/// with nothing refused, is the worst shape a failure can take.
 #[test]
 fn a_published_test_weeks_other_session_is_the_charts_taper() {
     let (prescriber, _directory) = published!(false);
