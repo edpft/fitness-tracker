@@ -16,15 +16,29 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
 ## Where the plan and the reasoning live
 
-Read these before planning anything. Neither is mentioned by the constitution,
-and a session that skips them re-derives decisions that were already settled —
-or worse, quietly contradicts one.
+Read these before planning anything. None of them is mentioned by the
+constitution, and a session that skips them re-derives decisions that were
+already settled — or worse, quietly contradicts one.
 
+**Four places, and which one a thing goes in is not a matter of taste.** The
+operator, 2026-09-09: *"the place for recording tasks or progress is the GitHub
+issues, the place for recording open questions is the GitHub discussions."*
+
+- **GitHub issues** — tasks and progress. What is to be done, what was done, and
+  what a change turned out to cost. Comment on the issue as the work lands
+  rather than at the end, and close it when its own "done when" is met.
+- **GitHub discussions** — open questions. A question does not go in the
+  roadmap, in a decision record or in a comment in the code; it goes here, where
+  the operator can answer it and where the answer is findable afterwards.
 - **`docs/roadmap.md`** — what is planned, in what order, and why. It carries
-  the current state at the top, the order of work, what each decision changed
-  about that order, and the questions nobody has answered. It is a living
-  document: revise it when the plan moves rather than leaving it to be
-  discovered stale.
+  the current state at the top, the order of work, and what each decision
+  changed about that order. **Not the open questions** — it said "and the
+  questions nobody has answered" until 2026-09-09, and that line is what put the
+  incremental-normalisation question in the roadmap rather than in discussion
+  #113.
+  An entry here may *point* at a discussion, because "deferred, and here is why"
+  is ordering; the question itself lives there. It is a living document: revise
+  it when the plan moves rather than leaving it to be discovered stale.
 - **`docs/decisions/`** — why the model is the shape it is. Numbered, dated, and
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.
@@ -37,15 +51,16 @@ or worse, quietly contradicts one.
   corrected is not a disagreement; it is one party catching up, and it belongs in
   a commit message rather than in a numbered record.
 
-  **The same test governs open questions**, wherever they are parked: a question
-  is only open if resolving it unblocks something. A thing nobody needs an answer
+  **The same test governs open questions**, which live in the discussions: a
+  question is only open if resolving it unblocks something. A thing nobody needs an answer
   to before shipping is not an open question, and a choice that is the operator's
   to make whenever he likes is not one either — it is a programming choice.
 
 **Write things down as they are settled, not at the end.** A long session holds
 a great deal of reasoning that exists nowhere else, and the remedy is not a
-better memory — it is a commit. If something was decided in conversation and is
-not in one of these two places or in the code, it will be lost.
+better memory — it is a commit, an issue comment or a discussion. If something
+was decided in conversation and is not in one of the places above or in the
+code, it will be lost.
 
 **What does not belong here**: anything about how a particular person likes to
 work. That is not a fact about the project.

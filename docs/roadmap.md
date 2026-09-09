@@ -326,18 +326,10 @@ by duration?"*
 - ~~The cool-down ride~~ — **built 2026-09-06** (#79, #82). Found by query rather
   than by a table, because what the operator rides is the most recent one; four
   of the twelve instructors publish none and fall back to Matt Wilpers.
-- **Incremental normalisation.** The operator, 2026-09-08: *"it doesn't make
-  sense to me for normalisation and derivation to be fully dynamic when the data
-  they are running on is incremental."* He is right that nothing requires the
-  rebuild — § II says a derivation is *"defined by what it is a function of, not
-  by how it is stored"*, so equalling a full re-derivation is the duty and
-  performing one is an implementation choice. Extraction is already incremental
-  because it avoids network; normalisation has none, and a full pass costs ~12
-  seconds on 905 records and 644,719 sample rows, against 0.19s for the gym's
-  168. What it would cost is the three cases where a new record changes an
-  entity already derived — supersession, a cool-down landing after the ride it
-  joins, and retraction — plus knowing when a zone or translator change forces
-  the full pass anyway. **Revisit when that 12 seconds is 12 minutes.**
+- **Incremental normalisation** — discussion #113, raised by the operator on
+  2026-09-08. A full pass costs ~12 seconds today. Revisit when it is 12
+  minutes; the argument and the measurements are in the discussion, which is
+  where an open question lives (2026-09-09).
 - **Slot amendments** — needed the next time equipment moves, not before.
 - **The Peloton class library, cached** (#94). `fitness plan` fetches sixty-five
   classes on every authoring and keeps none of them.
