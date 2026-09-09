@@ -1155,6 +1155,21 @@ fn sbs_load(
     let Some(maximum) = maximum.or_else(|| sbs.entry().anchor().map(Anchor::load)) else {
         return Err(UnderivableReason::NoOpeningMaximum);
     };
+
+    chart_load(day, maximum, steps)
+}
+
+/// One day of the chart, as a load, given the maximum it is a share of.
+///
+/// **Separate from [`sbs_load`] because two templates read the chart.** A cycle
+/// asks for the day its own week and role name, and a provided test week asks
+/// for the taper that precedes its attempt; what neither of them decides is
+/// what a chart day means once the maximum is known, which is this.
+fn chart_load(
+    day: SbsDay,
+    maximum: Kg,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
     let increment = steps.step_at(maximum);
 
     match day {
@@ -1257,8 +1272,27 @@ fn block_load(
     }
 }
 
-/// A standalone test's week: the attempt on the heavy session, and the
-/// predecessor's session on the light one.
+/// A test's week: the attempt on the heavy session, and on the light one either
+/// the published week's own other session or the predecessor's.
+///
+/// **A provided test week is a microcycle of a chart, and the chart states both
+/// its days.** *Squat 2x Int* µ4 is a taper and a one-repetition maximum, so the
+/// light session is neither underivable nor the predecessor's — it is the taper,
+/// a share of the maximum like every other percentage day. What it lacks is the
+/// maximum, and the operator settled that on 2026-09-09: *"the light SBS session
+/// before a heavy SBS session in a test week should take the heavy's expected
+/// target as it's anchor."*
+///
+/// That target is the number the attempt is an attempt at, so the two sessions
+/// of the week are shares of one figure and the week hangs together. Where it
+/// was declared it is an assertion — the operator, on the same day: *"I asserted
+/// that I think i'm going to hit 95 for 1 in that test"* — and
+/// [`TestTarget::Declared`] is the record of that, so nothing here needs to
+/// carry a provenance beside it.
+///
+/// **An unprovided test still runs the predecessor's session.** A week written
+/// by nobody has no chart to read a taper off, which is the case
+/// [`UnderivableReason::NoPredecessor`] remains for.
 fn test_load(
     test: &Test,
     parameters: &GenerationParameters,
@@ -1275,10 +1309,21 @@ fn test_load(
             reps: test.reps(),
         });
     }
-    // Not the test: the week's other session is the predecessor's, run at the
-    // load its progression stands at. A test with nothing before it has no such
-    // load, which is why a test that runs a second session needs a predecessor
-    // even where its target was declared.
+
+    if let Some(day) = provided_other_session(test) {
+        // The same refusal the attempt itself makes, and for the same reason:
+        // both days of the week are shares of the target, so a week with no
+        // target has no light session either.
+        let Some(target) = inheritance.target else {
+            return Err(UnderivableReason::NoTarget);
+        };
+        return chart_load(day, target, steps);
+    }
+
+    // Not the test, and nothing published to read: the week's other session is
+    // the predecessor's, run at the load its progression stands at. A test with
+    // nothing before it has no such load, which is why a test that runs a second
+    // session needs a predecessor even where its target was declared.
     let Some(load) = inheritance.light else {
         return Err(UnderivableReason::NoPredecessor);
     };
@@ -1286,6 +1331,20 @@ fn test_load(
         load: steps.quantise_loaded(load),
         reps: parameters.top_set_reps.get(role).as_rep_count(),
     })
+}
+
+/// The chart day the other session of a provided test week runs.
+///
+/// **The first microcycle it took, and a test week takes exactly one.** The
+/// selection is `NonEmpty` because a provided *cycle* is four weeks; a test is
+/// one, so the first number is the only number.
+///
+/// [`SbsSession::First`] rather than the role, because which session of the week
+/// this is has already been decided: the attempt is
+/// [`Test::ROLE`] and this is the other one.
+fn provided_other_session(test: &Test) -> Option<SbsDay> {
+    let microcycle = test.provided()?.microcycles().next()?;
+    sbs_day(microcycle, SbsSession::First).ok()
 }
 
 /// Several slots issued as one item, as the template groups them.

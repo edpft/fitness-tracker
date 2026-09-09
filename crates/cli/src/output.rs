@@ -643,10 +643,19 @@ fn test_standing(test: &domain::prescription::Test, standing: &application::Ladd
             println!("  inherited from the programme before it, as the record stands");
         }
     }
-    println!(
-        "  the {} session is the test; the other is the previous programme's",
-        domain::prescription::Test::ROLE
-    );
+    let role = domain::prescription::Test::ROLE;
+    match test.provided() {
+        // A published week states both its days, so the other one is the
+        // taper the programme puts before its own test rather than anything
+        // inherited. Naming the programme is the point: it is what says the
+        // light session exists at all.
+        Some(provided) => println!(
+            "  the {role} session is the test; the other is {} {}, off the same target",
+            provided.programme(),
+            provided,
+        ),
+        None => println!("  the {role} session is the test; the other is the previous programme's"),
+    }
 }
 
 /// A linear programme: its ladder, week by week, and where the record puts it.

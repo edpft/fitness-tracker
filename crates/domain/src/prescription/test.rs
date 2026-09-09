@@ -17,10 +17,19 @@
 //! **The week is two sessions and only one of them is the test.**
 //!
 //! ```text
-//! light   the predecessor's session, unchanged, at the light load its
-//!         progression stands at
+//! light   the published week's other session, off the target the heavy day is
+//!         an attempt at — or, where nobody published this week, the
+//!         predecessor's session at the light load its progression stands at
 //! heavy   the test: a ramp toward the target, then one autoregulated single
 //! ```
+//!
+//! **The light day was the predecessor's in every case until 2026-09-09**, which
+//! left the first week of a plan with no light session at all: there is no
+//! predecessor to inherit from, and the week that opens a plan is exactly the
+//! week that has none. The operator settled it — *"the light SBS session before
+//! a heavy SBS session in a test week should take the heavy's expected target as
+//! it's anchor"* — and a published week already states what that session is, so
+//! the target is the only thing it was missing.
 //!
 //! That asymmetry is why the tested exercise and the predecessor's may both
 //! appear in the fills, as the two halves of one [`Fill::Alternating`]. Where the
@@ -145,11 +154,11 @@ impl Test {
 
     /// The session the test is taken on.
     ///
-    /// **Heavy, and not a choice the document makes.** The light session of the
-    /// week is the predecessor's, run unchanged; the heavy one is replaced by
-    /// the test. A test programme that names a gating role would be naming
-    /// something with no ladder to gate, which is why [`Test`] has no such
-    /// field where [`Linear`](crate::prescription::Linear) does.
+    /// **Heavy, and not a choice the document makes.** The heavy session is
+    /// replaced by the test and the light one is not; what the light one runs
+    /// is the module doc's business. A test programme that names a gating role
+    /// would be naming something with no ladder to gate, which is why [`Test`]
+    /// has no such field where [`Linear`](crate::prescription::Linear) does.
     pub const ROLE: SessionRole = SessionRole::Heavy;
 
     /// The week a test occupies, as a calendar.
@@ -306,8 +315,8 @@ impl Test {
     /// Whether this slot is the one being tested.
     ///
     /// **Asked of a role as well as a slot**, unlike the linear equivalent. On
-    /// the light session the same slot is the predecessor's primary and gets a
-    /// primary's treatment from its own progression, not a test's.
+    /// the light session the same slot is an ordinary primary and gets a
+    /// primary's treatment, not a test's.
     #[must_use]
     pub fn is_tested(&self, slot: SlotId, role: SessionRole) -> bool {
         role == Self::ROLE && self.tested.pattern().slot() == slot

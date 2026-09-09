@@ -28,6 +28,7 @@ use domain::prescription::{
     Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SessionRole, SlotId,
     WeekKind, authored::Shape,
 };
+use domain::provider::{ExternalProgramme, ProvidedFrom};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
@@ -84,9 +85,33 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
 
 /// The corpus, landed and derived, with the fixture linear programme authored.
 ///
-/// Shared by both halves of this file: what succeeds the fixture block differs,
-/// and everything before that does not.
+/// Shared by every part of this file that wants a predecessor: what succeeds the
+/// fixture block differs, and everything before that does not.
 async fn corpus_store() -> Result<
+    (
+        domain::prescription::GenerationParameters,
+        tempfile::TempDir,
+        SqlitePool,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let (parameters, directory, pool) = landed_store().await?;
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(&programme::as_plan(programme::programme()?)?, &parameters)
+    .await?;
+
+    Ok((parameters, directory, pool))
+}
+
+/// The corpus, landed and derived, and **nothing authored**.
+///
+/// The store a plan's first week sees: a record of what has been trained, and no
+/// programme before this one to inherit anything from.
+async fn landed_store() -> Result<
     (
         domain::prescription::GenerationParameters,
         tempfile::TempDir,
@@ -121,16 +146,7 @@ async fn corpus_store() -> Result<
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
 
-    let parameters = programme::parameters()?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&programme::as_plan(programme::programme()?)?, &parameters)
-    .await?;
-
-    Ok((parameters, directory, pool))
+    Ok((programme::parameters()?, directory, pool))
 }
 
 /// A test week, authored in its own right.
@@ -460,5 +476,187 @@ fn the_phases_start_behind_the_entry_test() {
     assert!(
         working > 1,
         "accumulation runs sets across, got {working} working sets"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A test week its publisher wrote (issue #120).
+
+/// What the test is an attempt at, and what the taper before it is a share of.
+///
+/// The number the operator declared for the autumn plan's opening week: *"I
+/// asserted that I think i'm going to hit 95 for 1 in that test."* An anchor is
+/// tested or declared, and this is the second — the estimate the wizard showed
+/// him was a guide to declare against, not a source in its own right.
+const TARGET_GRAMS: u64 = 95_000;
+
+/// The chart's µ4 first session is `3 × 3 @ 75%`, and the barbell steps in
+/// 2.5kg: 75% of 95kg is 71.25kg, which is not on the grid, and the share is
+/// taken downward.
+const TAPER_GRAMS: u64 = 70_000;
+
+/// A test week taken from a published programme, target declared.
+///
+/// **µ4, because that is the only microcycle an entry test can be.** *Squat 2x
+/// Int* µ4 is a taper and a one-repetition maximum; the test is the second of
+/// those, and the week's other session is the first.
+fn provided_test() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
+    let published = ExternalProgramme::new(
+        "Stronger By Science".to_owned().try_into()?,
+        "Squat 2x Int".to_owned().try_into()?,
+    );
+    let answers = programme::authored(
+        Date::constant(2026, 8, 31),
+        Shape::Test {
+            reps: domain::measure::RepCount::new(1)?,
+            // Declared, because a plan's opening week has nothing before it to
+            // inherit a target from.
+            target: domain::prescription::TestTarget::Declared(domain::gym::Kg::from_grams(
+                TARGET_GRAMS,
+            )),
+            provided: Some(ProvidedFrom::new(published, vec![4])?),
+        },
+    )?;
+    Ok(programme::authoring(answers, &[])??)
+}
+
+/// A store whose only programme is a published test week — the shape of a plan
+/// on the day it opens.
+async fn with_provided_test(
+    predecessor: bool,
+) -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
+    let (parameters, directory, pool) = if predecessor {
+        corpus_store().await?
+    } else {
+        landed_store().await?
+    };
+    let plan = programme::named_plan("published-entry-test", vec![provided_test()?])?;
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(&plan, &parameters)
+    .await?;
+
+    Ok((
+        Prescribing::new(PrescriptionPorts {
+            history: SqliteExerciseHistory::new(pool.clone()),
+            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            parameters: SqliteGenerationParameterStore::new(pool.clone()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
+        }),
+        directory,
+    ))
+}
+
+macro_rules! published {
+    ($predecessor:expr) => {
+        match corpus::block_on(with_provided_test($predecessor)) {
+            Ok(Ok(ready)) => ready,
+            Ok(Err(error)) => panic!("the corpus lands, derives and authors: {error}"),
+            Err(error) => panic!("a runtime is available: {error}"),
+        }
+    };
+}
+
+/// The primary's working sets, panicking with the reason if it was withheld.
+///
+/// **A macro rather than a function**, because the panic exemptions
+/// `clippy.toml` grants reach `#[test]` functions and not helpers defined
+/// beside them — the same reason `run!` above is one.
+macro_rules! primary_of {
+    ($issued:expr) => {{
+        let issued = &$issued;
+        if let Some(missing) = issued
+            .underivable
+            .iter()
+            .find(|missing| missing.slot == SlotId::KneeDominant)
+        {
+            panic!(
+                "the lift the week is about is prescribed: {}",
+                missing.reason
+            )
+        }
+        let Some(PrescribedItem::Exercise { exercise, .. }) =
+            issued.workout.shape().item_for(SlotId::KneeDominant)
+        else {
+            panic!("the primary is a single exercise")
+        };
+        let domain::prescription::PrescribedExercise::ForReps { sets, .. } = exercise else {
+            panic!("the front squat is counted in repetitions")
+        };
+        let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
+        working
+    }};
+}
+
+/// The other session of a published test week is the chart's taper, off the
+/// target.
+///
+/// **The default output of `fitness plan`, and the defect this file exists
+/// for.** Its opening mesocycle is always a standalone test week with nothing
+/// before it, and the weekday map always gives that week a light session — so
+/// the primary was refused as underivable while the fifteen accessories around
+/// it were issued and delivered. A session missing the lift the plan is about,
+/// with nothing refused, is the worst shape a failure can take.
+#[test]
+fn a_published_test_weeks_other_session_is_the_charts_taper() {
+    let (prescriber, _directory) = published!(false);
+    let issued = run!(prescriber.prescribe(other_day()));
+
+    let working = primary_of!(issued);
+    assert_eq!(working.len(), 3, "µ4 day one is three sets");
+    for set in &working {
+        assert_eq!(
+            set.prescription.load(),
+            Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
+                TAPER_GRAMS
+            ))),
+            "75% of the target, on the barbell's grid"
+        );
+    }
+}
+
+/// And the test itself is unchanged: the attempt is still at the target.
+#[test]
+fn a_published_test_week_still_tests_on_the_heavy_session() {
+    let (prescriber, _directory) = published!(false);
+    let issued = run!(prescriber.prescribe(test_day()));
+
+    let working = primary_of!(issued);
+    assert_eq!(working.len(), 1, "one attempt, and nothing after it");
+    assert_eq!(
+        working[0].prescription.load(),
+        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
+            TARGET_GRAMS
+        ))),
+        "the attempt is at what the operator asserted"
+    );
+}
+
+/// A published week states its own other session, so the predecessor's is not
+/// consulted even where there is one.
+///
+/// **Both days are shares of one number**, which is what makes the week cohere:
+/// a taper taken off the predecessor's ladder and a test taken off the target
+/// would be two programmes sharing a week.
+#[test]
+fn the_published_taper_does_not_defer_to_a_predecessor() {
+    let (prescriber, _directory) = published!(true);
+    let issued = run!(prescriber.prescribe(other_day()));
+
+    let working = primary_of!(issued);
+    assert_eq!(working.len(), 3, "µ4 day one is three sets");
+    assert_eq!(
+        working[0].prescription.load(),
+        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
+            TAPER_GRAMS
+        ))),
+        "the chart's share of the target, not where the ladder before it stands"
     );
 }
