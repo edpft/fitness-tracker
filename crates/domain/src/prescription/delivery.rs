@@ -37,6 +37,8 @@ pub enum InvalidDelivery {
     DestinationNotLowercase,
     #[error("a session ordinal counts from one, and {value} does not")]
     OrdinalBelowOne { value: u32 },
+    #[error("a destination that answered said how it took the request")]
+    EmptyStatus,
 }
 
 /// What a destination called the session it was given.
@@ -181,5 +183,118 @@ impl fmt::Display for PrescriptionState {
             Self::Published { .. } => f.write_str("published"),
             Self::Performed { .. } => f.write_str("performed"),
         }
+    }
+}
+
+/// How a destination said it took what it was given, in its own vocabulary.
+///
+/// **Opaque, exactly as [`DeliveryReference`] is.** `201 Created` and
+/// `400 Bad Request` are Hevy's words for what it did; this side keeps them and
+/// does not parse them. What it does record is the one bit that is not the
+/// destination's to define: whether the act succeeded, which the adapter knows
+/// and nothing downstream could recover from the text without learning the
+/// destination's vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyStatus {
+    stated: String,
+    succeeded: bool,
+}
+
+impl ReplyStatus {
+    /// # Errors
+    ///
+    /// [`InvalidDelivery::EmptyStatus`] if the destination said nothing about
+    /// how it took the request. A destination that answered at all said
+    /// something.
+    pub fn new(stated: impl Into<String>, succeeded: bool) -> Result<Self, InvalidDelivery> {
+        let stated = stated.into();
+        if stated.is_empty() {
+            return Err(InvalidDelivery::EmptyStatus);
+        }
+        Ok(Self { stated, succeeded })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.stated
+    }
+
+    pub const fn succeeded(&self) -> bool {
+        self.succeeded
+    }
+}
+
+impl fmt::Display for ReplyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.stated)
+    }
+}
+
+/// What a destination answered, before anything interpreted it.
+///
+/// **The delivery side's [`crate::landing::RawPayload`]**, and it exists for the
+/// reason that one does: bytes read once cannot be asked for again. We kept
+/// every byte a source *served* and nothing a destination *answered*, so a reply
+/// that would not parse left only serde's complaint about a column number, and a
+/// reply that parsed left nothing at all — which is how a routine created
+/// without its front squat became a question only the live API could answer
+/// (#124).
+///
+/// Two things differ from a landing payload, and both follow from what a reply
+/// is rather than from convenience.
+///
+/// **An empty body is legal here.** A source that served nothing served no
+/// observation; a destination that refuses with a bare status has still
+/// answered, and that it said nothing beyond the status is the fact worth
+/// keeping.
+///
+/// **It is not observation data.** § II does not reach it: nothing here is a
+/// record of what happened, and this acquires no normalised or canonical form.
+/// It belongs to the delivery record — § 12 authored data, extended by what the
+/// destination said back — and, like the reference beside it, nothing
+/// regenerates it if lost.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DestinationReply {
+    status: ReplyStatus,
+    body: Vec<u8>,
+}
+
+impl DestinationReply {
+    /// Taken before anything interprets it, which is the whole point: an
+    /// adapter that parses first has already decided what is worth keeping.
+    pub const fn new(status: ReplyStatus, body: Vec<u8>) -> Self {
+        Self { status, body }
+    }
+
+    pub const fn status(&self) -> &ReplyStatus {
+        &self.status
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    /// The body as something printable, for the error the operator reads.
+    ///
+    /// Lossy rather than fallible: a reply that is not valid UTF-8 is exactly
+    /// the sort of surprise this exists to surface, and refusing to show it
+    /// would reproduce the failure it was written to end. The bytes are kept
+    /// intact whatever this renders.
+    pub fn text(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.body)
+    }
+}
+
+/// Prints the body's length rather than the body, for
+/// [`crate::landing::RawPayload`]'s reason: a reply is a whole routine, and
+/// dumping it into every log line helps nobody. The one place it is worth
+/// reading in full asks for it with [`DestinationReply::text`].
+impl fmt::Debug for DestinationReply {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DestinationReply({}, {} bytes)",
+            self.status,
+            self.body.len()
+        )
     }
 }

@@ -314,6 +314,20 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
     ) -> Result<(), application::StoreError> {
         Ok(())
     }
+
+    /// **Nothing is answered, so nothing is kept.** The preview destination
+    /// contacts no one and hands back no reply, so this is never reached with
+    /// one — and it forgets on principle either way, which is what makes running
+    /// a preview against the real store safe.
+    async fn record_reply(
+        &self,
+        _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+        _reply: &application::DestinationReply,
+        _at: jiff::Timestamp,
+    ) -> Result<(), application::StoreError> {
+        Ok(())
+    }
 }
 
 /// What a session did against what it was told.

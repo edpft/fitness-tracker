@@ -6,11 +6,12 @@
 //!
 //! Everything interesting about a delivery is in the destination that performed
 //! it; what is here is which prescription holds which of a destination's places,
-//! and the one write that moves a place from one prescription to another.
+//! the one write that moves a place from one prescription to another, and what
+//! the destination said each time it was asked.
 
 use application::{
-    DeliveryReference, DestinationName, PrescribedWorkoutId, PrescriptionDeliveryStore,
-    PrescriptionLifecycle, StoreError,
+    DeliveryReference, DestinationName, DestinationReply, PrescribedWorkoutId,
+    PrescriptionDeliveryStore, PrescriptionLifecycle, StoreError,
 };
 use domain::prescription::PrescriptionState;
 use jiff::{Timestamp, civil::Date};
@@ -183,6 +184,44 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             destination,
             reference,
             delivered_at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        Ok(())
+    }
+
+    async fn record_reply(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reply: &DestinationReply,
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        let id = prescription.as_i64();
+        let destination = destination.to_string();
+        let status = reply.status().as_str();
+        let succeeded = i64::from(reply.status().succeeded());
+        let body = reply.body();
+        let answered_at = at.to_string();
+
+        // An insert with nothing to reconcile against, because there is nothing
+        // it could collide with: this table has no key but its own, on purpose.
+        // Every attempt leaves a row, and two attempts that said the same thing
+        // are two answers rather than one repeated.
+        sqlx::query!(
+            r#"
+            INSERT INTO delivery_reply
+                (prescription, destination, status, succeeded, body, answered_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            id,
+            destination,
+            status,
+            succeeded,
+            body,
+            answered_at
         )
         .execute(&self.pool)
         .await

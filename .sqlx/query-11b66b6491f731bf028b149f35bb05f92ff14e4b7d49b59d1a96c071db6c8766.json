@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT status    AS \"status!: String\",\n                   succeeded AS \"succeeded!: i64\",\n                   body      AS \"body!: Vec<u8>\"\n            FROM delivery_reply\n            WHERE prescription = ? AND destination = 'hevy'\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "status!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "delivery_reply",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "succeeded!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "delivery_reply",
+            "name": "succeeded"
+          }
+        }
+      },
+      {
+        "name": "body!: Vec<u8>",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "delivery_reply",
+            "name": "body"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "11b66b6491f731bf028b149f35bb05f92ff14e4b7d49b59d1a96c071db6c8766"
+}

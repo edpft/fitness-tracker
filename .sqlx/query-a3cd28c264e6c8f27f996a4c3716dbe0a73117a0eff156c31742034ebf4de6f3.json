@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO delivery_reply\n                (prescription, destination, status, succeeded, body, answered_at)\n            VALUES (?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "a3cd28c264e6c8f27f996a4c3716dbe0a73117a0eff156c31742034ebf4de6f3"
+}

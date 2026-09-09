@@ -1351,14 +1351,16 @@ pub trait PlanAuthor {
 // **A destination is a renderer that returns a receipt.** Printing a session to
 // a terminal and putting it in the app the operator trains from are the same
 // act; the only asymmetry is that the second keeps what it was given, under an
-// identity of its own. That identity is the whole of what crosses back over the
-// port, and everything else about how a session is rendered — titles, folders,
-// which of the source's templates an exercise is written to, what its notes say
-// — is the adapter's and appears nowhere here.
+// identity of its own. That identity, and the answer it arrived in, are what
+// crosses back over the port; everything else about how a session is rendered —
+// titles, folders, which of the source's templates an exercise is written to,
+// what its notes say — is the adapter's and appears nowhere here.
 
 // Re-exported so that every ring above reaches them through the port surface,
 // as it does the rest of the vocabulary a port speaks.
-pub use domain::prescription::{DeliveryReference, DestinationName, SessionOrdinal};
+pub use domain::prescription::{
+    DeliveryReference, DestinationName, DestinationReply, ReplyStatus, SessionOrdinal,
+};
 
 /// Everything a rendering needs that the prescription does not itself carry.
 ///
@@ -1397,6 +1399,52 @@ pub struct Delivered {
     pub unexpressed: Vec<Unexpressed>,
 }
 
+/// One act against a destination, and everything it left behind.
+///
+/// **Not a `Result`, because a failure and an answer are different questions**
+/// (#124). A destination that refused the session still said something, and a
+/// destination that accepted it can still answer in a shape we cannot read —
+/// which is the case that cost two diagnoses in a day, and the case that used to
+/// record least. Folding the reply into `Delivered` would keep it exactly where
+/// it is least needed.
+///
+/// **The reply travels back through the port rather than being written by the
+/// adapter.** A destination writing to a store would be one driven adapter
+/// reaching for another, and what is worth recording is the use case's decision
+/// rather than the adapter's.
+#[derive(Debug)]
+pub struct DeliveryAttempt {
+    /// What the destination said, taken before anything interpreted it.
+    ///
+    /// `None` when there was nothing to take: a connection that never opened,
+    /// or a request that failed before it was sent. Every other case has one,
+    /// whether or not the status succeeded and whether or not the body parses.
+    pub reply: Option<DestinationReply>,
+    /// Whether the act itself worked out.
+    pub outcome: Result<Delivered, DeliveryError>,
+}
+
+impl DeliveryAttempt {
+    /// An act that never got as far as an answer.
+    pub const fn unanswered(error: DeliveryError) -> Self {
+        Self {
+            reply: None,
+            outcome: Err(error),
+        }
+    }
+
+    /// An answer, and what we made of it.
+    pub const fn answered(
+        reply: DestinationReply,
+        outcome: Result<Delivered, DeliveryError>,
+    ) -> Self {
+        Self {
+            reply: Some(reply),
+            outcome,
+        }
+    }
+}
+
 /// Where a prescription goes to be acted on.
 ///
 /// The mirror of [`WorkoutEventSource`]: that one is where observations come
@@ -1410,15 +1458,11 @@ pub trait PrescriptionDestination {
 
     /// Put a session there that is not there yet.
     ///
-    /// # Errors
-    ///
-    /// [`DeliveryError`] if the destination is unreachable or refuses the
-    /// session. An exercise it cannot state is not an error: it comes back in
-    /// [`Delivered::unexpressed`].
-    fn deliver(
-        &self,
-        session: &Deliverable,
-    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send;
+    /// The [`DeliveryAttempt`] carries a [`DeliveryError`] if the destination is
+    /// unreachable or refuses the session, and the destination's own answer
+    /// beside it either way. An exercise it cannot state is not an error: it
+    /// comes back in [`Delivered::unexpressed`].
+    fn deliver(&self, session: &Deliverable) -> impl Future<Output = DeliveryAttempt> + Send;
 
     /// Put a session in the place another one occupies, replacing it.
     ///
@@ -1435,17 +1479,16 @@ pub trait PrescriptionDestination {
     /// discarding it here would leave the store pointing at a place that no
     /// longer exists.
     ///
-    /// # Errors
-    ///
-    /// [`DeliveryError`] as for [`PrescriptionDestination::deliver`], and
-    /// additionally if the destination no longer holds `occupying` — which is
-    /// not something to paper over by creating one, because the session the
-    /// operator can see is the thing being reasoned about.
+    /// The attempt carries a [`DeliveryError`] as for
+    /// [`PrescriptionDestination::deliver`], and additionally if the destination
+    /// no longer holds `occupying` — which is not something to paper over by
+    /// creating one, because the session the operator can see is the thing being
+    /// reasoned about.
     fn replace(
         &self,
         session: &Deliverable,
         occupying: &DeliveryReference,
-    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send;
+    ) -> impl Future<Output = DeliveryAttempt> + Send;
 }
 
 /// **Borrowed destinations are destinations.** A caller that needs to keep hold
@@ -1456,10 +1499,7 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
         (*self).name()
     }
 
-    fn deliver(
-        &self,
-        session: &Deliverable,
-    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send {
+    fn deliver(&self, session: &Deliverable) -> impl Future<Output = DeliveryAttempt> + Send {
         (*self).deliver(session)
     }
 
@@ -1467,7 +1507,7 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
         &self,
         session: &Deliverable,
         occupying: &DeliveryReference,
-    ) -> impl Future<Output = Result<Delivered, DeliveryError>> + Send {
+    ) -> impl Future<Output = DeliveryAttempt> + Send {
         (*self).replace(session, occupying)
     }
 }
@@ -1552,6 +1592,29 @@ pub trait PrescriptionDeliveryStore {
         to: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Keep what the destination answered, whatever it was.
+    ///
+    /// **Every attempt, not every delivery** (#124). A reply is recorded before
+    /// anything decides whether the act succeeded, so a refusal and a success
+    /// nobody could parse both leave one — and a prescription delivered, failed
+    /// and delivered again leaves three. That is why this is append-only and
+    /// keyed by nothing the delivery record is keyed by: a failed create has no
+    /// delivery row to hang off, and it is precisely the case worth keeping.
+    ///
+    /// Called with the prescription and destination it was answering, which is
+    /// what makes it retrievable afterwards.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_reply(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reply: &DestinationReply,
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
