@@ -184,25 +184,36 @@ impl HevyRoutines {
         Ok(Some(created.routine_folder.id))
     }
 
-    /// Read a successful body, or turn the status into the right error.
+    /// Hand back a response that succeeded, or turn the status into the right
+    /// error.
     ///
     /// **Unauthorised is `Unreachable`, not a panic and not a silent skip**: a
     /// credential that has been revoked degrades the system (§ 36) and leaves
     /// the prescription exactly where it was.
+    ///
+    /// Separate from [`Self::read`] because an act whose answer carries nothing
+    /// worth reading still has a status worth honouring.
+    async fn succeeded(response: reqwest::Response) -> Result<reqwest::Response, DeliveryError> {
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
+        }
+
+        let detail = response.text().await.unwrap_or_default();
+        let message = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            format!("{status}: the API key was refused")
+        } else {
+            format!("{status}: {}", detail.trim())
+        };
+        Err(Self::unreachable(&message))
+    }
+
+    /// Read a successful body, or turn the status into the right error.
     async fn read<T: serde::de::DeserializeOwned>(
         &self,
         response: reqwest::Response,
     ) -> Result<T, DeliveryError> {
-        let status = response.status();
-        if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
-            let message = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-                format!("{status}: the API key was refused")
-            } else {
-                format!("{status}: {}", detail.trim())
-            };
-            return Err(Self::unreachable(&message));
-        }
+        let response = Self::succeeded(response).await?;
 
         // Parsed from bytes rather than through reqwest's `json` helper: the
         // client is built without that feature, because the extraction side
@@ -261,24 +272,17 @@ impl PrescriptionDestination for HevyRoutines {
 
         let created: CreatedRoutine = self.read(response).await?;
 
-        // The source answers with a list, and has been seen to answer with one
-        // element. Taking the first is not a guess: we sent one routine, so a
-        // reply naming none is a reply we cannot record.
-        let id = created
-            .routine
-            .into_iter()
-            .next()
-            .map(|routine| routine.id)
-            .ok_or_else(|| DeliveryError::Unidentifiable {
-                destination: NAME.to_owned(),
-                message: "the reply named no routine".to_owned(),
-            })?;
-
-        let reference =
-            DeliveryReference::try_from(id).map_err(|error| DeliveryError::Unidentifiable {
+        // **The only arm that has to read the reply.** The routine exists by the
+        // time this line runs and its id is nowhere else, so a reply this cannot
+        // parse is a session on the operator's phone that the store does not
+        // know about — which is why the shape above is the observed one rather
+        // than the documented one.
+        let reference = DeliveryReference::try_from(created.routine.id).map_err(|error| {
+            DeliveryError::Unidentifiable {
                 destination: NAME.to_owned(),
                 message: error.to_string(),
-            })?;
+            }
+        })?;
 
         Ok(Delivered {
             reference,
@@ -322,20 +326,17 @@ impl PrescriptionDestination for HevyRoutines {
             });
         }
 
-        // **And the reply is a bare routine, not a list.** The create endpoint
-        // wraps its answer in an array; the update endpoint does not. Mirroring
-        // the wire rather than tidying it is the same choice made twice.
-        let updated: UpdatedRoutine = self.read(response).await?;
-
-        let reference = DeliveryReference::try_from(updated.id).map_err(|error| {
-            DeliveryError::Unidentifiable {
-                destination: NAME.to_owned(),
-                message: error.to_string(),
-            }
-        })?;
+        // **And the reply's shape is not read at all, because the reference is
+        // already known.** A `PUT` answers about the routine its path names, so
+        // an id in the body could only be the one that was sent — and reading it
+        // would put the handover at the mercy of a shape nobody has confirmed
+        // live. The create endpoint's shape moved under us once (#119), after
+        // the routine existed; this arm cannot pay that price because it asks
+        // the body for nothing. Its status still has to be right.
+        Self::succeeded(response).await?;
 
         Ok(Delivered {
-            reference,
+            reference: occupying.clone(),
             unexpressed: rendered.unexpressed,
         })
     }
@@ -457,26 +458,22 @@ struct CreatedFolder {
     routine_folder: Folder,
 }
 
-/// **A list, because that is what the source sends back.** The create endpoint
-/// answers with the routine wrapped in an array even though exactly one was
-/// asked for, so this mirrors the wire rather than what would be tidier.
+/// **One routine under a wrapper, because that is what the source sends back.**
+/// This mirrors the wire rather than what would be tidier — and the wire moved:
+/// `POST /v1/routines` answered `{"routine": [{…}]}` until 2026-09-09, when a
+/// live run met `{"routine": {…}}` and could not read the id of a routine the
+/// app had already created (#119).
+///
+/// Mirroring is still the rule, and the published spec is not the arbiter: it
+/// describes this reply as a bare routine under no key at all, which is a third
+/// shape and not the one that arrived. What is here is what was observed.
 #[derive(Debug, Deserialize)]
 struct CreatedRoutine {
-    #[serde(default)]
-    routine: Vec<CreatedRoutineBody>,
+    routine: CreatedRoutineBody,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreatedRoutineBody {
-    id: String,
-}
-
-/// **Not a list.** `PUT /v1/routines/{routineId}` answers with the routine
-/// itself where `POST /v1/routines` answers with an array containing it. Two
-/// types rather than one tolerant one, because a shape we guessed wrong about
-/// should fail to parse rather than silently find nothing.
-#[derive(Debug, Deserialize)]
-struct UpdatedRoutine {
     id: String,
 }
 

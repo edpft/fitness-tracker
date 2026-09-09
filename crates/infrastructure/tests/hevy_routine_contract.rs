@@ -105,7 +105,7 @@ fn assistance_is_sent_as_the_assisted_template() {
         Mock::given(method("POST"))
             .and(path("/v1/routines"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "routine": [{ "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }]
+                "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
             })))
             .mount(&server)
             .await;
@@ -195,15 +195,16 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
             .mount(&server)
             .await;
 
-        // The update endpoint answers with the routine itself, not with a list
-        // containing it. Mirroring that is the point of the separate type.
+        // **A reply in a shape nobody has confirmed, naming an id that is not
+        // the one asked for.** The update endpoint's answer is not read: the
+        // reference comes from the path it was sent to, so the whole class of
+        // failure that #119 was — a shape moving under a reply we depended on —
+        // cannot reach this arm. If it ever does have to be read, this stub is
+        // the wrong shape and the test will say so.
         Mock::given(method("PUT"))
             .and(path("/v1/routines/b459cba5-cd6d-463c-abd6-54f8eafcadcb"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb",
-                "title": "07 Light",
-                "folder_id": 42,
-                "exercises": []
+                "routine": { "id": "a-shape-this-adapter-has-never-seen" }
             })))
             .mount(&server)
             .await;
@@ -257,7 +258,8 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
 
     assert_eq!(
         reference, "b459cba5-cd6d-463c-abd6-54f8eafcadcb",
-        "the place keeps its identity across a replacement"
+        "the place keeps its identity across a replacement, and takes it from \
+         the path rather than from whatever the reply says"
     );
 }
 
@@ -337,7 +339,7 @@ fn a_programme_without_a_folder_has_one_made_for_it() {
         Mock::given(method("POST"))
             .and(path("/v1/routines"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "routine": [{ "id": "created" }]
+                "routine": { "id": "created" }
             })))
             .mount(&server)
             .await;
@@ -476,7 +478,7 @@ fn an_exercise_carries_the_longest_rest_it_instructs() {
         Mock::given(method("POST"))
             .and(path("/v1/routines"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "routine": [{ "id": "rested" }]
+                "routine": { "id": "rested" }
             })))
             .mount(&server)
             .await;
