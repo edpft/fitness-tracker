@@ -58,8 +58,9 @@ code, it will be lost.
 
 **A new markdown file is almost never the answer.** The operator, 2026-09-09:
 *"you like writing markdown files, I don't like you writing markdown files."*
-`docs/roadmap.md` was retired that day into milestones, issues and discussions
-(#113, #115, #116), and `specs/` went on 2026-09-01 for the same reason: both
+`docs/roadmap.md` was retired that day into milestones 1 and 2, issues #117 and
+#118, and discussions #113 and #116; `specs/` went on 2026-09-01 for the same
+reason. Both
 were agent-authored prose the operator never read and a later session cited back
 at him as though it constrained him. Before adding a document, find which of the
 four places above it belongs in. `docs/` keeps the constitution, the decision
