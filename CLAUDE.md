@@ -16,15 +16,23 @@ revise the artifact, or withdraw it. Do not quietly pick one and proceed.
 
 ## Where the plan and the reasoning live
 
-Read these before planning anything. Neither is mentioned by the constitution,
-and a session that skips them re-derives decisions that were already settled —
-or worse, quietly contradicts one.
+Read these before planning anything. None of them is mentioned by the
+constitution, and a session that skips them re-derives decisions that were
+already settled — or worse, quietly contradicts one.
 
-- **`docs/roadmap.md`** — what is planned, in what order, and why. It carries
-  the current state at the top, the order of work, what each decision changed
-  about that order, and the questions nobody has answered. It is a living
-  document: revise it when the plan moves rather than leaving it to be
-  discovered stale.
+**Four places, and which one a thing goes in is not a matter of taste.** The
+operator, 2026-09-09: *"the place for recording tasks or progress is the GitHub
+issues, the place for recording open questions is the GitHub discussions."*
+
+- **GitHub issues** — tasks and progress. What is to be done, what was done, and
+  what a change turned out to cost. Comment on the issue as the work lands
+  rather than at the end, and close it when its own "done when" is met.
+- **GitHub discussions** — open questions. A question does not go in the
+  milestone, in a decision record or in a comment in the code; it goes here, where
+  the operator can answer it and where the answer is findable afterwards.
+- **Milestones** — the order of work, and why it is that order. The sequence
+  *within* a milestone is issue dependencies (`gh issue edit N --add-blocked-by
+  M`), not prose. An issue in no milestone is backlog.
 - **`docs/decisions/`** — why the model is the shape it is. Numbered, dated, and
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.
@@ -37,15 +45,26 @@ or worse, quietly contradicts one.
   corrected is not a disagreement; it is one party catching up, and it belongs in
   a commit message rather than in a numbered record.
 
-  **The same test governs open questions**, wherever they are parked: a question
-  is only open if resolving it unblocks something. A thing nobody needs an answer
+  **The same test governs open questions**, which live in the discussions: a
+  question is only open if resolving it unblocks something. A thing nobody needs an answer
   to before shipping is not an open question, and a choice that is the operator's
   to make whenever he likes is not one either — it is a programming choice.
 
 **Write things down as they are settled, not at the end.** A long session holds
 a great deal of reasoning that exists nowhere else, and the remedy is not a
-better memory — it is a commit. If something was decided in conversation and is
-not in one of these two places or in the code, it will be lost.
+better memory — it is a commit, an issue comment or a discussion. If something
+was decided in conversation and is not in one of the places above or in the
+code, it will be lost.
+
+**A new markdown file is almost never the answer.** The operator, 2026-09-09:
+*"you like writing markdown files, I don't like you writing markdown files."*
+`docs/roadmap.md` was retired that day into milestones 1 and 2, issues #117 and
+#118, and discussions #113 and #116; `specs/` went on 2026-09-01 for the same
+reason. Both
+were agent-authored prose the operator never read and a later session cited back
+at him as though it constrained him. Before adding a document, find which of the
+four places above it belongs in. `docs/` keeps the constitution, the decision
+records, and reference material the *operator* asked for.
 
 **What does not belong here**: anything about how a particular person likes to
 work. That is not a fact about the project.
@@ -78,7 +97,7 @@ work. That is not a fact about the project.
   prose that the operator has never read, cited back at him as though it
   constrained him. Everything load-bearing in it is in the code (630fa02 moved
   the seed, the candidates and the vocabulary into `domain`). What governs is
-  the constitution, `docs/decisions/`, `docs/roadmap.md` and the code.
+  the constitution, `docs/decisions/`, the issues and discussions, and the code.
 
   **Deleted on 2026-09-01**, along with `.specify/` and the `speckit-*` skills;
   the constitution moved to `docs/constitution.md` on its way out. All of it is
