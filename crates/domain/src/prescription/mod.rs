@@ -54,7 +54,8 @@ pub use authored::{Authored, AuthoringError};
 // `prescription::block::Block`, which is what its own module doc calls it.
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
 pub use delivery::{
-    DeliveryReference, DestinationName, InvalidDelivery, PrescriptionState, SessionOrdinal,
+    DeliveryReference, DestinationName, DestinationReply, InvalidDelivery, PrescriptionState,
+    ReplyStatus, SessionOrdinal,
 };
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{

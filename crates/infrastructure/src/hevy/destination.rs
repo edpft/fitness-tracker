@@ -3,7 +3,16 @@
 //! **A renderer that returns a receipt.** Everything about *what* the session
 //! instructs was settled before this adapter was called; what it adds is a
 //! rendering ([`super::routine`]) and the identity the source gives what it is
-//! handed. That identity is the only thing that crosses back over the port.
+//! handed.
+//!
+//! **And what the source said, whole** (#124). Until 2026-09-09 the identity was
+//! the only thing that crossed back: the reply was read for an id and dropped,
+//! which cost two diagnoses in a day — a create reply that would not parse, and
+//! a routine that arrived missing an exercise the same reply would have shown.
+//! The bytes now travel back over the port beside the outcome, taken before
+//! anything interprets them, and the use case decides what to keep. Nothing here
+//! writes to a store: a driven adapter reaching for another driven adapter is
+//! the shape this avoids.
 //!
 //! ## Created, then updated in place
 //!
@@ -42,8 +51,8 @@
 use std::{sync::OnceLock, time::Duration};
 
 use application::{
-    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName,
-    PrescriptionDestination,
+    Deliverable, Delivered, DeliveryAttempt, DeliveryError, DeliveryReference, DestinationName,
+    DestinationReply, PrescriptionDestination, ReplyStatus,
 };
 use reqwest::{Client, StatusCode, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -138,19 +147,17 @@ impl HevyRoutines {
 
     async fn find_folder(&self, title: &str) -> Result<Option<i64>, DeliveryError> {
         for page in 1..=FOLDER_PAGE_LIMIT {
-            let response = self
-                .client()?
-                .get(self.url(FOLDERS_ENDPOINT))
-                .header("api-key", &self.api_key)
-                .query(&[
-                    ("page", page.to_string()),
-                    ("pageSize", PAGE_SIZE.to_string()),
-                ])
-                .send()
-                .await
-                .map_err(|error| Self::unreachable(&error.to_string()))?;
-
-            let body: FolderPage = self.read(response).await?;
+            let body: FolderPage = self
+                .read(|client| {
+                    client
+                        .get(self.url(FOLDERS_ENDPOINT))
+                        .header("api-key", &self.api_key)
+                        .query(&[
+                            ("page", page.to_string()),
+                            ("pageSize", PAGE_SIZE.to_string()),
+                        ])
+                })
+                .await?;
             if let Some(found) = body
                 .routine_folders
                 .iter()
@@ -166,67 +173,155 @@ impl HevyRoutines {
     }
 
     async fn create_folder(&self, title: &str) -> Result<Option<i64>, DeliveryError> {
-        let response = self
-            .client()?
-            .post(self.url(FOLDERS_ENDPOINT))
-            .header("api-key", &self.api_key)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Self::encode(&CreateFolder {
-                routine_folder: FolderTitle {
-                    title: title.to_owned(),
-                },
-            })?)
+        let body = Self::encode(&CreateFolder {
+            routine_folder: FolderTitle {
+                title: title.to_owned(),
+            },
+        })?;
+
+        let created: CreatedFolder = self
+            .read(|client| {
+                client
+                    .post(self.url(FOLDERS_ENDPOINT))
+                    .header("api-key", &self.api_key)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body)
+            })
+            .await?;
+
+        Ok(Some(created.routine_folder.id))
+    }
+
+    /// Build a request, send it, and take what came back.
+    ///
+    /// The three steps that fail before there is anything to keep, in one place
+    /// so that the two acts below can say "either an answer or nothing" without
+    /// spelling the alternatives out twice.
+    async fn ask(
+        &self,
+        build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
+    ) -> Result<(StatusCode, DestinationReply), DeliveryError> {
+        let response = build(self.client()?)
             .send()
             .await
             .map_err(|error| Self::unreachable(&error.to_string()))?;
 
-        let created: CreatedFolder = self.read(response).await?;
-        Ok(Some(created.routine_folder.id))
+        Self::answered(response).await
     }
 
-    /// Hand back a response that succeeded, or turn the status into the right
-    /// error.
+    /// **Everything the destination said, before anything looks at it** (#124).
     ///
-    /// **Unauthorised is `Unreachable`, not a panic and not a silent skip**: a
-    /// credential that has been revoked degrades the system (§ 36) and leaves
-    /// the prescription exactly where it was.
+    /// The first thing done to a response and the only thing that consumes one,
+    /// so there is no path through this adapter on which a reply is interpreted
+    /// before it is taken. That ordering is the whole fix: the status used to
+    /// decide whether the body was worth reading, which meant a refusal kept
+    /// only a trimmed excerpt and an unparseable success kept nothing but
+    /// serde's complaint.
     ///
-    /// Separate from [`Self::read`] because an act whose answer carries nothing
-    /// worth reading still has a status worth honouring.
-    async fn succeeded(response: reqwest::Response) -> Result<reqwest::Response, DeliveryError> {
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
-        }
-
-        let detail = response.text().await.unwrap_or_default();
-        let message = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            format!("{status}: the API key was refused")
-        } else {
-            format!("{status}: {}", detail.trim())
-        };
-        Err(Self::unreachable(&message))
-    }
-
-    /// Read a successful body, or turn the status into the right error.
-    async fn read<T: serde::de::DeserializeOwned>(
-        &self,
+    /// Taken as bytes rather than through reqwest's `json` helper — the client
+    /// is built without that feature, exactly as on the extraction side, and for
+    /// the same reason.
+    ///
+    /// # Errors
+    ///
+    /// [`DeliveryError::Unreachable`] if the body could not be read off the
+    /// wire, which is a connection that failed part-way rather than an answer.
+    ///
+    /// The vendor's own [`StatusCode`] comes back beside the reply because two
+    /// decisions here turn on it and neither belongs in the port's vocabulary: a
+    /// refused credential and a routine that has gone. The reply carries only
+    /// whether the act succeeded, which is the part that is not Hevy's to
+    /// define.
+    async fn answered(
         response: reqwest::Response,
-    ) -> Result<T, DeliveryError> {
-        let response = Self::succeeded(response).await?;
-
-        // Parsed from bytes rather than through reqwest's `json` helper: the
-        // client is built without that feature, because the extraction side
-        // needs the payload's exact bytes and takes them the same way.
+    ) -> Result<(StatusCode, DestinationReply), DeliveryError> {
+        let status = response.status();
         let body = response
             .bytes()
             .await
             .map_err(|error| Self::unreachable(&error.to_string()))?;
 
-        serde_json::from_slice::<T>(&body).map_err(|error| DeliveryError::Unidentifiable {
+        // `StatusCode` always displays as something, so the fallible
+        // constructor's error arm is unreachable rather than merely unlikely —
+        // and it is still handled, because § 26 does not make exceptions for
+        // unlikely.
+        let stated =
+            ReplyStatus::new(status.to_string(), status.is_success()).map_err(|error| {
+                DeliveryError::Unidentifiable {
+                    destination: NAME.to_owned(),
+                    message: error.to_string(),
+                }
+            })?;
+
+        Ok((status, DestinationReply::new(stated, body.to_vec())))
+    }
+
+    /// Turn a refusal into the right error, having already kept what it said.
+    ///
+    /// **Unauthorised is `Unreachable`, not a panic and not a silent skip**: a
+    /// credential that has been revoked degrades the system (§ 36) and leaves
+    /// the prescription exactly where it was.
+    ///
+    /// **The body is deliberately not in the message.** It used to be, because
+    /// the message was the only place it could be; now the reply travels back
+    /// beside this error and the use case prints it there (#124), so repeating
+    /// it here showed the operator the same bytes twice. [`Self::read`] is the
+    /// exception and says why.
+    ///
+    /// Separate from [`Self::parse`] because an act whose answer carries nothing
+    /// worth reading still has a status worth honouring.
+    fn accepted(status: StatusCode) -> Result<(), DeliveryError> {
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(Self::unreachable(&Self::glossed(status)))
+    }
+
+    /// A status, plus the one thing worth saying about it that it does not say
+    /// itself.
+    fn glossed(status: StatusCode) -> String {
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            format!("{status}: the API key was refused")
+        } else {
+            status.to_string()
+        }
+    }
+
+    /// Read a reply as the shape it is supposed to be.
+    fn parse<T: serde::de::DeserializeOwned>(reply: &DestinationReply) -> Result<T, DeliveryError> {
+        serde_json::from_slice::<T>(reply.body()).map_err(|error| DeliveryError::Unidentifiable {
             destination: NAME.to_owned(),
             message: error.to_string(),
         })
+    }
+
+    /// Send it, keep the answer, and read the answer as `T`.
+    ///
+    /// The folder calls' whole path. Their replies are not recorded: what #124
+    /// is about is the answer to the *delivery*, and a folder lookup on the way
+    /// past is not that. A folder call that goes wrong still fails the delivery,
+    /// and still says what it said in the error it raises.
+    async fn read<T: serde::de::DeserializeOwned>(
+        &self,
+        build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
+    ) -> Result<T, DeliveryError> {
+        let (status, reply) = self.ask(build).await?;
+
+        // **The one refusal that carries its own body.** A folder call's reply
+        // is not the delivery's answer and so is not kept — what it said is in
+        // this message or it is nowhere.
+        if !status.is_success() {
+            let gloss = Self::glossed(status);
+            let said = reply.text();
+            let said = said.trim();
+            return Err(Self::unreachable(&if said.is_empty() {
+                gloss
+            } else {
+                format!("{gloss}: {said}")
+            }));
+        }
+
+        Self::parse(&reply)
     }
 
     /// # Errors
@@ -254,48 +349,74 @@ impl PrescriptionDestination for HevyRoutines {
         &self.name
     }
 
-    async fn deliver(&self, session: &Deliverable) -> Result<Delivered, DeliveryError> {
-        let folder = self.folder_for(session.plan.as_str()).await?;
+    async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
+        let folder = match self.folder_for(session.plan.as_str()).await {
+            Ok(folder) => folder,
+            // Nothing has been sent to `/v1/routines` yet, so there is no reply
+            // to this delivery — whatever the folder call said, it answered a
+            // different question.
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
         let rendered = render(session, folder);
 
-        let response = self
-            .client()?
-            .post(self.url(ROUTINES_ENDPOINT))
-            .header("api-key", &self.api_key)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Self::encode(&CreateRoutine {
-                routine: rendered.body,
-            })?)
-            .send()
-            .await
-            .map_err(|error| Self::unreachable(&error.to_string()))?;
+        let body = match Self::encode(&CreateRoutine {
+            routine: rendered.body,
+        }) {
+            Ok(body) => body,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
 
-        let created: CreatedRoutine = self.read(response).await?;
+        let answered = self
+            .ask(|client| {
+                client
+                    .post(self.url(ROUTINES_ENDPOINT))
+                    .header("api-key", &self.api_key)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body)
+            })
+            .await;
 
-        // **The only arm that has to read the reply.** The routine exists by the
-        // time this line runs and its id is nowhere else, so a reply this cannot
-        // parse is a session on the operator's phone that the store does not
-        // know about — which is why the shape above is the observed one rather
-        // than the documented one.
-        let reference = DeliveryReference::try_from(created.routine.id).map_err(|error| {
-            DeliveryError::Unidentifiable {
-                destination: NAME.to_owned(),
-                message: error.to_string(),
-            }
-        })?;
+        let (status, reply) = match answered {
+            Ok(answered) => answered,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
 
-        Ok(Delivered {
-            reference,
-            unexpressed: rendered.unexpressed,
-        })
+        // **Everything below interprets a reply that is already in hand**, which
+        // is what #124 is about: the id, the status and the parse all happen
+        // after the bytes have been taken, so the use case records what Hevy
+        // said whether or not any of the three works out.
+        let outcome = Self::accepted(status)
+            .and_then(|()| Self::parse::<CreatedRoutine>(&reply))
+            // **The only arm that has to read the reply.** The routine exists by
+            // the time this runs and its id is nowhere else, so a reply this
+            // cannot parse is a session on the operator's phone that the store
+            // does not know about — which is why the shape read is the observed
+            // one rather than the documented one.
+            .and_then(|created| {
+                DeliveryReference::try_from(created.routine.id).map_err(|error| {
+                    DeliveryError::Unidentifiable {
+                        destination: NAME.to_owned(),
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .map(|reference| Delivered {
+                reference,
+                unexpressed: rendered.unexpressed,
+            });
+
+        DeliveryAttempt::answered(reply, outcome)
     }
 
     async fn replace(
         &self,
         session: &Deliverable,
         occupying: &DeliveryReference,
-    ) -> Result<Delivered, DeliveryError> {
-        let folder = self.folder_for(session.plan.as_str()).await?;
+    ) -> DeliveryAttempt {
+        let folder = match self.folder_for(session.plan.as_str()).await {
+            Ok(folder) => folder,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
         let rendered = render(session, folder);
 
         // **The same body as `deliver` sends.** `PutRoutinesRequestBody` and
@@ -303,42 +424,56 @@ impl PrescriptionDestination for HevyRoutines {
         // the exercise and set schemas, so the rendering is shared rather than
         // mirrored — a second renderer would be two places for one decision
         // about what a session looks like in the app.
-        let response = self
-            .client()?
-            .put(self.url(&Self::routine_endpoint(occupying)))
-            .header("api-key", &self.api_key)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Self::encode(&CreateRoutine {
-                routine: rendered.body,
-            })?)
-            .send()
-            .await
-            .map_err(|error| Self::unreachable(&error.to_string()))?;
+        let body = match Self::encode(&CreateRoutine {
+            routine: rendered.body,
+        }) {
+            Ok(body) => body,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
+
+        let answered = self
+            .ask(|client| {
+                client
+                    .put(self.url(&Self::routine_endpoint(occupying)))
+                    .header("api-key", &self.api_key)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body)
+            })
+            .await;
+
+        let (status, reply) = match answered {
+            Ok(answered) => answered,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
 
         // A routine that is not there is its own answer rather than a transport
         // failure: the store believes the operator has this session and the app
-        // says otherwise, and only they can say which is right.
-        if response.status() == StatusCode::NOT_FOUND {
-            return Err(DeliveryError::Vanished {
+        // says otherwise, and only they can say which is right. The reply comes
+        // back with it, so what Hevy said about the routine it does not have is
+        // kept rather than inferred.
+        let outcome = if status == StatusCode::NOT_FOUND {
+            Err(DeliveryError::Vanished {
                 destination: NAME.to_owned(),
                 reference: occupying.to_string(),
                 date: session.workout.issued_for(),
-            });
-        }
+            })
+        } else {
+            // **And the reply's shape is not read at all, because the reference
+            // is already known.** A `PUT` answers about the routine its path
+            // names, so an id in the body could only be the one that was sent —
+            // and reading it would put the handover at the mercy of a shape
+            // nobody has confirmed live. The create endpoint's shape moved under
+            // us once (#119), after the routine existed; this arm cannot pay
+            // that price because it asks the body for nothing. Its status still
+            // has to be right, and the body is still kept: not reading a reply
+            // is not a reason to discard it.
+            Self::accepted(status).map(|()| Delivered {
+                reference: occupying.clone(),
+                unexpressed: rendered.unexpressed,
+            })
+        };
 
-        // **And the reply's shape is not read at all, because the reference is
-        // already known.** A `PUT` answers about the routine its path names, so
-        // an id in the body could only be the one that was sent — and reading it
-        // would put the handover at the mercy of a shape nobody has confirmed
-        // live. The create endpoint's shape moved under us once (#119), after
-        // the routine existed; this arm cannot pay that price because it asks
-        // the body for nothing. Its status still has to be right.
-        Self::succeeded(response).await?;
-
-        Ok(Delivered {
-            reference: occupying.clone(),
-            unexpressed: rendered.unexpressed,
-        })
+        DeliveryAttempt::answered(reply, outcome)
     }
 }
 
@@ -383,15 +518,22 @@ impl PrescriptionDestination for HevyRoutinePreview {
         &self.name
     }
 
-    async fn deliver(&self, session: &Deliverable) -> Result<Delivered, DeliveryError> {
+    /// **Answers nothing, because it asked nothing.** A preview contacts no
+    /// destination, so there is no reply to keep — and inventing one would put a
+    /// row in the store claiming Hevy said something it was never asked.
+    async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
         let rendered = render(session, None);
-        let body = serde_json::to_string_pretty(&CreateRoutine {
+        let body = match serde_json::to_string_pretty(&CreateRoutine {
             routine: rendered.body,
-        })
-        .map_err(|error| DeliveryError::Unidentifiable {
-            destination: NAME.to_owned(),
-            message: error.to_string(),
-        })?;
+        }) {
+            Ok(body) => body,
+            Err(error) => {
+                return DeliveryAttempt::unanswered(DeliveryError::Unidentifiable {
+                    destination: NAME.to_owned(),
+                    message: error.to_string(),
+                });
+            }
+        };
 
         if let Ok(mut held) = self.rendered.lock() {
             *held = Some(body);
@@ -400,17 +542,20 @@ impl PrescriptionDestination for HevyRoutinePreview {
         // A reference that could never be mistaken for one the source issued —
         // and one the caller is expected to throw away with the store it was
         // written to.
-        let reference = DeliveryReference::try_from("preview".to_owned()).map_err(|error| {
-            DeliveryError::Unidentifiable {
+        let outcome = DeliveryReference::try_from("preview".to_owned())
+            .map_err(|error| DeliveryError::Unidentifiable {
                 destination: NAME.to_owned(),
                 message: error.to_string(),
-            }
-        })?;
+            })
+            .map(|reference| Delivered {
+                reference,
+                unexpressed: rendered.unexpressed,
+            });
 
-        Ok(Delivered {
-            reference,
-            unexpressed: rendered.unexpressed,
-        })
+        DeliveryAttempt {
+            reply: None,
+            outcome,
+        }
     }
 
     /// **A preview renders the same body whichever act it stands in for.** What
@@ -422,12 +567,15 @@ impl PrescriptionDestination for HevyRoutinePreview {
         &self,
         session: &Deliverable,
         occupying: &DeliveryReference,
-    ) -> Result<Delivered, DeliveryError> {
-        let delivered = self.deliver(session).await?;
-        Ok(Delivered {
-            reference: occupying.clone(),
-            unexpressed: delivered.unexpressed,
-        })
+    ) -> DeliveryAttempt {
+        let attempt = self.deliver(session).await;
+        DeliveryAttempt {
+            reply: attempt.reply,
+            outcome: attempt.outcome.map(|delivered| Delivered {
+                reference: occupying.clone(),
+                unexpressed: delivered.unexpressed,
+            }),
+        }
     }
 }
 

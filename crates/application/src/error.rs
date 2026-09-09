@@ -381,4 +381,30 @@ pub enum DeliveryError {
         reference: String,
         date: Date,
     },
+
+    /// A delivery that failed after the destination had answered, wrapping what
+    /// it said.
+    ///
+    /// **The reply is shown as well as kept** (#124). What the operator used to
+    /// see was serde's complaint about a column number — *"invalid type: map,
+    /// expected a sequence at line 1 column 11"* — with the body that would have
+    /// explained it already dropped, so column 11 had to be reasoned back into
+    /// `{"routine":` rather than read. The bytes are in the store either way;
+    /// printing them is what makes the surprise legible at the moment it
+    /// happens, which is the operator's rule: *"if we get something we don't
+    /// expect, we should print it as an error"*.
+    ///
+    /// Wraps rather than replaces, so an unreachable destination still reads as
+    /// unreachable and a vanished routine still names what vanished.
+    #[error(
+        "{inner}\n  {destination} answered {status} with: {body}\n  the same reply is kept in \
+         `delivery_reply`, against prescription {prescription} at {destination}"
+    )]
+    Answered {
+        inner: Box<Self>,
+        destination: String,
+        prescription: i64,
+        status: String,
+        body: String,
+    },
 }

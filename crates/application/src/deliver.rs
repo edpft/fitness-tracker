@@ -32,7 +32,8 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::DeliveryError,
     ports::{
-        Deliverable, Delivery, MesocycleStore, PrescribedWorkoutStore, PrescriptionDeliverer,
+        Deliverable, Delivered, Delivery, DeliveryAttempt, DestinationName, MesocycleStore,
+        PrescribedWorkoutId, PrescribedWorkoutStore, PrescriptionDeliverer,
         PrescriptionDeliveryStore, PrescriptionDestination,
     },
 };
@@ -114,7 +115,8 @@ where
             // the store claiming the new session is the one on the operator's
             // phone.
             Some((holder, reference)) => {
-                let delivered = self.ports.destination.replace(&session, &reference).await?;
+                let attempt = self.ports.destination.replace(&session, &reference).await;
+                let delivered = keep(&self.ports.deliveries, id, destination, attempt).await?;
                 self.ports
                     .deliveries
                     .hand_over(
@@ -137,7 +139,8 @@ where
 
             // Nothing there. The ordinary first delivery.
             None => {
-                let delivered = self.ports.destination.deliver(&session).await?;
+                let attempt = self.ports.destination.deliver(&session).await;
+                let delivered = keep(&self.ports.deliveries, id, destination, attempt).await?;
                 self.ports
                     .deliveries
                     .record(id, destination, &delivered.reference, Timestamp::now())
@@ -153,6 +156,50 @@ where
             }
         }
     }
+}
+
+/// Keep what the destination answered, then say whether the act worked.
+///
+/// **Recorded first, and whatever the outcome** (#124). The extraction side
+/// has kept every byte a source served since the beginning; the delivery
+/// side kept nothing a destination answered, and both of the day that cost
+/// two diagnoses were replies already in hand — one that would not parse,
+/// one that parsed and would have shown a routine missing its front squat.
+/// So this runs before the error is looked at, which is what makes a refusal
+/// leave as much behind as a success.
+///
+/// **Recording is the use case's, not the adapter's.** A destination writing
+/// to a landing store would be one driven adapter reaching for another; what
+/// crosses the port is the reply, and what to do with it is decided here.
+///
+/// A failure to record supersedes the delivery's own error, because a store
+/// that will not take a write is the larger fact and the message below would
+/// otherwise promise a row that is not there.
+///
+/// A free function rather than a method, because `Delivering` carries no
+/// bounds of its own: borrowing it would hand this future a `&Self` that is
+/// not `Sync`, and the port declares every method `Send`.
+async fn keep<D: PrescriptionDeliveryStore + Sync>(
+    deliveries: &D,
+    prescription: PrescribedWorkoutId,
+    destination: &DestinationName,
+    attempt: DeliveryAttempt,
+) -> Result<Delivered, DeliveryError> {
+    let Some(reply) = attempt.reply else {
+        return attempt.outcome;
+    };
+
+    deliveries
+        .record_reply(prescription, destination, &reply, Timestamp::now())
+        .await?;
+
+    attempt.outcome.map_err(|inner| DeliveryError::Answered {
+        inner: Box::new(inner),
+        destination: destination.to_string(),
+        prescription: prescription.as_i64(),
+        status: reply.status().to_string(),
+        body: reply.text().into_owned(),
+    })
 }
 
 /// What was already there.

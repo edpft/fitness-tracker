@@ -115,6 +115,7 @@ fn assistance_is_sent_as_the_assisted_template() {
         let delivered = hevy
             .deliver(&session().expect("the fixture session builds"))
             .await
+            .outcome
             .expect("the session is delivered");
 
         let requests = server
@@ -217,6 +218,7 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
         let delivered = hevy
             .replace(&session().expect("the fixture session builds"), &occupying)
             .await
+            .outcome
             .expect("the session is replaced");
 
         let requests = server
@@ -293,7 +295,8 @@ fn a_replacement_of_a_routine_that_is_gone_is_refused() {
             DeliveryReference::try_from("gone".to_owned()).expect("the reference is valid");
         let outcome = hevy
             .replace(&session().expect("the fixture session builds"), &occupying)
-            .await;
+            .await
+            .outcome;
 
         let posted = server
             .received_requests()
@@ -348,6 +351,7 @@ fn a_programme_without_a_folder_has_one_made_for_it() {
             HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
         hevy.deliver(&session().expect("the fixture session builds"))
             .await
+            .outcome
             .expect("the session is delivered");
 
         let requests = server
@@ -383,7 +387,8 @@ fn a_refused_credential_is_reported_rather_than_swallowed() {
             HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
         let refused = hevy
             .deliver(&session().expect("the fixture session builds"))
-            .await;
+            .await
+            .outcome;
 
         match refused {
             Ok(_) => None,
@@ -395,6 +400,165 @@ fn a_refused_credential_is_reported_rather_than_swallowed() {
     let message = message.expect("a refused credential is an error");
     assert!(message.contains("hevy"), "{message}");
     assert!(message.contains("API key"), "{message}");
+}
+
+/// **The reply that would not parse is kept, and the error carries it** (#124).
+///
+/// The exact failure of 2026-09-09: `POST /v1/routines` succeeded, answered in a
+/// shape the adapter could not read, and left the operator serde's complaint
+/// about line 1 column 11 with the body already dropped — so column 11 had to be
+/// reasoned back into `{"routine":` rather than read. This is that run, and it
+/// asserts the two things that were missing: the bytes come back over the port,
+/// and the message shows them.
+#[test]
+fn a_success_that_cannot_be_read_still_hands_back_what_was_said() {
+    let (kept, message) = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        // The shape that broke: an array where the adapter reads an object.
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": [{ "id": "b459cba5" }]
+            })))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let attempt = hevy
+            .deliver(&session().expect("the fixture session builds"))
+            .await;
+
+        let kept = attempt
+            .reply
+            .map(|reply| (reply.status().to_string(), reply.text().into_owned()));
+
+        (kept, format!("{:?}", attempt.outcome))
+    })
+    .expect("the runtime runs");
+
+    let (status, body) = kept.expect("a reply that could not be read is still a reply");
+    assert_eq!(status, "201 Created");
+    assert!(
+        body.contains(r#""routine":[{"id":"b459cba5"}]"#),
+        "the bytes are what arrived, not a summary of them: {body}"
+    );
+    assert!(
+        message.contains("Unidentifiable"),
+        "and the delivery still failed: {message}"
+    );
+}
+
+/// **A refusal is a reply too**, and the case that recorded least.
+///
+/// The status decided whether the body was worth reading, so a rejected routine
+/// left a trimmed excerpt inside an error string and nothing else. Now the bytes
+/// come back whole, before anything looks at the status.
+#[test]
+fn a_refusal_hands_back_what_the_destination_said() {
+    let kept = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_string(r#"{"error":"exercise_template_id not found"}"#),
+            )
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let attempt = hevy
+            .deliver(&session().expect("the fixture session builds"))
+            .await;
+
+        attempt.reply.map(|reply| {
+            (
+                reply.status().to_string(),
+                reply.status().succeeded(),
+                reply.text().into_owned(),
+            )
+        })
+    })
+    .expect("the runtime runs");
+
+    let (status, succeeded, body) = kept.expect("a refusal is an answer");
+    assert_eq!(status, "400 Bad Request");
+    assert!(!succeeded, "the status says the act did not work out");
+    assert!(body.contains("exercise_template_id not found"), "{body}");
+}
+
+/// **A replacement's reply is kept even though nothing reads it.**
+///
+/// `replace` asks the body for nothing — the reference comes from the path it
+/// was sent to — and that is deliberate (#119). Not reading a reply is not a
+/// reason to discard it: what Hevy echoed about the routine it just rewrote is
+/// the same evidence a create's echo is.
+#[test]
+fn a_replacement_keeps_a_reply_it_does_not_read() {
+    let kept = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/routines/b459cba5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine": { "id": "a-shape-this-adapter-has-never-seen" }
+            })))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let occupying =
+            DeliveryReference::try_from("b459cba5".to_owned()).expect("the reference is valid");
+        let attempt = hevy
+            .replace(&session().expect("the fixture session builds"), &occupying)
+            .await;
+
+        attempt
+            .reply
+            .map(|reply| reply.text().into_owned())
+            .zip(attempt.outcome.ok().map(|delivered| delivered.reference))
+    })
+    .expect("the runtime runs");
+
+    let (body, reference) = kept.expect("the replacement succeeded and answered");
+    assert_eq!(
+        reference.as_str(),
+        "b459cba5",
+        "the path wins, not the body"
+    );
+    assert!(
+        body.contains("a-shape-this-adapter-has-never-seen"),
+        "{body}"
+    );
 }
 
 /// A primary's ramp, rested the way generation rests one: nothing between the
@@ -487,6 +651,7 @@ fn an_exercise_carries_the_longest_rest_it_instructs() {
             HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
         hevy.deliver(&ramped_primary().expect("the ramp fixture builds"))
             .await
+            .outcome
             .expect("the session is delivered");
 
         let requests = server

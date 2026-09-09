@@ -14,9 +14,9 @@ use std::sync::{
 };
 
 use application::{
-    Deliverable, Delivered, DeliveryError, DeliveryReference, DestinationName, Issuance,
-    PlanAuthor as _, PrescribedWorkoutId, PrescriptionDeliverer as _, PrescriptionDestination,
-    WorkoutPrescriber as _,
+    Deliverable, Delivered, DeliveryAttempt, DeliveryError, DeliveryReference, DestinationName,
+    DestinationReply, Issuance, PlanAuthor as _, PrescribedWorkoutId, PrescriptionDeliverer as _,
+    PrescriptionDestination, ReplyStatus, WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
@@ -68,7 +68,7 @@ impl PrescriptionDestination for Counting {
         &self.name
     }
 
-    async fn deliver(&self, session: &Deliverable) -> Result<Delivered, DeliveryError> {
+    async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
         let seen = self.calls.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut titles) = self.titles.lock() {
             titles.push(format!(
@@ -78,7 +78,7 @@ impl PrescriptionDestination for Counting {
             ));
         }
 
-        DeliveryReference::try_from(format!("routine-{seen}"))
+        let outcome = DeliveryReference::try_from(format!("routine-{seen}"))
             .map(|reference| Delivered {
                 reference,
                 unexpressed: Vec::new(),
@@ -86,7 +86,12 @@ impl PrescriptionDestination for Counting {
             .map_err(|error| DeliveryError::Unidentifiable {
                 destination: "hevy".to_owned(),
                 message: error.to_string(),
-            })
+            });
+
+        match reply(&format!(r#"{{"routine":{{"id":"routine-{seen}"}}}}"#), true) {
+            Ok(reply) => DeliveryAttempt::answered(reply, outcome),
+            Err(error) => DeliveryAttempt::unanswered(error),
+        }
     }
 
     /// **Keeps the reference it was given**, which is what a real `PUT` does and
@@ -96,7 +101,7 @@ impl PrescriptionDestination for Counting {
         &self,
         session: &Deliverable,
         occupying: &DeliveryReference,
-    ) -> Result<Delivered, DeliveryError> {
+    ) -> DeliveryAttempt {
         self.replacements.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut titles) = self.titles.lock() {
             titles.push(format!(
@@ -105,11 +110,40 @@ impl PrescriptionDestination for Counting {
                 session.workout.session_role()
             ));
         }
-        Ok(Delivered {
+
+        let outcome = Ok(Delivered {
             reference: occupying.clone(),
             unexpressed: Vec::new(),
-        })
+        });
+
+        match reply(r#"{"routine":{"id":"replaced"}}"#, true) {
+            Ok(reply) => DeliveryAttempt::answered(reply, outcome),
+            Err(error) => DeliveryAttempt::unanswered(error),
+        }
     }
+}
+
+/// A reply a fake destination can hand back.
+///
+/// Fallible and returning `Result` rather than expecting, because the test
+/// exemptions reach a `#[test]` body and not a free function beside it — the
+/// callers above turn a failure into an unanswered attempt, which is a state the
+/// port already models.
+fn reply(body: &str, succeeded: bool) -> Result<DestinationReply, DeliveryError> {
+    let status = ReplyStatus::new(
+        if succeeded {
+            "201 Created"
+        } else {
+            "400 Bad Request"
+        },
+        succeeded,
+    )
+    .map_err(|error| DeliveryError::Unidentifiable {
+        destination: "hevy".to_owned(),
+        message: error.to_string(),
+    })?;
+
+    Ok(DestinationReply::new(status, body.as_bytes().to_vec()))
 }
 
 type Prescriber = Prescribing<
@@ -488,4 +522,203 @@ fn the_reference_is_recorded_against_the_prescription() {
         Some(&delivered.reference),
         "what the store holds is what the destination said"
     );
+}
+
+/// **What the destination said is kept, on a delivery that worked** (#124).
+///
+/// The front-squat case. Hevy's create reply carries the whole routine back,
+/// exercises included, and it used to be read for an id and dropped — so a
+/// routine that arrived on the phone missing an exercise could only be
+/// investigated by asking the live API days later. The bytes are now in the
+/// store, against the prescription and destination they were answering, which is
+/// what makes that question answerable from the record.
+#[test]
+fn a_successful_delivery_keeps_what_the_destination_answered() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let kept = run!(async {
+        let prescription = ready.prescriber.prescribe(monday()).await?;
+        delivering(&ready, &destination).deliver(monday()).await?;
+
+        let id = prescription.id.as_i64();
+        let rows = sqlx::query!(
+            r#"
+            SELECT status    AS "status!: String",
+                   succeeded AS "succeeded!: i64",
+                   body      AS "body!: Vec<u8>"
+            FROM delivery_reply
+            WHERE prescription = ? AND destination = 'hevy'
+            ORDER BY id
+            "#,
+            id
+        )
+        .fetch_all(&ready.pool)
+        .await?;
+
+        Ok::<_, Box<dyn std::error::Error>>(
+            rows.into_iter()
+                .map(|row| {
+                    (
+                        row.status,
+                        row.succeeded == 1,
+                        String::from_utf8_lossy(&row.body).into_owned(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    assert_eq!(kept.len(), 1, "one act, one answer: {kept:?}");
+    let (status, succeeded, body) = &kept[0];
+    assert_eq!(status, "201 Created");
+    assert!(succeeded);
+    assert!(
+        body.contains("routine-0"),
+        "verbatim, not summarised: {body}"
+    );
+}
+
+/// **A delivery that failed keeps its reply, and says so** (#124).
+///
+/// The case that recorded least and mattered most. The store write happens
+/// before the error is looked at, so a refusal leaves as much behind as a
+/// success — and the message the operator reads carries the body rather than
+/// serde's complaint about a column number.
+#[test]
+fn a_failed_delivery_keeps_its_reply_and_shows_it() {
+    let ready = run!(ready());
+    let destination = match Refusing::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let (message, kept) = run!(async {
+        let prescription = ready.prescriber.prescribe(monday()).await?;
+
+        let refused = Delivering::new(DeliveryPorts {
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                ready.pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            programmes: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
+            deliveries: SqlitePrescriptionDeliveryStore::new(ready.pool.clone()),
+            destination: &destination,
+        })
+        .deliver(monday())
+        .await;
+
+        let id = prescription.id.as_i64();
+        let rows = sqlx::query!(
+            r#"
+            SELECT succeeded AS "succeeded!: i64",
+                   body      AS "body!: Vec<u8>"
+            FROM delivery_reply
+            WHERE prescription = ? AND destination = 'hevy'
+            "#,
+            id
+        )
+        .fetch_all(&ready.pool)
+        .await?;
+
+        Ok::<_, Box<dyn std::error::Error>>((
+            match refused {
+                Err(error) => Some(error.to_string()),
+                Ok(_) => None,
+            },
+            rows.into_iter()
+                .map(|row| {
+                    (
+                        row.succeeded == 1,
+                        String::from_utf8_lossy(&row.body).into_owned(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ))
+    });
+
+    let message = message.expect("a refused delivery is an error");
+    assert!(
+        message.contains("exercise_template_id not found"),
+        "the operator is shown what was said, not just that something was: {message}"
+    );
+    assert!(
+        message.contains("400 Bad Request"),
+        "and how it was said: {message}"
+    );
+    assert!(
+        message.contains("kept"),
+        "and that the same reply is retrievable: {message}"
+    );
+
+    assert_eq!(kept.len(), 1, "a refusal leaves a row: {kept:?}");
+    let (succeeded, body) = &kept[0];
+    assert!(!succeeded);
+    assert!(body.contains("exercise_template_id not found"), "{body}");
+
+    assert!(
+        run!(async {
+            let store = SqlitePrescriptionDeliveryStore::new(ready.pool.clone());
+            let name = DestinationName::try_from("hevy".to_owned())?;
+            Ok::<_, Box<dyn std::error::Error>>(
+                application::PrescriptionDeliveryStore::occupying(&store, monday(), &name)
+                    .await?
+                    .is_none(),
+            )
+        }),
+        "and nothing is recorded as delivered, because nothing was"
+    );
+}
+
+/// A destination that answers, and refuses.
+///
+/// Separate from [`Counting`] rather than a mode on it: what it is for is the
+/// arm where the act fails *after* the destination has spoken, and a flag would
+/// make every test that uses `Counting` read as though it might take that arm.
+struct Refusing {
+    name: DestinationName,
+}
+
+impl Refusing {
+    fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            name: DestinationName::try_from("hevy".to_owned())?,
+        })
+    }
+
+    fn refused() -> DeliveryAttempt {
+        match reply(r#"{"error":"exercise_template_id not found"}"#, false) {
+            Ok(answer) => DeliveryAttempt::answered(
+                answer,
+                Err(DeliveryError::Unreachable {
+                    destination: "hevy".to_owned(),
+                    // The status alone, as the real adapter now words it: the
+                    // body is in the reply beside it rather than said twice.
+                    message: "400 Bad Request".to_owned(),
+                }),
+            ),
+            Err(error) => DeliveryAttempt::unanswered(error),
+        }
+    }
+}
+
+impl PrescriptionDestination for Refusing {
+    fn name(&self) -> &DestinationName {
+        &self.name
+    }
+
+    async fn deliver(&self, _session: &Deliverable) -> DeliveryAttempt {
+        Self::refused()
+    }
+
+    async fn replace(
+        &self,
+        _session: &Deliverable,
+        _occupying: &DeliveryReference,
+    ) -> DeliveryAttempt {
+        Self::refused()
+    }
 }
