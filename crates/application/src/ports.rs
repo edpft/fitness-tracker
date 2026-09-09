@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, future::Future};
 use jiff::{Timestamp, civil::Date};
 
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, Ftp};
-use domain::gym::{Load, Performed, PerformedGymSession, exercise::RepsExercise};
+use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
@@ -680,7 +680,7 @@ pub trait RefusalReporter {
 // port below returns both kinds of value.
 // ---------------------------------------------------------------------------
 
-/// One working performance of one exercise, on one date.
+/// One performance of one exercise, on one date, as the record holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Performance {
     pub on: Date,
@@ -721,15 +721,23 @@ pub struct FulfilledSession {
 /// Enough of a set for double progression and for the gate.
 ///
 /// Deliberately not the whole `Set<M>`: rest is never recorded by the one source
-/// in use, and the set kind is already filtered to working sets before this is
-/// built.
+/// in use, and an effort report is not an input to any derivation, so `intensity`
+/// is absent too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerformedSetSummary {
     pub load: Load,
     /// A completed count, or a failed attempt. The gate reads this and nothing
-    /// else; `intensity` is deliberately absent, because an effort report is not
-    /// an input to any derivation.
+    /// else.
     pub outcome: Performed<RepCount>,
+    /// Warm-up or working, as the record has it.
+    ///
+    /// **Carried rather than filtered on, because only one caller's question is
+    /// about working sets.** What the heaviest weight lifted was does not depend
+    /// on which sets the source called warm-ups; whether every set of a slot
+    /// reached the top of its rep range does, since a warm-up is not one of the
+    /// sets the range was prescribed for. Excluding warm-ups in the store made
+    /// the first question unanswerable to serve the second.
+    pub kind: SetKind,
 }
 
 /// What the projection knows about an exercise.
@@ -817,7 +825,7 @@ pub enum UnderivableReason {
 /// signature is what makes that structural: asking for a hold's history is a
 /// compile error rather than a row the adapter cannot decode.
 pub trait ExerciseHistory {
-    /// The most recent working performance of each exercise asked about.
+    /// The most recent performance of each exercise asked about.
     ///
     /// Unbounded in time: an alternating slot's exercise was last performed two
     /// sessions ago, not one. Batched rather than one call per slot, because
@@ -825,7 +833,8 @@ pub trait ExerciseHistory {
     /// N+1 the first time a programme grows.
     ///
     /// Where two landing records share a source record id, the later-served one
-    /// is read (§ 10). Warm-ups are excluded.
+    /// is read (§ 10). Every set the record holds is returned, warm-ups
+    /// included, each carrying its kind.
     ///
     /// # Errors
     ///
@@ -835,7 +844,7 @@ pub trait ExerciseHistory {
         exercises: &[RepsExercise],
     ) -> impl Future<Output = Result<BTreeMap<RepsExercise, LastPerformance>, StoreError>> + Send;
 
-    /// Every working performance of one exercise, oldest first.
+    /// Every performance of one exercise, oldest first.
     ///
     /// The ladder position needs this and `last_performances` cannot supply it:
     /// deciding whether the ladder advances, holds or suspends means asking of

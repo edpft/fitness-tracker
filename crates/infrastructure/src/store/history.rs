@@ -19,9 +19,16 @@
 //! The first figure that needs it right is the trigger to build the canonical
 //! layer properly.
 //!
-//! Reading only, and only working sets. There is no write half: prescription may
-//! read the performed layer and never the reverse (§ 11), and a type with no
-//! `write` is how that stops being a promise about the code.
+//! **Every set the record holds, warm-ups included.** The heaviest weight lifted
+//! is the heaviest weight lifted, whatever the source tagged the set — so no
+//! query here narrows by kind, and the kind travels with the set for the one
+//! caller whose question is genuinely about working sets. The operator,
+//! 2026-09-09: *"there's nothing inherent to warmup sets that means they
+//! shouldn't be included in the search of the heaviest weight lifted."*
+//!
+//! Reading only. There is no write half: prescription may read the performed
+//! layer and never the reverse (§ 11), and a type with no `write` is how that
+//! stops being a promise about the code.
 
 use std::collections::BTreeMap;
 
@@ -72,6 +79,7 @@ struct SetRow {
     load_grams: i64,
     outcome: String,
     reps: Option<i64>,
+    set_kind: String,
 }
 
 /// Rebuild a set summary from its flat row.
@@ -114,7 +122,11 @@ fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
         }
     };
 
-    Ok(PerformedSetSummary { load, outcome })
+    Ok(PerformedSetSummary {
+        load,
+        outcome,
+        kind: set_kind_of(&row.set_kind)?,
+    })
 }
 
 /// The prescribed session a performance names, rebuilt from its two columns.
@@ -187,7 +199,8 @@ impl ExerciseHistory for SqliteExerciseHistory {
                    prescriber.name AS "plan: String",
                    session.session_role AS "session_role: String",
                    s.load_kind AS "load_kind!: String", s.load_grams AS "load_grams!: i64",
-                   s.outcome AS "outcome!: String", s.reps AS "reps: i64"
+                   s.outcome AS "outcome!: String", s.reps AS "reps: i64",
+                   s.set_kind AS "set_kind!: String"
             FROM gym_workout AS w
             JOIN performed_exercise AS e ON e.workout = w.landing_record_id
             JOIN performed_set AS s
@@ -215,7 +228,6 @@ impl ExerciseHistory for SqliteExerciseHistory {
             LEFT JOIN gym_mesocycle AS m ON m.id = session.mesocycle
             LEFT JOIN plan AS prescriber ON prescriber.id = m.plan
             WHERE e.exercise = ?
-              AND s.set_kind = 'working'
               AND NOT EXISTS (
                     SELECT 1
                     FROM gym_workout AS superseding
@@ -243,6 +255,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                 load_grams: row.load_grams,
                 outcome: row.outcome,
                 reps: row.reps,
+                set_kind: row.set_kind,
             })?;
 
             let id =
@@ -334,6 +347,21 @@ struct WholeSetRow {
     rest_after_seconds: Option<i64>,
 }
 
+/// A set kind from its column.
+///
+/// Refuses rather than defaulting: an unrecognised kind is a store something
+/// else has written to, and `Working` would be a lie about a set the source
+/// meant something else by.
+fn set_kind_of(stored: &str) -> Result<SetKind, StoreError> {
+    match stored {
+        "working" => Ok(SetKind::Working),
+        "warmup" => Ok(SetKind::Warmup),
+        other => Err(StoreError::Corrupt {
+            detail: format!("{other:?} is not a set kind"),
+        }),
+    }
+}
+
 /// A load from its two flat columns.
 fn load_of(kind: &str, grams: i64) -> Result<Load, StoreError> {
     match kind {
@@ -363,15 +391,7 @@ fn set_frame(
         ),
         None => None,
     };
-    let kind = match row.set_kind.as_str() {
-        "working" => SetKind::Working,
-        "warmup" => SetKind::Warmup,
-        other => {
-            return Err(StoreError::Corrupt {
-                detail: format!("{other:?} is not a set kind"),
-            });
-        }
-    };
+    let kind = set_kind_of(&row.set_kind)?;
     let rest_after = match row.rest_after_seconds {
         Some(seconds) => Some(Duration::from_seconds(u64::try_from(seconds).map_err(
             |_| StoreError::Corrupt {
