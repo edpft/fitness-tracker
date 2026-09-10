@@ -10,11 +10,11 @@
 //! asking the programme which slot is primary rather than by anything about the
 //! exercise filling it.
 
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Kg, Load,
+        Kg, Load, SetKind,
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     measure::RepCount,
@@ -42,7 +42,7 @@ use crate::{
     error::PrescriptionError,
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
-        LastPerformance, MesocycleStore, Performance, PlanAuthor, PlanStore,
+        LastPerformance, MesocycleStore, Performance, PerformedSetSummary, PlanAuthor, PlanStore,
         PrescribedWorkoutStore, Prescription, PrescriptionLifecycle, UnderivableReason,
         UnderivableSlot, WorkoutPrescriber,
     },
@@ -558,22 +558,16 @@ where
         })
     }
 
-    /// The heaviest completed top set of a lift inside a span.
+    /// What the record says a lift measured inside a span.
     ///
-    /// A failed attempt says what could not be lifted, which is not a maximum.
+    /// The rule is [`heaviest_completed`]; this is the read that supplies it.
     async fn measured_in(
         &self,
         primary: RepsExercise,
         span: Span,
     ) -> Result<Option<Kg>, PrescriptionError> {
         let performances = self.ports.history.performances(primary).await?;
-        Ok(performances
-            .iter()
-            .filter(|performance| span.covers(performance.on))
-            .filter_map(top_set_of)
-            .filter(|top| top.completed)
-            .map(|top| top.load)
-            .max())
+        Ok(heaviest_completed(&performances, span))
     }
 
     async fn sbs_maximum(
@@ -785,7 +779,36 @@ where
     }
 }
 
-/// A gating session's top set: the heaviest working set, and what became of it.
+/// The heaviest completed set of any session in a span.
+///
+/// **Every set of every session, warm-ups included** (issue #127). Two
+/// narrowings used to stand between this question and the record, and the case
+/// that matters defeats both: a test week ramps toward an attempt and misses it.
+/// The store excluded warm-ups, so a ramp's completed singles were invisible;
+/// and asking [`top_set_of`] collapsed each session to its heaviest set *before*
+/// asking whether it completed, so a session whose heaviest set was the failure
+/// answered nothing at all — leaving the light session's taper as the only
+/// candidate, or nothing.
+///
+/// A failed attempt says what could not be lifted, which is not a maximum. What
+/// was lifted is the heaviest thing that went up, wherever in the session it
+/// sits and whatever the source tagged it.
+fn heaviest_completed(performances: &[Performance], span: Span) -> Option<Kg> {
+    performances
+        .iter()
+        .filter(|performance| span.covers(performance.on))
+        .flat_map(|performance| performance.sets.iter())
+        .filter_map(|set| match (set.load, set.outcome.completed()) {
+            // Only an absolute load is comparable on this axis, as in the gate
+            // below: an assisted or weighted bodyweight lift is not measured
+            // from a mass a maximum could be taken of.
+            (Load::Absolute(mass), Some(_)) => Some(mass),
+            _ => None,
+        })
+        .max()
+}
+
+/// A gating session's top set: the heaviest set it holds, and what became of it.
 ///
 /// **Heaviest rather than first.** In a session issued from this template the top
 /// set is the first working set and the back-offs are lighter, so the two agree;
@@ -794,10 +817,17 @@ where
 /// readings, and the failed attempt this exists to notice is by construction the
 /// heaviest thing attempted.
 ///
-/// `None` where the session recorded no working set at all, which is a session
-/// that says nothing about the ladder rather than a miss.
+/// **Warm-ups are among the candidates** (issue #127), which is what makes that
+/// second reading true rather than merely intended: the bridging singles the
+/// paragraph above describes were filtered out by the store until then. Both
+/// mechanisms reading this respond to what was lifted — the ladder steps from
+/// the completed load and SBS back-computes its maximum from it — so a load
+/// lower than the one prescribed regulates them rather than misleading them.
+///
+/// `None` where the session recorded no set on this axis at all, which is a
+/// session that says nothing about the ladder rather than a miss.
 fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
-    let mut heaviest: Option<(u64, &crate::ports::PerformedSetSummary)> = None;
+    let mut heaviest: Option<(u64, &PerformedSetSummary)> = None;
     for set in &performance.sets {
         // Only an absolute load is comparable on this axis, and the primary is a
         // barbell lift. A relative one — assisted or weighted bodyweight — is left
@@ -1559,6 +1589,31 @@ fn one_exercise(
     })
 }
 
+/// The heaviest of a performed exercise's sets.
+///
+/// **The load a progression is against is the heaviest one, not the last one**
+/// (issue #129). Two shapes make those differ, and both are ordinary: a top set
+/// followed by back-offs, which is what the primary template issues and what an
+/// accessory takes whenever the operator works down; and ascending assistance,
+/// which is how the dips and pull-ups in the record are logged — `-7`, `-14`,
+/// `-21` across three sets as fatigue accumulates. In each the last set is the
+/// easiest, so progressing from it re-issues or steps up from the wrong number.
+///
+/// **A pair on two axes keeps the incumbent.** [`Load`] is only partially
+/// ordered, because an absolute load and a relative one are not comparable — and
+/// an exercise's implement decides its axis, so no performed exercise in the
+/// record has ever carried both. Keeping the first axis seen is a decision about
+/// a state the record does not reach, made explicitly rather than by whichever
+/// way a comparison happened to fall.
+fn heaviest_of<'a>(sets: &[&'a PerformedSetSummary]) -> Option<&'a PerformedSetSummary> {
+    sets.iter()
+        .copied()
+        .fold(None, |heaviest, set| match heaviest {
+            Some(held) if held.load.partial_cmp(&set.load) != Some(Ordering::Less) => Some(held),
+            Some(_) | None => Some(set),
+        })
+}
+
 /// Double progression: work the range, and add an increment once the top of it
 /// was reached at every working set.
 ///
@@ -1578,8 +1633,20 @@ fn progressed_load(
     scheme: &domain::prescription::AccessoryScheme,
     last: &Performance,
 ) -> Result<Load, UnderivableReason> {
-    let heaviest = last.sets.last().ok_or(UnderivableReason::NoWorkingSet)?;
-    let reached_top = last.sets.iter().all(|set| {
+    // **The one place a set's kind is read** (issue #127). Everything else about
+    // the record answers "what was lifted", which does not depend on what the
+    // source called a set; this asks whether every set the range was prescribed
+    // for reached the top of it, and a warm-up is not one of those. Left in, a
+    // ramp's three repetitions answer "no" every week and hold the load where it
+    // is for good — a freeze rather than a week's delay, because next week's
+    // ramp answers "no" again.
+    let working: Vec<_> = last
+        .sets
+        .iter()
+        .filter(|set| set.kind == SetKind::Working)
+        .collect();
+    let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
+    let reached_top = working.iter().all(|set| {
         set.outcome
             .completed()
             .is_some_and(|reps| *reps >= scheme.reps.maximum())
@@ -1915,6 +1982,271 @@ fn primary_sets(
         }
     }
     sets
+}
+
+#[cfg(test)]
+mod progression_tests {
+    //! Double progression progresses from the heaviest working set (issue #129).
+    //!
+    //! Here rather than in `infrastructure/tests` because [`progressed_load`] is
+    //! private and needs no port: it is a rule about one performance.
+
+    use domain::{
+        gym::{Kg, Load, Performed, SetKind, SignedKg, exercise::Exercise},
+        landing::LandingRecordId,
+        measure::RepCount,
+        prescription::seed::seed,
+    };
+    use jiff::civil::Date;
+
+    use super::{Performance, PerformedSetSummary, progressed_load};
+
+    /// One completed set. Returns `Result`: the test exemptions do not reach a
+    /// helper defined beside a `#[test]`.
+    fn set(load: Load, reps: u32) -> Result<PerformedSetSummary, Box<dyn std::error::Error>> {
+        Ok(PerformedSetSummary {
+            load,
+            outcome: Performed::Completed(RepCount::new(reps)?),
+            kind: SetKind::Working,
+        })
+    }
+
+    fn performance(
+        sets: Vec<PerformedSetSummary>,
+    ) -> Result<Performance, Box<dyn std::error::Error>> {
+        Ok(Performance {
+            on: Date::constant(2026, 8, 3),
+            landed_as: LandingRecordId::try_from(1)?,
+            fulfilled: None,
+            sets,
+        })
+    }
+
+    /// The shape the primary template issues: a top set, then lighter back-offs.
+    ///
+    /// Every set reached the top of the 4-6 range, so the load steps up — from
+    /// the 40kg top set, not from the 30kg back-off it ended on.
+    #[test]
+    fn a_session_progresses_from_its_top_set_not_its_back_offs() {
+        let parameters = seed().expect("the seed builds");
+        let last = performance(vec![
+            set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
+            set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
+            set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
+        ])
+        .expect("a performance");
+
+        let progressed = progressed_load(
+            &parameters,
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            &parameters.strength,
+            &last,
+        )
+        .expect("the slot derives");
+
+        assert_eq!(
+            progressed,
+            Load::absolute(Kg::from_grams(42_500)),
+            "the 40kg top set steps to 42.5, and the back-offs are not the load"
+        );
+    }
+
+    /// How the dips and pull-ups in the record are logged: assistance increases
+    /// across the session as fatigue accumulates, so the last set is the easiest.
+    ///
+    /// **The real shape, taken from 2026-06-15**: `-7 x 4`, `-14 x 5`, `-21 x 6`.
+    /// It fell short of the top of the range, so the load re-issues — and what
+    /// re-issues is the `-7` it started at, not the `-21` it ended on. Stepping
+    /// up is not reachable here: the seed authors no scale for a bodyweight
+    /// implement, so the week this slot would step is the week somebody has to
+    /// state one.
+    #[test]
+    fn an_assisted_session_re_issues_its_least_assisted_set() {
+        let parameters = seed().expect("the seed builds");
+        let last = performance(vec![
+            set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
+            set(Load::relative(SignedKg::from_grams(-14_000)), 5).expect("a set"),
+            set(Load::relative(SignedKg::from_grams(-21_000)), 6).expect("a set"),
+        ])
+        .expect("a performance");
+
+        let progressed = progressed_load(
+            &parameters,
+            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip),
+            &parameters.strength,
+            &last,
+        )
+        .expect("the slot derives");
+
+        assert_eq!(
+            progressed,
+            Load::relative(SignedKg::from_grams(-7_000)),
+            "less assistance is heavier, so -7 is the set the session is measured at"
+        );
+    }
+
+    /// A session that fell short re-issues the heaviest set, not the last one.
+    #[test]
+    fn a_session_that_fell_short_re_issues_its_top_set() {
+        let parameters = seed().expect("the seed builds");
+        let last = performance(vec![
+            set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
+            set(Load::absolute(Kg::from_grams(30_000)), 4).expect("a set"),
+        ])
+        .expect("a performance");
+
+        let progressed = progressed_load(
+            &parameters,
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            &parameters.strength,
+            &last,
+        )
+        .expect("the slot derives");
+
+        assert_eq!(progressed, Load::absolute(Kg::from_grams(40_000)));
+    }
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    //! What a test week leaves behind, read off a session that missed (issue
+    //! #127).
+    //!
+    //! Here rather than in `infrastructure/tests` because [`heaviest_completed`]
+    //! is private and needs no port: it is a rule about a slice of performances.
+    //! The three sessions below are the shapes the real record holds — the front
+    //! squat test of 2026-07-03, whose ramp is tagged working; a back squat day
+    //! of June 2025, whose heaviest completed set is a bridging single tagged
+    //! warm-up; and the light session that used to answer for both.
+
+    use domain::{
+        gym::{Kg, Load, Performed, SetKind},
+        landing::LandingRecordId,
+        measure::RepCount,
+        plan::Span,
+    };
+    use jiff::civil::Date;
+
+    use super::{Performance, PerformedSetSummary, heaviest_completed};
+
+    /// One set, as the record holds it. Returns `Result`: the test exemptions do
+    /// not reach a helper defined beside a `#[test]`.
+    fn set(
+        kg: u64,
+        reps: Option<u32>,
+        kind: SetKind,
+    ) -> Result<PerformedSetSummary, Box<dyn std::error::Error>> {
+        Ok(PerformedSetSummary {
+            load: Load::Absolute(Kg::from_grams(kg)),
+            outcome: match reps {
+                Some(count) => Performed::Completed(RepCount::new(count)?),
+                None => Performed::Failed,
+            },
+            kind,
+        })
+    }
+
+    fn performance(
+        on: Date,
+        id: i64,
+        sets: Vec<PerformedSetSummary>,
+    ) -> Result<Performance, Box<dyn std::error::Error>> {
+        Ok(Performance {
+            on,
+            landed_as: LandingRecordId::try_from(id)?,
+            fulfilled: None,
+            sets,
+        })
+    }
+
+    /// The week the test is in: Monday 29 June 2026 to Sunday 5 July.
+    fn week() -> Span {
+        Span::new(Date::constant(2026, 6, 29), 1)
+    }
+
+    #[test]
+    fn a_failed_attempt_is_not_what_was_lifted() {
+        let day = performance(
+            Date::constant(2026, 7, 3),
+            1,
+            vec![
+                set(72_500, Some(1), SetKind::Warmup).expect("a ramp step"),
+                set(80_000, Some(1), SetKind::Working).expect("a single"),
+                set(90_000, Some(1), SetKind::Working).expect("a single"),
+                set(95_000, None, SetKind::Working).expect("a failed attempt"),
+            ],
+        )
+        .expect("a performance");
+
+        assert_eq!(
+            heaviest_completed(&[day], week()),
+            Some(Kg::from_grams(90_000)),
+            "the completed single below the failure is what was lifted, and the \
+             session's heaviest set is the failure"
+        );
+    }
+
+    #[test]
+    fn the_lighter_session_does_not_answer_for_the_test() {
+        let taper = performance(
+            Date::constant(2026, 6, 30),
+            1,
+            vec![
+                set(70_000, Some(3), SetKind::Working).expect("a triple"),
+                set(70_000, Some(3), SetKind::Working).expect("a triple"),
+            ],
+        )
+        .expect("a performance");
+        let test = performance(
+            Date::constant(2026, 7, 3),
+            2,
+            vec![
+                set(90_000, Some(1), SetKind::Working).expect("a single"),
+                set(95_000, None, SetKind::Working).expect("a failed attempt"),
+            ],
+        )
+        .expect("a performance");
+
+        assert_eq!(
+            heaviest_completed(&[taper, test], week()),
+            Some(Kg::from_grams(90_000)),
+            "the taper is 70kg and the test reached 90"
+        );
+    }
+
+    #[test]
+    fn a_ramp_tagged_warm_up_is_still_what_was_lifted() {
+        // The June 2025 back squat shape: the ramp is the heavy work and the
+        // working sets below it are volume.
+        let day = performance(
+            Date::constant(2026, 7, 3),
+            1,
+            vec![
+                set(82_500, Some(1), SetKind::Warmup).expect("a bridging single"),
+                set(92_500, Some(1), SetKind::Warmup).expect("a bridging single"),
+                set(70_000, Some(10), SetKind::Working).expect("a set of ten"),
+            ],
+        )
+        .expect("a performance");
+
+        assert_eq!(
+            heaviest_completed(&[day], week()),
+            Some(Kg::from_grams(92_500)),
+            "92.5kg went up, whatever the source called the set"
+        );
+    }
+
+    #[test]
+    fn a_session_outside_the_span_is_not_evidence_about_it() {
+        let after = performance(
+            Date::constant(2026, 7, 6),
+            1,
+            vec![set(100_000, Some(1), SetKind::Working).expect("a single")],
+        )
+        .expect("a performance");
+
+        assert_eq!(heaviest_completed(&[after], week()), None);
+    }
 }
 
 #[cfg(test)]

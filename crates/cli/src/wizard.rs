@@ -660,10 +660,16 @@ fn as_one_rep_max(load: Kg, reps: RepCount) -> Option<Kg> {
 
 /// The best one-rep maximum the record implies for a lift.
 ///
-/// **Every completed working set is a candidate, not just the heaviest.** A
-/// triple at 85 implies more than a single at 88, and the block's own
-/// percentages already agree — so the comparison is made in the unit the anchor
-/// is stated in rather than in bare load.
+/// **Every completed set is a candidate, not just the heaviest.** A triple at 85
+/// implies more than a single at 88, and the block's own percentages already
+/// agree — so the comparison is made in the unit the anchor is stated in rather
+/// than in bare load.
+///
+/// **Warm-ups among them** (issue #127). The record holds six back squat days
+/// whose heaviest completed set is a bridging single tagged warm-up, and a
+/// single at 92.5 is evidence about a maximum whatever the source called it. It
+/// moves no number the record currently implies — the working sets win on every
+/// lift — which is the point: the narrowing was wrong rather than load-bearing.
 ///
 /// `None` where nothing has been performed, which is a real state: an exercise
 /// exists before it is prescribed and is prescribed before it has been done.

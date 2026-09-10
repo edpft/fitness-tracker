@@ -271,6 +271,31 @@ impl Load {
     pub const BODYWEIGHT: Self = Self::Relative(SignedKg::ZERO);
 }
 
+/// Heavier than, within one axis.
+///
+/// **Partial, and hand-written so it cannot be derived by accident.** Deriving
+/// would order by variant and declare every `Absolute` lighter than every
+/// `Relative`, which is not a fact about anything. Two axes do not compare: a
+/// bodyweight squat is `Absolute(0)` and a plain bodyweight pull-up is
+/// `Relative(0)`, they are not the same load, and neither is heavier.
+///
+/// Within an axis both are the obvious thing, and the relative one carries the
+/// crossover the axis exists for: −20 is lighter than −5, which is lighter than
+/// bodyweight, which is lighter than +10. Less assistance is heavier.
+///
+/// There is no `Ord`, so `Iterator::max` will not reach for this. That is
+/// deliberate: a caller taking the heaviest of a collection has to say what it
+/// means to find two it cannot order.
+impl PartialOrd for Load {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::Absolute(ours), Self::Absolute(theirs)) => Some(ours.cmp(theirs)),
+            (Self::Relative(ours), Self::Relative(theirs)) => Some(ours.cmp(theirs)),
+            (Self::Absolute(_), Self::Relative(_)) | (Self::Relative(_), Self::Absolute(_)) => None,
+        }
+    }
+}
+
 impl fmt::Display for Load {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

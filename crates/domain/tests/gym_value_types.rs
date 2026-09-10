@@ -245,3 +245,32 @@ fn a_set_cannot_disagree_with_its_exercise() {
     assert_eq!(reps_performed.as_u32(), 5);
     assert_eq!(distance_performed.metres, metres);
 }
+
+/// Heavier than, within one axis and never across two (issue #129).
+///
+/// The relative case is the one the axis exists for: assistance and added weight
+/// are one line through zero, so less assistance is heavier and a weighted rep is
+/// heavier still.
+#[test]
+fn a_load_is_ordered_within_its_axis_and_not_across_them() {
+    let assisted = Load::relative(SignedKg::from_grams(-20_000));
+    let barely = Load::relative(SignedKg::from_grams(-5_000));
+    let bodyweight = Load::BODYWEIGHT;
+    let weighted = Load::relative(SignedKg::from_grams(10_000));
+
+    assert!(assisted < barely, "less assistance is heavier");
+    assert!(barely < bodyweight, "no assistance is heavier still");
+    assert!(
+        bodyweight < weighted,
+        "and added weight is heavier than that"
+    );
+
+    let light = Load::absolute(Kg::from_grams(20_000));
+    let heavy = Load::absolute(Kg::from_grams(60_000));
+    assert!(light < heavy);
+
+    // A bodyweight squat and a plain bodyweight pull-up are both "no external
+    // load" and neither is heavier. There is no total order to reach for.
+    assert_eq!(Load::UNLOADED.partial_cmp(&Load::BODYWEIGHT), None);
+    assert_eq!(heavy.partial_cmp(&assisted), None);
+}

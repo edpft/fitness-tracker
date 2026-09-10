@@ -15,7 +15,7 @@ use application::{
     NormalisationSummary, WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts},
 };
-use domain::gym::{Performed, exercise::RepsExercise};
+use domain::gym::{Kg, Load, Performed, SetKind, exercise::RepsExercise};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymSessionStore,
@@ -106,7 +106,7 @@ macro_rules! run {
 ///
 /// A latest value cannot answer the gate's question, which is why the port has
 /// two reads. This asserts the series is a series: ordered, one entry per
-/// session, and carrying every working set of that session.
+/// session, and carrying every set of that session.
 #[test]
 fn the_primarys_series_is_ordered_and_complete() {
     let (history, _directory) = history!();
@@ -132,14 +132,59 @@ fn the_primarys_series_is_ordered_and_complete() {
         }
     }
 
-    // Every performance carries at least one working set, and warm-ups are
-    // excluded — a ramp step is not evidence about a maximum.
+    // A performance with no sets is not one.
     for performance in &performances {
-        assert!(
-            !performance.sets.is_empty(),
-            "a performance with no working set is not one"
-        );
+        assert!(!performance.sets.is_empty(), "a performance holds sets");
     }
+}
+
+/// The record includes its warm-ups, and says which sets they were (issue #127).
+///
+/// **The case is not hypothetical.** Six back squat sessions in June and July
+/// 2025 open with a bridging single heavier than anything in the working sets
+/// below it — 92.5kg against three tens at 70kg on 2025-07-04 — because that
+/// block was hand-run and the ramp was where the heavy work was. Excluding
+/// warm-ups in the query made the heaviest weight lifted that day unreportable
+/// by anything reading this port.
+///
+/// The operator, 2026-09-09: *"there's nothing inherent to warmup sets that
+/// means they shouldn't be included in the search of the heaviest weight
+/// lifted."*
+#[test]
+fn the_record_includes_its_warm_ups() {
+    let (history, _directory) = history!();
+
+    let performances = run!(history.performances(RepsExercise::SquatBarbell));
+    let Some(july) = performances
+        .iter()
+        .find(|performance| performance.on.to_string() == "2025-07-04")
+    else {
+        panic!("the corpus holds a back squat session on 2025-07-04")
+    };
+
+    let warmups = july
+        .sets
+        .iter()
+        .filter(|set| set.kind == SetKind::Warmup)
+        .count();
+    assert_eq!(warmups, 6, "the session's ramp is six steps");
+    assert_eq!(july.sets.len(), 9, "and three working sets follow it");
+
+    // The heaviest completed set of the session is the ramp's top single, which
+    // is the whole point: it is 22.5kg above every working set below it.
+    let heaviest = july
+        .sets
+        .iter()
+        .filter_map(|set| match (set.load, set.outcome.completed()) {
+            (Load::Absolute(mass), Some(_)) => Some(mass),
+            _ => None,
+        })
+        .max();
+    assert_eq!(
+        heaviest,
+        Some(Kg::from_grams(92_500)),
+        "the heaviest completed set is the ramp's single at 92.5kg"
+    );
 }
 
 /// The session of 2026-07-03 is the anchor's evidence: a completed single at 90,
@@ -306,13 +351,18 @@ fn the_newest_performance_is_the_corpuss_last_session() {
     assert_eq!(newest.to_string(), "2026-08-10");
 }
 
-/// Warm-up sets are excluded from history.
+/// Warm-up sets are history (issue #127).
 ///
-/// Double progression reads working sets, and a ramp step at 40% of a top set is
-/// not evidence about anything. The front squat's ramp is four sets a session, so
-/// including them would inflate every count here.
+/// **This asserted the opposite until 2026-09-09**, and the reason it gave was a
+/// rule about one caller: double progression reads working sets. Enforcing that
+/// in the store narrowed every *other* question with it, including the one the
+/// record is mostly asked — what was lifted. The filter now sits at that caller,
+/// where it can be read.
+///
+/// The corpus's last front squat session is 2026-08-10: a four-step ramp, a top
+/// set at 77.5 and three back-offs at 65.
 #[test]
-fn warm_ups_are_not_history() {
+fn warm_ups_are_history() {
     let (history, _directory) = history!();
     let front_squat = RepsExercise::FrontSquat;
 
@@ -321,12 +371,20 @@ fn warm_ups_are_not_history() {
         panic!("the corpus holds front squat sessions")
     };
 
-    // The sessions since July run a four-step ramp then three or four working
-    // sets. Any count above five would mean warm-ups leaked in.
-    assert!(
-        recent.sets.len() <= 5,
-        "warm-ups must be excluded, found {} sets",
-        recent.sets.len()
+    assert_eq!(recent.on.to_string(), "2026-08-10");
+    assert_eq!(
+        recent.sets.len(),
+        8,
+        "four ramp steps and four working sets"
+    );
+    assert_eq!(
+        recent
+            .sets
+            .iter()
+            .filter(|set| set.kind == SetKind::Warmup)
+            .count(),
+        4,
+        "the ramp is in the record, and says it is the ramp"
     );
 }
 
