@@ -10,26 +10,25 @@ pub mod credentials;
 pub mod hevy;
 pub mod lock;
 pub mod peloton;
+pub mod private_file;
 pub mod scribe;
-pub mod settings;
 pub mod store;
 
-pub use credentials::{CredentialError, Credentials};
+pub use credentials::{Credential, CredentialError, Credentials};
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyWorkoutEvents, PageCount,
     PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
-pub use settings::{Settings, SettingsError};
 pub use store::{
     HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePerformedWorkoutReader,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
+    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };
 
 /// The pool every store is built on, so a composition root can open one and

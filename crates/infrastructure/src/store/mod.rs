@@ -24,6 +24,7 @@ pub mod refusals;
 pub mod resumption;
 pub mod run_log;
 pub mod schedule;
+pub mod settings;
 
 use application::StoreError;
 use domain::{
@@ -51,6 +52,7 @@ pub use refusals::SqliteRefusalStore;
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;
+pub use settings::SqliteOperatorSettingsStore;
 
 /// Translate a store failure into the application's view of one.
 ///

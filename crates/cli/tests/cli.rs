@@ -6,6 +6,7 @@
 
 use std::{
     fs::OpenOptions,
+    io::{BufRead as _, BufReader, Write as _},
     path::Path,
     process::{Command, Output},
 };
@@ -34,7 +35,9 @@ fn fitness(
         // supplies its own home.
         .env_remove("HOME")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .args(arguments);
 
     if let Some(path) = database {
@@ -45,6 +48,48 @@ fn fitness(
     }
 
     command.output()
+}
+
+/// A source that accepts whatever it is shown.
+///
+/// **`init` checks a credential before storing it**, so a test that stores one
+/// needs something to check it against. A listener rather than a mock-server
+/// dependency: what is being exercised is the status code, and twenty lines of
+/// `TcpListener` cost less than a crate and an async runtime built by hand.
+///
+/// The thread runs until the process ends, which for one test binary per test is
+/// the end of the test.
+fn accepting_source() -> std::io::Result<String> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(match stream.try_clone() {
+                Ok(clone) => clone,
+                Err(_) => continue,
+            });
+            let mut line = String::new();
+            // The request line and its headers, up to the blank one.
+            while reader.read_line(&mut line).unwrap_or(0) > 2 {
+                line.clear();
+            }
+
+            let body = b"{\"events\":[],\"page\":1,\"page_count\":1}";
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+            let _ = stream.write_all(body);
+            let _ = stream.flush();
+        }
+    });
+
+    Ok(format!("http://{address}"))
 }
 
 fn code(output: &Output) -> i32 {
@@ -71,7 +116,9 @@ fn fitness_at_home(arguments: &[&str], home: &Path) -> std::io::Result<Output> {
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("HEVY_API_BASE_URL")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .env("HOME", home)
         .args(arguments);
     command.output()
@@ -96,15 +143,14 @@ fn the_store_defaults_to_the_data_directory() {
     );
 }
 
-/// The settings file is read from the specification's config directory, and a
-/// value stated there answers for every invocation.
+/// The zone is read from the store, and a value stated once answers for every
+/// invocation: `init` states the zone, and a later command with a bare
+/// environment finds it.
 #[test]
-fn the_settings_file_is_read_from_the_config_directory() {
+fn the_zone_is_read_from_the_store() {
     let home = TempDir::new().expect("a temporary home");
-    let config = home.path().join(".config/fitness-tracker");
-    std::fs::create_dir_all(&config).expect("a config directory");
-    std::fs::write(config.join("config.toml"), "timezone = \"Europe/London\"\n")
-        .expect("a settings file");
+    fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
 
     let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
 
@@ -485,19 +531,14 @@ fn reading_refusals_needs_no_declared_zone() {
 
 // --- Setup ------------------------------------------------------------------
 
-/// `init` makes both, and says what it made.
+/// `init` makes the store, states the zone in it, and says what it did.
 #[test]
-fn init_creates_the_store_and_the_settings() {
+fn init_creates_the_store_and_states_the_zone() {
     let home = TempDir::new().expect("a temporary home");
     let output = fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
         .expect("the binary runs");
 
     assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert!(
-        home.path()
-            .join(".config/fitness-tracker/config.toml")
-            .exists()
-    );
     assert!(
         home.path()
             .join(".local/share/fitness-tracker/store.db")
@@ -529,9 +570,11 @@ fn what_init_writes_is_what_the_next_run_reads() {
     );
 }
 
-/// **A settings file is hand-edited, so replacing one is asked for.**
+/// **A zone already in force is not restated on a whim.** `--force` supersedes
+/// it — § 12 keeps the old row — and without one a second `init` leaves the
+/// zone every prescription is generated against exactly where it was.
 #[test]
-fn init_refuses_to_overwrite_without_being_told() {
+fn init_refuses_to_restate_the_zone_without_being_told() {
     let home = TempDir::new().expect("a temporary home");
     fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
         .expect("the binary runs");
@@ -540,6 +583,16 @@ fn init_refuses_to_overwrite_without_being_told() {
         .expect("the binary runs");
     assert_eq!(code(&again), 4);
     assert!(stderr(&again).contains("--force"), "{}", stderr(&again));
+
+    // Re-running to connect a source, with no zone given, is not a restatement
+    // and is not refused.
+    let unchanged = fitness_at_home(&["init"], home.path()).expect("the binary runs");
+    assert_eq!(code(&unchanged), 0, "{}", stderr(&unchanged));
+    assert!(
+        stdout(&unchanged).contains("Europe/London"),
+        "the zone in force is left alone: {}",
+        stdout(&unchanged)
+    );
 
     let forced = fitness_at_home(
         &["init", "--timezone", "Europe/Paris", "--force"],
@@ -615,8 +668,8 @@ fn init_validates_the_zone_before_writing_anything() {
 }
 
 /// **A key on standard input never reaches argv**, which is the whole reason
-/// there is no flag for it. It is stored beside the settings rather than in
-/// them, and the file is owner-only.
+/// there is no flag for it. It goes to the state directory, and the file is
+/// owner-only.
 #[test]
 fn init_stores_a_key_given_on_standard_input() {
     use std::process::Stdio;
@@ -627,9 +680,15 @@ fn init_stores_a_key_given_on_standard_input() {
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .env("HOME", home.path())
-        .args(["init", "--timezone", "Europe/London", "--api-key-stdin"])
+        .env(
+            "HEVY_API_BASE_URL",
+            accepting_source().expect("a listening source"),
+        )
+        .args(["init", "--timezone", "Europe/London", "--credential-stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -646,18 +705,11 @@ fn init_stores_a_key_given_on_standard_input() {
     let output = child.wait_with_output().expect("the binary finishes");
     assert_eq!(code(&output), 0, "{}", stderr(&output));
 
-    let path = home.path().join(".config/fitness-tracker/credentials.toml");
+    let path = home
+        .path()
+        .join(".local/state/fitness-tracker/credentials.json");
     let written = std::fs::read_to_string(&path).expect("the credentials file exists");
     assert!(written.contains("a-stored-key"), "{written}");
-
-    // The settings file is the one kept with dotfiles, so the key must not be
-    // in it.
-    let settings = std::fs::read_to_string(home.path().join(".config/fitness-tracker/config.toml"))
-        .expect("the settings file exists");
-    assert!(
-        !settings.contains("a-stored-key"),
-        "a key must not reach the settings file: {settings}"
-    );
 
     #[cfg(unix)]
     {
@@ -680,7 +732,9 @@ fn init_does_not_copy_a_key_the_environment_already_answers_for() {
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .env("HOME", home.path())
         .env("HEVY_API_KEY", "already-answered")
         .args(["init", "--timezone", "Europe/London"])
@@ -691,7 +745,7 @@ fn init_does_not_copy_a_key_the_environment_already_answers_for() {
     assert!(
         !home
             .path()
-            .join(".config/fitness-tracker/credentials.toml")
+            .join(".local/state/fitness-tracker/credentials.json")
             .exists(),
         "nothing is written when the environment already answers"
     );
@@ -714,9 +768,15 @@ fn a_stored_key_is_used_by_a_later_command() {
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .env("HOME", home.path())
-        .args(["init", "--timezone", "Europe/London", "--api-key-stdin"])
+        .env(
+            "HEVY_API_BASE_URL",
+            accepting_source().expect("a listening source"),
+        )
+        .args(["init", "--timezone", "Europe/London", "--credential-stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -738,7 +798,9 @@ fn a_stored_key_is_used_by_a_later_command() {
         .env_remove("FITNESS_TRACKER_DATABASE")
         .env_remove("FITNESS_TRACKER_TIMEZONE")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("PELOTON_EMAIL")
+        .env_remove("PELOTON_PASSWORD")
         .env("HOME", home.path())
         .env("HEVY_API_BASE_URL", "http://127.0.0.1:1")
         .args(["extract", "hevy.workouts"])

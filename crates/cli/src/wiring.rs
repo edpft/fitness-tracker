@@ -254,6 +254,7 @@ async fn collect_rides(
         auth_base_url,
         email,
         password,
+        ..
     } = access
     else {
         return Err(WiringError::WrongCredential {
@@ -301,7 +302,10 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
     match command {
         Command::Extract(access) => {
-            let SourceAccess::ApiKey { base_url, api_key } = access else {
+            let SourceAccess::ApiKey {
+                base_url, api_key, ..
+            } = access
+            else {
                 return Err(WiringError::WrongCredential {
                     stream: HevyWorkoutLandingStore::STREAM.to_owned(),
                     given: "a login",
