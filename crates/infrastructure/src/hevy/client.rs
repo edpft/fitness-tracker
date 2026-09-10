@@ -85,6 +85,43 @@ impl HevyWorkoutEvents {
         })
     }
 
+    /// Ask the source whether this credential is accepted, landing nothing.
+    ///
+    /// **A real request, because nothing else proves a key.** A key's shape is
+    /// the vendor's business and could change; what cannot change is whether the
+    /// source accepts it. One page of one record is the cheapest question that
+    /// carries an answer — the truncated paste behind #61 looked exactly like a
+    /// key until something asked.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Unauthorised`] if the credential is rejected, and
+    /// [`SourceError::Unavailable`] if the source cannot be reached or answers
+    /// with anything else.
+    pub async fn verify(&self) -> Result<(), SourceError> {
+        let response = self
+            .client()?
+            .get(self.url())
+            .header("api-key", &self.api_key)
+            .query(&[("since", EPOCH), ("page", "1"), ("pageSize", "1")])
+            .send()
+            .await
+            .map_err(|error| SourceError::Unavailable {
+                detail: error.to_string(),
+            })?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err(SourceError::Unauthorised);
+        }
+        Err(SourceError::Unavailable {
+            detail: format!("{status}"),
+        })
+    }
+
     pub(crate) fn url(&self) -> String {
         format!("{}{EVENTS_ENDPOINT}", self.base_url)
     }

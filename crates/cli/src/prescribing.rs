@@ -194,14 +194,17 @@ pub async fn deliver(
         known,
         base_url,
         std::env::var(known.api_key_variable()),
-        credentials.key(known.name()),
+        credentials.credential(known.name()),
     )
     .map_err(|error| Failure::usage(&error))?;
 
     // `resolve` above builds the key-based kind, so the other arm is a
     // contradiction rather than a case: it would mean this source's catalogue
     // entry and the call that read its credential disagree.
-    let config::SourceAccess::ApiKey { base_url, api_key } = access else {
+    let config::SourceAccess::ApiKey {
+        base_url, api_key, ..
+    } = access
+    else {
         return Err(Failure::message(
             format!("{} is reached with an API key", known.name()),
             exit::STORE,

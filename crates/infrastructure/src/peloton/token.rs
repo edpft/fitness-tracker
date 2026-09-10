@@ -10,8 +10,7 @@
 //! its config and credentials as INI where the operator edits them and caches
 //! its SSO token under `~/.aws/sso/cache` where they do not; the split is
 //! between what a person supplies and what a flow derives. This is the second
-//! kind, so it lives apart from `credentials.toml` and in the state directory
-//! rather than the config one.
+//! kind, so it is kept apart from `credentials.json`, which holds the first.
 //!
 //! **JSON, not TOML, and the difference is the point.** TOML's advantage is that
 //! a person can read and edit it, which is exactly what should not happen here:
@@ -101,12 +100,7 @@ impl TokenFile {
         let body = serde_json::to_vec_pretty(&stored)
             .map_err(|error| std::io::Error::other(error.to_string()))?;
 
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let staging = self.path.with_extension("json.new");
-        write_private(&staging, &body)?;
-        std::fs::rename(&staging, &self.path)
+        crate::private_file::write(&self.path, &body)
     }
 
     /// Forget the token, if there is one. Absent is already forgotten.
@@ -120,26 +114,4 @@ impl TokenFile {
             other => other,
         }
     }
-}
-
-#[cfg(unix)]
-fn write_private(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    use std::{io::Write as _, os::unix::fs::OpenOptionsExt as _};
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(body)?;
-    file.sync_all()
-}
-
-/// **Owner-only is not enforced off Unix**, and saying so is better than
-/// implying it. Nothing here runs on Windows today; when it does, this is the
-/// function that has to grow an ACL rather than the callers.
-#[cfg(not(unix))]
-fn write_private(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, body)
 }

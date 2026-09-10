@@ -1108,11 +1108,11 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     use crate::setup::{CredentialOutcome, ParameterOutcome};
 
     println!("ready to use");
-    println!("  settings  {}", prepared.settings_path.display());
-    println!("  store     {}", prepared.database.display());
-    println!("  time zone {}", prepared.zone);
+    println!("  store       {}", prepared.database.display());
+    println!("  credentials {}", prepared.credentials_path.display());
+    println!("  time zone   {}", prepared.zone);
     println!(
-        "  numbers   {}",
+        "  numbers     {}",
         match prepared.parameters {
             ParameterOutcome::Seeded => "this build's shipped set, stored",
             ParameterOutcome::AlreadyInForce => "already set, left alone",
@@ -1122,28 +1122,37 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 
     // **A source is something the tool can connect to, not something it needs.**
     // A programme can be authored and a session prescribed with no source at
-    // all — what a key buys is reading the performed record and delivering to
-    // the phone. Listing them as obligations made one vendor look mandatory.
+    // all — what a credential buys is reading the performed record and
+    // delivering to the phone. Listing them as obligations made one vendor look
+    // mandatory.
     println!("sources:");
     for (source, outcome) in &prepared.credentials {
         let said = match outcome {
-            CredentialOutcome::Stored => "connected — key stored",
-            CredentialOutcome::InEnvironment => "connected — key from the environment",
+            // **Which of the two answered, said plainly.** A stored credential
+            // and an exported variable behave identically until one of them is
+            // wrong, and then the difference is the whole diagnosis.
+            CredentialOutcome::Stored => "connected — checked and stored".to_owned(),
+            CredentialOutcome::InEnvironment => "connected — from the environment".to_owned(),
             CredentialOutcome::Outstanding => {
-                "not connected — needed to read workouts and deliver sessions"
+                "not connected — needed to read workouts and deliver sessions".to_owned()
+            }
+            CredentialOutcome::Refused(detail) => {
+                format!("not connected — the source would not have it: {detail}")
             }
         };
         println!("  {source:<9} {said}");
     }
 
     for (source, outcome) in &prepared.credentials {
-        if *outcome == CredentialOutcome::Outstanding
-            && let Some(known) = crate::catalogue::source(source)
+        if matches!(
+            outcome,
+            CredentialOutcome::Outstanding | CredentialOutcome::Refused(_)
+        ) && let Some(known) = crate::catalogue::source(source)
         {
             // Every variable this source needs, not just a key: a login has
             // two, and naming one of them would read as the whole answer.
             println!(
-                "            connect it later with `fitness init --force`, or set {} — \
+                "            connect it later with `fitness init`, or set {} — \
                  credentials come from {}",
                 known.required_variables().join(" and "),
                 known.credential_url()
