@@ -615,6 +615,19 @@ impl MesocycleStore for SqliteGymMesocycleStore {
             .rfind(|(_, _, _, mesocycle)| mesocycle.span().end() <= date)
             .map(|(_, plan, id, mesocycle)| (id, plan, mesocycle)))
     }
+
+    async fn following(
+        &self,
+        date: Date,
+    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+        // Ordered by start, so the first one beginning after the date is the
+        // next in the sequence.
+        Ok(in_force(&self.pool, &self.zone)
+            .await?
+            .into_iter()
+            .find(|(_, _, _, mesocycle)| mesocycle.span().start() > date)
+            .map(|(_, plan, id, mesocycle)| (id, plan, mesocycle)))
+    }
 }
 
 /// Write one gym mesocycle of a plan, inside the plan's own transaction.

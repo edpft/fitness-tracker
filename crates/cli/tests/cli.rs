@@ -154,12 +154,14 @@ fn the_zone_is_read_from_the_store() {
 
     let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
 
-    // No plan is authored, so it gets that far and no further — which is
-    // exactly what proves the zone was found without being passed.
+    // No plan is authored, so it gets as far as saying nothing is planned —
+    // which is exactly what proves the zone was found without being passed.
+    // Saying so is an answer rather than a failure (#122).
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("no plan covers"),
+        stdout(&output).contains("no gym mesocycle has been authored"),
         "{}",
-        stderr(&output)
+        stdout(&output)
     );
 }
 
@@ -561,12 +563,14 @@ fn what_init_writes_is_what_the_next_run_reads() {
 
     let output = fitness_at_home(&["prescribe"], home.path()).expect("the binary runs");
 
-    // No plan is authored, so it gets exactly that far — which is what
-    // proves the zone was read back rather than asked for again.
+    // No plan is authored, so it gets exactly as far as saying nothing is
+    // planned — which is what proves the zone was read back rather than asked
+    // for again.
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("no plan covers"),
+        stdout(&output).contains("no gym mesocycle has been authored"),
         "{}",
-        stderr(&output)
+        stdout(&output)
     );
 }
 
