@@ -12,9 +12,8 @@
 //!
 //! **The attempts below it are what a miss leaves behind.** With one attempt, a
 //! missed target left the ramp's last single as the heaviest weight lifted.
-//! There are three, each a step of the tested lift's own scale apart — *"3
-//! attempts, each increasing by the availble weight plate increment"* — so a
-//! 95kg target on a 2.5kg bar is attempted at 90, 92.5 and 95.
+//! There are three, each one plate increment apart on the tested lift's own
+//! scale, so a 95kg target on a 2.5kg bar is attempted at 90, 92.5 and 95.
 //!
 //! **The ramp leads into the first attempt, not the target**: *"that first
 //! attempt should be the anchor for the warm up sets."*
