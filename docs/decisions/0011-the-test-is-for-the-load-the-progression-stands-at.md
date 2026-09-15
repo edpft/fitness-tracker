@@ -28,6 +28,13 @@ anchor; they are now taken of the target.
 and what the report names. Going past it is the outcome the block exists to
 produce, so nothing caps it.
 
+> **Amended 2026-09-15 (#136).** The paragraph above was wrong, and was never
+> the operator's. The target is a guess — *"we don't actually have any way of
+> knowing, in advance, what I'm going to be able to lift"* — so a test is three
+> attempts a plate apart ending at the target, the ramp is built off the first
+> of them, and nothing is prescribed past the last. A lift beyond it still
+> counts: the record takes the heaviest completed set (#127).
+
 ## Why
 
 **Because ramping off the anchor had the operator working up to a number they

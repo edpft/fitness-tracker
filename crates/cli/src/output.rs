@@ -623,11 +623,10 @@ fn sbs_standing(sbs: &domain::prescription::Sbs) {
 /// A standalone test: what it is an attempt at, and which session takes it.
 fn test_standing(test: &domain::prescription::Test, standing: &application::LadderStanding) {
     let reps = test.reps().as_u32();
-    let unit = if reps == 1 { "single" } else { "attempt" };
     match standing.target {
         Some(target) => println!(
-            "the test is for {target} at {reps} \
-             ({unit}, autoregulated — going past it is the point)"
+            "the test is for {target} at {reps}, the last of three attempts a \
+             step apart"
         ),
         None => println!(
             "no target: this test takes one from the programme before it, and \

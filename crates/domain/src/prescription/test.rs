@@ -20,7 +20,8 @@
 //! light   the published week's other session, off the target the heavy day is
 //!         an attempt at — or, where nobody published this week, the
 //!         predecessor's session at the light load its progression stands at
-//! heavy   the test: a ramp toward the target, then one autoregulated single
+//! heavy   the test: a ramp into the first of three attempts a step apart, the
+//!         last at the target (#136)
 //! ```
 //!
 //! **The light day was the predecessor's in every case until 2026-09-09**, which
