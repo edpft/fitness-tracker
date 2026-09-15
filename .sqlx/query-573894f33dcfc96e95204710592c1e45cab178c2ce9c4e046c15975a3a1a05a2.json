@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT timezone AS \"timezone!: String\"\n            FROM operator_settings\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "timezone!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operator_settings",
+            "name": "timezone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "573894f33dcfc96e95204710592c1e45cab178c2ce9c4e046c15975a3a1a05a2"
+}

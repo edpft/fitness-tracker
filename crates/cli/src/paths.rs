@@ -1,4 +1,4 @@
-//! Where the tool keeps its store and its settings.
+//! Where the tool keeps its store and its credentials.
 //!
 //! **A default location is not a hardcoded path.** § 34 forbids compiling in an
 //! assumption about a host, and the two are different things: these resolve from
@@ -23,14 +23,11 @@
 //! ## What goes where
 //!
 //! - **Data** is the store. It is the thing that would hurt to lose, and it is
-//!   not something an operator edits.
-//! - **Config** is what the operator states: the zone they train in. It is
-//!   hand-edited, backed up with dotfiles, and reproducible.
-//!
-//! - **Credentials** sit beside the settings, in a file of their own that is
-//!   created owner-only. § 35 allows a key in local config; what it must not
-//!   share is the file an operator keeps with their dotfiles. See
-//!   [`infrastructure::credentials`].
+//!   not something an operator edits. What the operator states — the zone they
+//!   train in — is a row in it, not a file beside it (#61).
+//! - **State** is what persists between runs without being either: the cached
+//!   token, and the credentials that obtain one. Nobody edits them, and losing
+//!   them costs a login rather than a fact. See [`infrastructure::credentials`].
 
 use std::{
     ffi::OsString,
@@ -43,8 +40,8 @@ const APPLICATION: &str = "fitness-tracker";
 /// The store's file name inside the data directory.
 const STORE: &str = "store.db";
 
-/// The settings file's name inside the config directory.
-const SETTINGS: &str = "config.toml";
+/// The credentials file's name inside the state directory.
+const CREDENTIALS: &str = "credentials.json";
 
 /// Why a base directory could not be resolved.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -91,15 +88,24 @@ pub fn store(environment: &impl Environment) -> Result<PathBuf, NoBaseDirectory>
     .map(|base| base.join(APPLICATION).join(STORE))
 }
 
-/// Where the settings live.
+/// Where the credentials live.
+///
+/// **`XDG_STATE_HOME`, beside the token.** Config is *hand-edited* by
+/// definition, and a secret nobody can read back is the one thing a person
+/// should never be editing (#61).
 ///
 /// # Errors
 ///
-/// [`NoBaseDirectory`] if neither `XDG_CONFIG_HOME` nor `HOME` gives an absolute
+/// [`NoBaseDirectory`] if neither `XDG_STATE_HOME` nor `HOME` gives an absolute
 /// path.
-pub fn settings(environment: &impl Environment) -> Result<PathBuf, NoBaseDirectory> {
-    base(environment, "XDG_CONFIG_HOME", &[".config"], "the settings")
-        .map(|base| base.join(APPLICATION).join(SETTINGS))
+pub fn credentials(environment: &impl Environment) -> Result<PathBuf, NoBaseDirectory> {
+    base(
+        environment,
+        "XDG_STATE_HOME",
+        &[".local", "state"],
+        "the credentials",
+    )
+    .map(|base| base.join(APPLICATION).join(CREDENTIALS))
 }
 
 /// Where a source's cached access token lives.
@@ -178,7 +184,7 @@ pub fn ensure_parent(file: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Environment, NoBaseDirectory, settings, store};
+    use super::{Environment, NoBaseDirectory, credentials, store};
     use std::{collections::BTreeMap, ffi::OsString};
 
     struct Fake(BTreeMap<&'static str, &'static str>);
@@ -197,7 +203,7 @@ mod tests {
     fn the_variables_win_where_they_are_absolute() {
         let set = environment(&[
             ("XDG_DATA_HOME", "/data"),
-            ("XDG_CONFIG_HOME", "/config"),
+            ("XDG_STATE_HOME", "/state"),
             ("HOME", "/home/someone"),
         ]);
 
@@ -206,8 +212,8 @@ mod tests {
             std::path::Path::new("/data/fitness-tracker/store.db")
         );
         assert_eq!(
-            settings(&set).expect("a config base"),
-            std::path::Path::new("/config/fitness-tracker/config.toml")
+            credentials(&set).expect("a state base"),
+            std::path::Path::new("/state/fitness-tracker/credentials.json")
         );
     }
 
@@ -220,8 +226,8 @@ mod tests {
             std::path::Path::new("/home/someone/.local/share/fitness-tracker/store.db")
         );
         assert_eq!(
-            settings(&set).expect("a config base"),
-            std::path::Path::new("/home/someone/.config/fitness-tracker/config.toml")
+            credentials(&set).expect("a state base"),
+            std::path::Path::new("/home/someone/.local/state/fitness-tracker/credentials.json")
         );
     }
 
@@ -246,11 +252,11 @@ mod tests {
     /// profile takes, and treating it as the root would put the store in `/`.
     #[test]
     fn an_empty_variable_falls_back() {
-        let set = environment(&[("XDG_CONFIG_HOME", ""), ("HOME", "/home/someone")]);
+        let set = environment(&[("XDG_STATE_HOME", ""), ("HOME", "/home/someone")]);
 
         assert_eq!(
-            settings(&set).expect("a config base"),
-            std::path::Path::new("/home/someone/.config/fitness-tracker/config.toml")
+            credentials(&set).expect("a state base"),
+            std::path::Path::new("/home/someone/.local/state/fitness-tracker/credentials.json")
         );
     }
 
@@ -262,7 +268,7 @@ mod tests {
 
         let refused: Result<_, NoBaseDirectory> = store(&bare);
         assert!(refused.is_err());
-        assert!(settings(&bare).is_err());
+        assert!(credentials(&bare).is_err());
 
         let message = refused
             .err()

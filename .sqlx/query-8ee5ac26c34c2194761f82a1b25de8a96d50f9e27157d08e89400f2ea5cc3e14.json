@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO operator_settings (authored_at, timezone)\n            VALUES (?1, ?2)\n            ON CONFLICT (authored_at) DO UPDATE SET timezone = excluded.timezone\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8ee5ac26c34c2194761f82a1b25de8a96d50f9e27157d08e89400f2ea5cc3e14"
+}

@@ -292,7 +292,7 @@ fn prescribe_command() -> ClapCommand {
 /// before the ones that need a store to already exist.
 fn init_command() -> ClapCommand {
     ClapCommand::new("init")
-        .about("Create the store and the settings file, and report what is still needed")
+        .about("Create the store, take the credentials, and report what is still needed")
         .arg(
             Arg::new("timezone")
                 .long("timezone")
@@ -307,16 +307,20 @@ fn init_command() -> ClapCommand {
             Arg::new("force")
                 .long("force")
                 .action(ArgAction::SetTrue)
-                .help("Replace an existing settings file. It is hand-edited, so this refuses by default"),
+                .help(
+                    "State the time zone again when one is already in force. Credentials \
+                     are asked for either way",
+                ),
         )
         .arg(
-            Arg::new("api-key-stdin")
-                .long("api-key-stdin")
+            Arg::new("credential-stdin")
+                .long("credential-stdin")
                 .action(ArgAction::SetTrue)
                 .help(
-                    "Read the source's API key from standard input, for piping from a \
-                     password manager. There is no flag to pass it directly: a secret in \
-                     argv lands in shell history and in `ps` output",
+                    "Read each source's credential from standard input, for piping from a \
+                     password manager — a key on one line, or an email and a password on \
+                     two. There is no flag to pass it directly: a secret in argv lands in \
+                     shell history and in `ps` output",
                 ),
         )
 }
@@ -573,15 +577,14 @@ fn run(matches: &ArgMatches) -> Result<(), Failure> {
 /// Where this invocation keeps things.
 ///
 /// Its own function rather than the top of [`dispatch`], because working out
-/// where the store and the settings live is a different question from which
+/// where the store and the credentials live is a different question from which
 /// command was asked for, and only one of the two is about the operator's
 /// intent.
 struct Locations {
-    settings: infrastructure::Settings,
     credentials: infrastructure::Credentials,
-    /// Named even where it could not be resolved, so a message can say what to
-    /// create.
-    settings_path: PathBuf,
+    /// What the operator stated once, read from the store. Unparsed: which of
+    /// the flag, the variable and this one wins is decided in `config`.
+    timezone: Option<String>,
     database: PathBuf,
 }
 
@@ -590,32 +593,26 @@ struct Locations {
 ///
 /// # Errors
 ///
-/// [`Failure`] if the settings file exists but will not parse, or if a store
-/// path is needed and no base directory can be worked out.
-fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
-    // **Settings are read once, and a machine that cannot say where they live
+/// [`Failure`] if the credentials file exists but will not parse, if a store
+/// path is needed and no base directory can be worked out, or if the store
+/// cannot be opened.
+async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
+    // **Credentials are read once, and a machine that cannot say where they live
     // simply has none.** Failing here would refuse to run for want of a file
-    // that may hold nothing an invocation needs — every value in it can be
-    // passed explicitly.
+    // that half the commands never consult — `status` and `reset` must work with
+    // no credential at all.
     let environment = paths::SystemEnvironment;
-    let resolved = paths::settings(&environment).ok();
-    let settings = match resolved.as_deref() {
-        Some(path) => infrastructure::Settings::read(path).map_err(config::ConfigError::from)?,
-        None => infrastructure::Settings::default(),
-    };
-    let credentials = match resolved.as_deref() {
-        Some(path) => infrastructure::Credentials::read(&infrastructure::credentials::beside(path))
-            .map_err(config::ConfigError::from)?,
-        None => infrastructure::Credentials::default(),
+    let credentials = match paths::credentials(&environment) {
+        Ok(path) => infrastructure::Credentials::read(&path).map_err(config::ConfigError::from)?,
+        Err(_) => infrastructure::Credentials::default(),
     };
 
     // The default store is resolved only if nothing else supplied one, so a
     // machine with no home directory still works when the path is passed.
-    let database =
-        match config::database(matches.get_one::<PathBuf>("database").cloned(), &settings) {
-            Some(path) => path,
-            None => paths::store(&environment).map_err(config::ConfigError::from)?,
-        };
+    let database = match matches.get_one::<PathBuf>("database").cloned() {
+        Some(path) => path,
+        None => paths::store(&environment).map_err(config::ConfigError::from)?,
+    };
 
     // **The store creates itself; its directory does not.** SQLite will make the
     // file but not the path to it, so a first run on a fresh machine would fail
@@ -630,12 +627,35 @@ fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
         )
     })?;
 
+    // **Opened here and closed again, rather than held for the command.** Every
+    // command opens its own pool, and the zone is needed before it is known
+    // which one will run — including by commands that then never open a pool at
+    // all. One extra open of a local file is not worth threading a pool through
+    // dispatch to avoid.
+    let timezone = stated_timezone(&database).await?;
+
     Ok(Locations {
-        settings,
         credentials,
-        settings_path: resolved.unwrap_or_else(|| PathBuf::from("the settings file")),
+        timezone,
         database,
     })
+}
+
+/// The zone the store holds, if it holds one.
+///
+/// **A store that will not open is not an error here.** `init` is the command
+/// that creates one, and refusing to run it because there is nothing to read
+/// would be a setup command that requires the thing it sets up.
+async fn stated_timezone(database: &Path) -> Result<Option<String>, Failure> {
+    let Ok(pool) = infrastructure::connect(database).await else {
+        return Ok(None);
+    };
+    let stated = infrastructure::SqliteOperatorSettingsStore::new(pool.clone())
+        .timezone()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    pool.close().await;
+    Ok(stated)
 }
 
 /// The commands that need no stream.
@@ -647,9 +667,8 @@ fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
 async fn authored_command(
     name: &str,
     sub: &ArgMatches,
-    settings: &infrastructure::Settings,
     credentials: &infrastructure::Credentials,
-    settings_path: &Path,
+    stated_timezone: Option<&str>,
     database: &Path,
 ) -> Option<Result<(), Failure>> {
     // Every one of these needs the zone, and asking for it here would refuse
@@ -657,19 +676,17 @@ async fn authored_command(
     let zone = |sub: &ArgMatches| {
         config::timezone(
             sub.get_one::<String>("timezone").map(String::as_str),
-            settings,
-            settings_path,
+            stated_timezone,
         )
     };
 
     match name {
         "init" => {
             let prepared = match setup::init(
-                settings_path,
                 database,
                 sub.get_one::<String>("timezone").map(String::as_str),
                 sub.get_flag("force"),
-                sub.get_flag("api-key-stdin"),
+                sub.get_flag("credential-stdin"),
             )
             .await
             {
@@ -726,9 +743,9 @@ async fn authored_command(
             Some(("show", _)) => prescribing::parameters(database).await,
             _ => Err(Failure::message("no parameters command given", exit::USAGE)),
         }),
-        name if catalogue::discipline(name).is_some() => Some(
-            discipline_command_run(name, sub, settings, credentials, settings_path, database).await,
-        ),
+        name if catalogue::discipline(name).is_some() => {
+            Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
+        }
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
             Some(("alter", _)) => scheduling::alter(database).await,
@@ -783,9 +800,8 @@ async fn deliver_command_run(
 async fn discipline_command_run(
     name: &str,
     sub: &ArgMatches,
-    settings: &infrastructure::Settings,
     credentials: &infrastructure::Credentials,
-    settings_path: &Path,
+    stated_timezone: Option<&str>,
     database: &Path,
 ) -> Result<(), Failure> {
     let Some(discipline) = catalogue::discipline(name) else {
@@ -803,8 +819,7 @@ async fn discipline_command_run(
 
     let zone = config::timezone(
         next.get_one::<String>("timezone").map(String::as_str),
-        settings,
-        settings_path,
+        stated_timezone,
     )?;
     let access = source_access(discipline.collects(), next, credentials)?;
 
@@ -944,21 +959,14 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     };
 
     let Locations {
-        settings,
         credentials,
-        settings_path,
+        timezone,
         database,
-    } = locations(matches)?;
+    } = locations(matches).await?;
+    let stated_timezone = timezone.as_deref();
 
-    if let Some(outcome) = authored_command(
-        name,
-        sub,
-        &settings,
-        &credentials,
-        &settings_path,
-        &database,
-    )
-    .await
+    if let Some(outcome) =
+        authored_command(name, sub, &credentials, stated_timezone, &database).await
     {
         return outcome;
     }
@@ -978,8 +986,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         "normalise" => {
             let zone = config::timezone(
                 sub.get_one::<String>("timezone").map(String::as_str),
-                &settings,
-                &settings_path,
+                stated_timezone,
             )?;
             // Printed before the run begins, so a long first derivation says
             // what it is doing.
@@ -998,7 +1005,19 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     };
 
     let reporting = matches!(command, Command::Status);
-    report(&stream, wiring::run(command, known, &database).await?);
+    // **Where the credential came from, kept for the one message that needs it.**
+    // A rejection is the moment an operator has to know whether the file or a
+    // variable answered — the failure that prompted #61 was a stored key being
+    // used by a shell whose owner believed a variable was set.
+    let origin = match &command {
+        Command::Extract(access) => Some(access.origin().to_string()),
+        _ => None,
+    };
+    let outcome = match wiring::run(command, known, &database).await {
+        Ok(outcome) => outcome,
+        Err(error) => return Err(rejected_credential(error, origin.as_deref())),
+    };
+    report(&stream, outcome);
 
     // § 38 on the prescribed side: which programme is in force, where its ladder
     // stands, and how current the record it derives from is. Appended to `status`
@@ -1008,25 +1027,43 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         prescription_status(
             &database,
             sub.get_one::<String>("timezone").map(String::as_str),
-            &settings,
-            &settings_path,
+            stated_timezone,
         )
         .await?;
     }
     Ok(())
 }
 
+/// A wiring failure, with the credential's origin named where that is the
+/// failure.
+///
+/// **Only for a rejection.** Naming the origin on an unreachable source would be
+/// noise attached to a failure that has nothing to do with the credential.
+fn rejected_credential(error: WiringError, origin: Option<&str>) -> Failure {
+    let rejected = matches!(
+        &error,
+        WiringError::Extraction(ExtractionError::Source(SourceError::Unauthorised))
+    );
+    let failure = Failure::from(error);
+    match (rejected, origin) {
+        (true, Some(origin)) => Failure::message(
+            format!("{}, which came from {origin}", failure.message_text()),
+            exit::SOURCE,
+        ),
+        _ => failure,
+    }
+}
+
 /// The prescription section of `status`, and why it may be absent.
 async fn prescription_status(
     database: &Path,
     declared: Option<&str>,
-    settings: &infrastructure::Settings,
-    settings_path: &Path,
+    stated_timezone: Option<&str>,
 ) -> Result<(), Failure> {
     // A blank line, so the prescribed side reads as its own section rather than as
     // more of the derivation's.
     println!();
-    let Ok(zone) = config::timezone(declared, settings, settings_path) else {
+    let Ok(zone) = config::timezone(declared, stated_timezone) else {
         // Not a failure: the stream half of the report is what an operator reaches
         // for when ingestion looks broken, and it must not stop working because a
         // zone is unset. Saying so beats printing nothing.
@@ -1089,7 +1126,7 @@ fn source_access(
             source,
             base_url,
             std::env::var(source.api_key_variable()),
-            credentials.key(source.name()),
+            credentials.credential(source.name()),
         )?,
         Credential::EmailPassword {
             default_auth_base_url,
@@ -1102,6 +1139,7 @@ fn source_access(
                 auth_base_url,
                 std::env::var(source.email_variable()),
                 std::env::var(source.password_variable()),
+                credentials.credential(source.name()),
             )?
         }
     })
