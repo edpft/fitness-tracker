@@ -203,11 +203,11 @@ const fn other_day() -> Date {
     Date::constant(2026, 8, 31)
 }
 
-/// The heavy session is a ramp and then one autoregulated attempt.
+/// The heavy session is a ramp and then three attempts, the last at the target.
 ///
 /// **No top set and no back-offs**, which is what separates a test from a
-/// climbing week: the load is open at the top because going past the target is
-/// the outcome the week exists to produce.
+/// climbing week, and nothing past the target (#136): it is a guess, so the two
+/// attempts below it are what a miss leaves behind.
 #[test]
 fn the_heavy_session_is_the_test() {
     let (prescriber, _directory) = prescriber!();
@@ -231,19 +231,21 @@ fn the_heavy_session_is_the_test() {
     let warmups = sets.iter().filter(|set| set.warmup).count();
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
     assert_eq!(warmups, 4, "the authored ramp is four steps");
-    assert_eq!(working.len(), 1, "one attempt, and nothing after it");
-    // **The attempt states the load it is an attempt at.** The ramp above is
-    // built as a share of exactly this number, so a prescription that withheld
-    // it was working the operator up to something it had already decided.
-    // Nothing caps it — zero in reserve is what says going past is the point.
+    assert_eq!(working.len(), 3, "three attempts, and nothing after them");
+    // **Every attempt states its load**, and only the last asks for
+    // everything: the two below it are steps toward the target.
     assert!(
-        working[0].prescription.load().is_some(),
-        "the attempt names the load the ramp was built toward"
+        working.iter().all(|set| set.prescription.load().is_some()),
+        "every attempt names its load"
     );
+    let efforts: Vec<_> = working
+        .iter()
+        .map(|set| set.prescription.effort())
+        .collect();
     assert_eq!(
-        working[0].prescription.effort(),
-        Some(domain::gym::Rir::Zero),
-        "nothing left in reserve is what makes it a test"
+        efforts,
+        vec![None, None, Some(domain::gym::Rir::Zero)],
+        "nothing left in reserve is asked of the target alone"
     );
 }
 
@@ -410,15 +412,15 @@ fn a_blocks_entry_test_ramps_toward_what_it_expects() {
         panic!("the front squat is counted in repetitions")
     };
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
-    assert_eq!(working.len(), 1, "one attempt, and nothing after it");
+    assert_eq!(working.len(), 3, "three attempts, and nothing after them");
     assert!(
-        working[0].prescription.load().is_some(),
-        "the attempt names the load the ramp was built toward"
+        working.iter().all(|set| set.prescription.load().is_some()),
+        "every attempt names its load"
     );
     assert_eq!(
-        working[0].prescription.effort(),
+        working.last().and_then(|set| set.prescription.effort()),
         Some(domain::gym::Rir::Zero),
-        "nothing left in reserve is what makes it a test"
+        "nothing left in reserve is asked of the target"
     );
 }
 
@@ -622,20 +624,20 @@ fn a_published_test_weeks_other_session_is_the_charts_taper() {
     }
 }
 
-/// And the test itself is unchanged: the attempt is still at the target.
+/// And the test itself is unchanged: the last attempt is still at the target.
 #[test]
 fn a_published_test_week_still_tests_on_the_heavy_session() {
     let (prescriber, _directory) = published!(false);
     let issued = run!(prescriber.prescribe(test_day()));
 
     let working = primary_of!(issued);
-    assert_eq!(working.len(), 1, "one attempt, and nothing after it");
+    assert_eq!(working.len(), 3, "three attempts, and nothing after them");
     assert_eq!(
-        working[0].prescription.load(),
+        working.last().and_then(|set| set.prescription.load()),
         Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
             TARGET_GRAMS
         ))),
-        "the attempt is at what the operator asserted"
+        "the last attempt is at what the operator asserted"
     );
 }
 

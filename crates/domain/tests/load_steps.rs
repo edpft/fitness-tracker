@@ -86,6 +86,21 @@ fn double_progression_leaves_a_load_on_the_step_it_is_leaving() {
 }
 
 #[test]
+fn a_step_down_is_the_step_that_reached_the_load() {
+    let bar = barbell().expect("a barbell is one band");
+    // A test's earlier attempts: 95kg follows 92.5, which follows 90.
+    assert_eq!(bar.next_below(kg(95_000)), kg(92_500));
+    assert_eq!(bar.next_below(kg(92_500)), kg(90_000));
+    let rack = dumbbell().expect("the rack has two bands");
+    // 10kg was reached on the 1kg step, so that is the one it drops by — the
+    // mirror of leaving it upward on the 2kg.
+    assert_eq!(rack.next_below(kg(10_000)), kg(9_000));
+    assert_eq!(rack.next_below(kg(12_000)), kg(10_000));
+    // Nothing is below nothing.
+    assert_eq!(bar.next_below(Kg::NONE), Kg::NONE);
+}
+
+#[test]
 fn a_load_between_bands_rounds_to_a_weight_that_exists() {
     let steps = dumbbell().expect("the rack has two bands");
     // 9.6 sits in the 1kg band; 10 is the next real dumbbell and is nearer.

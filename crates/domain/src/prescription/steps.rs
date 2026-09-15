@@ -189,6 +189,22 @@ impl LoadSteps {
             .saturating_add(self.step_at(load).as_grams());
         self.quantise(Kg::from_grams(stepped))
     }
+
+    /// One step down from a load, on this equipment.
+    ///
+    /// What a test's earlier attempts are taken at. The mirror of
+    /// [`LoadSteps::next_above`], read from the other side: the step is the one
+    /// in force *just below* the load being left, so a dumbbell leaving 10kg
+    /// drops the 1kg that reached it rather than the 2kg that applies from it.
+    /// Nothing is below nothing, so an empty load stays where it is.
+    #[must_use]
+    pub fn next_below(&self, load: Kg) -> Kg {
+        let Some(just_below) = load.as_grams().checked_sub(1) else {
+            return load;
+        };
+        let step = self.step_at(Kg::from_grams(just_below)).as_grams();
+        self.quantise(Kg::from_grams(load.as_grams().saturating_sub(step)))
+    }
 }
 
 impl fmt::Display for LoadSteps {

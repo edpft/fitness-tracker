@@ -21,8 +21,8 @@ use domain::{
     normalised::OperatorZone,
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
-        Anchor, AnchorProvenance, Anchoring, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
-        GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
+        Anchor, AnchorProvenance, Anchoring, Attempts, Block, BlockPeriodisation, BlockWeek,
+        DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
         PrescriptionState, Progress, Progression, RECENT_WEEKS, Sbs, SbsDay, SbsSession,
         SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind, WeekPlan,
@@ -1007,11 +1007,12 @@ enum PrimaryLoad {
         sets: RepCount,
         reps: RepCount,
     },
-    /// A ramp toward a load, then one autoregulated attempt at it.
+    /// A ramp, then three attempts a step apart, the last at `toward` (#136).
     ///
-    /// **Open at the top, always.** Going past the number is the outcome the
-    /// week exists to produce, so nothing caps it: the target is what the ramp
-    /// is built toward and what the report names, not a ceiling.
+    /// **Nothing is prescribed past the target**, because the target is a
+    /// guess: the operator picks a number to attempt, and anything lifted beyond
+    /// it is the record's to take rather than the plan's to ask for. The ramp
+    /// leads into the first attempt; see [`Attempts`].
     Attempt { toward: Kg, reps: RepCount },
     /// A ramp, one attempt at a repetition maximum, then back-offs **at
     /// whatever that turned out to be**.
@@ -1883,7 +1884,10 @@ fn primary_sets(
     // up toward a number they had passed three weeks earlier (decision 0011).
     let toward = match plan {
         PrimaryLoad::TopSet { load, .. } | PrimaryLoad::Across { load, .. } => load,
-        PrimaryLoad::Attempt { toward, .. } | PrimaryLoad::RepMax { toward, .. } => toward,
+        PrimaryLoad::RepMax { toward, .. } => toward,
+        // A test's ramp leads into its first attempt, which is the next thing
+        // loaded — not the target two steps above it (#136).
+        PrimaryLoad::Attempt { toward, .. } => Attempts::toward(toward, steps).first(),
     };
     // **The ramp's repetition counts follow the top set's** (decision 0030), but
     // only where the top set is maximal: a percentage day states a submaximal
@@ -1934,21 +1938,26 @@ fn primary_sets(
             }
         }
         PrimaryLoad::Attempt { toward, reps } => {
-            // **The target is in the plan, so it is printed.** The ramp above is
-            // built as a share of exactly this number, so omitting it left the
-            // operator working up to something the session had already decided
-            // and would not say.
+            // **The target is in the plan, so it is printed.** Decision 0011
+            // keeps it out of `programme show`, and that still holds: there it
+            // is a *projection* for a week that has not happened, and every
+            // session between now and then can move it. A prescription is issued
+            // for one date against the record as it stands, which is the moment
+            // the number is knowable.
             //
-            // Decision 0011 keeps the target out of `programme show`, and that
-            // still holds: there it is a *projection* for a week that has not
-            // happened, and every session between now and then can move it. A
-            // prescription is issued for one date against the record as it
-            // stands, which is the moment the number is knowable.
-            //
-            // Nothing caps it. Going past is the outcome the day exists to
-            // produce, and zero in reserve is what says so.
+            // **Three attempts, and nothing past the last** (#136). The target
+            // is a guess, so the two below it are what a miss leaves behind, and
+            // zero in reserve is asked of the target alone. A lift past it is
+            // the record's to take, not the plan's to ask for.
+            let [first, second, target] = Attempts::toward(toward, steps).loads();
+            for load in [first, second] {
+                sets.push(PrescribedSet::fixed(
+                    Load::Absolute(load),
+                    Target::Exactly(reps),
+                ));
+            }
             sets.push(
-                PrescribedSet::fixed(Load::Absolute(toward), Target::Exactly(reps))
+                PrescribedSet::fixed(Load::Absolute(target), Target::Exactly(reps))
                     .with_effort(domain::gym::Rir::Zero),
             );
         }
@@ -2261,7 +2270,7 @@ mod ramp_tests {
 
     use super::{PrimaryLoad, primary_sets};
     use domain::{
-        gym::Kg,
+        gym::{Kg, Load, Rir},
         measure::RepCount,
         prescription::{LoadSteps, SessionRole, seed::seed},
     };
@@ -2304,6 +2313,42 @@ mod ramp_tests {
             reps: RepCount::new(1).expect("one is a repetition count"),
         };
         assert_eq!(reps_of(plan).expect("the seed builds"), vec![4, 3, 2, 1]);
+    }
+
+    /// The autumn entry test (#136), on the operator's numbers: the ramp is
+    /// taken off 90, then 90, 92.5 and 95, and only the last asks for
+    /// everything.
+    #[test]
+    fn a_test_ramps_into_its_first_attempt_and_stops_at_the_target() {
+        let plan = PrimaryLoad::Attempt {
+            toward: Kg::from_grams(95_000),
+            reps: RepCount::new(1).expect("one is a repetition count"),
+        };
+        let parameters = seed().expect("the seed builds");
+        let steps = LoadSteps::uniform(Kg::from_grams(2_500)).expect("a barbell is one band");
+        let shape: Vec<(bool, Option<u64>, Option<Rir>)> =
+            primary_sets(plan, &parameters, SessionRole::Heavy, &steps)
+                .iter()
+                .map(|set| {
+                    let grams = match set.prescription.load() {
+                        Some(Load::Absolute(kg)) => Some(kg.as_grams()),
+                        _ => None,
+                    };
+                    (set.warmup, grams, set.prescription.effort())
+                })
+                .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (true, Some(35_000), None),
+                (true, Some(55_000), None),
+                (true, Some(72_500), None),
+                (true, Some(80_000), None),
+                (false, Some(90_000), None),
+                (false, Some(92_500), None),
+                (false, Some(95_000), Some(Rir::Zero)),
+            ]
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@
 //! Neither is derived from the other.
 
 pub mod anchor;
+pub mod attempts;
 pub mod authored;
 pub mod block;
 pub mod candidates;
@@ -47,6 +48,7 @@ pub use anchor::{Anchor, AnchorProvenance, Anchoring, Entry, InvalidAnchor, Unkn
 // at this level and `WorkoutShape` is the shape a session has, so a bare `Shape`
 // at the crate root would read as one of those. Reach it through
 // `prescription::authored::Shape`, beside the `Authored` it belongs to.
+pub use attempts::Attempts;
 pub use authored::{Authored, AuthoringError};
 // `block::Block` is deliberately not re-exported here: `shape::Block` already
 // holds that name at the crate root, and the two are different things — a group
