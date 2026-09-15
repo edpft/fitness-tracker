@@ -841,6 +841,25 @@ fn derived_phrase(
 }
 
 /// The prescription, as a session to train from.
+/// Nothing is programmed at or after the date asked from.
+///
+/// **Said, not refused.** Running out of plan is a fact about the plan rather
+/// than something the operator got wrong, and the answer to it is a new plan.
+pub fn nothing_planned(
+    from: jiff::civil::Date,
+    last: Option<&(domain::plan::PlanName, jiff::civil::Date)>,
+) {
+    match last {
+        Some((plan, day)) => println!(
+            "nothing is planned after {day} ({:?}), when {plan}'s gym mesocycles end",
+            day.weekday(),
+        ),
+        None => {
+            println!("nothing is planned on or after {from}: no gym mesocycle has been authored");
+        }
+    }
+}
+
 pub fn prescription(issued: &application::Prescription) {
     use application::Issuance;
 

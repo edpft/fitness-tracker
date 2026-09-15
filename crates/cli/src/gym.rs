@@ -67,7 +67,16 @@ pub async fn next(
     // 3. What to do next, derived against the record the two steps above have
     //    just brought up to date. This is the step the loop exists for, and the
     //    one that was quietly reading stale history before decision 0021.
-    prescribing::prescribe(database, zone, date).await?;
+    //
+    //    **The first session at or after the date, found once** (#122) and
+    //    handed to both steps below, so they cannot disagree about which
+    //    session they mean. Nothing planned has been said by now, and is not a
+    //    failure.
+    let Some(date) = prescribing::next(database, zone, date).await? else {
+        return Ok(());
+    };
+    let date = date.to_string();
+    prescribing::prescribe(database, zone, Some(&date)).await?;
     println!();
 
     // 4. Where to do it from. Reads what step 3 issued rather than deriving
@@ -76,7 +85,7 @@ pub async fn next(
     prescribing::deliver(
         database,
         zone,
-        date,
+        Some(&date),
         false,
         discipline.delivers_to(),
         credentials,

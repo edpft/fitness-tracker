@@ -18,7 +18,6 @@ use domain::{
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     measure::RepCount,
-    normalised::OperatorZone,
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Anchoring, Attempts, Block, BlockPeriodisation, BlockWeek,
@@ -39,7 +38,7 @@ use domain::{
 use jiff::{Timestamp, civil::Date};
 
 use crate::{
-    error::PrescriptionError,
+    error::{PrescriptionError, StoreError},
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
         LastPerformance, MesocycleStore, Performance, PerformedSetSummary, PlanAuthor, PlanStore,
@@ -48,14 +47,32 @@ use crate::{
     },
 };
 
-/// The date an invocation means when it names none.
+/// What asking for the next session finds.
+///
+/// **Running out of plan is an answer, not a fault.** The operator, 2026-09-15,
+/// on a date past the autumn's last day: *"there just isn't anything planned
+/// after 2026-12-13."* So it is a variant beside the session rather than an
+/// error, and a caller says it and exits cleanly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NextSession {
+    /// The first session at or after the date asked from.
+    On(Date),
+    /// Nothing is programmed at or after the date asked from.
+    NothingPlanned {
+        /// The plan whose gym mesocycles ran last, and the last day they
+        /// occupy. `None` where no gym mesocycle has been authored at all.
+        last: Option<(PlanName, Date)>,
+    },
+}
+
+/// The first programmed session at or after a date.
 ///
 /// **Capability, and it lives here because both driving adapters need the same
-/// answer.** "The next programmed day at or after today" is a statement about
-/// the operator's block: it reads the programme in force and asks its calendar.
-/// It sat in `cli` until 2026-08-30, which made a decision about training into
-/// something built into a transport — a terminal and a browser could have
-/// disagreed about which session was next, and nothing would have caught it.
+/// answer.** "The next session" is a statement about the operator's plan: it
+/// reads the mesocycles and asks their calendars. It sat in `cli` until
+/// 2026-08-30, which made a decision about training into something built into
+/// a transport — a terminal and a browser could have disagreed about which
+/// session was next, and nothing would have caught it.
 ///
 /// **A function rather than a method on [`WorkoutPrescriber`]**, because the
 /// only port it needs is the programme store. `deliver` and `compare` ask this
@@ -63,36 +80,58 @@ use crate::{
 /// generation apparatus, four ports deep — to find out what day it is asking
 /// about.
 ///
-/// The zone is passed rather than read from the programme: finding the
-/// programme needs a date, and the calendar that carries a zone is inside the
-/// programme. That circularity is why this takes an instant and a zone.
+/// **A starting point, not an exact match** (#122). It steps over days a block
+/// skips, needs no mesocycle in force on the date, and crosses into the next
+/// mesocycle when the one in force has nothing left — for the reason
+/// [`crate::cycling::next_ride`] crosses: answering "nothing" there would be
+/// the store's shape showing through as a gap in the plan. Answering for one
+/// particular date is `prescribe`'s job, and it still refuses a day the block
+/// does not run.
+///
+/// A date rather than an instant: which day *today* is belongs to the
+/// operator's zone and a clock, and both are the caller's.
 ///
 /// # Errors
 ///
-/// [`PrescriptionError::NoPlan`] where nothing covers today, and
-/// [`PrescriptionError::NoSessionScheduled`] where the block in force has
-/// finished. They read differently to an operator and are not merged.
+/// [`StoreError`] if the store is unavailable or holds something unreadable.
+/// Nothing about the plan is an error — see [`NextSession::NothingPlanned`].
 pub async fn next_session(
     programmes: &(impl MesocycleStore + Sync),
-    now: Timestamp,
-    zone: &OperatorZone,
-) -> Result<Date, PrescriptionError> {
-    // Today in the operator's zone, because *which programme is in force* is a
-    // question about their day. The calendar answers the rest in its own zone,
-    // which is the same zone by construction and is its business either way.
-    let today = now.to_zoned(zone.as_time_zone()).date();
+    from: Date,
+) -> Result<NextSession, StoreError> {
+    // **The calendars answer, not this.** Which days a block runs, which weeks
+    // it skips and where it ends are all their own; the only thing decided here
+    // is which mesocycle to ask. The one in force answers first, and only one
+    // with nothing left defers to those after it.
+    let covering = programmes.on(from).await?;
+    if let Some((_, _, mesocycle)) = &covering
+        && let Some(date) = mesocycle.calendar().next_programmed(from)
+    {
+        return Ok(NextSession::On(date));
+    }
 
-    let Some((_, _, programme)) = programmes.on(today).await? else {
-        return Err(PrescriptionError::NoPlan { date: today });
+    let mut after = from;
+    while let Some((_, _, mesocycle)) = programmes.following(after).await? {
+        let start = mesocycle.span().start();
+        if let Some(date) = mesocycle.calendar().next_programmed(start) {
+            return Ok(NextSession::On(date));
+        }
+        after = start;
+    }
+
+    // Where the plan ran out: the mesocycle in force if there is one — a date
+    // after its last session is still inside it — else the last to finish
+    // before the date.
+    let last = match covering {
+        Some(found) => Some(found),
+        None => programmes.preceding(from).await?,
     };
-
-    // **The calendar answers, not this.** Which days a block runs, which weeks
-    // it skips and where it ends are all its own; anything more here would be a
-    // second opinion about a schedule that already has one.
-    programme
-        .calendar()
-        .next_session(now)
-        .ok_or(PrescriptionError::NoSessionScheduled { from: today })
+    Ok(NextSession::NothingPlanned {
+        last: last.map(|(_, plan, mesocycle)| {
+            let end = mesocycle.span().end();
+            (plan, end.yesterday().unwrap_or(end))
+        }),
+    })
 }
 
 /// Everything generation needs from the outside.

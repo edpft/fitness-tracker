@@ -172,8 +172,8 @@ fn discipline_command() -> ClapCommand {
             )
             .arg(timezone_argument())
             .arg(Arg::new("date").long("date").value_name("date").help(
-                "The session to prescribe and deliver, as YYYY-MM-DD. \
-                 Defaults to the next programmed day at or after today",
+                "Where to look from, as YYYY-MM-DD: the first session at or \
+                 after it is prescribed and delivered. Defaults to today",
             ))
             .arg(Arg::new("base-url").long("base-url").help(
                 "Override the source's API root for this run. \
