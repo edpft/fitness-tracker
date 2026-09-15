@@ -88,6 +88,12 @@ pub struct RoutineSet {
     /// binary float on the way out would undo that at the last step.
     pub weight_kg: Option<Box<RawValue>>,
     pub reps: Option<u32>,
+    /// **Omitted rather than null**, unlike its siblings. The published schema
+    /// calls it nullable on both endpoints and `POST` agrees, but `PUT` refuses
+    /// a null — "Expected object, received null", once per set without a range.
+    /// Found live on 2026-09-15, on the first replacement ever sent: a stub
+    /// takes whatever it is given, so only the source could say.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rep_range: Option<RepRange>,
     pub distance_meters: Option<u64>,
     pub duration_seconds: Option<u64>,
