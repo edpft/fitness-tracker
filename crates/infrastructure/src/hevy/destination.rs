@@ -423,7 +423,9 @@ impl PrescriptionDestination for HevyRoutines {
         // `PostRoutinesRequestBody` are the same object field for field, down to
         // the exercise and set schemas, so the rendering is shared rather than
         // mirrored — a second renderer would be two places for one decision
-        // about what a session looks like in the app.
+        // about what a session looks like in the app. *Documented* as the same,
+        // that is: the validator behind `PUT` refuses a null `rep_range` that
+        // `POST` takes, so the one body is written to satisfy both.
         let body = match Self::encode(&CreateRoutine {
             routine: rendered.body,
         }) {

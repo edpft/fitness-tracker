@@ -180,9 +180,9 @@ fn assistance_is_sent_as_the_assisted_template() {
 ///
 /// Decision 0022. The two things a stub cannot tell us and a live run would find
 /// the hard way: that the reference goes into the URL rather than the payload,
-/// and that `PutRoutinesRequestBody` really does take what `POST` takes — the
-/// pinned document says the two schemas are identical field for field, and this
-/// is what holds us to it.
+/// and that `PutRoutinesRequestBody` really does take what `POST` takes. The
+/// published document says the two are identical field for field, and it is
+/// wrong about one of them — see the test after this one.
 #[test]
 fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
     let sent = support::corpus::block_on(async {
@@ -255,6 +255,7 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
         .expect("the routine carries exercises");
     assert_eq!(exercises[0]["exercise_template_id"], "E9E4089F");
     assert_eq!(exercises[0]["sets"][0]["weight_kg"], 7);
+    assert_eq!(exercises[0]["sets"][0]["rep_range"]["start"], 4);
     assert_eq!(body["routine"]["title"], "07 Light");
     assert_eq!(body["routine"]["folder_id"], 42);
 
@@ -263,6 +264,65 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
         "the place keeps its identity across a replacement, and takes it from \
          the path rather than from whatever the reply says"
     );
+}
+
+/// **A set without a range carries no `rep_range` key at all.**
+///
+/// `PUT` refuses a null where `POST` takes one, though the published schema
+/// calls it nullable on both: the first replacement ever sent came back `400`
+/// with "Expected object, received null" once per unranged set. The stub accepts
+/// anything, so this pins the body rather than the source's verdict on it.
+#[test]
+fn a_replacement_omits_the_range_of_a_set_that_has_none() {
+    let body = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/routines/b459cba5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        let occupying =
+            DeliveryReference::try_from("b459cba5".to_owned()).expect("the reference is valid");
+        hevy.replace(
+            &ramped_primary().expect("the ramp fixture builds"),
+            &occupying,
+        )
+        .await
+        .outcome
+        .expect("the session is replaced");
+
+        let requests = server
+            .received_requests()
+            .await
+            .expect("the mock recorded its requests");
+        let put = requests
+            .iter()
+            .find(|request| request.method == wiremock::http::Method::PUT)
+            .expect("a routine was put");
+        serde_json::from_slice::<Value>(&put.body).expect("the request body is json")
+    })
+    .expect("the runtime runs");
+
+    let sets = body["routine"]["exercises"][0]["sets"]
+        .as_array()
+        .expect("the squat carries sets");
+    assert_eq!(sets.len(), 3);
+    for set in sets {
+        assert!(set.get("rep_range").is_none(), "no range, no key: {set}");
+        assert!(set["reps"].is_u64(), "the count crosses as reps: {set}");
+    }
 }
 
 /// **A routine the source no longer holds is refused, not recreated.**
