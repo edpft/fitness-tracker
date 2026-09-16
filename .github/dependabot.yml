@@ -6,12 +6,40 @@ updates:
       interval: daily
     commit-message:
       prefix: "chore"
+  # Transitive crates too, since 2026-09-16. Dependabot's default is
+  # direct-only — version updates "only for the dependencies that are
+  # explicitly defined in a manifest" — so `rustls`, which nothing here
+  # declares and which arrives under `reqwest`, was never bumped.
+  # RUSTSEC-2026-0285 reached us as a nightly audit failure with no pull
+  # request behind it, and every other crate in the lock file was equally
+  # unwatched. `all` is what covers sub-dependencies, and cargo is one of the
+  # six ecosystems where it means that rather than just `direct`.
+  #
+  # § 40's exemption assumed otherwise: dependency updates merge without
+  # sign-off because "what is trusted there is the test suite and the advisory
+  # database", which was true only of the crates the manifest names.
+  #
+  # Patch and minor arrive as one pull request rather than the sixty-five the
+  # backlog would open at once. A group cannot be scoped to transitive
+  # dependencies — `dependency-type` inside a group takes only `development`
+  # or `production` — so it is bounded by update type, which is the line
+  # `auto-merge.yml` already draws: what is grouped is exactly what merges on
+  # green, and a major stays its own pull request for the click it needs.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: daily
     commit-message:
       prefix: "chore"
+    allow:
+      - dependency-type: "all"
+    groups:
+      cargo-patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
 
   # flake.lock, since 2026-04-07. Dependabot opens one pull request per stale
   # input rather than one moving all of them at once, and — unlike a workflow
