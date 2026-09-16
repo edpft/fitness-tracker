@@ -997,6 +997,22 @@ pub trait MesocycleStore {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
+
+    /// The first mesocycle to begin after a date, if there is one.
+    ///
+    /// **What makes the next session findable across a mesocycle boundary**
+    /// (#122). A test week whose one session is on the Friday has nothing left
+    /// on the Saturday, and the answer to "what is next" is the Monday the
+    /// mesocycle after it opens — which [`Self::on`] by definition does not
+    /// return.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn following(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.

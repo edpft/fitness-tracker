@@ -10,7 +10,7 @@ use application::{
     GenerationParameterStore as _, PrescriptionDeliverer as _, WorkoutPrescriber as _,
     compare::{Comparing, ComparisonPorts},
     deliver::{Delivering, DeliveryPorts},
-    prescribe::{Prescribing, PrescriptionPorts},
+    prescribe::{NextSession, Prescribing, PrescriptionPorts},
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
@@ -114,7 +114,9 @@ pub async fn prescribe(
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     });
 
-    let date = resolve(&programmes, zone, date).await?;
+    let Some(date) = resolve(&programmes, zone, date).await? else {
+        return Ok(());
+    };
     let issued = prescriber
         .prescribe(date)
         .await
@@ -124,33 +126,78 @@ pub async fn prescribe(
     Ok(())
 }
 
-/// The date to prescribe for.
+/// The date to prescribe for, or `None` where nothing is planned — which has
+/// been said by the time this returns.
 ///
 /// **The defaulting itself is [`application::prescribe::next_session`]**,
-/// which reads the programme in force and asks its calendar. It moved out of
-/// this crate on 2026-08-30: a terminal and a browser must not be able to
-/// disagree about which session is next, and while it lived here they could.
+/// which finds the first session at or after today. It moved out of this crate
+/// on 2026-08-30: a terminal and a browser must not be able to disagree about
+/// which session is next, and while it lived here they could.
 ///
 /// What is left is the half that is genuinely a transport's: turning the text an
-/// operator typed into a date, and telling a typo apart from a finished block so
-/// the two exit differently.
+/// operator typed into a date, and reading the clock for today.
 ///
-/// **A named date needs no programme.** Programmes succeed one another, so which
-/// one covers that date is settled when the prescription is derived — and asking
-/// the store first would refuse a perfectly good date merely because nothing is
-/// planned for *today*.
+/// **A named date needs no programme, and is not searched from.** The plumbing
+/// answers for the date it was given, so a day the block skips is refused when
+/// the prescription is derived. Only the porcelain searches — see [`next`].
 async fn resolve(
     programmes: &SqliteGymMesocycleStore,
     zone: &OperatorZone,
     given: Option<&str>,
-) -> Result<Date, Failure> {
+) -> Result<Option<Date>, Failure> {
     if let Some(text) = given {
-        return config::named_date(text).map_err(|error| Failure::usage(&error));
+        return config::named_date(text)
+            .map(Some)
+            .map_err(|error| Failure::usage(&error));
     }
+    search(programmes, today(zone)).await
+}
 
-    application::prescribe::next_session(programmes, jiff::Timestamp::now(), zone)
+/// The first session at or after a date, for `gym next`.
+///
+/// **`--date` is where to look from, not the one date to answer for** (#122).
+/// The operator, 2026-09-09: *"What I'm asking when I ask for the next
+/// prescription to be delivered is for the next prescription to be
+/// delivered."* So a day the block skips, a day before it opens and a day after
+/// a mesocycle's last session all answer with the session that follows.
+///
+/// `None` where nothing is planned at or after it, which has been said by the
+/// time this returns: it is an answer rather than a failure, so the run exits
+/// cleanly.
+pub async fn next(
+    database: &Path,
+    zone: &OperatorZone,
+    from: Option<&str>,
+) -> Result<Option<Date>, Failure> {
+    let pool = connect(database)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let programmes = SqliteGymMesocycleStore::new(pool, zone.clone());
+
+    let from = match from {
+        Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
+        None => today(zone),
+    };
+    search(&programmes, from).await
+}
+
+async fn search(programmes: &SqliteGymMesocycleStore, from: Date) -> Result<Option<Date>, Failure> {
+    let found = application::prescribe::next_session(programmes, from)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    match found {
+        NextSession::On(date) => Ok(Some(date)),
+        NextSession::NothingPlanned { last } => {
+            output::nothing_planned(from, last.as_ref());
+            Ok(None)
+        }
+    }
+}
+
+/// Today in the operator's zone, which is the day "the next session" is
+/// counted from — and it moves at their midnight, not at UTC's.
+fn today(zone: &OperatorZone) -> Date {
+    jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date()
 }
 
 /// Put the prescription for a date where the operator trains from.
@@ -171,7 +218,9 @@ pub async fn deliver(
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
-    let date = resolve(&programmes, zone, date).await?;
+    let Some(date) = resolve(&programmes, zone, date).await? else {
+        return Ok(());
+    };
 
     let prescriptions = SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned());
     if preview {
@@ -353,7 +402,9 @@ pub async fn compare(
         workouts: SqlitePerformedWorkoutReader::new(pool),
     });
 
-    let date = resolve(&programmes, zone, date).await?;
+    let Some(date) = resolve(&programmes, zone, date).await? else {
+        return Ok(());
+    };
     let comparison = comparing
         .compare(date)
         .await
