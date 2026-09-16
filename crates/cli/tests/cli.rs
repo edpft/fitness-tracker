@@ -399,6 +399,28 @@ fn help_and_version_exit_zero() {
     }
 }
 
+/// `--version` reports the build, never the crate's number.
+///
+/// `0.0.0` is what the crates carry and what `CARGO_PKG_VERSION` would report,
+/// so seeing it here means the binary has gone back to naming the wrong thing
+/// — which is how `--version` came to claim `0.2.0` for three weeks of builds
+/// that were nothing of the kind. The revision itself cannot be asserted: it
+/// is baked in by the flake, and a cargo-built test binary has none.
+#[test]
+fn version_never_reports_the_crate_number() {
+    let output = Command::new(BINARY)
+        .arg("--version")
+        .output()
+        .expect("the binary runs");
+
+    let reported = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !reported.contains("0.0.0"),
+        "`--version` reported the crate number: {reported}"
+    );
+}
+
 /// No arguments prints help and reports a usage error, which is what an
 /// operator who typed the command wrong needs to see.
 #[test]

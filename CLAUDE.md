@@ -108,8 +108,15 @@ work. That is not a fact about the project.
   — so a change whose shape was agreed and whose checks pass does not wait for a
   review that is not coming. A change whose design has *not* been agreed is not
   ready to merge, whatever the checks say.
-- **Conventional Commits.** release-please derives versions and changelogs from
-  them, so a mislabelled commit produces a wrong release.
+- **Conventional Commits.** Nothing derives a version from them any more —
+  release-please went on 2026-09-16 — but they are still how the history reads.
+- **There are no releases, and no version number.** The operator installs with
+  `nix profile` from `main` and upgrades in place, so the build he is running is
+  a commit, not a tag. `fitness --version` reports that revision and its date,
+  baked in by the flake; the crates carry `0.0.0` because nothing maintains it.
+  Do not reintroduce release tooling, changelogs, or a semantic version: each
+  was a number that named the wrong code, and `--version` said `0.2.0` for every
+  build installed between 2026-08-28 and 2026-09-16 because of it.
 - **`nix flake check` is the gate.** `cargo nextest run` inside `nix develop`
   is the fast inner loop. CI enumerates `checks` from the flake, so adding a
   check there adds a CI job with no workflow edit.
