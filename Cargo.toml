@@ -7,6 +7,15 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 # An application, not a library. Drop this on any crate you mean to publish.
 publish = false
+# Inert, and meant to be. Nothing releases this and nothing maintains a number:
+# the tool is installed with `nix profile` from `main`, so what identifies a
+# build is the commit, which the flake bakes into `fitness --version`. Cargo
+# requires *a* version, and `0.0.0` is the one that claims nothing.
+#
+# One number rather than five because release-please is gone: its Rust updater
+# rewrote `package.version` in each crate's own file and threw on a table, so a
+# version here was unmaintainable until 2026-09-16.
+version = "0.0.0"
 
 # Hexagonal architecture: dependencies point inward only.
 #   web ──▶ infrastructure ──▶ application ──▶ domain
