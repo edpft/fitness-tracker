@@ -92,7 +92,7 @@ fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
             let grams = u64::try_from(row.load_grams).map_err(|_| StoreError::Corrupt {
                 detail: "an absolute load stored as a negative mass".to_owned(),
             })?;
-            Load::Absolute(domain::gym::Kg::from_grams(grams))
+            Load::Absolute(domain::measure::Kg::from_grams(grams))
         }
         "relative" => Load::Relative(SignedKg::from_grams(row.load_grams)),
         other => {
@@ -369,7 +369,7 @@ fn load_of(kind: &str, grams: i64) -> Result<Load, StoreError> {
             let grams = u64::try_from(grams).map_err(|_| StoreError::Corrupt {
                 detail: "an absolute load stored as a negative mass".to_owned(),
             })?;
-            Ok(Load::Absolute(domain::gym::Kg::from_grams(grams)))
+            Ok(Load::Absolute(domain::measure::Kg::from_grams(grams)))
         }
         "relative" => Ok(Load::Relative(SignedKg::from_grams(grams))),
         other => Err(StoreError::Corrupt {

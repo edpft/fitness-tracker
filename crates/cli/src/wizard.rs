@@ -35,10 +35,10 @@ use application::{
 };
 use domain::{
     gym::{
-        Kg, Load,
+        Load,
         exercise::{Exercise, RepsExercise},
     },
-    measure::RepCount,
+    measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
     // `prescription::Block` is the *slot* block — plyometric, power, strength.

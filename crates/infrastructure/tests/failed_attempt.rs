@@ -18,10 +18,10 @@ mod support;
 use std::collections::BTreeMap;
 
 use domain::gym::{
-    GymWorkout, Kg, Load, Performed, PerformedExercise, Set, SetKind, exercise::RepsExercise,
+    GymWorkout, Load, Performed, PerformedExercise, Set, SetKind, exercise::RepsExercise,
 };
-use domain::measure::RepCount;
 use domain::normalised::{Refusal, RefusalKind};
+use domain::{measure::Kg, measure::RepCount};
 use support::{corpus, derived};
 
 /// Every set of every reps-counted exercise, with the exercise it belongs to.

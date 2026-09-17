@@ -2,14 +2,18 @@
 //!
 //! Everything specific to Withings lives behind this module: its hosts, its
 //! envelope, its status codes and its names for things. What lands is the
-//! measure group exactly as served; what a Body Scan weigh-in *is* waits for
-//! those payloads to be read (#117, #153).
+//! measure group exactly as served, and a Body Scan weigh-in is every group
+//! stamped with one second (#153).
 
+pub mod account;
 pub mod auth;
 pub mod measurements;
+pub mod translate;
 
+pub use account::{WeighInAccount, group};
 pub use auth::{WithingsAuth, WithingsClient};
 pub use measurements::{MeasurementPage, WithingsMeasurements};
+pub use translate::WithingsWeighInTranslator;
 
 use application::SourceError;
 use serde::Deserialize;

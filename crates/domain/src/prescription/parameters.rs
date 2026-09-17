@@ -10,15 +10,12 @@
 //! reproduced byte for byte is not a record of anything. A float would make
 //! `85%` into `0.8500000000000000888…` and every later comparison repair work.
 //!
-//! [`Kg`]: crate::gym::Kg
+//! [`Kg`]: crate::measure::Kg
 
 use std::{collections::BTreeMap, fmt};
 
-use crate::gym::{
-    Kg,
-    exercise::{Exercise, Implement},
-};
-use crate::measure::{Duration, RepCount};
+use crate::gym::exercise::{Exercise, Implement};
+use crate::measure::{Duration, Kg, RepCount};
 
 use super::{steps::LoadSteps, target::Target};
 

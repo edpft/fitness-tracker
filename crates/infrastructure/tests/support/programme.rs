@@ -22,11 +22,8 @@ use application::StoreError;
 use std::collections::BTreeMap;
 
 use domain::{
-    gym::{
-        Kg,
-        exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
-    },
-    measure::RepCount,
+    gym::exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
+    measure::{Kg, RepCount},
     plan::{Plan, PlanName, Programme},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,

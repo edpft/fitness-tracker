@@ -43,8 +43,7 @@
 //! SBS cycle's terminus is a scheduled test on a known week, not a number.
 
 use crate::{
-    gym::Kg,
-    measure::RepCount,
+    measure::{Kg, RepCount},
     prescription::{parameters::Percentage, target::Target},
 };
 

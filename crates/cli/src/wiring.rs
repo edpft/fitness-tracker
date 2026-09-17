@@ -30,8 +30,9 @@ use infrastructure::{
     HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
     PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, TokenFile,
-    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements, connect,
+    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, SqliteWeighInStore,
+    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -112,9 +113,6 @@ pub enum WiringError {
         wanted: &'static str,
         given: &'static str,
     },
-    /// A stream that lands and has nothing derived from it yet.
-    #[error("nothing is derived from {stream} yet: it lands, and that is all")]
-    Underived { stream: String },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
 }
@@ -303,15 +301,12 @@ async fn collect_rides(
     })
 }
 
-/// Withings' measure groups, landed and nothing more.
-///
-/// **Raw only, for now.** What a Body Scan weigh-in is gets read off these
-/// payloads (#117, #153), so there is no derivation to run, report or reset.
+/// Withings' measure groups, landed and derived into Body Scan weigh-ins.
 async fn withings_measurements(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = WithingsMeasurementLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::Extract(access) => {
@@ -348,14 +343,46 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
             let summary = extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::Underived {
-            stream: WithingsMeasurementLandingStore::STREAM.to_owned(),
-        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: WithingsWeighInAccountReader::new(pool.clone())?,
+                    translator: WithingsWeighInTranslator,
+                    workouts: SqliteWeighInStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        WithingsMeasurementLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+
+            let summary = normalisation.normalise().await?;
+            Ok(Outcome::Derived(Box::new(summary)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), WithingsMeasurementLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                WithingsMeasurementLandingStore::new(pool.clone())?,
+                SqliteWeighInStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), WithingsMeasurementLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {

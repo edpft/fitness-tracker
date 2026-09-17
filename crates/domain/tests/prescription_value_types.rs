@@ -5,8 +5,7 @@
 //! generator — so these strategies build through the real constructors and the
 //! properties assert what those constructors are supposed to guarantee.
 
-use domain::gym::Kg;
-use domain::measure::RepCount;
+use domain::measure::{Kg, RepCount};
 use domain::prescription::{
     Anchor, AnchorProvenance, LoadSteps, PerRole, Percentage, SessionRole, SlotId, Target,
     TopSetReps, WeekIndex, WeekKind,

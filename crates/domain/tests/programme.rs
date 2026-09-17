@@ -13,11 +13,8 @@
 //! defined beside them.
 
 use domain::{
-    gym::{
-        Kg,
-        exercise::{DurationExercise, Exercise, RepsExercise},
-    },
-    measure::RepCount,
+    gym::exercise::{DurationExercise, Exercise, RepsExercise},
+    measure::{Kg, RepCount},
     plan::Occupies,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,

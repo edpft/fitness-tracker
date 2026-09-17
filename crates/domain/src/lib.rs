@@ -8,6 +8,8 @@
 //! Data-type dependencies are fine — a timestamp, a hash. They describe
 //! values rather than machinery.
 
+pub mod analytical;
+pub mod body;
 pub mod cycling;
 pub mod gym;
 pub mod landing;

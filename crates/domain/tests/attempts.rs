@@ -1,7 +1,7 @@
 //! A test's attempts (#136): three, a step apart, the last the target.
 
 use domain::{
-    gym::Kg,
+    measure::Kg,
     prescription::{Attempts, LoadSteps, Step},
 };
 

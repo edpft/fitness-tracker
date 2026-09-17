@@ -134,6 +134,20 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
         "missing-series" => Ok(RefusalReason::MissingSeries {
             series: series_named(&detail)?,
         }),
+        "not-the-instrument" => Ok(RefusalReason::NotTheInstrument { detail }),
+        "unattributed" => Ok(RefusalReason::Unattributed),
+        "without-weigh-in" => Ok(RefusalReason::WithoutWeighIn {
+            part: match detail.as_str() {
+                "heart" => "heart",
+                "nerve" => "nerve",
+                "vascular" => "vascular",
+                other => {
+                    return Err(StoreError::Corrupt {
+                        detail: format!("{other:?} is not a part of a weigh-in"),
+                    });
+                }
+            },
+        }),
         other => Err(StoreError::Corrupt {
             detail: format!("{other:?} is not a refusal reason this version knows"),
         }),

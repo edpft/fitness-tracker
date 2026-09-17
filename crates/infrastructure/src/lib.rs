@@ -31,10 +31,11 @@ pub use store::{
     SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
     SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    WithingsMeasurementLandingStore, connect,
+    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
+    WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
-pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements};
+pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};
 
 /// The pool every store is built on, so a composition root can open one and
 /// hand it to several without depending on `sqlx` itself.

@@ -30,8 +30,8 @@ use std::num::NonZeroU8;
 
 use application::{MesocycleStore, StoreError};
 use domain::{
-    gym::{Kg, exercise::Exercise},
-    measure::RepCount,
+    gym::exercise::Exercise,
+    measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{Occupies, PlanName},
     prescription::{

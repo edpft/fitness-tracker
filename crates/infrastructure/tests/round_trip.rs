@@ -26,8 +26,8 @@ use application::{
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::{
-    gym::{Kg, Load, PerformedGymSession},
-    measure::RepCount,
+    gym::{Load, PerformedGymSession},
+    measure::{Kg, RepCount},
     prescription::{
         PrescribedExercise, PrescribedItem, PrescribedSet, ProjectionGap, SlotId, Target,
         WorkoutShape, project, satisfies,

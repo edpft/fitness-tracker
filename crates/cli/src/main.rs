@@ -168,7 +168,7 @@ fn command() -> ClapCommand {
 
 /// The daily loop, under the discipline it belongs to.
 ///
-/// **A group per discipline, and one command in it.** `gym next` is porcelain
+/// **A group per discipline.** `gym next` is porcelain
 /// over `extract`, `normalise`, `prescribe` and `deliver`, which stay exactly
 /// where they are — the nesting is here because a *pipeline* has one source and
 /// one sink only once a discipline has been named, not because collecting is a
@@ -195,6 +195,14 @@ fn discipline_command() -> ClapCommand {
                 "Override the source's API root for this run. \
                  Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
             )),
+    );
+    command = command.subcommand(
+        ClapCommand::new("strength")
+            .about(
+                "Collect and derive the gym and the scale, then report estimated \
+                 one-rep maximum over body weight for the headline lifts, per session",
+            )
+            .arg(timezone_argument()),
     );
 
     command
@@ -579,9 +587,6 @@ impl From<WiringError> for Failure {
             WiringError::Unwired { .. }
             | WiringError::Stream(_)
             | WiringError::WrongCredential { .. } => Self::message(error.to_string(), exit::STORE),
-            // A usage error, and the one of these the operator can act on: the
-            // stream is real, the command is not one it answers to yet.
-            WiringError::Underived { .. } => Self::message(error.to_string(), exit::USAGE),
         }
     }
 }
@@ -859,6 +864,13 @@ async fn discipline_command_run(
             exit::USAGE,
         ));
     };
+    if let Some(("strength", strength)) = sub.subcommand() {
+        let zone = config::timezone(
+            strength.get_one::<String>("timezone").map(String::as_str),
+            stated_timezone,
+        )?;
+        return gym::strength(discipline, database, &zone, credentials).await;
+    }
     let Some(("next", next)) = sub.subcommand() else {
         return Err(Failure::message(
             format!("no {name} command given"),
@@ -870,7 +882,11 @@ async fn discipline_command_run(
         next.get_one::<String>("timezone").map(String::as_str),
         stated_timezone,
     )?;
-    let access = source_access(discipline.collects(), next, credentials)?;
+    let access = source_access(
+        discipline.collects(),
+        next.get_one::<String>("base-url").cloned(),
+        credentials,
+    )?;
 
     gym::next(
         discipline,
@@ -1030,7 +1046,11 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             // what it is doing. The completion line carries the run number,
             // which only the store can assign.
             output::run_started(&stream);
-            Command::Extract(source_access(known, sub, &credentials)?)
+            Command::Extract(source_access(
+                known,
+                sub.get_one::<String>("base-url").cloned(),
+                &credentials,
+            )?)
         }
         "normalise" => {
             let zone = config::timezone(
@@ -1192,12 +1212,10 @@ fn named_stream(sub: &ArgMatches) -> Result<&'static KnownStream, Failure> {
 /// built-in root; the credential comes from the environment and nowhere else.
 fn source_access(
     known: &KnownStream,
-    sub: &ArgMatches,
+    base_url: Option<String>,
     credentials: &infrastructure::Credentials,
 ) -> Result<SourceAccess, Failure> {
-    let base_url = sub
-        .get_one::<String>("base-url")
-        .cloned()
+    let base_url = base_url
         .or_else(|| std::env::var(known.base_url_variable()).ok())
         .unwrap_or_else(|| known.default_base_url().to_owned());
 

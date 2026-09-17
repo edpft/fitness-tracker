@@ -147,6 +147,46 @@ impl ExtractionRunView {
     }
 }
 
+/// A collection that did not happen, in a command that carries on without it.
+pub fn not_collected(stream: &LandingStream, why: &str) {
+    println!("{stream} — not collected: {why}. Carrying on with what is already landed");
+}
+
+/// Relative strength, one line per session per lift.
+pub fn strength(report: &application::strength::StrengthReport) {
+    if report.rows.is_empty() {
+        println!("relative strength — no session holds a headline lift");
+        return;
+    }
+    println!(
+        "relative strength — estimated one-rep maximum over body weight ({})",
+        report.estimator
+    );
+    let dash = || "—".to_owned();
+    for lift in domain::analytical::HEADLINE_LIFTS {
+        let rows: Vec<_> = report.rows.iter().filter(|row| row.lift == lift).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        let with = rows.iter().filter(|row| row.relative.is_some()).count();
+        println!("\n{lift} — {with} of {} sessions have a figure", rows.len());
+        for row in rows {
+            let (maximum, from) = row.estimate.map_or_else(
+                || (dash(), "no set gives an estimate".to_owned()),
+                |estimate| (format!("{}kg", estimate.one_rep_max), estimate.to_string()),
+            );
+            let body = row
+                .body_mass
+                .map_or_else(|| "no weigh-in".to_owned(), |mass| format!("{mass}kg"));
+            let ratio = row.relative.map_or_else(dash, |ratio| ratio.to_string());
+            println!(
+                "  {}  {ratio:>6}  {maximum:>10}  {body:>11}  {from}",
+                row.on
+            );
+        }
+    }
+}
+
 pub fn reset(stream: &LandingStream, previous: Option<Watermark>) {
     match previous {
         Some(mark) => println!(
@@ -1378,7 +1418,7 @@ pub fn comparison(comparison: &application::compare::Comparison) {
 mod tests {
     use super::derived_phrase;
     use domain::{
-        gym::Kg,
+        measure::Kg,
         prescription::{Anchor, AnchorProvenance, DerivedFrom, WeekIndex, WeekKind},
     };
     use jiff::civil::date;

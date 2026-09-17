@@ -26,7 +26,7 @@
 
 use std::fmt;
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 use crate::sequence::NonEmpty;
 
 /// One band of a scale: a step size, and the load it starts applying at.

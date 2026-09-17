@@ -13,12 +13,12 @@
 
 use domain::{
     gym::{
-        GymWorkout, Kg, Load, Performed, PerformedExercise, Set, SetKind, SignedKg, Superset,
+        GymWorkout, Load, Performed, PerformedExercise, Set, SetKind, SignedKg, Superset,
         WorkoutItem,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
-    measure::{Distance, Duration, Metres, RepCount},
+    measure::{Distance, Duration, Kg, Metres, RepCount},
     normalised::{OperatorZone, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };

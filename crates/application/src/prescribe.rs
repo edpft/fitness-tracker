@@ -14,10 +14,10 @@ use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Kg, Load, SetKind,
+        Load, SetKind,
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
-    measure::RepCount,
+    measure::{Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Anchoring, Attempts, Block, BlockPeriodisation, BlockWeek,
@@ -2040,9 +2040,9 @@ mod progression_tests {
     //! private and needs no port: it is a rule about one performance.
 
     use domain::{
-        gym::{Kg, Load, Performed, SetKind, SignedKg, exercise::Exercise},
+        gym::{Load, Performed, SetKind, SignedKg, exercise::Exercise},
         landing::LandingRecordId,
-        measure::RepCount,
+        measure::{Kg, RepCount},
         prescription::seed::seed,
     };
     use jiff::civil::Date;
@@ -2168,9 +2168,9 @@ mod measurement_tests {
     //! warm-up; and the light session that used to answer for both.
 
     use domain::{
-        gym::{Kg, Load, Performed, SetKind},
+        gym::{Load, Performed, SetKind},
         landing::LandingRecordId,
-        measure::RepCount,
+        measure::{Kg, RepCount},
         plan::Span,
     };
     use jiff::civil::Date;
@@ -2309,8 +2309,8 @@ mod ramp_tests {
 
     use super::{PrimaryLoad, primary_sets};
     use domain::{
-        gym::{Kg, Load, Rir},
-        measure::RepCount,
+        gym::{Load, Rir},
+        measure::{Kg, RepCount},
         prescription::{LoadSteps, SessionRole, seed::seed},
     };
 

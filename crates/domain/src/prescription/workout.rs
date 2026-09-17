@@ -18,7 +18,7 @@ use std::fmt;
 
 use jiff::{Timestamp, civil::Date};
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 
 use super::{
     anchor::Anchor,

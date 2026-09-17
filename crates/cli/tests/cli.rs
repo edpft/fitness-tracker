@@ -973,10 +973,9 @@ fn extracting_withings_before_signing_in_says_so() {
     assert!(message.contains("withings.token.json"), "{message}");
 }
 
-/// A stream that lands and derives nothing says so, rather than pretending to
-/// normalise.
+/// Withings derives, and with nothing landed it derives nothing, successfully.
 #[test]
-fn withings_has_nothing_to_normalise_yet() {
+fn withings_normalises_an_empty_store() {
     let home = TempDir::new().expect("a temporary home");
     let output = fitness_at_home(
         &[
@@ -989,12 +988,7 @@ fn withings_has_nothing_to_normalise_yet() {
     )
     .expect("the binary runs");
 
-    assert_eq!(code(&output), 4, "{}", stderr(&output));
-    assert!(
-        stderr(&output).contains("nothing is derived from withings.measurements"),
-        "{}",
-        stderr(&output)
-    );
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
 }
 
 /// `status` works for it with no credential at all.

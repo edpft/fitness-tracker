@@ -447,9 +447,9 @@ fn the_entry_test_weeks_other_session_runs_the_authored_load() {
     };
     assert_eq!(
         first.prescription.load(),
-        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
-            60_000
-        ))),
+        Some(domain::gym::Load::Absolute(
+            domain::measure::Kg::from_grams(60_000)
+        )),
         "the 60kg the block states, not a share of anything"
     );
 }
@@ -513,7 +513,7 @@ fn provided_test() -> Result<domain::prescription::Mesocycle, Box<dyn std::error
             reps: domain::measure::RepCount::new(1)?,
             // Declared, because a plan's opening week has nothing before it to
             // inherit a target from.
-            target: domain::prescription::TestTarget::Declared(domain::gym::Kg::from_grams(
+            target: domain::prescription::TestTarget::Declared(domain::measure::Kg::from_grams(
                 TARGET_GRAMS,
             )),
             provided: Some(ProvidedFrom::new(published, vec![4])?),
@@ -616,9 +616,9 @@ fn a_published_test_weeks_other_session_is_the_charts_taper() {
     for set in &working {
         assert_eq!(
             set.prescription.load(),
-            Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
-                TAPER_GRAMS
-            ))),
+            Some(domain::gym::Load::Absolute(
+                domain::measure::Kg::from_grams(TAPER_GRAMS)
+            )),
             "75% of the target, on the barbell's grid"
         );
     }
@@ -634,9 +634,9 @@ fn a_published_test_week_still_tests_on_the_heavy_session() {
     assert_eq!(working.len(), 3, "three attempts, and nothing after them");
     assert_eq!(
         working.last().and_then(|set| set.prescription.load()),
-        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
-            TARGET_GRAMS
-        ))),
+        Some(domain::gym::Load::Absolute(
+            domain::measure::Kg::from_grams(TARGET_GRAMS)
+        )),
         "the last attempt is at what the operator asserted"
     );
 }
@@ -656,9 +656,9 @@ fn the_published_taper_does_not_defer_to_a_predecessor() {
     assert_eq!(working.len(), 3, "µ4 day one is three sets");
     assert_eq!(
         working[0].prescription.load(),
-        Some(domain::gym::Load::Absolute(domain::gym::Kg::from_grams(
-            TAPER_GRAMS
-        ))),
+        Some(domain::gym::Load::Absolute(
+            domain::measure::Kg::from_grams(TAPER_GRAMS)
+        )),
         "the chart's share of the target, not where the ladder before it stands"
     );
 }

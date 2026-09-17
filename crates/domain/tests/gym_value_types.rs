@@ -6,10 +6,10 @@
 //! hand-picked example works.
 
 use domain::gym::{
-    Kg, Load, Performed, Rir, SetKind, SignedKg,
+    Load, Performed, Rir, SetKind, SignedKg,
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
 };
-use domain::measure::{Distance, Metres, RepCount};
+use domain::measure::{Distance, Kg, Metres, RepCount};
 use domain::sequence::{AtLeastTwo, NonEmpty};
 use proptest::prelude::*;
 

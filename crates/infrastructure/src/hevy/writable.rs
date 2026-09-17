@@ -57,9 +57,10 @@
 //! axis it was filed under. The two tables cannot disagree and stay green.
 
 use domain::gym::{
-    Exercise, Kg, Load,
+    Exercise, Load,
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
 };
+use domain::measure::Kg;
 
 /// The templates an exercise can be written to, one per side of the load axis.
 ///
@@ -720,9 +721,10 @@ mod tests {
     use super::{Writable, writable, write_load};
     use crate::hevy::mapping::{LoadReading, lookup};
     use domain::gym::{
-        Exercise, Kg, Load, SignedKg,
+        Exercise, Load, SignedKg,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     };
+    use domain::measure::Kg;
 
     /// Every exercise in the vocabulary, whichever measure it is counted in.
     fn every_exercise() -> Vec<Exercise> {

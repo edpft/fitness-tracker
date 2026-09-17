@@ -14,6 +14,7 @@ use std::{collections::BTreeMap, future::Future};
 
 use jiff::{Timestamp, civil::Date};
 
+use domain::analytical::Weighed;
 use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, Ftp};
 use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
 use domain::landing::{
@@ -920,6 +921,20 @@ pub trait PerformedWorkoutReader {
     ) -> impl Future<Output = Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError>> + Send;
 }
 
+/// Weigh-ins, as the analytical layer reads them.
+///
+/// **A mass and a moment, not the whole weigh-in.** Relative strength needs
+/// nothing else, and rebuilding every part of a weigh-in to throw most of it
+/// away would be work with no reader.
+pub trait WeighInHistory {
+    /// Every weigh-in the normalised layer holds, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn weigh_ins(&self) -> impl Future<Output = Result<Vec<Weighed>, StoreError>> + Send;
+}
+
 /// The § 14 parameters, in force as one version.
 pub trait GenerationParameterStore {
     /// The greatest `authored_at`, with the version it came from.
@@ -1262,7 +1277,7 @@ pub struct LadderStanding {
     /// makes raises it (decision 0011), so the number here is true of the moment
     /// it was asked for and of nothing else. `None` for any programme that is not
     /// a test, and for a test whose predecessor cannot supply one.
-    pub target: Option<domain::gym::Kg>,
+    pub target: Option<domain::measure::Kg>,
     /// The newest performance the derivation could see. `None` for an empty
     /// record — which is not the same as a stale one.
     pub history_through: Option<Date>,

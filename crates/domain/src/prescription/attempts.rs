@@ -18,7 +18,7 @@
 //! **The ramp leads into the first attempt, not the target**: *"that first
 //! attempt should be the anchor for the warm up sets."*
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 
 use super::steps::LoadSteps;
 

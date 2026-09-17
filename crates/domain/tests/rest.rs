@@ -6,10 +6,10 @@
 
 use domain::{
     gym::{
-        Kg, Load,
+        Load,
         exercise::{DurationExercise, RepsExercise},
     },
-    measure::{Duration, RepCount},
+    measure::{Duration, Kg, RepCount},
     prescription::{
         BlockRest, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
         RestScheme, SlotId, SupersetMember, Target, WorkoutShape, rested,

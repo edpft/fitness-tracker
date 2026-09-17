@@ -21,7 +21,7 @@ pub use exercise::{
     DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
 };
 pub use intensity::{Rir, UnrecognisedIntensity};
-pub use load::{InvalidLoad, Kg, Load, SignedKg};
+pub use load::{Load, SignedKg};
 pub use outcome::Performed;
 pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};

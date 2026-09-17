@@ -19,7 +19,7 @@ use proptest::prelude::*;
 
 fn load() -> impl Strategy<Value = Load> {
     prop_oneof![
-        (0_u64..300_000).prop_map(|grams| Load::Absolute(domain::gym::Kg::from_grams(grams))),
+        (0_u64..300_000).prop_map(|grams| Load::Absolute(domain::measure::Kg::from_grams(grams))),
         (-40_000_i64..40_000).prop_map(|grams| Load::Relative(SignedKg::from_grams(grams))),
     ]
 }

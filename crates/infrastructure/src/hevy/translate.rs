@@ -23,11 +23,11 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        GymWorkout, Kg, Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind,
+        GymWorkout, Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind,
         SignedKg, Superset, WorkoutItem, exercise::Exercise,
     },
     landing::{EventKind, LandedRecord, Provenance},
-    measure::{Distance, Duration, Metres, RepCount},
+    measure::{Distance, Duration, Kg, Metres, RepCount},
     normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},

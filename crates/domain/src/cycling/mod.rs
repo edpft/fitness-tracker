@@ -35,8 +35,8 @@ pub use mesocycle::{
 };
 pub use performed::PerformedSession;
 pub use ride::{
-    BeatsPerMinute, BikePlusRide, Cadence, ComposedFrom, HeartRateSample, HeartRateSeries,
-    Resistance, RideRecord, RideSample, Speed,
+    BikePlusRide, Cadence, ComposedFrom, HeartRateSample, HeartRateSeries, Resistance, RideRecord,
+    RideSample, Speed,
 };
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{

@@ -33,11 +33,11 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     cycling::{
-        BeatsPerMinute, BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries,
-        PerformedSession, RideRecord, RideSample, Watts,
+        BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries, PerformedSession, RideRecord,
+        RideSample, Watts,
     },
     landing::{EventKind, Provenance},
-    measure::{Duration, Metres},
+    measure::{BeatsPerMinute, Duration, Metres},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
 };

@@ -19,8 +19,8 @@
 use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
-    gym::{Kg, exercise::Exercise},
-    measure::RepCount,
+    gym::exercise::Exercise,
+    measure::{Kg, RepCount},
     prescription::{
         anchor::{Anchor, Anchoring, Entry},
         block::{BlockPeriodisation, EntryTest},
