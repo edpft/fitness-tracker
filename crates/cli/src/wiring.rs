@@ -26,13 +26,14 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
-    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, SqliteWeighInStore,
-    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
-    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect,
+    FileRunLock, GarminAuth, GarminCredentials, GarminHrv, GarminHrvLandingStore,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
+    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts, SqliteCyclingSessionStore,
+    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
+    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
+    WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -107,6 +108,12 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
+    /// **Landing without a derivation is a real state, not a gap to paper
+    /// over.** A source is reached before its entity is settled — the shape of
+    /// what one record means is argued from payloads that have actually landed
+    /// — so a stream can collect for a while before anything derives it.
+    #[error("{stream} lands, but nothing derives it yet")]
+    NotDerived { stream: String },
     #[error("{stream} is reached with {wanted}, and {given} was resolved instead")]
     WrongCredential {
         stream: String,
@@ -138,6 +145,7 @@ pub async fn run(
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
         PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
         WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
+        GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -299,6 +307,86 @@ async fn collect_rides(
         first: Box::new(ridden),
         second: Box::new(sampled),
     })
+}
+
+/// Garmin's overnight HRV, landed.
+///
+/// **Extraction only, for now.** What one night's answer means — which of
+/// Garmin's figures are its own and which are ours to derive — is settled
+/// against payloads that have landed rather than against a guess, so the
+/// normalised entity follows the first real run (#161).
+///
+/// **No token cache**, as on Peloton and for the same reason: this adapter
+/// holds a password, so it can sign in again unattended, and a login per
+/// extraction is cheaper than a cache nothing else reads.
+async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = GarminHrvLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::Extract(access) => {
+            let SourceAccess::EmailPassword {
+                base_url,
+                auth_base_url,
+                email,
+                password,
+                ..
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: GarminHrvLandingStore::STREAM.to_owned(),
+                    wanted: "a login",
+                    given: "something else",
+                });
+            };
+
+            let auth = GarminAuth::new(
+                auth_base_url.clone(),
+                garmin::token_base_for(&auth_base_url),
+                GarminCredentials::new(email, password),
+                None,
+            );
+            let extraction = Extraction::new(ExtractionPorts {
+                source: GarminHrv::new(base_url, auth, today()),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+
+            let summary = extraction.extract().await?;
+            Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotDerived {
+            stream: GarminHrvLandingStore::STREAM.to_owned(),
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
+/// The last night worth asking Garmin about.
+///
+/// UTC, because a night's event time is its calendar date at midnight UTC and
+/// the walk must not run past what it can place.
+fn today() -> jiff::civil::Date {
+    jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
 }
 
 /// Withings' measure groups, landed and derived into Body Scan weigh-ins.
@@ -488,8 +576,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 #[cfg(test)]
 mod tests {
     use super::{
-        HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-        WithingsMeasurementLandingStore,
+        GarminHrvLandingStore, HevyWorkoutLandingStore, PelotonRideLandingStore,
+        PelotonRideSampleLandingStore, WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -510,6 +598,7 @@ mod tests {
             PelotonRideLandingStore::STREAM,
             PelotonRideSampleLandingStore::STREAM,
             WithingsMeasurementLandingStore::STREAM,
+            GarminHrvLandingStore::STREAM,
         ];
 
         for known in &KNOWN {
