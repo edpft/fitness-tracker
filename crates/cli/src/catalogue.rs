@@ -194,7 +194,7 @@ impl KnownStream {
 const SEPARATOR: char = domain::landing::STREAM_SEPARATOR;
 
 /// Every system this build can talk to.
-pub const SOURCES: [KnownSource; 3] = [
+pub const SOURCES: [KnownSource; 4] = [
     KnownSource {
         name: "hevy",
         default_base_url: "https://api.hevyapp.com",
@@ -215,6 +215,22 @@ pub const SOURCES: [KnownSource; 3] = [
         credential_url: "https://developer.withings.com/dashboard/",
         credential: Credential::OAuthClient {
             default_auth_base_url: "https://account.withings.com",
+        },
+    },
+    // **The account's own password, not a developer credential.** Garmin's
+    // Connect Developer Program serves HRV but is not accepting applications,
+    // so this build signs in the way the phone app does. The credential URL is
+    // therefore where an operator manages their account rather than where they
+    // would fetch a key.
+    //
+    // **The auth root is the sign-in host**; the token host beside it is
+    // derived by the adapter, so pointing this at a stub points both there.
+    KnownSource {
+        name: "garmin",
+        default_base_url: "https://connectapi.garmin.com",
+        credential_url: "https://connect.garmin.com",
+        credential: Credential::EmailPassword {
+            default_auth_base_url: "https://sso.garmin.com",
         },
     },
 ];
@@ -240,7 +256,7 @@ pub const SOURCES: [KnownSource; 3] = [
 ///
 /// **Withings serves measurements**, which is ours and not Withings' word
 /// (`getmeas`, `measuregrps`): one record is what one reading produced.
-pub const KNOWN: [KnownStream; 3] = [
+pub const KNOWN: [KnownStream; 4] = [
     KnownStream {
         source: &SOURCES[0],
         entity: "workouts",
@@ -252,6 +268,13 @@ pub const KNOWN: [KnownStream; 3] = [
     KnownStream {
         source: &SOURCES[2],
         entity: "measurements",
+    },
+    // **Garmin serves more than this**, and the entity is what makes room for
+    // the rest: sleep, resting heart rate and a decade of activities are each a
+    // stream of their own, resuming and locking independently.
+    KnownStream {
+        source: &SOURCES[3],
+        entity: "hrv",
     },
 ];
 
