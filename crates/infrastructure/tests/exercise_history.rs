@@ -15,7 +15,8 @@ use application::{
     NormalisationSummary, WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts},
 };
-use domain::gym::{Kg, Load, Performed, SetKind, exercise::RepsExercise};
+use domain::gym::{Load, Performed, SetKind, exercise::RepsExercise};
+use domain::measure::Kg;
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymSessionStore,

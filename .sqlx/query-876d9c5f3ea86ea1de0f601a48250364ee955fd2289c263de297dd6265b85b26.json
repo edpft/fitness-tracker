@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT measured_at_utc AS \"measured_at!: String\",\n                   zone AS \"zone!: String\",\n                   mass_grams AS \"mass_grams!: i64\"\n            FROM body_scan_weigh_in\n            ORDER BY measured_at_utc ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "measured_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "body_scan_weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "body_scan_weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "mass_grams!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_weigh_in",
+            "name": "mass_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "876d9c5f3ea86ea1de0f601a48250364ee955fd2289c263de297dd6265b85b26"
+}

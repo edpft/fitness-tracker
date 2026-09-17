@@ -26,6 +26,7 @@ pub mod run_log;
 pub mod schedule;
 pub mod settings;
 pub mod withings_landing;
+pub mod withings_normalised;
 
 use application::StoreError;
 use domain::{
@@ -55,6 +56,9 @@ pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
 pub use withings_landing::WithingsMeasurementLandingStore;
+pub use withings_normalised::{
+    SqliteWeighInHistory, SqliteWeighInStore, WithingsWeighInAccountReader,
+};
 
 /// Translate a store failure into the application's view of one.
 ///

@@ -1,4 +1,4 @@
-//! The daily loop, as one command.
+//! The gym's porcelain: the daily loop, and relative strength.
 //!
 //! **Porcelain over the plumbing, and nothing more.** `extract`, `normalise`,
 //! `prescribe` and `deliver` are the right internal steps and are untouched;
@@ -29,10 +29,15 @@
 use std::path::Path;
 
 use crate::{
-    Failure, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing, wiring,
-    wiring::Command,
+    Failure, catalogue, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing,
+    wiring, wiring::Command,
 };
-use domain::normalised::OperatorZone;
+use application::strength::RelativeStrength;
+use domain::{
+    analytical::Rts,
+    normalised::{OperatorZone, StartedAt},
+};
+use infrastructure::{SqlitePerformedWorkoutReader, SqliteWeighInHistory, connect};
 
 /// Run the discipline's daily loop: collect, derive, prescribe, deliver.
 ///
@@ -91,6 +96,68 @@ pub async fn next(
         credentials,
     )
     .await
+}
+
+/// Where body weight comes from. The one stream this report reads that the
+/// discipline does not collect.
+const WEIGH_INS: &str = "withings.measurements";
+
+/// Relative strength, against a record brought up to date first.
+///
+/// **A source that cannot be reached is reported and stepped past.** The figure
+/// reads what is landed, so an unreachable scale costs the newest weigh-ins
+/// rather than the whole report (§ 36); the note says so. Deriving is not
+/// stepped past: it contacts nothing, so a failure there is a real one.
+pub async fn strength(
+    discipline: &KnownDiscipline,
+    database: &Path,
+    zone: &OperatorZone,
+    credentials: &infrastructure::Credentials,
+) -> Result<(), Failure> {
+    let weigh_ins = catalogue::lookup(WEIGH_INS).ok_or_else(|| {
+        Failure::message(
+            format!("this build does not collect {WEIGH_INS}"),
+            crate::exit::USAGE,
+        )
+    })?;
+
+    for known in [discipline.collects(), weigh_ins] {
+        let stream = known
+            .landing_stream()
+            .map_err(|error| Failure::usage(&error))?;
+
+        output::run_started(&stream);
+        let collected = match crate::source_access(known, None, credentials) {
+            Ok(access) => wiring::run(Command::Extract(access), known, database)
+                .await
+                .map_err(Failure::from),
+            Err(failure) => Err(failure),
+        };
+        match collected {
+            Ok(outcome) => report(&stream, outcome),
+            Err(failure) => output::not_collected(&stream, failure.message_text()),
+        }
+
+        output::derivation_started(&stream);
+        let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
+        report(&stream, derived);
+    }
+    println!();
+
+    let pool = connect(database).await?;
+    let figures = RelativeStrength::new(
+        Rts,
+        SqlitePerformedWorkoutReader::new(pool.clone()),
+        SqliteWeighInHistory::new(pool),
+    )
+    .report(
+        StartedAt::new(jiff::Timestamp::now(), zone.clone())
+            .wall_clock()
+            .date(),
+    )
+    .await?;
+    output::strength(&figures);
+    Ok(())
 }
 
 /// The two outcomes this loop can produce, printed as the plumbing prints them.

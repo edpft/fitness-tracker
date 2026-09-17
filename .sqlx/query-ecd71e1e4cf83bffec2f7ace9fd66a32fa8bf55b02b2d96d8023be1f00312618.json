@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO body_scan_segment (\n            weigh_in, segment, fat_free_mass_grams, fat_mass_grams, muscle_mass_grams\n        )\n        VALUES (?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "ecd71e1e4cf83bffec2f7ace9fd66a32fa8bf55b02b2d96d8023be1f00312618"
+}

@@ -376,10 +376,10 @@
           # supposed to be driven by.
           #
           # `application` keeps its use cases behind `extract`, `normalise`,
-          # `prescribe` and `status` rather than re-exporting them at the crate
-          # root, so naming one requires naming its module. That makes this
-          # greppable, which is the only reason the module boundary is worth
-          # keeping. **All four are named here**: the check listed two of them
+          # `prescribe`, `status` and `strength` rather than re-exporting them
+          # at the crate root, so naming one requires naming its module. That
+          # makes this greppable, which is the only reason the module boundary
+          # is worth keeping. **Each is named here**: the check listed two of them
           # until 2026-08-19, so `prescribe` — added by feature 003 — was
           # unguarded for as long as it existed.
           #
@@ -397,7 +397,7 @@
           # checked. The mistake was invisible only because `web` was a stub that
           # called nothing; the first real line of it would have failed the gate.
           use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
-            if grep -rn 'application::\(cycling\|extract\|normalise\|prescribe\|status\)' \
+            if grep -rn 'application::\(cycling\|extract\|normalise\|prescribe\|status\|strength\)' \
                  ${repoSrc}/crates/infrastructure/src; then
               echo
               echo "Constitution § 16: a driven adapter implements ports, it"

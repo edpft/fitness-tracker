@@ -22,6 +22,7 @@ pub mod normalise;
 pub mod ports;
 pub mod prescribe;
 pub mod status;
+pub mod strength;
 
 pub use error::{
     ComparisonError, DeliveryError, ExtractionError, NormalisationError, PrescriptionError,
@@ -39,6 +40,6 @@ pub use ports::{
     PrescriptionDestination, PrescriptionLifecycle, RawExtent, RefusalReport, RefusalReporter,
     RefusalStore, ReplyStatus, ResumptionPointResetter, ResumptionPointStore, RunLock, RunSummary,
     SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation, Translator,
-    UnderivableReason, UnderivableSlot, Unexpressed, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber,
+    UnderivableReason, UnderivableSlot, Unexpressed, WeighInHistory, WorkoutEventSource,
+    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
 };

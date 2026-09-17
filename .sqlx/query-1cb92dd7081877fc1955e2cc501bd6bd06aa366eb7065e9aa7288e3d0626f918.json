@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO body_scan_weigh_in (\n            landing_record_id, measured_at_utc, zone, mass_grams, fat_free_mass_grams,\n            fat_mass_grams, muscle_mass_grams, body_water_grams, extracellular_water_grams,\n            intracellular_water_grams, bone_mass_grams, visceral_fat_tenths,\n            basal_metabolic_rate_kcal, metabolic_age_tenths, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "1cb92dd7081877fc1955e2cc501bd6bd06aa366eb7065e9aa7288e3d0626f918"
+}

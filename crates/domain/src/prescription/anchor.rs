@@ -17,7 +17,7 @@ use std::fmt;
 
 use jiff::civil::Date;
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 
 /// How the anchor was arrived at.
 ///

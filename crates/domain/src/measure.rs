@@ -9,6 +9,12 @@
 //! An exercise's measure is fixed by which vocabulary it belongs to, so a set
 //! and its exercise cannot disagree and nothing needs validating.
 
+mod heart;
+pub(crate) mod mass;
+
+pub use heart::BeatsPerMinute;
+pub use mass::{InvalidMass, Kg};
+
 use std::{
     fmt,
     num::{NonZeroU32, NonZeroU64},
@@ -28,7 +34,7 @@ pub enum InvalidQuantity {
     #[error("{unit} is bounded, and this is outside it")]
     OutOfRange { unit: &'static str },
     /// Zero beats per minute. A sensor saying nothing, not a rate — see
-    /// [`crate::cycling::BeatsPerMinute`].
+    /// [`BeatsPerMinute`].
     #[error("a heart rate of zero is a sensor that said nothing")]
     NotBeating,
 }

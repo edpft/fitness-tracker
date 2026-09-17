@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 
 use application::{GenerationParameterStore, StoreError};
 use domain::{
-    gym::{Kg, exercise::Implement},
-    measure::{Duration, RepCount},
+    gym::exercise::Implement,
+    measure::{Duration, Kg, RepCount},
     prescription::{
         BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage, ResetProtocol,
         RestScheme, Scales, SessionRole, Step, Target, TopSetReps, WarmupStep,

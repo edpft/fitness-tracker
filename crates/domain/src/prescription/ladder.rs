@@ -63,7 +63,7 @@
 //! `reclimb_per_week` there — because a reset is the same climb run at a
 //! different rate off a lower start.
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 
 use super::{anchor::Anchor, parameters::Percentage, schedule::WeekIndex, steps::LoadSteps};
 

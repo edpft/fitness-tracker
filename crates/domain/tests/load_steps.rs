@@ -7,7 +7,7 @@
 //! rather than the 1kg that reached it — is the whole reason the type changed.
 
 use domain::{
-    gym::Kg,
+    measure::Kg,
     prescription::{InvalidLoadSteps, LoadSteps, Step},
 };
 

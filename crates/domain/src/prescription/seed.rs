@@ -27,8 +27,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    gym::{Kg, exercise::Implement},
-    measure::{Duration, RepCount},
+    gym::exercise::Implement,
+    measure::{Duration, Kg, RepCount},
     prescription::{
         AccessoryScheme, BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage,
         ResetProtocol, RestScheme, Scales, Step, Target, TopSetReps, WarmupStep,
@@ -347,7 +347,7 @@ mod pinned {
     /// wrong prescribes a 9.5kg dumbbell — a load no rack holds.
     #[test]
     fn every_implement_that_is_loaded_has_a_scale() {
-        use crate::gym::{Kg, exercise::Implement};
+        use crate::{gym::exercise::Implement, measure::Kg};
 
         let seeded = seed().expect("the shipped parameters build");
 

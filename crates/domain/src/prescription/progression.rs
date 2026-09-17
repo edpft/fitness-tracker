@@ -42,7 +42,7 @@
 //! two stalls two stalls rather than one escalating immediately, and it is why the
 //! failed-load memory is per-stall rather than per-block.
 
-use crate::gym::Kg;
+use crate::measure::Kg;
 
 use super::{ladder::Ladder, parameters::ResetProtocol, schedule::WeekIndex, steps::LoadSteps};
 

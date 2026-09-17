@@ -37,8 +37,8 @@ use std::fmt;
 
 use application::{Deliverable, Unexpressed};
 use domain::{
-    gym::{Exercise, Kg, Load, Rir},
-    measure::Spans,
+    gym::{Exercise, Load, Rir},
+    measure::{Kg, Spans},
     prescription::{
         Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, SessionRole, Target,
         WeekKind,

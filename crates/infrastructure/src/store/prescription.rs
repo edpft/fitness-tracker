@@ -14,10 +14,10 @@
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
 use domain::{
     gym::{
-        Kg, Load, Rir, SignedKg,
+        Load, Rir, SignedKg,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
-    measure::{Distance, Duration, Metres, RepCount, Spans},
+    measure::{Distance, Duration, Kg, Metres, RepCount, Spans},
     prescription::{
         Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,

@@ -13,8 +13,8 @@ mod support;
 
 use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{
-    gym::{Kg, Load, SignedKg, exercise::RepsExercise},
-    measure::{Duration, RepCount},
+    gym::{Load, SignedKg, exercise::RepsExercise},
+    measure::{Duration, Kg, RepCount},
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SessionRole, SlotId, SupersetMember,

@@ -132,6 +132,23 @@ pub enum RefusalReason {
     NoReadingsInSeries { series: &'static str },
     /// The source served an entity missing a series it cannot be built without.
     MissingSeries { series: &'static str },
+    /// A reading from something other than the instrument the entity is for.
+    ///
+    /// The operator, 2026-09-17, of two weights typed into the Withings app:
+    /// rejected *"because they don't come from the Body Scan device."* The
+    /// detail says what it came from instead.
+    NotTheInstrument { detail: String },
+    /// A reading the instrument could not attribute to the operator.
+    ///
+    /// The Body Scan did not recognise who stepped on it, and someone assigned
+    /// the reading afterwards. Family members have done that by mistake, so
+    /// the operator rejects them all (2026-09-17).
+    Unattributed,
+    /// Part of a weigh-in, taken without one.
+    ///
+    /// A nerve reading on its own, 26 Jun: the operator does not want one kept
+    /// by itself.
+    WithoutWeighIn { part: &'static str },
 }
 
 impl RefusalReason {
@@ -155,6 +172,9 @@ impl RefusalReason {
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
             Self::Unmodelled { .. } => RefusalKind::Unmodelled,
+            Self::NotTheInstrument { .. } | Self::Unattributed | Self::WithoutWeighIn { .. } => {
+                RefusalKind::DeclaredLimitation
+            }
         }
     }
 
@@ -174,6 +194,9 @@ impl RefusalReason {
             Self::CompanionNotLanded { .. } => "companion-not-landed",
             Self::NoReadingsInSeries { .. } => "no-readings-in-series",
             Self::MissingSeries { .. } => "missing-series",
+            Self::NotTheInstrument { .. } => "not-the-instrument",
+            Self::Unattributed => "unattributed",
+            Self::WithoutWeighIn { .. } => "without-weigh-in",
         }
     }
 
@@ -183,14 +206,14 @@ impl RefusalReason {
         match self {
             Self::UnknownSetKind { kind } => Some(kind.clone()),
             Self::UnrecognisedIntensity { value } => Some(value.clone()),
-            Self::UnreadablePayload { detail } | Self::Unmodelled { detail } => {
-                Some(detail.clone())
-            }
+            Self::UnreadablePayload { detail }
+            | Self::Unmodelled { detail }
+            | Self::NotTheInstrument { detail } => Some(detail.clone()),
             Self::UnreadableValue { field, detail } => Some(format!("{field}: {detail}")),
             Self::CompanionNotLanded { stream } => Some(stream.clone()),
-            Self::NoReadingsInSeries { series } | Self::MissingSeries { series } => {
-                Some((*series).to_owned())
-            }
+            Self::NoReadingsInSeries { series }
+            | Self::MissingSeries { series }
+            | Self::WithoutWeighIn { part: series } => Some((*series).to_owned()),
             _ => None,
         }
     }
@@ -217,6 +240,11 @@ impl fmt::Display for RefusalReason {
                 write!(f, "every {series} reading was a sensor saying nothing")
             }
             Self::MissingSeries { series } => write!(f, "no {series} series was served"),
+            Self::NotTheInstrument { detail } => {
+                write!(f, "{detail} is not a reading from the instrument")
+            }
+            Self::Unattributed => f.write_str("the scale did not know whose reading it was"),
+            Self::WithoutWeighIn { part } => write!(f, "a {part} reading with no weigh-in"),
         }
     }
 }

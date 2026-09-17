@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO body_scan_part (\n            landing_record_id, weigh_in, part, source_record_id, algorithm,\n            endpoint, event_kind, event_time\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "d75cbfad8988605dfb5f7d574d794fefb7d9ad9326dee69f3475391f144e20d9"
+}

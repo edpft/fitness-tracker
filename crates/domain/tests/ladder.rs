@@ -5,7 +5,7 @@
 //! of separating it from the failure mechanism, and is why these are table and
 //! property tests rather than integration ones.
 
-use domain::gym::Kg;
+use domain::measure::Kg;
 use domain::prescription::{
     Anchor, AnchorProvenance, Ladder, LoadSteps, Opening, Percentage, WeekIndex,
 };

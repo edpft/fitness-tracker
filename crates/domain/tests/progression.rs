@@ -16,7 +16,7 @@
 //! pair so both cost the same" is only true of −5% with +2.5kg. So the example's
 //! rows are the error, not the protocol.
 
-use domain::gym::Kg;
+use domain::measure::Kg;
 use domain::prescription::{
     Anchor, AnchorProvenance, GatingTopSet, Ladder, LoadSteps, Opening, Percentage, Progress,
     Reset, ResetProtocol, WeekIndex, progress_after,

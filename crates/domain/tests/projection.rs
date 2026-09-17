@@ -16,12 +16,12 @@
 
 use domain::{
     gym::{
-        GymWorkout, Kg, Load, Performed, PerformedExercise, PerformedGymSession, Set, SetKind,
+        GymWorkout, Load, Performed, PerformedExercise, PerformedGymSession, Set, SetKind,
         SignedKg, Superset, WorkoutItem,
         exercise::{DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
-    measure::{Duration, RepCount},
+    measure::{Duration, Kg, RepCount},
     normalised::{OperatorZone, StartedAt},
     prescription::{Position, PrimaryPattern, ProjectionGap, SlotId, project},
     sequence::{AtLeastTwo, NonEmpty},

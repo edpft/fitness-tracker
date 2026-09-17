@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO body_scan_nerves (\n                weigh_in, left_foot_nanosiemens, right_foot_nanosiemens, both_feet_nanosiemens\n            )\n            VALUES (?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "02f2ec8cd4fcf4af379f489a5d80608dfd0be7e2ac5bd0abd46c23b623bca20a"
+}

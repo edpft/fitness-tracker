@@ -16,7 +16,8 @@
 //! [`Progression::Linear`]: crate::prescription::Progression::Linear
 
 use crate::{
-    gym::{Kg, exercise::Exercise},
+    gym::exercise::Exercise,
+    measure::Kg,
     prescription::{
         anchor::{Anchor, Entry},
         ladder::{InvalidLadder, Ladder, Opening},

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO body_scan_vascular (\n                weigh_in, pulse_wave_velocity_millimetres_per_second, vascular_age_tenths\n            )\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ef802e096611940ae7fd6731d514856289dc78a1aa4e2ac4003148ec78f0f186"
+}
