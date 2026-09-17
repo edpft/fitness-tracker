@@ -399,6 +399,30 @@ async fn verify(
         .await
         .map(|_| ())
         .map_err(|error| error.to_string()),
+        // **Garmin's own arm, though it shares Peloton's credential kind.**
+        // Which adapter answers for a login is a fact about the source: these
+        // two both take an email and a password and neither can check the
+        // other's. Garmin also needs two hosts rather than one, and the second
+        // is derived from the first so that a stub reaches both.
+        (
+            "garmin",
+            StoredCredential::Login { email, password },
+            Credential::EmailPassword {
+                default_auth_base_url,
+            },
+        ) => {
+            let sso = auth_base_url(default_auth_base_url);
+            infrastructure::GarminAuth::new(
+                sso.clone(),
+                infrastructure::garmin::token_base_for(&sso),
+                infrastructure::GarminCredentials::new(email.clone(), password.clone()),
+                None,
+            )
+            .bearer()
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        }
         (
             "withings",
             StoredCredential::OAuthClient {
