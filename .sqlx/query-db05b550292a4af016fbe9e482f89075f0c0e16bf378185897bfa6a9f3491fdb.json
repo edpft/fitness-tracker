@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COALESCE(MAX(serve_ordinal), -1) AS \"highest!: i64\"\n            FROM withings_measurement_landing\n            WHERE run_id = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "highest!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "db05b550292a4af016fbe9e482f89075f0c0e16bf378185897bfa6a9f3491fdb"
+}

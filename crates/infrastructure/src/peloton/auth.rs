@@ -40,6 +40,8 @@ use rand::Rng as _;
 use reqwest::{Client, StatusCode, cookie::CookieStore as _, cookie::Jar, redirect::Policy};
 use sha2::{Digest as _, Sha256};
 
+pub use crate::token::Token;
+
 /// Auth0's tenant for Peloton, and the connection a password login names.
 const TENANT: &str = "peloton-prod";
 const CONNECTION: &str = "pelo-user-password";
@@ -62,13 +64,6 @@ const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// Auth0 expects its own client fingerprint. Base64 of
 /// `{"name":"auth0.js-ulp","version":"9.14.3"}`.
 const AUTH0_CLIENT: &str = "eyJuYW1lIjoiYXV0aDAuanMtdWxwIiwidmVyc2lvbiI6IjkuMTQuMyJ9";
-
-/// How long before expiry a token is treated as spent.
-///
-/// A token that expires while a request is in flight fails the run, and the
-/// whole point of the refresh is that it does not. Sixty seconds is longer than
-/// any single call this adapter makes.
-const EXPIRY_MARGIN: jiff::SignedDuration = jiff::SignedDuration::from_secs(60);
 
 /// How many redirects to walk between the login form and the code.
 ///
@@ -99,54 +94,6 @@ impl std::fmt::Debug for PelotonCredentials {
     }
 }
 
-/// A bearer token and what is needed to replace it.
-///
-/// **Wall clock, not `Instant`.** A `std::time::Instant` is monotonic and has no
-/// meaning outside the process that read it — it cannot be written down, and a
-/// token this adapter cannot write down is one that costs a full Auth0 login on
-/// every invocation (#54). A `Timestamp` is an instant anyone can agree on,
-/// which is what § II asks of every time this system stores.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Token {
-    access: String,
-    refresh: Option<String>,
-    expires_at: jiff::Timestamp,
-}
-
-impl Token {
-    pub const fn new(access: String, refresh: Option<String>, expires_at: jiff::Timestamp) -> Self {
-        Self {
-            access,
-            refresh,
-            expires_at,
-        }
-    }
-
-    pub fn access(&self) -> &str {
-        &self.access
-    }
-
-    pub fn refresh(&self) -> Option<&str> {
-        self.refresh.as_deref()
-    }
-
-    pub const fn expires_at(&self) -> jiff::Timestamp {
-        self.expires_at
-    }
-
-    /// Whether it is still good, with [`EXPIRY_MARGIN`] to spare.
-    ///
-    /// A clock that cannot add a minute to now is not a clock this can reason
-    /// about, so the answer there is "spent" — a needless login is a cost, and
-    /// using a token that may already be dead is a failed run.
-    #[must_use]
-    pub fn usable(&self) -> bool {
-        jiff::Timestamp::now()
-            .checked_add(EXPIRY_MARGIN)
-            .is_ok_and(|soon| soon < self.expires_at)
-    }
-}
-
 /// Holds a token, and gets a new one when it has to.
 ///
 /// **Constructing this does no I/O**, the same rule the Hevy adapter follows:
@@ -160,7 +107,7 @@ pub struct PelotonAuth {
     ///
     /// `None` is a composition that does not persist — the contract tests, and
     /// anything that would rather log in than write to a disk it does not own.
-    cache: Option<super::token::TokenFile>,
+    cache: Option<crate::token::TokenFile>,
     /// Held explicitly rather than left inside the client: the flow has to read
     /// the `_csrf` cookie back out, and a client's own jar is not readable.
     jar: Arc<Jar>,
@@ -197,7 +144,7 @@ impl PelotonAuth {
     /// had. Tolerable for a command run once a block; not for a sink that writes
     /// on every prescription (#54).
     #[must_use]
-    pub fn caching_in(mut self, cache: super::token::TokenFile) -> Self {
+    pub fn caching_in(mut self, cache: crate::token::TokenFile) -> Self {
         self.cache = Some(cache);
         self
     }
@@ -214,13 +161,13 @@ impl PelotonAuth {
         // already logged in does not read the file again.
         let held = self
             .cached()?
-            .or_else(|| self.cache.as_ref().and_then(super::token::TokenFile::read));
+            .or_else(|| self.cache.as_ref().and_then(crate::token::TokenFile::read));
 
         if let Some(token) = held {
             if token.usable() {
                 return Ok(self.store(token));
             }
-            if let Some(refresh) = token.refresh.clone() {
+            if let Some(refresh) = token.refresh().map(str::to_owned) {
                 // A refresh that fails is not fatal: the credentials are still
                 // in hand and a full login is the documented recovery.
                 if let Ok(fresh) = self.refresh(&refresh).await {
@@ -249,7 +196,7 @@ impl PelotonAuth {
     /// not be filed. § II calls this reconstructible state, and losing it costs
     /// a re-fetch rather than a fact.
     fn store(&self, token: Token) -> String {
-        let access = token.access.clone();
+        let access = token.access().to_owned();
         if let Some(cache) = &self.cache {
             // Ignored deliberately: see above. Nothing downstream can act on it.
             drop(cache.write(&token));

@@ -572,6 +572,7 @@ fn init_creates_the_store_and_states_the_zone() {
     // What is left to do is the part an operator cannot discover by succeeding.
     let report = stdout(&output);
     assert!(report.contains("HEVY_API_KEY"), "{report}");
+    assert!(report.contains("fitness credentials hevy"), "{report}");
     assert!(report.contains("programme add"), "{report}");
 }
 
@@ -839,4 +840,168 @@ fn a_stored_key_is_used_by_a_later_command() {
         "the stored key answered, so nothing asks for the variable: {message}"
     );
     assert_eq!(code(&output), 1, "{message}");
+}
+
+// --- Credentials, one source at a time ----------------------------------------
+
+/// **Adding a source is not a rerun of `init`.** The command names what it can
+/// connect to when given something it cannot.
+#[test]
+fn credentials_refuses_a_source_this_build_does_not_have() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["credentials", "strava"], home.path()).expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    let message = stderr(&output);
+    assert!(message.contains("hevy, peloton, withings"), "{message}");
+}
+
+/// A key piped to `fitness credentials hevy` is checked and stored, and
+/// nothing else is asked about.
+#[test]
+fn credentials_stores_one_sources_key_from_standard_input() {
+    use std::process::Stdio;
+
+    let home = TempDir::new().expect("a temporary home");
+    let mut child = Command::new(BINARY)
+        .env_remove("HEVY_API_KEY")
+        .env_remove("XDG_STATE_HOME")
+        .env("HOME", home.path())
+        .env(
+            "HEVY_API_BASE_URL",
+            accepting_source().expect("a listening source"),
+        )
+        .args(["credentials", "hevy", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().expect("a pipe");
+        stdin.write_all(b"a-new-key\n").expect("the key is piped");
+    }
+    let output = child.wait_with_output().expect("the binary finishes");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("checked and stored"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(!stdout(&output).contains("peloton"), "{}", stdout(&output));
+
+    let written = std::fs::read_to_string(
+        home.path()
+            .join(".local/state/fitness-tracker/credentials.json"),
+    )
+    .expect("the credentials file exists");
+    assert!(written.contains("a-new-key"), "{written}");
+}
+
+/// **Withings is granted at a browser**, so a pipe cannot finish it and nothing
+/// is stored.
+#[test]
+fn withings_credentials_are_not_taken_from_a_pipe() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = Command::new(BINARY)
+        .env_remove("WITHINGS_CLIENT_ID")
+        .env_remove("WITHINGS_CLIENT_SECRET")
+        .env_remove("WITHINGS_REDIRECT_URI")
+        .env_remove("XDG_STATE_HOME")
+        .env("HOME", home.path())
+        .args(["credentials", "withings", "--stdin"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(
+        !home
+            .path()
+            .join(".local/state/fitness-tracker/credentials.json")
+            .exists()
+    );
+}
+
+/// With no application, extraction names the command that adds one.
+#[test]
+fn extracting_withings_without_an_application_names_the_command() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = Command::new(BINARY)
+        .env_remove("WITHINGS_CLIENT_ID")
+        .env_remove("WITHINGS_CLIENT_SECRET")
+        .env_remove("WITHINGS_REDIRECT_URI")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env("HOME", home.path())
+        .args(["extract", "withings.measurements"])
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    let message = stderr(&output);
+    assert!(
+        message.contains("fitness credentials withings"),
+        "{message}"
+    );
+    assert!(message.contains("WITHINGS_CLIENT_SECRET"), "{message}");
+}
+
+/// **An application nobody has granted is not signed in**, and says so before
+/// any request is made.
+#[test]
+fn extracting_withings_before_signing_in_says_so() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = Command::new(BINARY)
+        .env("WITHINGS_CLIENT_ID", "an-id")
+        .env("WITHINGS_CLIENT_SECRET", "a-secret")
+        .env("WITHINGS_REDIRECT_URI", "https://example.test/back")
+        .env("WITHINGS_API_BASE_URL", "http://127.0.0.1:1")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env("HOME", home.path())
+        .args(["extract", "withings.measurements"])
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    let message = stderr(&output);
+    assert!(message.contains("not signed in"), "{message}");
+    assert!(message.contains("withings.token.json"), "{message}");
+}
+
+/// A stream that lands and derives nothing says so, rather than pretending to
+/// normalise.
+#[test]
+fn withings_has_nothing_to_normalise_yet() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(
+        &[
+            "normalise",
+            "withings.measurements",
+            "--timezone",
+            "Europe/London",
+        ],
+        home.path(),
+    )
+    .expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("nothing is derived from withings.measurements"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// `status` works for it with no credential at all.
+#[test]
+fn withings_status_needs_no_credential() {
+    let home = TempDir::new().expect("a temporary home");
+    let output = fitness_at_home(&["status", "withings.measurements"], home.path())
+        .expect("the binary runs");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
 }

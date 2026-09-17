@@ -146,6 +146,7 @@ fn command() -> ClapCommand {
                 .arg(timezone_argument().required(false)),
         )
         .subcommand(init_command())
+        .subcommand(credentials_command())
         .subcommand(discipline_command())
         .subcommand(cycling_command())
         .subcommand(plan_command())
@@ -322,10 +323,7 @@ fn init_command() -> ClapCommand {
             Arg::new("force")
                 .long("force")
                 .action(ArgAction::SetTrue)
-                .help(
-                    "State the time zone again when one is already in force. Credentials \
-                     are asked for either way",
-                ),
+                .help("State the time zone again when one is already in force"),
         )
         .arg(
             Arg::new("credential-stdin")
@@ -336,6 +334,40 @@ fn init_command() -> ClapCommand {
                      password manager — a key on one line, or an email and a password on \
                      two. There is no flag to pass it directly: a secret in argv lands in \
                      shell history and in `ps` output",
+                ),
+        )
+}
+
+/// Add or replace one source's credential.
+///
+/// **Its own command, not a rerun of `init`.** `init` prepares a machine once;
+/// a source connected later, or a key that changed, or a Withings grant that
+/// lapsed, is one source's business and should not walk the operator past every
+/// other one.
+fn credentials_command() -> ClapCommand {
+    ClapCommand::new("credentials")
+        .about("Add or replace one source's credential, checked before it is stored")
+        .arg(
+            Arg::new("source")
+                .required(true)
+                .value_name("source")
+                .help(format!(
+                    "Which source: {}",
+                    catalogue::SOURCES
+                        .iter()
+                        .map(catalogue::KnownSource::name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+        )
+        .arg(
+            Arg::new("stdin")
+                .long("stdin")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Read the credential from standard input, for piping from a password \
+                     manager — a key on one line, or an email and a password on two. Not \
+                     for Withings, which is granted at a browser",
                 ),
         )
 }
@@ -549,6 +581,7 @@ impl From<WiringError> for Failure {
             | WiringError::WrongCredential { .. } => Self::message(error.to_string(), exit::STORE),
             // A usage error, and the one of these the operator can act on: the
             // stream is real, the command is not one it answers to yet.
+            WiringError::Underived { .. } => Self::message(error.to_string(), exit::USAGE),
         }
     }
 }
@@ -711,6 +744,7 @@ async fn authored_command(
             output::prepared(&prepared);
             Some(Ok(()))
         }
+        "credentials" => Some(credentials_command_run(sub).await),
         "prescribe" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
@@ -1049,6 +1083,41 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     Ok(())
 }
 
+/// Take one source's credential, and say what became of it.
+async fn credentials_command_run(sub: &ArgMatches) -> Result<(), Failure> {
+    let name = sub
+        .get_one::<String>("source")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let Some(known) = catalogue::source(name) else {
+        return Err(Failure::message(
+            format!(
+                "unknown source {name:?}; this build connects to {}",
+                catalogue::SOURCES
+                    .iter()
+                    .map(catalogue::KnownSource::name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            exit::USAGE,
+        ));
+    };
+
+    let (path, outcome) = setup::credential(known, sub.get_flag("stdin")).await?;
+    output::credential(known.name(), &path, &outcome);
+    match outcome {
+        setup::CredentialOutcome::Refused(_) => Err(Failure::message(
+            format!("{name} did not accept it, and nothing was stored"),
+            exit::SOURCE,
+        )),
+        setup::CredentialOutcome::Outstanding => Err(Failure::message(
+            format!("nothing was taken for {name}"),
+            exit::USAGE,
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// A wiring failure, with the credential's origin named where that is the
 /// failure.
 ///
@@ -1155,6 +1224,21 @@ fn source_access(
                 std::env::var(source.email_variable()),
                 std::env::var(source.password_variable()),
                 credentials.credential(source.name()),
+            )?
+        }
+        Credential::OAuthClient {
+            default_auth_base_url,
+        } => {
+            let auth_base_url = std::env::var(source.auth_base_url_variable())
+                .unwrap_or_else(|_| default_auth_base_url.to_owned());
+            let token = paths::token(&paths::SystemEnvironment, source.name())
+                .map_err(ConfigError::from)?;
+            SourceAccess::resolve_oauth_client(
+                source,
+                (base_url, auth_base_url),
+                source.oauth_client_variables().map(std::env::var),
+                credentials.credential(source.name()),
+                token,
             )?
         }
     })
