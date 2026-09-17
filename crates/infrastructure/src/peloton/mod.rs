@@ -19,10 +19,10 @@ pub mod samples;
 pub mod sessions;
 pub mod skeleton;
 pub mod stack;
-pub mod token;
 pub mod translate;
 pub mod workouts;
 
+pub use crate::token::TokenFile;
 pub use account::{LandedRide, SessionAccount};
 pub use class::{ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from};
 pub use mapping::{
@@ -32,6 +32,5 @@ pub use samples::{PelotonWorkoutSamples, SamplePage};
 pub use sessions::group;
 pub use skeleton::{POWER_ZONE_TEST, Placement, Skeleton};
 pub use stack::{PelotonStack, Stacked, join_token};
-pub use token::TokenFile;
 pub use translate::PelotonSessionTranslator;
 pub use workouts::{PelotonWorkouts, WorkoutPage};

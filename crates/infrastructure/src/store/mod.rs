@@ -25,6 +25,7 @@ pub mod resumption;
 pub mod run_log;
 pub mod schedule;
 pub mod settings;
+pub mod withings_landing;
 
 use application::StoreError;
 use domain::{
@@ -53,6 +54,7 @@ pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
+pub use withings_landing::WithingsMeasurementLandingStore;
 
 /// Translate a store failure into the application's view of one.
 ///

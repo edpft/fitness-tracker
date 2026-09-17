@@ -13,6 +13,8 @@ pub mod peloton;
 pub mod private_file;
 pub mod scribe;
 pub mod store;
+pub mod token;
+pub mod withings;
 
 pub use credentials::{Credential, CredentialError, Credentials};
 pub use hevy::{
@@ -28,8 +30,11 @@ pub use store::{
     SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
     SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
     SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
+    WithingsMeasurementLandingStore, connect,
 };
+pub use token::{Token, TokenFile};
+pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements};
 
 /// The pool every store is built on, so a composition root can open one and
 /// hand it to several without depending on `sqlx` itself.

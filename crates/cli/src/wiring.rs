@@ -30,7 +30,8 @@ use infrastructure::{
     HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
     PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, connect,
+    SqliteNormalisationRunLog, SqliteRefusalStore, SqliteResumptionPointStore, TokenFile,
+    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements, connect,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -105,8 +106,15 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
-    #[error("{stream} is reached with a login, and {given} was resolved instead")]
-    WrongCredential { stream: String, given: &'static str },
+    #[error("{stream} is reached with {wanted}, and {given} was resolved instead")]
+    WrongCredential {
+        stream: String,
+        wanted: &'static str,
+        given: &'static str,
+    },
+    /// A stream that lands and has nothing derived from it yet.
+    #[error("nothing is derived from {stream} yet: it lands, and that is all")]
+    Underived { stream: String },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
 }
@@ -131,6 +139,7 @@ pub async fn run(
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
         PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
+        WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -259,7 +268,8 @@ async fn collect_rides(
     else {
         return Err(WiringError::WrongCredential {
             stream: PelotonRideLandingStore::STREAM.to_owned(),
-            given: "an API key",
+            wanted: "a login",
+            given: "something else",
         });
     };
 
@@ -293,6 +303,70 @@ async fn collect_rides(
     })
 }
 
+/// Withings' measure groups, landed and nothing more.
+///
+/// **Raw only, for now.** What a Body Scan weigh-in is gets read off these
+/// payloads (#117, #153), so there is no derivation to run, report or reset.
+async fn withings_measurements(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = WithingsMeasurementLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::Extract(access) => {
+            let SourceAccess::OAuthClient {
+                base_url,
+                auth_base_url,
+                client,
+                token,
+                ..
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: WithingsMeasurementLandingStore::STREAM.to_owned(),
+                    wanted: "an application",
+                    given: "something else",
+                });
+            };
+
+            let auth = WithingsAuth::new(
+                base_url.clone(),
+                auth_base_url,
+                WithingsClient::new(client.client_id, client.client_secret, client.redirect_uri),
+                TokenFile::new(token),
+            );
+            let extraction = Extraction::new(ExtractionPorts {
+                source: WithingsMeasurements::new(base_url, auth),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+
+            let summary = extraction.extract().await?;
+            Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::Underived {
+            stream: WithingsMeasurementLandingStore::STREAM.to_owned(),
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 /// Hevy's workout events feed, landed into the table shaped for it.
 async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
@@ -308,7 +382,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             else {
                 return Err(WiringError::WrongCredential {
                     stream: HevyWorkoutLandingStore::STREAM.to_owned(),
-                    given: "a login",
+                    wanted: "a key",
+                    given: "something else",
                 });
             };
 
@@ -385,7 +460,10 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 
 #[cfg(test)]
 mod tests {
-    use super::{HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore};
+    use super::{
+        HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+        WithingsMeasurementLandingStore,
+    };
     use crate::catalogue::{KNOWN, lookup};
 
     /// Every catalogue entry must be reachable, and must name the same stream
@@ -404,6 +482,7 @@ mod tests {
             HevyWorkoutLandingStore::STREAM,
             PelotonRideLandingStore::STREAM,
             PelotonRideSampleLandingStore::STREAM,
+            WithingsMeasurementLandingStore::STREAM,
         ];
 
         for known in &KNOWN {

@@ -49,8 +49,15 @@ pub fn run_succeeded(summary: &RunSummary) {
 
 /// Never having run is a fact to report, not an error to raise.
 pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
+    // As wide as the longest name this build can collect, so every stream's
+    // columns line up with the header's.
+    let width = crate::catalogue::KNOWN
+        .iter()
+        .map(|known| known.name().len())
+        .max()
+        .unwrap_or_default();
     println!(
-        "{:<16} {:<22} {:>11} {:>15} {:>13}",
+        "{:<width$} {:<22} {:>11} {:>15} {:>13}",
         "stream", "last succeeded", "events seen", "records landed", "records held"
     );
 
@@ -60,7 +67,7 @@ pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
     };
 
     println!(
-        "{:<16} {:<22} {:>11} {:>15} {:>13}",
+        "{:<width$} {:<22} {:>11} {:>15} {:>13}",
         standing.stream.to_string(),
         when,
         seen,
@@ -1117,6 +1124,48 @@ fn unexpressed(unexpressed: &[application::Unexpressed]) {
     }
 }
 
+/// What one source's credential came to.
+fn credential_said(outcome: &crate::setup::CredentialOutcome) -> String {
+    use crate::setup::CredentialOutcome;
+
+    match outcome {
+        // **Which of the two answered, said plainly.** A stored credential
+        // and an exported variable behave identically until one of them is
+        // wrong, and then the difference is the whole diagnosis.
+        CredentialOutcome::Stored => "connected — checked and stored".to_owned(),
+        CredentialOutcome::InEnvironment => "connected — from the environment".to_owned(),
+        CredentialOutcome::AlreadyStored => "connected — stored earlier".to_owned(),
+        CredentialOutcome::Outstanding => "not connected".to_owned(),
+        CredentialOutcome::Refused(detail) => {
+            format!("not connected — the source would not have it: {detail}")
+        }
+    }
+}
+
+/// What `fitness credentials <source>` did.
+pub fn credential(source: &str, path: &std::path::Path, outcome: &crate::setup::CredentialOutcome) {
+    println!("{source:<9} {}", credential_said(outcome));
+    if *outcome == crate::setup::CredentialOutcome::Stored {
+        println!("          kept in {}", path.display());
+    }
+    if let Some(known) = crate::catalogue::source(source)
+        && matches!(
+            outcome,
+            crate::setup::CredentialOutcome::Outstanding
+                | crate::setup::CredentialOutcome::Refused(_)
+        )
+    {
+        // Every variable this source needs, not just a key: a login has two
+        // and an application three, and naming one would read as the whole
+        // answer.
+        println!(
+            "          or set {} — credentials come from {}",
+            known.required_variables().join(", "),
+            known.credential_url()
+        );
+    }
+}
+
 /// What `init` made, and what is left to do.
 ///
 /// **The remaining steps are the point.** A setup command that says only
@@ -1145,20 +1194,7 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     // mandatory.
     println!("sources:");
     for (source, outcome) in &prepared.credentials {
-        let said = match outcome {
-            // **Which of the two answered, said plainly.** A stored credential
-            // and an exported variable behave identically until one of them is
-            // wrong, and then the difference is the whole diagnosis.
-            CredentialOutcome::Stored => "connected — checked and stored".to_owned(),
-            CredentialOutcome::InEnvironment => "connected — from the environment".to_owned(),
-            CredentialOutcome::Outstanding => {
-                "not connected — needed to read workouts and deliver sessions".to_owned()
-            }
-            CredentialOutcome::Refused(detail) => {
-                format!("not connected — the source would not have it: {detail}")
-            }
-        };
-        println!("  {source:<9} {said}");
+        println!("  {source:<9} {}", credential_said(outcome));
     }
 
     for (source, outcome) in &prepared.credentials {
@@ -1168,11 +1204,12 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
         ) && let Some(known) = crate::catalogue::source(source)
         {
             // Every variable this source needs, not just a key: a login has
-            // two, and naming one of them would read as the whole answer.
+            // two and an application three, and naming one of them would read
+            // as the whole answer.
             println!(
-                "            connect it later with `fitness init`, or set {} — \
+                "            connect it later with `fitness credentials {source}`, or set {} — \
                  credentials come from {}",
-                known.required_variables().join(" and "),
+                known.required_variables().join(", "),
                 known.credential_url()
             );
         }

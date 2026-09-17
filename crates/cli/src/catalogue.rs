@@ -69,6 +69,17 @@ pub enum Credential {
         /// the contract tests point it at a stub.
         default_auth_base_url: &'static str,
     },
+    /// An application the operator registered with the source, which a person
+    /// then grants access to at a browser. `WITHINGS_CLIENT_ID`,
+    /// `WITHINGS_CLIENT_SECRET`, `WITHINGS_REDIRECT_URI`.
+    ///
+    /// What the grant obtains is a token, kept apart from the application for
+    /// the reason Peloton's is: a flow derived it and nobody supplies it.
+    OAuthClient {
+        /// Where the browser is sent. Withings' is the account host, not the
+        /// API host.
+        default_auth_base_url: &'static str,
+    },
 }
 
 impl KnownSource {
@@ -111,6 +122,16 @@ impl KnownSource {
         self.variable("AUTH_BASE_URL")
     }
 
+    /// The application's id, its secret, and where it sends the browser back
+    /// to, in that order.
+    pub fn oauth_client_variables(&self) -> [String; 3] {
+        [
+            self.variable("CLIENT_ID"),
+            self.variable("CLIENT_SECRET"),
+            self.variable("REDIRECT_URI"),
+        ]
+    }
+
     /// Every variable this source needs set, in the order an operator would
     /// set them. What `init` reports and what a missing-credential error lists.
     pub fn required_variables(&self) -> Vec<String> {
@@ -119,6 +140,7 @@ impl KnownSource {
             Credential::EmailPassword { .. } => {
                 vec![self.email_variable(), self.password_variable()]
             }
+            Credential::OAuthClient { .. } => self.oauth_client_variables().to_vec(),
         }
     }
 
@@ -172,7 +194,7 @@ impl KnownStream {
 const SEPARATOR: char = domain::landing::STREAM_SEPARATOR;
 
 /// Every system this build can talk to.
-pub const SOURCES: [KnownSource; 2] = [
+pub const SOURCES: [KnownSource; 3] = [
     KnownSource {
         name: "hevy",
         default_base_url: "https://api.hevyapp.com",
@@ -185,6 +207,14 @@ pub const SOURCES: [KnownSource; 2] = [
         credential_url: "https://members.onepeloton.com",
         credential: Credential::EmailPassword {
             default_auth_base_url: "https://auth.onepeloton.com",
+        },
+    },
+    KnownSource {
+        name: "withings",
+        default_base_url: "https://wbsapi.withings.net",
+        credential_url: "https://developer.withings.com/dashboard/",
+        credential: Credential::OAuthClient {
+            default_auth_base_url: "https://account.withings.com",
         },
     },
 ];
@@ -207,7 +237,10 @@ pub const SOURCES: [KnownSource; 2] = [
 /// correction: *"workouts was right for Hevy but it isn't the right term for
 /// Peloton and `workout_samples` is the thing that proves it, their name suffixed
 /// to ours"*. One Hevy record is a workout; one Peloton record is a ride.
-pub const KNOWN: [KnownStream; 2] = [
+///
+/// **Withings serves measurements**, which is ours and not Withings' word
+/// (`getmeas`, `measuregrps`): one record is what one reading produced.
+pub const KNOWN: [KnownStream; 3] = [
     KnownStream {
         source: &SOURCES[0],
         entity: "workouts",
@@ -215,6 +248,10 @@ pub const KNOWN: [KnownStream; 2] = [
     KnownStream {
         source: &SOURCES[1],
         entity: "rides",
+    },
+    KnownStream {
+        source: &SOURCES[2],
+        entity: "measurements",
     },
 ];
 
@@ -388,6 +425,38 @@ mod tests {
         let hevy = source("hevy").expect("hevy is a known source");
         assert_eq!(hevy.required_variables(), vec!["HEVY_API_KEY".to_owned()]);
         assert_eq!(hevy.credential(), Credential::ApiKey);
+    }
+
+    /// The third kind, and the three variables it derives.
+    #[test]
+    fn an_application_source_names_all_three_of_its_variables() {
+        let withings = source("withings").expect("withings is a known source");
+        assert_eq!(
+            withings.required_variables(),
+            vec![
+                "WITHINGS_CLIENT_ID".to_owned(),
+                "WITHINGS_CLIENT_SECRET".to_owned(),
+                "WITHINGS_REDIRECT_URI".to_owned(),
+            ]
+        );
+        assert_eq!(withings.auth_base_url_variable(), "WITHINGS_AUTH_BASE_URL");
+        assert_eq!(withings.base_url_variable(), "WITHINGS_API_BASE_URL");
+        assert!(lookup("withings.measurements").is_some());
+    }
+
+    /// **Two hosts, both bare, and not the same one.** Withings grants access
+    /// on its account host and serves data on its API host; a stub serving both
+    /// would never notice them swapped.
+    #[test]
+    fn withings_roots_are_the_documented_hosts() {
+        let withings = source("withings").expect("withings is a known source");
+        assert_eq!(withings.default_base_url(), "https://wbsapi.withings.net");
+        assert_eq!(
+            withings.credential(),
+            Credential::OAuthClient {
+                default_auth_base_url: "https://account.withings.com"
+            }
+        );
     }
 
     /// **Both roots are bare.** The auth root is a second base URL and gets the

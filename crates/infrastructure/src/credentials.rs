@@ -7,9 +7,10 @@
 //! beside that token for the same reason — persists between runs, nobody edits
 //! it, losing it costs a login rather than a fact.
 //!
-//! **Two shapes, because there are two kinds of credential.** They are not
-//! invented here — they are the ones `cli::catalogue` already declares, so a
-//! third source is an entry in the catalogue and nothing in this module.
+//! **One shape per kind of credential** — a key, a login, an application. They
+//! are not invented here — they are the ones `cli::catalogue` already declares,
+//! so another source of an existing kind is an entry in the catalogue and
+//! nothing in this module.
 //!
 //! Keyed by source name rather than by variable name: `hevy`, not
 //! `HEVY_API_KEY`. The variable is how the environment spells it, which is the
@@ -34,14 +35,27 @@ pub enum CredentialError {
 
 /// One source's credential, as it is written down.
 ///
-/// **Tagged, so the two shapes cannot be confused for one another.** An untagged
+/// **Tagged, so the shapes cannot be confused for one another.** An untagged
 /// union would read a login missing its password as an API key and fail much
 /// later, at the source, with a message about authorisation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Credential {
-    ApiKey { key: String },
-    Login { email: String, password: String },
+    ApiKey {
+        key: String,
+    },
+    Login {
+        email: String,
+        password: String,
+    },
+    /// A registered OAuth application. What it obtains — the token — is kept
+    /// apart, in the source's token file, because a flow derived it.
+    #[serde(rename = "oauth_client")]
+    OAuthClient {
+        client_id: String,
+        client_secret: String,
+        redirect_uri: String,
+    },
 }
 
 impl Credential {
@@ -55,6 +69,13 @@ impl Credential {
             Self::Login { email, password } => {
                 !email.trim().is_empty() && !password.trim().is_empty()
             }
+            Self::OAuthClient {
+                client_id,
+                client_secret,
+                redirect_uri,
+            } => [client_id, client_secret, redirect_uri]
+                .iter()
+                .all(|value| !value.trim().is_empty()),
         }
     }
 }
@@ -183,6 +204,45 @@ mod tests {
                 email: "someone@example.test".to_owned(),
                 password: "a-password".to_owned(),
             })
+        );
+    }
+
+    /// The third kind, and the name it is written under.
+    #[test]
+    fn an_oauth_client_survives_a_round_trip() {
+        let directory = match tempfile::tempdir() {
+            Ok(directory) => directory,
+            Err(error) => panic!("a temporary directory: {error}"),
+        };
+        let path = directory.path().join("credentials.json");
+        let client = Credential::OAuthClient {
+            client_id: "an-id".to_owned(),
+            client_secret: "a-secret".to_owned(),
+            redirect_uri: "https://example.test/back".to_owned(),
+        };
+
+        let mut credentials = Credentials::default();
+        credentials.set("withings", client.clone());
+        credentials.write(&path).expect("the file writes");
+
+        let written = std::fs::read_to_string(&path).expect("the file reads");
+        assert!(written.contains("\"kind\": \"oauth_client\""), "{written}");
+        let read = Credentials::read(&path).expect("the file reads");
+        assert_eq!(read.credential("withings"), Some(&client));
+
+        let mut blank = Credentials::default();
+        blank.set(
+            "withings",
+            Credential::OAuthClient {
+                client_id: "an-id".to_owned(),
+                client_secret: " ".to_owned(),
+                redirect_uri: "https://example.test/back".to_owned(),
+            },
+        );
+        assert_eq!(
+            blank.credential("withings"),
+            None,
+            "a blank secret is absent"
         );
     }
 

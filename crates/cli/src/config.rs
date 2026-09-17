@@ -15,7 +15,7 @@ use crate::catalogue::KnownSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
-    /// **`init` first, the variables second.** The stored credential is the way
+    /// **The command first, the variables second.** The stored credential is the way
     /// this tool is meant to be used, and the environment is the override — so
     /// the message leads with the one that fixes the machine rather than the one
     /// that fixes the shell. It named an untracked `.env` until #61, which
@@ -23,7 +23,8 @@ pub enum ConfigError {
     /// the checkout, which is the one place an operator running the installed
     /// binary is not.
     #[error(
-        "no {source_name} credential. Run `fitness init` to store one, or set {variables}. \
+        "no {source_name} credential. Run `fitness credentials {source_name}` to store one, or \
+         set {variables}. \
          Get one from {credential_url} — never on the command line"
     )]
     MissingCredential {
@@ -38,12 +39,23 @@ pub enum ConfigError {
     #[error(
         "the stored {source_name} credential is {held}, and {source_name} authenticates with \
          {wanted}. \
-         Run `fitness init` to replace it"
+         Run `fitness credentials {source_name}` to replace it"
     )]
     WrongCredentialKind {
         source_name: &'static str,
         held: &'static str,
         wanted: &'static str,
+    },
+
+    /// Withings' credential is an application, and an application is not yet
+    /// access: somebody has to grant it once, at a browser.
+    #[error(
+        "not signed in to {source_name}: the application is known but no token is kept at \
+         {token}. Run `fitness credentials {source_name}` to sign in"
+    )]
+    NotSignedIn {
+        source_name: &'static str,
+        token: String,
     },
 
     #[error("{variable} is set but is not valid text")]
@@ -144,6 +156,29 @@ pub enum SourceAccess {
         password: String,
         origin: Origin,
     },
+    OAuthClient {
+        base_url: String,
+        auth_base_url: String,
+        client: OAuthClient,
+        /// Where the token this application was granted is kept.
+        token: std::path::PathBuf,
+        origin: Origin,
+    },
+}
+
+/// A registered OAuth application, as the dashboard issued it.
+#[derive(Clone)]
+pub struct OAuthClient {
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_uri: String,
+}
+
+/// Deliberately opaque. A secret that can be printed gets printed.
+impl std::fmt::Debug for OAuthClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("OAuthClient(<redacted>)")
+    }
 }
 
 /// Which of the two answered.
@@ -173,7 +208,9 @@ impl SourceAccess {
     /// Which of the file and the environment supplied this.
     pub const fn origin(&self) -> &Origin {
         match self {
-            Self::ApiKey { origin, .. } | Self::EmailPassword { origin, .. } => origin,
+            Self::ApiKey { origin, .. }
+            | Self::EmailPassword { origin, .. }
+            | Self::OAuthClient { origin, .. } => origin,
         }
     }
 }
@@ -220,6 +257,13 @@ impl SourceAccess {
                 Err(ConfigError::WrongCredentialKind {
                     source_name: known.name(),
                     held: "a login",
+                    wanted: "a key",
+                })
+            }
+            Some(infrastructure::Credential::OAuthClient { .. }) => {
+                Err(ConfigError::WrongCredentialKind {
+                    source_name: known.name(),
+                    held: "an application",
                     wanted: "a key",
                 })
             }
@@ -281,8 +325,104 @@ impl SourceAccess {
                     wanted: "a login",
                 })
             }
+            Some(infrastructure::Credential::OAuthClient { .. }) => {
+                Err(ConfigError::WrongCredentialKind {
+                    source_name: known.name(),
+                    held: "an application",
+                    wanted: "a login",
+                })
+            }
             _ => Err(missing(known)),
         }
+    }
+
+    /// Resolve a source reached through an OAuth application.
+    ///
+    /// **All three from one place**, for the reason a login's two halves are:
+    /// an id from the shell paired with a stored secret is an application
+    /// nobody registered.
+    ///
+    /// **And a token, or it is not access.** The token is checked for here,
+    /// before a run begins, so an application that was never granted says so
+    /// rather than failing as a rejected credential.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError`] if neither states an application, the stored one is
+    /// another kind, or no token is kept.
+    pub fn resolve_oauth_client(
+        known: &KnownSource,
+        bases: (String, String),
+        variables: [Result<String, VarError>; 3],
+        stored: Option<&infrastructure::Credential>,
+        token: std::path::PathBuf,
+    ) -> Result<Self, ConfigError> {
+        let (base_url, auth_base_url) = bases;
+        let names = known.oauth_client_variables();
+        let [id, secret, redirect] = variables;
+        let from_env = (
+            from_environment(id, &names[0])?,
+            from_environment(secret, &names[1])?,
+            from_environment(redirect, &names[2])?,
+        );
+
+        let (client, origin) = match (from_env, stored) {
+            ((Some(client_id), Some(client_secret), Some(redirect_uri)), _) => (
+                OAuthClient {
+                    client_id,
+                    client_secret,
+                    redirect_uri,
+                },
+                Origin::Environment(names.join(", ")),
+            ),
+            (
+                _,
+                Some(
+                    credential @ infrastructure::Credential::OAuthClient {
+                        client_id,
+                        client_secret,
+                        redirect_uri,
+                    },
+                ),
+            ) if credential.is_stated() => (
+                OAuthClient {
+                    client_id: client_id.clone(),
+                    client_secret: client_secret.clone(),
+                    redirect_uri: redirect_uri.clone(),
+                },
+                Origin::Stored,
+            ),
+            (_, Some(infrastructure::Credential::ApiKey { .. })) => {
+                return Err(ConfigError::WrongCredentialKind {
+                    source_name: known.name(),
+                    held: "a key",
+                    wanted: "an application",
+                });
+            }
+            (_, Some(infrastructure::Credential::Login { .. })) => {
+                return Err(ConfigError::WrongCredentialKind {
+                    source_name: known.name(),
+                    held: "a login",
+                    wanted: "an application",
+                });
+            }
+            _ => return Err(missing(known)),
+        };
+
+        if !token.is_file() {
+            return Err(ConfigError::NotSignedIn {
+                source_name: known.name(),
+                token: token.display().to_string(),
+            });
+        }
+
+        Ok(Self::OAuthClient {
+            base_url,
+            auth_base_url,
+            client,
+            token,
+            origin,
+        })
     }
 }
 
@@ -351,6 +491,7 @@ mod tests {
         match access {
             SourceAccess::ApiKey { api_key, .. } => api_key,
             SourceAccess::EmailPassword { .. } => "<a login, not a key>",
+            SourceAccess::OAuthClient { .. } => "<an application, not a key>",
         }
     }
 
@@ -380,7 +521,7 @@ mod tests {
         );
         let message = refused.expect_err("nothing states a key").to_string();
 
-        assert!(message.contains("fitness init"), "{message}");
+        assert!(message.contains("fitness credentials hevy"), "{message}");
         assert!(message.contains("HEVY_API_KEY"), "{message}");
         assert!(message.contains("hevy.com/settings"), "{message}");
         assert!(message.contains("never on the command line"), "{message}");
@@ -463,7 +604,7 @@ mod tests {
                 assert_eq!(email, "someone@example.test");
                 assert_eq!(origin, Origin::Stored);
             }
-            other @ SourceAccess::ApiKey { .. } => panic!("a login resolved as {other:?}"),
+            other => panic!("a login resolved as {other:?}"),
         }
     }
 
@@ -487,8 +628,146 @@ mod tests {
                 assert_eq!(email, "someone@example.test");
                 assert_eq!(origin, Origin::Stored);
             }
-            other @ SourceAccess::ApiKey { .. } => panic!("a login resolved as {other:?}"),
+            other => panic!("a login resolved as {other:?}"),
         }
+    }
+
+    fn withings() -> Option<&'static KnownSource> {
+        source("withings")
+    }
+
+    fn application(secret: &str) -> Credential {
+        Credential::OAuthClient {
+            client_id: "an-id".to_owned(),
+            client_secret: secret.to_owned(),
+            redirect_uri: "https://example.test/back".to_owned(),
+        }
+    }
+
+    fn unset() -> [Result<String, VarError>; 3] {
+        [
+            Err(VarError::NotPresent),
+            Err(VarError::NotPresent),
+            Err(VarError::NotPresent),
+        ]
+    }
+
+    fn bases() -> (String, String) {
+        (
+            "https://api.example.test".to_owned(),
+            "https://account.example.test".to_owned(),
+        )
+    }
+
+    /// A stored application with a kept token is access.
+    #[test]
+    fn a_granted_application_resolves() {
+        let known = withings().expect("withings is a known source");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let token = directory.path().join("withings.token.json");
+        std::fs::write(&token, "{}").expect("a token file");
+
+        let resolved = SourceAccess::resolve_oauth_client(
+            known,
+            bases(),
+            unset(),
+            Some(&application("a-secret")),
+            token.clone(),
+        )
+        .expect("the file answers");
+
+        match resolved {
+            SourceAccess::OAuthClient {
+                client,
+                token: kept,
+                origin,
+                ..
+            } => {
+                assert_eq!(client.client_secret, "a-secret");
+                assert_eq!(kept, token);
+                assert_eq!(origin, Origin::Stored);
+            }
+            other => panic!("an application resolved as {other:?}"),
+        }
+    }
+
+    /// **An application nobody granted is not access**, and says so before a
+    /// run begins rather than failing as a rejected credential.
+    #[test]
+    fn an_application_without_a_token_is_not_signed_in() {
+        let known = withings().expect("withings is a known source");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+
+        let refused = SourceAccess::resolve_oauth_client(
+            known,
+            bases(),
+            unset(),
+            Some(&application("a-secret")),
+            directory.path().join("withings.token.json"),
+        );
+        assert!(
+            matches!(refused, Err(ConfigError::NotSignedIn { .. })),
+            "{refused:?}"
+        );
+    }
+
+    /// Two of three variables do not borrow the third from the file.
+    #[test]
+    fn part_of_an_application_in_the_environment_is_not_an_override() {
+        let known = withings().expect("withings is a known source");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let token = directory.path().join("withings.token.json");
+        std::fs::write(&token, "{}").expect("a token file");
+
+        let resolved = SourceAccess::resolve_oauth_client(
+            known,
+            bases(),
+            [
+                Ok("another-id".to_owned()),
+                Ok("another-secret".to_owned()),
+                Err(VarError::NotPresent),
+            ],
+            Some(&application("a-secret")),
+            token,
+        )
+        .expect("the file answers whole");
+
+        match resolved {
+            SourceAccess::OAuthClient { client, origin, .. } => {
+                assert_eq!(client.client_id, "an-id");
+                assert_eq!(origin, Origin::Stored);
+            }
+            other => panic!("an application resolved as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nothing_stated_names_all_three_variables() {
+        let known = withings().expect("withings is a known source");
+        let refused = SourceAccess::resolve_oauth_client(
+            known,
+            bases(),
+            unset(),
+            Some(&key("a-key")),
+            "/nowhere/withings.token.json".into(),
+        );
+        assert!(
+            matches!(refused, Err(ConfigError::WrongCredentialKind { .. })),
+            "{refused:?}"
+        );
+
+        let Err(missing) =
+            SourceAccess::resolve_oauth_client(known, bases(), unset(), None, "/nowhere".into())
+        else {
+            panic!("nothing stated resolved");
+        };
+        let message = missing.to_string();
+        assert!(
+            message.contains("WITHINGS_CLIENT_ID")
+                && message.contains("WITHINGS_CLIENT_SECRET")
+                && message.contains("WITHINGS_REDIRECT_URI"),
+            "{message}"
+        );
     }
 
     /// The same ordering for the zone, plus the case that reports rather than
