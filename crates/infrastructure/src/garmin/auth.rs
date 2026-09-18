@@ -199,7 +199,7 @@ impl GarminAuth {
     /// For a stub, which is not behind Cloudflare and has nothing to be
     /// suspicious of. A live run that calls this is asking to be blocked.
     #[must_use]
-    pub fn without_pause(mut self) -> Self {
+    pub const fn without_pause(mut self) -> Self {
         self.pause = false;
         self
     }
@@ -493,7 +493,7 @@ fn basic_auth(client_id: &str) -> String {
 ///
 /// Every one of these names the embed page. Garmin issues the ticket for
 /// `service`, and the widget refuses to render embedded without the rest.
-fn signin_query(embed: &str) -> [(&'static str, &str); 7] {
+const fn signin_query(embed: &str) -> [(&'static str, &str); 7] {
     [
         ("id", WIDGET_ID),
         ("embedWidget", "true"),
