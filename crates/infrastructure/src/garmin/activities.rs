@@ -29,6 +29,8 @@
 //! movement is marked as one — is settled by reading payloads that have landed,
 //! the way the HRV entity was. If they are a second endpoint, that is a second
 //! walk behind this same entry, as Peloton's graphs are behind its rides.
+//! They are: the list summarises a gym session per movement rather than per
+//! set, and [`super::exercise_sets`] is that second walk (#173).
 
 use std::{sync::OnceLock, time::Duration};
 
@@ -153,7 +155,7 @@ impl Identity {
 /// Falls back to the payload's own digest when the bytes will not parse or will
 /// not re-serialise, which is the safe direction: an unreadable payload compares
 /// on everything and so lands again rather than being wrongly judged unchanged.
-fn revision_of(payload: &RawPayload) -> PayloadDigest {
+pub(super) fn revision_of(payload: &RawPayload) -> PayloadDigest {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload.as_bytes()) else {
         return payload.digest();
     };
@@ -213,22 +215,39 @@ impl GarminActivities {
 
     /// One page of the list, as served.
     async fn page(&self, start: u32) -> Result<String, SourceError> {
+        self.get(
+            ACTIVITIES_PATH,
+            &[
+                ("start", start.to_string()),
+                ("limit", PAGE_SIZE.to_string()),
+            ],
+        )
+        .await
+    }
+
+    /// One answer from the API, as served.
+    ///
+    /// Visible to the Garmin adapter so [`super::exercise_sets`] asks through
+    /// the same client, credential and error mapping rather than a second copy
+    /// of them, as Peloton's graphs do through its workout list.
+    pub(super) async fn get(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<String, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
             .client()?
-            .get(format!("{}{ACTIVITIES_PATH}", self.api_base))
+            .get(format!("{}{path}", self.api_base))
             .bearer_auth(bearer)
-            .query(&[
-                ("start", start.to_string()),
-                ("limit", PAGE_SIZE.to_string()),
-            ])
+            .query(query)
             .send()
             .await
             .map_err(|error| SourceError::Unavailable {
                 detail: error.to_string(),
             })?;
 
-        super::answer(response, ACTIVITIES_PATH).await
+        super::answer(response, path).await
     }
 }
 
