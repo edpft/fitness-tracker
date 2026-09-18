@@ -1,10 +1,12 @@
 //! Signing in to Garmin Connect, and staying signed in.
 //!
 //! **The SSO embed widget, because both API front doors are shut.** Garmin's
-//! Connect Developer Program serves HRV through its Health API but is not
-//! accepting new applications, so this adapter reaches Connect the way a
-//! browser does. That is the same standing risk already taken on Peloton: an
-//! unofficial surface can change without notice.
+//! Connect Developer Program serves HRV through its Health API but is, in its
+//! own FAQ's words, "available for enterprise use" — applications are open, and
+//! one person wanting their own data is not who they are open to. So this
+//! adapter reaches Connect the way a browser does, which is the same standing
+//! risk already taken on Peloton: an unofficial surface can change without
+//! notice.
 //!
 //! The phone app's JSON endpoint still exists — `sso.garmin.com/mobile/api/login`
 //! — but has answered 429 from Cloudflare since March 2026 regardless of who is
