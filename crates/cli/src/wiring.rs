@@ -483,8 +483,10 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
 /// after it means what they ask for is for activities this same command has
 /// just listed.
 ///
-/// A `GarminAuth` per walk, as Peloton's two walks have one each: none holds
-/// another's state, and a further sign-in costs one request.
+/// **One `GarminAuth`, shared**, unlike Peloton's two: Garmin rate-limits its
+/// sign-in page, and a run that signed in once per walk was refused by it on
+/// the operator's account. The token is held behind a lock, so the walks share
+/// it without sharing anything else.
 async fn collect_activities(
     access: SourceAccess,
     (landing, sets_landing, files_landing): (
@@ -513,17 +515,15 @@ async fn collect_activities(
 
     let credentials = GarminCredentials::new(email, password);
     let token_base = garmin::token_base_for(&auth_base_url);
-    let auth = || {
-        GarminAuth::new(
-            auth_base_url.clone(),
-            token_base.clone(),
-            credentials.clone(),
-            None,
-        )
-    };
+    let auth = std::sync::Arc::new(GarminAuth::new(
+        auth_base_url.clone(),
+        token_base,
+        credentials,
+        None,
+    ));
 
     let listed = Extraction::new(ExtractionPorts {
-        source: garmin::GarminActivities::new(base_url.clone(), auth()),
+        source: garmin::GarminActivities::new(base_url.clone(), std::sync::Arc::clone(&auth)),
         landing,
         resumption: resumption.clone(),
         runs: runs.clone(),
@@ -534,7 +534,7 @@ async fn collect_activities(
     .await?;
 
     let sets = Extraction::new(ExtractionPorts {
-        source: garmin::GarminExerciseSets::new(base_url.clone(), auth()),
+        source: garmin::GarminExerciseSets::new(base_url.clone(), std::sync::Arc::clone(&auth)),
         landing: sets_landing,
         resumption: resumption.clone(),
         runs: runs.clone(),
@@ -545,7 +545,7 @@ async fn collect_activities(
     .await?;
 
     let recordings = Extraction::new(ExtractionPorts {
-        source: garmin::GarminActivityFiles::new(base_url, auth()),
+        source: garmin::GarminActivityFiles::new(base_url, auth),
         landing: files_landing,
         resumption,
         runs,

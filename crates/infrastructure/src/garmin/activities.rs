@@ -32,7 +32,10 @@
 //! They are: the list summarises a gym session per movement rather than per
 //! set, and [`super::exercise_sets`] is that second walk (#173).
 
-use std::{sync::OnceLock, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
@@ -189,15 +192,18 @@ fn parse_garmin_datetime(stated: &str) -> Option<Timestamp> {
 /// Garmin's activities.
 #[derive(Debug)]
 pub struct GarminActivities {
-    auth: GarminAuth,
+    /// Shared with the other walks behind this entry, so that one run signs in
+    /// once: Garmin rate-limits its sign-in page, and three walks each signing
+    /// in for themselves is what first ran into it.
+    auth: Arc<GarminAuth>,
     api_base: String,
     client: OnceLock<Result<reqwest::Client, String>>,
 }
 
 impl GarminActivities {
-    pub fn new(api_base: impl Into<String>, auth: GarminAuth) -> Self {
+    pub fn new(api_base: impl Into<String>, auth: impl Into<Arc<GarminAuth>>) -> Self {
         Self {
-            auth,
+            auth: auth.into(),
             api_base: api_base.into().trim_end_matches('/').to_owned(),
             client: OnceLock::new(),
         }

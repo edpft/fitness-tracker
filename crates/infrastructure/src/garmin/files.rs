@@ -19,7 +19,7 @@
 //! **A file older than the resumption point is not fetched.** A finished
 //! activity's recording is what the watch wrote.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, RawPayload, Watermark};
@@ -53,7 +53,7 @@ pub struct GarminActivityFiles {
 }
 
 impl GarminActivityFiles {
-    pub fn new(api_base: impl Into<String>, auth: GarminAuth) -> Self {
+    pub fn new(api_base: impl Into<String>, auth: impl Into<Arc<GarminAuth>>) -> Self {
         Self {
             activities: GarminActivities::new(api_base, auth),
         }

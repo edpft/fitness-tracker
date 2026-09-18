@@ -27,7 +27,7 @@
 //! after it, and the boundary again because the port defines `since` as
 //! inclusive.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, RawPayload, Watermark};
@@ -82,7 +82,7 @@ pub struct GarminExerciseSets {
 }
 
 impl GarminExerciseSets {
-    pub fn new(api_base: impl Into<String>, auth: GarminAuth) -> Self {
+    pub fn new(api_base: impl Into<String>, auth: impl Into<Arc<GarminAuth>>) -> Self {
         Self {
             activities: GarminActivities::new(api_base, auth),
         }
