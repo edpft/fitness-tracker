@@ -8,6 +8,7 @@
 
 pub mod cycling_mesocycle;
 pub mod delivery;
+pub mod garmin_activity_file_landing;
 pub mod garmin_activity_landing;
 pub mod garmin_exercise_set_landing;
 pub mod garmin_landing;
@@ -40,6 +41,7 @@ use domain::{
 
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
+pub use garmin_activity_file_landing::GarminActivityFileLandingStore;
 pub use garmin_activity_landing::GarminActivityLandingStore;
 pub use garmin_exercise_set_landing::GarminExerciseSetLandingStore;
 pub use garmin_landing::GarminHrvLandingStore;

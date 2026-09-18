@@ -1268,9 +1268,10 @@ fn source_access(
 fn report(stream: &LandingStream, outcome: Outcome) {
     match outcome {
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
-        Outcome::ExtractedBoth { first, second } => {
-            output::run_succeeded(&first);
-            output::run_succeeded(&second);
+        Outcome::ExtractedEach(summaries) => {
+            for summary in &summaries {
+                output::run_succeeded(summary);
+            }
         }
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         Outcome::Refused(report) => output::refusals(stream, &report),

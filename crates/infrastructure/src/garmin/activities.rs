@@ -67,6 +67,12 @@ const PAGE_SIZE: u32 = 50;
 /// [`super::hrv`].
 const BETWEEN_PAGES: Duration = Duration::from_millis(250);
 
+/// How many times a request the server fails is asked, in all.
+const ATTEMPTS: u32 = 4;
+
+/// How long to wait before the first retry. Doubled for each one after.
+const FIRST_RETRY_AFTER: Duration = Duration::from_secs(2);
+
 /// Where a walk has got to: the offset of the next page.
 ///
 /// **An offset rather than a page number**, because that is what this source
@@ -235,9 +241,49 @@ impl GarminActivities {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<String, SourceError> {
+        super::answer(self.send(path, query).await?, path).await
+    }
+
+    /// One answer from the API, as the bytes served — for [`super::files`],
+    /// whose answer is an archive rather than text.
+    pub(super) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, SourceError> {
+        super::answer_bytes(self.send(path, &[]).await?, path).await
+    }
+
+    /// One request, asked again if the server fails it.
+    ///
+    /// **A 5xx is retried; nothing else is.** A walk of every activity's file
+    /// is two thousand requests and half an hour, and the first run against the
+    /// operator's account died nineteen minutes in on a single 504 — with no
+    /// resumption point, because one is only recorded when a run succeeds, so
+    /// the next run starts again from the top. A gateway timeout says nothing
+    /// about the request, so asking again is the whole remedy. A 429 is not
+    /// retried: that is the source asking us to stop, and [`super::answer`]
+    /// says so.
+    async fn send(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<reqwest::Response, SourceError> {
+        let mut wait = FIRST_RETRY_AFTER;
+        for _ in 1..ATTEMPTS {
+            let response = self.send_once(path, query).await?;
+            if !response.status().is_server_error() {
+                return Ok(response);
+            }
+            tokio::time::sleep(wait).await;
+            wait = wait.saturating_mul(2);
+        }
+        self.send_once(path, query).await
+    }
+
+    async fn send_once(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<reqwest::Response, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
-            .client()?
+        self.client()?
             .get(format!("{}{path}", self.api_base))
             .bearer_auth(bearer)
             .query(query)
@@ -245,9 +291,7 @@ impl GarminActivities {
             .await
             .map_err(|error| SourceError::Unavailable {
                 detail: error.to_string(),
-            })?;
-
-        super::answer(response, path).await
+            })
     }
 }
 
