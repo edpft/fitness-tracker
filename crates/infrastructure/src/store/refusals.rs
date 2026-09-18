@@ -134,8 +134,12 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
         "missing-series" => Ok(RefusalReason::MissingSeries {
             series: series_named(&detail)?,
         }),
+        "missing-figure" => Ok(RefusalReason::MissingFigure {
+            figure: figure_named(&detail)?,
+        }),
         "not-the-instrument" => Ok(RefusalReason::NotTheInstrument { detail }),
         "unattributed" => Ok(RefusalReason::Unattributed),
+        "without-baseline" => Ok(RefusalReason::WithoutBaseline),
         "without-weigh-in" => Ok(RefusalReason::WithoutWeighIn {
             part: match detail.as_str() {
                 "heart" => "heart",
@@ -150,6 +154,20 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
         }),
         other => Err(StoreError::Corrupt {
             detail: format!("{other:?} is not a refusal reason this version knows"),
+        }),
+    }
+}
+
+/// A figure's name, back as the `&'static str` the reason carries.
+///
+/// Closed for [`series_named`]'s reason. Both figures a night can be refused for
+/// are named here.
+fn figure_named(detail: &str) -> Result<&'static str, StoreError> {
+    match detail {
+        "overnight reading of any kind" => Ok("overnight reading of any kind"),
+        "overnight average" => Ok("overnight average"),
+        other => Err(StoreError::Corrupt {
+            detail: format!("{other:?} is not a figure this version knows"),
         }),
     }
 }

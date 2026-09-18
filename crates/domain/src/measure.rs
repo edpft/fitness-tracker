@@ -12,7 +12,7 @@
 mod heart;
 pub(crate) mod mass;
 
-pub use heart::BeatsPerMinute;
+pub use heart::{BeatsPerMinute, HeartRateVariability};
 pub use mass::{InvalidMass, Kg};
 
 use std::{
@@ -37,6 +37,10 @@ pub enum InvalidQuantity {
     /// [`BeatsPerMinute`].
     #[error("a heart rate of zero is a sensor that said nothing")]
     NotBeating,
+    /// Zero milliseconds of variability. A sensor saying nothing — see
+    /// [`HeartRateVariability`].
+    #[error("a heart-rate variability of zero is a sensor that said nothing")]
+    NoVariability,
 }
 
 /// How many times the movement was performed.

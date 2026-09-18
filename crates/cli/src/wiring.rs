@@ -26,11 +26,12 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, GarminAuth, GarminCredentials, GarminHrv, GarminHrvLandingStore,
-    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
-    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts, SqliteCyclingSessionStore,
-    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    FileRunLock, GarminAuth, GarminCredentials, GarminHrv, GarminHrvAccountReader,
+    GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
+    HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
     SqliteResumptionPointStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, connect, garmin,
@@ -108,12 +109,6 @@ pub enum WiringError {
     Store(#[from] application::StoreError),
     #[error("this build knows the stream {stream} but has no adapters wired for it")]
     Unwired { stream: String },
-    /// **Landing without a derivation is a real state, not a gap to paper
-    /// over.** A source is reached before its entity is settled — the shape of
-    /// what one record means is argued from payloads that have actually landed
-    /// — so a stream can collect for a while before anything derives it.
-    #[error("{stream} lands, but nothing derives it yet")]
-    NotDerived { stream: String },
     #[error("{stream} is reached with {wanted}, and {given} was resolved instead")]
     WrongCredential {
         stream: String,
@@ -309,12 +304,12 @@ async fn collect_rides(
     })
 }
 
-/// Garmin's overnight HRV, landed.
+/// Garmin's overnight HRV, landed and derived into nights.
 ///
-/// **Extraction only, for now.** What one night's answer means — which of
-/// Garmin's figures are its own and which are ours to derive — is settled
-/// against payloads that have landed rather than against a guess, so the
-/// normalised entity follows the first real run (#161).
+/// **The entity was settled against payloads that had landed** rather than
+/// against a guess (#161): the first run brought back 634 nights, and what they
+/// say — which figures Garmin states, which it omits, and what its status is
+/// actually a classification of — is in [`domain::body::hrv`].
 ///
 /// **No token cache**, as on Peloton and for the same reason: this adapter
 /// holds a password, so it can sign in again unattended, and a login per
@@ -323,7 +318,7 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
     let pool = connect(database).await?;
     let landing = GarminHrvLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::Extract(access) => {
@@ -360,14 +355,43 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
             let summary = extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NotDerived {
-            stream: GarminHrvLandingStore::STREAM.to_owned(),
-        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: GarminHrvAccountReader::new(pool.clone())?,
+                    translator: GarminHrvTranslator,
+                    workouts: SqliteOvernightHrvStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(pool.clone(), GarminHrvLandingStore::STREAM)?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+
+            let summary = normalisation.normalise().await?;
+            Ok(Outcome::Derived(Box::new(summary)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), GarminHrvLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                GarminHrvLandingStore::new(pool.clone())?,
+                SqliteOvernightHrvStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), GarminHrvLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {

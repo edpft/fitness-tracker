@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT morning_of AS \"morning!: String\" FROM overnight_hrv ORDER BY morning_of",
+  "describe": {
+    "columns": [
+      {
+        "name": "morning!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_hrv",
+            "name": "morning_of"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1d09880835401d41931b7100b121126a3bc0bc82428539a69435b7aa4a38248a"
+}

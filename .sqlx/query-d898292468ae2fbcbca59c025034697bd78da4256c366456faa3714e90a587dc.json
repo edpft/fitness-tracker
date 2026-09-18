@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO overnight_hrv (\n            landing_record_id, source_record_id, morning_of, measured_from_utc,\n            measured_until_utc, zone, last_night_average_ms,\n            last_night_five_minute_high_ms, weekly_average_ms, status,\n            baseline_low_upper_ms, baseline_balanced_low_ms, baseline_balanced_upper_ms,\n            endpoint, event_kind, event_time, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 17
+    },
+    "nullable": []
+  },
+  "hash": "d898292468ae2fbcbca59c025034697bd78da4256c366456faa3714e90a587dc"
+}

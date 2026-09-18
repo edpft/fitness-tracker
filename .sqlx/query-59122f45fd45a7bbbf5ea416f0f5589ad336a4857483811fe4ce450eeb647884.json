@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT count(*) AS \"n!: i64\" FROM overnight_hrv",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "59122f45fd45a7bbbf5ea416f0f5589ad336a4857483811fe4ce450eeb647884"
+}
