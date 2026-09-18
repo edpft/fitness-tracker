@@ -252,8 +252,19 @@ impl GarminActivities {
 
     /// One answer from the API, as the bytes served — for [`super::files`],
     /// whose answer is an archive rather than text.
-    pub(super) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, SourceError> {
-        super::answer_bytes(self.send(path, &[]).await?, path).await
+    ///
+    /// `None` where the source answers 404: it has said there is nothing at
+    /// that path, which for an activity's file is a fact about the activity
+    /// rather than a failure of the walk.
+    pub(super) async fn get_bytes_if_any(
+        &self,
+        path: &str,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        let response = self.send(path, &[]).await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        super::answer_bytes(response, path).await.map(Some)
     }
 
     /// One request, asked again if the server fails it.

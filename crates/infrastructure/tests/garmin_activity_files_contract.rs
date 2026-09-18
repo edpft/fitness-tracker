@@ -81,12 +81,14 @@ async fn stub() -> MockServer {
               "activityType": { "typeKey": "strength_training" } },
             { "activityId": 2, "beginTimestamp": 1_000_000,
               "activityType": { "typeKey": "cycling" } },
+            { "activityId": 3, "beginTimestamp": 500_000,
+              "activityType": { "typeKey": "cycling" } },
         ])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path("/activitylist-service/activities/search/activities"))
-        .and(query_param("start", "2"))
+        .and(query_param("start", "3"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .mount(&server)
         .await;
@@ -96,6 +98,15 @@ async fn stub() -> MockServer {
         .respond_with(ResponseTemplate::new(504).set_body_string("error code: 504"))
         .up_to_n_times(1)
         .with_priority(1)
+        .mount(&server)
+        .await;
+    // What Garmin answers for an activity it holds no file for.
+    Mock::given(method("GET"))
+        .and(path("/download-service/files/activity/3"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "message": "Uploaded file not found for activity",
+            "error": "NotFoundException",
+        })))
         .mount(&server)
         .await;
     for id in [1, 2] {
@@ -109,7 +120,8 @@ async fn stub() -> MockServer {
 }
 
 /// **Every activity, whatever its type, and the bytes as served** — including
-/// the one whose first request the server failed.
+/// the one whose first request the server failed, and passing over the one
+/// Garmin says it has no file for.
 #[test]
 fn every_activity_s_file_lands_byte_for_byte() {
     let runtime = runtime().expect("a runtime");
