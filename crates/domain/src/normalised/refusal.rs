@@ -132,12 +132,33 @@ pub enum RefusalReason {
     NoReadingsInSeries { series: &'static str },
     /// The source served an entity missing a series it cannot be built without.
     MissingSeries { series: &'static str },
+    /// The source served a summary missing a figure the entity cannot be built
+    /// without.
+    ///
+    /// Distinct from [`Self::MissingSeries`], which is about a stream of
+    /// readings: this is one stated number, and the two are not interchangeable
+    /// — Garmin serves 23 nights it measured nothing on as a summary with no
+    /// overnight average and a window two seconds long, and one night with a
+    /// five-minute high and no average.
+    ///
+    /// The name is the figure alone, undetermined: [`fmt::Display`] puts it in
+    /// "no {figure} was stated".
+    MissingFigure { figure: &'static str },
     /// A reading from something other than the instrument the entity is for.
     ///
     /// The operator, 2026-09-17, of two weights typed into the Withings app:
     /// rejected *"because they don't come from the Body Scan device."* The
     /// detail says what it came from instead.
     NotTheInstrument { detail: String },
+    /// A night the source served no baseline for, which is not a night with HRV.
+    ///
+    /// The operator, 2026-09-18: *"without a baseline, you can't actually report
+    /// HRV"*. Garmin states `status: "NONE"` and no baseline for the first 18
+    /// nights of a watch's life, while it gathers the three weeks of sleep its
+    /// baseline needs. A declared limitation rather than something unmodelled:
+    /// the nights are excluded because they say nothing comparable, not because
+    /// an entity for them is still to be written.
+    WithoutBaseline,
     /// A reading the instrument could not attribute to the operator.
     ///
     /// The Body Scan did not recognise who stepped on it, and someone assigned
@@ -164,6 +185,7 @@ impl RefusalReason {
             | Self::UnreadablePayload { .. }
             | Self::NoReadingsInSeries { .. }
             | Self::MissingSeries { .. }
+            | Self::MissingFigure { .. }
             // Fixed by collecting the other stream, which is a thing to do at
             // the source rather than a gap in the model.
             | Self::CompanionNotLanded { .. }
@@ -172,9 +194,10 @@ impl RefusalReason {
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
             Self::Unmodelled { .. } => RefusalKind::Unmodelled,
-            Self::NotTheInstrument { .. } | Self::Unattributed | Self::WithoutWeighIn { .. } => {
-                RefusalKind::DeclaredLimitation
-            }
+            Self::NotTheInstrument { .. }
+            | Self::Unattributed
+            | Self::WithoutBaseline
+            | Self::WithoutWeighIn { .. } => RefusalKind::DeclaredLimitation,
         }
     }
 
@@ -194,8 +217,10 @@ impl RefusalReason {
             Self::CompanionNotLanded { .. } => "companion-not-landed",
             Self::NoReadingsInSeries { .. } => "no-readings-in-series",
             Self::MissingSeries { .. } => "missing-series",
+            Self::MissingFigure { .. } => "missing-figure",
             Self::NotTheInstrument { .. } => "not-the-instrument",
             Self::Unattributed => "unattributed",
+            Self::WithoutBaseline => "without-baseline",
             Self::WithoutWeighIn { .. } => "without-weigh-in",
         }
     }
@@ -213,6 +238,7 @@ impl RefusalReason {
             Self::CompanionNotLanded { stream } => Some(stream.clone()),
             Self::NoReadingsInSeries { series }
             | Self::MissingSeries { series }
+            | Self::MissingFigure { figure: series }
             | Self::WithoutWeighIn { part: series } => Some((*series).to_owned()),
             _ => None,
         }
@@ -240,10 +266,14 @@ impl fmt::Display for RefusalReason {
                 write!(f, "every {series} reading was a sensor saying nothing")
             }
             Self::MissingSeries { series } => write!(f, "no {series} series was served"),
+            Self::MissingFigure { figure } => write!(f, "no {figure} was stated"),
             Self::NotTheInstrument { detail } => {
                 write!(f, "{detail} is not a reading from the instrument")
             }
             Self::Unattributed => f.write_str("the scale did not know whose reading it was"),
+            Self::WithoutBaseline => {
+                f.write_str("a night with no baseline, which is not a night with HRV")
+            }
             Self::WithoutWeighIn { part } => write!(f, "a {part} reading with no weigh-in"),
         }
     }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO overnight_hrv_reading (night, taken_at_utc, zone, value_ms)\n        VALUES (?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "9b4c70e5cb6695d25798cd1ce11441518fbdeafb7424f0455d189192f7c94975"
+}

@@ -11,11 +11,15 @@
 //! sign-in host here rather than becoming a third field on a credential that
 //! every other source would then carry empty.
 
+pub mod account;
 pub mod auth;
 pub mod hrv;
+pub mod translate;
 
+pub use account::{NightAccount, nights};
 pub use auth::{GarminAuth, GarminCredentials};
 pub use hrv::{GarminHrv, HrvWalk};
+pub use translate::GarminHrvTranslator;
 
 use application::SourceError;
 

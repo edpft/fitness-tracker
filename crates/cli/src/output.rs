@@ -293,8 +293,19 @@ pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
 }
 
 /// Enough of an identifier to find the record, without a full UUID per line.
+///
+/// **An identifier that is already short stays whole.** Garmin names a night by
+/// its date, and the first eight characters of `2025-03-31` are a month — which
+/// named the wrong thing on the first run of `refusals garmin.hrv`.
 fn short(id: &str) -> String {
-    id.chars().take(8).collect()
+    /// Longer than a date and shorter than a UUID.
+    const WHOLE: usize = 12;
+
+    if id.chars().count() <= WHOLE {
+        id.to_owned()
+    } else {
+        id.chars().take(8).collect()
+    }
 }
 
 /// What was authored.
