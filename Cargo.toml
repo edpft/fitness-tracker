@@ -51,7 +51,9 @@ rand = "0.10.2"
 thiserror = "2.0.20"
 
 # Adapters. Nothing below this line may appear in `domain` or `application`.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+# `time` is the Garmin widget flow's anti-bot pause: Cloudflare reads a
+# credential POST that follows its GET too closely as a bot.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
 # rustls, not native-tls: no OpenSSL, so the nix build needs no buildInputs.
 # The feature is `rustls` — 0.13 renamed it from `rustls-tls`.
 reqwest = { version = "0.13.4", default-features = false, features = [
