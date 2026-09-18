@@ -256,7 +256,7 @@ pub const SOURCES: [KnownSource; 4] = [
 ///
 /// **Withings serves measurements**, which is ours and not Withings' word
 /// (`getmeas`, `measuregrps`): one record is what one reading produced.
-pub const KNOWN: [KnownStream; 4] = [
+pub const KNOWN: [KnownStream; 5] = [
     KnownStream {
         source: &SOURCES[0],
         entity: "workouts",
@@ -269,12 +269,22 @@ pub const KNOWN: [KnownStream; 4] = [
         source: &SOURCES[2],
         entity: "measurements",
     },
-    // **Garmin serves more than this**, and the entity is what makes room for
-    // the rest: sleep, resting heart rate and a decade of activities are each a
-    // stream of their own, resuming and locking independently.
+    // **Garmin serves more than these two**, and the entity is what makes room
+    // for the rest: sleep and resting heart rate are each a stream of their own,
+    // resuming and locking independently.
     KnownStream {
         source: &SOURCES[3],
         entity: "hrv",
+    },
+    // **All of them, not the gym ones.** Garmin serves one activity list and
+    // states an activity's type as a field on the record, so "gym activities"
+    // is a filter this build would impose rather than a thing the source
+    // serves. Naming the stream after the filter would cut a source along a
+    // category it does not have (§ II.3); separating rides from gym sessions is
+    // normalisation's job, from the type each record states.
+    KnownStream {
+        source: &SOURCES[3],
+        entity: "activities",
     },
 ];
 

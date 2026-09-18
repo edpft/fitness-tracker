@@ -26,8 +26,8 @@ pub use hevy::{
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use store::{
-    GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
-    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    GarminActivityLandingStore, GarminHrvAccountReader, GarminHrvLandingStore,
+    HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,

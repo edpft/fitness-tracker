@@ -26,12 +26,12 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, GarminAuth, GarminCredentials, GarminHrv, GarminHrvAccountReader,
-    GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
-    HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
+    FileRunLock, GarminActivityLandingStore, GarminAuth, GarminCredentials, GarminHrv,
+    GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader,
+    HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
+    PelotonWorkoutSamples, PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
     SqliteResumptionPointStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, connect, garmin,
@@ -117,6 +117,8 @@ pub enum WiringError {
     },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
+    #[error("{stream} lands, and nothing derives it yet")]
+    NothingDerives { stream: &'static str },
 }
 
 /// Carry out `command` against `known`, with whatever adapters that stream
@@ -141,6 +143,7 @@ pub async fn run(
         PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
         WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
+        GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -403,6 +406,78 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
     }
 }
 
+/// Garmin's activities, landed and nothing more.
+///
+/// **Every activity, because that is what Garmin serves.** The type is a field
+/// on each record rather than an endpoint, so this walk takes the whole list and
+/// separating gym sessions from rides is left to whatever derives them. The
+/// operator settled that, 2026-09-18, on #166.
+///
+/// **Nothing derives it yet, and that is the deliverable.** What one activity's
+/// payload holds — whether a gym activity carries its exercise sets, and whether
+/// a set the watch guessed is marked as one — is read off payloads that have
+/// landed, the way the HRV entity was. So `normalise` and `refusals` refuse
+/// here rather than standing up a translator against a guess.
+async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = GarminActivityLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+
+    match command {
+        Command::Extract(access) => {
+            let SourceAccess::EmailPassword {
+                base_url,
+                auth_base_url,
+                email,
+                password,
+                ..
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: GarminActivityLandingStore::STREAM.to_owned(),
+                    wanted: "a login",
+                    given: "something else",
+                });
+            };
+
+            let auth = GarminAuth::new(
+                auth_base_url.clone(),
+                garmin::token_base_for(&auth_base_url),
+                GarminCredentials::new(email, password),
+                None,
+            );
+            let extraction = Extraction::new(ExtractionPorts {
+                source: garmin::GarminActivities::new(base_url, auth),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+
+            let summary = extraction.extract().await?;
+            Ok(Outcome::Extracted(Box::new(summary)))
+        }
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
+            stream: GarminActivityLandingStore::STREAM,
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 /// The last night worth asking Garmin about.
 ///
 /// UTC, because a night's event time is its calendar date at midnight UTC and
@@ -600,8 +675,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 #[cfg(test)]
 mod tests {
     use super::{
-        GarminHrvLandingStore, HevyWorkoutLandingStore, PelotonRideLandingStore,
-        PelotonRideSampleLandingStore, WithingsMeasurementLandingStore,
+        GarminActivityLandingStore, GarminHrvLandingStore, HevyWorkoutLandingStore,
+        PelotonRideLandingStore, PelotonRideSampleLandingStore, WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -623,6 +698,7 @@ mod tests {
             PelotonRideSampleLandingStore::STREAM,
             WithingsMeasurementLandingStore::STREAM,
             GarminHrvLandingStore::STREAM,
+            GarminActivityLandingStore::STREAM,
         ];
 
         for known in &KNOWN {
