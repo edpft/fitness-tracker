@@ -26,12 +26,13 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, GarminActivityLandingStore, GarminAuth, GarminCredentials, GarminHrv,
-    GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader,
-    HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent,
-    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
-    PelotonWorkoutSamples, PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
+    FileRunLock, GarminActivityLandingStore, GarminAuth, GarminCredentials,
+    GarminExerciseSetLandingStore, GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore,
+    GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
+    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
     SqliteResumptionPointStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, connect, garmin,
@@ -406,21 +407,27 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
     }
 }
 
-/// Garmin's activities, landed and nothing more.
+/// Garmin's activities and their exercise sets, landed and nothing more.
 ///
 /// **Every activity, because that is what Garmin serves.** The type is a field
 /// on each record rather than an endpoint, so this walk takes the whole list and
 /// separating gym sessions from rides is left to whatever derives them. The
 /// operator settled that, 2026-09-18, on #166.
 ///
-/// **Nothing derives it yet, and that is the deliverable.** What one activity's
-/// payload holds — whether a gym activity carries its exercise sets, and whether
-/// a set the watch guessed is marked as one — is read off payloads that have
-/// landed, the way the HRV entity was. So `normalise` and `refusals` refuse
-/// here rather than standing up a translator against a guess.
+/// **Two walks behind one entry**, as Peloton's graphs are behind its rides: the
+/// list summarises a gym session per movement, and the sets are a request per
+/// activity against a different endpoint (#173). Neither is a gym session
+/// without the other, so the operator cannot ask for one alone.
+///
+/// **Nothing derives them yet, and that is the deliverable.** What the sets hold
+/// — whether they are the sets performed, and whether one the watch guessed is
+/// marked as such — is read off payloads that have landed, the way the HRV
+/// entity was. So `normalise` and `refusals` refuse here rather than standing up
+/// a translator against a guess.
 async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = GarminActivityLandingStore::new(pool.clone())?;
+    let sets_landing = GarminExerciseSetLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
@@ -441,23 +448,47 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
                 });
             };
 
-            let auth = GarminAuth::new(
-                auth_base_url.clone(),
-                garmin::token_base_for(&auth_base_url),
-                GarminCredentials::new(email, password),
-                None,
-            );
-            let extraction = Extraction::new(ExtractionPorts {
-                source: garmin::GarminActivities::new(base_url, auth),
+            // Two `GarminAuth`s, as Peloton's two walks have two: neither
+            // holds the other's state, and a second sign-in costs one request.
+            let credentials = GarminCredentials::new(email, password);
+            let token_base = garmin::token_base_for(&auth_base_url);
+            let list = Extraction::new(ExtractionPorts {
+                source: garmin::GarminActivities::new(
+                    base_url.clone(),
+                    GarminAuth::new(
+                        auth_base_url.clone(),
+                        token_base.clone(),
+                        credentials.clone(),
+                        None,
+                    ),
+                ),
                 landing,
+                resumption: resumption.clone(),
+                runs: runs.clone(),
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            let listed = list.extract().await?;
+
+            // Second, so the sets it asks for are for activities this same
+            // command has just listed.
+            let sets = Extraction::new(ExtractionPorts {
+                source: garmin::GarminExerciseSets::new(
+                    base_url,
+                    GarminAuth::new(auth_base_url, token_base, credentials, None),
+                ),
+                landing: sets_landing,
                 resumption,
                 runs,
                 lock: FileRunLock::beside(database),
                 clock: SystemClock,
             });
+            let set = sets.extract().await?;
 
-            let summary = extraction.extract().await?;
-            Ok(Outcome::Extracted(Box::new(summary)))
+            Ok(Outcome::ExtractedBoth {
+                first: Box::new(listed),
+                second: Box::new(set),
+            })
         }
         Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
             stream: GarminActivityLandingStore::STREAM,
@@ -470,7 +501,16 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
             })
         }
         Command::Reset => {
+            // Both, for the reason Peloton's are: one reset and not the other
+            // leaves the two walks at different points in history.
             let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(
+                sets_landing,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool),
+            )
+            .reset()
+            .await?;
             let reader = ExtractionStatus::new(landing, resumption, runs);
             reader.reset().await?;
             Ok(Outcome::Reset { previous })
@@ -675,8 +715,9 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 #[cfg(test)]
 mod tests {
     use super::{
-        GarminActivityLandingStore, GarminHrvLandingStore, HevyWorkoutLandingStore,
-        PelotonRideLandingStore, PelotonRideSampleLandingStore, WithingsMeasurementLandingStore,
+        GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminHrvLandingStore,
+        HevyWorkoutLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+        WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -699,6 +740,7 @@ mod tests {
             WithingsMeasurementLandingStore::STREAM,
             GarminHrvLandingStore::STREAM,
             GarminActivityLandingStore::STREAM,
+            GarminExerciseSetLandingStore::STREAM,
         ];
 
         for known in &KNOWN {
@@ -711,10 +753,14 @@ mod tests {
 
         // **Streams that land behind another entry rather than under their own
         // name.** Peloton's graphs are collected by the same command that
-        // collects its rides, because neither derives anything without the
-        // other — so this one is wired, lands, resumes and locks, and cannot be
+        // collects its rides, and Garmin's exercise sets by the one that
+        // collects its activities, because neither derives anything without the
+        // other — so these are wired, land, resume and lock, and cannot be
         // asked for. Anything else wired but uncollectable is a mistake.
-        let landed_behind_another = [PelotonRideSampleLandingStore::STREAM];
+        let landed_behind_another = [
+            PelotonRideSampleLandingStore::STREAM,
+            GarminExerciseSetLandingStore::STREAM,
+        ];
         assert_eq!(
             wired.len(),
             KNOWN.len() + landed_behind_another.len(),

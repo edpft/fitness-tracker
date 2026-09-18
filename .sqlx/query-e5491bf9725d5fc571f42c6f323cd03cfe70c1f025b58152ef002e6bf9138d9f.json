@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COALESCE(MAX(serve_ordinal), -1) AS \"highest!: i64\"\n            FROM garmin_exercise_set_landing\n            WHERE run_id = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "highest!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e5491bf9725d5fc571f42c6f323cd03cfe70c1f025b58152ef002e6bf9138d9f"
+}

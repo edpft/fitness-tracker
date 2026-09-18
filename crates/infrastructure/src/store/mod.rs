@@ -9,6 +9,7 @@
 pub mod cycling_mesocycle;
 pub mod delivery;
 pub mod garmin_activity_landing;
+pub mod garmin_exercise_set_landing;
 pub mod garmin_landing;
 pub mod garmin_normalised;
 pub mod gym_mesocycle;
@@ -40,6 +41,7 @@ use domain::{
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
 pub use garmin_activity_landing::GarminActivityLandingStore;
+pub use garmin_exercise_set_landing::GarminExerciseSetLandingStore;
 pub use garmin_landing::GarminHrvLandingStore;
 pub use garmin_normalised::{GarminHrvAccountReader, SqliteOvernightHrvStore};
 pub use gym_mesocycle::SqliteGymMesocycleStore;

@@ -1,8 +1,9 @@
 //! The Garmin adapter.
 //!
 //! Everything specific to Garmin lives behind this module: its three hosts, its
-//! mobile sign-in, and its names for things. Two streams land behind it — a
-//! night's HRV answer and the activity list — each exactly as served.
+//! mobile sign-in, and its names for things. Three streams land behind it — a
+//! night's HRV answer, the activity list and each activity's exercise sets —
+//! each exactly as served.
 //!
 //! **Three hosts, which is one more than any source before it.** Sign-in is at
 //! `sso.garmin.com`, tokens are minted at `diauth.garmin.com`, and the API
@@ -14,12 +15,14 @@
 pub mod account;
 pub mod activities;
 pub mod auth;
+pub mod exercise_sets;
 pub mod hrv;
 pub mod translate;
 
 pub use account::{NightAccount, nights};
 pub use activities::{ActivityPage, GarminActivities};
 pub use auth::{GarminAuth, GarminCredentials};
+pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
 pub use hrv::{GarminHrv, HrvWalk};
 pub use translate::GarminHrvTranslator;
 
