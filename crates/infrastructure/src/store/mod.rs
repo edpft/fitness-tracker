@@ -54,7 +54,8 @@ pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
-    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionStore, SqliteFtpHistory,
+    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionLog,
+    SqliteCyclingSessionStore, SqliteFtpHistory,
 };
 pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;

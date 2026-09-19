@@ -999,3 +999,25 @@ fn withings_status_needs_no_credential() {
         .expect("the binary runs");
     assert_eq!(code(&output), 0, "{}", stderr(&output));
 }
+
+/// **`next` answers from the schedule**, so with no week recorded there is
+/// nothing to say what is next — and the refusal names the command that
+/// records one, rather than a discipline being guessed (#137).
+#[test]
+fn next_without_a_recorded_week_names_the_command_that_records_one() {
+    let Ok(directory) = TempDir::new() else {
+        panic!("a temporary directory is available")
+    };
+    let database = directory.path().join("test.db");
+
+    let Ok(output) = fitness_in(&["next"], Some(&database), "Europe/London") else {
+        panic!("the binary runs")
+    };
+
+    assert_eq!(code(&output), 4, "usage: {}", stderr(&output));
+    assert!(
+        stderr(&output).contains("fitness schedule add"),
+        "{}",
+        stderr(&output)
+    );
+}

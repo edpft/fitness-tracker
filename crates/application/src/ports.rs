@@ -921,6 +921,30 @@ pub trait PerformedWorkoutReader {
     ) -> impl Future<Output = Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError>> + Send;
 }
 
+/// When a discipline's sessions were performed, and nothing else about them.
+///
+/// **What `fitness next` asks of the record** (#137): whether the slot the
+/// schedule says came last has a session to account for it. The date is all
+/// that question needs, and it is the one thing every discipline's record has
+/// whatever its sessions are made of — so this is one port with an adapter per
+/// discipline rather than a question put to each discipline's own reader.
+///
+/// A session's date is the calendar day it started on, in the zone it was
+/// performed in.
+pub trait PerformedSessionLog {
+    /// One date per session performed between the two days, both included,
+    /// oldest first. Two sessions on one day are two dates.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn dates_between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<Date>, StoreError>> + Send;
+}
+
 /// Weigh-ins, as the analytical layer reads them.
 ///
 /// **A mass and a moment, not the whole weigh-in.** Relative strength needs

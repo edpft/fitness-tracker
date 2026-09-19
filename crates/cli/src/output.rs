@@ -903,6 +903,28 @@ fn derived_phrase(
 ///
 /// **Said, not refused.** Running out of plan is a fact about the plan rather
 /// than something the operator got wrong, and the answer to it is a new plan.
+/// A slot the schedule held that no performed session accounts for, even
+/// after collecting. Reported and nothing more: recording why is #177's.
+pub fn unperformed(slot: domain::schedule::ScheduledSlot) {
+    println!(
+        "no {} session has been performed since {} ({:?} {}), the slot before this one",
+        slot.discipline, slot.date, slot.slot.weekday, slot.slot.part,
+    );
+}
+
+/// Whose slot is next, and when — what the schedule says before the
+/// discipline's own `next` says the rest.
+pub fn next_slot(slot: domain::schedule::ScheduledSlot) {
+    println!(
+        "next: {} on {} ({:?} {})",
+        slot.discipline, slot.date, slot.slot.weekday, slot.slot.part,
+    );
+}
+
+pub fn no_next_slot(from: jiff::civil::Date) {
+    println!("the schedule holds no slot on or after {from}");
+}
+
 pub fn nothing_planned(
     from: jiff::civil::Date,
     last: Option<&(domain::plan::PlanName, jiff::civil::Date)>,

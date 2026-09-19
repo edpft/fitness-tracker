@@ -508,4 +508,141 @@ impl Diary {
     fn pattern_on(&self, date: Date) -> Option<&TrainingPattern> {
         self.patterns.iter().rfind(|pattern| pattern.from() <= date)
     }
+
+    /// Every slot on one date, in the order the day runs, after every
+    /// alteration covering it.
+    pub fn slots_of(&self, date: Date) -> Vec<ScheduledSlot> {
+        self.on(date)
+            .map(|availability| {
+                availability
+                    .slots
+                    .iter()
+                    .filter(|(slot, _)| slot.weekday == date.weekday())
+                    .map(|(slot, discipline)| ScheduledSlot {
+                        date,
+                        slot: *slot,
+                        discipline: *discipline,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The last slot on a day before this one.
+    ///
+    /// `None` when nothing the operator has said reaches back that far.
+    pub fn last_before(&self, date: Date) -> Option<ScheduledSlot> {
+        let first = self.patterns.first()?.from();
+        let mut cursor = date.yesterday().ok()?;
+        while cursor >= first {
+            if let Some(last) = self.slots_of(cursor).pop() {
+                return Some(last);
+            }
+            cursor = cursor.yesterday().ok()?;
+        }
+        None
+    }
+
+    /// The first slot on a day after this one.
+    ///
+    /// **Bounded by what the diary says.** Past the last pattern and the last
+    /// alteration the week only repeats, so a week beyond both that holds no
+    /// slot means none ever comes — and `None` says so, rather than searching
+    /// for ever.
+    pub fn first_after(&self, date: Date) -> Option<ScheduledSlot> {
+        let described = self
+            .patterns
+            .iter()
+            .map(TrainingPattern::from)
+            .chain(self.alterations.iter().map(Alteration::last))
+            .max()?
+            .max(date);
+        let horizon = described.checked_add(jiff::Span::new().days(7)).ok()?;
+
+        let mut cursor = date.tomorrow().ok()?;
+        while cursor <= horizon {
+            if let Some(first) = self.slots_of(cursor).into_iter().next() {
+                return Some(first);
+            }
+            cursor = cursor.tomorrow().ok()?;
+        }
+        None
+    }
+
+    /// The slots a session should have been performed for by the end of a day:
+    /// the last one before it, and every one on it.
+    ///
+    /// **The last before, not every one before.** What went missing earlier than
+    /// that has already been answered for by an earlier run, and whether a miss
+    /// moves anything is #177's question rather than this one's.
+    pub fn due_by(&self, date: Date) -> Vec<ScheduledSlot> {
+        self.last_before(date)
+            .into_iter()
+            .chain(self.slots_of(date))
+            .collect()
+    }
+}
+
+/// One slot on one date, and whose it is.
+///
+/// Ordered by date, then by the slot within it, so a list of them reads as the
+/// days ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScheduledSlot {
+    pub date: Date,
+    pub slot: TrainingSlot,
+    pub discipline: Discipline,
+}
+
+impl std::fmt::Display for ScheduledSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}, {} {}", self.discipline, self.date, self.slot.part)
+    }
+}
+
+/// The slots no performed session accounts for.
+///
+/// **A session accounts for a slot of its discipline on or after the slot's
+/// date**, not only on it. The operator, 2026-09-19: *"if the previous
+/// prescribed session was performed since we last checked, that's fine, the
+/// slot doesn't have to match"* — a test missed through illness yesterday and
+/// performed today is that test.
+///
+/// **Each session accounts for one slot.** The earliest slot takes the
+/// earliest session that can answer for it, so a session done a day late
+/// fills the slot it was late for and leaves today's slot of the same
+/// discipline still to do.
+///
+/// `performed` is each discipline's session dates; a discipline absent from it
+/// has performed nothing.
+pub fn unaccounted(
+    due: &[ScheduledSlot],
+    performed: &BTreeMap<Discipline, Vec<Date>>,
+) -> Vec<ScheduledSlot> {
+    let mut due = due.to_vec();
+    due.sort();
+
+    let mut remaining: BTreeMap<Discipline, Vec<Date>> = performed
+        .iter()
+        .map(|(discipline, dates)| {
+            let mut dates = dates.clone();
+            dates.sort();
+            (*discipline, dates)
+        })
+        .collect();
+
+    due.into_iter()
+        .filter(|slot| {
+            let Some(dates) = remaining.get_mut(&slot.discipline) else {
+                return true;
+            };
+            dates
+                .iter()
+                .position(|date| *date >= slot.date)
+                .is_none_or(|found| {
+                    dates.remove(found);
+                    false
+                })
+        })
+        .collect()
 }

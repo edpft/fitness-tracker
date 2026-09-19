@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT first.started_at_utc AS \"started_at_utc!: String\",\n                   first.zone           AS \"zone!: String\"\n              FROM cycling_session AS s\n              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id\n             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?\n             ORDER BY first.started_at_utc ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f185f4fa56c2ab42797a95acdf7903d7b5941d70896a9fd4affc7feeacc20753"
+}
