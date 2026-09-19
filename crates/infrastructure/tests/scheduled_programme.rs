@@ -129,7 +129,7 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
             days!(1),
             Absence::Holiday {
                 zone: None,
-                slots: BTreeMap::new(),
+                slots: Some(BTreeMap::new()),
             },
             "away, and unable to train".to_owned(),
         ))
@@ -175,7 +175,7 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
                 days!(14),
                 Absence::Holiday {
                     zone: None,
-                    slots: BTreeMap::new(),
+                    slots: Some(BTreeMap::new()),
                 },
                 "away in December".to_owned(),
             ))
@@ -295,7 +295,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
                 days!(1),
                 Absence::Holiday {
                     zone: None,
-                    slots: BTreeMap::new(),
+                    slots: Some(BTreeMap::new()),
                 },
                 "a wedding".to_owned(),
             ))
@@ -349,7 +349,7 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
                 days!(1),
                 Absence::Holiday {
                     zone: None,
-                    slots: BTreeMap::new(),
+                    slots: Some(BTreeMap::new()),
                 },
                 "called away".to_owned(),
             ))
@@ -428,7 +428,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
                 days!(1),
                 Absence::Holiday {
                     zone: None,
-                    slots: BTreeMap::new(),
+                    slots: Some(BTreeMap::new()),
                 },
                 "written off, and then trained anyway".to_owned(),
             ))

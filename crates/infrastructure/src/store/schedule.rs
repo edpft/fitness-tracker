@@ -108,7 +108,7 @@ impl DiaryStore for SqliteDiaryStore {
 
         let booked = sqlx::query!(
             r"
-            SELECT id, start_date, days, absence, zone, reason
+            SELECT id, start_date, days, absence, zone, states_slots, reason
             FROM alteration
             ORDER BY start_date
             "
@@ -126,6 +126,12 @@ impl DiaryStore for SqliteDiaryStore {
 
             let absence = match alteration.absence.as_str() {
                 "illness" => Absence::Illness,
+                "holiday" if alteration.states_slots == 0 => Absence::Holiday {
+                    zone: alteration.zone.as_deref().map(zone_of).transpose()?,
+                    slots: None,
+                },
+                // Stated slots, which may be none: zero rows either way, so
+                // `states_slots` is what tells "none" from "the ordinary week".
                 "holiday" => {
                     let rows = sqlx::query!(
                         r"
@@ -141,15 +147,16 @@ impl DiaryStore for SqliteDiaryStore {
 
                     Absence::Holiday {
                         zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                        slots: rows
-                            .iter()
-                            .map(|row| {
-                                Ok((
-                                    slot_of(&row.weekday, &row.part)?,
-                                    discipline_of(&row.discipline)?,
-                                ))
-                            })
-                            .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+                        slots: Some(
+                            rows.iter()
+                                .map(|row| {
+                                    Ok((
+                                        slot_of(&row.weekday, &row.part)?,
+                                        discipline_of(&row.discipline)?,
+                                    ))
+                                })
+                                .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+                        ),
                     }
                 }
                 other => return Err(corrupt(&format!("an absence of kind {other:?}"))),
@@ -239,20 +246,22 @@ impl DiaryAuthor for SqliteDiaryStore {
         let days = i64::from(alteration.days().get());
         let absence = alteration.absence().as_str();
         let zone = alteration.zone().map(|zone| zone.id().to_owned());
+        let states_slots = i64::from(alteration.slots().is_some());
         let reason = alteration.reason().to_owned();
 
         let id = sqlx::query!(
             r"
             INSERT INTO alteration (
-                authored_at, start_date, days, absence, zone, reason
+                authored_at, start_date, days, absence, zone, states_slots, reason
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (start_date) DO UPDATE
                 SET authored_at = excluded.authored_at,
                     days        = excluded.days,
                     absence     = excluded.absence,
-                    zone        = excluded.zone,
-                    reason      = excluded.reason
+                    zone         = excluded.zone,
+                    states_slots = excluded.states_slots,
+                    reason       = excluded.reason
             RETURNING id
             ",
             authored_at,
@@ -260,6 +269,7 @@ impl DiaryAuthor for SqliteDiaryStore {
             days,
             absence,
             zone,
+            states_slots,
             reason
         )
         .fetch_one(&mut *tx)
@@ -272,7 +282,7 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, discipline) in alteration.slots() {
+        for (slot, discipline) in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
             let discipline = discipline.as_str();

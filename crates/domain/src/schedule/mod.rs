@@ -52,6 +52,8 @@
 //!
 //! ## What an absence can say
 //!
+//! - **a holiday that keeps the slots** — away, perhaps in another zone,
+//!   training at the usual times.
 //! - **a holiday with no slots** — unable to train at all.
 //! - **a holiday with different slots** — able to train at times the ordinary
 //!   pattern does not offer. A Friday evening becomes a Saturday morning, which
@@ -59,6 +61,10 @@
 //!   is said: keep the morning, lose the rest.
 //! - **illness** — unable to train at all, wherever the operator is. If it runs
 //!   on, the illness is extended rather than a second one recorded beside it.
+//!
+//! A holiday's `None` slots are "the ordinary week stands" and `Some` of an
+//! empty set is "none at all". Those are different facts, and collapsing them
+//! would make training away as usual cancel every session of the trip.
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
@@ -245,11 +251,12 @@ impl TrainingPattern {
 /// Why a run of days departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Absence {
-    /// Out of the routine. `None` is "the zone is unchanged", which is not the
-    /// same as any zone; an empty set of slots is "no room to train at all".
+    /// Out of the routine. A `None` zone is "the zone is unchanged", which is
+    /// not the same as any zone; `None` slots are "the ordinary week stands",
+    /// and an empty set is "no room to train at all".
     Holiday {
         zone: Option<OperatorZone>,
-        slots: BTreeMap<TrainingSlot, Discipline>,
+        slots: Option<BTreeMap<TrainingSlot, Discipline>>,
     },
     /// Too ill to train. Bad enough to prevent training is what makes it
     /// illness, so it has no slots, and where the operator is does not matter.
@@ -310,11 +317,12 @@ impl Alteration {
         }
     }
 
-    /// The slots while it lasts, which replace the ordinary week's.
-    pub fn slots(&self) -> &BTreeMap<TrainingSlot, Discipline> {
+    /// The slots while it lasts, which replace the ordinary week's. `None`
+    /// when the ordinary week stands.
+    pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Discipline>> {
         match &self.absence {
-            Absence::Holiday { slots, .. } => slots,
-            Absence::Illness => &NO_SLOTS,
+            Absence::Holiday { slots, .. } => slots.as_ref(),
+            Absence::Illness => Some(&NO_SLOTS),
         }
     }
 
@@ -422,7 +430,9 @@ impl Diary {
             if let Some(zone) = alteration.zone() {
                 availability.zone.clone_from(zone);
             }
-            availability.slots.clone_from(alteration.slots());
+            if let Some(slots) = alteration.slots() {
+                availability.slots.clone_from(slots);
+            }
         }
 
         Some(availability)

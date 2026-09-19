@@ -8,7 +8,9 @@ CREATE TABLE alteration (
     days         INTEGER NOT NULL CHECK (days > 0 AND days <= 255),
     absence      TEXT    NOT NULL CHECK (absence IN ('holiday', 'illness')),
     zone         TEXT    CHECK (zone IS NULL OR absence = 'holiday'),
-    reason       TEXT    NOT NULL CHECK (length(trim(reason)) > 0)
+    states_slots INTEGER NOT NULL CHECK (states_slots IN (0, 1)),
+    reason       TEXT    NOT NULL CHECK (length(trim(reason)) > 0),
+    CHECK (absence = 'holiday' OR states_slots = 1)
 ) STRICT;
 
 CREATE TABLE alteration_slot (
@@ -23,15 +25,13 @@ CREATE TABLE alteration_slot (
     PRIMARY KEY (alteration, weekday, part)
 ) STRICT, WITHOUT ROWID;
 
-INSERT INTO alteration (id, authored_at, start_date, days, absence, zone, reason)
-    SELECT id, authored_at, start_date, days, 'holiday', zone, reason
-    FROM alteration_old
-    WHERE states_slots = 1;
+INSERT INTO alteration (id, authored_at, start_date, days, absence, zone, states_slots, reason)
+    SELECT id, authored_at, start_date, days, 'holiday', zone, states_slots, reason
+    FROM alteration_old;
 
 INSERT INTO alteration_slot (alteration, weekday, part, discipline)
     SELECT alteration, weekday, part, discipline
-    FROM alteration_slot_old
-    WHERE alteration IN (SELECT id FROM alteration);
+    FROM alteration_slot_old;
 
 DROP TABLE alteration_slot_old;
 DROP TABLE alteration_old;
