@@ -1,9 +1,9 @@
 //! The Garmin adapter.
 //!
 //! Everything specific to Garmin lives behind this module: its three hosts, its
-//! mobile sign-in, and its names for things. Three streams land behind it — a
-//! night's HRV answer, the activity list and each activity's exercise sets —
-//! each exactly as served.
+//! mobile sign-in, and its names for things. Four streams land behind it — a
+//! night's HRV answer, the activity list, each activity's exercise sets and
+//! each activity's FIT file — each exactly as served.
 //!
 //! **Three hosts, which is one more than any source before it.** Sign-in is at
 //! `sso.garmin.com`, tokens are minted at `diauth.garmin.com`, and the API
@@ -16,6 +16,7 @@ pub mod account;
 pub mod activities;
 pub mod auth;
 pub mod exercise_sets;
+pub mod files;
 pub mod hrv;
 pub mod translate;
 
@@ -23,6 +24,7 @@ pub use account::{NightAccount, nights};
 pub use activities::{ActivityPage, GarminActivities};
 pub use auth::{GarminAuth, GarminCredentials};
 pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
+pub use files::{ActivityFilePage, GarminActivityFiles};
 pub use hrv::{GarminHrv, HrvWalk};
 pub use translate::GarminHrvTranslator;
 
@@ -45,12 +47,24 @@ pub fn token_base_for(sso_base: &str) -> String {
 
 /// The text of a Garmin answer, once the transport has said it arrived.
 async fn answer(response: reqwest::Response, path: &str) -> Result<String, SourceError> {
+    let bytes = answer_bytes(response, path).await?;
+    String::from_utf8(bytes).map_err(|error| SourceError::Malformed {
+        detail: format!("{path} answered something that is not text: {error}"),
+    })
+}
+
+/// The bytes of a Garmin answer, once the transport has said it arrived.
+///
+/// **Bytes, not text**, for the one answer that is not text: an activity's
+/// file is an archive, and decoding it as UTF-8 would corrupt what § II.1 says
+/// lands exactly as served.
+async fn answer_bytes(response: reqwest::Response, path: &str) -> Result<Vec<u8>, SourceError> {
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(SourceError::Unauthorised);
     }
-    let text = response
-        .text()
+    let bytes = response
+        .bytes()
         .await
         .map_err(|error| SourceError::Unavailable {
             detail: error.to_string(),
@@ -62,10 +76,13 @@ async fn answer(response: reqwest::Response, path: &str) -> Result<String, Sourc
     }
     if !status.is_success() {
         return Err(SourceError::Unavailable {
-            detail: format!("{path} answered {status}: {}", text.trim()),
+            detail: format!(
+                "{path} answered {status}: {}",
+                String::from_utf8_lossy(&bytes).trim()
+            ),
         });
     }
-    Ok(text)
+    Ok(bytes.to_vec())
 }
 
 #[cfg(test)]

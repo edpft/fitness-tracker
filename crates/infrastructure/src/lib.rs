@@ -26,17 +26,17 @@ pub use hevy::{
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use store::{
-    GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminHrvAccountReader,
-    GarminHrvLandingStore, HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent,
-    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
-    SqliteCyclingMesocycleStore, SqliteCyclingSessionStore, SqliteDiaryStore,
-    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
-    WithingsWeighInAccountReader, connect,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
+    GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
+    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingMesocycleStore,
+    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
+    SqliteOvernightHrvStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteWeighInHistory, SqliteWeighInStore,
+    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};
