@@ -1,7 +1,15 @@
 <!--
 Sync Impact Report
-- Version: 3.2.0, amended 2026-09-08. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 4.0.0, amended 2026-09-19. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 4.0.0 — § 12 no longer requires authored data to keep its history; only what is in force is
+  required. MAJOR: a rule is removed. The operator, 2026-09-19, while settling the export of the
+  authored side (#151): "I don't think authored data needs to keep it's history". § 14 already
+  argued this for generation parameters, and the argument covers plans too: a superseded plan
+  answers no question, because what was prescribed from it is recorded concretely in the
+  prescription. § 13 is untouched, so interpretive parameters, the timezone among them, are
+  still retained. Nothing is deleted: the store keeps what it holds, and the amendment only
+  means nothing has to. No decision record: he stated the rule and there was no second position.
 - 3.2.0 — § 3.1 redefined and § II.3's example list corrected. A normalised entity is a
   *session*, composing what one source says about it: several records from one endpoint,
   complementary responses across endpoints, or both. MINOR: it widens what may compose, so
@@ -181,7 +189,7 @@ Consequences:
 
 § II governs what happened. This section governs the rest of what the system stores: what we intend, and what we consult. Neither is derived, neither passes through raw, and neither is subject to § II's layering.
 
-**12.** **Authored data.** Records of intent, authored by us: prescriptions, planned sessions, assumed anchors. It is a primary input — nothing regenerates it if lost — so it is stored durably and keeps its history. No raw layer applies: raw exists to guard against fallible translation of a format we do not control, and we control this one entirely. § 11 governs its relationship to observations and is not weakened here.
+**12.** **Authored data.** Records of intent, authored by us: prescriptions, planned sessions, assumed anchors. It is a primary input — nothing regenerates it if lost — so it is stored durably. Only what is in force is required: a superseded authoring answers no question, because what was prescribed from it is recorded concretely in the prescription (§ 11). No raw layer applies: raw exists to guard against fallible translation of a format we do not control, and we control this one entirely. § 11 governs its relationship to observations and is not weakened here.
 
 **12.1.** **A prescription is drafted, published, or performed**, and "nothing regenerates it if lost" is true of only the last. A *drafted* prescription is issued and nowhere else; it re-derives exactly from its programme, the record and the parameters, so nothing is lost by deleting it. A *published* one has been delivered somewhere it can be performed and is fixed by the reference that destination gave it; it is equally cheap, but withdrawing it means removing the session at the destination rather than merely forgetting it here. A *performed* one is named by an observation. Only then does the first paragraph apply in full: what it records happened, the performance beside it would be left comparing against nothing, and it is not deletable.
 
@@ -281,4 +289,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 3.2.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-08
+**Version**: 4.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-19
