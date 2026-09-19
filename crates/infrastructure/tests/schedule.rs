@@ -95,7 +95,7 @@ fn a_pattern_and_its_alterations_round_trip() {
         days!(1),
         Absence::Holiday {
             zone: None,
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
         },
         "away, and unable to train".to_owned(),
     );
@@ -135,7 +135,7 @@ fn an_illness_is_not_a_holiday() {
         days!(3),
         Absence::Holiday {
             zone: Some(zone!("Europe/Rome")),
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
         },
         "Rome".to_owned(),
     );
@@ -178,6 +178,46 @@ fn an_illness_is_not_a_holiday() {
     );
 }
 
+/// A holiday's slots are `Option`: absent means the ordinary week stands —
+/// away, training as usual — and present-but-empty means no room to train at
+/// all. Both are zero rows in `alteration_slot`, so storage has to carry the
+/// difference some other way, and collapsing them would make training away
+/// silently cancel every session of a trip.
+#[test]
+fn training_away_as_usual_is_not_a_holiday_with_no_room() {
+    let (store, _directory) = opened!();
+
+    run!(store.record_pattern(&TrainingPattern::new(
+        date(2026, 8, 24),
+        zone!("Europe/London"),
+        ordinary_pattern()
+    )));
+
+    let as_usual = Alteration::new(
+        date(2026, 10, 5),
+        days!(1),
+        Absence::Holiday {
+            zone: Some(zone!("Europe/Rome")),
+            slots: None,
+        },
+        "in Rome, training as usual".to_owned(),
+    );
+    run!(store.record_alteration(&as_usual));
+
+    let diary = run!(store.diary());
+    assert_eq!(
+        diary.alterations(),
+        [as_usual],
+        "the ordinary week still stands"
+    );
+
+    let Some(in_rome) = diary.on(date(2026, 10, 5)) else {
+        panic!("the diary answers a date it covers")
+    };
+    assert_eq!(in_rome.zone.id(), "Europe/Rome");
+    assert!(in_rome.open(date(2026, 10, 5)), "a Monday in Rome is open");
+}
+
 /// Re-stating an absence from the same date corrects its kind too.
 #[test]
 fn restating_an_absence_can_make_it_illness() {
@@ -188,7 +228,11 @@ fn restating_an_absence_can_make_it_illness() {
         days!(2),
         Absence::Holiday {
             zone: None,
-            slots: slots(&[(Weekday::Monday, PartOfDay::Morning, Discipline::Cycling)]),
+            slots: Some(slots(&[(
+                Weekday::Monday,
+                PartOfDay::Morning,
+                Discipline::Cycling
+            )])),
         },
         "away".to_owned(),
     )));
@@ -223,7 +267,7 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
         days!(1),
         Absence::Holiday {
             zone: None,
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
         },
         "away, and unable to train".to_owned(),
     )));
@@ -338,10 +382,10 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
         days!(7),
         Absence::Holiday {
             zone: None,
-            slots: slots(&[
+            slots: Some(slots(&[
                 (Weekday::Saturday, PartOfDay::Morning, Discipline::Gym),
                 (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
-            ]),
+            ])),
         },
         "away; the hotel gym is only free at the weekend".to_owned(),
     )));

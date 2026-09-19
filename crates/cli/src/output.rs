@@ -1343,10 +1343,12 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
     if let Some(zone) = alteration.zone() {
         println!("    in {}", zone.id());
     }
-    if alteration.slots().is_empty() {
-        println!("    no room to train at all");
-    } else {
-        week_slots(alteration.slots());
+    match alteration.slots() {
+        // Absent and empty are different facts, and printing them the same way
+        // would undo the distinction the schema goes to trouble to keep.
+        None => println!("    when you train is unchanged"),
+        Some(slots) if slots.is_empty() => println!("    no room to train at all"),
+        Some(slots) => week_slots(slots),
     }
 }
 
