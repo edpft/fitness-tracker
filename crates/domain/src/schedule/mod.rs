@@ -37,30 +37,28 @@
 //! until something supersedes it. An [`Alteration`] is a run of days that
 //! departs from it.
 //!
-//! **An alteration is not a holiday.** A course, a visitor, a late finish and a
-//! fortnight in Rome all change a week, and only one of them is a trip. The
-//! type says what it does — this run of days differs, and here is why.
+//! **Every alteration is an absence, and there are two kinds.** A holiday takes
+//! the operator out of the routine — away from the gym and the bike, perhaps in
+//! another zone, with whatever slots the trip allows. Illness is only illness
+//! when it prevents training, so it has no slots at all. A late finish or a
+//! session moved to the next morning is neither: a session can be performed
+//! any time in its window, and the scheduling side need not know. A lasting
+//! change is a new [`TrainingPattern`].
 //!
 //! They are held apart rather than nested, because an alteration is a fact
 //! about dates and not about which pattern happened to be in force when it was
 //! recorded. Nesting them would lose every alteration already recorded the next
 //! time the ordinary pattern changed.
 //!
-//! ## What an alteration can say
+//! ## What an absence can say
 //!
-//! Both of its fields are optional, and the combinations are the cases the
-//! operator actually has:
-//!
-//! - **zone only** — away, training as usual, in another country.
-//! - **no slots** — unable to train at all. The hard case.
-//! - **different slots** — able to train at times the ordinary pattern does not
-//!   offer. A Friday evening becomes a Saturday morning, which is possible on
-//!   holiday and not in ordinary life. It is also how half a day is said: keep
-//!   the morning, lose the rest.
-//!
-//! `None` is "unchanged" and `Some` of an empty set is "none at all". Those are
-//! different facts, and collapsing them would make a zone-only alteration
-//! cancel every session of the trip.
+//! - **a holiday with no slots** — unable to train at all.
+//! - **a holiday with different slots** — able to train at times the ordinary
+//!   pattern does not offer. A Friday evening becomes a Saturday morning, which
+//!   is possible on holiday and not in ordinary life. It is also how half a day
+//!   is said: keep the morning, lose the rest.
+//! - **illness** — unable to train at all, wherever the operator is. If it runs
+//!   on, the illness is extended rather than a second one recorded beside it.
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
@@ -244,13 +242,38 @@ impl TrainingPattern {
     }
 }
 
+/// Why a run of days departs from the ordinary pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Absence {
+    /// Out of the routine. `None` is "the zone is unchanged", which is not the
+    /// same as any zone; an empty set of slots is "no room to train at all".
+    Holiday {
+        zone: Option<OperatorZone>,
+        slots: BTreeMap<TrainingSlot, Discipline>,
+    },
+    /// Too ill to train. Bad enough to prevent training is what makes it
+    /// illness, so it has no slots, and where the operator is does not matter.
+    Illness,
+}
+
+impl Absence {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Holiday { .. } => "holiday",
+            Self::Illness => "illness",
+        }
+    }
+}
+
+/// Illness's slots, so [`Alteration::slots`] can lend a map whatever the kind.
+static NO_SLOTS: BTreeMap<TrainingSlot, Discipline> = BTreeMap::new();
+
 /// A run of days that departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alteration {
     start: Date,
     days: NonZeroU8,
-    zone: Option<OperatorZone>,
-    slots: Option<BTreeMap<TrainingSlot, Discipline>>,
+    absence: Absence,
     /// Why. An unexplained override is unreadable six months later — § II.2's
     /// obligation on an edit overlay, which this is the authored-data analogue
     /// of.
@@ -258,18 +281,11 @@ pub struct Alteration {
 }
 
 impl Alteration {
-    pub const fn new(
-        start: Date,
-        days: NonZeroU8,
-        zone: Option<OperatorZone>,
-        slots: Option<BTreeMap<TrainingSlot, Discipline>>,
-        reason: String,
-    ) -> Self {
+    pub const fn new(start: Date, days: NonZeroU8, absence: Absence, reason: String) -> Self {
         Self {
             start,
             days,
-            zone,
-            slots,
+            absence,
             reason,
         }
     }
@@ -282,12 +298,24 @@ impl Alteration {
         self.days
     }
 
-    pub const fn zone(&self) -> Option<&OperatorZone> {
-        self.zone.as_ref()
+    pub const fn absence(&self) -> &Absence {
+        &self.absence
     }
 
-    pub const fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Discipline>> {
-        self.slots.as_ref()
+    /// The zone a holiday is spent in, when it is not the ordinary one.
+    pub const fn zone(&self) -> Option<&OperatorZone> {
+        match &self.absence {
+            Absence::Holiday { zone, .. } => zone.as_ref(),
+            Absence::Illness => None,
+        }
+    }
+
+    /// The slots while it lasts, which replace the ordinary week's.
+    pub fn slots(&self) -> &BTreeMap<TrainingSlot, Discipline> {
+        match &self.absence {
+            Absence::Holiday { slots, .. } => slots,
+            Absence::Illness => &NO_SLOTS,
+        }
     }
 
     pub fn reason(&self) -> &str {
@@ -394,9 +422,7 @@ impl Diary {
             if let Some(zone) = alteration.zone() {
                 availability.zone.clone_from(zone);
             }
-            if let Some(slots) = alteration.slots() {
-                availability.slots.clone_from(slots);
-            }
+            availability.slots.clone_from(alteration.slots());
         }
 
         Some(availability)

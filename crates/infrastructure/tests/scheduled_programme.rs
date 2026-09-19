@@ -20,7 +20,7 @@ use domain::{
     prescription::{
         Anchor, AnchorProvenance, Authored, EntryTest, SessionRole, Skip, authored::Shape,
     },
-    schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{Absence, Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};
@@ -127,8 +127,10 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
         .record_alteration(&Alteration::new(
             date(2026, 9, 14),
             days!(1),
-            None,
-            Some(BTreeMap::new()),
+            Absence::Holiday {
+                zone: None,
+                slots: BTreeMap::new(),
+            },
             "away, and unable to train".to_owned(),
         ))
         .await?;
@@ -171,8 +173,10 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
             .record_alteration(&Alteration::new(
                 date(2026, 12, 7),
                 days!(14),
-                None,
-                Some(BTreeMap::new()),
+                Absence::Holiday {
+                    zone: None,
+                    slots: BTreeMap::new(),
+                },
                 "away in December".to_owned(),
             ))
             .await?;
@@ -289,8 +293,10 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 25),
                 days!(1),
-                None,
-                Some(BTreeMap::new()),
+                Absence::Holiday {
+                    zone: None,
+                    slots: BTreeMap::new(),
+                },
                 "a wedding".to_owned(),
             ))
             .await?;
@@ -341,8 +347,10 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 21),
                 days!(1),
-                None,
-                Some(BTreeMap::new()),
+                Absence::Holiday {
+                    zone: None,
+                    slots: BTreeMap::new(),
+                },
                 "called away".to_owned(),
             ))
             .await?;
@@ -418,8 +426,10 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
             .record_alteration(&Alteration::new(
                 performed_on,
                 days!(1),
-                None,
-                Some(BTreeMap::new()),
+                Absence::Holiday {
+                    zone: None,
+                    slots: BTreeMap::new(),
+                },
                 "written off, and then trained anyway".to_owned(),
             ))
             .await?;
