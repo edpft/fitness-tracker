@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Alteration, Diary, Discipline, PartOfDay, ScheduledSlot, TrainingPattern, TrainingSlot,
-        unaccounted,
+        Absence, Alteration, Diary, Discipline, PartOfDay, ScheduledSlot, TrainingPattern,
+        TrainingSlot, unaccounted,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -65,8 +65,10 @@ fn september() -> Built<Diary> {
     let first = Alteration::new(
         date(2026, 8, 29)?,
         days(7)?,
-        None,
-        Some(BTreeMap::new()),
+        Absence::Holiday {
+            zone: None,
+            slots: BTreeMap::new(),
+        },
         "away with family; no free weights where we are staying".to_owned(),
     );
 
@@ -74,8 +76,10 @@ fn september() -> Built<Diary> {
     let second = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
-        Some(zone("Europe/Rome")?),
-        Some(BTreeMap::new()),
+        Absence::Holiday {
+            zone: Some(zone("Europe/Rome")?),
+            slots: BTreeMap::new(),
+        },
         "away with family in Rome".to_owned(),
     );
 
@@ -281,8 +285,10 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
         vec![Alteration::new(
             monday,
             days(1).expect("one day"),
-            None,
-            Some(morning_only),
+            Absence::Holiday {
+                zone: None,
+                slots: morning_only,
+            },
             "trains in the morning, away from lunchtime".to_owned(),
         )],
     );
@@ -541,4 +547,36 @@ fn a_session_before_its_slot_or_of_another_discipline_does_not_count() {
     ]);
 
     assert_eq!(unaccounted(&due, &performed), due.to_vec());
+}
+
+/// Illness leaves no room to train and says nothing about where the operator
+/// is, so an illness in the middle of a holiday keeps the holiday's zone.
+#[test]
+fn illness_empties_the_day_and_keeps_the_zone() {
+    let rome = zone("Europe/Rome").expect("a real zone");
+    let saturday = date(2026, 9, 12).expect("a real date");
+
+    let mut alterations = september()
+        .expect("the diary builds")
+        .alterations()
+        .to_vec();
+    alterations.push(Alteration::new(
+        saturday,
+        days(1).expect("one day"),
+        Absence::Illness,
+        "a cold".to_owned(),
+    ));
+    let diary = Diary::new(
+        vec![TrainingPattern::new(
+            date(2026, 1, 1).expect("a real date"),
+            zone("Europe/London").expect("a real zone"),
+            ordinary(),
+        )],
+        alterations,
+    );
+
+    let ill = diary.on(saturday).expect("a schedule is in force");
+    assert_eq!(ill.zone, rome, "still in Rome");
+    assert!(ill.slots.is_empty(), "no room to train while ill");
+    assert_eq!(diary.alterations()[2].slots(), &BTreeMap::new());
 }

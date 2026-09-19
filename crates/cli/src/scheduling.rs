@@ -26,7 +26,7 @@ use std::{
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
-    schedule::{Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{Absence, Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Date, Weekday};
@@ -205,12 +205,6 @@ fn yes(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "y" | "yes")
 }
 
-/// Only an explicit no. An empty line takes the offered default, which for
-/// "are you able to train" is yes — so a stray return cannot cancel a week.
-fn no(typed: &str) -> bool {
-    matches!(typed.to_lowercase().as_str(), "n" | "no")
-}
-
 async fn store(database: &Path) -> Result<SqliteDiaryStore, Failure> {
     let pool = connect(database)
         .await
@@ -259,8 +253,9 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
 pub async fn alter(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
-    println!("What departs from the ordinary pattern?");
-    println!("  Not only holidays — a course, a visitor or a late finish all count.");
+    println!("Which absence departs from the ordinary pattern: a holiday, or an illness?");
+    println!("  A session moved within its window needs nothing recorded, and a lasting");
+    println!("  change is `fitness schedule add`.");
 
     let start = ask_until("From which date? ", parse_date)?;
     let days = ask_until("How many days? [1] ", |typed| {
@@ -274,30 +269,34 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             .ok_or_else(|| format!("{typed:?} is not a number of days from 1 to 255"))
     })?;
 
-    let zone = {
-        let typed = ask("In a different time zone? [no] ")?;
-        if typed.is_empty() || typed.eq_ignore_ascii_case("no") {
-            None
-        } else {
-            Some(ask_until("Which IANA time zone? ", parse_zone)?)
-        }
-    };
-
-    // **The three cases, asked so the commonest is one keystroke.** Leaving the
-    // slots alone, having none at all, and having different ones are three
-    // different facts. Being unable to train is much the most common of them —
-    // it is why most alterations get recorded — so it is asked first and
-    // answered outright, and the walk through the days only happens for the
-    // case that actually needs it.
-    let slots = if no(&ask("Are you able to train during this period? [yes] ")?) {
-        Some(BTreeMap::new())
-    } else if yes(&ask("Does this change when you can train? [no] ")?) {
-        Some(ask_slots(
-            "Which parts of each day, while it lasts?",
-            &covered_weekdays(start, days),
-        )?)
+    // **Illness is asked first, because it settles everything else.** It is only
+    // illness when it prevents training, so it has no slots and no zone to ask
+    // about; well enough to ride is not recorded at all.
+    let absence = if yes(&ask("Too ill to train? [no] ")?) {
+        Absence::Illness
     } else {
-        None
+        let zone = {
+            let typed = ask("In a different time zone? [no] ")?;
+            if typed.is_empty() || typed.eq_ignore_ascii_case("no") {
+                None
+            } else {
+                Some(ask_until("Which IANA time zone? ", parse_zone)?)
+            }
+        };
+
+        // Away from the gym and the bike, so the ordinary slots never simply
+        // carry over: either there is no room at all, which is the commonest
+        // holiday and one keystroke, or the trip's own slots are walked through.
+        let slots = if yes(&ask("Can you train at all while away? [no] ")?) {
+            ask_slots(
+                "Which parts of each day, while it lasts?",
+                &covered_weekdays(start, days),
+            )?
+        } else {
+            BTreeMap::new()
+        };
+
+        Absence::Holiday { zone, slots }
     };
 
     let reason = ask_until("Why? ", |typed| {
@@ -308,7 +307,7 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
         }
     })?;
 
-    let alteration = Alteration::new(start, days, zone, slots, reason);
+    let alteration = Alteration::new(start, days, absence, reason);
 
     store(database)
         .await?
@@ -334,7 +333,7 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
-    use super::{covered_weekdays, no, parse_parts, yes};
+    use super::{covered_weekdays, parse_parts, yes};
     use domain::schedule::PartOfDay;
     use jiff::civil::{Weekday, date};
 
@@ -394,18 +393,13 @@ mod tests {
         }
     }
 
-    /// **An empty line takes the offered default, and the defaults differ.**
-    ///
-    /// "Are you able to train" defaults to yes, so a stray return cannot cancel
-    /// a week's training; "does this change when you can train" defaults to no,
-    /// so a stray return cannot rewrite it either.
+    /// **An empty line takes the offered default, which is always no.** A
+    /// stray return cannot record an illness, and cannot start a walk through
+    /// the days of a holiday.
     #[test]
-    fn an_empty_answer_is_neither_a_yes_nor_a_no() {
+    fn an_empty_answer_is_not_a_yes() {
         assert!(!yes(""), "an empty line does not agree");
-        assert!(!no(""), "and does not refuse");
-
         assert!(yes("y") && yes("yes") && yes("YES"));
-        assert!(no("n") && no("no") && no("No"));
     }
 
     /// `-` and an empty line both mean no part of this day.
