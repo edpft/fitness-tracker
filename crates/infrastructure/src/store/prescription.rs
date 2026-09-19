@@ -7,8 +7,9 @@
 //!
 //! `(issued_for, issued_at)` is the unique key, so a date may be prescribed
 //! more than once and the greatest `issued_at` is the one in force — the same
-//! rule `generation_parameters` uses, and for the same reason: an issued
-//! prescription is authored data (§ 12) and keeps its history. FR-010's
+//! rule `generation_parameters` uses: a correction supersedes rather than
+//! overwrites. § 12 no longer requires the superseded row, but nothing deletes
+//! it either. FR-010's
 //! idempotence is therefore the schema's rather than a caller's to remember.
 
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
