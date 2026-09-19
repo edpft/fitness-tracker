@@ -166,7 +166,7 @@ pub async fn strength(
 /// `Outcome` variants belong to commands that answer a question rather than
 /// advance the loop, and a match arm for them here would be a claim that `next`
 /// might one day reset a watermark.
-fn report(stream: &domain::landing::LandingStream, outcome: wiring::Outcome) {
+pub fn report(stream: &domain::landing::LandingStream, outcome: wiring::Outcome) {
     match outcome {
         wiring::Outcome::Extracted(summary) => output::run_succeeded(&summary),
         wiring::Outcome::Derived(summary) => output::derivation_succeeded(&summary),

@@ -25,7 +25,7 @@
 //! both being current, which is why a ride with no graph is a refusal rather
 //! than an error.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, PerformedSessionLog, StoreError};
 use domain::{
     cycling::{BikePlusRide, Ftp, FtpProvenance, HeartRateSeries, PerformedSession, Watts},
     landing::{
@@ -580,6 +580,67 @@ impl application::FtpHistory for SqliteFtpHistory {
         Ftp::new(watts, from, provenance)
             .map(Some)
             .map_err(|error| corrupt(error.to_string()))
+    }
+}
+
+/// When cycling sessions were ridden.
+///
+/// A session's day is its first ride's, which is also what it is keyed on: a
+/// session that ran past midnight is filed under the day it started, as a gym
+/// session is.
+#[derive(Debug, Clone)]
+pub struct SqliteCyclingSessionLog {
+    pool: SqlitePool,
+}
+
+impl SqliteCyclingSessionLog {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl PerformedSessionLog for SqliteCyclingSessionLog {
+    async fn dates_between(&self, from: Date, to: Date) -> Result<Vec<Date>, StoreError> {
+        // **Widened in SQL and narrowed in Rust**, for the reason the gym's
+        // reader gives: the day depends on the zone on each row, and a day
+        // either side covers every zone there is.
+        let lower = from
+            .checked_sub(jiff::Span::new().days(1))
+            .map_err(|_| StoreError::Corrupt {
+                detail: "a date before the calendar".to_owned(),
+            })?
+            .to_string();
+        let upper = to
+            .checked_add(jiff::Span::new().days(2))
+            .map_err(|_| StoreError::Corrupt {
+                detail: "a date beyond the calendar".to_owned(),
+            })?
+            .to_string();
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT first.started_at_utc AS "started_at_utc!: String",
+                   first.zone           AS "zone!: String"
+              FROM cycling_session AS s
+              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id
+             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
+             ORDER BY first.started_at_utc ASC
+            "#,
+            lower,
+            upper,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut dates = Vec::new();
+        for row in rows {
+            let day = super::history::day_of(&row.started_at_utc, &row.zone)?;
+            if day >= from && day <= to {
+                dates.push(day);
+            }
+        }
+        Ok(dates)
     }
 }
 

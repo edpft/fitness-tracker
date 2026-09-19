@@ -9,6 +9,7 @@ mod catalogue;
 mod config;
 mod cycling;
 mod gym;
+mod next;
 mod output;
 mod paths;
 mod plan;
@@ -147,6 +148,7 @@ fn command() -> ClapCommand {
         )
         .subcommand(init_command())
         .subcommand(credentials_command())
+        .subcommand(next_command())
         .subcommand(discipline_command())
         .subcommand(cycling_command())
         .subcommand(plan_command())
@@ -164,6 +166,25 @@ fn command() -> ClapCommand {
                 )
                 .arg(stream_argument()),
         )
+}
+
+/// `fitness next` — whichever discipline the schedule says is next.
+///
+/// **No `--base-url` and no `--ftp`.** Each belongs to one discipline, and which
+/// discipline runs is this command's answer rather than the operator's; they
+/// stay on `gym next` and `cycling next`.
+fn next_command() -> ClapCommand {
+    ClapCommand::new("next")
+        .about(
+            "Collect what has been done since the last slot, then deliver the session \
+             the schedule says is next, whichever discipline it is",
+        )
+        .arg(timezone_argument())
+        .arg(Arg::new("date").long("date").value_name("date").help(
+            "The day to count from, as YYYY-MM-DD: the slot before it is checked \
+             against the record, and the next slot on or after it is delivered. \
+             Defaults to today",
+        ))
 }
 
 /// The daily loop, under the discipline it belongs to.
@@ -788,6 +809,7 @@ async fn authored_command(
             };
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
+        "next" => Some(next_command_run(sub, database, credentials, stated_timezone).await),
         "cycling" => Some(cycling_command_run(sub, database).await),
         "plan" => {
             let zone = match zone(sub) {
@@ -818,6 +840,26 @@ async fn authored_command(
         }
         _ => None,
     }
+}
+
+/// `next`, once its arguments are in hand.
+async fn next_command_run(
+    sub: &ArgMatches,
+    database: &Path,
+    credentials: &infrastructure::Credentials,
+    stated_timezone: Option<&str>,
+) -> Result<(), Failure> {
+    let zone = config::timezone(
+        sub.get_one::<String>("timezone").map(String::as_str),
+        stated_timezone,
+    )?;
+    next::next(
+        database,
+        &zone,
+        sub.get_one::<String>("date").map(String::as_str),
+        credentials,
+    )
+    .await
 }
 
 /// `deliver`, once the zone is in hand. Its own function only because the arm

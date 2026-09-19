@@ -34,7 +34,8 @@ use std::collections::BTreeMap;
 
 use application::{
     DeliveryReference, ExerciseHistory, FulfilledSession, LastPerformance, Performance,
-    PerformedSetSummary, PerformedWorkoutReader, PrescribedWorkoutId, StoreError,
+    PerformedSessionLog, PerformedSetSummary, PerformedWorkoutReader, PrescribedWorkoutId,
+    StoreError,
 };
 use domain::{
     gym::{
@@ -159,7 +160,7 @@ fn fulfilled_of(
 /// The zone is on the row, so this resolves through it rather than assuming the
 /// stored instant's UTC date is the day trained (§ II.3). An evening session in
 /// British Summer Time is the case that breaks the naive reading.
-fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
+pub(super) fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
     let instant: jiff::Timestamp = started_at_utc.parse().map_err(|_| StoreError::Corrupt {
         detail: format!("{started_at_utc:?} is not an instant"),
     })?;
@@ -524,6 +525,20 @@ fn sets_of<M>(
     NonEmpty::new(sets).map_err(|_| StoreError::Corrupt {
         detail: "a performed exercise with no sets".to_owned(),
     })
+}
+
+/// The gym's dates, read through [`PerformedWorkoutReader::between`] so that a
+/// session is what that reader says it is — split routines and all — and a day
+/// is the one it is filed under.
+impl PerformedSessionLog for SqlitePerformedWorkoutReader {
+    async fn dates_between(&self, from: Date, to: Date) -> Result<Vec<Date>, StoreError> {
+        Ok(self
+            .between(from, to)
+            .await?
+            .iter()
+            .map(|session| session.started_at().wall_clock().date())
+            .collect())
+    }
 }
 
 impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
