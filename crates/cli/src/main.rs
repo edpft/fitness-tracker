@@ -182,10 +182,21 @@ fn next_command() -> ClapCommand {
         )
         .arg(timezone_argument())
         .arg(Arg::new("date").long("date").value_name("date").help(
-            "The day to count from, as YYYY-MM-DD: the slot before it is checked \
-             against the record, and the next slot on or after it is delivered. \
-             Defaults to today",
+            "The day to report from, as YYYY-MM-DD: its microcycle is the one \
+             reported, and the first session of that microcycle still to be \
+             prescribed is the one delivered. Defaults to today",
         ))
+        .arg(
+            Arg::new("part")
+                .long("part")
+                .value_name("part")
+                .value_parser(["morning", "afternoon", "evening"])
+                .help(
+                    "How far into the day it is. A session may be performed \
+                     until the next one starts, so this decides whether a \
+                     session still has time left. Defaults to now",
+                ),
+        )
 }
 
 /// The daily loop, under the discipline it belongs to.
@@ -857,6 +868,7 @@ async fn next_command_run(
         database,
         &zone,
         sub.get_one::<String>("date").map(String::as_str),
+        sub.get_one::<String>("part").map(String::as_str),
         credentials,
     )
     .await

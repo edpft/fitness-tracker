@@ -894,26 +894,85 @@ fn derived_phrase(
     }
 }
 
-/// The prescription, as a session to train from.
-/// Nothing is programmed at or after the date asked from.
+/// Where every session of the microcycle stands, in the order the week runs.
 ///
-/// **Said, not refused.** Running out of plan is a fact about the plan rather
-/// than something the operator got wrong, and the answer to it is a new plan.
-/// A slot the schedule held that no performed session accounts for, even
-/// after collecting. Reported and nothing more: recording why is #177's.
-pub fn unperformed(slot: domain::schedule::ScheduledSlot) {
+/// **From the first session, not from the last slot** (#185). The operator, on
+/// his first run of the installed build: *"Maybe we should always start from
+/// the begining of the microcycle."* A week reported from its opening says
+/// where the week is up to; one reported from last night says only what
+/// happened last night.
+pub fn microcycle(sessions: &[application::microcycle::Session]) {
+    let Some(first) = sessions.first() else {
+        return;
+    };
     println!(
-        "no {} session has been performed since {} ({:?} {}), the slot before this one",
-        slot.discipline, slot.date, slot.slot.weekday, slot.slot.part,
+        "this microcycle, from {:?} {}",
+        first.slot.date.weekday(),
+        first.slot.date,
     );
+    println!();
+
+    let named: Vec<(String, String, String)> = sessions
+        .iter()
+        .map(|session| {
+            (
+                format!("{} {}", session.slot.discipline, session.number),
+                format!(
+                    "{:?} {} {}",
+                    session.slot.date.weekday(),
+                    session.slot.date,
+                    session.slot.slot.part,
+                ),
+                session.state.to_string(),
+            )
+        })
+        .collect();
+    let widest = |at: fn(&(String, String, String)) -> &String| {
+        named
+            .iter()
+            .map(|row| at(row).chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let name = widest(|row| &row.0);
+    let when = widest(|row| &row.1);
+
+    for (session, slot, state) in &named {
+        println!("  {session:name$}   {slot:when$}   {state}");
+    }
 }
 
-/// Whose slot is next, and when — what the schedule says before the
+/// The microcycle holds nothing left to prescribe.
+///
+/// Not a fault, and not silence either: a week that is done is a real answer,
+/// and the slot after it says when the next one opens without prescribing it.
+/// Deriving next week's session against a record that has a week left to
+/// change would be issuing something nobody can train from yet.
+pub fn microcycle_complete(after: Option<domain::schedule::ScheduledSlot>) {
+    match after {
+        Some(slot) => println!(
+            "nothing in this microcycle is still to be prescribed. The next slot is {} on {} ({:?} {})",
+            slot.discipline, slot.date, slot.slot.weekday, slot.slot.part,
+        ),
+        None => println!(
+            "nothing in this microcycle is still to be prescribed, and the schedule holds no slot after it"
+        ),
+    }
+}
+
+/// Which session is next, and when — what the schedule says before the
 /// discipline's own `next` says the rest.
-pub fn next_slot(slot: domain::schedule::ScheduledSlot) {
+///
+/// Named as the table above names it, so the line and the row are visibly the
+/// same session rather than two descriptions of one.
+pub fn next_slot(session: &application::microcycle::Session) {
     println!(
-        "next: {} on {} ({:?} {})",
-        slot.discipline, slot.date, slot.slot.weekday, slot.slot.part,
+        "next: {} {}, {:?} {} {}",
+        session.slot.discipline,
+        session.number,
+        session.slot.date.weekday(),
+        session.slot.date,
+        session.slot.slot.part,
     );
 }
 
@@ -921,6 +980,21 @@ pub fn no_next_slot(from: jiff::civil::Date) {
     println!("the schedule holds no slot on or after {from}");
 }
 
+/// The week has slots and no plan covers it.
+///
+/// **Told apart from a week with no slots**, because the two are answered by
+/// different commands and a wrong one sends the operator to the wrong wizard.
+pub fn no_plan_covers(week_of: jiff::civil::Date) {
+    println!(
+        "the week of {week_of} has training slots and no plan covers it, \
+         so there is no microcycle to report. Author one: fitness plan"
+    );
+}
+
+/// Nothing is programmed at or after the date asked from.
+///
+/// **Said, not refused.** Running out of plan is a fact about the plan rather
+/// than something the operator got wrong, and the answer to it is a new plan.
 pub fn nothing_planned(
     from: jiff::civil::Date,
     last: Option<&(domain::plan::PlanName, jiff::civil::Date)>,
@@ -936,6 +1010,7 @@ pub fn nothing_planned(
     }
 }
 
+/// The prescription, as a session to train from.
 pub fn prescription(issued: &application::Prescription) {
     use application::Issuance;
 

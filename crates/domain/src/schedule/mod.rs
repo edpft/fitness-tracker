@@ -947,21 +947,6 @@ impl Diary {
             .unwrap_or_default()
     }
 
-    /// The last slot on a day before this one.
-    ///
-    /// `None` when nothing the operator has said reaches back that far.
-    pub fn last_before(&self, date: Date) -> Option<ScheduledSlot> {
-        let first = self.patterns.first()?.from();
-        let mut cursor = date.yesterday().ok()?;
-        while cursor >= first {
-            if let Some(last) = self.slots_of(cursor).pop() {
-                return Some(last);
-            }
-            cursor = cursor.yesterday().ok()?;
-        }
-        None
-    }
-
     /// The first slot on a day after this one.
     ///
     /// **Bounded by what the diary says.** Past the last pattern and the last
@@ -987,19 +972,6 @@ impl Diary {
         }
         None
     }
-
-    /// The slots a session should have been performed for by the end of a day:
-    /// the last one before it, and every one on it.
-    ///
-    /// **The last before, not every one before.** What went missing earlier than
-    /// that has already been answered for by an earlier run, and whether a miss
-    /// moves anything is #177's question rather than this one's.
-    pub fn due_by(&self, date: Date) -> Vec<ScheduledSlot> {
-        self.last_before(date)
-            .into_iter()
-            .chain(self.slots_of(date))
-            .collect()
-    }
 }
 
 /// One slot on one date, and whose it is.
@@ -1023,49 +995,47 @@ impl std::fmt::Display for ScheduledSlot {
     }
 }
 
-/// The slots no performed session accounts for.
+/// Which planned sessions the record accounts for, one answer per slot.
 ///
-/// **A session accounts for a slot of its discipline on or after the slot's
-/// date**, not only on it. The operator, 2026-09-19: *"if the previous
-/// prescribed session was performed since we last checked, that's fine, the
-/// slot doesn't have to match"* — a test missed through illness yesterday and
-/// performed today is that test.
+/// **A session answers for the slot whose turn it was**: the latest slot of
+/// its discipline on or before the day it was performed. The operator,
+/// 2026-09-19: *"if the previous prescribed session was performed since we
+/// last checked, that's fine, the slot doesn't have to match"* — a test missed
+/// through illness on the Friday and performed on the Saturday is that test,
+/// because the Friday is the last gym slot the Saturday is after.
 ///
-/// **Each session accounts for one slot.** The earliest slot takes the
-/// earliest session that can answer for it, so a session done a day late
-/// fills the slot it was late for and leaves today's slot of the same
-/// discipline still to do.
+/// **Read from the session rather than from the slot**, which is the
+/// correction #185 forced. Walking the slots instead and giving each the
+/// earliest session that could answer for it is the same thing while there is
+/// one slot in question, and wrong across a whole microcycle: a gym session
+/// done on the Sunday would answer for the *Monday* six days earlier and leave
+/// the Friday looking missed.
 ///
-/// `performed` is each discipline's session dates; a discipline absent from it
-/// has performed nothing.
-pub fn unaccounted(
-    due: &[ScheduledSlot],
+/// **A slot takes one session.** Two performed on one slot's watch fill it
+/// once; there is no second slot for the second to reach back to.
+///
+/// `slots` is in the order the week runs, and `performed` is each discipline's
+/// session dates; a discipline absent from it has performed nothing.
+#[must_use]
+pub fn accounted(
+    slots: &[ScheduledSlot],
     performed: &BTreeMap<Discipline, Vec<Date>>,
-) -> Vec<ScheduledSlot> {
-    let mut due = due.to_vec();
-    due.sort();
+) -> Vec<bool> {
+    let mut answered = vec![false; slots.len()];
 
-    let mut remaining: BTreeMap<Discipline, Vec<Date>> = performed
-        .iter()
-        .map(|(discipline, dates)| {
-            let mut dates = dates.clone();
-            dates.sort();
-            (*discipline, dates)
-        })
-        .collect();
-
-    due.into_iter()
-        .filter(|slot| {
-            let Some(dates) = remaining.get_mut(&slot.discipline) else {
-                return true;
-            };
-            dates
+    for (discipline, dates) in performed {
+        for date in dates {
+            let whose_turn = slots
                 .iter()
-                .position(|date| *date >= slot.date)
-                .is_none_or(|found| {
-                    dates.remove(found);
-                    false
-                })
-        })
-        .collect()
+                .enumerate()
+                .filter(|(_, slot)| slot.discipline == *discipline && slot.date <= *date)
+                .map(|(at, _)| at)
+                .next_back();
+            if let Some(answer) = whose_turn.and_then(|at| answered.get_mut(at)) {
+                *answer = true;
+            }
+        }
+    }
+
+    answered
 }

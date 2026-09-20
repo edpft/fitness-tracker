@@ -27,8 +27,8 @@ use domain::{
     plan::{Plan, PlanName, Programme},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, ByIntensity, Calendar,
-        GenerationParameters, Linear, LoadSteps, Mesocycle, Percentage, Progression, ResetProtocol,
-        Scales, Skip, Step, TopSetReps, WarmupStep,
+        GenerationParameters, Linear, LoadSteps, Mesocycle, Percentage, PrescribedWorkout,
+        Progression, ResetProtocol, Scales, Skip, Step, TopSetReps, WarmupStep,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -618,4 +618,63 @@ fn grouped(
         between_sets: span(low, high)?,
         after_superset: Some(span(superset_low, superset_high)?),
     })
+}
+
+/// A minimal issued session for a date, for a test that only needs one to
+/// exist.
+///
+/// **Its contents do not matter and its identity does.** What #185 asks of a
+/// gym prescription is whether one holds the date's place at a destination,
+/// which is a join between two tables and says nothing about what was
+/// prescribed.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the date, the shape or the parameters are
+/// invalid.
+pub fn a_workout_for(
+    date: Date,
+    parameters_authored_at: jiff::Timestamp,
+) -> Result<PrescribedWorkout, ProgrammeFixtureError> {
+    use domain::{
+        gym::{Load, exercise::RepsExercise},
+        measure::RepCount,
+        prescription::{
+            DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet, SlotId,
+            Target, WeekIndex, WeekKind, WorkoutShape,
+        },
+        sequence::NonEmpty,
+    };
+
+    let sets = NonEmpty::new(vec![PrescribedSet::fixed(
+        Load::BODYWEIGHT,
+        Target::spanning(
+            RepCount::new(5).map_err(invalid)?,
+            RepCount::new(3).map_err(invalid)?,
+        ),
+    )])
+    .map_err(invalid)?;
+
+    let shape = WorkoutShape::new(
+        NonEmpty::new(vec![PrescribedItem::Exercise {
+            slot: SlotId::UpperPull,
+            exercise: PrescribedExercise::ForReps {
+                exercise: RepsExercise::NeutralGripPullUp,
+                sets,
+            },
+        }])
+        .map_err(invalid)?,
+    );
+
+    Ok(PrescribedWorkout::new(
+        shape,
+        date,
+        SessionRole::new(Relative::Higher, Relative::Lower),
+        WeekKind::Climbing(WeekIndex::new(1).map_err(invalid)?),
+        DerivedFrom::Anchor(anchor()?),
+        parameters()?,
+        parameters_authored_at,
+        MesocycleId::new(1),
+        "2026-09-15T18:00:00Z".parse().map_err(invalid)?,
+    ))
 }

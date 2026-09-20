@@ -11,7 +11,7 @@ use domain::{
     normalised::OperatorZone,
     schedule::{
         Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, ScheduledSlot,
-        SessionRole, TrainingPattern, TrainingSlot, unaccounted,
+        SessionRole, TrainingPattern, TrainingSlot, accounted,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -461,25 +461,9 @@ fn slot(on: Date, part: PartOfDay, discipline: Discipline) -> ScheduledSlot {
     }
 }
 
-/// **The previous slot is found across an absence.** Rome takes Friday 11
-/// through Monday 14, so on Wednesday 16 the last slot there was room for is
-/// the Wednesday before.
-#[test]
-fn the_last_slot_before_a_day_skips_the_days_an_absence_took() {
-    let diary = september().expect("the diary builds");
-    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
-
-    assert_eq!(
-        diary.last_before(wednesday),
-        Some(slot(
-            date(2026, 9, 9).expect("a real Wednesday"),
-            PartOfDay::Evening,
-            Discipline::Cycling,
-        )),
-    );
-}
-
-/// And the next one is found across it the other way.
+/// **The next slot is found across an absence.** Rome takes Friday 11 through
+/// Monday 14, so the first slot there is room for after Thursday 10 is the
+/// Wednesday after the trip.
 #[test]
 fn the_first_slot_after_a_day_skips_the_days_an_absence_took() {
     let diary = september().expect("the diary builds");
@@ -495,22 +479,29 @@ fn the_first_slot_after_a_day_skips_the_days_an_absence_took() {
     );
 }
 
-/// **Due by a day is the last slot before it and every slot on it.**
+/// **The ordinary week keeps the days an absence took**, which is what a
+/// microcycle's sessions are read from (#185): a session lost to a holiday is
+/// still a session, and why it did not happen is a state rather than a gap.
 #[test]
-fn what_is_due_by_a_day_is_the_slot_before_and_the_day_itself() {
+fn the_ordinary_slots_of_a_day_ignore_every_alteration() {
     let diary = september().expect("the diary builds");
-    let monday = date(2026, 9, 21).expect("a real Monday");
+    let monday = date(2026, 9, 14).expect("a real Monday");
 
+    assert!(
+        diary.slots_of(monday).is_empty(),
+        "Rome covers the Monday, so the altered week holds nothing"
+    );
     assert_eq!(
-        diary.due_by(monday),
-        vec![
-            slot(
-                date(2026, 9, 20).expect("a real Sunday"),
-                PartOfDay::Morning,
-                Discipline::Cycling,
-            ),
-            slot(monday, PartOfDay::Evening, Discipline::Gym),
-        ],
+        diary.ordinary_slots_of(monday),
+        vec![slot(monday, PartOfDay::Evening, Discipline::Gym)],
+    );
+    assert_eq!(
+        diary.first_ordinary_after(date(2026, 9, 14).expect("a real Monday")),
+        Some(slot(
+            date(2026, 9, 16).expect("a real Wednesday"),
+            PartOfDay::Evening,
+            Discipline::Cycling,
+        )),
     );
 }
 
@@ -529,7 +520,7 @@ fn a_week_with_no_slots_has_no_next_slot() {
     );
 
     assert_eq!(empty.first_after(start), None);
-    assert_eq!(empty.last_before(start), None);
+    assert_eq!(empty.first_ordinary_after(start), None);
     assert_eq!(Diary::default().first_after(start), None);
 }
 
@@ -544,26 +535,61 @@ fn a_session_performed_after_its_slot_accounts_for_it() {
     let due = [slot(friday, PartOfDay::Evening, Discipline::Gym)];
     let performed = BTreeMap::from([(Discipline::Gym, vec![saturday])]);
 
-    assert_eq!(unaccounted(&due, &performed), vec![]);
+    assert_eq!(accounted(&due, &performed), vec![true]);
 }
 
-/// **One session answers for one slot.** Done a day late, it fills the slot
-/// it was late for, and the day's own slot is still to do.
+/// **A session answers for the slot whose turn it was**, not for the earliest
+/// one that could take it. A gym session at the end of the week is the
+/// Friday's done late, and reading it as the Monday's would leave the Friday
+/// looking missed.
 #[test]
-fn one_session_accounts_for_one_slot() {
+fn a_session_answers_for_the_slot_whose_turn_it_was() {
+    let monday = date(2026, 9, 14).expect("a real Monday");
     let friday = date(2026, 9, 18).expect("a real Friday");
     let saturday = date(2026, 9, 19).expect("a real Saturday");
 
     let due = [
-        slot(saturday, PartOfDay::Morning, Discipline::Gym),
+        slot(monday, PartOfDay::Evening, Discipline::Gym),
         slot(friday, PartOfDay::Evening, Discipline::Gym),
     ];
     let performed = BTreeMap::from([(Discipline::Gym, vec![saturday])]);
 
-    assert_eq!(
-        unaccounted(&due, &performed),
-        vec![slot(saturday, PartOfDay::Morning, Discipline::Gym)],
-    );
+    assert_eq!(accounted(&due, &performed), vec![false, true]);
+}
+
+/// **Two sessions fill two slots.**
+#[test]
+fn a_session_each_fills_both_slots() {
+    let monday = date(2026, 9, 14).expect("a real Monday");
+    let tuesday = date(2026, 9, 15).expect("a real Tuesday");
+    let friday = date(2026, 9, 18).expect("a real Friday");
+    let saturday = date(2026, 9, 19).expect("a real Saturday");
+
+    let due = [
+        slot(monday, PartOfDay::Evening, Discipline::Gym),
+        slot(friday, PartOfDay::Evening, Discipline::Gym),
+    ];
+    let performed = BTreeMap::from([(Discipline::Gym, vec![tuesday, saturday])]);
+
+    assert_eq!(accounted(&due, &performed), vec![true, true]);
+}
+
+/// **And a slot takes one session.** Two trained on the Monday slot's watch
+/// answer for the Monday twice over; the Friday is still to do.
+#[test]
+fn one_slot_takes_one_session() {
+    let monday = date(2026, 9, 14).expect("a real Monday");
+    let tuesday = date(2026, 9, 15).expect("a real Tuesday");
+    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
+    let friday = date(2026, 9, 18).expect("a real Friday");
+
+    let due = [
+        slot(monday, PartOfDay::Evening, Discipline::Gym),
+        slot(friday, PartOfDay::Evening, Discipline::Gym),
+    ];
+    let performed = BTreeMap::from([(Discipline::Gym, vec![tuesday, wednesday])]);
+
+    assert_eq!(accounted(&due, &performed), vec![true, false]);
 }
 
 /// **A session before the slot does not account for it**, and nor does one of
@@ -580,7 +606,7 @@ fn a_session_before_its_slot_or_of_another_discipline_does_not_count() {
         (Discipline::Gym, vec![thursday]),
     ]);
 
-    assert_eq!(unaccounted(&due, &performed), due.to_vec());
+    assert_eq!(accounted(&due, &performed), vec![false]);
 }
 
 /// Illness leaves no room to train and says nothing about where the operator
