@@ -1,3 +1,4 @@
+-- no-transaction
 PRAGMA foreign_keys = OFF;
 
 CREATE TABLE gym_mesocycle_rebuilt (

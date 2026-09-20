@@ -1,3 +1,4 @@
+-- no-transaction
 PRAGMA foreign_keys = OFF;
 
 CREATE TABLE generation_parameters_rebuilt (
