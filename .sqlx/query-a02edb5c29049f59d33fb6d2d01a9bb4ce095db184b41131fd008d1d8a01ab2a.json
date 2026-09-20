@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reference AS \"reference!: String\",\n                   called    AS \"called!: String\"\n              FROM cycling_delivery_class\n             WHERE delivery = ?\n             ORDER BY position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery_class",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "called!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery_class",
+            "name": "called"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a02edb5c29049f59d33fb6d2d01a9bb4ce095db184b41131fd008d1d8a01ab2a"
+}

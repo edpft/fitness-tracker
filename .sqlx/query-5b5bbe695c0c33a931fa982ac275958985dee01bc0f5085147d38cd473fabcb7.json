@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM cycling_delivery_class WHERE delivery = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5b5bbe695c0c33a931fa982ac275958985dee01bc0f5085147d38cd473fabcb7"
+}

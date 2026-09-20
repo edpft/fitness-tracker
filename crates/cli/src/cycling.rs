@@ -26,14 +26,16 @@ use std::path::Path;
 use application::{DiaryStore as _, FtpHistory};
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMicrocycle, CyclingSession, Ftp, PlannedRide, Ride,
-        SessionPosition, clock,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, DeliveredRide, Ftp, PlannedRide, Ride,
+        RideVenue, SessionPosition, clock,
     },
     measure::PositiveDuration,
     schedule::{Discipline, TrainingWeek},
+    sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory, connect,
+    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory,
+    connect,
     peloton::{PelotonClasses, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -99,7 +101,11 @@ pub async fn next(
     // applies to it. An override stands whatever the record says.
     let ftp = match ftp {
         Some(asserted) => Some(asserted),
-        None => SqliteFtpHistory::new(pool).in_force_on(next.date).await?,
+        None => {
+            SqliteFtpHistory::new(pool.clone())
+                .in_force_on(next.date)
+                .await?
+        }
     };
 
     let extra = PositiveDuration::from_seconds(EXTRA_COOL_DOWN_SECONDS)
@@ -118,7 +124,17 @@ pub async fn next(
 
     println!();
     match to {
-        Ok((classes, stack)) => deliver_ride(&next, classes, stack, false).await,
+        Ok((classes, stack)) => {
+            deliver_ride(
+                &SqliteCyclingDeliveryStore::new(pool),
+                &programme,
+                &next,
+                classes,
+                stack,
+                false,
+            )
+            .await
+        }
         Err(why) => {
             output::not_delivered(why);
             Ok(())
@@ -284,11 +300,32 @@ pub async fn deliver(
     );
     println!("{}, {}", weekday_name(next.date.weekday()), next.date);
     println!();
-    deliver_ride(&next, classes, stack, replace).await
+    deliver_ride(
+        &SqliteCyclingDeliveryStore::new(pool),
+        &programme,
+        &next,
+        classes,
+        stack,
+        replace,
+    )
+    .await
 }
 
-/// Put one session's classes in the stack, in the order they are ridden.
-async fn deliver_ride(
+/// Put one session's classes in the stack, in the order they are ridden, and
+/// record what went.
+///
+/// **The record is written after the stack, and only if the stack took it.**
+/// It is the evidence that a ride was prescribed — nothing else in the store
+/// says so, because a cycling session is authored in full and has no derived
+/// prescription to leave behind (#185). Writing it before the delivery would
+/// report a session as prescribed that Peloton refused.
+///
+/// **What is recorded is what went, not what the programme holds.** The
+/// cool-down is chosen here, from the last class's instructor, and appears in
+/// no authored record at all.
+async fn deliver_ride<S: application::CyclingDeliveryStore + Sync>(
+    recording: &S,
+    programme: &CyclingMesocycle,
     next: &application::cycling::NextRide,
     classes: &PelotonClasses,
     stack: &PelotonStack,
@@ -351,6 +388,8 @@ async fn deliver_ride(
         cool_down.title,
         whoever(taught_by.as_ref())
     );
+
+    record_delivery(recording, programme, next, &cool_down).await?;
     println!();
 
     // **A total of zero is Peloton's answer, not a failure.** It counts a
@@ -403,4 +442,59 @@ async fn cycling_week(diary: &SqliteDiaryStore, from: Date) -> Result<TrainingWe
                 exit::USAGE,
             )
         })
+}
+
+/// Write down the session that has just gone to the stack.
+///
+/// The destination is named from the catalogue rather than spelled here, for
+/// the reason every other name is: one entry says where a discipline delivers,
+/// and a second spelling of it is a second thing that can disagree.
+async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
+    recording: &S,
+    programme: &CyclingMesocycle,
+    next: &application::cycling::NextRide,
+    cool_down: &infrastructure::peloton::ClassSummary,
+) -> Result<(), Failure> {
+    let destination = crate::catalogue::discipline(Discipline::Cycling.as_str())
+        .map(|known| known.delivers_to().name())
+        .ok_or_else(|| {
+            Failure::message(
+                "this build has no cycling destination to record against",
+                exit::USAGE,
+            )
+        })?;
+    let destination = application::DestinationName::try_from(destination.to_owned())
+        .map_err(|error| Failure::usage(&error))?;
+
+    let mut written: Vec<RideVenue> = next
+        .ride
+        .at()
+        .iter()
+        .map(|venue| RideVenue::new(venue.reference(), venue.called()))
+        .collect::<Result<_, _>>()
+        .map_err(|error| Failure::usage(&error))?;
+    written.push(
+        RideVenue::new(&cool_down.id, &cool_down.title).map_err(|error| Failure::usage(&error))?,
+    );
+    let written = NonEmpty::new(written).map_err(|error| Failure::usage(&error))?;
+
+    let microcycle = u32::try_from(next.microcycle).map_err(|_| {
+        Failure::message(
+            format!("microcycle {} is past counting", next.microcycle),
+            exit::USAGE,
+        )
+    })?;
+
+    recording
+        .record(&DeliveredRide {
+            prescribed_for: next.date,
+            destination,
+            programme: programme.programme().name().clone(),
+            microcycle,
+            session: next.session,
+            classes: written,
+            delivered_at: jiff::Timestamp::now(),
+        })
+        .await
+        .map_err(Failure::from)
 }

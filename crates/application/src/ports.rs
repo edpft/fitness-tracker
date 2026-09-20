@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, future::Future};
 use jiff::{Timestamp, civil::Date};
 
 use domain::analytical::Weighed;
-use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, Ftp};
+use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, DeliveredRide, Ftp};
 use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -1167,6 +1167,48 @@ pub trait CyclingMesocycleStore {
     ) -> impl Future<
         Output = Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>,
     > + Send;
+}
+
+/// What cycling sessions have been written to a destination.
+///
+/// **A record of an outward act, and the whole of what cycling has.** The gym
+/// keeps a prescription and a delivery apart, because a gym session is derived
+/// before it is sent and the derivation is worth keeping (§ 12). A cycling
+/// session is authored in full when the plan is, so there is nothing to draft
+/// and nothing to store until it is published (§ 12.1) — and until 2026-09-20
+/// nothing was stored at any point, which left *prescribed* and *to be
+/// prescribed* indistinguishable for a ride.
+///
+/// One table across destinations, as [`PrescriptionDeliveryStore`] is, and for
+/// the same reason: what is recorded is the same few columns whoever received
+/// it.
+pub trait CyclingDeliveryStore {
+    /// What was delivered for a date, if anything was.
+    ///
+    /// **A date has at most one**, because a destination holds a place rather
+    /// than a pile: Peloton's stack is one list shared across everything the
+    /// operator queues, and delivering into it replaces what is there. So a
+    /// second delivery for a date supersedes the first rather than joining it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn delivered_for(
+        &self,
+        date: Date,
+        destination: &DestinationName,
+    ) -> impl Future<Output = Result<Option<DeliveredRide>, StoreError>> + Send;
+
+    /// Record what went, replacing whatever the date's place held.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record(
+        &self,
+        delivered: &DeliveredRide,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// What was issued.

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO cycling_delivery_class (delivery, position, reference, called)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "f1bd8ad805f9912264ed995cffbe4637430275c00586443f75abce6035296bd2"
+}

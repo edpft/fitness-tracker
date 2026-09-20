@@ -1,58 +1,61 @@
-//! `fitness next` — what's next, from what should happen and what has.
+//! `fitness next` — where the microcycle is up to, and the session to deliver.
 //!
 //! The operator, 2026-09-19: *"This command is all about what's next, based on
 //! what has happened and what should happen."* (#137)
 //!
-//! **What should happen is the diary.** Its slots, with every alteration
-//! applied, say which discipline has each one — so the schedule alone knows
-//! whose session is next, and no discipline is asked.
+//! **It reports from the first session of the microcycle, not from the slot
+//! before today** (#185). His first run of the installed build checked only the
+//! previous slot, so it collected the gym and not the bike and could not say
+//! where the week was up to: *"We should be checking from the last performed
+//! session, not the last prescribed session"*, and then *"Maybe we should
+//! always start from the beginning of the microcycle."*
 //!
-//! **What has happened is the record.** The slot before today, and any slot
-//! today, is accounted for by a performed session of its discipline on or after
-//! its date; see [`domain::schedule::unaccounted`]. Where the store holds none,
-//! that discipline's record is collected and derived before looking again,
-//! since the session may be at the source and not yet landed.
+//! **Every source is collected first, and unconditionally.** Deciding what to
+//! collect from what the store already holds is how the bike went unasked: the
+//! store said nothing was outstanding because nothing had been prescribed. So
+//! each discipline's record is collected and derived before anything is
+//! judged. An unreachable source is reported and stepped past (§ 36).
 //!
-//! **A slot still unaccounted for is reported and nothing more.** Recording
-//! why it was missed, and moving anything because of it, is #177.
-//!
-//! Then the next slot's discipline runs its own `next`, from that slot's date,
-//! and prints exactly what it prints alone.
+//! **Then each session of the microcycle gets a state**, and the first one
+//! still to be prescribed is the one delivered. Recording why a session was
+//! missed is #178's, which is done; moving anything because of it is #177's.
 
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 
-use application::{DiaryStore as _, PerformedSessionLog as _};
+use application::{
+    DiaryStore as _,
+    microcycle::{Microcycle, MicrocyclePorts},
+};
 use domain::{
     normalised::OperatorZone,
-    schedule::{Discipline, ScheduledSlot, unaccounted},
+    planner::SessionState,
+    schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot},
 };
 use infrastructure::{
-    SqliteCyclingSessionLog, SqliteDiaryStore, SqlitePerformedWorkoutReader, connect,
+    SqliteCyclingDeliveryStore, SqliteCyclingSessionLog, SqliteDiaryStore,
+    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescriptionDeliveryStore, connect,
 };
-use jiff::civil::Date;
 
 use crate::{
     Failure, catalogue, config, cycling, exit, gym, output, plan, wiring, wiring::Command,
 };
 
-/// Account for what was due, then run the next slot's discipline.
+/// Collect everything, report the microcycle, and deliver what is next.
 ///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no week has been recorded, or
 /// if the next discipline's own `next` fails. A source that cannot be reached
-/// while accounting is reported and stepped past (§ 36): the record already
+/// while collecting is reported and stepped past (§ 36): the record already
 /// landed still answers, and the next session is still worth delivering.
 pub async fn next(
     database: &Path,
     zone: &OperatorZone,
     date: Option<&str>,
+    part: Option<&str>,
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
-    let today = match date {
-        Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
-        None => jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date(),
-    };
+    let now = moment(zone, date, part)?;
 
     let pool = connect(database).await?;
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
@@ -63,76 +66,94 @@ pub async fn next(
             exit::USAGE,
         ));
     }
-
-    // 1. What has happened, against what should have.
-    let due = diary.due_by(today);
-    let mut missing = unaccounted(&due, &performed(&pool, &due, today).await?);
-
-    let uncollected: Vec<Discipline> = {
-        let mut disciplines: Vec<Discipline> = missing.iter().map(|slot| slot.discipline).collect();
-        disciplines.sort();
-        disciplines.dedup();
-        disciplines
-    };
-    if !uncollected.is_empty() {
-        for discipline in &uncollected {
-            collect(*discipline, database, zone, credentials).await?;
-        }
-        println!();
-        missing = unaccounted(&due, &performed(&pool, &due, today).await?);
-    }
     pool.close().await;
 
-    for slot in missing.iter().filter(|slot| slot.date < today) {
-        output::unperformed(*slot);
+    // 1. Every source, before anything is judged.
+    for discipline in [Discipline::Gym, Discipline::Cycling] {
+        collect(discipline, database, zone, credentials).await?;
     }
-
-    // 2. What should happen next: a slot today not yet done, or else the first
-    //    one after it.
-    let Some(next) = missing
-        .iter()
-        .find(|slot| slot.date == today)
-        .copied()
-        .or_else(|| diary.first_after(today))
-    else {
-        output::no_next_slot(today);
-        return Ok(());
-    };
-    output::next_slot(next);
     println!();
 
-    run(next, database, zone, credentials).await
+    // 2. Where the microcycle stands.
+    let pool = connect(database).await?;
+    let standing = Microcycle::new(
+        MicrocyclePorts {
+            diary: SqliteDiaryStore::new(pool.clone()),
+            plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
+            gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            gym_performed: SqlitePerformedWorkoutReader::new(pool.clone()),
+            cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
+        },
+        destination(Discipline::Gym)?,
+        destination(Discipline::Cycling)?,
+    )
+    .standing(now)
+    .await?;
+    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
+    pool.close().await;
+
+    if standing.is_empty() {
+        // **Two empty answers, and they are different facts.** A week the
+        // diary holds nothing for is a week off; a week it holds slots for
+        // that no plan covers is a plan to author.
+        let monday = domain::planner::commencing(now.date);
+        let has_slots = (0..7)
+            .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
+            .any(|date| !diary.ordinary_slots_of(date).is_empty());
+        if has_slots {
+            output::no_plan_covers(monday);
+        } else {
+            output::no_next_slot(now.date);
+        }
+        return Ok(());
+    }
+    output::microcycle(&standing);
+    println!();
+
+    // 3. The first still to be prescribed, which is the one delivered.
+    let Some(next) = standing
+        .iter()
+        .find(|session| session.state == SessionState::ToBePrescribed)
+    else {
+        let after = standing
+            .last()
+            .and_then(|last| diary.first_ordinary_after(last.slot.date));
+        output::microcycle_complete(after);
+        return Ok(());
+    };
+
+    output::next_slot(next);
+    println!();
+    run(next.slot, database, zone, credentials).await
 }
 
-/// Each due discipline's session dates, from the earliest due slot to today.
-async fn performed(
-    pool: &infrastructure::SqlitePool,
-    due: &[ScheduledSlot],
-    today: Date,
-) -> Result<BTreeMap<Discipline, Vec<Date>>, Failure> {
-    let mut performed = BTreeMap::new();
-    let Some(from) = due.iter().map(|slot| slot.date).min() else {
-        return Ok(performed);
+/// Where the operator's day has got to.
+///
+/// **A part as well as a date**, because how much of a session's window is
+/// left is the question every state turns on (#185). Both default to the
+/// clock in the operator's own zone; `--date` moves the day and `--part` the
+/// part, so a run can be asked what a Saturday evening would have said.
+fn moment(zone: &OperatorZone, date: Option<&str>, part: Option<&str>) -> Result<DayPart, Failure> {
+    let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
+    let date = match date {
+        Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
+        None => here.date(),
     };
-    for slot in due {
-        if performed.contains_key(&slot.discipline) {
-            continue;
+    let part = match part {
+        Some(text) => {
+            PartOfDay::try_from(text.to_owned()).map_err(|error| Failure::usage(&error))?
         }
-        let dates = match slot.discipline {
-            Discipline::Gym => {
-                SqlitePerformedWorkoutReader::new(pool.clone())
-                    .dates_between(from, today)
-                    .await?
-            }
-            Discipline::Cycling => {
-                SqliteCyclingSessionLog::new(pool.clone())
-                    .dates_between(from, today)
-                    .await?
-            }
-        };
-        performed.insert(slot.discipline, dates);
-    }
-    Ok(performed)
+        None => DayPart::containing(here.datetime()).part,
+    };
+    Ok(DayPart::new(date, part))
+}
+
+/// Where a discipline's sessions are put, as the catalogue names it.
+fn destination(discipline: Discipline) -> Result<application::DestinationName, Failure> {
+    let known = known(discipline)?;
+    application::DestinationName::try_from(known.delivers_to().name().to_owned())
+        .map_err(|error| Failure::usage(&error))
 }
 
 /// Collect and derive one discipline's record.

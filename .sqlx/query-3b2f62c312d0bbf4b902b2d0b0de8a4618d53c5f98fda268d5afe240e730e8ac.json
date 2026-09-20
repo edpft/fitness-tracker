@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO cycling_delivery\n                (prescribed_for, destination, programme, microcycle, session, delivered_at)\n            VALUES (?, ?, ?, ?, ?, ?)\n            ON CONFLICT (prescribed_for, destination) DO UPDATE SET\n                programme    = excluded.programme,\n                microcycle   = excluded.microcycle,\n                session      = excluded.session,\n                delivered_at = excluded.delivered_at\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3b2f62c312d0bbf4b902b2d0b0de8a4618d53c5f98fda268d5afe240e730e8ac"
+}

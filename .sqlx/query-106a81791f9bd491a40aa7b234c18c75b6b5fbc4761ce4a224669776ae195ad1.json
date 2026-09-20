@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id           AS \"id!: i64\",\n                   programme    AS \"programme!: String\",\n                   microcycle   AS \"microcycle!: i64\",\n                   session      AS \"session!: i64\",\n                   delivered_at AS \"delivered_at!: String\"\n              FROM cycling_delivery\n             WHERE prescribed_for = ? AND destination = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "programme!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "programme"
+          }
+        }
+      },
+      {
+        "name": "microcycle!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "microcycle"
+          }
+        }
+      },
+      {
+        "name": "session!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "delivered_at!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_delivery",
+            "name": "delivered_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "106a81791f9bd491a40aa7b234c18c75b6b5fbc4761ce4a224669776ae195ad1"
+}
