@@ -29,8 +29,8 @@ use domain::normalised::{
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
-    GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState, Progress,
-    SessionRole, SlotId,
+    Anchor, GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
+    Progress, SessionRole, SlotId,
 };
 use domain::schedule::{Alteration, Diary, TrainingPattern};
 use domain::sequence::NonEmpty;
@@ -1025,9 +1025,8 @@ pub trait MesocycleStore {
     /// the plan before.
     ///
     /// The latest one to have *finished* by the date, so a mesocycle still
-    /// running is not it. `None` is a test with nothing before it, which is why
-    /// [`TestTarget::Declared`](domain::prescription::TestTarget::Declared)
-    /// exists.
+    /// running is not it. `None` is a test with nothing before it, which is the
+    /// case the test's own asserted anchor exists for.
     ///
     /// # Errors
     ///
@@ -1302,6 +1301,14 @@ pub struct LadderStanding {
     /// it was asked for and of nothing else. `None` for any programme that is not
     /// a test, and for a test whose predecessor cannot supply one.
     pub target: Option<domain::measure::Kg>,
+    /// What this programme's loads are shares of, resolved as at the date asked
+    /// about.
+    ///
+    /// **Reported rather than stored, because it moves week to week.** An anchor
+    /// belongs to a microcycle: a week that measures something leaves a new one
+    /// behind and the week after it programmes from that. `None` for a lift
+    /// nothing has measured and no test has asserted.
+    pub anchor: Option<Anchor>,
     /// The newest performance the derivation could see. `None` for an empty
     /// record — which is not the same as a stale one.
     pub history_through: Option<Date>,

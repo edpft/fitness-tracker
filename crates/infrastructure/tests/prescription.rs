@@ -60,9 +60,8 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     let _summary: NormalisationSummary = normalisation.normalise().await?;
 
     let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
-    let programmes = SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?);
     let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    Authoring::new(plans, programmes, parameters)
+    Authoring::new(plans, parameters)
         .author(
             &programme::as_plan(programme::programme()?)?,
             &programme::parameters()?,

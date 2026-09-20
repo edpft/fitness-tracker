@@ -102,7 +102,7 @@ use crate::measure::RepCount;
 use crate::{gym::exercise::Exercise, measure::Kg};
 
 use crate::prescription::{
-    anchor::Entry,
+    anchor::Anchor,
     linear::{Primary, PrimaryPattern, SlotFills},
     mesocycle::{InconsistentMesocycle, check_primary},
     parameters::Percentage,
@@ -457,6 +457,7 @@ impl Block {
 pub struct EntryTest {
     reps: RepCount,
     light: Option<Kg>,
+    asserted: Option<Anchor>,
 }
 
 impl EntryTest {
@@ -465,13 +466,35 @@ impl EntryTest {
     /// [`InvalidBlock::EntryTestTooLong`] for a repetition count the
     /// repetition-maximum table cannot convert into the one-rep maximum the
     /// block's percentages are shares of.
-    pub fn new(reps: RepCount, light: Option<Kg>) -> Result<Self, InvalidBlock> {
+    pub fn new(
+        reps: RepCount,
+        light: Option<Kg>,
+        asserted: Option<Anchor>,
+    ) -> Result<Self, InvalidBlock> {
         if rep_max(reps).is_none() {
             return Err(InvalidBlock::EntryTestTooLong {
                 reps: reps.as_u32(),
             });
         }
-        Ok(Self { reps, light })
+        Ok(Self {
+            reps,
+            light,
+            asserted,
+        })
+    }
+
+    /// The anchor this week ramps toward, where nothing before it measured one.
+    ///
+    /// **A block's entry test is an opening entry test like any other.** It is
+    /// the first microcycle of a sequence, so there is no test behind it to read
+    /// an anchor off — the operator states what he expects to lift and the week
+    /// finds out whether he was right. Once it has been performed, what it
+    /// measured supersedes this for every week after it.
+    ///
+    /// `None` is an entry test with something behind it, which reads rather than
+    /// asserts.
+    pub const fn asserted(self) -> Option<Anchor> {
+        self.asserted
     }
 
     /// What the attempt is performed at.
@@ -531,20 +554,6 @@ const fn phase_weeks_of(calendar: &Calendar, entry_test: Option<EntryTest>) -> u
 pub struct BlockPeriodisation {
     primary: Primary,
     fills: SlotFills,
-    /// The maximum every load in this block is a share of.
-    ///
-    /// **An expectation where the block tests, a measurement where it does
-    /// not.** A block that runs its own entry test is authored before the number
-    /// is known: the anchor says what the operator expects to lift, the test
-    /// week confirms it, and a result that differs is answered by re-authoring
-    /// the block — which decision 0012 makes a supersession rather than a second
-    /// programme. A block *without* an entry test has no such opportunity, so
-    /// its anchor must already have been tested.
-    ///
-    /// The opening feeds nothing here: a block's loads are shares of the anchor
-    /// rather than rungs off an opening. It is carried because [`Entry`] travels
-    /// whole.
-    entry: Entry,
     /// The week in front of the phases, where this block measures its own anchor.
     entry_test: Option<EntryTest>,
     /// **Every week the block occupies**, the entry test's included. What the
@@ -559,20 +568,17 @@ impl BlockPeriodisation {
     ///
     /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary that cannot carry a top set, a primary that does not fill its own
-    /// slot, an entry test that does not precede the block, an anchor that was
-    /// not tested, or a duration that does not make a block.
+    /// slot, or a duration that does not make a block.
     pub fn new(
         primary: Primary,
         fills: SlotFills,
-        entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: Calendar,
     ) -> Result<Self, InconsistentMesocycle> {
-        Self::check(primary, &fills, entry, entry_test, &calendar)?;
+        Self::check(primary, &fills, entry_test, &calendar)?;
         Ok(Self {
             primary,
             fills,
-            entry,
             entry_test,
             calendar,
         })
@@ -615,15 +621,13 @@ impl BlockPeriodisation {
     pub fn rehydrate(
         primary: Primary,
         fills: SlotFills,
-        entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: Calendar,
     ) -> Result<Self, InconsistentMesocycle> {
-        Self::check(primary, &fills, entry, entry_test, &calendar)?;
+        Self::check(primary, &fills, entry_test, &calendar)?;
         Ok(Self {
             primary,
             fills,
-            entry,
             entry_test,
             calendar,
         })
@@ -632,7 +636,6 @@ impl BlockPeriodisation {
     fn check(
         primary: Primary,
         fills: &SlotFills,
-        entry: Entry,
         entry_test: Option<EntryTest>,
         calendar: &Calendar,
     ) -> Result<(), InconsistentMesocycle> {
@@ -648,21 +651,12 @@ impl BlockPeriodisation {
             primary.gating_role(),
         )?;
 
-        // The entry test precedes the block it anchors — 0009's rule, which 0013
-        // keeps and makes the weaker half of a stronger one.
-        if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
-                start: calendar.start(),
-                tested: entry.anchor().from(),
-            });
-        }
-
-        // **Whether this anchor had to be measured is not a question this type
-        // can answer.** A block opens from a test where one precedes it, runs
-        // its own where none is usable, and may state a number outright only
-        // where nothing precedes it at all — and which of those is the case is a
-        // fact about the store. So the rule lives in `Authoring`, and what is
-        // left here is everything decidable from the programme alone.
+        // **A block no longer states what it is a share of**, so the rule that
+        // its test must precede it is not a check here any more — it is how the
+        // maximum is resolved. What a block opens from is the maximum in force
+        // *on the day it starts*, which by construction is not one its own weeks
+        // produced: a block reading its own entry test as the thing it plans
+        // from would be counting one session twice.
 
         // The phases have to make a block over what is left of the calendar
         // once the entry test has taken its week. Checked here so an unplannable
@@ -741,10 +735,6 @@ impl BlockPeriodisation {
 
     pub const fn fills(&self) -> &SlotFills {
         &self.fills
-    }
-
-    pub const fn entry(&self) -> Entry {
-        self.entry
     }
 
     pub const fn calendar(&self) -> &Calendar {

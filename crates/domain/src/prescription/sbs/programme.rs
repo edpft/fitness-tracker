@@ -15,7 +15,6 @@
 use crate::{
     gym::exercise::Exercise,
     prescription::{
-        anchor::Anchoring,
         linear::{Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         schedule::{Calendar, SessionRole},
@@ -40,15 +39,6 @@ pub const GATING: SessionRole = SessionRole::Heavy;
 pub struct Sbs {
     primary: Primary,
     fills: SlotFills,
-    /// Where week 1 programmes from: a maximum, or the cycle before this one.
-    ///
-    /// **The opening only.** Unlike every other programme here, this number does
-    /// not stand for the whole cycle: each repetition-maximum day resets it
-    /// through [`training_max_share`](super::chart::training_max_share), so what
-    /// week 3 is a share of was established in week 2. The anchor is where the
-    /// cycle *starts*, and is the last number in it that was not derived from a
-    /// performance.
-    entry: Anchoring,
     calendar: Calendar,
 }
 
@@ -59,13 +49,11 @@ impl Sbs {
     ///
     /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary not counted in repetitions, a primary exercise that does not fill
-    /// the slot named as primary, a calendar that is not four weeks, or a test
-    /// that does not precede the cycle it anchors.
+    /// the slot named as primary, or a calendar that is not four weeks.
     pub fn new(
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Anchoring,
         calendar: Calendar,
     ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
@@ -88,26 +76,9 @@ impl Sbs {
             });
         }
 
-        // The same rule the linear template applies, for the same reason: a
-        // cycle containing the test that anchors it would read that session
-        // twice, once as its own opening and once as work inside it.
-        //
-        // **An inherited opening cannot break it.** It names no date, and the
-        // mesocycle it defers to is by construction the one before this one —
-        // so there is nothing here to be out of order.
-        if let Some(anchor) = entry.anchor()
-            && anchor.from() >= calendar.start()
-        {
-            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
-                start: calendar.start(),
-                tested: anchor.from(),
-            });
-        }
-
         Ok(Self {
             primary,
             fills,
-            entry,
             calendar,
         })
     }
@@ -121,13 +92,11 @@ impl Sbs {
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
-        entry: Anchoring,
         calendar: Calendar,
     ) -> Self {
         Self {
             primary: Primary::new(pattern, exercise, GATING),
             fills,
-            entry,
             calendar,
         }
     }
@@ -138,11 +107,6 @@ impl Sbs {
 
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
-    }
-
-    /// Where this cycle opens, stated or inherited.
-    pub const fn entry(&self) -> Anchoring {
-        self.entry
     }
 
     pub const fn primary(&self) -> PrimaryPattern {

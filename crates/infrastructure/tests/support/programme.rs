@@ -26,7 +26,7 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Plan, PlanName, Programme},
     prescription::{
-        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
+        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar,
         GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, Progression,
         ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
         authored::Shape,
@@ -80,51 +80,11 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] if any literal here is not a valid value, which
 /// would be a typo in this file.
 pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
-    let warmup = NonEmpty::new(vec![
-        WarmupStep {
-            of_top_set: pct("40%")?,
-            reps: reps(4)?,
-        },
-        WarmupStep {
-            of_top_set: pct("60%")?,
-            reps: reps(3)?,
-        },
-        WarmupStep {
-            of_top_set: pct("80%")?,
-            reps: reps(2)?,
-        },
-        WarmupStep {
-            of_top_set: pct("90%")?,
-            reps: reps(1)?,
-        },
-    ])
-    .map_err(invalid)?;
-
     Ok(GenerationParameters {
-        warmup,
-        // The primary's back-off, per role: heavy is 2 x 4 and light is 3 x 6.
-        // These used to be read off `strength` below, which issued the light
-        // session's pattern on the heavy day.
-        back_off: PerRole {
-            light: BackOff {
-                sets: reps(3)?,
-                reps: reps(6)?,
-                of_top_set: pct("85%")?,
-            },
-            heavy: BackOff {
-                sets: reps(2)?,
-                reps: reps(4)?,
-                of_top_set: pct("85%")?,
-            },
-        },
         light_of_heavy: pct("85%")?,
         // A test rate. See the module note.
         ladder_climb_per_week: kg("2.5")?,
         entry_drop: pct("-10%")?,
-        top_set_reps: PerRole {
-            light: TopSetReps::new(reps(3)?),
-            heavy: TopSetReps::new(reps(1)?),
-        },
         // The bar, and the rack the wrist work is done on. A banded scale is
         // what the single increment could not express: 10kg leaves on a 2kg
         // step and 7kg on a 1kg one.
@@ -165,23 +125,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             hypertrophy: grouped(120, 180, 90, 150)?,
             mobility: flat(0),
         },
-        strength: domain::prescription::AccessoryScheme {
-            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
-            sets: reps(3)?,
-        },
-        hypertrophy: domain::prescription::AccessoryScheme {
-            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
-            sets: reps(3)?,
-        },
         static_hold: domain::measure::Duration::from_seconds(60),
-        first_reset: ResetProtocol {
-            drop: pct("-10%")?,
-            reclimb_per_week: kg("5")?,
-        },
-        second_reset: ResetProtocol {
-            drop: pct("-5%")?,
-            reclimb_per_week: kg("2.5")?,
-        },
     })
 }
 
@@ -355,7 +299,44 @@ pub fn named_plan(called: &str, mesocycles: Vec<Mesocycle>) -> Result<Plan, Prog
 ///
 /// As [`plan`].
 pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
-    plan(vec![as_programme(linear)])
+    plan(vec![entry_test()?, as_programme(linear)])
+}
+
+/// The 3 July entry test, as the week in front of the block.
+///
+/// **Here because a programme no longer carries what it opens from.** The block
+/// used to hold [`anchor`] as a field; it now reads the anchor off whatever
+/// measured the lift before it, so the fixture has to put that measurement in
+/// the plan rather than on the programme. The week is the one the record shows
+/// — Monday 29 June to Sunday 5 July, with the test taken on the Friday — and
+/// it asserts [`anchor`] so a store with no performances still resolves.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the week or the test is invalid.
+pub fn entry_test() -> Result<Mesocycle, ProgrammeFixtureError> {
+    let start = Date::new(2026, 6, 29).map_err(invalid)?;
+    let week = domain::prescription::Test::week(
+        start,
+        &[] as &[Skip],
+        weekdays()?,
+        jiff::tz::TimeZone::UTC,
+    )
+    .map_err(invalid)?;
+    Ok(Mesocycle::Test(
+        domain::prescription::Test::new(
+            domain::prescription::Tested::new(
+                PrimaryPattern::KneeDominant,
+                Exercise::Reps(RepsExercise::FrontSquat),
+                domain::measure::RepCount::new(1).map_err(invalid)?,
+            ),
+            fills()?,
+            week,
+            None,
+            Some(anchor()?),
+        )
+        .map_err(invalid)?,
+    ))
 }
 
 /// A set of answers, as the wizard would hand them over.
@@ -429,8 +410,6 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_running(weekdays()?, skips)?,
         &parameters,
     )
@@ -452,8 +431,6 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_from(start, weekdays()?)?,
         &parameters,
     )
@@ -482,8 +459,6 @@ pub fn gating_on_a_role_it_never_runs()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_running(monday_only, &[])?,
         &parameters,
     ))
@@ -504,8 +479,6 @@ pub fn primary_not_counted_in_reps()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar()?,
         &parameters,
     ))
@@ -528,8 +501,6 @@ pub fn primary_does_not_fill_its_slot()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar()?,
         &parameters,
     ))

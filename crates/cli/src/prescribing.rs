@@ -39,7 +39,9 @@ pub async fn parameters(database: &Path) -> Result<(), Failure> {
 
     match current {
         Some((authored_at, parameters)) => {
-            output::parameters_in_force(authored_at, &parameters);
+            let programming = domain::prescription::programming()
+                .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+            output::parameters_in_force(authored_at, &parameters, &programming);
             Ok(())
         }
         // Not an empty report: a store with no parameters can hold a programme

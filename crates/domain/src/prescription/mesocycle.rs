@@ -41,7 +41,6 @@
 use crate::{
     gym::exercise::Exercise,
     prescription::{
-        anchor::{Anchor, Entry},
         block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
         sbs::Sbs,
@@ -129,18 +128,6 @@ impl Mesocycle {
         }
     }
 
-    /// The anchor this programme's loads derive from, where it has one.
-    ///
-    /// **A test has none, and that is the point of it.** It produces the number
-    /// the next programme anchors on rather than consuming one.
-    #[must_use]
-    pub const fn anchor(&self) -> Option<Anchor> {
-        match self {
-            Self::Test(_) => None,
-            Self::Progression(periodisation) => periodisation.anchor(),
-        }
-    }
-
     /// The maximum this programme leaves behind it, if it leaves one.
     ///
     /// **What a block asks of the programme before it** (decision 0013). A block
@@ -180,64 +167,6 @@ impl Mesocycle {
                 Some(sbs.primary_exercise())
             }
             Self::Progression(Progression::Linear(_)) => None,
-        }
-    }
-
-    /// Whether this programme's anchor is a claim about a test that already
-    /// happened.
-    ///
-    /// **A block's anchor comes from one of three places, and the authored
-    /// programme says which:**
-    ///
-    /// ```text
-    /// a previous test    provenance = tested, and no entry test of its own
-    /// its own entry test the anchor is what the operator expects; week one
-    ///                    measures it
-    /// declared           provenance = asserted or estimated: a number, and
-    ///                    it says so
-    /// ```
-    ///
-    /// Only the first is a claim about the past, so only the first is checkable
-    /// — and it is the one the store has to be asked about. The other two are
-    /// complete statements on their own: an entry test measures its own anchor,
-    /// and a declared one is honest about being a number.
-    ///
-    /// **Blocks only.** A linear programme's anchor may be superseded by a
-    /// declared opening — the summer block's tested anchor is a month old and
-    /// deliberately feeds nothing — so the same rule there would need a carve-out
-    /// for exactly the case it exists to allow. A block has no opening: every
-    /// load is a share of the anchor.
-    #[must_use]
-    pub const fn claims_an_earlier_maximum(&self) -> bool {
-        match self {
-            Self::Progression(Progression::BlockPeriodisation(block)) => {
-                block.entry_test().is_none()
-                    && matches!(
-                        block.entry().anchor().provenance(),
-                        crate::prescription::AnchorProvenance::Tested
-                    )
-            }
-            // **The same claim a block makes, and for a stronger reason.** An
-            // SBS cycle has no entry test at all — its test is the *last*
-            // session, not the first — so a `Tested` anchor here can only be
-            // pointing at something that already happened: the standalone week 4
-            // that opens the sequence, or the previous cycle's own week 4. There
-            // is no case where the cycle is about to measure its own opening, so
-            // no carve-out is needed for one.
-            // **An inherited opening makes no claim at all**, so there is
-            // nothing here to be right or wrong about: it does not assert that a
-            // test happened, it defers to whichever one did. What it resolves to
-            // is read off the record when a session is asked for.
-            Self::Progression(Progression::Provided { cycle: sbs, .. }) => {
-                match sbs.entry().anchor() {
-                    Some(anchor) => matches!(
-                        anchor.provenance(),
-                        crate::prescription::AnchorProvenance::Tested
-                    ),
-                    None => false,
-                }
-            }
-            Self::Progression(Progression::Linear(_)) | Self::Test(_) => false,
         }
     }
 
@@ -297,30 +226,6 @@ impl Progression {
             Self::Linear(linear) => linear.primary_exercise(),
             Self::BlockPeriodisation(block) => block.primary_exercise(),
             Self::Provided { cycle: sbs, .. } => sbs.primary_exercise(),
-        }
-    }
-
-    /// The entry test both models open from, and the opening where one is
-    /// declared rather than derived.
-    ///
-    /// **`None` only for a provided cycle that inherits.** A ladder and a block
-    /// both carry their number: it is knowable when they are authored, and every
-    /// load they prescribe is a share of it. A provided cycle opening from the
-    /// one before it has no number of its own until that one has been performed.
-    #[must_use]
-    pub const fn entry(&self) -> Option<Entry> {
-        match self {
-            Self::Linear(linear) => Some(linear.entry()),
-            Self::BlockPeriodisation(block) => Some(block.entry()),
-            Self::Provided { cycle: sbs, .. } => sbs.entry().stated(),
-        }
-    }
-
-    #[must_use]
-    pub const fn anchor(&self) -> Option<Anchor> {
-        match self.entry() {
-            Some(entry) => Some(entry.anchor()),
-            None => None,
         }
     }
 

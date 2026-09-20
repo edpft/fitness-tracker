@@ -20,16 +20,16 @@ use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
     gym::exercise::Exercise,
-    measure::{Kg, RepCount},
+    measure::RepCount,
     prescription::{
-        anchor::{Anchor, Anchoring, Entry},
+        anchor::Anchor,
         block::{BlockPeriodisation, EntryTest},
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
         parameters::GenerationParameters,
         sbs::{Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
-        test::{Test, TestTarget, Tested},
+        test::{Test, Tested},
     },
     provider::ProvidedFrom,
 };
@@ -73,11 +73,16 @@ pub struct Authored {
 /// The part of a programme that differs by template.
 ///
 /// **A variant per template, and each carries only what that template has.**
-/// This is where the document reader's eight `refuse_unused` calls went: a test
-/// has no anchor because measuring is what it is for, an SBS cycle has no gating
-/// role because the chart says which session advances it, a linear programme has
-/// no entry test and a block has no opening. None of them is a field that can be
+/// This is where the document reader's eight `refuse_unused` calls went: an SBS
+/// cycle has no gating role because the chart says which session advances it,
+/// and a linear programme has no entry test. None of them is a field that can be
 /// set and then refused.
+///
+/// **Only the test carries a load, and only sometimes.** A progression states
+/// shares — sets, repetitions, percentages — and what those are shares of is
+/// read off the record when a session is prescribed. The one exception is the
+/// test at the front of a sequence, which has nothing behind it to read and so
+/// states an asserted anchor.
 ///
 /// **Nor is a duration, except where it is really asked.** A test is one week
 /// (decision 0013) and the chart is four (decision 0024); only [`Self::Linear`]
@@ -88,29 +93,22 @@ pub enum Shape {
     /// One week, measuring.
     Test {
         reps: RepCount,
-        /// What the test attempts. [`TestTarget::Inherited`] takes it from the
-        /// programme this follows, which is the ordinary case (decision 0013).
-        target: TestTarget,
         /// Which microcycle of which published programme this week is, where a
         /// publisher wrote it. `None` is a week that exists only to measure a
         /// lift before something else begins.
         provided: Option<ProvidedFrom>,
+        /// The anchor this week states, where it is the test at the front of a
+        /// sequence and there is nothing behind it to read one from. `None`
+        /// defers to whatever preceded it.
+        asserted: Option<Anchor>,
     },
     /// A top-set ladder climbing at a rate, for a stated span.
-    Linear {
-        gating: SessionRole,
-        weeks: u32,
-        anchor: Anchor,
-        /// Where the ladder opens. `None` derives it from the anchor, which is
-        /// what the operator means when he does not say.
-        opening: Option<Kg>,
-    },
+    Linear { gating: SessionRole, weeks: u32 },
     /// Phases to a planned endpoint, over a span of phase weeks.
     Block {
         gating: SessionRole,
         /// Phase weeks. An entry test adds one in front of them.
         weeks: u32,
-        anchor: Anchor,
         entry_test: Option<EntryTest>,
     },
     /// A mesocycle taken from an external programme rather than derived here:
@@ -118,10 +116,6 @@ pub enum Shape {
     Provided {
         /// Which microcycles of which external programme.
         from: ProvidedFrom,
-        /// A stated maximum, or the cycle before this one. A plan holding three
-        /// of these can only state the first: the other two open from tests that
-        /// have not happened when it is authored.
-        anchor: Anchoring,
     },
 }
 
@@ -222,29 +216,23 @@ pub fn programme(
     match shape {
         Shape::Test {
             reps,
-            target,
             provided,
+            asserted,
         } => {
             let calendar = Test::week(start, interruptions, weekdays, zone)?;
             Ok(Mesocycle::Test(Test::new(
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
                 calendar,
-                target,
                 provided,
+                asserted,
             )?))
         }
-        Shape::Linear {
-            gating,
-            weeks,
-            anchor,
-            opening,
-        } => {
+        Shape::Linear { gating, weeks } => {
             let calendar = Calendar::new(start, weeks, interruptions, weekdays, zone)?;
             Ok(Mesocycle::Progression(Progression::Linear(Linear::new(
                 Primary::new(pattern, primary_exercise, gating),
                 fills,
-                Entry::new(anchor, opening),
                 calendar,
                 parameters,
             )?)))
@@ -252,7 +240,6 @@ pub fn programme(
         Shape::Block {
             gating,
             weeks,
-            anchor,
             entry_test,
         } => {
             let calendar = BlockPeriodisation::weeks(
@@ -267,20 +254,16 @@ pub fn programme(
                 BlockPeriodisation::new(
                     Primary::new(pattern, primary_exercise, gating),
                     fills,
-                    // A block's loads are every one of them a share of its
-                    // anchor, so there is no opening to declare and none to
-                    // derive.
-                    Entry::derived(anchor),
                     entry_test,
                     calendar,
                 )?,
             )))
         }
-        Shape::Provided { from, anchor } => {
+        Shape::Provided { from } => {
             let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
             Ok(Mesocycle::Progression(Progression::Provided {
                 from,
-                cycle: Sbs::new(pattern, primary_exercise, fills, anchor, calendar)?,
+                cycle: Sbs::new(pattern, primary_exercise, fills, calendar)?,
             }))
         }
     }

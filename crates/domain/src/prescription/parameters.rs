@@ -15,9 +15,9 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::gym::exercise::{Exercise, Implement};
-use crate::measure::{Duration, Kg, RepCount};
+use crate::measure::{Duration, Kg};
 
-use super::{steps::LoadSteps, target::Target};
+use super::steps::LoadSteps;
 
 /// Why a percentage could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -221,95 +221,15 @@ impl Scales {
     }
 }
 
-/// How many repetitions a top set is prescribed for.
+/// Everything consulted when generating that is a fact about the world, in
+/// force as one version.
 ///
-/// A count and not a range: the primary's top set is executed as written, which
-/// is what makes it pass or fail rather than scored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TopSetReps(RepCount);
-
-impl TopSetReps {
-    pub const fn new(reps: RepCount) -> Self {
-        Self(reps)
-    }
-
-    pub const fn as_rep_count(self) -> RepCount {
-        self.0
-    }
-}
-
-impl fmt::Display for TopSetReps {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// One step of the ramp before a top set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WarmupStep {
-    /// Of the session's own top set, never of the anchor.
-    pub of_top_set: Percentage,
-    pub reps: RepCount,
-}
-
-/// What a stall costs, and how the ground is re-covered.
-///
-/// The drop and the increment are chosen as a pair so both land on the plate
-/// grid and both cost the same four weeks — so a stall has a fixed price
-/// whichever reset is in play.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResetProtocol {
-    /// Negative. Taken from the failed load, never from the anchor.
-    pub drop: Percentage,
-    pub reclimb_per_week: Kg,
-}
-
-/// The primary's back-off sets, for one session role.
-///
-/// **Its own numbers, per role.** These used to be read off the strength
-/// block's [`AccessoryScheme`] on the grounds that the primary is a strength
-/// slot and nobody had stated otherwise — which issued the light session's
-/// three sets of six on the heavy day. The operator stated it on 2026-08-20:
-/// heavy is `1 @ x, 2 × 4`, light is `3 @ x, 3 × 6`, and the record agrees on
-/// every session since the July test.
-///
-/// The percentage lives here rather than beside it because that is how the two
-/// patterns were stated — as patterns, each complete. Both are 85% today and
-/// nothing requires them to stay equal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BackOff {
-    pub sets: RepCount,
-    pub reps: RepCount,
-    /// Of this session's own top set, never of the anchor.
-    pub of_top_set: Percentage,
-}
-
-/// The double-progression scheme one block's slots run.
-///
-/// Work the range, and when the top of it is reached at every working set, add an
-/// increment and start again at the bottom.
-///
-/// **One scheme per block, not one per slot and not one for everything.** The
-/// slots within a block are prescribed alike — every non-primary strength slot
-/// shares a scheme, and so does every hypertrophy slot — while the two blocks
-/// differ from each other. A per-slot scheme is a larger authored surface that
-/// nothing yet needs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AccessoryScheme {
-    /// The rep target, as a target. **Not two loose bounds**: a `low` and a
-    /// `high` beside each other can be written down inverted, and the check that
-    /// would catch it belongs in the type rather than at every call site
-    /// (§ 24). See [`Target`].
-    pub reps: Target<RepCount>,
-    pub sets: RepCount,
-}
-
-/// Everything consulted when generating, in force as one version.
+/// **A parameter is true whether or not a programme is being authored.** What is
+/// on the rack is a parameter; what the warm-up ramp runs is not, and the ramp,
+/// the back-offs, the top sets, the accessory schemes and the reset protocols
+/// moved to [`Programming`](super::Programming) because of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationParameters {
-    pub warmup: crate::sequence::NonEmpty<WarmupStep>,
-    /// The primary's back-off sets. Per role, because the two roles differ.
-    pub back_off: super::schedule::PerRole<BackOff>,
     /// The light session's top set, as a proportion of that week's heavy one.
     /// Deriving it from the heavy load rather than from the anchor is what makes
     /// the two roles move together by construction.
@@ -323,6 +243,8 @@ pub struct GenerationParameters {
     /// **There is no opening percentage beside it.** Where the ladder opens is
     /// derived from the entry test the anchor records, not authored — see
     /// `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
+    ///
+    /// [`ResetProtocol::reclimb_per_week`]: super::ResetProtocol::reclimb_per_week
     pub ladder_climb_per_week: Kg,
     /// Negative. What a block's opening drops off the load its entry test
     /// failed, where the opening is derived rather than declared.
@@ -332,11 +254,6 @@ pub struct GenerationParameters {
     /// today by decision rather than by derivation, and a composed default that
     /// nothing pins is exactly the class of fault that produced `/v1/v1`.
     pub entry_drop: Percentage,
-    pub top_set_reps: super::schedule::PerRole<TopSetReps>,
-    /// Every non-primary strength slot.
-    pub strength: AccessoryScheme,
-    /// Every hypertrophy slot.
-    pub hypertrophy: AccessoryScheme,
     /// How long to rest, block by block.
     ///
     /// § 14 like everything else here: only the current value is required,
@@ -352,8 +269,6 @@ pub struct GenerationParameters {
     /// What each implement can hold. Consulted wherever a derived load has to
     /// land on something the gym owns.
     pub scales: Scales,
-    pub first_reset: ResetProtocol,
-    pub second_reset: ResetProtocol,
 }
 
 crate::newtype::from_str_via_string!(Percentage, InvalidPercentage);

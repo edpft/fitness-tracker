@@ -14,12 +14,12 @@
 
 use domain::{
     gym::exercise::{DurationExercise, Exercise, RepsExercise},
-    measure::{Kg, RepCount},
+    measure::RepCount,
     plan::Occupies,
     prescription::{
-        Anchor, AnchorProvenance, BlockPeriodisation, BlockWeek, Entry, EntryTest, Fill,
-        InconsistentMesocycle, Mesocycle, PerRole, Primary, PrimaryPattern, Progression,
-        SessionRole, Skip, SlotFills, StaticFill, Test, TestTarget, Tested, WeekIndex, Weekdays,
+        BlockPeriodisation, BlockWeek, EntryTest, Fill, InconsistentMesocycle, Mesocycle, PerRole,
+        Primary, PrimaryPattern, Progression, SessionRole, Skip, SlotFills, StaticFill, Test,
+        Tested, WeekIndex, Weekdays,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -86,20 +86,12 @@ fn fills(knee_dominant: Fill<Exercise>) -> Result<SlotFills, Invalid> {
     })
 }
 
-/// An anchor dated before any programme these tests build.
-fn anchor(provenance: AnchorProvenance) -> Result<Anchor, Invalid> {
-    let load = Kg::try_from("90".to_owned()).map_err(invalid)?;
-    Anchor::new(load, None, provenance, date(2026, 9, 18)?).map_err(invalid)
-}
-
 /// A ten-week block opening on 21 September, three days after its entry test.
 ///
-/// **Two shapes, and the provenance rule is the whole difference.** A block
-/// handed a test taken before it opens from a measured maximum; a block that
-/// runs its own opens from what the operator expects, and its first week finds
-/// out.
+/// **Two shapes: one that measures its own entry and one that does not.** What
+/// either opens from is the maximum in force on the day it starts, which is not
+/// something the programme carries.
 fn block(
-    provenance: AnchorProvenance,
     entry_test: Option<EntryTest>,
 ) -> Result<Result<BlockPeriodisation, InconsistentMesocycle>, Invalid> {
     let calendar = BlockPeriodisation::weeks(
@@ -118,7 +110,6 @@ fn block(
             SessionRole::Heavy,
         ),
         fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)))?,
-        Entry::derived(anchor(provenance)?),
         entry_test,
         calendar,
     ))
@@ -126,7 +117,7 @@ fn block(
 
 /// A three-repetition entry test, with no light session.
 fn entry_test() -> Result<EntryTest, Invalid> {
-    EntryTest::new(reps(3)?, None).map_err(invalid)
+    EntryTest::new(reps(3)?, None, None).map_err(invalid)
 }
 
 /// A test on the week of 14 September: Monday light, Friday the test itself.
@@ -150,7 +141,7 @@ fn test(
         ),
         fills(knee_dominant)?,
         week,
-        TestTarget::Inherited,
+        None,
         None,
     ))
 }
@@ -265,38 +256,13 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
     ));
 }
 
-/// A block does not decide for itself whether its anchor had to be measured.
-///
-/// **The rule left this type on 2026-08-22.** Whether a block may state a number
-/// outright depends on what precedes it — nothing, an unusable test, or a
-/// measurement it should have opened from — and that is a fact about the store.
-/// `BlockPeriodisation` sees one programme, so it accepts all three provenances and
-/// `Authoring` refuses the one that is wrong; `tests/composition.rs` at the
-/// adapter's ring is where that rule is asserted.
-#[test]
-fn a_block_accepts_any_provenance_on_its_own() {
-    for provenance in [
-        AnchorProvenance::Asserted,
-        AnchorProvenance::Estimated,
-        AnchorProvenance::Tested,
-    ] {
-        let Ok(built) = block(provenance, None) else {
-            panic!("the fixture builds")
-        };
-        assert!(
-            built.is_ok(),
-            "a {provenance} anchor is not a programme this type can refuse"
-        );
-    }
-}
-
 /// The entry test takes a week in front of the phases, and counts for none.
 #[test]
 fn an_entry_test_adds_a_week_and_shifts_the_phases() {
-    let (Ok(test), Ok(Ok(without))) = (entry_test(), block(AnchorProvenance::Tested, None)) else {
+    let (Ok(test), Ok(Ok(without))) = (entry_test(), block(None)) else {
         panic!("the fixture builds")
     };
-    let Ok(Ok(with)) = block(AnchorProvenance::Tested, Some(test)) else {
+    let Ok(Ok(with)) = block(Some(test)) else {
         panic!("the fixture builds")
     };
 
@@ -331,7 +297,7 @@ fn an_entry_test_adds_a_week_and_shifts_the_phases() {
 /// A block's weeks are its phase weeks, with no entry test among them.
 #[test]
 fn a_block_plans_exactly_the_weeks_its_calendar_holds() {
-    let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
+    let Ok(Ok(block)) = block(None) else {
         panic!("a tested anchor makes a block")
     };
     let Ok(plan) = block.plan() else {
@@ -347,7 +313,7 @@ fn a_block_plans_exactly_the_weeks_its_calendar_holds() {
 
 /// The two levels of the enum answer different questions.
 #[test]
-fn a_test_has_no_anchor_and_no_gating_role() {
+fn a_test_gates_nothing_and_a_block_gates_a_role() {
     let Ok(weekdays) = weekdays() else {
         panic!("the operator's week is a weekday map")
     };
@@ -360,18 +326,12 @@ fn a_test_has_no_anchor_and_no_gating_role() {
     };
     let programme = Mesocycle::Test(test);
     assert_eq!(programme.template(), "test");
-    assert_eq!(
-        programme.anchor(),
-        None,
-        "a test produces one, never reads one"
-    );
     assert_eq!(programme.gating_role(), None, "and gates nothing");
 
-    let Ok(Ok(block)) = block(AnchorProvenance::Tested, None) else {
+    let Ok(Ok(block)) = block(None) else {
         panic!("a tested anchor makes a block")
     };
     let programme = Mesocycle::Progression(Progression::BlockPeriodisation(block));
     assert_eq!(programme.template(), "block");
-    assert!(programme.anchor().is_some());
     assert_eq!(programme.gating_role(), Some(SessionRole::Heavy));
 }

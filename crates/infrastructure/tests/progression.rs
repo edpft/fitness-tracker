@@ -200,8 +200,13 @@ fn the_block_opens_below_what_its_entry_test_failed() {
     let Ok(programme) = programme::programme_from(BLOCK_START) else {
         panic!("the programme builds")
     };
-    let (Ok(ladder), Ok(steps)) = (programme.ladder(&parameters), programme.steps(&parameters))
-    else {
+    let Ok(anchor) = programme::anchor() else {
+        panic!("the anchor fixture builds")
+    };
+    let (Ok(ladder), Ok(steps)) = (
+        programme.ladder(anchor, &parameters),
+        programme.steps(&parameters),
+    ) else {
         panic!("the ladder builds")
     };
 

@@ -83,8 +83,8 @@ fn ladder_at_ninety() -> Fallible<(Ladder, Kg)> {
         AnchorProvenance::Tested,
         jiff::civil::Date::new(2026, 7, 3)?,
     )?;
-    let opening = Opening::FromAnchor {
-        anchor,
+    let opening = Opening {
+        maximum: anchor,
         drop: pct("-10%")?,
     };
     Ok((Ladder::new(opening, kg("2.5")?, 8, &grid()?)?, kg("87.5")?))
@@ -145,8 +145,15 @@ fn a_reset_never_touches_the_anchor() {
         let Ok(drop) = pct("-10%") else {
             panic!("-10% is a percentage")
         };
-        let Ok(plan) = Ladder::new(Opening::FromAnchor { anchor, drop }, rate, 8, &increment)
-        else {
+        let Ok(plan) = Ladder::new(
+            Opening {
+                maximum: anchor,
+                drop,
+            },
+            rate,
+            8,
+            &increment,
+        ) else {
             panic!("the ladder builds")
         };
         assert_eq!(
@@ -467,11 +474,25 @@ mod test_target {
     };
 
     /// The seven-week block the sketches are drawn over. Seven weeks is six
-    /// climbing and a test, and the opening is declared so the rungs are exactly
+    /// climbing and a test, and the opening lands on 85 so the rungs are exactly
     /// the numbers the operator wrote.
+    ///
+    /// **From a test that failed nothing**, which opens one climb above what it
+    /// reached: 82.5 plus the 2.5 a week this block climbs. A declared opening
+    /// would have said 85 outright and there is no longer such a thing — a
+    /// programme states shares and the kilograms come from a measurement.
     fn block() -> Fallible<(Ladder, LoadSteps)> {
         let steps = grid()?;
-        let ladder = Ladder::new(Opening::Declared(kg("85")?), kg("2.5")?, 7, &steps)?;
+        let opening = Opening {
+            maximum: Anchor::new(
+                kg("82.5")?,
+                None,
+                AnchorProvenance::Tested,
+                jiff::civil::Date::new(2026, 8, 21)?,
+            )?,
+            drop: domain::prescription::Percentage::try_from("-10%".to_owned())?,
+        };
+        let ladder = Ladder::new(opening, kg("2.5")?, 7, &steps)?;
         Ok((ladder, steps))
     }
 

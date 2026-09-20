@@ -132,33 +132,6 @@ fn authoring_supersedes_and_retains() {
     assert_eq!(count, 2, "the superseded version is kept, not overwritten");
 }
 
-/// The store refuses parameters missing a session role.
-///
-/// `PerRole` is a struct, so a missing role is unrepresentable in Rust — which
-/// makes this boundary the only place it can be asserted. A row deleted by hand
-/// must be reported as corrupt rather than defaulted.
-#[test]
-fn parameters_missing_a_role_are_corrupt_not_defaulted() {
-    let (store, pool, _directory) = opened!();
-    let Ok(authored) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
-    };
-    run!(store.author(jiff::Timestamp::now(), &authored));
-
-    let deleted = corpus::block_on(async {
-        sqlx::query("DELETE FROM generation_role_reps WHERE role = 'light'")
-            .execute(&pool)
-            .await
-    });
-    assert!(deleted.is_ok(), "the row deletes");
-
-    match corpus::block_on(store.current()) {
-        Ok(Err(application::StoreError::Corrupt { .. })) => {}
-        Ok(other) => panic!("a missing role must be corrupt, got {other:?}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    }
-}
-
 // --- The programme ---------------------------------------------------------
 
 async fn programme_store() -> Result<
@@ -252,11 +225,6 @@ fn a_programme_round_trips_with_every_fill_shape() {
     assert_eq!(read_back.primary(), authored.primary());
     assert_eq!(read_back.primary_exercise(), authored.primary_exercise());
     assert_eq!(read_back.gating_role(), Some(authored.gating_role()));
-    assert_eq!(
-        read_back.anchor(),
-        Some(authored.anchor()),
-        "the anchor round trips"
-    );
     assert_eq!(
         read_back.calendar().start(),
         authored.calendar().start(),
@@ -461,9 +429,7 @@ fn fixture_block() -> Result<domain::prescription::Authored, programme::Programm
         domain::prescription::authored::Shape::Linear {
             gating: domain::prescription::SessionRole::Heavy,
             weeks: 8,
-            anchor: programme::anchor()?,
             // Derived from the anchor, as the fixtures do it.
-            opening: None,
         },
     )
 }

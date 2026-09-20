@@ -198,7 +198,6 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
 
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(
@@ -362,7 +361,6 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
     let (issued, second) = run!(async {
         Authoring::new(
             SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
-            SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
             SqliteGenerationParameterStore::new(ready.pool.clone()),
         )
         .author(
@@ -427,7 +425,6 @@ fn a_replacement_moves_the_delivery_record() {
     let replacing = run!(async {
         Authoring::new(
             SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
-            SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
             SqliteGenerationParameterStore::new(ready.pool.clone()),
         )
         .author(

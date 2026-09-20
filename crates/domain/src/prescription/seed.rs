@@ -28,12 +28,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     gym::exercise::Implement,
-    measure::{Duration, Kg, RepCount},
+    measure::{Duration, Kg},
     prescription::{
-        AccessoryScheme, BackOff, BlockRest, GenerationParameters, LoadSteps, PerRole, Percentage,
-        ResetProtocol, RestScheme, Scales, Step, Target, TopSetReps, WarmupStep,
+        BlockRest, GenerationParameters, LoadSteps, Percentage, RestScheme, Scales, Step, Target,
     },
-    sequence::NonEmpty,
 };
 
 /// A value in this file that will not build.
@@ -64,10 +62,6 @@ fn mass(what: &str, kilos: &str) -> Result<Kg, InvalidSeed> {
     Kg::try_from(kilos.to_owned()).map_err(|error| wrong(what, error))
 }
 
-fn count(what: &str, reps: u32) -> Result<RepCount, InvalidSeed> {
-    RepCount::new(reps).map_err(|error| wrong(what, error))
-}
-
 /// A rest of one duration.
 const fn exactly(seconds: u64) -> BlockRest {
     BlockRest {
@@ -92,15 +86,6 @@ fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRes
     })
 }
 
-/// The double-progression scheme a block's non-primary slots run.
-fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, InvalidSeed> {
-    Ok(AccessoryScheme {
-        reps: Target::between(count(what, reps.0)?, count(what, reps.1)?)
-            .ok_or_else(|| wrong(what, "a rep range runs low-high and must span"))?,
-        sets: count(what, sets)?,
-    })
-}
-
 /// The set this build ships.
 ///
 /// # Errors
@@ -108,17 +93,6 @@ fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, In
 /// [`InvalidSeed`] if a value written here does not build, which is a defect in
 /// this build rather than anything the operator can correct.
 pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
-    // The operator's own ramp: 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%, all of
-    // the top set rather than of the anchor.
-    let mut warmup = Vec::with_capacity(4);
-    for (of_top_set, reps) in [("40%", 4), ("60%", 3), ("80%", 2), ("90%", 1)] {
-        warmup.push(WarmupStep {
-            of_top_set: percentage("warm-up ramp", of_top_set)?,
-            reps: count("warm-up ramp", reps)?,
-        });
-    }
-    let warmup = NonEmpty::new(warmup).map_err(|_| wrong("warm-up ramp", "a ramp needs a step"))?;
-
     // **A scale, not an increment.** One increment for everything prescribed a
     // dumbbell at 12.5kg and another at 9.5kg — neither of which is a dumbbell.
     // A bare step is uniform; a list is banded, lightest first, and the first
@@ -155,28 +129,6 @@ pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
     scales.insert(Implement::Dumbbell, dumbbell);
 
     Ok(GenerationParameters {
-        warmup,
-
-        // **The primary's back-off sets, per session role — its own pattern,
-        // not the strength block's accessory scheme.** They used to be read off
-        // the accessory scheme on the grounds that the primary is a strength
-        // slot and nobody had stated otherwise, which issued the light
-        // session's three sets of six on the heavy day. Stated by the operator
-        // on 2026-08-20; the record agrees on every session since the July
-        // test.
-        back_off: PerRole {
-            heavy: BackOff {
-                sets: count("heavy back-off", 2)?,
-                reps: count("heavy back-off", 4)?,
-                of_top_set: percentage("heavy back-off", "85%")?,
-            },
-            light: BackOff {
-                sets: count("light back-off", 3)?,
-                reps: count("light back-off", 6)?,
-                of_top_set: percentage("light back-off", "85%")?,
-            },
-        },
-
         // The light session's top set, as a percentage of that week's heavy top
         // set. Stated by the operator on 2026-08-18, and the first version of
         // this number was wrong in an instructive way.
@@ -216,25 +168,6 @@ pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
         // and only the first survives either of them being changed.
         entry_drop: percentage("entry drop", "-10%")?,
 
-        // INFERRED. The primary's top set, per session role, read off every
-        // session since the July test. Well evidenced — they have not varied
-        // within a role — and still not stated.
-        //
-        // Constant within a block either way: descending reps across the block,
-        // fives then threes then singles, is the textbook linear variant and is
-        // deferred.
-        top_set_reps: PerRole {
-            light: TopSetReps::new(count("light top set", 3)?),
-            heavy: TopSetReps::new(count("heavy top set", 1)?),
-        },
-
-        // INFERRED. The ranges were eyeballed from pull-ups at six, curls around
-        // four to six and wrist work at six, and are unconfirmed. One scheme per
-        // block rather than one per slot: the slots within a block are
-        // prescribed alike, and the two blocks differ from each other.
-        strength: scheme("strength scheme", (4, 6), 3)?,
-        hypertrophy: scheme("hypertrophy scheme", (4, 6), 3)?,
-
         // How long to rest between sets, block by block. All of it stated by the
         // operator on 2026-08-23.
         //
@@ -270,18 +203,6 @@ pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
         static_hold: Duration::from_seconds(60),
 
         scales: Scales::new(scales),
-
-        // From docs/primary-lift-progression.md. The drop and the increment are
-        // chosen as a pair so both land on the plate grid and both cost four
-        // weeks — so a stall has a fixed price whichever reset is in play.
-        first_reset: ResetProtocol {
-            drop: percentage("first reset", "-10%")?,
-            reclimb_per_week: mass("first reset", "5")?,
-        },
-        second_reset: ResetProtocol {
-            drop: percentage("second reset", "-5%")?,
-            reclimb_per_week: mass("second reset", "2.5")?,
-        },
     })
 }
 
@@ -309,38 +230,6 @@ mod pinned {
         assert_eq!(seeded.ladder_climb_per_week.to_string(), "2.5");
         assert_eq!(seeded.entry_drop.to_string(), "-10%");
         assert_eq!(seeded.static_hold.as_seconds(), 60);
-
-        assert_eq!(seeded.first_reset.drop.to_string(), "-10%");
-        assert_eq!(seeded.first_reset.reclimb_per_week.to_string(), "5");
-        assert_eq!(seeded.second_reset.drop.to_string(), "-5%");
-        assert_eq!(seeded.second_reset.reclimb_per_week.to_string(), "2.5");
-
-        // 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%. Of the top set, never of the
-        // anchor.
-        let ramp: Vec<(String, u32)> = seeded
-            .warmup
-            .iter()
-            .map(|step| (step.of_top_set.to_string(), step.reps.as_u32()))
-            .collect();
-        assert_eq!(
-            ramp,
-            vec![
-                ("40%".to_owned(), 4),
-                ("60%".to_owned(), 3),
-                ("80%".to_owned(), 2),
-                ("90%".to_owned(), 1),
-            ]
-        );
-
-        // Heavy is `1 @ x, 2 × 4`; light is `3 @ x, 3 × 6`. The two roles differ,
-        // which is the whole reason back-off is not read off the accessory
-        // scheme.
-        assert_eq!(seeded.back_off.heavy.sets.as_u32(), 2);
-        assert_eq!(seeded.back_off.heavy.reps.as_u32(), 4);
-        assert_eq!(seeded.top_set_reps.heavy.as_rep_count().as_u32(), 1);
-        assert_eq!(seeded.back_off.light.sets.as_u32(), 3);
-        assert_eq!(seeded.back_off.light.reps.as_u32(), 6);
-        assert_eq!(seeded.top_set_reps.light.as_rep_count().as_u32(), 3);
     }
 
     /// **The dumbbell scale is banded and the rest are not**, and getting that

@@ -45,17 +45,16 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Anchor, AnchorProvenance, Anchoring, Authored, Block, Calendar, Entry, EntryTest, Fill,
-        GenerationParameters, InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern,
-        SessionRole, Skip, SlotFills, SlotId, StaticFill, TestTarget, Weekdays, authored::Shape,
-        block::Block as BlockPlan, rep_max,
+        Anchor, AnchorProvenance, Authored, Block, Calendar, EntryTest, Fill, GenerationParameters,
+        InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern, SessionRole, Skip, SlotFills,
+        SlotId, StaticFill, Weekdays, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline},
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqlitePlanStore, connect,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePlanStore,
+    connect,
 };
 use jiff::civil::{Date, Weekday};
 
@@ -711,63 +710,6 @@ async fn best_of(
     }
     Ok(best)
 }
-
-/// What the entry test is an attempt at.
-///
-/// **Three intents, and the operator picks between them** — match a recent
-/// maximum, exceed one, or declare a number. Stated by him on 2026-08-26, and
-/// it settles what the date on an anchor means: where the number points at a
-/// performance the date is that performance's, and where it is plucked out of
-/// the air there is nothing for a date to mean, so none is asked.
-///
-/// **Never `tested`.** The record shows a set, not a test — a completed single
-/// may have been a top set rather than an attempt at a ceiling — so reading a
-/// maximum off it is an estimate however few repetitions it took. Only a test
-/// this tool issued may claim to have tested anything.
-fn ask_anchor(
-    asks: &str,
-    lift: &str,
-    best: Option<&Best>,
-    scale: Option<&LoadSteps>,
-    start: Date,
-) -> Result<Anchor, Failure> {
-    println!("\n{asks}");
-
-    let Some(best) = best else {
-        // Nothing to match and nothing to beat. The one remaining answer is
-        // asked directly rather than offered as the only item on a list.
-        println!("  nothing in the record for {lift}, so there is nothing to match");
-        let declared = ask_until("  what should it aim at? ", declared_load)?;
-        return anchor(declared, start, AnchorProvenance::Asserted);
-    };
-
-    let beaten = scale.map_or(best.maximum, |steps| steps.next_above(best.maximum));
-    println!("  {}", best.describe(lift));
-    // The whole figure is padded, not the number in front of the unit: "95kg"
-    // and "97.5kg" have to end in the same column to be comparable at a glance.
-    println!("   1. match it{:>30}", format!("{}kg", best.maximum));
-    println!("   2. beat it{:>31}", format!("{beaten}kg"));
-    println!("   3. a number of my own");
-
-    let choice = ask_until("  which? [2] ", |typed| match typed {
-        "" | "2" => Ok(2),
-        "1" => Ok(1),
-        "3" => Ok(3),
-        other => Err(format!("{other:?} is not one of the three")),
-    })?;
-
-    match choice {
-        1 => anchor(best.maximum, best.on, AnchorProvenance::Estimated),
-        // Asserted: nobody has lifted it. The date is still the performance's,
-        // because that performance is what the assertion is reasoning from.
-        2 => anchor(beaten, best.on, AnchorProvenance::Asserted),
-        _ => {
-            let declared = ask_until("  what should it aim at? ", declared_load)?;
-            anchor(declared, start, AnchorProvenance::Asserted)
-        }
-    }
-}
-
 /// The anchor, once the load and where it came from are settled.
 ///
 /// **No ceiling is ever asked for here.** `Anchor::failed` is what an entry test
@@ -939,9 +881,9 @@ async fn ask_programme(
 ) -> Result<(PlanName, Authored), Failure> {
     match template {
         "test" => ask_test(diary, history, parameters).await,
-        "sbs" => ask_climb(Climbing::Sbs, diary, history, parameters).await,
-        "linear" => ask_climb(Climbing::Linear, diary, history, parameters).await,
-        _ => ask_climb(Climbing::Block, diary, history, parameters).await,
+        "sbs" => ask_climb(Climbing::Sbs, diary),
+        "linear" => ask_climb(Climbing::Linear, diary),
+        _ => ask_climb(Climbing::Block, diary),
     }
 }
 
@@ -962,14 +904,15 @@ async fn ask_test(
     let best = best_of(history, lift, scale).await?;
 
     println!("\nwhat should the test aim at?");
-    // **Inheriting is the ordinary case** (decision 0013): a test between two
-    // programmes is for the load the progression stands at, and the programme
-    // before it is what knows that. A declared target is for the case
-    // inheritance cannot answer.
-    let target = match best.as_ref() {
+    // **Deferring is the ordinary case**: a test between two programmes is for
+    // the load the lift has got to, and what the record shows is what knows
+    // that. A number here is the seed at the front of a sequence — the one
+    // anchor in the model that nothing can derive, because nothing came before
+    // it to measure one.
+    let asserted = match best.as_ref() {
         Some(best) => {
             println!("  {}", best.describe(primary));
-            println!("   1. the load the programme before this one stands at");
+            println!("   1. whatever the record says the lift is at by then");
             println!("   2. a number of my own");
             let choice = ask_until("  which? [1] ", |typed| match typed {
                 "" | "1" => Ok(1),
@@ -977,14 +920,22 @@ async fn ask_test(
                 other => Err(format!("{other:?} is not one of the two")),
             })?;
             if choice == 1 {
-                TestTarget::Inherited
+                None
             } else {
-                TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?)
+                Some(anchor(
+                    ask_until("  what should it aim at? ", declared_load)?,
+                    common.start,
+                    AnchorProvenance::Asserted,
+                )?)
             }
         }
-        // Nothing performed, so there is nothing to describe and nothing a
-        // predecessor could hand over either.
-        None => TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?),
+        // Nothing performed, so there is nothing to describe and nothing the
+        // record could hand over either.
+        None => Some(anchor(
+            ask_until("  what should it aim at? ", declared_load)?,
+            common.start,
+            AnchorProvenance::Asserted,
+        )?),
     };
     let reps = ask_until("  attempted at how many reps? [1] ", |typed| {
         if typed.is_empty() {
@@ -1023,8 +974,8 @@ async fn ask_test(
             weekdays: common.scheduled,
             shape: Shape::Test {
                 reps: count(reps)?,
-                target,
                 provided,
+                asserted,
             },
         },
     ))
@@ -1049,21 +1000,15 @@ enum Climbing {
     Sbs,
 }
 
-async fn ask_climb(
-    climbing: Climbing,
-    diary: &Diary,
-    history: &SqliteExerciseHistory,
-    parameters: &GenerationParameters,
-) -> Result<(PlanName, Authored), Failure> {
-    let (template, asks_anchor) = match climbing {
-        // **A ladder has no test week, so nothing aims at its anchor.** The
-        // anchor is the maximum its percentages are shares of, and week one
-        // climbs from it rather than measuring it.
-        Climbing::Linear => ("ladder", "what does the ladder climb from?"),
-        Climbing::Block => ("block", "what should the entry test aim at?"),
-        // **What the chart's percentages are shares of, opening.** It does not
-        // stay fixed: each week's rep-max day resets it.
-        Climbing::Sbs => ("cycle", "what does week one programme from?"),
+fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), Failure> {
+    // **None of the three is asked what it climbs from any more.** An anchor
+    // belongs to a microcycle and is a function of the test before it, so a
+    // programme that climbs reads one rather than stating one. What still states
+    // one is the test at the front of a sequence, which has nothing to read.
+    let template = match climbing {
+        Climbing::Linear => "ladder",
+        Climbing::Block => "block",
+        Climbing::Sbs => "cycle",
     };
     println!("A {template}: what it is, before what it contains.\n");
     let common = ask_common(diary, template)?;
@@ -1077,44 +1022,17 @@ async fn ask_climb(
     };
     let lift = ask_lift(template, common.pattern)?;
 
-    let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
-    let best = best_of(history, lift, scale).await?;
-    let anchor = ask_anchor(
-        asks_anchor,
-        lift.as_str(),
-        best.as_ref(),
-        scale,
-        common.start,
-    )?;
-
     let shape = match climbing {
-        Climbing::Linear => {
-            // **The anchor is where it opens unless the operator says
-            // otherwise**, which is the `None` the assembly takes as "derive
-            // it".
-            let typed = ask("  and it opens at? [the anchor] ")?;
-            let opening = if typed.is_empty() {
-                None
-            } else {
-                Some(declared_load(&typed).map_err(usage)?)
-            };
-            Shape::Linear {
-                gating: common.gating,
-                weeks,
-                anchor,
-                opening,
-            }
-        }
+        Climbing::Linear => Shape::Linear {
+            gating: common.gating,
+            weeks,
+        },
         // The chart states every set it runs, so there is nothing to ask about
-        // the shape — only about who published it.
-        //
-        // **Stated, because this command adds one cycle at a time.** The
-        // operator running it has the predecessor's test behind him and a number
-        // to give. `fitness plan` authors the whole chain months ahead, where
-        // only the first cycle has one — the rest inherit.
+        // the shape — only about who published it. What week one programmes from
+        // is read off the record when a session is asked for, which is what lets
+        // `fitness plan` author three of these months ahead.
         Climbing::Sbs => Shape::Provided {
             from: ask_provided((1..=SBS_MICROCYCLES).collect())?,
-            anchor: Anchoring::Stated(Entry::derived(anchor)),
         },
         Climbing::Block => {
             let entry_reps = ask_until(
@@ -1132,11 +1050,26 @@ async fn ask_climb(
             } else {
                 Some(declared_load(&typed).map_err(usage)?)
             };
+            // **Asked only where nothing can answer it.** The entry test ramps
+            // toward what the lift is at; where something measured that, the
+            // record says so and this week reads it. A number is wanted only at
+            // the front of a sequence, where there is nothing behind to read.
+            let typed = ask("  and it ramps toward? [what the record says] ")?;
+            let asserted = if typed.is_empty() {
+                None
+            } else {
+                Some(anchor(
+                    declared_load(&typed).map_err(usage)?,
+                    common.start,
+                    AnchorProvenance::Asserted,
+                )?)
+            };
             Shape::Block {
                 gating: common.gating,
                 weeks,
-                anchor,
-                entry_test: Some(EntryTest::new(count(entry_reps)?, light).map_err(usage)?),
+                entry_test: Some(
+                    EntryTest::new(count(entry_reps)?, light, asserted).map_err(usage)?,
+                ),
             }
         }
     };
@@ -1221,14 +1154,10 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let plan = with_gym(name, existing.as_ref(), mesocycle.clone())?;
 
-    let (id, authored) = Authoring::new(
-        plans,
-        SqliteGymMesocycleStore::new(pool, zone.clone()),
-        parameter_store,
-    )
-    .author(&plan, &parameters)
-    .await
-    .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let (id, authored) = Authoring::new(plans, parameter_store)
+        .author(&plan, &parameters)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     output::programme_authored(id, authored, &plan, &mesocycle, &parameters);
     Ok(())
@@ -1309,6 +1238,7 @@ fn ask_entry_test(
     published: &ExternalProgramme,
     microcycle: u32,
     best: Option<&Best>,
+    start: Date,
 ) -> Result<Shape, Failure> {
     println!("\nthe entry test");
     let reps = ask_until("  attempted at how many reps? [1] ", |typed| {
@@ -1317,7 +1247,11 @@ fn ask_entry_test(
         }
         parse_count("reps", typed)
     })?;
-    let target = match best {
+    // **This one always states a number**, and it is the only week in the plan
+    // that does. It is at the front: nothing ran before it, so there is no test
+    // for it to read an anchor off and the operator supplies one. Everything
+    // after it — this test's own result included — is read from the record.
+    let asserted = match best {
         Some(best) => {
             println!("  {}", best.describe(lift.as_str()));
             println!(
@@ -1331,21 +1265,30 @@ fn ask_entry_test(
                 other => Err(format!("{other:?} is not one of the two")),
             })?;
             if choice == 1 {
-                TestTarget::Declared(best.maximum)
+                // Arithmetic over a set taken to failure, dated to that set.
+                anchor(best.maximum, best.on, AnchorProvenance::Estimated)?
             } else {
-                TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?)
+                anchor(
+                    ask_until("  what should it aim at? ", declared_load)?,
+                    start,
+                    AnchorProvenance::Asserted,
+                )?
             }
         }
-        None => TestTarget::Declared(ask_until("  what should it aim at? ", declared_load)?),
+        None => anchor(
+            ask_until("  what should it aim at? ", declared_load)?,
+            start,
+            AnchorProvenance::Asserted,
+        )?,
     };
 
     Ok(Shape::Test {
         reps: count(reps)?,
-        target,
         provided: Some(
             ProvidedFrom::new(published.clone(), vec![microcycle])
                 .map_err(|error| Failure::usage(&error))?,
         ),
+        asserted: Some(asserted),
     })
 }
 
@@ -1357,11 +1300,11 @@ fn ask_entry_test(
 /// four mesocycles are laid out from the answers rather than typed in over three
 /// months.
 ///
-/// **Only the first progression states an anchor.** The rest open from the cycle
-/// before them — week 4 day 2 is a one-repetition maximum, so each leaves the
-/// next one's opening behind it — and those tests have not happened when the
-/// plan is authored. Asking for them would be asking the operator to invent
-/// three numbers; see [`Anchoring::Inherited`].
+/// **No progression states an anchor.** Each opens from the cycle before it —
+/// week 4 day 2 is a one-repetition maximum, so each leaves the next one's
+/// opening behind it — and those tests have not happened when the plan is
+/// authored. What seeds the chain is the entry test at the front, which is the
+/// one week with nothing behind it to read.
 ///
 /// # Errors
 ///
@@ -1397,7 +1340,7 @@ pub async fn gym_side(
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(&history, lift, scale).await?;
 
-    let entry = ask_entry_test(lift, published, test_microcycle, best.as_ref())?;
+    let entry = ask_entry_test(lift, published, test_microcycle, best.as_ref(), start)?;
 
     let mut shapes: Vec<(Date, Shape)> = vec![(start, entry)];
     for cycle in 0..progressions {
@@ -1409,14 +1352,6 @@ pub async fn gym_side(
             Shape::Provided {
                 from: ProvidedFrom::new(published.clone(), numbers)
                     .map_err(|error| Failure::usage(&error))?,
-                // **Every one of them inherits, the first included.** It
-                // stated an anchor until 2026-09-07, and the operator asked why
-                // the entry test is given a target and then the mesocycle after
-                // it is given the same number again. It is the same number: the
-                // entry test is the week that measures it, and it runs before
-                // this begins. Stating it here would be fixing what that test is
-                // about to find out.
-                anchor: Anchoring::Inherited,
             },
         ));
     }

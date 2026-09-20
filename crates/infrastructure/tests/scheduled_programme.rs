@@ -34,18 +34,17 @@ fn autumn() -> Result<Authored, Box<dyn std::error::Error>> {
         Shape::Block {
             gating: SessionRole::Heavy,
             weeks: 9,
-            // What the operator expects to lift. Week one finds out; a result
-            // that differs is answered by re-authoring, which decision 0012
-            // makes a supersession.
-            anchor: Anchor::new(
-                "90".to_owned().try_into()?,
-                None,
-                AnchorProvenance::Asserted,
-                date(2026, 7, 3),
-            )?,
             entry_test: Some(EntryTest::new(
                 domain::measure::RepCount::new(3)?,
                 Some("60".to_owned().try_into()?),
+                // What the operator expects to lift, because nothing before this
+                // block measured the lift. Week one finds out.
+                Some(Anchor::new(
+                    "90".to_owned().try_into()?,
+                    None,
+                    AnchorProvenance::Asserted,
+                    date(2026, 7, 3),
+                )?),
             )?),
         },
     )?)
