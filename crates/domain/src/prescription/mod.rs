@@ -28,6 +28,7 @@ pub mod linear;
 pub mod mesocycle;
 pub mod parameters;
 pub mod prilepin;
+pub mod programming;
 pub mod progression;
 pub mod project;
 pub mod repmax;
@@ -64,9 +65,10 @@ pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,
 };
 pub use mesocycle::{InconsistentMesocycle, Mesocycle, Progression, check_primary};
-pub use parameters::{
-    AccessoryScheme, BackOff, GenerationParameters, InvalidPercentage, Percentage, ResetProtocol,
-    Scales, TopSetReps, WarmupStep,
+pub use parameters::{GenerationParameters, InvalidPercentage, Percentage, Scales};
+pub use programming::{
+    AccessoryScheme, BackOff, InvalidProgramming, Programming, ResetProtocol, TopSetReps,
+    WarmupStep, programming,
 };
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};

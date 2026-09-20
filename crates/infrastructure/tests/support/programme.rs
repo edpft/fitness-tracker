@@ -80,51 +80,11 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] if any literal here is not a valid value, which
 /// would be a typo in this file.
 pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
-    let warmup = NonEmpty::new(vec![
-        WarmupStep {
-            of_top_set: pct("40%")?,
-            reps: reps(4)?,
-        },
-        WarmupStep {
-            of_top_set: pct("60%")?,
-            reps: reps(3)?,
-        },
-        WarmupStep {
-            of_top_set: pct("80%")?,
-            reps: reps(2)?,
-        },
-        WarmupStep {
-            of_top_set: pct("90%")?,
-            reps: reps(1)?,
-        },
-    ])
-    .map_err(invalid)?;
-
     Ok(GenerationParameters {
-        warmup,
-        // The primary's back-off, per role: heavy is 2 x 4 and light is 3 x 6.
-        // These used to be read off `strength` below, which issued the light
-        // session's pattern on the heavy day.
-        back_off: PerRole {
-            light: BackOff {
-                sets: reps(3)?,
-                reps: reps(6)?,
-                of_top_set: pct("85%")?,
-            },
-            heavy: BackOff {
-                sets: reps(2)?,
-                reps: reps(4)?,
-                of_top_set: pct("85%")?,
-            },
-        },
         light_of_heavy: pct("85%")?,
         // A test rate. See the module note.
         ladder_climb_per_week: kg("2.5")?,
         entry_drop: pct("-10%")?,
-        top_set_reps: PerRole {
-            light: TopSetReps::new(reps(3)?),
-            heavy: TopSetReps::new(reps(1)?),
-        },
         // The bar, and the rack the wrist work is done on. A banded scale is
         // what the single increment could not express: 10kg leaves on a 2kg
         // step and 7kg on a 1kg one.
@@ -165,23 +125,7 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
             hypertrophy: grouped(120, 180, 90, 150)?,
             mobility: flat(0),
         },
-        strength: domain::prescription::AccessoryScheme {
-            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
-            sets: reps(3)?,
-        },
-        hypertrophy: domain::prescription::AccessoryScheme {
-            reps: domain::prescription::Target::spanning(reps(4)?, reps(2)?),
-            sets: reps(3)?,
-        },
         static_hold: domain::measure::Duration::from_seconds(60),
-        first_reset: ResetProtocol {
-            drop: pct("-10%")?,
-            reclimb_per_week: kg("5")?,
-        },
-        second_reset: ResetProtocol {
-            drop: pct("-5%")?,
-            reclimb_per_week: kg("2.5")?,
-        },
     })
 }
 

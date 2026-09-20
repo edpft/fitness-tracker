@@ -38,7 +38,7 @@
 use crate::measure::RepCount;
 use crate::sequence::NonEmpty;
 
-use super::parameters::WarmupStep;
+use super::programming::WarmupStep;
 
 /// The ramp to run when working up to `top` repetitions.
 ///

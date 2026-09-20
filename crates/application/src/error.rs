@@ -185,6 +185,16 @@ pub enum PrescriptionError {
     #[error("no generation parameters have been authored, so no load can be derived")]
     NoParameters,
 
+    /// The shape this build programmes to does not build.
+    ///
+    /// **Not anything the operator did.** Every value in it is written into the
+    /// binary and validated on the way out, so this is a defect in the build —
+    /// it is a variant rather than a panic because panicking is forbidden, and
+    /// `domain::prescription::programming`'s own test is what keeps it
+    /// unreachable.
+    #[error(transparent)]
+    Programming(#[from] domain::prescription::InvalidProgramming),
+
     /// The date falls on no weekday the programme runs, before its start, or
     /// past its end.
     ///

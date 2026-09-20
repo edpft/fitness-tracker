@@ -473,17 +473,8 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
 /// same whichever template was being authored.
 fn authored_parameters(parameters: &domain::prescription::GenerationParameters) {
     println!(
-        "  heavy top set × {}; light top set × {} at {} of the heavy load",
-        parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
-    );
-    println!(
-        "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
-        parameters.back_off.heavy.sets,
-        parameters.back_off.heavy.reps,
-        parameters.back_off.heavy.of_top_set,
-        parameters.back_off.light.sets,
-        parameters.back_off.light.reps,
-        parameters.back_off.light.of_top_set,
+        "  the light session's top set runs at {} of the heavy load",
+        parameters.light_of_heavy
     );
     println!(
         "  opening drops {} off a failed entry test",
@@ -492,13 +483,6 @@ fn authored_parameters(parameters: &domain::prescription::GenerationParameters) 
     for (implement, steps) in parameters.scales.iter() {
         println!("  {implement} loads in {steps}");
     }
-    println!(
-        "  strength slots {} × {}; hypertrophy slots {} × {}",
-        parameters.strength.sets,
-        parameters.strength.reps,
-        parameters.hypertrophy.sets,
-        parameters.hypertrophy.reps,
-    );
     println!("  holds {}", parameters.static_hold);
 }
 
@@ -517,6 +501,7 @@ fn authored_parameters(parameters: &domain::prescription::GenerationParameters) 
 pub fn parameters_in_force(
     authored_at: jiff::Timestamp,
     parameters: &domain::prescription::GenerationParameters,
+    programming: &domain::prescription::Programming,
 ) {
     // Seconds, not nanoseconds. What the operator wants from this line is
     // whether it predates the block he is about to author.
@@ -526,28 +511,6 @@ pub fn parameters_in_force(
     );
 
     println!();
-    println!("the primary lift");
-    println!(
-        "  heavy top set × {}; light top set × {} at {} of the heavy load",
-        parameters.top_set_reps.heavy, parameters.top_set_reps.light, parameters.light_of_heavy,
-    );
-    println!(
-        "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
-        parameters.back_off.heavy.sets,
-        parameters.back_off.heavy.reps,
-        parameters.back_off.heavy.of_top_set,
-        parameters.back_off.light.sets,
-        parameters.back_off.light.reps,
-        parameters.back_off.light.of_top_set,
-    );
-
-    println!();
-    println!("the warm-up ramp, of the session's own top set");
-    for step in parameters.warmup.iter() {
-        println!("  {} × {}", step.of_top_set, step.reps);
-    }
-
-    println!();
     println!("the ladder");
     println!("  climbs {}kg a week", parameters.ladder_climb_per_week);
     println!(
@@ -555,23 +518,12 @@ pub fn parameters_in_force(
         parameters.entry_drop
     );
     println!(
-        "  first stall: drop {}, re-climb {}kg a week",
-        parameters.first_reset.drop, parameters.first_reset.reclimb_per_week,
-    );
-    println!(
-        "  second stall: drop {}, re-climb {}kg a week",
-        parameters.second_reset.drop, parameters.second_reset.reclimb_per_week,
+        "  the light session's top set runs at {} of the heavy load",
+        parameters.light_of_heavy
     );
 
     println!();
     println!("everything that is not the primary");
-    println!(
-        "  strength slots {} × {}; hypertrophy slots {} × {}",
-        parameters.strength.sets,
-        parameters.strength.reps,
-        parameters.hypertrophy.sets,
-        parameters.hypertrophy.reps,
-    );
     println!("  holds {}", parameters.static_hold);
 
     println!();
@@ -601,6 +553,49 @@ pub fn parameters_in_force(
         // Rendered before it is padded: a `Display` that writes straight to the
         // formatter ignores a width, and `Implement`'s does.
         println!("  {:<12} {steps}", implement.to_string());
+    }
+
+    // **Printed even though it is not authored.** These stopped being
+    // parameters, and none of them can be set — but the guard against a wrong
+    // shipped value was that it is never invisible, and dropping them from this
+    // report would leave the warm-up ramp exactly as unexaminable as it was
+    // before the report existed. The heading says which half is which.
+    println!();
+    println!("how this build programmes, which is fixed and not authored");
+    println!(
+        "  heavy top set × {}; light top set × {}",
+        programming.top_set_reps.heavy, programming.top_set_reps.light,
+    );
+    println!(
+        "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
+        programming.back_off.heavy.sets,
+        programming.back_off.heavy.reps,
+        programming.back_off.heavy.of_top_set,
+        programming.back_off.light.sets,
+        programming.back_off.light.reps,
+        programming.back_off.light.of_top_set,
+    );
+    println!(
+        "  strength slots {} × {}; hypertrophy slots {} × {}",
+        programming.strength.sets,
+        programming.strength.reps,
+        programming.hypertrophy.sets,
+        programming.hypertrophy.reps,
+    );
+    println!(
+        "  first stall: drop {}, re-climb {}kg a week",
+        programming.first_reset.drop, programming.first_reset.reclimb_per_week,
+    );
+    println!(
+        "  second stall: drop {}, re-climb {}kg a week",
+        programming.second_reset.drop, programming.second_reset.reclimb_per_week,
+    );
+
+    println!();
+    println!("the warm-up ramp, of the session's own top set");
+    println!("  a floor: a work-up toward a higher repetition count takes more");
+    for step in programming.warmup.iter() {
+        println!("  {} × {}", step.of_top_set, step.reps);
     }
 }
 

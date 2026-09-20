@@ -13,15 +13,21 @@ use domain::schedule::Absence;
 use infrastructure::{SqliteDiaryStore, connect};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
-/// A store with every migration applied except the last, which is 0044.
+/// A store migrated as far as 0043, which is the state 0044 has to cope with.
+///
+/// **Pinned to 0043 rather than to "the last but one"**, which is what it said
+/// until 0045 landed and made "the last" a migration this test knows nothing
+/// about. What this suite is about is one join — the rows 0043 wrote, read back
+/// after 0044 — and that join does not move when a later migration arrives.
 async fn before_0044(path: &Path) -> Result<SqlitePool, Box<dyn std::error::Error>> {
+    const BEFORE: i64 = 43;
+
     let migrator = sqlx::migrate!("../../migrations");
     let versions: Vec<i64> = migrator.iter().map(|migration| migration.version).collect();
-    let [.., previous, last] = versions.as_slice() else {
-        return Err("fewer than two migrations".into());
-    };
-    if *last != 44 {
-        return Err(format!("0044 is no longer the last migration, {last} is").into());
+    for wanted in [BEFORE, 44] {
+        if !versions.contains(&wanted) {
+            return Err(format!("migration {wanted:04} is missing").into());
+        }
     }
     let pool = SqlitePool::connect_with(
         SqliteConnectOptions::new()
@@ -29,7 +35,7 @@ async fn before_0044(path: &Path) -> Result<SqlitePool, Box<dyn std::error::Erro
             .create_if_missing(true),
     )
     .await?;
-    migrator.run_to(*previous, &pool).await?;
+    migrator.run_to(BEFORE, &pool).await?;
     Ok(pool)
 }
 

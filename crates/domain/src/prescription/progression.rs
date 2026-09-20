@@ -44,7 +44,7 @@
 
 use crate::measure::Kg;
 
-use super::{ladder::Ladder, parameters::ResetProtocol, schedule::WeekIndex, steps::LoadSteps};
+use super::{ladder::Ladder, programming::ResetProtocol, schedule::WeekIndex, steps::LoadSteps};
 
 /// One gating session's top set, as the progression reads it.
 ///

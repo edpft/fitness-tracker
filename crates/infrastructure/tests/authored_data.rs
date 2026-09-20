@@ -132,33 +132,6 @@ fn authoring_supersedes_and_retains() {
     assert_eq!(count, 2, "the superseded version is kept, not overwritten");
 }
 
-/// The store refuses parameters missing a session role.
-///
-/// `PerRole` is a struct, so a missing role is unrepresentable in Rust — which
-/// makes this boundary the only place it can be asserted. A row deleted by hand
-/// must be reported as corrupt rather than defaulted.
-#[test]
-fn parameters_missing_a_role_are_corrupt_not_defaulted() {
-    let (store, pool, _directory) = opened!();
-    let Ok(authored) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
-    };
-    run!(store.author(jiff::Timestamp::now(), &authored));
-
-    let deleted = corpus::block_on(async {
-        sqlx::query("DELETE FROM generation_role_reps WHERE role = 'light'")
-            .execute(&pool)
-            .await
-    });
-    assert!(deleted.is_ok(), "the row deletes");
-
-    match corpus::block_on(store.current()) {
-        Ok(Err(application::StoreError::Corrupt { .. })) => {}
-        Ok(other) => panic!("a missing role must be corrupt, got {other:?}"),
-        Err(error) => panic!("a runtime is available: {error}"),
-    }
-}
-
 // --- The programme ---------------------------------------------------------
 
 async fn programme_store() -> Result<
