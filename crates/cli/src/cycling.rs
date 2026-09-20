@@ -38,7 +38,7 @@ use infrastructure::{
 };
 use jiff::civil::{Date, Weekday};
 
-use crate::{Failure, exit};
+use crate::{Failure, exit, output};
 
 /// The operator's own cool-down, ridden after the minute Peloton builds in.
 ///
@@ -60,6 +60,12 @@ const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
 /// delivery and not the answer (§ 36). The programme is already authored, so a
 /// failed delivery costs a retry rather than anything derived.
 ///
+/// **The absence of a destination carries its own reason**, which is why `to`
+/// is a `Result` rather than an `Option` (#184). A `None` says only that
+/// nothing will be sent, and the one thing an operator needs at that point is
+/// *why* — so the reason travels with the absence and no call site can print
+/// the session and forget to mention it.
+///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no cycling programme covers the
@@ -69,7 +75,7 @@ pub async fn next(
     database: &Path,
     from: Date,
     ftp: Option<Ftp>,
-    to: Option<(&PelotonClasses, &PelotonStack)>,
+    to: Result<(&PelotonClasses, &PelotonStack), &str>,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingMesocycleStore::new(pool.clone());
@@ -110,11 +116,14 @@ pub async fn next(
         ftp,
     );
 
-    let Some((classes, stack)) = to else {
-        return Ok(());
-    };
     println!();
-    deliver_ride(&next, classes, stack, false).await
+    match to {
+        Ok((classes, stack)) => deliver_ride(&next, classes, stack, false).await,
+        Err(why) => {
+            output::not_delivered(why);
+            Ok(())
+        }
+    }
 }
 
 /// `jiff`'s `Weekday` has no `Display` — a week has no universal first day and

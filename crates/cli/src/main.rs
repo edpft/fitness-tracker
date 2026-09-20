@@ -27,8 +27,9 @@ use std::{
 use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
+use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
-use catalogue::{Credential, KnownStream};
+use catalogue::{Credential, KnownSource, KnownStream};
 use config::{ConfigError, SourceAccess};
 use wiring::{Command, Outcome, WiringError};
 
@@ -809,13 +810,13 @@ async fn authored_command(
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
         "next" => Some(next_command_run(sub, database, credentials, stated_timezone).await),
-        "cycling" => Some(cycling_command_run(sub, database).await),
+        "cycling" => Some(cycling_command_run(sub, database, credentials).await),
         "plan" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(plan_command_run(sub, database, &zone).await)
+            Some(plan_command_run(sub, database, &zone, credentials).await)
         }
         "parameters" => Some(match sub.subcommand() {
             Some(("show", _)) => prescribing::parameters(database).await,
@@ -948,6 +949,7 @@ async fn plan_command_run(
     sub: &ArgMatches,
     database: &Path,
     zone: &domain::normalised::OperatorZone,
+    credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let count = |name: &str| -> Result<usize, Failure> {
         sub.get_one::<String>(name)
@@ -972,12 +974,17 @@ async fn plan_command_run(
         zone,
         count("microcycles")?,
         count("cycling-sessions")?,
+        credentials,
     )
     .await
 }
 
 /// `cycling next`, once its arguments are in hand.
-async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+async fn cycling_command_run(
+    sub: &ArgMatches,
+    database: &Path,
+    credentials: &infrastructure::Credentials,
+) -> Result<(), Failure> {
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
         value.parse::<jiff::civil::Date>().map_err(|error| {
             Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
@@ -989,7 +996,7 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
-        let (classes, stack) = plan::peloton()?;
+        let (classes, stack) = plan::peloton(credentials)?;
         return cycling::deliver(
             database,
             from,
@@ -1032,12 +1039,27 @@ async fn cycling_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Fa
     };
 
     // **The session is delivered as well as printed**, the way `gym next` is.
-    // Credentials that are absent cost the delivery and not the answer: the
+    // A credential that is absent costs the delivery and not the answer: the
     // programme is in the store and the ride prints from it, so a machine with
-    // no Peloton credentials still says what to do (§ 36).
-    let peloton = plan::peloton().ok();
-    let to = peloton.as_ref().map(|(classes, stack)| (classes, stack));
+    // no Peloton credential still says what to do (§ 36) — and says that it
+    // sent nothing, which is the half that was missing (#184).
+    let peloton = plan::peloton(credentials);
+    let to = to_peloton(&peloton);
     cycling::next(database, from, ftp, to).await
+}
+
+/// The destination, or the reason there is not one.
+///
+/// Its own function because both `cycling next` and `fitness next` need the
+/// borrow to outlive the call, and because the message an operator reads when
+/// nothing is sent should not depend on which command they typed.
+pub(crate) fn to_peloton(
+    resolved: &Result<(PelotonClasses, PelotonStack), Failure>,
+) -> Result<(&PelotonClasses, &PelotonStack), &str> {
+    match resolved {
+        Ok((classes, stack)) => Ok((classes, stack)),
+        Err(failure) => Err(failure.message_text()),
+    }
 }
 
 /// `programme add` and `programme show`, once the zone is in hand.
@@ -1253,17 +1275,34 @@ fn named_stream(sub: &ArgMatches) -> Result<&'static KnownStream, Failure> {
 }
 
 /// The base URL comes from the flag, then the source's own variable, then the
-/// built-in root; the credential comes from the environment and nowhere else.
+/// built-in root; the credential comes from the environment, then the store.
+///
+/// A stream resolves by the source behind it, because a credential and an API
+/// root belong to the system rather than to one of the things it serves.
 fn source_access(
     known: &KnownStream,
     base_url: Option<String>,
     credentials: &infrastructure::Credentials,
 ) -> Result<SourceAccess, Failure> {
-    let base_url = base_url
-        .or_else(|| std::env::var(known.base_url_variable()).ok())
-        .unwrap_or_else(|| known.default_base_url().to_owned());
+    source_access_for(known.source(), base_url, credentials)
+}
 
-    let source = known.source();
+/// The same resolution, for a source this invocation reaches without collecting
+/// from it.
+///
+/// **Reachable from the crate because a destination is not a stream.**
+/// Delivering a session lands nothing, so Peloton is reached here by the source
+/// the cycling discipline delivers to — and reading its credential some other
+/// way is how `cycling next` came to ignore the store (#184).
+pub(crate) fn source_access_for(
+    source: &'static KnownSource,
+    base_url: Option<String>,
+    credentials: &infrastructure::Credentials,
+) -> Result<SourceAccess, Failure> {
+    let base_url = base_url
+        .or_else(|| std::env::var(source.base_url_variable()).ok())
+        .unwrap_or_else(|| source.default_base_url().to_owned());
+
     // The kind of credential decides how it is read. Both paths derive their
     // variables from the source's name, so a third source adds an arm here and
     // nothing else.
