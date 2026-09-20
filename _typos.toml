@@ -21,6 +21,16 @@ Hevy = "Hevy"
 # are current English and the constitution is not ours to edit for a linter.
 unparseable = "unparseable"
 
+# The operator's own spelling, inside a quotation of him: *"Maybe we should
+# always start from the begining of the microcycle."* (#185, 2026-09-20, in
+# `planner`, `application::microcycle`, `cli::next` and `cli::output`.)
+#
+# Quoted rather than corrected for the reason the excluded payloads above are
+# left alone: what someone said is a record, and editing it to satisfy a
+# linter makes the record wrong in order to make the check green. Ours to
+# spell right; his to spell how he likes.
+begining = "begining"
+
 [default.extend-identifiers]
 # The plural of SQL's CHECK constraint, in a migration comment. Listed as an
 # identifier rather than a word because the splitter reads `CHECKs` as `CHEC`
