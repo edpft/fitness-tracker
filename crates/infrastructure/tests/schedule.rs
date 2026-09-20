@@ -139,11 +139,7 @@ fn an_illness_is_not_a_holiday() {
             reason: "Rome".to_owned(),
         },
     );
-    let illness = Alteration::new(
-        date(2026, 9, 19),
-        days!(2),
-        Absence::Illness,
-    );
+    let illness = Alteration::new(date(2026, 9, 19), days!(2), Absence::Illness);
 
     run!(store.record_alteration(&holiday));
     run!(store.record_alteration(&illness));
@@ -235,11 +231,7 @@ fn restating_an_absence_can_make_it_illness() {
             reason: "away".to_owned(),
         },
     )));
-    let corrected = Alteration::new(
-        date(2026, 9, 14),
-        days!(2),
-        Absence::Illness,
-    );
+    let corrected = Alteration::new(date(2026, 9, 14), days!(2), Absence::Illness);
     run!(store.record_alteration(&corrected));
 
     let diary = run!(store.diary());
