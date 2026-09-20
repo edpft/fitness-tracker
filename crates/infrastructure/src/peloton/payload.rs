@@ -76,6 +76,14 @@ pub struct WorkoutRecord {
 /// thing, and it is stable across all of it.
 #[derive(Debug, Deserialize)]
 pub struct ClassRecord {
+    /// Peloton's own id for the class.
+    ///
+    /// **The identity of the place a ride was ridden**, and what answers
+    /// whether a class has been taken before (#180). It is not what says a
+    /// class is *of a kind* — that is `series_id`, for the reason above — so
+    /// nothing matches on it; it is only ever compared for equality.
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]

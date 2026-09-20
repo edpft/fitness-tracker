@@ -57,6 +57,7 @@ use crate::measure::{Duration, InvalidQuantity, Metres};
 use crate::sequence::NonEmpty;
 use crate::{measure::BeatsPerMinute, normalised::StartedAt};
 
+use super::venue::RideVenue;
 use super::zone::Watts;
 
 /// How fast the pedals turned, in revolutions per minute.
@@ -372,6 +373,7 @@ pub struct ComposedFrom {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BikePlusRide {
     started_at: StartedAt,
+    at: RideVenue,
     duration: Duration,
     distance: Metres,
     average_power: Watts,
@@ -386,6 +388,19 @@ pub struct BikePlusRide {
 /// arguments of which three are identifiers.
 pub struct RideRecord {
     pub started_at: StartedAt,
+    /// The class this ride was ridden to, as the source names it.
+    ///
+    /// **The same type an authored ride carries**, which is what makes
+    /// "have I ridden this class before?" a join rather than a translation
+    /// (§ 11). #180 asks exactly that question: a holding microcycle takes the
+    /// newest class of a given kind that does not appear here.
+    ///
+    /// **Required, because a ride is always ridden to something.** Every one of
+    /// the operator's 309 landed cycling workouts names a class, freestyle
+    /// rides included — and a freestyle ride is refused before this for a
+    /// different reason. A workout that names none is not a session this model
+    /// holds, and the translator refuses it rather than inventing a venue.
+    pub at: RideVenue,
     /// How long the ride lasted: the span of the workout itself.
     ///
     /// **Not the class's length**, which Peloton also serves and which the
@@ -415,6 +430,7 @@ impl BikePlusRide {
     pub fn new(record: RideRecord) -> Self {
         Self {
             started_at: record.started_at,
+            at: record.at,
             duration: record.duration,
             distance: record.distance,
             average_power: record.average_power,
@@ -428,6 +444,11 @@ impl BikePlusRide {
 
     pub const fn started_at(&self) -> &StartedAt {
         &self.started_at
+    }
+
+    /// The class this ride was ridden to.
+    pub const fn at(&self) -> &RideVenue {
+        &self.at
     }
 
     pub const fn duration(&self) -> Duration {

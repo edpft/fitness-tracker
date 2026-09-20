@@ -27,13 +27,13 @@ pub mod performed;
 pub mod ride;
 pub mod session;
 pub mod shape;
+pub mod venue;
 pub mod zone;
 
 pub use delivered::DeliveredRide;
 pub use mesocycle::{
     CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, InvalidCyclingMesocycle,
-    InvalidMicrocycle, InvalidSessionPosition, InvalidVenue, PlannedRide, RideVenue,
-    SessionPosition,
+    InvalidMicrocycle, InvalidSessionPosition, PlannedRide, SessionPosition,
 };
 pub use performed::PerformedSession;
 pub use ride::{
@@ -45,6 +45,7 @@ pub use shape::{
     Answer, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,
     mesocycles, partition, span, zones_lost,
 };
+pub use venue::{InvalidVenue, RideVenue};
 pub use zone::{
     Ftp, FtpProvenance, InvalidFtp, PowerZone, UnknownZone, WattRange, Watts, ZoneBand,
 };

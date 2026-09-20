@@ -18,6 +18,7 @@ pub mod cycling;
 pub mod deliver;
 pub mod error;
 pub mod extract;
+pub mod holding;
 pub mod microcycle;
 pub mod normalise;
 pub mod ports;
@@ -34,14 +35,14 @@ pub use ports::{
     Delivered, Delivery, DeliveryAttempt, DeliveryReference, DerivationStatus,
     DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor, DiaryStore,
     EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FtpHistory,
-    FulfilledSession, GenerationParameterStore, Issuance, LadderStanding, LandingStore,
-    LastPerformance, MesocycleStore, NormalisationRunLog, NormalisationSummary,
+    FulfilledSession, GenerationParameterStore, HoldingRides, Issuance, LadderStanding,
+    LandingStore, LastPerformance, MesocycleStore, NormalisationRunLog, NormalisationSummary,
     NormalisedEntityStore, Performance, PerformedSessionLog, PerformedSetSummary,
     PerformedWorkoutReader, PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore,
     Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionLifecycle, RawExtent, RefusalReport, RefusalReporter, RefusalStore, ReplyStatus,
-    ResumptionPointResetter, ResumptionPointStore, RunLock, RunSummary, SessionOrdinal,
-    SourceAccount, SourceEvent, StreamStatus, Translation, Translator, UnderivableReason,
-    UnderivableSlot, Unexpressed, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber,
+    ResumptionPointResetter, ResumptionPointStore, RiddenVenues, RunLock, RunSummary,
+    SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation, Translator,
+    UnderivableReason, UnderivableSlot, Unexpressed, WeighInHistory, WorkoutEventSource,
+    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
 };

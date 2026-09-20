@@ -48,6 +48,38 @@ use serde::Deserialize;
 /// stated rather than derived from the word "cool down".
 pub(crate) const COOL_DOWN_RIDE_CLASS_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
 
+/// Peloton's own id for the *Power Zone* class type.
+///
+/// **It does not separate the formats**, which is why the series below exist.
+/// *Power Zone Endurance Ride*, *Power Zone Ride* and *Power Zone Max Ride* all
+/// carry this one type id, verified across the operator's 309 landed cycling
+/// workouts on 2026-09-20. A browse filtered on it alone returns all three.
+pub(crate) const POWER_ZONE_CLASS_TYPE: &str = "665395ff3abf4081bf315686227d1a51";
+
+/// Peloton's series for its *Power Zone Endurance Ride* classes.
+///
+/// The lower-intensity holding ride (#180). A series is Peloton's own statement
+/// that two classes are the same kind of thing — the same signal
+/// [`super::sessions`] uses to recognise an FTP test — so the format is read
+/// from the source rather than from the words in a title.
+pub(crate) const POWER_ZONE_ENDURANCE_SERIES: &str = "0f63c48726fa4533a928cae5358d94d7";
+
+/// Peloton's series for its plain *Power Zone Ride* classes.
+///
+/// The higher-intensity holding ride (#180). It excludes the *Max* rides and
+/// the themed ones — Pop, Hip Hop, Rock, House, EDM — which carry series of
+/// their own, and that is the operator's choice: he named *"a regular 45 minute
+/// power zone ride"* on 2026-09-20.
+pub(crate) const POWER_ZONE_SERIES: &str = "9fde039566054ea499130bed1c289eb3";
+
+/// How many candidates one browse asks for.
+///
+/// Generous on purpose: every ride already taken is skipped, and the operator
+/// has ridden 29 of the 45-minute endurance classes and 19 of the plain ones.
+/// A page that ran out would mean offering a repeat rather than an error, so
+/// the page is sized to make that not happen rather than to be minimal.
+const BROWSE_PAGE: u32 = 100;
+
 /// Whose cool-down ride is used when a class's own instructor has none.
 ///
 /// Matt Wilpers, by the operator's instruction on 2026-09-06. Four of the twelve
@@ -99,6 +131,44 @@ pub fn cool_down_from(instructor: &str, body: &str) -> Result<Option<ClassSummar
     }))
 }
 
+/// Read a browse response, keeping only one series, newest first.
+///
+/// **The filter is applied here as well as asked for.** The query names the
+/// series, but this adapter does not own the endpoint and cannot promise the
+/// parameter is honoured — so what comes back is checked against what was
+/// asked for. Belt and braces over a silent wrong answer.
+///
+/// # Errors
+///
+/// [`SourceError::Malformed`] where the response cannot be read, or where it
+/// lists classes and none of them says which series it is in — which would
+/// mean the endpoint no longer serves the field this selection turns on,
+/// rather than that no class matched.
+pub fn in_series_from(series: &str, body: &str) -> Result<Vec<ClassSummary>, SourceError> {
+    let listing: Listing = serde_json::from_str(body).map_err(|error| SourceError::Malformed {
+        detail: format!("the class search for series {series} could not be read: {error}"),
+    })?;
+    if !listing.data.is_empty() && listing.data.iter().all(|found| found.series_id.is_none()) {
+        return Err(SourceError::Malformed {
+            detail: format!(
+                "the class search for series {series} listed {} classes and none of them \
+                 stated a series, so which format each is cannot be read",
+                listing.data.len(),
+            ),
+        });
+    }
+    Ok(listing
+        .data
+        .into_iter()
+        .filter(|found| found.series_id.as_deref() == Some(series))
+        .map(|found| ClassSummary {
+            id: found.id,
+            title: found.title,
+            duration_seconds: found.duration,
+        })
+        .collect())
+}
+
 #[derive(Deserialize)]
 struct Listing {
     #[serde(default)]
@@ -110,6 +180,14 @@ struct Listed {
     id: String,
     title: String,
     duration: u64,
+    /// Which kind of class it is, as the source groups them.
+    ///
+    /// Optional because the browse endpoint is not ours: a listing that omits
+    /// it is a listing this adapter cannot filter, and
+    /// [`PelotonClasses::newest_in_series`] says so rather than silently
+    /// answering nothing.
+    #[serde(default)]
+    series_id: Option<String>,
 }
 
 /// What one class prescribes, before it is joined to any other.
@@ -470,6 +548,70 @@ impl PelotonClasses {
                 detail: error.to_string(),
             })?;
         cool_down_from(instructor, &body)
+    }
+
+    /// Every class of one series and one length, newest first.
+    ///
+    /// **The operator's own app filters, as a query**, exactly as
+    /// [`cool_down_for`](Self::cool_down_for) is: cycling, that exact length,
+    /// the Power Zone class type, sorted by air date with the newest first.
+    /// The series is what separates *Power Zone Endurance Ride* from *Power
+    /// Zone Ride*, which the class type cannot — both carry
+    /// [`POWER_ZONE_CLASS_TYPE`].
+    ///
+    /// **Newest first and nothing skipped here.** Which of these has already
+    /// been ridden is a question about the operator's record, not about
+    /// Peloton, so it is answered a ring up. This hands back the catalogue's
+    /// answer in the catalogue's order.
+    ///
+    /// An empty list is a real answer: no class of that series is that long.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the token, or
+    /// answers something this cannot read.
+    pub async fn newest_in_series(
+        &self,
+        series: &str,
+        duration_seconds: u64,
+    ) -> Result<Vec<ClassSummary>, SourceError> {
+        let bearer = self.auth.bearer().await?;
+        let response = self
+            .client()?
+            .get(format!("{}/api/v2/ride/archived", self.api_base))
+            .bearer_auth(bearer)
+            .header("Peloton-Platform", "web")
+            .query(&[
+                ("browse_category", "cycling"),
+                ("duration", &duration_seconds.to_string()),
+                ("class_type_id", POWER_ZONE_CLASS_TYPE),
+                ("series_id", series),
+                ("sort_by", "original_air_time"),
+                ("desc", "true"),
+                ("limit", &BROWSE_PAGE.to_string()),
+            ])
+            .send()
+            .await
+            .map_err(|error| SourceError::Unavailable {
+                detail: error.to_string(),
+            })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(SourceError::Unauthorised);
+        }
+        if !status.is_success() {
+            return Err(SourceError::Unavailable {
+                detail: format!("the class search for series {series} answered {status}"),
+            });
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|error| SourceError::Malformed {
+                detail: error.to_string(),
+            })?;
+        in_series_from(series, &body)
     }
 
     /// One class, derived.

@@ -704,6 +704,13 @@ fn build(
         // The shortest ride of the week is the higher-intensity one; the rest
         // are the longer, easier ones. Settled after the sessions are chosen,
         // because a role is relative to the sessions actually ridden.
+        //
+        // **A tie is legitimate rather than arbitrary** (the operator,
+        // 2026-09-20). The volume comparison admits equality, so two rides of
+        // one length satisfy the rule whichever way round the roles go; the
+        // position break below picks one and both are valid. What it cannot do
+        // is say which *kind* of class is the harder one — an assembled week
+        // states its roles instead of deriving them (#180).
         let shortest = read_rides
             .iter()
             .min_by_key(|(position, ride, _, _)| (ride.total(), *position))

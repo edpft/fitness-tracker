@@ -53,7 +53,12 @@ pub(crate) const FTP_WARM_UP_SERIES: &str = "ad6c6bc2e8ce4304bb6839f690038271";
 pub(crate) const LOW_IMPACT_RIDE_CLASS_TYPE: &str = "59a49f882ea9475faa3110d50a8fb3f3";
 
 /// What Peloton calls a ride that was not a class.
-const FREESTYLE: &str = "freestyle";
+///
+/// **Shared with the translator on purpose.** Both sides have to ask the same
+/// question of the same word — grouping calls a freestyle ride
+/// [`RideRole::NotARide`] and the translator refuses it as unmodelled — and a
+/// second copy of the string is a rule stated twice.
+pub(crate) const FREESTYLE: &str = "freestyle";
 /// What Peloton calls a ride.
 const CYCLING: &str = "cycling";
 /// What Peloton calls the Bike+.

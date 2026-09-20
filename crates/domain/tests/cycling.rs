@@ -883,6 +883,7 @@ fn ridden(
     };
     Ok(BikePlusRide::new(RideRecord {
         started_at: StartedAt::new(instant, OperatorZone::try_from("UTC".to_owned())?),
+        at: RideVenue::new("class-1", "20 min FTP Test Ride")?,
         duration: Duration::from_seconds(1200),
         distance: Metres::from_millimetres(11_000_000),
         average_power: Watts::from_u32(average),

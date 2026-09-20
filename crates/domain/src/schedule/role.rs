@@ -6,6 +6,21 @@
 //! gym session and the longer ride. The operator, 2026-09-19: length is not
 //! independent of intensity, so neither axis says enough on its own.
 //!
+//! **The volume comparison admits equality**, and the intensity one does not.
+//! The operator, 2026-09-20, settling how a holding microcycle of two
+//! 45-minute rides can be roled at all: the higher-intensity session's volume
+//! is *no more than* the other's, and the lower-intensity session's *no less*.
+//! Two sessions of equal volume therefore carry different roles, told apart by
+//! intensity alone; two of equal intensity never do.
+//!
+//! **So a role cannot be derived from volume.** A week of a 45-minute Power
+//! Zone ride and a 45-minute Power Zone Endurance ride satisfies the rule
+//! whichever way round the roles are put, and only the *kind* of class says
+//! which is which. Where a mesocycle is assembled rather than provided (#180)
+//! the role is stated at authoring; where it is read off a published
+//! programme's durations, a tie leaves both orderings legitimate and the
+//! reader picks one.
+//!
 //! **The gym said `light` and `heavy` until 2026-09-20 and cycling said
 //! nothing at all.** One vocabulary of two words could not carry two axes, and
 //! it could not carry cycling either: "a heavy ride" reads as a long one, which
@@ -134,6 +149,11 @@ impl SessionRole {
     /// **One axis under one name.** Cycling expresses volume as duration and
     /// the gym as work done, and carrying two names for one axis would make a
     /// planner joining the two disciplines translate between them for no gain.
+    ///
+    /// **`Lower` means no more, and `Higher` no less** (the operator,
+    /// 2026-09-20). Unlike [`Self::intensity`], this side of the comparison is
+    /// not strict: two sessions of equal volume are a legitimate week, and the
+    /// intensity is what separates them.
     pub const fn volume(self) -> Relative {
         self.volume
     }
