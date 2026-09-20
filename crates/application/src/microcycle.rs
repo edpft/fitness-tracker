@@ -3,7 +3,7 @@
 //! **The question `fitness next` actually asks** (#185). It used to ask a
 //! narrower one — was the slot before today accounted for — and the operator
 //! found what that misses on his first run of the installed build:
-//! *"Maybe we should always start from the begining of the microcycle."* A week
+//! *"Maybe we should always start from the beginning of the microcycle."* A week
 //! reported from its first session says where the week is up to; one reported
 //! from the last slot says only what happened last night.
 //!

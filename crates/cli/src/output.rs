@@ -898,7 +898,7 @@ fn derived_phrase(
 ///
 /// **From the first session, not from the last slot** (#185). The operator, on
 /// his first run of the installed build: *"Maybe we should always start from
-/// the begining of the microcycle."* A week reported from its opening says
+/// the beginning of the microcycle."* A week reported from its opening says
 /// where the week is up to; one reported from last night says only what
 /// happened last night.
 pub fn microcycle(sessions: &[application::microcycle::Session]) {

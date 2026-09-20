@@ -8,7 +8,7 @@
 //! previous slot, so it collected the gym and not the bike and could not say
 //! where the week was up to: *"We should be checking from the last performed
 //! session, not the last prescribed session"*, and then *"Maybe we should
-//! always start from the begining of the microcycle."*
+//! always start from the beginning of the microcycle."*
 //!
 //! **Every source is collected first, and unconditionally.** Deciding what to
 //! collect from what the store already holds is how the bike went unasked: the
