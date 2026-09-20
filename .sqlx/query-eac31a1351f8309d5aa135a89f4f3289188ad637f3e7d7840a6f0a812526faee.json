@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n                        SELECT weekday, part, discipline\n                        FROM alteration_slot\n                        WHERE alteration = ?\n                        ",
+  "query": "\n                    SELECT weekday, part, discipline, intensity, volume\n                    FROM alteration_slot\n                    WHERE alteration = ?\n                    ",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,28 @@
             "name": "discipline"
           }
         }
+      },
+      {
+        "name": "intensity",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration_slot",
+            "name": "intensity"
+          }
+        }
+      },
+      {
+        "name": "volume",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "alteration_slot",
+            "name": "volume"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +65,10 @@
     "nullable": [
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "dc1473bdb6b9a5868beb8e3c57248bf224be968221adbc46395994f66da99f42"
+  "hash": "eac31a1351f8309d5aa135a89f4f3289188ad637f3e7d7840a6f0a812526faee"
 }

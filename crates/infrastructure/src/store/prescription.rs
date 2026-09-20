@@ -22,12 +22,19 @@ use domain::{
     prescription::{
         Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        SessionRole, SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
+        SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
+    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
+
+/// A session's role, from the two columns that carry it.
+fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
+    let side = |text: &str| Relative::try_from(text.to_owned()).map_err(|error| corrupt(&error));
+    Ok(SessionRole::new(side(intensity)?, side(volume)?))
+}
 
 use super::{corrupt, store_error};
 
@@ -392,7 +399,8 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 
         let mesocycle = workout.programme().as_i64();
         let issued_for = workout.issued_for().to_string();
-        let role = workout.session_role().as_str();
+        let intensity = workout.session_role().intensity().as_str();
+        let volume = workout.session_role().volume().as_str();
         let week_kind = workout.week().as_str();
         let week_index = workout
             .week()
@@ -414,18 +422,19 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let id = sqlx::query!(
             r#"
             INSERT INTO prescribed_workout (
-                mesocycle, issued_for, zone, session_role,
+                mesocycle, issued_for, zone, session_intensity, session_volume,
                 week_kind, week_index,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
                 target_grams, parameters_authored_at, issued_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             mesocycle,
             issued_for,
             self.zone,
-            role,
+            intensity,
+            volume,
             week_kind,
             week_index,
             anchor_grams,
@@ -492,7 +501,8 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let Some(row) = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", mesocycle AS "mesocycle!: i64",
-                   session_role AS "session_role!: String",
+                   session_intensity AS "session_intensity!: String",
+                   session_volume AS "session_volume!: String",
                    week_kind AS "week_kind!: String", week_index AS "week_index: i64",
                    anchor_grams AS "anchor_grams: i64",
                    anchor_provenance AS "anchor_provenance: String",
@@ -570,7 +580,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let workout = PrescribedWorkout::new(
             shape,
             date,
-            SessionRole::try_from(row.session_role).map_err(|error| corrupt(&error))?,
+            role_of(&row.session_intensity, &row.session_volume)?,
             week,
             derived_from,
             parameters,

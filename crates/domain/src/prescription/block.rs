@@ -108,8 +108,9 @@ use crate::prescription::{
     parameters::Percentage,
     prilepin,
     repmax::{PER_REPETITION, rep_max},
-    schedule::{Calendar, InvalidCalendar, SessionRole, Skip, WeekIndex, WeekKind, Weekdays},
+    schedule::{Calendar, InvalidCalendar, Skip, WeekIndex, WeekKind},
 };
+use crate::schedule::{SessionRole, TrainingWeek};
 
 /// Why a block could not be planned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -601,11 +602,11 @@ impl BlockPeriodisation {
         phase_weeks: u32,
         entry_test: bool,
         interruptions: &[Skip],
-        weekdays: Weekdays,
+        week: TrainingWeek,
         zone: TimeZone,
     ) -> Result<Calendar, InvalidCalendar> {
         let weeks = phase_weeks.saturating_add(u32::from(entry_test));
-        Calendar::new(start, weeks, interruptions, weekdays, zone)
+        Calendar::new(start, weeks, interruptions, week, zone)
     }
 
     /// Rebuild a block that was already authored.
@@ -639,11 +640,6 @@ impl BlockPeriodisation {
         entry_test: Option<EntryTest>,
         calendar: &Calendar,
     ) -> Result<(), InconsistentMesocycle> {
-        if !calendar.weekdays().runs(primary.gating_role()) {
-            return Err(InconsistentMesocycle::GatingRoleNeverRuns {
-                gating: primary.gating_role(),
-            });
-        }
         check_primary(
             primary.pattern(),
             primary.exercise(),

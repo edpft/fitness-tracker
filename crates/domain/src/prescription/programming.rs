@@ -26,7 +26,7 @@ use std::fmt;
 
 use crate::{
     measure::{Kg, RepCount},
-    prescription::{PerRole, Percentage, Target},
+    prescription::{ByIntensity, Percentage, Target},
     sequence::NonEmpty,
 };
 
@@ -127,8 +127,8 @@ pub struct Programming {
     /// [`warmup_ramp`]: super::warmup_ramp
     pub warmup: NonEmpty<WarmupStep>,
     /// The primary's back-off sets. Per role, because the two roles differ.
-    pub back_off: PerRole<BackOff>,
-    pub top_set_reps: PerRole<TopSetReps>,
+    pub back_off: ByIntensity<BackOff>,
+    pub top_set_reps: ByIntensity<TopSetReps>,
     /// Every non-primary strength slot.
     pub strength: AccessoryScheme,
     /// Every hypertrophy slot.
@@ -209,13 +209,13 @@ pub fn programming() -> Result<Programming, InvalidProgramming> {
         // session's three sets of six on the heavy day. Stated by the operator
         // on 2026-08-20; the record agrees on every session since the July
         // test.
-        back_off: PerRole {
-            heavy: BackOff {
+        back_off: ByIntensity {
+            higher: BackOff {
                 sets: count("heavy back-off", 2)?,
                 reps: count("heavy back-off", 4)?,
                 of_top_set: percentage("heavy back-off", "85%")?,
             },
-            light: BackOff {
+            lower: BackOff {
                 sets: count("light back-off", 3)?,
                 reps: count("light back-off", 6)?,
                 of_top_set: percentage("light back-off", "85%")?,
@@ -229,9 +229,9 @@ pub fn programming() -> Result<Programming, InvalidProgramming> {
         // Constant within a block either way: descending reps across the block,
         // fives then threes then singles, is the textbook linear variant and is
         // deferred.
-        top_set_reps: PerRole {
-            light: TopSetReps::new(count("light top set", 3)?),
-            heavy: TopSetReps::new(count("heavy top set", 1)?),
+        top_set_reps: ByIntensity {
+            lower: TopSetReps::new(count("light top set", 3)?),
+            higher: TopSetReps::new(count("heavy top set", 1)?),
         },
 
         // INFERRED. The ranges were eyeballed from pull-ups at six, curls around
@@ -289,11 +289,11 @@ mod pinned {
             ]
         );
 
-        assert_eq!(shipped.back_off.heavy.sets.as_u32(), 2);
-        assert_eq!(shipped.back_off.heavy.reps.as_u32(), 4);
-        assert_eq!(shipped.top_set_reps.heavy.as_rep_count().as_u32(), 1);
-        assert_eq!(shipped.back_off.light.sets.as_u32(), 3);
-        assert_eq!(shipped.back_off.light.reps.as_u32(), 6);
-        assert_eq!(shipped.top_set_reps.light.as_rep_count().as_u32(), 3);
+        assert_eq!(shipped.back_off.higher.sets.as_u32(), 2);
+        assert_eq!(shipped.back_off.higher.reps.as_u32(), 4);
+        assert_eq!(shipped.top_set_reps.higher.as_rep_count().as_u32(), 1);
+        assert_eq!(shipped.back_off.lower.sets.as_u32(), 3);
+        assert_eq!(shipped.back_off.lower.reps.as_u32(), 6);
+        assert_eq!(shipped.top_set_reps.lower.as_rep_count().as_u32(), 3);
     }
 }

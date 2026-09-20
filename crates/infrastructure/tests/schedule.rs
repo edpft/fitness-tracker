@@ -11,7 +11,10 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
-    schedule::{Absence, Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{
+        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot,
+    },
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Weekday, date};
@@ -64,19 +67,56 @@ macro_rules! days {
     };
 }
 
-fn slots(of: &[(Weekday, PartOfDay, Discipline)]) -> BTreeMap<TrainingSlot, Discipline> {
+fn slots(
+    of: &[(Weekday, PartOfDay, Discipline, SessionRole)],
+) -> BTreeMap<TrainingSlot, Allocation> {
     of.iter()
-        .map(|(day, part, discipline)| (TrainingSlot::new(*day, *part), *discipline))
+        .map(|(day, part, discipline, role)| {
+            (
+                TrainingSlot::new(*day, *part),
+                Allocation::new(*discipline, *role),
+            )
+        })
         .collect()
 }
 
+/// The harder, shorter session of a discipline's week; and the easier, longer
+/// one.
+const fn harder() -> SessionRole {
+    SessionRole::new(Relative::Higher, Relative::Lower)
+}
+
+const fn easier() -> SessionRole {
+    SessionRole::new(Relative::Lower, Relative::Higher)
+}
+
 /// The operator's ordinary pattern, as stated on 2026-08-24.
-fn ordinary_pattern() -> BTreeMap<TrainingSlot, Discipline> {
+fn ordinary_pattern() -> BTreeMap<TrainingSlot, Allocation> {
     slots(&[
-        (Weekday::Monday, PartOfDay::Evening, Discipline::Gym),
-        (Weekday::Wednesday, PartOfDay::Evening, Discipline::Cycling),
-        (Weekday::Friday, PartOfDay::Evening, Discipline::Gym),
-        (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
+        (
+            Weekday::Monday,
+            PartOfDay::Evening,
+            Discipline::Gym,
+            easier(),
+        ),
+        (
+            Weekday::Wednesday,
+            PartOfDay::Evening,
+            Discipline::Cycling,
+            harder(),
+        ),
+        (
+            Weekday::Friday,
+            PartOfDay::Evening,
+            Discipline::Gym,
+            harder(),
+        ),
+        (
+            Weekday::Sunday,
+            PartOfDay::Morning,
+            Discipline::Cycling,
+            easier(),
+        ),
     ])
 }
 
@@ -226,7 +266,8 @@ fn restating_an_absence_can_make_it_illness() {
             slots: Some(slots(&[(
                 Weekday::Monday,
                 PartOfDay::Morning,
-                Discipline::Cycling
+                Discipline::Cycling,
+                easier()
             )])),
             reason: "away".to_owned(),
         },
@@ -289,7 +330,12 @@ fn re_stating_a_pattern_corrects_it() {
     run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 8, 24),
         zone!("Europe/London"),
-        slots(&[(Weekday::Tuesday, PartOfDay::Morning, Discipline::Gym)]),
+        slots(&[(
+            Weekday::Tuesday,
+            PartOfDay::Morning,
+            Discipline::Gym,
+            harder()
+        )]),
     )));
 
     let diary = run!(store.diary());
@@ -297,7 +343,12 @@ fn re_stating_a_pattern_corrects_it() {
     assert_eq!(diary.patterns().len(), 1, "one pattern, corrected");
     assert_eq!(
         diary.patterns()[0].slots(),
-        &slots(&[(Weekday::Tuesday, PartOfDay::Morning, Discipline::Gym)]),
+        &slots(&[(
+            Weekday::Tuesday,
+            PartOfDay::Morning,
+            Discipline::Gym,
+            harder()
+        )]),
         "the correction is what stands"
     );
 }
@@ -315,7 +366,12 @@ fn a_later_pattern_supersedes_by_existing() {
     run!(store.record_pattern(&TrainingPattern::new(
         date(2026, 9, 21),
         zone!("Europe/London"),
-        slots(&[(Weekday::Saturday, PartOfDay::Morning, Discipline::Gym)]),
+        slots(&[(
+            Weekday::Saturday,
+            PartOfDay::Morning,
+            Discipline::Gym,
+            harder()
+        )]),
     )));
 
     let diary = run!(store.diary());
@@ -336,7 +392,12 @@ fn a_later_pattern_supersedes_by_existing() {
     );
     assert_eq!(
         after.slots,
-        slots(&[(Weekday::Saturday, PartOfDay::Morning, Discipline::Gym)]),
+        slots(&[(
+            Weekday::Saturday,
+            PartOfDay::Morning,
+            Discipline::Gym,
+            harder()
+        )]),
         "the later pattern answers from its own date"
     );
 
@@ -373,8 +434,18 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
         Absence::Holiday {
             zone: None,
             slots: Some(slots(&[
-                (Weekday::Saturday, PartOfDay::Morning, Discipline::Gym),
-                (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
+                (
+                    Weekday::Saturday,
+                    PartOfDay::Morning,
+                    Discipline::Gym,
+                    harder(),
+                ),
+                (
+                    Weekday::Sunday,
+                    PartOfDay::Morning,
+                    Discipline::Cycling,
+                    easier(),
+                ),
             ])),
             reason: "away; the hotel gym is only free at the weekend".to_owned(),
         },
@@ -393,7 +464,10 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
     // fixed allocation could never have seen.
     assert_eq!(
         diary.slots_on(date(2026, 9, 19), Discipline::Gym),
-        [TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning)],
+        [(
+            TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning),
+            harder()
+        )],
         "the gym keeps the Saturday morning the alteration gave it"
     );
     assert!(

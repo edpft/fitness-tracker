@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO prescribed_workout (\n                mesocycle, issued_for, zone, session_intensity, session_volume,\n                week_kind, week_index,\n                anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,\n                target_grams, parameters_authored_at, issued_at\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5db6ae831c732d633ffe7716f6beeb66f257d36ef611c50a90de39fb36946d87"
+}

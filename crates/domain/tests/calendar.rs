@@ -12,8 +12,9 @@
 
 use std::num::NonZeroU8;
 
-use domain::prescription::{
-    Calendar, InvalidCalendar, NotScheduled, SessionRole, Skip, WeekKind, Weekdays,
+use domain::{
+    prescription::{Calendar, InvalidCalendar, NotScheduled, Skip, WeekKind},
+    schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{
     civil::{Date, Weekday},
@@ -28,10 +29,16 @@ fn date(year: i16, month: i8, day: i8) -> Result<Date, Box<dyn std::error::Error
     Ok(Date::new(year, month, day)?)
 }
 
-fn monday_light_friday_heavy() -> Result<Weekdays, Box<dyn std::error::Error>> {
-    Ok(Weekdays::new(vec![
-        (Weekday::Monday, SessionRole::Light),
-        (Weekday::Friday, SessionRole::Heavy),
+fn monday_light_friday_heavy() -> Result<TrainingWeek, Box<dyn std::error::Error>> {
+    Ok(TrainingWeek::new(vec![
+        (
+            Weekday::Monday,
+            SessionRole::new(Relative::Lower, Relative::Higher),
+        ),
+        (
+            Weekday::Friday,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+        ),
     ])?)
 }
 

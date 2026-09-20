@@ -98,6 +98,10 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
         .block_on(async {
             let directory = tempfile::tempdir()?;
             let pool = infrastructure::connect(&directory.path().join("test.db")).await?;
+            // A block's calendar is rebuilt from the operator's week on every
+            // read (issue #63), so a store with no week in it cannot hold a
+            // plan.
+            programme::record_the_week(&pool).await?;
             let zone = support::corpus::zone()?;
 
             let plan = programme::plan(vec![cycle()?])?;

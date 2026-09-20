@@ -26,7 +26,10 @@ use std::{
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
-    schedule::{Absence, Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{
+        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot,
+    },
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Date, Weekday};
@@ -130,6 +133,21 @@ fn parse_discipline(typed: &str) -> Result<Discipline, String> {
     }
 }
 
+/// What the session in a slot is, against the week's others of its discipline.
+///
+/// **Two letters for four roles, and both axes are asked.** The two the week
+/// actually runs are the harder-and-shorter one and the easier-and-longer one,
+/// so those are what the keys spell; answering them separately would make
+/// "higher intensity, higher volume" as easy to type as the two that exist, and
+/// it is not a week anything prescribes yet.
+fn parse_role(typed: &str) -> Result<SessionRole, String> {
+    match typed.to_lowercase().as_str() {
+        "" | "h" | "harder" => Ok(SessionRole::new(Relative::Higher, Relative::Lower)),
+        "e" | "easier" => Ok(SessionRole::new(Relative::Lower, Relative::Higher)),
+        other => Err(format!("{other:?} is not harder or easier")),
+    }
+}
+
 /// Ask for a week's worth of slots, a day at a time, and whose each one is.
 ///
 /// **Two passes rather than one prompt per slot-and-discipline.** Which parts of
@@ -142,7 +160,7 @@ fn parse_discipline(typed: &str) -> Result<Discipline, String> {
 fn ask_slots(
     preamble: &str,
     weekdays: &[(Weekday, &str)],
-) -> Result<BTreeMap<TrainingSlot, Discipline>, Failure> {
+) -> Result<BTreeMap<TrainingSlot, Allocation>, Failure> {
     println!("{preamble}");
     println!("  m = morning, a = afternoon, e = evening; several is \"me\"; - is none");
 
@@ -161,10 +179,27 @@ fn ask_slots(
     println!("And which of those are the gym's?");
     println!("  g = gym, c = cycling");
 
-    let mut slots = BTreeMap::new();
+    let mut disciplines = Vec::with_capacity(found.len());
     for (name, slot) in found {
         let asked = format!("  {:<20}[gym] ", format!("{name} {}", slot.part));
-        slots.insert(slot, ask_until(&asked, parse_discipline)?);
+        disciplines.push((name, slot, ask_until(&asked, parse_discipline)?));
+    }
+
+    // **A third pass, because a role is relative and the set has to be settled
+    // first.** The operator, 2026-09-20: the comparison is between the sessions
+    // a week actually holds, so there is nothing to compare until the slots and
+    // their disciplines are both known.
+    println!("And which session does each one take?");
+    println!("  h = harder and shorter, e = easier and longer");
+
+    let mut slots = BTreeMap::new();
+    for (name, slot, discipline) in disciplines {
+        let asked = format!(
+            "  {:<24}[harder] ",
+            format!("{name} {} ({discipline})", slot.part)
+        );
+        let role = ask_until(&asked, parse_role)?;
+        slots.insert(slot, Allocation::new(discipline, role));
     }
     Ok(slots)
 }

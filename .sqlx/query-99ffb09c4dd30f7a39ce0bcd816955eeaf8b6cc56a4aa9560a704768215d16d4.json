@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT weekday, part, discipline, intensity, volume\n                FROM training_slot\n                WHERE pattern = ?\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weekday",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_slot",
+            "name": "weekday"
+          }
+        }
+      },
+      {
+        "name": "part",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_slot",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "name": "discipline",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_slot",
+            "name": "discipline"
+          }
+        }
+      },
+      {
+        "name": "intensity",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_slot",
+            "name": "intensity"
+          }
+        }
+      },
+      {
+        "name": "volume",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "training_slot",
+            "name": "volume"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "99ffb09c4dd30f7a39ce0bcd816955eeaf8b6cc56a4aa9560a704768215d16d4"
+}

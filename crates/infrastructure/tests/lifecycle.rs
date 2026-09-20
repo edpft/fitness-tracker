@@ -282,11 +282,13 @@ fn a_superseded_session_that_was_trained_is_the_one_in_force() {
     let later: i64 = run!(async {
         sqlx::query_scalar!(
             r#"INSERT INTO prescribed_workout (
-                   mesocycle, issued_for, zone, session_role, week_kind, week_index,
+                   mesocycle, issued_for, zone, session_intensity, session_volume,
+                   week_kind, week_index,
                    anchor_grams, anchor_provenance, anchor_from,
                    parameters_authored_at, issued_at
                )
-               SELECT mesocycle, issued_for, zone, session_role, week_kind, week_index,
+               SELECT mesocycle, issued_for, zone, session_intensity, session_volume,
+                      week_kind, week_index,
                       anchor_grams, anchor_provenance, anchor_from,
                       parameters_authored_at, '2099-01-01T00:00:00Z'
                FROM prescribed_workout WHERE id = ?

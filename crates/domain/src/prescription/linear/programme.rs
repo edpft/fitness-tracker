@@ -22,9 +22,10 @@ use crate::{
         ladder::{InvalidLadder, Ladder, Opening},
         mesocycle::{InconsistentMesocycle, check_primary},
         parameters::GenerationParameters,
-        schedule::{Calendar, SessionRole, Weekdays},
+        schedule::Calendar,
         steps::LoadSteps,
     },
+    schedule::SessionRole,
 };
 
 use super::template::{PrimaryPattern, SlotFills};
@@ -109,7 +110,6 @@ impl Linear {
             primary.exercise,
             &fills,
             primary.gating_role,
-            calendar.weekdays(),
         )?;
 
         // 4. And the climb has to make a ladder over this duration. Checked
@@ -168,7 +168,6 @@ impl Linear {
             primary.exercise,
             &fills,
             primary.gating_role,
-            calendar.weekdays(),
         )?;
         Ok(Self {
             primary,
@@ -178,21 +177,22 @@ impl Linear {
     }
 
     /// The checks that need nothing but the programme.
+    ///
+    /// **Whether the operator's week runs the gating role is not among them**,
+    /// and was until 2026-09-20. It is a question about the pairing of a
+    /// programme with a week rather than about the programme, and the week
+    /// changes under a programme that is already stored — so a type invariant
+    /// would make an old mesocycle unreadable the day the operator moved his
+    /// gym nights. [`runs_its_gating_session`](super::super::authored::programme)
+    /// asks it at authoring, where a refusal is something he can act on.
     fn check(
         primary: PrimaryPattern,
         primary_exercise: Exercise,
         fills: &SlotFills,
         gating_role: SessionRole,
-        weekdays: &Weekdays,
     ) -> Result<(), InconsistentMesocycle> {
-        // A programme gating on a role it never runs would never advance.
-        if !weekdays.runs(gating_role) {
-            return Err(InconsistentMesocycle::GatingRoleNeverRuns {
-                gating: gating_role,
-            });
-        }
-        // The other two are the template's rather than this model's, and a block
-        // asks them in the same words.
+        // The template's rather than this model's, and a block asks it in the
+        // same words.
         check_primary(primary, primary_exercise, fills, gating_role)
     }
 

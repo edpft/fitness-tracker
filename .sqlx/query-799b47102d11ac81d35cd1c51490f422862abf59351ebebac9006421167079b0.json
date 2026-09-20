@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, start_date, days, absence, zone, states_slots, reason\n            FROM alteration\n            ORDER BY start_date\n            ",
+  "query": "\n        SELECT id, start_date, days, absence, zone, states_slots, reason\n        FROM alteration\n        ORDER BY start_date\n        ",
   "describe": {
     "columns": [
       {
@@ -94,5 +94,5 @@
       true
     ]
   },
-  "hash": "a5b44875b4e018fdb135f7327e6ff59d19f97a6b9d1f54c77f3e631636e7baad"
+  "hash": "799b47102d11ac81d35cd1c51490f422862abf59351ebebac9006421167079b0"
 }

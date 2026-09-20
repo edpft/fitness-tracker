@@ -42,10 +42,11 @@
 
 use std::collections::BTreeMap;
 
-use jiff::civil::{Date, Weekday};
+use jiff::civil::Date;
 
 use crate::{
     provider::{ExternalProgramme, InvalidProvision, ProvidedFrom},
+    schedule::{SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 
@@ -66,8 +67,12 @@ use super::session::CyclingSession;
 /// the second of two, which is what the operator caught on 2026-09-05.
 ///
 /// **Ordinal, never a weekday** (decision 0018): a programme states a first and
-/// a second session and says nothing about Wednesdays. What maps one onto a
-/// calendar day is [`CyclingWeekdays`].
+/// a second session and says nothing about Wednesdays. **Nor does it decide
+/// one** — until 2026-09-20 `CyclingWeekdays` mapped a position to a weekday,
+/// which made this ordinal the scheduling fact it is not. What places a ride in
+/// the week is [`PlannedRide::role`] meeting a training slot of the same role
+/// (issue #63); this is the order the rides are authored in, and the way back
+/// to what the publisher called them.
 ///
 /// No ceiling beyond the type's own. How many sessions a microcycle holds is a
 /// fact about a published programme rather than a number to decide here —
@@ -169,6 +174,7 @@ pub struct PlannedRide {
     session: CyclingSession,
     at: NonEmpty<RideVenue>,
     published_session: u32,
+    role: SessionRole,
 }
 
 impl PlannedRide {
@@ -176,16 +182,37 @@ impl PlannedRide {
         session: CyclingSession,
         at: NonEmpty<RideVenue>,
         published_session: u32,
+        role: SessionRole,
     ) -> Self {
         Self {
             session,
             at,
             published_session,
+            role,
         }
     }
 
     pub const fn session(&self) -> &CyclingSession {
         &self.session
+    }
+
+    /// What this ride is against the microcycle's others: shorter and harder,
+    /// or longer and easier.
+    ///
+    /// **Against the ones the operator rides, not the ones Peloton published.**
+    /// A published microcycle offers three and he takes two; the two are roled
+    /// against each other, and what the third would have been does not enter
+    /// into it. The operator, 2026-09-20: *"the comparison is after the number
+    /// of sessions have been decided"*.
+    ///
+    /// **It is this, and not [`Self::published_session`], that decides the
+    /// weekday.** Peloton puts the FTP test second in its test microcycle,
+    /// which would land it on the Sunday; it is the higher-intensity, shorter
+    /// session, so it goes in the Wednesday slot. The operator, 2026-09-19:
+    /// *"it does make more sense for the cycling test to keep the shorter /
+    /// harder cycling slot on the Wednesday"*.
+    pub const fn role(&self) -> SessionRole {
+        self.role
     }
 
     /// Every place this ride is done, in the order they are ridden.
@@ -209,6 +236,14 @@ pub enum InvalidMicrocycle {
     NoRides,
     #[error("a published programme's microcycles count from one, so there is no microcycle 0")]
     ZeroPublishedOrdinal,
+    /// Two rides the planner cannot tell apart.
+    ///
+    /// A role is what places a ride in the week (issue #63), so a microcycle
+    /// holding two rides in the same role offers the planner no way to say
+    /// which of them Wednesday gets. Roles are relative *within* the microcycle
+    /// — if two rides really are alike, the week holds one session, not two.
+    #[error("two rides in this microcycle are both {role}, and a week has one slot for each")]
+    RepeatedRole { role: SessionRole },
 }
 
 /// One week of an authored programme: what is ridden, and in what order.
@@ -224,13 +259,26 @@ pub struct CyclingMicrocycle {
 impl CyclingMicrocycle {
     /// # Errors
     ///
-    /// [`InvalidMicrocycle::NoRides`] if it prescribes nothing.
+    /// [`InvalidMicrocycle::NoRides`] if it prescribes nothing,
+    /// [`InvalidMicrocycle::RepeatedRole`] if two of its rides are the same
+    /// thing relative to each other, and
+    /// [`InvalidMicrocycle::ZeroPublishedOrdinal`] for a published numbering
+    /// that counts from zero.
     pub fn new(
         rides: BTreeMap<SessionPosition, PlannedRide>,
         published_ordinal: u32,
     ) -> Result<Self, InvalidMicrocycle> {
         if rides.is_empty() {
             return Err(InvalidMicrocycle::NoRides);
+        }
+        for (at, (_, ride)) in rides.iter().enumerate() {
+            if rides
+                .values()
+                .skip(at + 1)
+                .any(|later| later.role() == ride.role())
+            {
+                return Err(InvalidMicrocycle::RepeatedRole { role: ride.role() });
+            }
         }
         if published_ordinal == 0 {
             return Err(InvalidMicrocycle::ZeroPublishedOrdinal);
@@ -248,6 +296,35 @@ impl CyclingMicrocycle {
     #[must_use]
     pub fn ride(&self, at: SessionPosition) -> Option<&PlannedRide> {
         self.rides.get(&at)
+    }
+
+    /// The ride this week runs in a given role, and where it sits in the week.
+    ///
+    /// **This is the join.** A training slot states a discipline and a role;
+    /// this answers with the ride that fills it. At most one can match, which
+    /// [`Self::new`] guarantees.
+    #[must_use]
+    pub fn for_role(&self, role: SessionRole) -> Option<(SessionPosition, &PlannedRide)> {
+        self.rides
+            .iter()
+            .find(|(_, ride)| ride.role() == role)
+            .map(|(position, ride)| (*position, ride))
+    }
+
+    /// Every role this week rides, in a stable order.
+    ///
+    /// **Sorted, not in session order.** Every microcycle rides the same two
+    /// roles and the harder one always takes the same slot; what changes
+    /// between weeks is which *published* session carries it. The operator's
+    /// autumn cycling mesocycle ends in a test microcycle, and Peloton files
+    /// the FTP test second where an ordinary week's shorter ride is first.
+    /// Comparing in session order would refuse that as a change of roles when
+    /// nothing about the week has changed.
+    #[must_use]
+    pub fn roles(&self) -> Vec<SessionRole> {
+        let mut roles: Vec<SessionRole> = self.rides.values().map(PlannedRide::role).collect();
+        roles.sort_unstable();
+        roles
     }
 
     /// Which microcycle of the published programme this is, in that
@@ -269,91 +346,28 @@ impl CyclingMicrocycle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidWeekdays {
-    #[error("a programme that rides no day of the week prescribes nothing")]
-    NoDays,
-    #[error("{weekday} is given two sessions, and a day rides one")]
-    RepeatedWeekday { weekday: String },
-    #[error("{position} is ridden on two weekdays, and a session is ridden once")]
-    RepeatedSession { position: SessionPosition },
-}
-
-/// Which weekday rides which session of the microcycle.
-///
-/// **Two facts in one place because they must agree.** Taking the week's last
-/// session and riding on Sunday are the same decision — it is the long ride and
-/// Sunday morning is the only slot long enough — and splitting them across two
-/// records would let them drift.
-///
-/// **Fixed at authoring, as the gym's `Weekdays` are.** A programme's weekdays
-/// are its weekly shape; an alteration is a run of days that departs from that
-/// shape, and the calendar takes those out separately.
-///
-/// A list rather than a map because `jiff`'s `Weekday` is deliberately not
-/// `Ord` — a week has no universal first day. At most a handful of entries, so
-/// a scan is the whole cost.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CyclingWeekdays {
-    days: Vec<(Weekday, SessionPosition)>,
-}
-
-impl CyclingWeekdays {
-    /// # Errors
-    ///
-    /// [`InvalidWeekdays`] for an empty map, a weekday given two sessions, or a
-    /// session given two weekdays.
-    pub fn new(days: Vec<(Weekday, SessionPosition)>) -> Result<Self, InvalidWeekdays> {
-        if days.is_empty() {
-            return Err(InvalidWeekdays::NoDays);
-        }
-        for (at, (weekday, position)) in days.iter().enumerate() {
-            let rest = days.iter().skip(at + 1);
-            for (later_day, later_position) in rest {
-                if later_day == weekday {
-                    return Err(InvalidWeekdays::RepeatedWeekday {
-                        weekday: format!("{weekday:?}"),
-                    });
-                }
-                if later_position == position {
-                    return Err(InvalidWeekdays::RepeatedSession {
-                        position: *position,
-                    });
-                }
-            }
-        }
-        Ok(Self { days })
-    }
-
-    #[must_use]
-    pub fn days(&self) -> &[(Weekday, SessionPosition)] {
-        &self.days
-    }
-
-    /// Which session this date rides, if it rides one.
-    #[must_use]
-    pub fn session_on(&self, date: Date) -> Option<SessionPosition> {
-        self.days
-            .iter()
-            .find(|(weekday, _)| *weekday == date.weekday())
-            .map(|(_, position)| *position)
-    }
-
-    /// Every session position the week rides, in order.
-    #[must_use]
-    pub fn positions(&self) -> Vec<SessionPosition> {
-        let mut positions: Vec<SessionPosition> =
-            self.days.iter().map(|(_, position)| *position).collect();
-        positions.sort_unstable();
-        positions
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidCyclingMesocycle {
-    #[error("microcycle {microcycle} has no {position}, which the programme rides every week")]
-    MissingRide {
+    /// The weeks do not agree about what the week is.
+    ///
+    /// Every microcycle of a mesocycle runs the same roles, because the
+    /// operator's week gives cycling the same slots every week of it. A
+    /// mesocycle whose second week drops the longer ride would leave Sunday
+    /// with nothing to put in it, and nothing here could say which week was
+    /// the mistake.
+    ///
+    /// **The same roles, and not necessarily at the same positions.** A
+    /// mesocycle ending in a test microcycle rides exactly the roles the other
+    /// weeks do; Peloton just files the FTP test as the later session. That is
+    /// the whole point of a role placing a session rather than a position
+    /// doing it.
+    #[error(
+        "microcycle {microcycle} rides {rode}, and the first rides {expected} — \
+         every week of a mesocycle rides the same roles"
+    )]
+    RolesDiffer {
         microcycle: usize,
-        position: SessionPosition,
+        rode: String,
+        expected: String,
     },
     /// The published numbers are not a selection: one is taken twice.
     ///
@@ -396,16 +410,15 @@ pub struct CyclingMesocycle {
     /// The Monday microcycle one begins on.
     start: Date,
     microcycles: NonEmpty<CyclingMicrocycle>,
-    weekdays: CyclingWeekdays,
 }
 
 impl CyclingMesocycle {
     /// # Errors
     ///
-    /// [`InvalidCyclingMesocycle::MissingRide`] where a microcycle does not hold
-    /// a session the weekday map rides. That is the one thing the parts cannot
+    /// [`InvalidCyclingMesocycle::RolesDiffer`] where the microcycles do not
+    /// all ride the same roles. That is the one thing the parts cannot
     /// guarantee between them, and leaving it unchecked would author a
-    /// programme with a Wednesday nothing answers for.
+    /// programme with a Sunday nothing answers for.
     ///
     /// [`InvalidCyclingMesocycle::NotASelection`] where two microcycles claim
     /// the same published week. A selection takes each week once, and µ1-2-2-4
@@ -414,16 +427,16 @@ impl CyclingMesocycle {
         programme: ExternalProgramme,
         start: Date,
         microcycles: NonEmpty<CyclingMicrocycle>,
-        weekdays: CyclingWeekdays,
     ) -> Result<Self, InvalidCyclingMesocycle> {
-        for (at, microcycle) in microcycles.iter().enumerate() {
-            for position in weekdays.positions() {
-                if microcycle.ride(position).is_none() {
-                    return Err(InvalidCyclingMesocycle::MissingRide {
-                        microcycle: at + 1,
-                        position,
-                    });
-                }
+        let expected = microcycles.first().roles();
+        for (at, microcycle) in microcycles.iter().enumerate().skip(1) {
+            let rode = microcycle.roles();
+            if rode != expected {
+                return Err(InvalidCyclingMesocycle::RolesDiffer {
+                    microcycle: at + 1,
+                    rode: describe(&rode),
+                    expected: describe(&expected),
+                });
             }
         }
         ProvidedFrom::new(
@@ -437,7 +450,6 @@ impl CyclingMesocycle {
             programme,
             start,
             microcycles,
-            weekdays,
         })
     }
 
@@ -472,10 +484,6 @@ impl CyclingMesocycle {
         &self.microcycles
     }
 
-    pub const fn weekdays(&self) -> &CyclingWeekdays {
-        &self.weekdays
-    }
-
     /// How many weeks it runs.
     #[must_use]
     pub const fn duration_weeks(&self) -> usize {
@@ -507,26 +515,46 @@ impl CyclingMesocycle {
 
     /// What is ridden on a date: which microcycle, which session, and the ride.
     ///
-    /// `None` for a date this programme does not cover, or a weekday it does not
-    /// ride.
+    /// **The week decides, not the programme.** `week` is cycling's slots as
+    /// the diary gives them; the slot on this date names a role, and the ride
+    /// answering to that role is what is ridden. Until 2026-09-20 the
+    /// programme carried its own weekday map and this took no argument, which
+    /// is the duplication issue #63 removes.
+    ///
+    /// `None` for a date this programme does not cover, a weekday cycling does
+    /// not ride, or a role the microcycle has no ride for.
     #[must_use]
-    pub fn on(&self, date: Date) -> Option<(usize, SessionPosition, &PlannedRide)> {
+    pub fn on(
+        &self,
+        date: Date,
+        week: &TrainingWeek,
+    ) -> Option<(usize, SessionPosition, &PlannedRide)> {
         let number = self.microcycle_of(date)?;
-        let position = self.weekdays.session_on(date)?;
-        let ride = self.microcycle(number)?.ride(position)?;
+        let role = week.role_on(date.weekday())?;
+        let (position, ride) = self.microcycle(number)?.for_role(role)?;
         Some((number, position, ride))
     }
 
     /// The first date at or after `from` that this programme rides.
     ///
-    /// Looks a week ahead and no further: the weekday map names weekdays, so if
-    /// none of the next seven days rides, none ever will.
+    /// Looks a week ahead and no further: the week names weekdays, so if none
+    /// of the next seven days rides, none ever will.
     #[must_use]
-    pub fn next_riding_day(&self, from: Date) -> Option<Date> {
+    pub fn next_riding_day(&self, from: Date, week: &TrainingWeek) -> Option<Date> {
         let from = from.max(self.start);
         (0..7).find_map(|offset| {
             let date = from.checked_add(jiff::Span::new().days(offset)).ok()?;
-            self.on(date).map(|_| date)
+            self.on(date, week).map(|_| date)
         })
+    }
+}
+
+/// A list of roles in a sentence, for a refusal that names both sides.
+fn describe(roles: &[SessionRole]) -> String {
+    let named: Vec<String> = roles.iter().map(ToString::to_string).collect();
+    match named.split_last() {
+        None => "nothing".to_owned(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     }
 }

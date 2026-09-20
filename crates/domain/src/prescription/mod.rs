@@ -78,9 +78,14 @@ pub use sbs::{
     InvalidSbs, Sbs, SbsDay, SbsSession, advance, day, maximum_after, training_max_share,
     working_load,
 };
+// `SessionRole` is deliberately not re-exported here. It moved to
+// `domain::schedule` on 2026-09-20 (issue #63), because a training slot carries
+// one and both disciplines read it — a role is a fact about the operator's week
+// rather than about the gym's prescriptions, and a second name for it at this
+// level would invite the gym to keep thinking of it as its own.
 pub use schedule::{
-    Calendar, Interruptions, InvalidCalendar, InvalidWeek, NoWeekdays, NotScheduled, PerRole,
-    SessionRole, Skip, UnknownSessionRole, WeekIndex, WeekKind, Weekdays,
+    ByIntensity, Calendar, Interruptions, InvalidCalendar, InvalidWeek, NotScheduled, Skip,
+    WeekIndex, WeekKind,
 };
 pub use shape::{
     Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO cycling_ride (\n            mesocycle, microcycle, session, published_session,\n            intensity, volume, warm_up_seconds, cool_down_seconds, effort_seconds\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "4d9f4a7b26c0de5928f018ad4e56b4787ffffec3eac987bc23413b1b227b1ec0"
+}

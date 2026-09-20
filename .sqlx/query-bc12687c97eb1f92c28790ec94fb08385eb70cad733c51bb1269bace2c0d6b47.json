@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO gym_mesocycle (\n            plan, ordinal, provider, provided_programme, template,\n            primary_pattern, primary_exercise,\n            asserted_grams, asserted_provenance, asserted_from, asserted_failed_grams,\n            gating_intensity, gating_volume, start_date, duration_weeks,\n            test_reps, entry_test_reps, entry_test_light_grams\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        RETURNING id AS \"id!: i64\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_mesocycle",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 18
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bc12687c97eb1f92c28790ec94fb08385eb70cad733c51bb1269bace2c0d6b47"
+}

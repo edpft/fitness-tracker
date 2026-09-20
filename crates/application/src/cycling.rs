@@ -16,7 +16,10 @@
 //! last month stays reproducible and a source being unavailable costs nothing
 //! (§ 36).
 
-use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition};
+use domain::{
+    cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition},
+    schedule::TrainingWeek,
+};
 use jiff::civil::Date;
 
 use crate::{CyclingMesocycleStore, PrescriptionError};
@@ -41,6 +44,11 @@ pub struct NextRide {
 /// answer in the next — and answering "nothing" there would be the store's shape
 /// showing through as a gap in the plan.
 ///
+/// **The week is cycling's slots, as the diary gives them**, and it is passed
+/// in rather than looked up: which weekday takes which ride is a fact about the
+/// operator's life rather than about the programme (issue #63), and the caller
+/// is what holds the diary.
+///
 /// # Errors
 ///
 /// [`PrescriptionError::NoPlan`] if no cycling programme covers the date or
@@ -50,6 +58,7 @@ pub struct NextRide {
 pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     store: &S,
     from: Date,
+    week: &TrainingWeek,
 ) -> Result<(CyclingMesocycle, NextRide), PrescriptionError> {
     let covering = store.on(from).await?;
     let covered = covering.is_some();
@@ -57,7 +66,7 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     // no riding day left defers to the one after it — a mesocycle whose last
     // ride is on the Sunday is still the programme in force on the Saturday.
     if let Some((id, _, programme)) = covering
-        && let Some(found) = ride_in(&programme, id, from)
+        && let Some(found) = ride_in(&programme, id, from, week)
     {
         return Ok((programme, found));
     }
@@ -72,14 +81,19 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
             PrescriptionError::NoPlan { date: from }
         });
     };
-    let found =
-        ride_in(&programme, id, from).ok_or(PrescriptionError::NoSessionScheduled { from })?;
+    let found = ride_in(&programme, id, from, week)
+        .ok_or(PrescriptionError::NoSessionScheduled { from })?;
     Ok((programme, found))
 }
 
-fn ride_in(programme: &CyclingMesocycle, id: CyclingMesocycleId, from: Date) -> Option<NextRide> {
-    let date = programme.next_riding_day(from)?;
-    let (microcycle, session, ride) = programme.on(date)?;
+fn ride_in(
+    programme: &CyclingMesocycle,
+    id: CyclingMesocycleId,
+    from: Date,
+    week: &TrainingWeek,
+) -> Option<NextRide> {
+    let date = programme.next_riding_day(from, week)?;
+    let (microcycle, session, ride) = programme.on(date, week)?;
     Some(NextRide {
         programme: id,
         date,

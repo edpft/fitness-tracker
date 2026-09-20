@@ -8,6 +8,7 @@
 mod support;
 
 use application::{GenerationParameterStore as _, MesocycleStore as _, PlanStore as _};
+use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
 };
@@ -145,6 +146,9 @@ async fn programme_store() -> Result<
 > {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
     Ok((
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
         SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
@@ -297,8 +301,12 @@ fn the_weekday_mapping_round_trips() {
         panic!("what was authored is in force")
     };
 
-    let mut authored_days: Vec<_> = authored.calendar().weekdays().iter().collect();
-    let mut read_days: Vec<_> = read_back.calendar().weekdays().iter().collect();
+    // **The week is the diary's, not the mesocycle's**, so what this asserts is
+    // that a block rebuilt from the store runs against the same week it was
+    // authored against — and that is a round trip through `training_slot`
+    // rather than through a copy the programme carried (issue #63).
+    let mut authored_days: Vec<_> = authored.calendar().week().iter().collect();
+    let mut read_days: Vec<_> = read_back.calendar().week().iter().collect();
     authored_days.sort_by_key(|(day, _)| format!("{day:?}"));
     read_days.sort_by_key(|(day, _)| format!("{day:?}"));
     assert_eq!(read_days, authored_days);
@@ -427,7 +435,7 @@ fn fixture_block() -> Result<domain::prescription::Authored, programme::Programm
     programme::authored(
         jiff::civil::Date::constant(2026, 7, 6),
         domain::prescription::authored::Shape::Linear {
-            gating: domain::prescription::SessionRole::Heavy,
+            gating: SessionRole::new(Relative::Higher, Relative::Lower),
             weeks: 8,
             // Derived from the anchor, as the fixtures do it.
         },

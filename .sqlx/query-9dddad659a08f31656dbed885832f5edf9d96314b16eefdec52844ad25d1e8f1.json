@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT slot AS \"slot!: String\", role AS \"role: String\",\n               exercise AS \"exercise!: String\",\n               static_sets AS \"static_sets: i64\", static_reps AS \"static_reps: i64\"\n        FROM gym_slot_fill\n        WHERE mesocycle = ?\n        ORDER BY slot ASC, position ASC\n        ",
+  "query": "\n        SELECT slot AS \"slot!: String\", intensity AS \"intensity: String\",\n               exercise AS \"exercise!: String\",\n               static_sets AS \"static_sets: i64\", static_reps AS \"static_reps: i64\"\n        FROM gym_slot_fill\n        WHERE mesocycle = ?\n        ORDER BY slot ASC, position ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -15,13 +15,13 @@
         }
       },
       {
-        "name": "role: String",
+        "name": "intensity: String",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "gym_slot_fill",
-            "name": "role"
+            "name": "intensity"
           }
         }
       },
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "2908ba4d8376822d6027b9d3f1328238fc5210e2c7da6703c11aae5295861a77"
+  "hash": "9dddad659a08f31656dbed885832f5edf9d96314b16eefdec52844ad25d1e8f1"
 }

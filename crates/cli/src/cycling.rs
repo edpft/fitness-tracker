@@ -23,16 +23,17 @@
 
 use std::path::Path;
 
-use application::FtpHistory;
+use application::{DiaryStore as _, FtpHistory};
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, Ftp, PlannedRide, Ride,
         SessionPosition, clock,
     },
     measure::PositiveDuration,
+    schedule::{Discipline, TrainingWeek},
 };
 use infrastructure::{
-    SqliteCyclingMesocycleStore, SqliteFtpHistory, connect,
+    SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory, connect,
     peloton::{PelotonClasses, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -72,8 +73,9 @@ pub async fn next(
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let week = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
 
-    let (programme, next) = application::cycling::next_ride(&store, from)
+    let (programme, next) = application::cycling::next_ride(&store, from, &week)
         .await
         .map_err(|error| match error {
             application::PrescriptionError::NoPlan { .. } => Failure::message(
@@ -255,8 +257,9 @@ pub async fn deliver(
     stack: &PelotonStack,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool);
-    let (programme, next) = application::cycling::next_ride(&store, from)
+    let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let week = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
+    let (programme, next) = application::cycling::next_ride(&store, from, &week)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 
@@ -366,4 +369,29 @@ fn whoever(instructor: Option<&infrastructure::peloton::Instructor>) -> String {
         || "instructor unknown, so this is the one every session falls back to".to_owned(),
         |who| who.name.clone(),
     )
+}
+
+/// Cycling's week as of a date, which is what places a ride on a weekday.
+///
+/// **Read here rather than carried by the programme.** A cycling mesocycle
+/// stated its own weekday map until 2026-09-20 — `cycling_weekday`, keyed on a
+/// bare session ordinal — and issue #63 replaced it with a role on each ride
+/// and a role on each slot. Which weekday takes which is the schedule's, so it
+/// is read at the point of asking.
+async fn cycling_week(diary: &SqliteDiaryStore, from: Date) -> Result<TrainingWeek, Failure> {
+    let diary = diary
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    diary
+        .training_week(from, Discipline::Cycling)
+        .ok_or_else(|| {
+            Failure::message(
+                format!(
+                    "the schedule gives cycling no day of the week as of {from}, so there \
+                     is no day to ride on. Record the week first: fitness schedule add"
+                ),
+                exit::USAGE,
+            )
+        })
 }

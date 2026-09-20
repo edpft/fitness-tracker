@@ -45,18 +45,18 @@ use domain::{
     // The periodised one is a different type with the same word on it, so it is
     // named for what it holds: the plan a duration divides into.
     prescription::{
-        Anchor, AnchorProvenance, Authored, Block, Calendar, EntryTest, Fill, GenerationParameters,
-        InvalidBlock, LoadSteps, Mesocycle, PerRole, PrimaryPattern, SessionRole, Skip, SlotFills,
-        SlotId, StaticFill, Weekdays, authored::Shape, block::Block as BlockPlan, rep_max,
+        Anchor, AnchorProvenance, Authored, Block, ByIntensity, Calendar, EntryTest, Fill,
+        GenerationParameters, InvalidBlock, LoadSteps, Mesocycle, PrimaryPattern, Skip, SlotFills,
+        SlotId, StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
-    schedule::{Diary, Discipline},
+    schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
 };
 use infrastructure::{
     SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePlanStore,
     connect,
 };
-use jiff::civil::{Date, Weekday};
+use jiff::civil::Date;
 
 use crate::{Failure, exit, output, plan::SBS_MICROCYCLES};
 
@@ -281,9 +281,9 @@ async fn ask_single(
     let alternates = ask("  a different one on the other session? [no] ")?;
     if matches!(alternates.to_lowercase().as_str(), "y" | "yes") {
         let other = ask_exercise(slot, &offers)?;
-        return Ok(Fill::Alternating(PerRole {
-            light: exercise,
-            heavy: other,
+        return Ok(Fill::Alternating(ByIntensity {
+            lower: exercise,
+            higher: other,
         }));
     }
 
@@ -339,16 +339,6 @@ const PATTERNS: [(PrimaryPattern, &str); 2] = [
     (PrimaryPattern::HipDominant, "hip dominant"),
 ];
 
-const WEEKDAYS: [(&str, Weekday); 7] = [
-    ("monday", Weekday::Monday),
-    ("tuesday", Weekday::Tuesday),
-    ("wednesday", Weekday::Wednesday),
-    ("thursday", Weekday::Thursday),
-    ("friday", Weekday::Friday),
-    ("saturday", Weekday::Saturday),
-    ("sunday", Weekday::Sunday),
-];
-
 fn ask_pattern() -> Result<PrimaryPattern, Failure> {
     println!("\nwhich pattern is the primary?");
     for (at, (_, name)) in PATTERNS.iter().enumerate() {
@@ -369,106 +359,46 @@ fn ask_pattern() -> Result<PrimaryPattern, Failure> {
     })
 }
 
-/// Which session each of the gym's days is.
+/// The gym's week, as the diary gives it, and the role a block gates on.
 ///
-/// **The schedule says which days are the gym's; the programme says what it
-/// does with them.** This asked all seven and consulted nothing, so a block
-/// could name days the schedule had given to cycling and nothing would object
-/// — the autumn block agreed with the schedule by the operator's hand rather
-/// than by construction. The days come from the diary now, and the only
-/// question left is the one the schedule cannot answer.
+/// **Nothing is asked here any more.** This used to ask which session each of
+/// the gym's days was — light or heavy — and write the answer onto the
+/// programme, which is the copy issue #63 removes: a slot states its role, the
+/// operator states it once in `fitness schedule add`, and a block reads it.
+/// What is left is a lookup and two refusals.
 ///
 /// **Ordinary days, not the days around the start.** A block starting inside a
 /// holiday would otherwise be offered whatever that holiday left, which is the
 /// alteration deciding the shape of the block rather than interrupting it. The
 /// calendar takes the alteration out separately, as skips.
 ///
-/// **The light and the heavy are not interchangeable.** The heavy session is
-/// the one the ladder gates on and the one an entry test is taken in, so a
-/// block with no heavy day is a block that cannot advance.
-///
-/// A day may still be declined with `-`: which days are the gym's is the
-/// schedule's to say, and how many of them a given block uses is not.
-fn ask_weekdays(diary: &Diary, start: Date) -> Result<(Weekdays, SessionRole), Failure> {
-    let Some(available) = diary.ordinarily(start, Discipline::Gym) else {
+/// **The two sessions are not interchangeable.** The higher-intensity one is
+/// where the ladder gates and where an entry test is taken, so a week with none
+/// is a week no block can advance in.
+fn gym_week(diary: &Diary, start: Date) -> Result<(TrainingWeek, SessionRole), Failure> {
+    let Some(week) = diary.training_week(start, Discipline::Gym) else {
         return Err(usage(format!(
-            "the schedule says nothing about {start}, so there is no way to know \
-             which days are the gym's. Record the week first: fitness schedule add"
+            "the schedule gives the gym no day of the week as of {start}, so there \
+             is nothing for a programme to run on. Record the week first: \
+             fitness schedule add"
         )));
     };
-    if available.is_empty() {
+
+    let gating = SessionRole::new(Relative::Higher, Relative::Lower);
+    if !week.offers(gating) {
         return Err(usage(format!(
-            "the schedule gives the gym no day of the week as of {start}, so \
-             there is nothing for a programme to run on"
+            "the gym's week as of {start} is {} — a block gates on the \
+             higher-intensity session and takes its test in one, so it cannot run \
+             in a week that holds none",
+            week.describe()
         )));
     }
 
-    let offered: Vec<(&'static str, Weekday)> = WEEKDAYS
-        .into_iter()
-        .filter(|(_, weekday)| available.contains(weekday))
-        .collect();
-
-    println!("\nwhich session is each of the gym's days?");
     println!(
-        "  the schedule gives the gym {} as of {start}.",
-        list(&offered)
+        "\nthe schedule gives the gym {} as of {start}.",
+        week.describe()
     );
-    println!("  l = light, h = heavy; - is a day this programme does not use");
-
-    loop {
-        let mut chosen = Vec::new();
-        for (key, weekday) in &offered {
-            let role = ask_until(&format!("  {key:<10}[-] "), |typed| {
-                match typed.to_lowercase().as_str() {
-                    "" | "-" => Ok(None),
-                    "l" | "light" => Ok(Some(SessionRole::Light)),
-                    "h" | "heavy" => Ok(Some(SessionRole::Heavy)),
-                    other => Err(format!("{other:?} is not l, h or -")),
-                }
-            })?;
-            if let Some(role) = role {
-                chosen.push((*key, *weekday, role));
-            }
-        }
-
-        if chosen.is_empty() {
-            println!("  a programme has to run on some day — asking again");
-            continue;
-        }
-        if !chosen
-            .iter()
-            .any(|(_, _, role)| *role == SessionRole::Heavy)
-        {
-            println!(
-                "  a heavy session is needed: a ladder gates on it, and a test is taken in it"
-            );
-            continue;
-        }
-
-        // The calendar is needed here, before the programme exists, to work out
-        // how many training weeks the operator's dates actually hold.
-        let scheduled = Weekdays::new(
-            chosen
-                .iter()
-                .map(|(_, weekday, role)| (*weekday, *role))
-                .collect(),
-        )
-        .map_err(|error| usage(error.to_string()))?;
-
-        // Gating is on the heavy session wherever there is one, which there
-        // now is.
-        return Ok((scheduled, SessionRole::Heavy));
-    }
-}
-
-/// Days in a sentence, so the line reads as one.
-fn list(days: &[(&'static str, Weekday)]) -> String {
-    let names: Vec<&str> = days.iter().map(|(key, _)| *key).collect();
-    match names.split_last() {
-        None => String::new(),
-        Some((last, [])) => (*last).to_owned(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-    }
+    Ok((week, gating))
 }
 
 /// How many weeks the block gets, from the dates it has to run between.
@@ -495,7 +425,7 @@ fn ask_weeks(
     climbing: Climbing,
     diary: &Diary,
     start: Date,
-    weekdays: &Weekdays,
+    week: &TrainingWeek,
 ) -> Result<u32, Failure> {
     loop {
         let last = ask_until("ends? ", |typed| {
@@ -514,7 +444,7 @@ fn ask_weeks(
             .into_iter()
             .map(Skip::day)
             .collect();
-        let available = Calendar::training_weeks_within(start, last, weekdays, &skips);
+        let available = Calendar::training_weeks_within(start, last, week, &skips);
 
         // **A block's first week measures the maximum the rest is a share of,
         // and it is not a phase**, so `duration_weeks` is one fewer than the
@@ -766,7 +696,7 @@ struct Common {
     plan: PlanName,
     start: Date,
     pattern: PrimaryPattern,
-    scheduled: Weekdays,
+    week: TrainingWeek,
     gating: SessionRole,
 }
 
@@ -785,13 +715,13 @@ fn ask_common(diary: &Diary, template: &str) -> Result<Common, Failure> {
     let start = ask_until("starts? ", parse_date)?;
 
     let pattern = ask_pattern()?;
-    let (scheduled, gating) = ask_weekdays(diary, start)?;
+    let (week, gating) = gym_week(diary, start)?;
 
     Ok(Common {
         plan,
         start,
         pattern,
-        scheduled,
+        week,
         gating,
     })
 }
@@ -971,7 +901,7 @@ async fn ask_test(
             start: common.start,
             pattern: common.pattern,
             primary_exercise: Exercise::Reps(lift),
-            weekdays: common.scheduled,
+            week: common.week,
             shape: Shape::Test {
                 reps: count(reps)?,
                 provided,
@@ -1018,7 +948,7 @@ fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), 
     let weeks = if matches!(climbing, Climbing::Sbs) {
         domain::prescription::sbs::WEEKS
     } else {
-        ask_weeks(climbing, diary, common.start, &common.scheduled)?
+        ask_weeks(climbing, diary, common.start, &common.week)?
     };
     let lift = ask_lift(template, common.pattern)?;
 
@@ -1080,7 +1010,7 @@ fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), 
             start: common.start,
             pattern: common.pattern,
             primary_exercise: Exercise::Reps(lift),
-            weekdays: common.scheduled,
+            week: common.week,
             shape,
         },
     ))
@@ -1331,7 +1261,7 @@ pub async fn gym_side(
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     println!("\nthe gym side: asked once, for the whole plan\n");
-    let (weekdays, _) = ask_weekdays(&diary, start)?;
+    let (week, _) = gym_week(&diary, start)?;
 
     println!("\nAnd the slots. A number picks from the list; anything else is read");
     println!("as an exercise, so something you have never done is one word away.");
@@ -1362,7 +1292,7 @@ pub async fn gym_side(
             start: at,
             pattern,
             primary_exercise: Exercise::Reps(lift),
-            weekdays: weekdays.clone(),
+            week: week.clone(),
             shape,
         };
         let skips = interruptions(&diary, &answers);

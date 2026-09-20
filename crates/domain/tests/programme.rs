@@ -17,10 +17,11 @@ use domain::{
     measure::RepCount,
     plan::Occupies,
     prescription::{
-        BlockPeriodisation, BlockWeek, EntryTest, Fill, InconsistentMesocycle, Mesocycle, PerRole,
-        Primary, PrimaryPattern, Progression, SessionRole, Skip, SlotFills, StaticFill, Test,
-        Tested, WeekIndex, Weekdays,
+        Authored, AuthoringError, BlockPeriodisation, BlockWeek, ByIntensity, EntryTest, Fill,
+        InconsistentMesocycle, Mesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
+        StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed::seed,
     },
+    schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{civil::Date, tz::TimeZone};
 
@@ -41,10 +42,16 @@ fn date(year: i16, month: i8, day: i8) -> Result<Date, Invalid> {
 }
 
 /// Monday light, Friday heavy — the operator's own week.
-fn weekdays() -> Result<Weekdays, Invalid> {
-    Weekdays::new(vec![
-        (jiff::civil::Weekday::Monday, SessionRole::Light),
-        (jiff::civil::Weekday::Friday, SessionRole::Heavy),
+fn weekdays() -> Result<TrainingWeek, Invalid> {
+    TrainingWeek::new(vec![
+        (
+            jiff::civil::Weekday::Monday,
+            SessionRole::new(Relative::Lower, Relative::Higher),
+        ),
+        (
+            jiff::civil::Weekday::Friday,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+        ),
     ])
     .map_err(invalid)
 }
@@ -107,7 +114,7 @@ fn block(
         Primary::new(
             PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
-            SessionRole::Heavy,
+            SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)))?,
         entry_test,
@@ -129,7 +136,7 @@ fn entry_test() -> Result<EntryTest, Invalid> {
 fn test(
     knee_dominant: Fill<Exercise>,
     reps_at: u32,
-    weekdays: Weekdays,
+    weekdays: TrainingWeek,
 ) -> Result<Result<Test, InconsistentMesocycle>, Invalid> {
     let week =
         Test::week(date(2026, 9, 14)?, &[] as &[Skip], weekdays, TimeZone::UTC).map_err(invalid)?;
@@ -192,44 +199,81 @@ fn the_light_session_may_run_the_predecessors_lift() {
     let Ok(weekdays) = weekdays() else {
         panic!("the operator's week is a weekday map")
     };
-    let inherited = Fill::Alternating(PerRole {
-        light: Exercise::Reps(RepsExercise::SquatBarbell),
-        heavy: Exercise::Reps(RepsExercise::FrontSquat),
+    let inherited = Fill::Alternating(ByIntensity {
+        lower: Exercise::Reps(RepsExercise::SquatBarbell),
+        higher: Exercise::Reps(RepsExercise::FrontSquat),
     });
     let Ok(Ok(test)) = test(inherited, 1, weekdays) else {
         panic!("a week that back squats light and tests the front squat is a test")
     };
     assert_eq!(
-        test.fills()
-            .primary(PrimaryPattern::KneeDominant, SessionRole::Light),
+        test.fills().primary(
+            PrimaryPattern::KneeDominant,
+            SessionRole::new(Relative::Lower, Relative::Higher)
+        ),
         &Exercise::Reps(RepsExercise::SquatBarbell)
     );
-    assert!(test.is_tested(PrimaryPattern::KneeDominant.slot(), SessionRole::Heavy));
+    assert!(test.is_tested(
+        PrimaryPattern::KneeDominant.slot(),
+        SessionRole::new(Relative::Higher, Relative::Lower)
+    ));
     assert!(
-        !test.is_tested(PrimaryPattern::KneeDominant.slot(), SessionRole::Light),
+        !test.is_tested(
+            PrimaryPattern::KneeDominant.slot(),
+            SessionRole::new(Relative::Lower, Relative::Higher)
+        ),
         "the light session is the predecessor's, not a second attempt at the maximum"
     );
 }
 
-/// A week that never runs the heavy session never takes the test.
+/// A week that never runs the higher-intensity session never takes the test.
+///
+/// **Asked of the authoring, not of `Test::new`.** The check moved there on
+/// 2026-09-20 (issue #63): a role belongs to a training slot now, so whether
+/// the week offers the one the test is taken in is a question about a
+/// programme and a week together — and the week is superseded whenever the
+/// operator's life changes, while the programme stays in the store.
 #[test]
 fn a_test_that_never_runs_its_session_is_refused() {
-    let Ok(mondays) = Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)])
-    else {
-        panic!("one day is a weekday map")
+    let Ok(mondays) = TrainingWeek::new(vec![(
+        jiff::civil::Weekday::Monday,
+        SessionRole::new(Relative::Lower, Relative::Higher),
+    )]) else {
+        panic!("one day is a week")
     };
-    let Ok(refused) = test(
-        Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
-        1,
-        mondays,
-    ) else {
+    let (Ok(start), Ok(count)) = (date(2026, 9, 14), reps(1)) else {
         panic!("the fixture builds")
     };
+    let Ok(filled) = fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat))) else {
+        panic!("the fixture builds")
+    };
+    let Ok(parameters) = seed() else {
+        panic!("the seed builds")
+    };
+
+    let refused = domain::prescription::authored::programme(
+        Authored {
+            start,
+            pattern: PrimaryPattern::KneeDominant,
+            primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+            week: mondays,
+            shape: AuthoredShape::Test {
+                reps: count,
+                provided: None,
+                asserted: None,
+            },
+        },
+        filled,
+        &[] as &[Skip],
+        TimeZone::UTC,
+        &parameters,
+    );
+
     assert!(matches!(
         refused,
-        Err(InconsistentMesocycle::TestNeverRunsItsSession {
-            role: SessionRole::Heavy
-        })
+        Err(AuthoringError::Mesocycle(
+            InconsistentMesocycle::TestNeverRunsItsSession { .. }
+        ))
     ));
 }
 
@@ -333,5 +377,8 @@ fn a_test_gates_nothing_and_a_block_gates_a_role() {
     };
     let programme = Mesocycle::Progression(Progression::BlockPeriodisation(block));
     assert_eq!(programme.template(), "block");
-    assert_eq!(programme.gating_role(), Some(SessionRole::Heavy));
+    assert_eq!(
+        programme.gating_role(),
+        Some(SessionRole::new(Relative::Higher, Relative::Lower))
+    );
 }

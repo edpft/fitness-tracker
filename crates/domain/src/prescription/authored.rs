@@ -27,11 +27,12 @@ use crate::{
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
         parameters::GenerationParameters,
-        sbs::{Sbs, WEEKS},
-        schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
+        sbs::{self, Sbs, WEEKS},
+        schedule::{Calendar, InvalidCalendar, Skip},
         test::{Test, Tested},
     },
     provider::ProvidedFrom,
+    schedule::{SessionRole, TrainingWeek},
 };
 
 /// Why a set of answers does not make a programme.
@@ -65,7 +66,16 @@ pub struct Authored {
     pub start: Date,
     pub pattern: PrimaryPattern,
     pub primary_exercise: Exercise,
-    pub weekdays: Weekdays,
+    /// The operator's week for the gym as of the start date, read from the
+    /// diary.
+    ///
+    /// **Consulted, not kept.** Nothing built from these answers holds it: a
+    /// calendar needs it to count training weeks and the checks below need it
+    /// to see whether the gating session is one the week offers, and both
+    /// questions are asked again from the diary whenever they come up. Storing
+    /// it beside the programme is what `gym_weekday` did, once per mesocycle,
+    /// for a fact the schedule already held (issue #63).
+    pub week: TrainingWeek,
     /// What this template needs beyond the five facts above.
     pub shape: Shape,
 }
@@ -209,7 +219,7 @@ pub fn programme(
         start,
         pattern,
         primary_exercise,
-        weekdays,
+        week,
         shape,
     } = authored;
 
@@ -219,7 +229,12 @@ pub fn programme(
             provided,
             asserted,
         } => {
-            let calendar = Test::week(start, interruptions, weekdays, zone)?;
+            if !week.offers(Test::ROLE) {
+                return Err(
+                    InconsistentMesocycle::TestNeverRunsItsSession { role: Test::ROLE }.into(),
+                );
+            }
+            let calendar = Test::week(start, interruptions, week, zone)?;
             Ok(Mesocycle::Test(Test::new(
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
@@ -229,7 +244,8 @@ pub fn programme(
             )?))
         }
         Shape::Linear { gating, weeks } => {
-            let calendar = Calendar::new(start, weeks, interruptions, weekdays, zone)?;
+            gates_on_a_session_the_week_offers(&week, gating)?;
+            let calendar = Calendar::new(start, weeks, interruptions, week, zone)?;
             Ok(Mesocycle::Progression(Progression::Linear(Linear::new(
                 Primary::new(pattern, primary_exercise, gating),
                 fills,
@@ -242,12 +258,13 @@ pub fn programme(
             weeks,
             entry_test,
         } => {
+            gates_on_a_session_the_week_offers(&week, gating)?;
             let calendar = BlockPeriodisation::weeks(
                 start,
                 weeks,
                 entry_test.is_some(),
                 interruptions,
-                weekdays,
+                week,
                 zone,
             )?;
             Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
@@ -260,11 +277,41 @@ pub fn programme(
             )))
         }
         Shape::Provided { from } => {
-            let calendar = Calendar::new(start, WEEKS, interruptions, weekdays, zone)?;
+            gates_on_a_session_the_week_offers(&week, sbs::GATING)?;
+            let calendar = Calendar::new(start, WEEKS, interruptions, week, zone)?;
             Ok(Mesocycle::Progression(Progression::Provided {
                 from,
                 cycle: Sbs::new(pattern, primary_exercise, fills, calendar)?,
             }))
         }
     }
+}
+
+/// A programme gating on a role the operator's week never offers would never
+/// advance.
+///
+/// **Asked here rather than by the programme**, and it moved on 2026-09-20. A
+/// role belongs to a training slot now (issue #63), so this is a question about
+/// a programme and a week together — and the week is superseded whenever the
+/// operator's life changes, while the programme stays in the store. Held as a
+/// type invariant it would make a mesocycle authored last month fail to load
+/// this month, which is a stored fact being refused for something that is not
+/// about it.
+///
+/// For an SBS cycle it is worse than a stalled ladder: the gating day is where
+/// the maximum is *set*, so a cycle without one would prescribe every week off
+/// the opening maximum for ever.
+///
+/// # Errors
+///
+/// [`InconsistentMesocycle::GatingRoleNeverRuns`] where the week offers no
+/// session in the gating role.
+fn gates_on_a_session_the_week_offers(
+    week: &TrainingWeek,
+    gating: SessionRole,
+) -> Result<(), AuthoringError> {
+    if week.offers(gating) {
+        return Ok(());
+    }
+    Err(InconsistentMesocycle::GatingRoleNeverRuns { gating }.into())
 }

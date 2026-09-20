@@ -17,10 +17,11 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use application::{DiaryAuthor as _, DiaryStore as _, ExerciseHistory as _};
 use domain::{
     normalised::OperatorZone,
-    prescription::{
-        Anchor, AnchorProvenance, Authored, EntryTest, SessionRole, Skip, authored::Shape,
+    prescription::{Anchor, AnchorProvenance, Authored, EntryTest, Skip, authored::Shape},
+    schedule::{
+        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot,
     },
-    schedule::{Absence, Alteration, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};
@@ -32,7 +33,7 @@ fn autumn() -> Result<Authored, Box<dyn std::error::Error>> {
     Ok(fixture::authored(
         date(2026, 9, 14),
         Shape::Block {
-            gating: SessionRole::Heavy,
+            gating: SessionRole::new(Relative::Higher, Relative::Lower),
             weeks: 9,
             entry_test: Some(EntryTest::new(
                 domain::measure::RepCount::new(3)?,
@@ -69,23 +70,33 @@ macro_rules! days {
 }
 
 /// Monday and Friday evenings are the gym's; Wednesday and Sunday are not.
-fn ordinary() -> BTreeMap<TrainingSlot, Discipline> {
+/// The harder, shorter session of a discipline's week; and the easier, longer
+/// one.
+const fn harder() -> SessionRole {
+    SessionRole::new(Relative::Higher, Relative::Lower)
+}
+
+const fn easier() -> SessionRole {
+    SessionRole::new(Relative::Lower, Relative::Higher)
+}
+
+fn ordinary() -> BTreeMap<TrainingSlot, Allocation> {
     [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Discipline::Gym,
+            Allocation::new(Discipline::Gym, easier()),
         ),
         (
             TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            Discipline::Cycling,
+            Allocation::new(Discipline::Cycling, harder()),
         ),
         (
             TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
-            Discipline::Gym,
+            Allocation::new(Discipline::Gym, harder()),
         ),
         (
             TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            Discipline::Cycling,
+            Allocation::new(Discipline::Cycling, easier()),
         ),
     ]
     .into_iter()

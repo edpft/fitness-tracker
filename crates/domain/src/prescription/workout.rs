@@ -18,13 +18,10 @@ use std::fmt;
 
 use jiff::{Timestamp, civil::Date};
 
-use crate::measure::Kg;
+use crate::{measure::Kg, schedule::SessionRole};
 
 use super::{
-    anchor::Anchor,
-    parameters::GenerationParameters,
-    schedule::{SessionRole, WeekKind},
-    shape::WorkoutShape,
+    anchor::Anchor, parameters::GenerationParameters, schedule::WeekKind, shape::WorkoutShape,
 };
 
 /// Which authored programme issued a prescription.

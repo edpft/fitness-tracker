@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT m.id AS \"id!: i64\", m.plan AS \"plan!: i64\",\n               pl.name AS \"plan_name!: String\",\n               m.template AS \"template!: String\",\n               m.provider AS \"provider: String\",\n               m.provided_programme AS \"provided_programme: String\",\n               m.primary_pattern AS \"primary_pattern!: String\",\n               m.primary_exercise AS \"primary_exercise!: String\",\n               m.asserted_grams AS \"asserted_grams: i64\",\n               m.asserted_provenance AS \"asserted_provenance: String\",\n               m.asserted_from AS \"asserted_from: String\",\n               m.asserted_failed_grams AS \"asserted_failed_grams: i64\",\n               m.gating_role AS \"gating_role: String\",\n               m.start_date AS \"start_date!: String\",\n               m.duration_weeks AS \"duration_weeks!: i64\",\n               m.test_reps AS \"test_reps: i64\",\n               m.entry_test_reps AS \"entry_test_reps: i64\",\n               m.entry_test_light_grams AS \"entry_test_light_grams: i64\"\n        FROM gym_mesocycle AS m\n        JOIN plan AS pl ON pl.id = m.plan\n        WHERE pl.authored_at = (\n            SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = pl.name\n        )\n        ORDER BY m.start_date ASC, m.id ASC\n        ",
+  "query": "\n        SELECT m.id AS \"id!: i64\", m.plan AS \"plan!: i64\",\n               pl.name AS \"plan_name!: String\",\n               m.template AS \"template!: String\",\n               m.provider AS \"provider: String\",\n               m.provided_programme AS \"provided_programme: String\",\n               m.primary_pattern AS \"primary_pattern!: String\",\n               m.primary_exercise AS \"primary_exercise!: String\",\n               m.asserted_grams AS \"asserted_grams: i64\",\n               m.asserted_provenance AS \"asserted_provenance: String\",\n               m.asserted_from AS \"asserted_from: String\",\n               m.asserted_failed_grams AS \"asserted_failed_grams: i64\",\n               m.gating_intensity AS \"gating_intensity: String\",\n               m.gating_volume AS \"gating_volume: String\",\n               m.start_date AS \"start_date!: String\",\n               m.duration_weeks AS \"duration_weeks!: i64\",\n               m.test_reps AS \"test_reps: i64\",\n               m.entry_test_reps AS \"entry_test_reps: i64\",\n               m.entry_test_light_grams AS \"entry_test_light_grams: i64\"\n        FROM gym_mesocycle AS m\n        JOIN plan AS pl ON pl.id = m.plan\n        WHERE pl.authored_at = (\n            SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = pl.name\n        )\n        ORDER BY m.start_date ASC, m.id ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -136,19 +136,30 @@
         }
       },
       {
-        "name": "gating_role: String",
+        "name": "gating_intensity: String",
         "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "gym_mesocycle",
-            "name": "gating_role"
+            "name": "gating_intensity"
+          }
+        }
+      },
+      {
+        "name": "gating_volume: String",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_mesocycle",
+            "name": "gating_volume"
           }
         }
       },
       {
         "name": "start_date!: String",
-        "ordinal": 13,
+        "ordinal": 14,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -159,7 +170,7 @@
       },
       {
         "name": "duration_weeks!: i64",
-        "ordinal": 14,
+        "ordinal": 15,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -170,7 +181,7 @@
       },
       {
         "name": "test_reps: i64",
-        "ordinal": 15,
+        "ordinal": 16,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -181,7 +192,7 @@
       },
       {
         "name": "entry_test_reps: i64",
-        "ordinal": 16,
+        "ordinal": 17,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -192,7 +203,7 @@
       },
       {
         "name": "entry_test_light_grams: i64",
-        "ordinal": 17,
+        "ordinal": 18,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -219,6 +230,7 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       true,
@@ -226,5 +238,5 @@
       true
     ]
   },
-  "hash": "e174f1385849b6d4a1c1c2ad47b3b62039021e96d121a396a6fcf01f47adbfce"
+  "hash": "f5fb1898a762e6f90fc5a3b53ff420f1e7031f090756c10880207497dc6c1daf"
 }

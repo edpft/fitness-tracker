@@ -17,6 +17,7 @@ pub mod measure;
 mod newtype;
 pub mod normalised;
 pub mod plan;
+pub mod planner;
 pub mod prescription;
 pub mod provider;
 pub mod schedule;

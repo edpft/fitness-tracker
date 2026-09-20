@@ -49,10 +49,11 @@ use crate::{
         linear::{PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         repmax::rep_max,
-        schedule::{Calendar, InvalidCalendar, SessionRole, Skip, Weekdays},
+        schedule::{Calendar, InvalidCalendar, Skip},
         shape::SlotId,
     },
     provider::ProvidedFrom,
+    schedule::{Relative, SessionRole, TrainingWeek},
 };
 
 /// What is being tested, and how it is being measured.
@@ -161,7 +162,7 @@ impl Test {
     /// is the module doc's business. A test programme that names a gating role
     /// would be naming something with no ladder to gate, which is why [`Test`]
     /// has no such field where [`Linear`](crate::prescription::Linear) does.
-    pub const ROLE: SessionRole = SessionRole::Heavy;
+    pub const ROLE: SessionRole = SessionRole::new(Relative::Higher, Relative::Lower);
 
     /// The week a test occupies, as a calendar.
     ///
@@ -176,10 +177,10 @@ impl Test {
     pub fn week(
         start: Date,
         interruptions: &[Skip],
-        weekdays: Weekdays,
+        week: TrainingWeek,
         zone: TimeZone,
     ) -> Result<Calendar, InvalidCalendar> {
-        Calendar::new(start, Self::WEEKS, interruptions, weekdays, zone)
+        Calendar::new(start, Self::WEEKS, interruptions, week, zone)
     }
 
     /// Build, running the checks the type system cannot.
@@ -255,15 +256,7 @@ impl Test {
             });
         }
 
-        // 2. A test that never runs the session it is taken on is not a test.
-        //    The linear equivalent is a gate on a role the programme never runs,
-        //    and it is the same mistake: a plan whose whole purpose falls on a
-        //    day it does not train.
-        if !calendar.weekdays().runs(Self::ROLE) {
-            return Err(InconsistentMesocycle::TestNeverRunsItsSession { role: Self::ROLE });
-        }
-
-        // 3. The tested lift has to be countable in repetitions and has to fill
+        // 2. The tested lift has to be countable in repetitions and has to fill
         //    the slot it named. The role matters here in a way it does not for a
         //    linear programme: the light session of this week may legitimately
         //    fill the same slot with the predecessor's lift, so it is the test's

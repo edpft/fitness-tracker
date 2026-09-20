@@ -16,10 +16,8 @@ use std::fmt;
 use crate::{
     gym::exercise::Exercise,
     measure::RepCount,
-    prescription::{
-        schedule::{PerRole, SessionRole},
-        shape::SlotId,
-    },
+    prescription::{schedule::ByIntensity, shape::SlotId},
+    schedule::SessionRole,
 };
 
 /// Which lower slot the programme is trying to move.
@@ -172,7 +170,7 @@ pub enum Fill<T> {
     /// The same on both sessions.
     Same(T),
     /// One per session role — Nordic curls one day, back extension the other.
-    Alternating(PerRole<T>),
+    Alternating(ByIntensity<T>),
 }
 
 impl<T> Fill<T> {
@@ -190,7 +188,7 @@ impl<T> Fill<T> {
     pub fn all(&self) -> Vec<&T> {
         match self {
             Self::Same(fill) => vec![fill],
-            Self::Alternating(per_role) => vec![&per_role.light, &per_role.heavy],
+            Self::Alternating(by_intensity) => vec![&by_intensity.lower, &by_intensity.higher],
         }
     }
 }

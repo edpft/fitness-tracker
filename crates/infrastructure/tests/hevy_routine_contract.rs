@@ -17,9 +17,10 @@ use domain::{
     measure::{Duration, Kg, RepCount},
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
-        PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SessionRole, SlotId, SupersetMember,
-        Target, WeekIndex, WeekKind, WorkoutShape,
+        PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SlotId, SupersetMember, Target,
+        WeekIndex, WeekKind, WorkoutShape,
     },
+    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use infrastructure::HevyRoutines;
@@ -67,7 +68,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
     let workout = PrescribedWorkout::new(
         shape,
         "2026-08-24".parse()?,
-        SessionRole::Light,
+        SessionRole::new(Relative::Lower, Relative::Higher),
         WeekKind::Climbing(WeekIndex::new(4)?),
         DerivedFrom::Anchor(support::programme::anchor()?),
         support::programme::parameters()?,

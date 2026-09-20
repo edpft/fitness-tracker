@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE mesocycle = ? AND microcycle = ?\n        ORDER BY session\n        ",
+  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               intensity AS \"intensity!: String\",\n               volume AS \"volume!: String\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE mesocycle = ? AND microcycle = ?\n        ORDER BY session\n        ",
   "describe": {
     "columns": [
       {
@@ -26,8 +26,30 @@
         }
       },
       {
-        "name": "warm_up_seconds!: i64",
+        "name": "intensity!: String",
         "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "intensity"
+          }
+        }
+      },
+      {
+        "name": "volume!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "volume"
+          }
+        }
+      },
+      {
+        "name": "warm_up_seconds!: i64",
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +60,7 @@
       },
       {
         "name": "cool_down_seconds: i64",
-        "ordinal": 3,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +71,7 @@
       },
       {
         "name": "effort_seconds: i64",
-        "ordinal": 4,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -66,9 +88,11 @@
       false,
       false,
       false,
+      false,
+      false,
       true,
       true
     ]
   },
-  "hash": "fb66a72396e3954304f289e38f30167a379826904dab86511e0d1900dc01bdb6"
+  "hash": "6c6db566dcad6bda0c40f9f50feb67a501ab001350d275f147f1d2939d7def7f"
 }

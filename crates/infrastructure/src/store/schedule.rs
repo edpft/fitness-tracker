@@ -19,7 +19,10 @@ use std::collections::BTreeMap;
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
-    schedule::{Absence, Alteration, Diary, Discipline, PartOfDay, TrainingPattern, TrainingSlot},
+    schedule::{
+        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot, TrainingWeek,
+    },
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -62,6 +65,84 @@ fn discipline_of(text: &str) -> Result<Discipline, StoreError> {
     Discipline::try_from(text.to_owned()).map_err(|error| corrupt(&error))
 }
 
+fn relative_of(text: &str) -> Result<Relative, StoreError> {
+    Relative::try_from(text.to_owned()).map_err(|error| corrupt(&error))
+}
+
+fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
+    Ok(SessionRole::new(
+        relative_of(intensity)?,
+        relative_of(volume)?,
+    ))
+}
+
+fn allocation_of(
+    discipline: &str,
+    intensity: &str,
+    volume: &str,
+) -> Result<Allocation, StoreError> {
+    Ok(Allocation::new(
+        discipline_of(discipline)?,
+        role_of(intensity, volume)?,
+    ))
+}
+
+/// One discipline's ordinary week as of a date, for a calendar to be built
+/// against.
+///
+/// **The pattern in force, with no alteration applied**, which is the rule
+/// [`Diary::training_week`] states: a holiday covering a block's start date
+/// would otherwise decide the shape of every week after it.
+///
+/// A query of its own rather than a whole [`Diary`], because a mesocycle is
+/// read back one row at a time and assembling every pattern and every
+/// alteration to answer about one date is work nobody asked for.
+///
+/// # Errors
+///
+/// [`StoreError`] if the store is unavailable or holds a week the domain
+/// refuses.
+pub(super) async fn training_week(
+    pool: &SqlitePool,
+    date: Date,
+    discipline: Discipline,
+) -> Result<Option<TrainingWeek>, StoreError> {
+    let on = date.to_string();
+    let key = discipline.as_str();
+    let rows = sqlx::query!(
+        r"
+        SELECT weekday, part, intensity, volume
+        FROM training_slot
+        WHERE discipline = ?
+          AND pattern = (
+              SELECT id FROM training_pattern
+              WHERE from_date <= ?
+              ORDER BY from_date DESC
+              LIMIT 1
+          )
+        ORDER BY part
+        ",
+        key,
+        on
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut days = Vec::with_capacity(rows.len());
+    for row in rows {
+        // The part of day is read so the ordering matches `TrainingSlot`'s:
+        // where a discipline holds two slots on one weekday, the earlier one's
+        // role is the one the week keeps.
+        let _ = part_of(&row.part)?;
+        days.push((
+            weekday_of(&row.weekday)?,
+            role_of(&row.intensity, &row.volume)?,
+        ));
+    }
+    Ok(TrainingWeek::new(days).ok())
+}
+
 /// A holiday's reason, which the schema requires it to have and forbids an
 /// illness. Only a row written round the check could be missing one.
 fn reason_of(text: Option<String>) -> Result<String, StoreError> {
@@ -85,7 +166,7 @@ impl DiaryStore for SqliteDiaryStore {
         for week in weeks {
             let slots = sqlx::query!(
                 r"
-                SELECT weekday, part, discipline
+                SELECT weekday, part, discipline, intensity, volume
                 FROM training_slot
                 WHERE pattern = ?
                 ",
@@ -100,7 +181,7 @@ impl DiaryStore for SqliteDiaryStore {
                 .map(|row| {
                     Ok((
                         slot_of(&row.weekday, &row.part)?,
-                        discipline_of(&row.discipline)?,
+                        allocation_of(&row.discipline, &row.intensity, &row.volume)?,
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>, StoreError>>()?;
@@ -112,73 +193,82 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        let booked = sqlx::query!(
-            r"
-            SELECT id, start_date, days, absence, zone, states_slots, reason
-            FROM alteration
-            ORDER BY start_date
-            "
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        let mut alterations = Vec::with_capacity(booked.len());
-        for alteration in booked {
-            let days = u8::try_from(alteration.days)
-                .ok()
-                .and_then(std::num::NonZeroU8::new)
-                .ok_or_else(|| corrupt(&"an alteration covering no days"))?;
-
-            let absence = match alteration.absence.as_str() {
-                "illness" => Absence::Illness,
-                "holiday" if alteration.states_slots == 0 => Absence::Holiday {
-                    zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                    slots: None,
-                    reason: reason_of(alteration.reason)?,
-                },
-                // Stated slots, which may be none: zero rows either way, so
-                // `states_slots` is what tells "none" from "the ordinary week".
-                "holiday" => {
-                    let rows = sqlx::query!(
-                        r"
-                        SELECT weekday, part, discipline
-                        FROM alteration_slot
-                        WHERE alteration = ?
-                        ",
-                        alteration.id
-                    )
-                    .fetch_all(&self.pool)
-                    .await
-                    .map_err(|error| store_error(&error))?;
-
-                    Absence::Holiday {
-                        zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                        reason: reason_of(alteration.reason)?,
-                        slots: Some(
-                            rows.iter()
-                                .map(|row| {
-                                    Ok((
-                                        slot_of(&row.weekday, &row.part)?,
-                                        discipline_of(&row.discipline)?,
-                                    ))
-                                })
-                                .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
-                        ),
-                    }
-                }
-                other => return Err(corrupt(&format!("an absence of kind {other:?}"))),
-            };
-
-            alterations.push(Alteration::new(
-                date_of(&alteration.start_date)?,
-                days,
-                absence,
-            ));
-        }
-
-        Ok(Diary::new(patterns, alterations))
+        Ok(Diary::new(patterns, read_alterations(&self.pool).await?))
     }
+}
+
+/// Every alteration, with the slots each one states.
+///
+/// **Split out of `diary` so that function stays inside the line budget**, and
+/// they are two questions anyway: the ordinary weeks and what departs from
+/// them are stored apart because a departure is a fact about dates rather than
+/// about which week was in force when it was recorded.
+async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreError> {
+    let booked = sqlx::query!(
+        r"
+        SELECT id, start_date, days, absence, zone, states_slots, reason
+        FROM alteration
+        ORDER BY start_date
+        "
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    let mut alterations = Vec::with_capacity(booked.len());
+    for alteration in booked {
+        let days = u8::try_from(alteration.days)
+            .ok()
+            .and_then(std::num::NonZeroU8::new)
+            .ok_or_else(|| corrupt(&"an alteration covering no days"))?;
+
+        let absence = match alteration.absence.as_str() {
+            "illness" => Absence::Illness,
+            "holiday" if alteration.states_slots == 0 => Absence::Holiday {
+                zone: alteration.zone.as_deref().map(zone_of).transpose()?,
+                slots: None,
+                reason: reason_of(alteration.reason)?,
+            },
+            // Stated slots, which may be none: zero rows either way, so
+            // `states_slots` is what tells "none" from "the ordinary week".
+            "holiday" => {
+                let rows = sqlx::query!(
+                    r"
+                    SELECT weekday, part, discipline, intensity, volume
+                    FROM alteration_slot
+                    WHERE alteration = ?
+                    ",
+                    alteration.id
+                )
+                .fetch_all(pool)
+                .await
+                .map_err(|error| store_error(&error))?;
+
+                Absence::Holiday {
+                    zone: alteration.zone.as_deref().map(zone_of).transpose()?,
+                    reason: reason_of(alteration.reason)?,
+                    slots: Some(
+                        rows.iter()
+                            .map(|row| {
+                                Ok((
+                                    slot_of(&row.weekday, &row.part)?,
+                                    allocation_of(&row.discipline, &row.intensity, &row.volume)?,
+                                ))
+                            })
+                            .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+                    ),
+                }
+            }
+            other => return Err(corrupt(&format!("an absence of kind {other:?}"))),
+        };
+
+        alterations.push(Alteration::new(
+            date_of(&alteration.start_date)?,
+            days,
+            absence,
+        ));
+    }
+    Ok(alterations)
 }
 
 impl DiaryAuthor for SqliteDiaryStore {
@@ -219,19 +309,23 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, discipline) in pattern.slots() {
+        for (slot, allocation) in pattern.slots() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
-            let discipline = discipline.as_str();
+            let discipline = allocation.discipline.as_str();
+            let intensity = allocation.role.intensity().as_str();
+            let volume = allocation.role.volume().as_str();
             sqlx::query!(
                 r"
-                INSERT INTO training_slot (pattern, weekday, part, discipline)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO training_slot (pattern, weekday, part, discipline, intensity, volume)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ",
                 id,
                 weekday,
                 part,
-                discipline
+                discipline,
+                intensity,
+                volume
             )
             .execute(&mut *tx)
             .await
@@ -289,19 +383,23 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, discipline) in alteration.slots().into_iter().flatten() {
+        for (slot, allocation) in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
-            let discipline = discipline.as_str();
+            let discipline = allocation.discipline.as_str();
+            let intensity = allocation.role.intensity().as_str();
+            let volume = allocation.role.volume().as_str();
             sqlx::query!(
                 r"
-                INSERT INTO alteration_slot (alteration, weekday, part, discipline)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO alteration_slot (alteration, weekday, part, discipline, intensity, volume)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ",
                 id,
                 weekday,
                 part,
-                discipline
+                discipline,
+                intensity,
+                volume
             )
             .execute(&mut *tx)
             .await

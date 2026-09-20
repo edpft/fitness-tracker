@@ -36,6 +36,10 @@ pub async fn with_programme(
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
 
+    // Before anything else, because a block's calendar is rebuilt from the
+    // operator's week on every read (issue #63).
+    programme::record_the_week(&pool).await?;
+
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
     let run = runs

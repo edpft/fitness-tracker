@@ -30,9 +30,9 @@ use domain::normalised::{
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
     Anchor, GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
-    Progress, SessionRole, SlotId,
+    Progress, SlotId,
 };
-use domain::schedule::{Alteration, Diary, TrainingPattern};
+use domain::schedule::{Alteration, Diary, SessionRole, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{

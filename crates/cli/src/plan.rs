@@ -32,15 +32,15 @@ use std::path::Path;
 use application::{Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
-        Answer, CyclingMesocycle, CyclingMicrocycle, CyclingWeekdays, PlannedRide,
-        PublishedProgramme, SessionPosition,
+        Answer, CyclingMesocycle, CyclingMicrocycle, PlannedRide, PublishedProgramme,
+        SessionPosition,
     },
     gym::exercise::RepsExercise,
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
     prescription::PrimaryPattern,
     provider::{ExternalProgramme, ProgrammeName, Provider},
-    schedule::Discipline,
+    schedule::{Discipline, Relative, SessionRole},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -582,8 +582,19 @@ fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
 /// are the published first and third is a fact about where they were taken from,
 /// not what to call them.
 ///
-/// The sessions are mapped onto the schedule's cycling days in the order both
-/// are given: the week's earlier ride to the week's earlier day.
+/// **A ride's role is read off its length, not off its published order.** The
+/// shorter of the week's rides is the higher-intensity one — that is what the
+/// pairing means (issue #177) — and it is what places it in the week: the
+/// harder, shorter slot rather than the longer one. Peloton puts the FTP test
+/// second in its test microcycle, which by published order would land it on
+/// the Sunday; it is the shortest ride of that week, so it goes to the
+/// Wednesday. The operator, 2026-09-19: *"it does make more sense for the
+/// cycling test to keep the shorter / harder cycling slot on the Wednesday"*.
+///
+/// **A tie goes to the earlier session.** Two rides of exactly equal length
+/// have nothing in them to tell apart, and the published order is the only
+/// thing left; it is a fallback rather than a rule, and the case has not
+/// arisen.
 fn build(
     start: Date,
     read: &Read,
@@ -616,7 +627,7 @@ fn build(
 
     let mut weeks = Vec::with_capacity(microcycles.len());
     for number in microcycles {
-        let mut rides = std::collections::BTreeMap::new();
+        let mut read_rides = Vec::with_capacity(positions.len());
         for (position, session) in positions.iter().zip(sessions) {
             let classes = read.fetched.get(&(*number, *session)).ok_or_else(|| {
                 Failure::message(
@@ -629,19 +640,28 @@ fn build(
             })?;
             let (ride, at) = provider::session((*number, *session), classes)
                 .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
-            rides.insert(*position, PlannedRide::new(ride, at, *session));
+            read_rides.push((*position, ride, at, *session));
+        }
+
+        // The shortest ride of the week is the higher-intensity one; the rest
+        // are the longer, easier ones. Settled after the sessions are chosen,
+        // because a role is relative to the sessions actually ridden.
+        let shortest = read_rides
+            .iter()
+            .min_by_key(|(position, ride, _, _)| (ride.total(), *position))
+            .map(|(position, _, _, _)| *position);
+
+        let mut rides = std::collections::BTreeMap::new();
+        for (position, ride, at, session) in read_rides {
+            let role = if Some(position) == shortest {
+                SessionRole::new(Relative::Higher, Relative::Lower)
+            } else {
+                SessionRole::new(Relative::Lower, Relative::Higher)
+            };
+            rides.insert(position, PlannedRide::new(ride, at, session, role));
         }
         weeks.push(CyclingMicrocycle::new(rides, *number).map_err(|error| Failure::usage(&error))?);
     }
-
-    let weekdays = CyclingWeekdays::new(
-        riding_days
-            .iter()
-            .copied()
-            .zip(positions.iter().copied())
-            .collect(),
-    )
-    .map_err(|error| Failure::usage(&error))?;
 
     CyclingMesocycle::new(
         ExternalProgramme::new(
@@ -650,7 +670,6 @@ fn build(
         ),
         start,
         NonEmpty::new(weeks).map_err(|error| Failure::usage(&error))?,
-        weekdays,
     )
     .map_err(|error| Failure::usage(&error))
 }

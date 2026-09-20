@@ -168,6 +168,9 @@ struct Ready {
 async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
