@@ -1,8 +1,9 @@
 # 0018 — A programme counts cycles, and the scheduler owns the calendar
 
 **Date**: 2026-08-25
-**Status**: Proposed. The three questions it was drafted with were answered on
-2026-08-25 and folded in; what is left under *Open* is new.
+**Status**: Proposed, and **partly reversed — see *Amended 2026-09-20* below.**
+The three questions it was drafted with were answered on 2026-08-25 and folded
+in; what is left under *Open* is new.
 
 **Amends** `0014-block-periodisation-keeps-its-endpoint.md`, which becomes a
 scheduling policy rather than a fact about blocks — and then stops being needed,
@@ -303,3 +304,48 @@ What remains open:
 - **Whether "two light and one heavy" survives contact.** It is explicitly a
   placeholder. Recording it as one means nobody later mistakes it for a
   considered position.
+
+## Amended 2026-09-20 — the allocation is stated, not derived
+
+**The derived allocation above is withdrawn**, and with it the `commitment`
+concept and the alternation rule that were there to support it. The operator,
+2026-09-16, on which slots are the gym's:
+
+> the gym and cycling programmes shouldn't know anything about the days of the
+> week they're allocated, they're responsible for providing a number of
+> sessions with a role, heavier/lighter, longer/shorter, the allocator/planner
+> maps them to actual calendars weeks but, for now at least, it can just take
+> the available slots and discipline/role I've already decided as an input.
+
+And on the drift this section was written to prevent — a week that changes
+leaving a stored weekday silently wrong:
+
+> It's not likely to change, unless something significant changes in my life.
+> However, more importantly, it's not likely to change frequently.
+
+Deriving it would need three facts this system does not have: a slot's
+capacity, that a Sunday morning is extendable where a weeknight evening is not,
+and a commitments concept that exists only as a sentence in a doc comment. So
+`training_slot.discipline` stays, the wizard keeps asking whose each slot is,
+and it now asks one more thing: what the session in that slot *is*.
+
+**What did land, in issue #63.** The half of this decision that was right is
+done. A programme states sessions and roles and no weekday; `gym_weekday` and
+`cycling_weekday` are dropped, so the same two rows are no longer stored once
+per mesocycle; and `SessionPosition` stops deciding which day a ride is on. A
+**role** — an intensity and a volume, each relative to the microcycle's other
+sessions — is what places a session, which is this decision's "a microcycle's
+shape: one heavy session, one light" arriving with two axes instead of one.
+
+**What did not.** `Calendar` still holds the operator's week, `start`,
+`duration_weeks`, `interruptions` and `zone`. The week is read from the diary
+when a mesocycle is built and persisted nowhere, so the duplication this
+decision objects to is gone; the *type* still knows dates. Removing them means
+threading the week through `place`, `ordinal`, `Occupies`, `Programme<M>` and
+every store, which is mechanical and wide and buys the letter of the rule
+rather than its reason. Recorded as not done rather than quietly dropped.
+
+**The `place(date)` fallback survives** for the same reason the 2026-08-28
+amendment gives: an unlinked performance is still not a record of nothing. What
+changed is where its role comes from — the operator's week rather than a copy
+the programme carried.
