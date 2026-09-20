@@ -260,8 +260,6 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
     println!("Which absence departs from the ordinary pattern: a holiday, or an illness?");
-    println!("  A session moved within its window needs nothing recorded, and a lasting");
-    println!("  change is `fitness schedule add`.");
 
     let start = ask_until("From which date? ", parse_date)?;
     let days = ask_until("How many days? [1] ", |typed| {
@@ -306,18 +304,26 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             None
         };
 
-        Absence::Holiday { zone, slots }
+        // **Only a holiday is asked why.** It has somewhere to be and a week to
+        // rearrange, and "Rome" is what makes the rearrangement readable six
+        // months later. That the operator was too ill to train is the whole of
+        // an illness, and the previous question already asked it.
+        let reason = ask_until("Why? ", |typed| {
+            if typed.is_empty() {
+                Err("a trip nobody explained is unreadable six months later".to_owned())
+            } else {
+                Ok(typed.to_owned())
+            }
+        })?;
+
+        Absence::Holiday {
+            zone,
+            slots,
+            reason,
+        }
     };
 
-    let reason = ask_until("Why? ", |typed| {
-        if typed.is_empty() {
-            Err("an alteration nobody explained is unreadable six months later".to_owned())
-        } else {
-            Ok(typed.to_owned())
-        }
-    })?;
-
-    let alteration = Alteration::new(start, days, absence, reason);
+    let alteration = Alteration::new(start, days, absence);
 
     store(database)
         .await?

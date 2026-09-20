@@ -254,9 +254,14 @@ pub enum Absence {
     /// Out of the routine. A `None` zone is "the zone is unchanged", which is
     /// not the same as any zone; `None` slots are "the ordinary week stands",
     /// and an empty set is "no room to train at all".
+    ///
+    /// **Only a holiday is asked why.** It has somewhere to be and a week to
+    /// rearrange, so "Rome" is what makes the rearrangement readable six months
+    /// later. Illness explains itself.
     Holiday {
         zone: Option<OperatorZone>,
         slots: Option<BTreeMap<TrainingSlot, Discipline>>,
+        reason: String,
     },
     /// Too ill to train. Bad enough to prevent training is what makes it
     /// illness, so it has no slots, and where the operator is does not matter.
@@ -281,19 +286,14 @@ pub struct Alteration {
     start: Date,
     days: NonZeroU8,
     absence: Absence,
-    /// Why. An unexplained override is unreadable six months later — § II.2's
-    /// obligation on an edit overlay, which this is the authored-data analogue
-    /// of.
-    reason: String,
 }
 
 impl Alteration {
-    pub const fn new(start: Date, days: NonZeroU8, absence: Absence, reason: String) -> Self {
+    pub const fn new(start: Date, days: NonZeroU8, absence: Absence) -> Self {
         Self {
             start,
             days,
             absence,
-            reason,
         }
     }
 
@@ -326,8 +326,14 @@ impl Alteration {
         }
     }
 
-    pub fn reason(&self) -> &str {
-        &self.reason
+    /// Why, which only a holiday has. An unexplained trip is unreadable six
+    /// months later — § II.2's obligation on an edit overlay, which this is the
+    /// authored-data analogue of. Illness needs no explanation beyond itself.
+    pub fn reason(&self) -> Option<&str> {
+        match &self.absence {
+            Absence::Holiday { reason, .. } => Some(reason.as_str()),
+            Absence::Illness => None,
+        }
     }
 
     /// The last day this covers.

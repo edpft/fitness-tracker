@@ -62,6 +62,12 @@ fn discipline_of(text: &str) -> Result<Discipline, StoreError> {
     Discipline::try_from(text.to_owned()).map_err(|error| corrupt(&error))
 }
 
+/// A holiday's reason, which the schema requires it to have and forbids an
+/// illness. Only a row written round the check could be missing one.
+fn reason_of(text: Option<String>) -> Result<String, StoreError> {
+    text.ok_or_else(|| corrupt(&"a holiday with no reason"))
+}
+
 impl DiaryStore for SqliteDiaryStore {
     async fn diary(&self) -> Result<Diary, StoreError> {
         let weeks = sqlx::query!(
@@ -129,6 +135,7 @@ impl DiaryStore for SqliteDiaryStore {
                 "holiday" if alteration.states_slots == 0 => Absence::Holiday {
                     zone: alteration.zone.as_deref().map(zone_of).transpose()?,
                     slots: None,
+                    reason: reason_of(alteration.reason)?,
                 },
                 // Stated slots, which may be none: zero rows either way, so
                 // `states_slots` is what tells "none" from "the ordinary week".
@@ -147,6 +154,7 @@ impl DiaryStore for SqliteDiaryStore {
 
                     Absence::Holiday {
                         zone: alteration.zone.as_deref().map(zone_of).transpose()?,
+                        reason: reason_of(alteration.reason)?,
                         slots: Some(
                             rows.iter()
                                 .map(|row| {
@@ -166,7 +174,6 @@ impl DiaryStore for SqliteDiaryStore {
                 date_of(&alteration.start_date)?,
                 days,
                 absence,
-                alteration.reason,
             ));
         }
 
@@ -247,7 +254,7 @@ impl DiaryAuthor for SqliteDiaryStore {
         let absence = alteration.absence().as_str();
         let zone = alteration.zone().map(|zone| zone.id().to_owned());
         let states_slots = i64::from(alteration.slots().is_some());
-        let reason = alteration.reason().to_owned();
+        let reason = alteration.reason().map(str::to_owned);
 
         let id = sqlx::query!(
             r"

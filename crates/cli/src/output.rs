@@ -1334,11 +1334,11 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
         format!("{} to {last}", alteration.start())
     };
 
-    println!(
-        "  {span} — {}: {}",
-        alteration.absence().as_str(),
-        alteration.reason()
-    );
+    match alteration.reason() {
+        Some(reason) => println!("  {span} — {}: {reason}", alteration.absence().as_str()),
+        // An illness has no reason, so there is nothing for a colon to introduce.
+        None => println!("  {span} — {}", alteration.absence().as_str()),
+    }
 
     if let Some(zone) = alteration.zone() {
         println!("    in {}", zone.id());

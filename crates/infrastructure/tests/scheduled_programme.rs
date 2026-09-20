@@ -130,8 +130,8 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
             Absence::Holiday {
                 zone: None,
                 slots: Some(BTreeMap::new()),
+                reason: "away, and unable to train".to_owned(),
             },
-            "away, and unable to train".to_owned(),
         ))
         .await?;
 
@@ -176,8 +176,8 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
                 Absence::Holiday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
+                    reason: "away in December".to_owned(),
                 },
-                "away in December".to_owned(),
             ))
             .await?;
 
@@ -296,8 +296,8 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
                 Absence::Holiday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
+                    reason: "a wedding".to_owned(),
                 },
-                "a wedding".to_owned(),
             ))
             .await?;
         let after = derived(&autumn()?, &store).await?;
@@ -350,8 +350,8 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
                 Absence::Holiday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
+                    reason: "called away".to_owned(),
                 },
-                "called away".to_owned(),
             ))
             .await?;
 
@@ -429,8 +429,8 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
                 Absence::Holiday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
+                    reason: "written off, and then trained anyway".to_owned(),
                 },
-                "written off, and then trained anyway".to_owned(),
             ))
             .await?;
 
