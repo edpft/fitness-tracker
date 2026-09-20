@@ -172,14 +172,6 @@ impl KnownStream {
         self.source
     }
 
-    pub const fn default_base_url(&self) -> &'static str {
-        self.source.default_base_url
-    }
-
-    pub fn base_url_variable(&self) -> String {
-        self.source.base_url_variable()
-    }
-
     /// # Errors
     ///
     /// [`InvalidStream`] if an entry here does not name a stream. Pinned by a
@@ -433,7 +425,7 @@ mod tests {
     fn the_environment_variables_are_named_after_the_source() {
         let hevy = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
         assert_eq!(hevy.source().api_key_variable(), "HEVY_API_KEY");
-        assert_eq!(hevy.base_url_variable(), "HEVY_API_BASE_URL");
+        assert_eq!(hevy.source().base_url_variable(), "HEVY_API_BASE_URL");
     }
 
     /// The second kind of credential, and what it derives.
@@ -530,6 +522,6 @@ mod tests {
     #[test]
     fn the_default_base_url_carries_no_version_segment() {
         let hevy = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
-        assert_eq!(hevy.default_base_url(), "https://api.hevyapp.com");
+        assert_eq!(hevy.source().default_base_url(), "https://api.hevyapp.com");
     }
 }

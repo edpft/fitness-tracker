@@ -152,6 +152,17 @@ pub fn not_collected(stream: &LandingStream, why: &str) {
     println!("{stream} — not collected: {why}. Carrying on with what is already landed");
 }
 
+/// A delivery that did not happen, in a command that has already printed the
+/// session.
+///
+/// **Said out loud, which is the whole of #184.** A credential that is absent
+/// costs the delivery and not the answer (§ 36) — but a `next` that silently
+/// sends nothing looks exactly like one that sent something, and the operator
+/// finds out at the bike.
+pub fn not_delivered(why: &str) {
+    println!("not delivered: {why}");
+}
+
 /// Relative strength, one line per session per lift.
 pub fn strength(report: &application::strength::StrengthReport) {
     if report.rows.is_empty() {

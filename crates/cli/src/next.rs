@@ -194,11 +194,12 @@ async fn run(
             )
             .await
         }
-        // Credentials that are absent cost the delivery and not the answer, as
-        // they do for `cycling next`.
+        // A credential that is absent costs the delivery and not the answer, as
+        // it does for `cycling next` — and says so, rather than printing a
+        // session that looks delivered (#184).
         Discipline::Cycling => {
-            let peloton = plan::peloton().ok();
-            let to = peloton.as_ref().map(|(classes, stack)| (classes, stack));
+            let peloton = plan::peloton(credentials);
+            let to = crate::to_peloton(&peloton);
             cycling::next(database, next.date, None, to).await
         }
     }

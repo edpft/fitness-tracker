@@ -1021,3 +1021,65 @@ fn next_without_a_recorded_week_names_the_command_that_records_one() {
         stderr(&output)
     );
 }
+
+// --- Peloton's credential ----------------------------------------------------
+
+/// Plant a Peloton login in the state directory, the way `fitness credentials
+/// peloton` writes one.
+///
+/// A file rather than a run of the wizard: storing one interactively needs a
+/// terminal and a source that will accept it, and what is under test here is
+/// that the *reading* side looks in this file at all.
+fn store_a_peloton_login(home: &Path) -> std::io::Result<()> {
+    let directory = home.join(".local/state/fitness-tracker");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::write(
+        directory.join("credentials.json"),
+        r#"{"peloton":{"kind":"login","email":"rider@example.com","password":"secret"}}"#,
+    )
+}
+
+/// **The stored credential is what the installed build has** (#184).
+///
+/// `plan::peloton` read `PELOTON_EMAIL` and `PELOTON_PASSWORD` out of the
+/// environment and nowhere else, so on the operator's machine — where the store
+/// is the only place a credential is kept — every cycling delivery was silently
+/// skipped. Getting *past* the credential is the whole assertion: what it then
+/// fails on is the empty store, which is a later step and a different message.
+#[test]
+fn a_stored_peloton_login_answers_when_neither_variable_is_set() {
+    let home = TempDir::new().expect("a temporary home");
+    fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
+    store_a_peloton_login(home.path()).expect("a credential is stored");
+
+    let output = fitness_at_home(&["cycling", "deliver"], home.path()).expect("the binary runs");
+
+    let message = stderr(&output);
+    assert!(
+        !message.contains("PELOTON_EMAIL"),
+        "the stored login was not read: {message}"
+    );
+    assert!(
+        !message.contains("fitness credentials peloton"),
+        "the stored login was not read: {message}"
+    );
+}
+
+/// With no credential anywhere, the refusal names the command that stores one
+/// before it names the variables — the store is how the tool is set up and the
+/// environment is the override.
+#[test]
+fn no_peloton_credential_anywhere_names_the_command_that_stores_one() {
+    let home = TempDir::new().expect("a temporary home");
+    fitness_at_home(&["init", "--timezone", "Europe/London"], home.path())
+        .expect("the binary runs");
+
+    let output = fitness_at_home(&["cycling", "deliver"], home.path()).expect("the binary runs");
+
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    let message = stderr(&output);
+    assert!(message.contains("fitness credentials peloton"), "{message}");
+    assert!(message.contains("PELOTON_EMAIL"), "{message}");
+    assert!(message.contains("PELOTON_PASSWORD"), "{message}");
+}

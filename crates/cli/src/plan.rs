@@ -56,11 +56,15 @@ use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit, wizard};
 
-const AUTH_BASE: &str = "https://auth.onepeloton.com";
-const API_BASE: &str = "https://api.onepeloton.com";
-
 /// Who publishes the cycling programmes this build reads.
 const PELOTON: &str = "Peloton";
+
+/// The same system, under the name the catalogue files it by.
+///
+/// **The roots are not written down here.** They are `peloton`'s entry in
+/// [`crate::catalogue`], along with the variables that override them, so this
+/// module cannot drift from the one every other command reaches Peloton by.
+const PELOTON_SOURCE: &str = "peloton";
 
 /// A gym provider this build holds, and what choosing it settles.
 ///
@@ -147,8 +151,14 @@ pub async fn generate(
     zone: &OperatorZone,
     microcycles: usize,
     sessions: usize,
+    credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     wizard::interactive()?;
+
+    // **Resolved before a single question is asked.** Every answer below is
+    // spent reading Peloton, so a missing login found afterwards wastes the
+    // whole interrogation.
+    let access = access(credentials)?;
 
     println!("A hybrid programme: one gym provider, one cycling provider.\n");
     let start = wizard::ask_until("Monday the block begins (YYYY-MM-DD): ", |typed| {
@@ -173,7 +183,7 @@ pub async fn generate(
     let diary = SqliteDiaryStore::new(pool.clone());
     let riding_days = cycling_weekdays(&diary, start).await?;
 
-    let classes = credentials()?;
+    let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
     println!(
         "\nreading {} from Peloton",
         pairing.programmes.join(" and ")
@@ -274,44 +284,92 @@ fn choose(question: &str, options: &[&str]) -> Result<usize, Failure> {
     })
 }
 
-/// The Peloton adapters, from the environment.
+/// The Peloton adapters, from a resolved login.
 ///
-/// **Public because `cycling stack` composes the same two.** Both need the same
-/// credentials and the same cached token, and building them twice from two
-/// places is how one of them ends up without the cache.
+/// **One place composes both**, because they need the same login and the same
+/// cached token, and building them twice from two places is how one of them
+/// ends up without the cache.
+///
+/// **The login is resolved the way every other source's is**: the environment
+/// first, then the store `fitness credentials peloton` writes to. It read
+/// `PELOTON_EMAIL` and `PELOTON_PASSWORD` out of the environment and nowhere
+/// else until #184, which made the store invisible to `cycling next` — and on
+/// the installed build the store is the only place a credential is kept.
 ///
 /// # Errors
 ///
-/// [`Failure`] if either credential is absent from the environment.
-pub fn peloton() -> Result<(PelotonClasses, infrastructure::peloton::PelotonStack), Failure> {
-    let classes = credentials()?;
+/// [`Failure`] if neither the environment nor the store holds a Peloton login.
+pub fn peloton(
+    credentials: &infrastructure::Credentials,
+) -> Result<(PelotonClasses, infrastructure::peloton::PelotonStack), Failure> {
+    let access = access(credentials)?;
+    let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
     let stack = infrastructure::peloton::PelotonStack::new(
         infrastructure::peloton::stack::GATEWAY.to_owned(),
-        auth()?,
+        access.auth(),
     );
     Ok((classes, stack))
 }
 
-/// The authenticator, with the token cache where there is one.
-fn auth() -> Result<PelotonAuth, Failure> {
-    let missing = |name: &str| Failure::message(format!("{name} is not set"), exit::USAGE);
-    let email = std::env::var("PELOTON_EMAIL").map_err(|_| missing("PELOTON_EMAIL"))?;
-    let password = std::env::var("PELOTON_PASSWORD").map_err(|_| missing("PELOTON_PASSWORD"))?;
-    let mut auth = PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password));
-
-    // **Where the token is kept, when there is anywhere to keep it.** Without
-    // this every invocation walks the whole Auth0 flow to obtain a token the
-    // last one already had (#54). A machine with neither `XDG_STATE_HOME` nor
-    // `HOME` gets the old behaviour rather than an error: logging in again costs
-    // a few seconds, and refusing to run costs the session.
-    if let Ok(path) = crate::paths::token(&crate::paths::SystemEnvironment, "peloton") {
-        auth = auth.caching_in(infrastructure::peloton::TokenFile::new(path));
-    }
-    Ok(auth)
+/// A resolved Peloton login, and the root it is exchanged at.
+struct Access {
+    base_url: String,
+    auth_base_url: String,
+    credentials: PelotonCredentials,
 }
 
-fn credentials() -> Result<PelotonClasses, Failure> {
-    Ok(PelotonClasses::new(API_BASE, auth()?))
+impl Access {
+    /// An authenticator, with the token cache where there is one.
+    ///
+    /// **One per adapter rather than one shared**, as [`crate::wiring`] builds
+    /// them: each caches the token it fetches to the same file, so the second
+    /// login costs nothing and neither adapter holds the other's state.
+    fn auth(&self) -> PelotonAuth {
+        let mut auth = PelotonAuth::new(self.auth_base_url.clone(), self.credentials.clone());
+
+        // **Where the token is kept, when there is anywhere to keep it.**
+        // Without this every invocation walks the whole Auth0 flow to obtain a
+        // token the last one already had (#54). A machine with neither
+        // `XDG_STATE_HOME` nor `HOME` gets the old behaviour rather than an
+        // error: logging in again costs a few seconds, and refusing to run
+        // costs the session.
+        if let Ok(path) = crate::paths::token(&crate::paths::SystemEnvironment, PELOTON_SOURCE) {
+            auth = auth.caching_in(infrastructure::peloton::TokenFile::new(path));
+        }
+        auth
+    }
+}
+
+fn access(credentials: &infrastructure::Credentials) -> Result<Access, Failure> {
+    let known = crate::catalogue::source(PELOTON_SOURCE).ok_or_else(|| {
+        Failure::message(
+            format!("this build does not connect to {PELOTON_SOURCE}"),
+            exit::USAGE,
+        )
+    })?;
+
+    // The catalogue says Peloton authenticates with a login, so the other two
+    // arms are a contradiction rather than a case: they would mean its entry
+    // and the call that read its credential disagree.
+    let crate::config::SourceAccess::EmailPassword {
+        base_url,
+        auth_base_url,
+        email,
+        password,
+        ..
+    } = crate::source_access_for(known, None, credentials)?
+    else {
+        return Err(Failure::message(
+            format!("{PELOTON_SOURCE} is reached with a login"),
+            exit::USAGE,
+        ));
+    };
+
+    Ok(Access {
+        base_url,
+        auth_base_url,
+        credentials: PelotonCredentials::new(email, password),
+    })
 }
 
 fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
@@ -771,4 +829,30 @@ fn join(items: &[u32], between: &str) -> String {
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(between)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PELOTON_SOURCE;
+    use crate::catalogue::{Credential, source};
+
+    /// **The roots this module used to compile in are the catalogue's.**
+    ///
+    /// `AUTH_BASE` and `API_BASE` were private constants here until #184, and a
+    /// stub-based test could not have seen them disagree with the entry every
+    /// other Peloton command reads — nothing pointed both at the same stub.
+    /// Pinning the literals is what makes deleting them safe.
+    #[test]
+    fn peloton_is_reached_at_the_roots_this_module_used_to_hold() {
+        let known = source(PELOTON_SOURCE).expect("peloton is a known source");
+        assert_eq!(known.default_base_url(), "https://api.onepeloton.com");
+
+        let Credential::EmailPassword {
+            default_auth_base_url,
+        } = known.credential()
+        else {
+            panic!("peloton is reached with a login");
+        };
+        assert_eq!(default_auth_base_url, "https://auth.onepeloton.com");
+    }
 }
