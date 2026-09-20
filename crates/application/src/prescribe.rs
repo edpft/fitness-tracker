@@ -23,9 +23,8 @@ use domain::{
         Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
         GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession,
-        SessionRole, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape,
-        anchor,
+        PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession, SlotId,
+        SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
@@ -33,6 +32,7 @@ use domain::{
         },
         warmup_ramp,
     },
+    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
@@ -1142,7 +1142,7 @@ fn issue_slots(
 ///
 /// Heavy, and for the same reason a standalone test's is: it is the week's whole
 /// purpose, and the other session is whatever the block states for it.
-const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::Heavy;
+const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::new(Relative::Higher, Relative::Lower);
 
 /// Which week this session belongs to, in the vocabulary the store speaks.
 ///
@@ -1371,9 +1371,12 @@ fn linear_load(
     let WeekKind::Climbing(_) = week else {
         return Err(UnderivableReason::NoLadder);
     };
-    let load = match role {
-        SessionRole::Heavy => progress.heavy_top_set(ladder, steps),
-        SessionRole::Light => {
+    // **On the intensity alone**, which is the whole of what separates the two
+    // top sets: the lighter session's is a share of the heavier session's, and
+    // how long either session is does not enter into the load.
+    let load = match role.intensity() {
+        Relative::Higher => progress.heavy_top_set(ladder, steps),
+        Relative::Lower => {
             progress.light_top_set(ladder, steps, consulted.parameters.light_of_heavy)
         }
     };
@@ -1412,9 +1415,11 @@ fn sbs_load(
     let WeekKind::Climbing(index) = week else {
         return Err(UnderivableReason::NoLadder);
     };
-    let session = match role {
-        SessionRole::Light => SbsSession::First,
-        SessionRole::Heavy => SbsSession::Second,
+    // The chart's two days in the order it writes them: the lighter session
+    // first, the repetition-maximum day second.
+    let session = match role.intensity() {
+        Relative::Lower => SbsSession::First,
+        Relative::Higher => SbsSession::Second,
     };
     let Ok(day) = sbs_day(index.as_u32(), session) else {
         return Err(UnderivableReason::NoLadder);
@@ -2399,7 +2404,8 @@ mod ramp_tests {
     use domain::{
         gym::{Load, Rir},
         measure::{Kg, RepCount},
-        prescription::{LoadSteps, SessionRole, seed::seed},
+        prescription::{LoadSteps, seed::seed},
+        schedule::{Relative, SessionRole},
     };
 
     fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
@@ -2410,7 +2416,12 @@ mod ramp_tests {
             programming: &shape,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
-        let sets = primary_sets(plan, &consulted, SessionRole::Heavy, &steps);
+        let sets = primary_sets(
+            plan,
+            &consulted,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+            &steps,
+        );
         Ok(sets
             .iter()
             .filter(|set| set.warmup)
@@ -2463,17 +2474,21 @@ mod ramp_tests {
             programming: &shape,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500)).expect("a barbell is one band");
-        let shape: Vec<(bool, Option<u64>, Option<Rir>)> =
-            primary_sets(plan, &consulted, SessionRole::Heavy, &steps)
-                .iter()
-                .map(|set| {
-                    let grams = match set.prescription.load() {
-                        Some(Load::Absolute(kg)) => Some(kg.as_grams()),
-                        _ => None,
-                    };
-                    (set.warmup, grams, set.prescription.effort())
-                })
-                .collect();
+        let shape: Vec<(bool, Option<u64>, Option<Rir>)> = primary_sets(
+            plan,
+            &consulted,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+            &steps,
+        )
+        .iter()
+        .map(|set| {
+            let grams = match set.prescription.load() {
+                Some(Load::Absolute(kg)) => Some(kg.as_grams()),
+                _ => None,
+            };
+            (set.warmup, grams, set.prescription.effort())
+        })
+        .collect();
         assert_eq!(
             shape,
             vec![

@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Alteration, Diary, Discipline, PartOfDay, ScheduledSlot, TrainingPattern,
-        TrainingSlot, unaccounted,
+        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, ScheduledSlot,
+        SessionRole, TrainingPattern, TrainingSlot, unaccounted,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -30,28 +30,46 @@ fn days(count: u8) -> Built<NonZeroU8> {
     NonZeroU8::new(count).ok_or_else(|| "a run of days is at least one".into())
 }
 
+/// The harder, shorter session of a discipline's week.
+const fn harder() -> SessionRole {
+    SessionRole::new(Relative::Higher, Relative::Lower)
+}
+
+/// The easier, longer one.
+const fn easier() -> SessionRole {
+    SessionRole::new(Relative::Lower, Relative::Higher)
+}
+
+const fn gym(role: SessionRole) -> Allocation {
+    Allocation::new(Discipline::Gym, role)
+}
+
+const fn cycling(role: SessionRole) -> Allocation {
+    Allocation::new(Discipline::Cycling, role)
+}
+
 /// The operator's ordinary week: four slots, two of which are the gym's.
 ///
 /// The allocation is part of the pattern rather than something a caller brings
 /// with it, which is what lets an alteration move a slot *and* say whose the
-/// new one is.
-fn ordinary() -> BTreeMap<TrainingSlot, Discipline> {
+/// new one is — and, since 2026-09-20, what session it takes.
+fn ordinary() -> BTreeMap<TrainingSlot, Allocation> {
     [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Discipline::Gym,
+            gym(easier()),
         ),
         (
             TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            Discipline::Cycling,
+            cycling(harder()),
         ),
         (
             TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
-            Discipline::Gym,
+            gym(harder()),
         ),
         (
             TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            Discipline::Cycling,
+            cycling(easier()),
         ),
     ]
     .into_iter()
@@ -169,7 +187,7 @@ fn a_later_schedule_supersedes_an_earlier_one() {
         zone("America/New_York").expect("a zone"),
         std::iter::once((
             TrainingSlot::new(Weekday::Tuesday, PartOfDay::Morning),
-            Discipline::Gym,
+            gym(harder()),
         ))
         .collect(),
     );
@@ -257,22 +275,22 @@ fn each_discipline_loses_its_own_days() {
 fn a_day_that_keeps_the_wrong_half_is_still_lost() {
     let monday = date(2026, 9, 14).expect("a real Monday");
 
-    let ordinary: BTreeMap<TrainingSlot, Discipline> = [
+    let ordinary: BTreeMap<TrainingSlot, Allocation> = [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
-            Discipline::Cycling,
+            cycling(easier()),
         ),
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Discipline::Gym,
+            gym(harder()),
         ),
     ]
     .into_iter()
     .collect();
 
-    let morning_only: BTreeMap<TrainingSlot, Discipline> = std::iter::once((
+    let morning_only: BTreeMap<TrainingSlot, Allocation> = std::iter::once((
         TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
-        Discipline::Cycling,
+        cycling(easier()),
     ))
     .collect();
 
@@ -305,7 +323,10 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
     );
     assert_eq!(
         diary.slots_on(monday, Discipline::Cycling),
-        vec![TrainingSlot::new(Weekday::Monday, PartOfDay::Morning)],
+        vec![(
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
+            easier()
+        )],
         "and can say what it still has"
     );
 }
@@ -367,11 +388,11 @@ fn a_day_held_twice_is_named_once() {
     let both_halves = [
         (
             TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning),
-            Discipline::Gym,
+            gym(easier()),
         ),
         (
             TrainingSlot::new(Weekday::Saturday, PartOfDay::Evening),
-            Discipline::Gym,
+            gym(harder()),
         ),
     ]
     .into_iter()
@@ -419,11 +440,24 @@ fn a_week_nobody_has_described_has_no_ordinary_days() {
     );
 }
 
+/// One slot on a date, with the role the ordinary week gives it.
+///
+/// **The role is looked up where the week has one**, rather than stated: a
+/// second copy of the allocation here would be exactly the duplication issue
+/// #63 removed. A day the ordinary week does not hold — a Saturday an
+/// alteration handed over — falls back to the harder session, and nothing
+/// these tests assert turns on which it is.
 fn slot(on: Date, part: PartOfDay, discipline: Discipline) -> ScheduledSlot {
+    let slot = TrainingSlot::new(on.weekday(), part);
+    let role = ordinary()
+        .get(&slot)
+        .filter(|allocated| allocated.discipline == discipline)
+        .map_or_else(harder, |allocated| allocated.role);
     ScheduledSlot {
         date: on,
-        slot: TrainingSlot::new(on.weekday(), part),
+        slot,
         discipline,
+        role,
     }
 }
 

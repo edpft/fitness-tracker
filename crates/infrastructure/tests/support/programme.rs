@@ -26,12 +26,13 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Plan, PlanName, Programme},
     prescription::{
-        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar,
-        GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, Progression,
-        ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
+        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, ByIntensity, Calendar,
+        GenerationParameters, Linear, LoadSteps, Mesocycle, Percentage, Progression, ResetProtocol,
+        Scales, Skip, Step, TopSetReps, WarmupStep,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
+    schedule::{Relative, SessionRole, TrainingWeek},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -157,9 +158,9 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
         upper_push: Fill::Same(Exercise::Reps(RepsExercise::ChestDip)),
         upper_pull: Fill::Same(Exercise::Reps(RepsExercise::NeutralGripPullUp)),
         // Alternating: the reason the history projection is unbounded.
-        hip_dominant: Fill::Alternating(PerRole {
-            light: Exercise::Reps(RepsExercise::BackExtensionMachine),
-            heavy: Exercise::Reps(RepsExercise::NordicHamstringsCurls),
+        hip_dominant: Fill::Alternating(ByIntensity {
+            lower: Exercise::Reps(RepsExercise::BackExtensionMachine),
+            higher: Exercise::Reps(RepsExercise::NordicHamstringsCurls),
         }),
         biceps: Fill::Same(Exercise::Reps(RepsExercise::PreacherCurlBarbell)),
         triceps: Fill::Same(Exercise::Reps(RepsExercise::OverheadTricepsExtensionCable)),
@@ -191,15 +192,82 @@ pub fn anchor() -> Result<Anchor, ProgrammeFixtureError> {
     Anchor::new(kg("90")?, Some(kg("95")?), AnchorProvenance::Tested, from).map_err(invalid)
 }
 
+/// The operator's week, recorded so a mesocycle can be read back against it.
+///
+/// **A store needs a schedule before it can hold a plan**, and that is not a
+/// fixture convenience. Since issue #63 a gym mesocycle carries no weekdays of
+/// its own: its calendar is rebuilt from `training_slot` on every read, so a
+/// programme authored into a store with no week in it cannot be read out
+/// again. `fitness schedule add` is what the operator runs first, and the
+/// wizard refuses to author a block without it.
+///
+/// From 2026-01-01, which is before every fixture block.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the store is unavailable.
+pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFixtureError> {
+    use application::DiaryAuthor as _;
+    use domain::schedule::{Allocation, Discipline, PartOfDay, TrainingPattern, TrainingSlot};
+
+    let slots = [
+        (
+            TrainingSlot::new(jiff::civil::Weekday::Monday, PartOfDay::Evening),
+            Allocation::new(
+                Discipline::Gym,
+                SessionRole::new(Relative::Lower, Relative::Higher),
+            ),
+        ),
+        (
+            TrainingSlot::new(jiff::civil::Weekday::Wednesday, PartOfDay::Evening),
+            Allocation::new(
+                Discipline::Cycling,
+                SessionRole::new(Relative::Higher, Relative::Lower),
+            ),
+        ),
+        (
+            TrainingSlot::new(jiff::civil::Weekday::Friday, PartOfDay::Evening),
+            Allocation::new(
+                Discipline::Gym,
+                SessionRole::new(Relative::Higher, Relative::Lower),
+            ),
+        ),
+        (
+            TrainingSlot::new(jiff::civil::Weekday::Sunday, PartOfDay::Morning),
+            Allocation::new(
+                Discipline::Cycling,
+                SessionRole::new(Relative::Lower, Relative::Higher),
+            ),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    infrastructure::SqliteDiaryStore::new(pool.clone())
+        .record_pattern(&TrainingPattern::new(
+            Date::new(2026, 1, 1).map_err(invalid)?,
+            super::corpus::zone().map_err(invalid)?,
+            slots,
+        ))
+        .await
+        .map_err(invalid)
+}
+
 /// Monday light, Friday heavy — what the record has run since June.
 ///
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] if the list is empty.
-pub fn weekdays() -> Result<Weekdays, ProgrammeFixtureError> {
-    Weekdays::new(vec![
-        (jiff::civil::Weekday::Monday, SessionRole::Light),
-        (jiff::civil::Weekday::Friday, SessionRole::Heavy),
+pub fn weekdays() -> Result<TrainingWeek, ProgrammeFixtureError> {
+    TrainingWeek::new(vec![
+        (
+            jiff::civil::Weekday::Monday,
+            SessionRole::new(Relative::Lower, Relative::Higher),
+        ),
+        (
+            jiff::civil::Weekday::Friday,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+        ),
     ])
     .map_err(invalid)
 }
@@ -220,7 +288,7 @@ pub fn calendar() -> Result<Calendar, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] if the date is invalid, or if a named week falls
 /// outside the block.
 pub fn calendar_running(
-    weekdays: Weekdays,
+    weekdays: TrainingWeek,
     skipping: &[Skip],
 ) -> Result<Calendar, ProgrammeFixtureError> {
     let start = Date::new(2026, 7, 6).map_err(invalid)?;
@@ -237,7 +305,10 @@ pub fn calendar_running(
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] if the date or the weekday list is invalid.
-pub fn calendar_from(start: Date, weekdays: Weekdays) -> Result<Calendar, ProgrammeFixtureError> {
+pub fn calendar_from(
+    start: Date,
+    weekdays: TrainingWeek,
+) -> Result<Calendar, ProgrammeFixtureError> {
     Calendar::new(start, 8, &[], weekdays, zone()?).map_err(invalid)
 }
 
@@ -357,7 +428,7 @@ pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureE
         start,
         pattern: PrimaryPattern::KneeDominant,
         primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
-        weekdays: weekdays()?,
+        week: weekdays()?,
         shape,
     })
 }
@@ -407,7 +478,7 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
-            SessionRole::Heavy,
+            SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
         calendar_running(weekdays()?, skips)?,
@@ -428,7 +499,7 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::FrontSquat),
-            SessionRole::Heavy,
+            SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
         calendar_from(start, weekdays()?)?,
@@ -437,31 +508,44 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
     .map_err(invalid)
 }
 
-/// A programme whose gating role it never runs.
+/// A programme gating on a role the operator's week never runs.
 ///
 /// One of the three inconsistencies the types cannot catch, built here so the
 /// test asserting it is refused does not have to construct it inline.
+///
+/// **Refused at authoring rather than by `Linear::new`**, and it moved there on
+/// 2026-09-20 (issue #63). Whether the week offers the gating session is a
+/// question about a programme and a week together, and the week is superseded
+/// whenever the operator's life changes while the programme stays in the
+/// store — so as a type invariant it would make an old mesocycle fail to load.
 ///
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] only if a literal here is invalid; the programme
 /// itself is expected to be refused, which the caller asserts.
 pub fn gating_on_a_role_it_never_runs()
--> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
-    let parameters = parameters()?;
-    // Monday only, and Monday is light — so a heavy gate never fires.
-    let monday_only =
-        Weekdays::new(vec![(jiff::civil::Weekday::Monday, SessionRole::Light)]).map_err(invalid)?;
-    Ok(Linear::new(
-        Primary::new(
-            domain::prescription::PrimaryPattern::KneeDominant,
-            Exercise::Reps(RepsExercise::FrontSquat),
-            SessionRole::Heavy,
-        ),
-        fills()?,
-        calendar_running(monday_only, &[])?,
-        &parameters,
-    ))
+-> Result<Result<Mesocycle, AuthoringError>, ProgrammeFixtureError> {
+    // Monday only, and Monday is the easier session — so a gate on the harder
+    // one never fires.
+    let monday_only = TrainingWeek::new(vec![(
+        jiff::civil::Weekday::Monday,
+        SessionRole::new(Relative::Lower, Relative::Higher),
+    )])
+    .map_err(invalid)?;
+
+    authoring(
+        Authored {
+            start: Date::new(2026, 7, 6).map_err(invalid)?,
+            pattern: PrimaryPattern::KneeDominant,
+            primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+            week: monday_only,
+            shape: Shape::Linear {
+                gating: SessionRole::new(Relative::Higher, Relative::Lower),
+                weeks: 8,
+            },
+        },
+        &[],
+    )
 }
 
 /// A programme whose primary is counted in something other than repetitions.
@@ -476,7 +560,7 @@ pub fn primary_not_counted_in_reps()
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Distance(DistanceExercise::Running),
-            SessionRole::Heavy,
+            SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
         calendar()?,
@@ -498,7 +582,7 @@ pub fn primary_does_not_fill_its_slot()
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
             Exercise::Reps(RepsExercise::DeadliftBarbell),
-            SessionRole::Heavy,
+            SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
         calendar()?,

@@ -44,9 +44,10 @@ use crate::{
         block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
         sbs::Sbs,
-        schedule::{Calendar, SessionRole},
+        schedule::Calendar,
     },
     provider::ProvidedFrom,
+    schedule::SessionRole,
 };
 
 /// What was authored: one programme, of whichever kind.

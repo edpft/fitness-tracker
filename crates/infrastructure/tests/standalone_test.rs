@@ -25,10 +25,11 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::prescription::{
-    Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SessionRole, SlotId,
-    WeekKind, authored::Shape,
+    Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SlotId, WeekKind,
+    authored::Shape,
 };
 use domain::provider::{ExternalProgramme, ProvidedFrom};
+use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
@@ -119,6 +120,9 @@ async fn landed_store() -> Result<
 > {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -331,7 +335,7 @@ fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error:
     let answers = programme::authored(
         Date::constant(2026, 8, 31),
         Shape::Block {
-            gating: SessionRole::Heavy,
+            gating: SessionRole::new(Relative::Higher, Relative::Lower),
             weeks: 10,
             entry_test: Some(EntryTest::new(
                 domain::measure::RepCount::new(3)?,

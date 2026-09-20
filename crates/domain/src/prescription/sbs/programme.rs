@@ -17,8 +17,9 @@ use crate::{
     prescription::{
         linear::{Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
-        schedule::{Calendar, SessionRole},
+        schedule::Calendar,
     },
+    schedule::{Relative, SessionRole},
 };
 
 use super::chart::WEEKS;
@@ -32,7 +33,7 @@ use super::chart::WEEKS;
 /// and asking would be asking for a number already stated (decisions 0019 and
 /// 0020). Which *weekday* that falls on is the calendar's business, and the
 /// operator's schedule already records Friday as his heavy day.
-pub const GATING: SessionRole = SessionRole::Heavy;
+pub const GATING: SessionRole = SessionRole::new(Relative::Higher, Relative::Lower);
 
 /// A cycle of the SBS chart, as authored.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,13 +59,6 @@ impl Sbs {
     ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
 
-        // A cycle that never runs its gating session would never advance — and
-        // here that is worse than a stalled ladder, because the gating day is
-        // where the maximum is *set*. A cycle without one would prescribe every
-        // week off the opening maximum for ever.
-        if !calendar.weekdays().runs(GATING) {
-            return Err(InconsistentMesocycle::GatingRoleNeverRuns { gating: GATING });
-        }
         check_primary(pattern, exercise, &fills, GATING)?;
 
         // The chart is four weeks. A calendar of any other length is not this

@@ -24,7 +24,8 @@ use application::{
     DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,
     prescribe::{Prescribing, PrescriptionPorts},
 };
-use domain::prescription::{PrescribedItem, SessionRole, SlotId, WeekIndex, WeekKind};
+use domain::prescription::{PrescribedItem, SlotId, WeekIndex, WeekKind};
+use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
@@ -187,7 +188,10 @@ fn the_block_opens_below_what_its_entry_test_failed() {
     let (prescriber, _directory) = ready!();
     let (issued, load) = top_set!(&prescriber, Date::constant(2026, 7, 10));
 
-    assert_eq!(issued.workout.session_role(), SessionRole::Heavy);
+    assert_eq!(
+        issued.workout.session_role(),
+        SessionRole::new(Relative::Higher, Relative::Lower)
+    );
     assert_eq!(
         issued.workout.week(),
         WeekKind::Climbing(WeekIndex::FIRST),
@@ -253,7 +257,10 @@ fn a_gating_session_performed_the_next_morning_still_gates() {
     trained_the_next_morning(&pool);
 
     let (issued, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
-    assert_eq!(issued.workout.session_role(), SessionRole::Light);
+    assert_eq!(
+        issued.workout.session_role(),
+        SessionRole::new(Relative::Lower, Relative::Higher)
+    );
 
     let Ok(gated) = "75".to_owned().try_into().map(domain::gym::Load::Absolute) else {
         panic!("75 is a mass")
@@ -345,7 +352,10 @@ fn trained_the_next_morning(pool: &SqlitePool) {
 fn only_the_gating_role_gates() {
     let (prescriber, _directory) = ready!();
     let (issued, light) = top_set!(&prescriber, Date::constant(2026, 7, 13));
-    assert_eq!(issued.workout.session_role(), SessionRole::Light);
+    assert_eq!(
+        issued.workout.session_role(),
+        SessionRole::new(Relative::Lower, Relative::Higher)
+    );
 
     let (Ok(gated), Ok(ungated)) = (
         "75".to_owned().try_into().map(domain::gym::Load::Absolute),

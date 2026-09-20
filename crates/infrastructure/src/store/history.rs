@@ -47,7 +47,7 @@ use domain::{
     measure::{Distance, Duration, Metres, RepCount},
     normalised::{OperatorZone, StartedAt},
     plan::PlanName,
-    prescription::SessionRole,
+    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
@@ -137,18 +137,22 @@ fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
 /// it is reported rather than papered over with a default role.
 fn fulfilled_of(
     plan: Option<String>,
-    role: Option<String>,
+    intensity: Option<String>,
+    volume: Option<String>,
 ) -> Result<Option<FulfilledSession>, StoreError> {
-    match (plan, role) {
-        (Some(plan), Some(role)) => Ok(Some(FulfilledSession {
+    let side = |text: String| {
+        Relative::try_from(text).map_err(|error| StoreError::Corrupt {
+            detail: error.to_string(),
+        })
+    };
+    match (plan, intensity, volume) {
+        (Some(plan), Some(intensity), Some(volume)) => Ok(Some(FulfilledSession {
             plan: PlanName::try_from(plan).map_err(|error| StoreError::Corrupt {
                 detail: error.to_string(),
             })?,
-            role: SessionRole::try_from(role).map_err(|error| StoreError::Corrupt {
-                detail: error.to_string(),
-            })?,
+            role: SessionRole::new(side(intensity)?, side(volume)?),
         })),
-        (None, None) => Ok(None),
+        (None, None, None) => Ok(None),
         _ => Err(StoreError::Corrupt {
             detail: "a prescribed session with only half an identity".to_owned(),
         }),
@@ -198,7 +202,8 @@ impl ExerciseHistory for SqliteExerciseHistory {
             SELECT w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.landing_record_id AS "landed_as!: i64",
                    prescriber.name AS "plan: String",
-                   session.session_role AS "session_role: String",
+                   session.session_intensity AS "session_intensity: String",
+                   session.session_volume AS "session_volume: String",
                    s.load_kind AS "load_kind!: String", s.load_grams AS "load_grams!: i64",
                    s.outcome AS "outcome!: String", s.reps AS "reps: i64",
                    s.set_kind AS "set_kind!: String"
@@ -268,7 +273,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                 _ => performances.push(Performance {
                     on: day,
                     landed_as: id,
-                    fulfilled: fulfilled_of(row.plan, row.session_role)?,
+                    fulfilled: fulfilled_of(row.plan, row.session_intensity, row.session_volume)?,
                     sets: vec![summary],
                 }),
             }

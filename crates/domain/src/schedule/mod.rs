@@ -66,11 +66,15 @@
 //! empty set is "none at all". Those are different facts, and collapsing them
 //! would make training away as usual cancel every session of the trip.
 
+mod role;
+
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use jiff::civil::{Date, Weekday};
 
 use crate::normalised::OperatorZone;
+
+pub use role::{Relative, SessionRole, UnknownRelative};
 
 /// Roughly when in the day, as the operator says it.
 ///
@@ -175,6 +179,128 @@ impl std::fmt::Display for Discipline {
     }
 }
 
+/// What a training slot is given to, and as what.
+///
+/// **Two facts in one value because they are one decision.** Sunday morning is
+/// cycling's *and* it is the longer ride — it is the only slot long enough, and
+/// that is the same sentence twice. Holding them apart would let them drift,
+/// which is what `cycling_weekday` and `gym_weekday` did eight times over per
+/// discipline (issue #63).
+///
+/// **The role is the operator's input, not a derivation.** Deriving it would
+/// need a slot's capacity, the fact that a Sunday morning is extendable where a
+/// weeknight is not, and a concept of commitments this system does not have.
+/// The operator, 2026-09-16: the allocation *"is not likely to change
+/// frequently"*, so it is stated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Allocation {
+    pub discipline: Discipline,
+    pub role: SessionRole,
+}
+
+impl Allocation {
+    pub const fn new(discipline: Discipline, role: SessionRole) -> Self {
+        Self { discipline, role }
+    }
+}
+
+impl std::fmt::Display for Allocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.discipline, self.role)
+    }
+}
+
+/// One discipline's ordinary week: which weekdays it trains, and the role each
+/// of those days is held for.
+///
+/// **Derived from the diary on every read, and never stored.** The gym kept its
+/// own copy in `gym_weekday` until 2026-09-20 — the same two rows written once
+/// per mesocycle, eight times over for the autumn, with nothing keeping them in
+/// step with the week the operator actually trains (issue #63). The shape of
+/// the type was never the problem; a programme owning a copy of it was.
+///
+/// **A block's calendar needs it and does not hold it.** Whether a calendar
+/// week counts as a training week depends on whether any of its days runs, so
+/// the question cannot be answered without this — and it is a fact about a
+/// life, not about a block, so it is handed in rather than kept.
+///
+/// **Non-empty**, because a programme that runs on no day issues nothing. A
+/// week that is known and holds nothing for a discipline is a real answer — it
+/// is [`Diary::ordinarily`] returning an empty vector — but it is not a
+/// training week and it cannot build a calendar.
+///
+/// A list rather than a map because `jiff`'s `Weekday` is deliberately not
+/// `Ord`: a week has no universal first day. At most a handful of entries, so a
+/// scan is the whole cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainingWeek {
+    /// Monday-first, one entry per weekday: a discipline given both a morning
+    /// and an evening on a Saturday still trains on one Saturday, and the
+    /// earlier slot's role is the one that stands.
+    days: Vec<(Weekday, SessionRole)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a programme that runs on no day of the week issues nothing")]
+pub struct NoTrainingDays;
+
+impl TrainingWeek {
+    /// # Errors
+    ///
+    /// [`NoTrainingDays`] if the discipline trains on no day at all.
+    pub fn new(days: Vec<(Weekday, SessionRole)>) -> Result<Self, NoTrainingDays> {
+        let mut days = days;
+        days.sort_by_key(|(weekday, _)| weekday.to_monday_zero_offset());
+        days.dedup_by_key(|(weekday, _)| weekday.to_monday_zero_offset());
+        if days.is_empty() {
+            return Err(NoTrainingDays);
+        }
+        Ok(Self { days })
+    }
+
+    #[must_use]
+    pub fn runs(&self, day: Weekday) -> bool {
+        self.days.iter().any(|(weekday, _)| *weekday == day)
+    }
+
+    #[must_use]
+    pub fn role_on(&self, day: Weekday) -> Option<SessionRole> {
+        self.days
+            .iter()
+            .find(|(weekday, _)| *weekday == day)
+            .map(|(_, role)| *role)
+    }
+
+    /// Whether the week holds a session in this role at all.
+    ///
+    /// A programme gating on a role the week never offers would never advance,
+    /// which is the one thing the types cannot catch between them.
+    #[must_use]
+    pub fn offers(&self, role: SessionRole) -> bool {
+        self.days.iter().any(|(_, held)| *held == role)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Weekday, SessionRole)> + '_ {
+        self.days.iter().copied()
+    }
+
+    /// The week in a sentence, for a refusal that says what a programme does
+    /// run rather than only what it does not.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let named: Vec<String> = self
+            .days
+            .iter()
+            .map(|(day, role)| format!("{day:?} ({role})"))
+            .collect();
+        match named.split_last() {
+            None => String::new(),
+            Some((last, [])) => last.clone(),
+            Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        }
+    }
+}
+
 /// A time the operator is free to train, and could train instead of another.
 ///
 /// Ordered by weekday then part of day, so a set of them reads as a week.
@@ -221,7 +347,7 @@ impl std::fmt::Display for TrainingSlot {
 pub struct TrainingPattern {
     from: Date,
     zone: OperatorZone,
-    slots: BTreeMap<TrainingSlot, Discipline>,
+    slots: BTreeMap<TrainingSlot, Allocation>,
 }
 
 impl TrainingPattern {
@@ -230,7 +356,7 @@ impl TrainingPattern {
     pub const fn new(
         from: Date,
         zone: OperatorZone,
-        slots: BTreeMap<TrainingSlot, Discipline>,
+        slots: BTreeMap<TrainingSlot, Allocation>,
     ) -> Self {
         Self { from, zone, slots }
     }
@@ -243,7 +369,7 @@ impl TrainingPattern {
         &self.zone
     }
 
-    pub const fn slots(&self) -> &BTreeMap<TrainingSlot, Discipline> {
+    pub const fn slots(&self) -> &BTreeMap<TrainingSlot, Allocation> {
         &self.slots
     }
 }
@@ -260,7 +386,7 @@ pub enum Absence {
     /// later. Illness explains itself.
     Holiday {
         zone: Option<OperatorZone>,
-        slots: Option<BTreeMap<TrainingSlot, Discipline>>,
+        slots: Option<BTreeMap<TrainingSlot, Allocation>>,
         reason: String,
     },
     /// Too ill to train. Bad enough to prevent training is what makes it
@@ -278,7 +404,7 @@ impl Absence {
 }
 
 /// Illness's slots, so [`Alteration::slots`] can lend a map whatever the kind.
-static NO_SLOTS: BTreeMap<TrainingSlot, Discipline> = BTreeMap::new();
+static NO_SLOTS: BTreeMap<TrainingSlot, Allocation> = BTreeMap::new();
 
 /// A run of days that departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,7 +445,7 @@ impl Alteration {
 
     /// The slots while it lasts, which replace the ordinary week's. `None`
     /// when the ordinary week stands.
-    pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Discipline>> {
+    pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Allocation>> {
         match &self.absence {
             Absence::Holiday { slots, .. } => slots.as_ref(),
             Absence::Illness => Some(&NO_SLOTS),
@@ -352,7 +478,7 @@ impl Alteration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Availability {
     pub zone: OperatorZone,
-    pub slots: BTreeMap<TrainingSlot, Discipline>,
+    pub slots: BTreeMap<TrainingSlot, Allocation>,
 }
 
 impl Availability {
@@ -364,18 +490,19 @@ impl Availability {
         self.slots.keys().any(|slot| slot.weekday == date.weekday())
     }
 
-    /// This date's slots belonging to one discipline.
+    /// This date's slots belonging to one discipline, each with the role it is
+    /// held for.
     pub fn for_discipline(
         &self,
         discipline: Discipline,
         date: Date,
-    ) -> impl Iterator<Item = TrainingSlot> + '_ {
+    ) -> impl Iterator<Item = (TrainingSlot, SessionRole)> + '_ {
         self.slots
             .iter()
             .filter(move |(slot, allocated)| {
-                **allocated == discipline && slot.weekday == date.weekday()
+                allocated.discipline == discipline && slot.weekday == date.weekday()
             })
-            .map(|(slot, _)| *slot)
+            .map(|(slot, allocated)| (*slot, allocated.role))
     }
 }
 
@@ -480,7 +607,7 @@ impl Diary {
                         .slots()
                         .iter()
                         .filter(|(slot, allocated)| {
-                            **allocated == discipline && slot.weekday == cursor.weekday()
+                            allocated.discipline == discipline && slot.weekday == cursor.weekday()
                         })
                         .map(|(slot, _)| *slot)
                         .collect()
@@ -488,10 +615,18 @@ impl Diary {
                 .unwrap_or_default();
 
             if !ordinarily.is_empty() {
+                // **The discipline is what has to survive, not the role.** A
+                // holiday may hand the gym a Saturday morning as its
+                // higher-intensity session where the ordinary week held a
+                // Friday evening; the Friday is still a day the programme
+                // cannot run, and a role that moved with it is not a loss.
                 let kept = self.on(cursor).is_some_and(|availability| {
-                    ordinarily
-                        .iter()
-                        .any(|slot| availability.slots.get(slot) == Some(&discipline))
+                    ordinarily.iter().any(|slot| {
+                        availability
+                            .slots
+                            .get(slot)
+                            .is_some_and(|allocated| allocated.discipline == discipline)
+                    })
                 });
                 if !kept {
                     lost.push(cursor);
@@ -509,7 +644,7 @@ impl Diary {
     ///
     /// The other half of [`Self::unavailable`]: what a programme *has*, rather
     /// than what it lost.
-    pub fn slots_on(&self, date: Date, discipline: Discipline) -> Vec<TrainingSlot> {
+    pub fn slots_on(&self, date: Date, discipline: Discipline) -> Vec<(TrainingSlot, SessionRole)> {
         self.on(date)
             .map(|availability| availability.for_discipline(discipline, date).collect())
             .unwrap_or_default()
@@ -540,11 +675,37 @@ impl Diary {
         let mut days: Vec<Weekday> = pattern
             .slots()
             .iter()
-            .filter(|(_, held)| **held == discipline)
+            .filter(|(_, held)| held.discipline == discipline)
             .map(|(slot, _)| slot.weekday)
             .collect();
         days.dedup_by_key(|weekday| weekday.to_monday_zero_offset());
         Some(days)
+    }
+
+    /// One discipline's ordinary week as of a date, ready for a calendar.
+    ///
+    /// **Ordinary, so alterations are not applied**, for the reason
+    /// [`Self::ordinarily`] gives: an alteration is a run of days that departs
+    /// from the week's shape, and letting a holiday covering the start date
+    /// decide the shape of every week after it is how the autumn block — which
+    /// starts inside one — would have been built on a fortnight in Rome.
+    ///
+    /// `None` where the diary says nothing about the date, and where it says
+    /// the discipline has no day at all. The two are different facts and
+    /// [`Self::ordinarily`] tells them apart; neither builds a calendar, which
+    /// is all this is for.
+    #[must_use]
+    pub fn training_week(&self, date: Date, discipline: Discipline) -> Option<TrainingWeek> {
+        let pattern = self.pattern_on(date)?;
+        // `TrainingSlot` orders Monday-first and then by part of day, so equal
+        // weekdays are adjacent and the earlier part of the day comes first.
+        let days: Vec<(Weekday, SessionRole)> = pattern
+            .slots()
+            .iter()
+            .filter(|(_, held)| held.discipline == discipline)
+            .map(|(slot, held)| (slot.weekday, held.role))
+            .collect();
+        TrainingWeek::new(days).ok()
     }
 
     fn pattern_on(&self, date: Date) -> Option<&TrainingPattern> {
@@ -560,10 +721,11 @@ impl Diary {
                     .slots
                     .iter()
                     .filter(|(slot, _)| slot.weekday == date.weekday())
-                    .map(|(slot, discipline)| ScheduledSlot {
+                    .map(|(slot, allocated)| ScheduledSlot {
                         date,
                         slot: *slot,
-                        discipline: *discipline,
+                        discipline: allocated.discipline,
+                        role: allocated.role,
                     })
                     .collect()
             })
@@ -634,6 +796,10 @@ pub struct ScheduledSlot {
     pub date: Date,
     pub slot: TrainingSlot,
     pub discipline: Discipline,
+    /// What the session filling it is, against the microcycle's others. Flat
+    /// beside the discipline rather than an [`Allocation`], because this is a
+    /// slot *on a date* and the pair is already settled by the time it is one.
+    pub role: SessionRole,
 }
 
 impl std::fmt::Display for ScheduledSlot {

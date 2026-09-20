@@ -40,9 +40,9 @@ use domain::{
     gym::{Exercise, Load, Rir},
     measure::{Kg, Spans},
     prescription::{
-        Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, SessionRole, Target,
-        WeekKind,
+        Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, Target, WeekKind,
     },
+    schedule::Relative,
 };
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -116,10 +116,16 @@ pub struct Rendered {
 /// glance. Two digits because a block is a dozen sessions, and a wider one still
 /// sorts correctly — it is the padding that makes 9 come before 10, not the
 /// width.
+///
+/// **"Light" and "Heavy" are Hevy's words now, not the domain's.** A role is an
+/// intensity and a volume since 2026-09-20 (issue #63) and prints as both; a
+/// routine list on a phone has room for one word, and these are the two the
+/// operator has been reading all year. Only the intensity is named because it
+/// is what tells his two gym sessions apart.
 fn title(session: &Deliverable) -> String {
-    let role = match session.workout.session_role() {
-        SessionRole::Light => "Light",
-        SessionRole::Heavy => "Heavy",
+    let role = match session.workout.session_role().intensity() {
+        Relative::Lower => "Light",
+        Relative::Higher => "Heavy",
     };
     format!("{:02} {role}", session.ordinal.as_u32())
 }

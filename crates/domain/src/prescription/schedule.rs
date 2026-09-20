@@ -21,72 +21,35 @@ use std::{fmt, num::NonZeroU8};
 
 use jiff::{Zoned, civil::Date, tz::TimeZone};
 
+use crate::schedule::{Relative, SessionRole, TrainingWeek};
+
 use super::delivery::SessionOrdinal;
 
-/// Which session within a week.
+/// One value per intensity, both mandatory.
 ///
-/// An ordering rather than state: the two differ in fill and in the primary's
-/// loading, and nothing carries "which one is next" because the calendar
-/// already says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum SessionRole {
-    Light,
-    Heavy,
-}
-
-impl SessionRole {
-    pub const ALL: &'static [Self] = &[Self::Light, Self::Heavy];
-
-    /// The stable key. Persisted, so it outlives a rename.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Light => "light",
-            Self::Heavy => "heavy",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{value:?} does not name a session role")]
-pub struct UnknownSessionRole {
-    value: String,
-}
-
-impl TryFrom<String> for SessionRole {
-    type Error = UnknownSessionRole;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "light" => Ok(Self::Light),
-            "heavy" => Ok(Self::Heavy),
-            _ => Err(UnknownSessionRole { value }),
-        }
-    }
-}
-
-impl fmt::Display for SessionRole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// One value per role, both mandatory.
+/// A struct rather than a map, so a programme missing a side is a compile error
+/// rather than a runtime one (§ 24). A map would make "the higher-intensity
+/// session has no rep count" representable and then need checking wherever it
+/// is read.
 ///
-/// A struct rather than a map, so a programme missing a role is a compile error
-/// rather than a runtime one (§ 24). Two roles exist and both are always needed;
-/// a map would make "the heavy session has no rep count" representable and then
-/// need checking wherever it is read.
+/// **Keyed on intensity alone, where a [`SessionRole`] carries two axes.**
+/// Everything this holds — a back-off, a top set's repetitions, which exercise
+/// fills an alternating slot — differs between the gym's two sessions because
+/// one is heavier than the other, and not because one is longer. A gym week of
+/// two sessions at the same intensity is not something this can express, which
+/// is honest: nothing derives such a week today, and the day the planner asks
+/// for one this is the type that has to answer for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PerRole<T> {
-    pub light: T,
-    pub heavy: T,
+pub struct ByIntensity<T> {
+    pub lower: T,
+    pub higher: T,
 }
 
-impl<T> PerRole<T> {
+impl<T> ByIntensity<T> {
     pub const fn get(&self, role: SessionRole) -> &T {
-        match role {
-            SessionRole::Light => &self.light,
-            SessionRole::Heavy => &self.heavy,
+        match role.intensity() {
+            Relative::Lower => &self.lower,
+            Relative::Higher => &self.higher,
         }
     }
 }
@@ -180,12 +143,6 @@ impl fmt::Display for WeekKind {
     }
 }
 
-/// Which weekdays the programme runs, and as what.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Weekdays {
-    days: Vec<(jiff::civil::Weekday, SessionRole)>,
-}
-
 /// Why a date could not be placed in the block.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotScheduled {
@@ -209,51 +166,6 @@ pub enum NotScheduled {
     #[error("{date} is not run: this block skips {skip}")]
     Interrupted { date: Date, skip: Skip },
 }
-
-impl Weekdays {
-    /// # Errors
-    ///
-    /// [`NoWeekdays`] if the programme runs on no day at all.
-    pub fn new(days: Vec<(jiff::civil::Weekday, SessionRole)>) -> Result<Self, NoWeekdays> {
-        if days.is_empty() {
-            return Err(NoWeekdays);
-        }
-        Ok(Self { days })
-    }
-
-    pub fn role_on(&self, weekday: jiff::civil::Weekday) -> Option<SessionRole> {
-        self.days
-            .iter()
-            .find(|(day, _)| *day == weekday)
-            .map(|(_, role)| *role)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (jiff::civil::Weekday, SessionRole)> + '_ {
-        self.days.iter().copied()
-    }
-
-    /// Whether the programme runs the given role at all.
-    ///
-    /// A programme gating on a role it never runs would never advance, which is
-    /// one of the three things the types cannot catch.
-    pub fn runs(&self, role: SessionRole) -> bool {
-        self.days.iter().any(|(_, scheduled)| *scheduled == role)
-    }
-
-    fn describe(&self) -> String {
-        let mut parts: Vec<String> = self
-            .days
-            .iter()
-            .map(|(day, role)| format!("{day:?} ({role})"))
-            .collect();
-        parts.sort();
-        parts.join(" and ")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a programme that runs on no day of the week issues nothing")]
-pub struct NoWeekdays;
 
 /// The sessions a block does not run.
 ///
@@ -383,8 +295,8 @@ pub enum InvalidCalendar {
     NeverCompletes { duration: u32 },
 }
 
-/// The block's calendar: where it starts, how many training weeks it runs, which
-/// weeks it skips, and which weekdays carry which role.
+/// The block's calendar: where it starts, how many training weeks it runs,
+/// which weeks it skips, and the operator's week it runs against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Calendar {
     start: Date,
@@ -392,7 +304,17 @@ pub struct Calendar {
     /// interruption.
     duration_weeks: u32,
     interruptions: Interruptions,
-    weekdays: Weekdays,
+    /// **Read from the diary, and persisted nowhere.** A calendar cannot say
+    /// whether a week of the block runs without knowing which days hold a
+    /// session, so it is handed the operator's week when it is built — at
+    /// authoring, and again every time a mesocycle is read back.
+    ///
+    /// Until 2026-09-20 this was a `Weekdays` of the programme's own, written
+    /// into `gym_weekday` once per mesocycle: the same two rows eight times
+    /// over for the autumn, with nothing keeping them in step with the week the
+    /// operator actually trains (issue #63). The shape of the value was never
+    /// the problem; a programme owning a copy of it was.
+    week: TrainingWeek,
     zone: TimeZone,
 }
 
@@ -404,11 +326,14 @@ impl Calendar {
     /// nothing, and is refused rather than ignored: it means the operator and
     /// this programme disagree about when the block runs, and that disagreement
     /// is worth more than the holiday.
+    ///
+    /// `week` is the operator's, read from the diary by the caller. It is not
+    /// the programme's to state.
     pub fn new(
         start: Date,
         duration_weeks: u32,
         interruptions: &[Skip],
-        weekdays: Weekdays,
+        week: TrainingWeek,
         zone: TimeZone,
     ) -> Result<Self, InvalidCalendar> {
         if duration_weeks == 0 {
@@ -429,7 +354,7 @@ impl Calendar {
             start,
             duration_weeks,
             interruptions: Interruptions { skips },
-            weekdays,
+            week,
             zone,
         };
 
@@ -514,7 +439,7 @@ impl Calendar {
     /// gap in it. The old whole-week behaviour falls out as the case where
     /// nothing survives.
     fn week_runs(&self, week: i64) -> bool {
-        week_runs(self.start, week, &self.weekdays, &self.interruptions)
+        week_runs(self.start, week, &self.week, &self.interruptions)
     }
 
     /// How many training weeks fit between two dates.
@@ -539,7 +464,7 @@ impl Calendar {
     pub fn training_weeks_within(
         start: Date,
         last: Date,
-        weekdays: &Weekdays,
+        shape: &TrainingWeek,
         interruptions: &[Skip],
     ) -> u32 {
         let interruptions = Interruptions {
@@ -553,7 +478,7 @@ impl Calendar {
             if opens > last {
                 break;
             }
-            if week_runs(start, week, weekdays, &interruptions) {
+            if week_runs(start, week, shape, &interruptions) {
                 training = training.saturating_add(1);
             }
         }
@@ -564,26 +489,32 @@ impl Calendar {
         &self.interruptions
     }
 
-    pub const fn weekdays(&self) -> &Weekdays {
-        &self.weekdays
+    /// The operator's week this block runs against, as the diary gave it.
+    pub const fn week(&self) -> &TrainingWeek {
+        &self.week
     }
 
-    /// Where a date sits: which **training** week of the block, and in which
-    /// role.
+    /// Which **training** week of the block a date sits in.
+    ///
+    /// **It no longer says in which role.** A date's role is the role of the
+    /// slot the operator's week gives that date, which the diary holds and this
+    /// does not (issue #63). Until 2026-09-20 the answer came from the
+    /// calendar's own weekday map, which was the same fact written down a
+    /// second time.
     ///
     /// # Errors
     ///
-    /// [`NotScheduled`] if the date falls on no programmed weekday, before the
+    /// [`NotScheduled`] if the date falls on no training day, before the
     /// block, in a week the block skips, or past its end. Declining is
     /// deliberate — silently prescribing Friday's session for a Wednesday is
     /// worse than saying no, and so is prescribing week 4 to someone who spent
     /// week 3 on a beach.
     pub fn place(&self, date: Date) -> Result<(WeekKind, SessionRole), NotScheduled> {
-        let Some(role) = self.weekdays.role_on(date.weekday()) else {
+        let Some(role) = self.week.role_on(date.weekday()) else {
             return Err(NotScheduled::NotAProgrammedDay {
                 date,
                 weekday: format!("{:?}", date.weekday()),
-                programmed: self.weekdays.describe(),
+                programmed: self.week.describe(),
             });
         };
 
@@ -624,8 +555,10 @@ impl Calendar {
         // `WeekKind::Test` stays for the templates that do own their test: a
         // periodised block always ends in one, and a standalone test programme
         // is nothing else.
-        let kind = WeekKind::Climbing(WeekIndex::new(week).unwrap_or(WeekIndex(1)));
-        Ok((kind, role))
+        Ok((
+            WeekKind::Climbing(WeekIndex::new(week).unwrap_or(WeekIndex(1))),
+            role,
+        ))
     }
 
     /// The next session at or after a date, or `None` once the block is over.
@@ -734,12 +667,12 @@ impl Calendar {
 /// forward one walks weeks to find where a duration reaches, and
 /// [`Calendar::training_weeks_within`] walks them to find how many a span
 /// holds. Two copies of this rule would be two answers to the same question.
-fn week_runs(start: Date, week: i64, weekdays: &Weekdays, interruptions: &Interruptions) -> bool {
+fn week_runs(start: Date, week: i64, shape: &TrainingWeek, interruptions: &Interruptions) -> bool {
     (0..7).any(|day| {
         let span = jiff::Span::new().days(week.saturating_mul(7).saturating_add(day));
-        start.checked_add(span).is_ok_and(|date| {
-            weekdays.role_on(date.weekday()).is_some() && !interruptions.covers(date)
-        })
+        start
+            .checked_add(span)
+            .is_ok_and(|date| shape.runs(date.weekday()) && !interruptions.covers(date))
     })
 }
 
@@ -750,23 +683,36 @@ fn offset_of(start: Date, date: Date) -> i64 {
 #[cfg(test)]
 mod next_session_tests {
     use super::Calendar;
-    use crate::prescription::{SessionRole, Skip, Weekdays};
+    use crate::{
+        prescription::Skip,
+        schedule::{Relative, SessionRole, TrainingWeek},
+    };
     use jiff::{Timestamp, civil::Weekday};
+
+    /// The week the operator trains, which the diary supplies in earnest.
+    fn days() -> Result<TrainingWeek, Box<dyn std::error::Error>> {
+        Ok(TrainingWeek::new(vec![
+            (
+                Weekday::Monday,
+                SessionRole::new(Relative::Lower, Relative::Higher),
+            ),
+            (
+                Weekday::Friday,
+                SessionRole::new(Relative::Higher, Relative::Lower),
+            ),
+        ])?)
+    }
 
     /// **These moved here from `cli::config` on 2026-08-30.** They were always
     /// tests of the calendar rather than of a terminal, and while they lived a
     /// ring away the only thing exercising this logic was one of the two
     /// adapters that need it.
     fn build(skipped: &[Skip]) -> Result<Calendar, Box<dyn std::error::Error>> {
-        let weekdays = Weekdays::new(vec![
-            (Weekday::Monday, SessionRole::Light),
-            (Weekday::Friday, SessionRole::Heavy),
-        ])?;
         Ok(Calendar::new(
             "2026-09-07".parse()?,
             4,
             skipped,
-            weekdays,
+            days()?,
             jiff::tz::TimeZone::get("Pacific/Auckland")?,
         )?)
     }

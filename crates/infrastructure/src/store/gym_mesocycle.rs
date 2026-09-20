@@ -35,12 +35,13 @@ use domain::{
     normalised::OperatorZone,
     plan::{Occupies, PlanName},
     prescription::{
-        Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Linear, Mesocycle, MesocycleId,
-        PerRole, Progression, Sbs, SessionRole, Skip, SlotId, Test, Tested,
+        Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, Linear, Mesocycle,
+        MesocycleId, Progression, Sbs, Skip, SlotId, Test, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
+    schedule::{Discipline, Relative, SessionRole},
 };
 use jiff::civil::{Date, Weekday};
 use sqlx::SqlitePool;
@@ -79,10 +80,13 @@ pub(super) fn weekday_of(key: &str) -> Result<Weekday, StoreError> {
 
 /// One fill row, flattened.
 ///
-/// `role` is `None` where the slot does not alternate.
+/// `intensity` is `None` where the slot does not alternate. It is an intensity
+/// rather than a whole role because that is what `ByIntensity` is keyed on:
+/// what fills a slot differs between the gym's two sessions because one is
+/// heavier, not because one is longer.
 struct FillRow {
     slot: SlotId,
-    role: Option<SessionRole>,
+    intensity: Option<Relative>,
     exercise: Exercise,
     /// Present only for a static slot, which carries its whole prescription.
     statics: Option<(RepCount, RepCount)>,
@@ -121,9 +125,9 @@ impl SlotRows {
                 "slot {slot} alternates but does not hold one exercise per role"
             )));
         };
-        Ok(Fill::Alternating(PerRole {
-            light: *light,
-            heavy: *heavy,
+        Ok(Fill::Alternating(ByIntensity {
+            lower: *light,
+            higher: *heavy,
         }))
     }
 
@@ -138,9 +142,9 @@ impl SlotRows {
                 "slot {slot} is static and does not hold one prescription per role"
             )));
         };
-        Ok(Fill::Alternating(PerRole {
-            light: *light,
-            heavy: *heavy,
+        Ok(Fill::Alternating(ByIntensity {
+            lower: *light,
+            higher: *heavy,
         }))
     }
 }
@@ -191,7 +195,8 @@ pub(super) async fn in_force(
                m.asserted_provenance AS "asserted_provenance: String",
                m.asserted_from AS "asserted_from: String",
                m.asserted_failed_grams AS "asserted_failed_grams: i64",
-               m.gating_role AS "gating_role: String",
+               m.gating_intensity AS "gating_intensity: String",
+               m.gating_volume AS "gating_volume: String",
                m.start_date AS "start_date!: String",
                m.duration_weeks AS "duration_weeks!: i64",
                m.test_reps AS "test_reps: i64",
@@ -212,21 +217,29 @@ pub(super) async fn in_force(
     let mut mesocycles = Vec::with_capacity(rows.len());
     for row in rows {
         let fills = read_fills(pool, row.id).await?;
-        let weekdays = read_weekdays(pool, row.id).await?;
         let interruptions = read_interruptions(pool, row.id).await?;
+
+        let start = row
+            .start_date
+            .parse::<Date>()
+            .map_err(|_| corrupt(&"a start date that is not a date"))?;
+        // **Read from the schedule, not from the mesocycle.** `gym_weekday`
+        // held a copy of this per row until 2026-09-20 (issue #63); the week
+        // belongs to the operator, and a block is rebuilt against the one in
+        // force when it started.
+        let week = super::schedule::training_week(pool, start, Discipline::Gym)
+            .await?
+            .ok_or_else(|| {
+                corrupt(&format!(
+                    "the schedule gives the gym no day of the week as of {start}, \
+                     so a block starting then has nothing to run on"
+                ))
+            })?;
 
         let duration = u32::try_from(row.duration_weeks)
             .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
-        let calendar = Calendar::new(
-            row.start_date
-                .parse::<Date>()
-                .map_err(|_| corrupt(&"a start date that is not a date"))?,
-            duration,
-            &interruptions,
-            weekdays,
-            zone.as_time_zone(),
-        )
-        .map_err(|error| corrupt(&error))?;
+        let calendar = Calendar::new(start, duration, &interruptions, week, zone.as_time_zone())
+            .map_err(|error| corrupt(&error))?;
 
         let plan = PlanName::try_from(row.plan_name).map_err(|error| corrupt(&error))?;
         let pattern =
@@ -255,7 +268,7 @@ pub(super) async fn in_force(
             template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                 common,
                 template,
-                row.gating_role,
+                gating_of(row.gating_intensity, row.gating_volume)?,
                 read_entry_test(
                     row.entry_test_reps,
                     row.entry_test_light_grams,
@@ -334,7 +347,8 @@ struct Columns {
     provenance: Option<&'static str>,
     asserted_from: Option<String>,
     asserted_failed: Option<i64>,
-    gating: Option<&'static str>,
+    gating_intensity: Option<&'static str>,
+    gating_volume: Option<&'static str>,
     test_reps: Option<i64>,
     entry_test_reps: Option<i64>,
     entry_test_light: Option<i64>,
@@ -390,7 +404,10 @@ fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
                     .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
             })
             .transpose()?,
-        gating: programme.gating_role().map(SessionRole::as_str),
+        gating_intensity: programme
+            .gating_role()
+            .map(|role| role.intensity().as_str()),
+        gating_volume: programme.gating_role().map(|role| role.volume().as_str()),
         test_reps,
         entry_test_reps: entry_test.map(|test| i64::from(test.reps().as_u32())),
         entry_test_light,
@@ -439,16 +456,12 @@ fn rehydrate_test(
 fn rehydrate_periodisation(
     common: Common,
     template: &str,
-    gating_role: Option<String>,
+    gating: Option<SessionRole>,
     entry_test: Option<EntryTest>,
 ) -> Result<Mesocycle, StoreError> {
     let gating =
-        gating_role.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
-    let primary = Primary::new(
-        common.pattern,
-        common.exercise,
-        SessionRole::try_from(gating).map_err(|error| corrupt(&error))?,
-    );
+        gating.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
+    let primary = Primary::new(common.pattern, common.exercise, gating);
     if template == "sbs" {
         // A `CHECK` refuses an `sbs` row without a provider, so a `None` here is
         // a row that got past the database rather than a state to default.
@@ -619,7 +632,8 @@ pub(super) async fn write(
         provenance,
         asserted_from,
         asserted_failed,
-        gating,
+        gating_intensity,
+        gating_volume,
         test_reps,
         entry_test_reps,
         entry_test_light,
@@ -631,10 +645,10 @@ pub(super) async fn write(
             plan, ordinal, provider, provided_programme, template,
             primary_pattern, primary_exercise,
             asserted_grams, asserted_provenance, asserted_from, asserted_failed_grams,
-            gating_role, start_date, duration_weeks,
+            gating_intensity, gating_volume, start_date, duration_weeks,
             test_reps, entry_test_reps, entry_test_light_grams
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id AS "id!: i64"
         "#,
         plan,
@@ -648,7 +662,8 @@ pub(super) async fn write(
         provenance,
         asserted_from,
         asserted_failed,
-        gating,
+        gating_intensity,
+        gating_volume,
         start,
         duration,
         test_reps,
@@ -706,7 +721,7 @@ async fn write_fills(
 ) -> Result<(), StoreError> {
     for fill in flatten(mesocycle.fills()) {
         let slot_key = fill.slot.as_str();
-        let role_key = fill.role.map(SessionRole::as_str);
+        let intensity_key = fill.intensity.map(Relative::as_str);
         let exercise_key = fill.exercise.as_str();
         let (static_sets, static_reps) = fill.statics.map_or((None, None), |(sets, reps)| {
             (
@@ -717,7 +732,7 @@ async fn write_fills(
         sqlx::query!(
             r"
             INSERT INTO gym_slot_fill (
-                mesocycle, slot, role, position, exercise, static_sets, static_reps
+                mesocycle, slot, intensity, position, exercise, static_sets, static_reps
             )
             -- `position` ordered the members of a supersetted slot. Every slot
             -- now holds one exercise, so it is always zero; the column stays
@@ -726,7 +741,7 @@ async fn write_fills(
             ",
             id,
             slot_key,
-            role_key,
+            intensity_key,
             exercise_key,
             static_sets,
             static_reps
@@ -759,7 +774,7 @@ const fn provided_of(mesocycle: &Mesocycle) -> Option<&ProvidedFrom> {
 async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, StoreError> {
     let fill_rows = sqlx::query!(
         r#"
-        SELECT slot AS "slot!: String", role AS "role: String",
+        SELECT slot AS "slot!: String", intensity AS "intensity: String",
                exercise AS "exercise!: String",
                static_sets AS "static_sets: i64", static_reps AS "static_reps: i64"
         FROM gym_slot_fill
@@ -776,8 +791,8 @@ async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, Stor
     for fill in fill_rows {
         parsed.push(FillRow {
             slot: SlotId::try_from(fill.slot).map_err(|error| corrupt(&error))?,
-            role: match fill.role {
-                Some(role) => Some(SessionRole::try_from(role).map_err(|error| corrupt(&error))?),
+            intensity: match fill.intensity {
+                Some(side) => Some(Relative::try_from(side).map_err(|error| corrupt(&error))?),
                 None => None,
             },
             exercise: exercise_of(&fill.exercise)?,
@@ -798,17 +813,17 @@ async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, Stor
                 sets,
                 reps,
             };
-            match fill.role {
+            match fill.intensity {
                 None => entry.same_static.push(fixed),
-                Some(SessionRole::Light) => entry.light_static.push(fixed),
-                Some(SessionRole::Heavy) => entry.heavy_static.push(fixed),
+                Some(Relative::Lower) => entry.light_static.push(fixed),
+                Some(Relative::Higher) => entry.heavy_static.push(fixed),
             }
             continue;
         }
-        match fill.role {
+        match fill.intensity {
             None => entry.same.push(fill.exercise),
-            Some(SessionRole::Light) => entry.light.push(fill.exercise),
-            Some(SessionRole::Heavy) => entry.heavy.push(fill.exercise),
+            Some(Relative::Lower) => entry.light.push(fill.exercise),
+            Some(Relative::Higher) => entry.heavy.push(fill.exercise),
         }
     }
     let rows_for = |slot: SlotId| -> Result<&SlotRows, StoreError> {
@@ -839,11 +854,14 @@ async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, Stor
     })
 }
 
-/// When the block runs: its weekdays, and the weeks it skips.
+/// When the block does not run.
 ///
-/// Split out of `author` so that function stays inside the line budget. The two
-/// go together because both answer "does this date carry a session", which is
-/// the question `Calendar::place` is rebuilt from on read.
+/// **Only the interruptions, since 2026-09-20.** The weekdays went with
+/// `gym_weekday` (issue #63): which days the gym trains is the schedule's, read
+/// back from `training_slot` rather than copied here once per mesocycle. What
+/// the block *skipped* stays, because it is what was planned — a holiday coming
+/// off the calendar afterwards must not retroactively move what was prescribed
+/// (§ 12).
 async fn write_calendar(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     mesocycle: i64,
@@ -866,22 +884,6 @@ async fn write_calendar(
         .map_err(|error| store_error(&error))?;
     }
 
-    for (day, role) in calendar.weekdays().iter() {
-        let day_key = weekday_key(day);
-        let role_key = role.as_str();
-        sqlx::query!(
-            r"
-            INSERT INTO gym_weekday (mesocycle, weekday, role)
-            VALUES (?, ?, ?)
-            ",
-            mesocycle,
-            day_key,
-            role_key
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| store_error(&error))?;
-    }
     Ok(())
 }
 
@@ -918,34 +920,27 @@ async fn read_interruptions(pool: &SqlitePool, mesocycle: i64) -> Result<Vec<Ski
     Ok(skips)
 }
 
-/// Which weekdays the mesocycle runs, and as what.
-async fn read_weekdays(
-    pool: &SqlitePool,
-    mesocycle: i64,
-) -> Result<domain::prescription::Weekdays, StoreError> {
-    let weekday_rows = sqlx::query!(
-        r#"
-        SELECT weekday AS "weekday!: String", role AS "role!: String"
-        FROM gym_weekday
-        WHERE mesocycle = ?
-        "#,
-        mesocycle
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error(&error))?;
-
-    let mut days = Vec::with_capacity(weekday_rows.len());
-    for day in weekday_rows {
-        days.push((
-            weekday_of(&day.weekday)?,
-            SessionRole::try_from(day.role).map_err(|error| corrupt(&error))?,
-        ));
+/// Our exercise vocabulary, from its stored key.
+/// The gating role, from the pair of columns that carry it.
+///
+/// `None` for a test, which advances nothing and gates on nothing. A row with
+/// one half of the pair got past the `CHECK` that ties them together.
+fn gating_of(
+    intensity: Option<String>,
+    volume: Option<String>,
+) -> Result<Option<SessionRole>, StoreError> {
+    let side = |text: String| Relative::try_from(text).map_err(|error| corrupt(&error));
+    match (intensity, volume) {
+        (None, None) => Ok(None),
+        (Some(intensity), Some(volume)) => {
+            Ok(Some(SessionRole::new(side(intensity)?, side(volume)?)))
+        }
+        _ => Err(corrupt(
+            &"a gating role that is half an intensity and half a volume",
+        )),
     }
-    domain::prescription::Weekdays::new(days).map_err(|error| corrupt(&error))
 }
 
-/// Our exercise vocabulary, from its stored key.
 fn exercise_of(key: &str) -> Result<Exercise, StoreError> {
     use domain::gym::exercise::{DistanceExercise, DurationExercise, RepsExercise};
     if let Ok(reps) = RepsExercise::try_from(key.to_owned()) {
@@ -971,19 +966,19 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
     let mut rows = Vec::new();
 
     let mut statics = |slot: SlotId, fill: &Fill<StaticFill>| {
-        let mut push = |role, fixed: &StaticFill| {
+        let mut push = |intensity, fixed: &StaticFill| {
             rows.push(FlatFill {
                 slot,
-                role,
+                intensity,
                 exercise: fixed.exercise,
                 statics: Some((fixed.sets, fixed.reps)),
             });
         };
         match fill {
             Fill::Same(fixed) => push(None, fixed),
-            Fill::Alternating(per_role) => {
-                push(Some(SessionRole::Light), &per_role.light);
-                push(Some(SessionRole::Heavy), &per_role.heavy);
+            Fill::Alternating(by_intensity) => {
+                push(Some(Relative::Lower), &by_intensity.lower);
+                push(Some(Relative::Higher), &by_intensity.higher);
             }
         }
     };
@@ -991,19 +986,19 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
     statics(SlotId::Power, &fills.power);
 
     let mut single = |slot: SlotId, fill: &Fill<Exercise>| {
-        let mut push = |role, exercise| {
+        let mut push = |intensity, exercise| {
             rows.push(FlatFill {
                 slot,
-                role,
+                intensity,
                 exercise,
                 statics: None,
             });
         };
         match fill {
             Fill::Same(exercise) => push(None, *exercise),
-            Fill::Alternating(per_role) => {
-                push(Some(SessionRole::Light), per_role.light);
-                push(Some(SessionRole::Heavy), per_role.heavy);
+            Fill::Alternating(by_intensity) => {
+                push(Some(Relative::Lower), by_intensity.lower);
+                push(Some(Relative::Higher), by_intensity.higher);
             }
         }
     };
@@ -1032,7 +1027,7 @@ fn flatten(fills: &SlotFills) -> Vec<FlatFill> {
 /// One fill row, ready to write.
 struct FlatFill {
     slot: SlotId,
-    role: Option<SessionRole>,
+    intensity: Option<Relative>,
     exercise: Exercise,
     statics: Option<(RepCount, RepCount)>,
 }

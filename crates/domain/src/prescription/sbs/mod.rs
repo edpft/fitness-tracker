@@ -14,4 +14,4 @@ pub use chart::{
     InvalidSbs, SbsDay, SbsSession, WEEKS, advance, day, maximum_after, training_max_share,
     working_load,
 };
-pub use programme::Sbs;
+pub use programme::{GATING, Sbs};

@@ -26,22 +26,19 @@ use std::collections::BTreeMap;
 use application::{CyclingMesocycleStore, StoreError};
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingWeekdays, Interval,
-        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, Interval, PlannedRide, PowerZone,
+        Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
     plan::{Occupies, PlanName},
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    schedule::{Relative, SessionRole},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
 
-use super::{
-    corrupt,
-    gym_mesocycle::{weekday_key, weekday_of},
-    store_error,
-};
+use super::{corrupt, store_error};
 
 /// The authored cycling side, in SQLite.
 pub struct SqliteCyclingMesocycleStore {
@@ -95,34 +92,17 @@ pub(super) async fn in_force(
         let microcycles = read_microcycles(pool, row.id).await?;
         let microcycles = NonEmpty::new(microcycles)
             .map_err(|_| corrupt(&"a cycling mesocycle with no microcycle in it"))?;
-        let weekdays = read_weekdays(pool, row.id).await?;
-
-        let mesocycle = CyclingMesocycle::new(published, start, microcycles, weekdays)
+        let mesocycle = CyclingMesocycle::new(published, start, microcycles)
             .map_err(|error| corrupt(&error))?;
         mesocycles.push((row.plan, plan, CyclingMesocycleId::new(row.id), mesocycle));
     }
     Ok(mesocycles)
 }
 
-async fn read_weekdays(pool: &SqlitePool, id: i64) -> Result<CyclingWeekdays, StoreError> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT weekday AS "weekday!: String", session AS "session!: i64"
-        FROM cycling_weekday
-        WHERE mesocycle = ?
-        ORDER BY session
-        "#,
-        id
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error(&error))?;
-
-    let mut days = Vec::with_capacity(rows.len());
-    for row in rows {
-        days.push((weekday_of(&row.weekday)?, position_of(row.session)?));
-    }
-    CyclingWeekdays::new(days).map_err(|error| corrupt(&error))
+/// A ride's role, from the two columns that carry it.
+fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
+    let side = |text: &str| Relative::try_from(text.to_owned()).map_err(|error| corrupt(&error));
+    Ok(SessionRole::new(side(intensity)?, side(volume)?))
 }
 
 async fn read_microcycles(
@@ -162,6 +142,8 @@ async fn read_rides(
         r#"
         SELECT session AS "session!: i64",
                published_session AS "published_session!: i64",
+               intensity AS "intensity!: String",
+               volume AS "volume!: String",
                warm_up_seconds AS "warm_up_seconds!: i64",
                cool_down_seconds AS "cool_down_seconds: i64",
                effort_seconds AS "effort_seconds: i64"
@@ -206,6 +188,7 @@ async fn read_rides(
                 domain::cycling::CyclingSession::new(warm_up, ride, cool_down),
                 read_venues(pool, id, microcycle, row.session).await?,
                 published,
+                role_of(&row.intensity, &row.volume)?,
             ),
         );
     }
@@ -356,23 +339,6 @@ pub(super) async fn write(
     .map_err(|error| store_error(&error))?
     .id;
 
-    for (weekday, position) in mesocycle.weekdays().days() {
-        let key = weekday_key(*weekday);
-        let session = i64::from(position.as_u8());
-        sqlx::query!(
-            r"
-            INSERT INTO cycling_weekday (mesocycle, weekday, session)
-            VALUES (?, ?, ?)
-            ",
-            id,
-            key,
-            session
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| store_error(&error))?;
-    }
-
     for (at, microcycle) in mesocycle.microcycles().iter().enumerate() {
         let week = i64::try_from(at + 1)
             .map_err(|_| corrupt(&"more microcycles than the store can number"))?;
@@ -415,18 +381,22 @@ async fn write_ride(
     };
 
     let published = i64::from(planned.published_session());
+    let intensity = planned.role().intensity().as_str();
+    let volume = planned.role().volume().as_str();
     sqlx::query!(
         r"
         INSERT INTO cycling_ride (
             mesocycle, microcycle, session, published_session,
-            warm_up_seconds, cool_down_seconds, effort_seconds
+            intensity, volume, warm_up_seconds, cool_down_seconds, effort_seconds
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         mesocycle,
         microcycle,
         session,
         published,
+        intensity,
+        volume,
         warm_up,
         cool_down,
         effort

@@ -7,9 +7,10 @@
 
 use domain::measure::{Kg, RepCount};
 use domain::prescription::{
-    Anchor, AnchorProvenance, LoadSteps, PerRole, Percentage, SessionRole, SlotId, Target,
-    TopSetReps, WeekIndex, WeekKind,
+    Anchor, AnchorProvenance, ByIntensity, LoadSteps, Percentage, SlotId, Target, TopSetReps,
+    WeekIndex, WeekKind,
 };
+use domain::schedule::{Relative, SessionRole};
 use jiff::civil::Date;
 use proptest::prelude::*;
 
@@ -237,15 +238,21 @@ proptest! {
         prop_assert_eq!(target.satisfied_by(&performed), offset <= span);
     }
 
-    /// `PerRole` always answers for both roles, which is why it is a struct.
+    /// `ByIntensity` answers for every role, which is why it is a struct.
+    ///
+    /// **Four roles and two arms.** A role pairs an intensity with a volume and
+    /// only the intensity is asked here, so the two higher-intensity roles get
+    /// the same answer and so do the two lower ones. That is the point of the
+    /// type: what fills a gym slot differs because one session is heavier, not
+    /// because one is longer.
     #[test]
     fn per_role_answers_for_both_roles(light in 1_u32..20, heavy in 1_u32..20) {
         let (Ok(light_reps), Ok(heavy_reps)) = (RepCount::new(light), RepCount::new(heavy)) else {
             panic!("one and above is a rep count")
         };
-        let per_role = PerRole {
-            light: TopSetReps::new(light_reps),
-            heavy: TopSetReps::new(heavy_reps),
+        let per_role = ByIntensity {
+            lower: TopSetReps::new(light_reps),
+            higher: TopSetReps::new(heavy_reps),
         };
         for role in SessionRole::ALL {
             let reps = per_role.get(*role);
@@ -286,11 +293,16 @@ fn a_test_week_is_not_a_ladder_position() {
 
 #[test]
 fn session_roles_and_provenances_read_back() {
+    // A role is two axes and is persisted as two columns, so what reads back is
+    // each side on its own.
     for role in SessionRole::ALL {
-        let Ok(parsed) = SessionRole::try_from(role.as_str().to_owned()) else {
-            panic!("{role} is its own key")
+        let (Ok(intensity), Ok(volume)) = (
+            Relative::try_from(role.intensity().as_str().to_owned()),
+            Relative::try_from(role.volume().as_str().to_owned()),
+        ) else {
+            panic!("{role} is its own pair of keys")
         };
-        assert_eq!(parsed, *role);
+        assert_eq!(SessionRole::new(intensity, volume), *role);
     }
     for provenance in [
         AnchorProvenance::Tested,

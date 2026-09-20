@@ -11,12 +11,13 @@ mod support;
 use application::{CyclingMesocycleStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMicrocycle, CyclingSession, CyclingWeekdays, Interval,
-        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMicrocycle, CyclingSession, Interval, PlannedRide, PowerZone,
+        Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    schedule::{Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -87,7 +88,12 @@ macro_rules! run {
 }
 
 /// A ride of several zones in order, at one class.
-fn intervals(reference: &str, called: &str, published: u32) -> Fallible<PlannedRide> {
+fn intervals(
+    reference: &str,
+    called: &str,
+    published: u32,
+    role: SessionRole,
+) -> Fallible<PlannedRide> {
     let runs = [
         (PowerZone::One, 300),
         (PowerZone::Three, 600),
@@ -114,6 +120,7 @@ fn intervals(reference: &str, called: &str, published: u32) -> Fallible<PlannedR
         session,
         NonEmpty::of(RideVenue::new(reference, called)?, Vec::new()),
         published,
+        role,
     ))
 }
 
@@ -134,10 +141,29 @@ fn ftp_test() -> Fallible<PlannedRide> {
             )?],
         ),
         3,
+        // The test is the week's higher-intensity, shorter ride, whatever
+        // Peloton numbers it.
+        SessionRole::new(Relative::Higher, Relative::Lower),
     ))
 }
 
 fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
+    // **A test week rides the same two roles as any other.** The test is the
+    // shorter, harder ride and takes the Wednesday like every week's harder
+    // session; Peloton just files it second, where an ordinary week's shorter
+    // ride is first. Issue #63: a role places a ride, a published order does
+    // not.
+    let (first_role, second_role) = if test {
+        (
+            SessionRole::new(Relative::Lower, Relative::Higher),
+            SessionRole::new(Relative::Higher, Relative::Lower),
+        )
+    } else {
+        (
+            SessionRole::new(Relative::Higher, Relative::Lower),
+            SessionRole::new(Relative::Lower, Relative::Higher),
+        )
+    };
     let second = if test {
         ftp_test()?
     } else {
@@ -145,6 +171,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
             "414a518108ea4c5cada00ab9899a9d8d",
             "60 min Power Zone Ride",
             3,
+            second_role,
         )?
     };
     let rides = [
@@ -154,6 +181,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
                 "9f8f3af689cc4f0db9afa013d4676ed6",
                 "45 min Power Zone Endurance Ride",
                 1,
+                first_role,
             )?,
         ),
         // The operator's second ride of the week, taken from the published
@@ -171,10 +199,6 @@ fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMeso
         .iter()
         .map(|number| microcycle(*number, test))
         .collect::<Fallible<Vec<_>>>()?;
-    let weekdays = CyclingWeekdays::new(vec![
-        (Weekday::Wednesday, SessionPosition::new(1)?),
-        (Weekday::Sunday, SessionPosition::new(2)?),
-    ])?;
     Ok(CyclingMesocycle::new(
         ExternalProgramme::new(
             Provider::try_from("Peloton".to_owned())?,
@@ -182,8 +206,23 @@ fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMeso
         ),
         start,
         NonEmpty::new(weeks)?,
-        weekdays,
     )?)
+}
+
+/// The week cycling is given: Wednesday the harder, shorter ride, Sunday the
+/// easier, longer one. The operator's own, and what the programme used to
+/// carry a copy of.
+fn riding_week() -> Fallible<TrainingWeek> {
+    Ok(TrainingWeek::new(vec![
+        (
+            Weekday::Wednesday,
+            SessionRole::new(Relative::Higher, Relative::Lower),
+        ),
+        (
+            Weekday::Sunday,
+            SessionRole::new(Relative::Lower, Relative::Higher),
+        ),
+    ])?)
 }
 
 /// Every interval, every venue and the order of both, exactly as authored.
@@ -208,6 +247,10 @@ fn an_authored_mesocycle_round_trips_exactly() {
 
 /// A ride with no zones and no cool-down is the FTP test, and absent must not
 /// come back as zero: they are different claims and only one is true.
+///
+/// **And the test is ridden on the Wednesday.** Peloton files it second, which
+/// by published order is the Sunday; it is the higher-intensity, shorter
+/// session, and the Wednesday is that slot (issue #63).
 #[test]
 fn an_effort_round_trips_with_no_cool_down() {
     let (opened, _directory) = opened!();
@@ -217,15 +260,23 @@ fn an_effort_round_trips_with_no_cool_down() {
     let Ok(plan) = plan("autumn", vec![authored]) else {
         panic!("the fixture plan is valid")
     };
+    let Ok(week) = riding_week() else {
+        panic!("the fixture week is valid")
+    };
 
     run!(author(&opened, &plan));
 
-    let Some((_, _, read_back)) = run!(opened.cycling.on(date(2026, 9, 20))) else {
-        panic!("the test week covers its Sunday")
+    let Some((_, _, read_back)) = run!(opened.cycling.on(date(2026, 9, 16))) else {
+        panic!("the test week covers its Wednesday")
     };
-    let Some((_, _, ride)) = read_back.on(date(2026, 9, 20)) else {
-        panic!("Sunday rides the test")
+    let Some((_, position, ride)) = read_back.on(date(2026, 9, 16), &week) else {
+        panic!("Wednesday rides the test")
     };
+    assert_eq!(
+        position.as_u8(),
+        2,
+        "the test is the week's second session and still takes the Wednesday"
+    );
     assert_eq!(ride.session().cool_down(), None, "absent, not zero");
     assert!(
         matches!(ride.session().ride(), Ride::Effort(duration) if duration.as_seconds() == 1200),
@@ -331,7 +382,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
     // after the first one's last Sunday, the answer is the second's Wednesday.
     let (_, next) = run!(application::cycling::next_ride(
         &opened.cycling,
-        date(2026, 10, 19)
+        date(2026, 10, 19),
+        &riding_week().expect("the fixture week is valid")
     ));
     assert_eq!(next.date, date(2026, 10, 21));
     assert_eq!(next.microcycle, 1);
@@ -339,7 +391,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
     // And inside a mesocycle, the ride found is that mesocycle's own.
     let (_, next) = run!(application::cycling::next_ride(
         &opened.cycling,
-        date(2026, 10, 12)
+        date(2026, 10, 12),
+        &riding_week().expect("the fixture week is valid")
     ));
     assert_eq!(next.date, date(2026, 10, 14));
     assert_eq!(next.microcycle, 4, "the fourth week of the first mesocycle");

@@ -11,18 +11,37 @@
 use domain::{
     cycling::{
         BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle, CyclingSession,
-        CyclingWeekdays, Ftp, FtpProvenance, Interval, PerformedSession, PlannedRide, PowerZone,
-        Resistance, Ride, RideRecord, RideSample, RideVenue, SessionPosition, Speed, Watts,
-        ZoneProfile, bottom_level, diverges, mesocycles, partition, span, zones_lost,
+        Ftp, FtpProvenance, Interval, PerformedSession, PlannedRide, PowerZone, Resistance, Ride,
+        RideRecord, RideSample, RideVenue, SessionPosition, Speed, Watts, ZoneProfile,
+        bottom_level, diverges, mesocycles, partition, span, zones_lost,
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, SourceRecordId},
     measure::{Duration, Metres, PositiveDuration},
     normalised::{OperatorZone, StartedAt},
     plan::Occupies,
     provider::{ExternalProgramme, ProgrammeName, Provider},
+    schedule::{Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 use jiff::civil::{Weekday, date};
+
+/// The harder, shorter ride of a week; and the easier, longer one.
+const fn harder() -> SessionRole {
+    SessionRole::new(Relative::Higher, Relative::Lower)
+}
+
+const fn easier() -> SessionRole {
+    SessionRole::new(Relative::Lower, Relative::Higher)
+}
+
+/// The week cycling is given: Wednesday takes the harder ride, Sunday the
+/// longer one. What the programme used to carry as a weekday map of its own.
+fn riding_week() -> Result<TrainingWeek, Box<dyn std::error::Error>> {
+    Ok(TrainingWeek::new(vec![
+        (Weekday::Wednesday, harder()),
+        (Weekday::Sunday, easier()),
+    ])?)
+}
 
 /// A ride of one zone held for a stated time, at one venue.
 ///
@@ -33,6 +52,7 @@ fn ride(
     seconds: u64,
     called: &str,
     published_session: u32,
+    role: SessionRole,
 ) -> Result<PlannedRide, Box<dyn std::error::Error>> {
     let duration = PositiveDuration::from_seconds(seconds)?;
     let session = CyclingSession::new(
@@ -45,6 +65,7 @@ fn ride(
         session,
         NonEmpty::of(venue, Vec::new()),
         published_session,
+        role,
     ))
 }
 
@@ -53,11 +74,17 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
     let rides = [
         (
             SessionPosition::new(1)?,
-            ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride", 1)?,
+            ride(
+                PowerZone::Two,
+                1800,
+                "45 min Power Zone Endurance Ride",
+                1,
+                harder(),
+            )?,
         ),
         (
             SessionPosition::new(2)?,
-            ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3)?,
+            ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3, easier())?,
         ),
     ];
     Ok(CyclingMicrocycle::new(rides.into_iter().collect(), number)?)
@@ -79,15 +106,10 @@ fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
         microcycle(4)?,
         microcycle(5)?,
     ])?;
-    let weekdays = CyclingWeekdays::new(vec![
-        (Weekday::Wednesday, SessionPosition::new(1)?),
-        (Weekday::Sunday, SessionPosition::new(2)?),
-    ])?;
     Ok(CyclingMesocycle::new(
         build()?,
         date(2026, 9, 21),
         microcycles,
-        weekdays,
     )?)
 }
 
@@ -128,7 +150,7 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
     // 2026-09-23 is the Wednesday of the first week, 2026-10-11 the Sunday of
     // the third.
     let (number, position, ride) = programme
-        .on(date(2026, 9, 23))
+        .on(date(2026, 9, 23), &riding_week().expect("a week"))
         .expect("the first Wednesday rides");
     assert_eq!(number, 1);
     assert_eq!(position.as_u8(), 1);
@@ -138,7 +160,7 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
     );
 
     let (number, position, ride) = programme
-        .on(date(2026, 10, 11))
+        .on(date(2026, 10, 11), &riding_week().expect("a week"))
         .expect("the third Sunday rides");
     assert_eq!(number, 3, "three weeks after the start is microcycle three");
     assert_eq!(position.as_u8(), 2, "Sunday is the second ride of the week");
@@ -183,7 +205,11 @@ fn a_week_counts_its_own_sessions_and_keeps_the_published_numbers() {
 #[test]
 fn a_day_outside_the_programme_rides_nothing() {
     let programme = programme().expect("the fixture programme is valid");
-    assert_eq!(programme.on(date(2026, 9, 25)), None, "Friday is the gym's");
+    assert_eq!(
+        programme.on(date(2026, 9, 25), &riding_week().expect("a week")),
+        None,
+        "Friday is the gym's"
+    );
     assert_eq!(
         programme.microcycle_of(date(2026, 9, 20)),
         None,
@@ -202,60 +228,179 @@ fn a_day_outside_the_programme_rides_nothing() {
 fn the_next_riding_day_is_found_from_any_date() {
     let programme = programme().expect("the fixture programme is valid");
     assert_eq!(
-        programme.next_riding_day(date(2026, 9, 28)),
+        programme.next_riding_day(date(2026, 9, 28), &riding_week().expect("a week")),
         Some(date(2026, 9, 30)),
     );
     assert_eq!(
-        programme.next_riding_day(date(2026, 9, 1)),
+        programme.next_riding_day(date(2026, 9, 1), &riding_week().expect("a week")),
         Some(date(2026, 9, 23)),
         "a date before the start finds the programme's own first ride",
     );
 }
 
-/// The one thing the parts cannot guarantee between them. A weekday map naming
-/// a session no microcycle holds would author a Wednesday nothing answers for.
+/// The one thing the parts cannot guarantee between them. A mesocycle whose
+/// weeks ride different roles would leave a slot with nothing to put in it, and
+/// nothing here could say which week was the mistake.
 #[test]
-fn a_weekday_riding_a_session_no_microcycle_holds_is_refused() {
-    let microcycles = NonEmpty::new(vec![microcycle(1).expect("a microcycle")])
-        .expect("one microcycle is enough");
-    let weekdays = CyclingWeekdays::new(vec![(
-        Weekday::Friday,
-        SessionPosition::new(3).expect("session three"),
-    )])
-    .expect("one day is a week");
+fn microcycles_that_ride_different_roles_are_refused() {
+    let odd = CyclingMicrocycle::new(
+        std::iter::once((
+            SessionPosition::new(1).expect("session one"),
+            ride(PowerZone::Two, 1800, "45 min Power Zone Ride", 1, easier())
+                .expect("a planned ride"),
+        ))
+        .collect(),
+        2,
+    )
+    .expect("one ride is a microcycle");
+
+    let microcycles =
+        NonEmpty::new(vec![microcycle(1).expect("a microcycle"), odd]).expect("two microcycles");
 
     let refused = CyclingMesocycle::new(
         build().expect("the published programme"),
         date(2026, 9, 21),
         microcycles,
-        weekdays,
     );
     assert!(
         refused.is_err(),
-        "the microcycle holds a first and a second"
+        "the first week rides two roles and the second rides one"
     );
 }
 
-/// Two weekdays riding one session would prescribe the same ride twice in a
-/// week, and one weekday riding two sessions is a day that cannot answer.
+/// **A mesocycle may end in a test week, and its roles do not change when it
+/// does.**
+///
+/// Found on the operator's own store, 2026-09-20: the autumn's second cycling
+/// mesocycle runs three ordinary weeks and a test week. Every one of them rides
+/// one shorter, harder session and one longer, easier one, and the harder one
+/// takes the Wednesday throughout. What differs is only which *published*
+/// session that is — Peloton files the FTP test second, where an ordinary
+/// week's shorter ride is first. Comparing the weeks in session order refused
+/// the programme he is actually running.
 #[test]
-fn a_weekday_map_names_each_day_and_each_session_once() {
-    let first = SessionPosition::new(1).expect("session one");
-    let second = SessionPosition::new(2).expect("session two");
+fn a_test_week_rides_the_same_roles_at_different_positions() {
+    let ordinary = microcycle(1).expect("an ordinary microcycle");
+    let test_week = CyclingMicrocycle::new(
+        [
+            (
+                SessionPosition::new(1).expect("session one"),
+                ride(
+                    PowerZone::Two,
+                    2700,
+                    "45 min Power Zone Endurance Ride",
+                    1,
+                    easier(),
+                )
+                .expect("a planned ride"),
+            ),
+            (
+                SessionPosition::new(2).expect("session two"),
+                ride(PowerZone::Four, 1200, "20 min FTP Test Ride", 3, harder())
+                    .expect("a planned ride"),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        2,
+    )
+    .expect("two rides is a microcycle");
 
-    assert!(
-        CyclingWeekdays::new(vec![(Weekday::Wednesday, first), (Weekday::Sunday, first)]).is_err(),
-        "one session, two days",
+    let accepted = CyclingMesocycle::new(
+        build().expect("the published programme"),
+        date(2026, 9, 21),
+        NonEmpty::new(vec![ordinary, test_week]).expect("two microcycles"),
     );
     assert!(
-        CyclingWeekdays::new(vec![
-            (Weekday::Wednesday, first),
-            (Weekday::Wednesday, second)
-        ])
-        .is_err(),
-        "one day, two sessions",
+        accepted.is_ok(),
+        "both weeks ride a harder and an easier session, which is what the slots need"
     );
-    assert!(CyclingWeekdays::new(Vec::new()).is_err(), "no day at all");
+}
+
+/// Two rides that are the same thing relative to each other leave the planner
+/// no way to say which of them Wednesday gets.
+#[test]
+fn a_microcycle_rides_each_role_once() {
+    let repeated = CyclingMicrocycle::new(
+        [
+            (
+                SessionPosition::new(1).expect("session one"),
+                ride(PowerZone::Two, 1800, "45 min Power Zone Ride", 1, harder())
+                    .expect("a planned ride"),
+            ),
+            (
+                SessionPosition::new(2).expect("session two"),
+                ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3, harder())
+                    .expect("a planned ride"),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        1,
+    );
+    assert!(repeated.is_err(), "both rides are the harder one");
+}
+
+/// **A role places a ride, and a published order does not.** Peloton puts the
+/// FTP test second in its test microcycle, which by published order lands it on
+/// the Sunday; it is the higher-intensity, shorter session, so the Wednesday
+/// slot takes it.
+#[test]
+fn the_shorter_harder_ride_takes_the_wednesday_whatever_its_position() {
+    let test_week = CyclingMicrocycle::new(
+        [
+            (
+                SessionPosition::new(1).expect("session one"),
+                ride(
+                    PowerZone::Two,
+                    2700,
+                    "45 min Power Zone Endurance Ride",
+                    1,
+                    easier(),
+                )
+                .expect("a planned ride"),
+            ),
+            (
+                SessionPosition::new(2).expect("session two"),
+                ride(PowerZone::Four, 1200, "20 min FTP Test Ride", 2, harder())
+                    .expect("a planned ride"),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        1,
+    )
+    .expect("two rides is a microcycle");
+
+    let mesocycle = CyclingMesocycle::new(
+        build().expect("the published programme"),
+        date(2026, 9, 21),
+        NonEmpty::new(vec![test_week]).expect("one microcycle"),
+    )
+    .expect("the test microcycle is valid");
+
+    let week = riding_week().expect("a week");
+    let (_, position, wednesday) = mesocycle
+        .on(date(2026, 9, 23), &week)
+        .expect("the Wednesday rides");
+    assert_eq!(
+        wednesday.at().first().called(),
+        "20 min FTP Test Ride",
+        "the test is the shorter, harder ride and the Wednesday is that slot"
+    );
+    assert_eq!(
+        position.as_u8(),
+        2,
+        "and it is still the week's second session, which is not what places it"
+    );
+
+    let (_, _, sunday) = mesocycle
+        .on(date(2026, 9, 27), &week)
+        .expect("the Sunday rides");
+    assert_eq!(
+        sunday.at().first().called(),
+        "45 min Power Zone Endurance Ride"
+    );
 }
 
 /// A mesocycle occupies calendar weeks from its start, and `Occupies` is what
@@ -278,8 +423,14 @@ fn a_cycling_mesocycle_occupies_the_weeks_it_runs() {
 /// in, and it is applied when a session is prescribed rather than stored.
 #[test]
 fn the_operator_s_own_cool_down_is_added_to_the_class_s() {
-    let planned = ride(PowerZone::Two, 1800, "45 min Power Zone Endurance Ride", 1)
-        .expect("the fixture ride is valid");
+    let planned = ride(
+        PowerZone::Two,
+        1800,
+        "45 min Power Zone Endurance Ride",
+        1,
+        harder(),
+    )
+    .expect("the fixture ride is valid");
     let session = planned.session();
     let extended =
         session.with_extra_cool_down(PositiveDuration::from_seconds(300).expect("five minutes"));
@@ -698,16 +849,10 @@ fn a_date_months_after_the_start_resolves_to_the_right_microcycle() {
             .expect("thirteen microcycles are valid"),
     )
     .expect("thirteen is non-empty");
-    let weekdays = CyclingWeekdays::new(vec![(
-        Weekday::Wednesday,
-        SessionPosition::new(1).expect("session one"),
-    )])
-    .expect("one day is a week");
     let long = CyclingMesocycle::new(
         build().expect("the published programme"),
         date(2026, 9, 21),
         microcycles,
-        weekdays,
     )
     .expect("the programme is valid");
 

@@ -552,16 +552,16 @@ pub fn parameters_in_force(
     println!("how this build programmes, which is fixed and not authored");
     println!(
         "  heavy top set × {}; light top set × {}",
-        programming.top_set_reps.heavy, programming.top_set_reps.light,
+        programming.top_set_reps.higher, programming.top_set_reps.lower,
     );
     println!(
         "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
-        programming.back_off.heavy.sets,
-        programming.back_off.heavy.reps,
-        programming.back_off.heavy.of_top_set,
-        programming.back_off.light.sets,
-        programming.back_off.light.reps,
-        programming.back_off.light.of_top_set,
+        programming.back_off.higher.sets,
+        programming.back_off.higher.reps,
+        programming.back_off.higher.of_top_set,
+        programming.back_off.lower.sets,
+        programming.back_off.lower.reps,
+        programming.back_off.lower.of_top_set,
     );
     println!(
         "  strength slots {} × {}; hypertrophy slots {} × {}",
@@ -1279,16 +1279,22 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 
 // --- The operator's week ----------------------------------------------------
 
-/// The slots of a week, as a line per weekday, each saying whose it is.
+/// The slots of a week, as a line per weekday, each saying whose it is and
+/// what it takes.
 ///
 /// Grouped by day rather than listed flat, because "Monday evening, Wednesday
 /// evening" is how the week is said and a flat list of seven is not a week. The
 /// slots arrive ordered by weekday then part, so grouping is a fold rather than
 /// a sort.
+///
+/// **The role reads as the operator says it**, not as the type prints it: a
+/// slot is the harder and shorter session of its discipline's week, or the
+/// easier and longer one. "higher intensity, lower volume" is what the domain
+/// means by that and is a mouthful in a list of four lines.
 fn week_slots(
     slots: &std::collections::BTreeMap<
         domain::schedule::TrainingSlot,
-        domain::schedule::Discipline,
+        domain::schedule::Allocation,
     >,
 ) {
     if slots.is_empty() {
@@ -1297,8 +1303,13 @@ fn week_slots(
     }
 
     let mut days: Vec<(jiff::civil::Weekday, Vec<String>)> = Vec::new();
-    for (slot, discipline) in slots {
-        let entry = format!("{} ({discipline})", slot.part);
+    for (slot, allocation) in slots {
+        let entry = format!(
+            "{} ({}, {})",
+            slot.part,
+            allocation.discipline,
+            said(allocation.role)
+        );
         match days.last_mut() {
             Some((day, parts)) if *day == slot.weekday => parts.push(entry),
             _ => days.push((slot.weekday, vec![entry])),
@@ -1308,6 +1319,17 @@ fn week_slots(
     for (day, parts) in days {
         let name = format!("{day:?}").to_lowercase();
         println!("    {name:<10}{}", parts.join(", "));
+    }
+}
+
+/// A role in the words the prompt asks for it in.
+const fn said(role: domain::schedule::SessionRole) -> &'static str {
+    use domain::schedule::Relative;
+    match (role.intensity(), role.volume()) {
+        (Relative::Higher, Relative::Lower) => "harder, shorter",
+        (Relative::Lower, Relative::Higher) => "easier, longer",
+        (Relative::Higher, Relative::Higher) => "harder, longer",
+        (Relative::Lower, Relative::Lower) => "easier, shorter",
     }
 }
 

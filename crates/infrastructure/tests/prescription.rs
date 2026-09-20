@@ -11,7 +11,8 @@ use application::{
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::prescription::{Block, PrescribedItem, SessionRole, SlotId, WeekKind};
+use domain::prescription::{Block, PrescribedItem, SlotId, WeekKind};
+use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
@@ -34,6 +35,9 @@ type Prescriber = Prescribing<
 async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -115,7 +119,10 @@ fn a_workout_is_issued_in_fatigue_order() {
     let issued = run!(prescriber.prescribe(monday()));
 
     assert_eq!(issued.issuance, Issuance::Issued);
-    assert_eq!(issued.workout.session_role(), SessionRole::Light);
+    assert_eq!(
+        issued.workout.session_role(),
+        SessionRole::new(Relative::Lower, Relative::Higher)
+    );
     assert!(matches!(issued.workout.week(), WeekKind::Climbing(_)));
 
     // Blocks never go backwards through the session.

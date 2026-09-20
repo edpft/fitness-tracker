@@ -24,7 +24,8 @@ use application::{
 };
 use domain::{
     measure::RepCount,
-    prescription::{Mesocycle, SessionRole, Skip, authored::Shape},
+    prescription::{Mesocycle, Skip, authored::Shape},
+    schedule::{Relative, SessionRole},
 };
 use infrastructure::{SqliteGymMesocycleStore, SqlitePlanStore, connect};
 use jiff::civil::Date;
@@ -40,7 +41,7 @@ fn mesocycle(start: Date, weeks: u32) -> Fallible<Mesocycle> {
     let answers = programme::authored(
         start,
         Shape::Linear {
-            gating: SessionRole::Heavy,
+            gating: SessionRole::new(Relative::Higher, Relative::Lower),
             weeks,
         },
     )?;
@@ -67,6 +68,9 @@ fn test_week(start: Date, skipping: &[Skip]) -> Fallible<Mesocycle> {
 async fn empty() -> Fallible<(SqliteGymMesocycleStore, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
     Ok((
         SqliteGymMesocycleStore::new(pool, corpus::zone()?),
         directory,
@@ -77,6 +81,9 @@ async fn empty() -> Fallible<(SqliteGymMesocycleStore, tempfile::TempDir)> {
 async fn autumn() -> Fallible<(SqliteGymMesocycleStore, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
+    // A block's calendar is rebuilt from the operator's week on every read
+    // (issue #63), so a store with no week in it cannot hold a plan.
+    programme::record_the_week(&pool).await?;
 
     let opening = Date::constant(2026, 9, 14);
     let plan = programme::named_plan(
