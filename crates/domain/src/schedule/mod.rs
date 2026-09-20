@@ -329,7 +329,7 @@ impl Alteration {
     /// Why, which only a holiday has. An unexplained trip is unreadable six
     /// months later — § II.2's obligation on an edit overlay, which this is the
     /// authored-data analogue of. Illness needs no explanation beyond itself.
-    pub fn reason(&self) -> Option<&str> {
+    pub const fn reason(&self) -> Option<&str> {
         match &self.absence {
             Absence::Holiday { reason, .. } => Some(reason.as_str()),
             Absence::Illness => None,
