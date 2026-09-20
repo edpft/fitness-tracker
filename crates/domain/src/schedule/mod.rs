@@ -52,6 +52,8 @@
 //!
 //! ## What an absence can say
 //!
+//! - **a holiday that keeps the slots** — away, perhaps in another zone,
+//!   training at the usual times.
 //! - **a holiday with no slots** — unable to train at all.
 //! - **a holiday with different slots** — able to train at times the ordinary
 //!   pattern does not offer. A Friday evening becomes a Saturday morning, which
@@ -59,6 +61,10 @@
 //!   is said: keep the morning, lose the rest.
 //! - **illness** — unable to train at all, wherever the operator is. If it runs
 //!   on, the illness is extended rather than a second one recorded beside it.
+//!
+//! A holiday's `None` slots are "the ordinary week stands" and `Some` of an
+//! empty set is "none at all". Those are different facts, and collapsing them
+//! would make training away as usual cancel every session of the trip.
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
@@ -245,11 +251,17 @@ impl TrainingPattern {
 /// Why a run of days departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Absence {
-    /// Out of the routine. `None` is "the zone is unchanged", which is not the
-    /// same as any zone; an empty set of slots is "no room to train at all".
+    /// Out of the routine. A `None` zone is "the zone is unchanged", which is
+    /// not the same as any zone; `None` slots are "the ordinary week stands",
+    /// and an empty set is "no room to train at all".
+    ///
+    /// **Only a holiday is asked why.** It has somewhere to be and a week to
+    /// rearrange, so "Rome" is what makes the rearrangement readable six months
+    /// later. Illness explains itself.
     Holiday {
         zone: Option<OperatorZone>,
-        slots: BTreeMap<TrainingSlot, Discipline>,
+        slots: Option<BTreeMap<TrainingSlot, Discipline>>,
+        reason: String,
     },
     /// Too ill to train. Bad enough to prevent training is what makes it
     /// illness, so it has no slots, and where the operator is does not matter.
@@ -274,19 +286,14 @@ pub struct Alteration {
     start: Date,
     days: NonZeroU8,
     absence: Absence,
-    /// Why. An unexplained override is unreadable six months later — § II.2's
-    /// obligation on an edit overlay, which this is the authored-data analogue
-    /// of.
-    reason: String,
 }
 
 impl Alteration {
-    pub const fn new(start: Date, days: NonZeroU8, absence: Absence, reason: String) -> Self {
+    pub const fn new(start: Date, days: NonZeroU8, absence: Absence) -> Self {
         Self {
             start,
             days,
             absence,
-            reason,
         }
     }
 
@@ -310,16 +317,23 @@ impl Alteration {
         }
     }
 
-    /// The slots while it lasts, which replace the ordinary week's.
-    pub fn slots(&self) -> &BTreeMap<TrainingSlot, Discipline> {
+    /// The slots while it lasts, which replace the ordinary week's. `None`
+    /// when the ordinary week stands.
+    pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Discipline>> {
         match &self.absence {
-            Absence::Holiday { slots, .. } => slots,
-            Absence::Illness => &NO_SLOTS,
+            Absence::Holiday { slots, .. } => slots.as_ref(),
+            Absence::Illness => Some(&NO_SLOTS),
         }
     }
 
-    pub fn reason(&self) -> &str {
-        &self.reason
+    /// Why, which only a holiday has. An unexplained trip is unreadable six
+    /// months later — § II.2's obligation on an edit overlay, which this is the
+    /// authored-data analogue of. Illness needs no explanation beyond itself.
+    pub const fn reason(&self) -> Option<&str> {
+        match &self.absence {
+            Absence::Holiday { reason, .. } => Some(reason.as_str()),
+            Absence::Illness => None,
+        }
     }
 
     /// The last day this covers.
@@ -422,7 +436,9 @@ impl Diary {
             if let Some(zone) = alteration.zone() {
                 availability.zone.clone_from(zone);
             }
-            availability.slots.clone_from(alteration.slots());
+            if let Some(slots) = alteration.slots() {
+                availability.slots.clone_from(slots);
+            }
         }
 
         Some(availability)

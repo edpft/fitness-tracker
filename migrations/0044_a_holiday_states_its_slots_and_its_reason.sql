@@ -1,0 +1,43 @@
+ALTER TABLE alteration_slot RENAME TO alteration_slot_old;
+ALTER TABLE alteration      RENAME TO alteration_old;
+
+CREATE TABLE alteration (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    authored_at  TEXT    NOT NULL,
+    start_date   TEXT    NOT NULL UNIQUE,
+    days         INTEGER NOT NULL CHECK (days > 0 AND days <= 255),
+    absence      TEXT    NOT NULL CHECK (absence IN ('holiday', 'illness')),
+    zone         TEXT    CHECK (zone IS NULL OR absence = 'holiday'),
+    states_slots INTEGER NOT NULL CHECK (states_slots IN (0, 1)),
+    reason       TEXT    CHECK (reason IS NULL OR length(trim(reason)) > 0),
+    CHECK (absence = 'holiday' OR states_slots = 1),
+    CHECK ((absence = 'holiday') = (reason IS NOT NULL))
+) STRICT;
+
+CREATE TABLE alteration_slot (
+    alteration INTEGER NOT NULL REFERENCES alteration(id) ON DELETE CASCADE,
+    weekday    TEXT    NOT NULL
+        CHECK (weekday IN ('monday', 'tuesday', 'wednesday', 'thursday',
+                           'friday', 'saturday', 'sunday')),
+    part       TEXT    NOT NULL
+        CHECK (part IN ('morning', 'afternoon', 'evening')),
+    discipline TEXT    NOT NULL CHECK (discipline IN ('gym', 'cycling')),
+
+    PRIMARY KEY (alteration, weekday, part)
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO alteration (
+    id, authored_at, start_date, days, absence, zone, states_slots, reason
+)
+    SELECT id, authored_at, start_date, days, absence, zone, 1,
+           CASE absence WHEN 'holiday' THEN reason END
+    FROM alteration_old;
+
+INSERT INTO alteration_slot (alteration, weekday, part, discipline)
+    SELECT alteration, weekday, part, discipline
+    FROM alteration_slot_old;
+
+DROP TABLE alteration_slot_old;
+DROP TABLE alteration_old;
+
+CREATE INDEX alteration_by_start ON alteration (start_date);

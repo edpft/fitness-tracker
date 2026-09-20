@@ -205,6 +205,12 @@ fn yes(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "y" | "yes")
 }
 
+/// Only an explicit no. An empty line takes the offered default, which for
+/// "are you able to train" is yes — so a stray return cannot cancel a week.
+fn no(typed: &str) -> bool {
+    matches!(typed.to_lowercase().as_str(), "n" | "no")
+}
+
 async fn store(database: &Path) -> Result<SqliteDiaryStore, Failure> {
     let pool = connect(database)
         .await
@@ -254,8 +260,6 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
     println!("Which absence departs from the ordinary pattern: a holiday, or an illness?");
-    println!("  A session moved within its window needs nothing recorded, and a lasting");
-    println!("  change is `fitness schedule add`.");
 
     let start = ask_until("From which date? ", parse_date)?;
     let days = ask_until("How many days? [1] ", |typed| {
@@ -284,30 +288,42 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             }
         };
 
-        // Away from the gym and the bike, so the ordinary slots never simply
-        // carry over: either there is no room at all, which is the commonest
-        // holiday and one keystroke, or the trip's own slots are walked through.
-        let slots = if yes(&ask("Can you train at all while away? [no] ")?) {
-            ask_slots(
+        // **The three cases, asked so the commonest is one keystroke.** Training
+        // as usual, having no room at all, and having different slots are three
+        // different facts. Being unable to train is much the most common of them,
+        // so it is asked first and answered outright, and the walk through the
+        // days only happens for the case that actually needs it.
+        let slots = if no(&ask("Are you able to train during this period? [yes] ")?) {
+            Some(BTreeMap::new())
+        } else if yes(&ask("Does this change when you can train? [no] ")?) {
+            Some(ask_slots(
                 "Which parts of each day, while it lasts?",
                 &covered_weekdays(start, days),
-            )?
+            )?)
         } else {
-            BTreeMap::new()
+            None
         };
 
-        Absence::Holiday { zone, slots }
+        // **Only a holiday is asked why.** It has somewhere to be and a week to
+        // rearrange, and "Rome" is what makes the rearrangement readable six
+        // months later. That the operator was too ill to train is the whole of
+        // an illness, and the previous question already asked it.
+        let reason = ask_until("Why? ", |typed| {
+            if typed.is_empty() {
+                Err("a trip nobody explained is unreadable six months later".to_owned())
+            } else {
+                Ok(typed.to_owned())
+            }
+        })?;
+
+        Absence::Holiday {
+            zone,
+            slots,
+            reason,
+        }
     };
 
-    let reason = ask_until("Why? ", |typed| {
-        if typed.is_empty() {
-            Err("an alteration nobody explained is unreadable six months later".to_owned())
-        } else {
-            Ok(typed.to_owned())
-        }
-    })?;
-
-    let alteration = Alteration::new(start, days, absence, reason);
+    let alteration = Alteration::new(start, days, absence);
 
     store(database)
         .await?
@@ -333,7 +349,7 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
-    use super::{covered_weekdays, parse_parts, yes};
+    use super::{covered_weekdays, no, parse_parts, yes};
     use domain::schedule::PartOfDay;
     use jiff::civil::{Weekday, date};
 
@@ -393,13 +409,19 @@ mod tests {
         }
     }
 
-    /// **An empty line takes the offered default, which is always no.** A
-    /// stray return cannot record an illness, and cannot start a walk through
-    /// the days of a holiday.
+    /// **An empty line takes the offered default, and the defaults differ.**
+    ///
+    /// "Too ill to train" defaults to no, so a stray return cannot record an
+    /// illness; "are you able to train" defaults to yes, so it cannot cancel a
+    /// week's training; "does this change when you can train" defaults to no,
+    /// so it cannot rewrite it either.
     #[test]
-    fn an_empty_answer_is_not_a_yes() {
+    fn an_empty_answer_is_neither_a_yes_nor_a_no() {
         assert!(!yes(""), "an empty line does not agree");
+        assert!(!no(""), "and does not refuse");
+
         assert!(yes("y") && yes("yes") && yes("YES"));
+        assert!(no("n") && no("no") && no("No"));
     }
 
     /// `-` and an empty line both mean no part of this day.

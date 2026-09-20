@@ -17,6 +17,11 @@
 *.db-shm
 *.db-wal
 
+# And the copies `connect` takes before migrating one (#182), whose names end in
+# a timestamp rather than in `.db`. The pattern above does not reach them, and
+# one reached `main` in #186 — 500KB of the operator's beta store.
+*.db.before-*
+
 # The authored programme. Same privacy guard as the databases above: it names
 # the operator's block, their anchor and the dates they are away, and it is
 # personal to whoever runs the tool. The fixture the tests author from lives in

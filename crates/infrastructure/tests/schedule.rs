@@ -95,9 +95,9 @@ fn a_pattern_and_its_alterations_round_trip() {
         days!(1),
         Absence::Holiday {
             zone: None,
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
+            reason: "away, and unable to train".to_owned(),
         },
-        "away, and unable to train".to_owned(),
     );
 
     run!(store.record_pattern(&pattern));
@@ -135,16 +135,11 @@ fn an_illness_is_not_a_holiday() {
         days!(3),
         Absence::Holiday {
             zone: Some(zone!("Europe/Rome")),
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
+            reason: "Rome".to_owned(),
         },
-        "Rome".to_owned(),
     );
-    let illness = Alteration::new(
-        date(2026, 9, 19),
-        days!(2),
-        Absence::Illness,
-        "a cold".to_owned(),
-    );
+    let illness = Alteration::new(date(2026, 9, 19), days!(2), Absence::Illness);
 
     run!(store.record_alteration(&holiday));
     run!(store.record_alteration(&illness));
@@ -178,6 +173,46 @@ fn an_illness_is_not_a_holiday() {
     );
 }
 
+/// A holiday's slots are `Option`: absent means the ordinary week stands —
+/// away, training as usual — and present-but-empty means no room to train at
+/// all. Both are zero rows in `alteration_slot`, so storage has to carry the
+/// difference some other way, and collapsing them would make training away
+/// silently cancel every session of a trip.
+#[test]
+fn training_away_as_usual_is_not_a_holiday_with_no_room() {
+    let (store, _directory) = opened!();
+
+    run!(store.record_pattern(&TrainingPattern::new(
+        date(2026, 8, 24),
+        zone!("Europe/London"),
+        ordinary_pattern()
+    )));
+
+    let as_usual = Alteration::new(
+        date(2026, 10, 5),
+        days!(1),
+        Absence::Holiday {
+            zone: Some(zone!("Europe/Rome")),
+            slots: None,
+            reason: "in Rome, training as usual".to_owned(),
+        },
+    );
+    run!(store.record_alteration(&as_usual));
+
+    let diary = run!(store.diary());
+    assert_eq!(
+        diary.alterations(),
+        [as_usual],
+        "the ordinary week still stands"
+    );
+
+    let Some(in_rome) = diary.on(date(2026, 10, 5)) else {
+        panic!("the diary answers a date it covers")
+    };
+    assert_eq!(in_rome.zone.id(), "Europe/Rome");
+    assert!(in_rome.open(date(2026, 10, 5)), "a Monday in Rome is open");
+}
+
 /// Re-stating an absence from the same date corrects its kind too.
 #[test]
 fn restating_an_absence_can_make_it_illness() {
@@ -188,16 +223,15 @@ fn restating_an_absence_can_make_it_illness() {
         days!(2),
         Absence::Holiday {
             zone: None,
-            slots: slots(&[(Weekday::Monday, PartOfDay::Morning, Discipline::Cycling)]),
+            slots: Some(slots(&[(
+                Weekday::Monday,
+                PartOfDay::Morning,
+                Discipline::Cycling
+            )])),
+            reason: "away".to_owned(),
         },
-        "away".to_owned(),
     )));
-    let corrected = Alteration::new(
-        date(2026, 9, 14),
-        days!(2),
-        Absence::Illness,
-        "ill, not away".to_owned(),
-    );
+    let corrected = Alteration::new(date(2026, 9, 14), days!(2), Absence::Illness);
     run!(store.record_alteration(&corrected));
 
     let diary = run!(store.diary());
@@ -223,9 +257,9 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
         days!(1),
         Absence::Holiday {
             zone: None,
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
+            reason: "away, and unable to train".to_owned(),
         },
-        "away, and unable to train".to_owned(),
     )));
 
     let diary = run!(store.diary());
@@ -338,12 +372,12 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
         days!(7),
         Absence::Holiday {
             zone: None,
-            slots: slots(&[
+            slots: Some(slots(&[
                 (Weekday::Saturday, PartOfDay::Morning, Discipline::Gym),
                 (Weekday::Sunday, PartOfDay::Morning, Discipline::Cycling),
-            ]),
+            ])),
+            reason: "away; the hotel gym is only free at the weekend".to_owned(),
         },
-        "away; the hotel gym is only free at the weekend".to_owned(),
     )));
 
     let diary = run!(store.diary());

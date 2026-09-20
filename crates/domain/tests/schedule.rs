@@ -67,9 +67,9 @@ fn september() -> Built<Diary> {
         days(7)?,
         Absence::Holiday {
             zone: None,
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
+            reason: "away with family; no free weights where we are staying".to_owned(),
         },
-        "away with family; no free weights where we are staying".to_owned(),
     );
 
     // Away, unable to train, and in another country.
@@ -78,9 +78,9 @@ fn september() -> Built<Diary> {
         days(4)?,
         Absence::Holiday {
             zone: Some(zone("Europe/Rome")?),
-            slots: BTreeMap::new(),
+            slots: Some(BTreeMap::new()),
+            reason: "away with family in Rome".to_owned(),
         },
-        "away with family in Rome".to_owned(),
     );
 
     Ok(Diary::new(vec![schedule], vec![first, second]))
@@ -287,9 +287,9 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
             days(1).expect("one day"),
             Absence::Holiday {
                 zone: None,
-                slots: morning_only,
+                slots: Some(morning_only),
+                reason: "trains in the morning, away from lunchtime".to_owned(),
             },
-            "trains in the morning, away from lunchtime".to_owned(),
         )],
     );
 
@@ -564,7 +564,6 @@ fn illness_empties_the_day_and_keeps_the_zone() {
         saturday,
         days(1).expect("one day"),
         Absence::Illness,
-        "a cold".to_owned(),
     ));
     let diary = Diary::new(
         vec![TrainingPattern::new(
@@ -578,5 +577,5 @@ fn illness_empties_the_day_and_keeps_the_zone() {
     let ill = diary.on(saturday).expect("a schedule is in force");
     assert_eq!(ill.zone, rome, "still in Rome");
     assert!(ill.slots.is_empty(), "no room to train while ill");
-    assert_eq!(diary.alterations()[2].slots(), &BTreeMap::new());
+    assert_eq!(diary.alterations()[2].slots(), Some(&BTreeMap::new()));
 }

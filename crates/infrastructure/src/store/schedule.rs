@@ -62,6 +62,12 @@ fn discipline_of(text: &str) -> Result<Discipline, StoreError> {
     Discipline::try_from(text.to_owned()).map_err(|error| corrupt(&error))
 }
 
+/// A holiday's reason, which the schema requires it to have and forbids an
+/// illness. Only a row written round the check could be missing one.
+fn reason_of(text: Option<String>) -> Result<String, StoreError> {
+    text.ok_or_else(|| corrupt(&"a holiday with no reason"))
+}
+
 impl DiaryStore for SqliteDiaryStore {
     async fn diary(&self) -> Result<Diary, StoreError> {
         let weeks = sqlx::query!(
@@ -108,7 +114,7 @@ impl DiaryStore for SqliteDiaryStore {
 
         let booked = sqlx::query!(
             r"
-            SELECT id, start_date, days, absence, zone, reason
+            SELECT id, start_date, days, absence, zone, states_slots, reason
             FROM alteration
             ORDER BY start_date
             "
@@ -126,6 +132,13 @@ impl DiaryStore for SqliteDiaryStore {
 
             let absence = match alteration.absence.as_str() {
                 "illness" => Absence::Illness,
+                "holiday" if alteration.states_slots == 0 => Absence::Holiday {
+                    zone: alteration.zone.as_deref().map(zone_of).transpose()?,
+                    slots: None,
+                    reason: reason_of(alteration.reason)?,
+                },
+                // Stated slots, which may be none: zero rows either way, so
+                // `states_slots` is what tells "none" from "the ordinary week".
                 "holiday" => {
                     let rows = sqlx::query!(
                         r"
@@ -141,15 +154,17 @@ impl DiaryStore for SqliteDiaryStore {
 
                     Absence::Holiday {
                         zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                        slots: rows
-                            .iter()
-                            .map(|row| {
-                                Ok((
-                                    slot_of(&row.weekday, &row.part)?,
-                                    discipline_of(&row.discipline)?,
-                                ))
-                            })
-                            .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+                        reason: reason_of(alteration.reason)?,
+                        slots: Some(
+                            rows.iter()
+                                .map(|row| {
+                                    Ok((
+                                        slot_of(&row.weekday, &row.part)?,
+                                        discipline_of(&row.discipline)?,
+                                    ))
+                                })
+                                .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+                        ),
                     }
                 }
                 other => return Err(corrupt(&format!("an absence of kind {other:?}"))),
@@ -159,7 +174,6 @@ impl DiaryStore for SqliteDiaryStore {
                 date_of(&alteration.start_date)?,
                 days,
                 absence,
-                alteration.reason,
             ));
         }
 
@@ -239,20 +253,22 @@ impl DiaryAuthor for SqliteDiaryStore {
         let days = i64::from(alteration.days().get());
         let absence = alteration.absence().as_str();
         let zone = alteration.zone().map(|zone| zone.id().to_owned());
-        let reason = alteration.reason().to_owned();
+        let states_slots = i64::from(alteration.slots().is_some());
+        let reason = alteration.reason().map(str::to_owned);
 
         let id = sqlx::query!(
             r"
             INSERT INTO alteration (
-                authored_at, start_date, days, absence, zone, reason
+                authored_at, start_date, days, absence, zone, states_slots, reason
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (start_date) DO UPDATE
                 SET authored_at = excluded.authored_at,
                     days        = excluded.days,
                     absence     = excluded.absence,
-                    zone        = excluded.zone,
-                    reason      = excluded.reason
+                    zone         = excluded.zone,
+                    states_slots = excluded.states_slots,
+                    reason       = excluded.reason
             RETURNING id
             ",
             authored_at,
@@ -260,6 +276,7 @@ impl DiaryAuthor for SqliteDiaryStore {
             days,
             absence,
             zone,
+            states_slots,
             reason
         )
         .fetch_one(&mut *tx)
@@ -272,7 +289,7 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, discipline) in alteration.slots() {
+        for (slot, discipline) in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
             let discipline = discipline.as_str();

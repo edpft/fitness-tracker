@@ -1334,19 +1334,21 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
         format!("{} to {last}", alteration.start())
     };
 
-    println!(
-        "  {span} — {}: {}",
-        alteration.absence().as_str(),
-        alteration.reason()
-    );
+    match alteration.reason() {
+        Some(reason) => println!("  {span} — {}: {reason}", alteration.absence().as_str()),
+        // An illness has no reason, so there is nothing for a colon to introduce.
+        None => println!("  {span} — {}", alteration.absence().as_str()),
+    }
 
     if let Some(zone) = alteration.zone() {
         println!("    in {}", zone.id());
     }
-    if alteration.slots().is_empty() {
-        println!("    no room to train at all");
-    } else {
-        week_slots(alteration.slots());
+    match alteration.slots() {
+        // Absent and empty are different facts, and printing them the same way
+        // would undo the distinction the schema goes to trouble to keep.
+        None => println!("    when you train is unchanged"),
+        Some(slots) if slots.is_empty() => println!("    no room to train at all"),
+        Some(slots) => week_slots(slots),
     }
 }
 
