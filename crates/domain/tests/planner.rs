@@ -26,8 +26,8 @@ use domain::{
     },
     provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::{
-        Allocation, Diary, Discipline, PartOfDay, Relative, SessionRole, TrainingPattern,
-        TrainingSlot,
+        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot,
     },
     sequence::NonEmpty,
 };
@@ -307,5 +307,41 @@ fn a_week_no_mesocycle_covers_is_reported_as_unfilled() {
     assert!(
         planned.iter().all(|slot| slot.session.is_err()),
         "and nothing in the plan reaches June"
+    );
+}
+
+/// **An absence does not delete a session from the week** (#185).
+///
+/// The operator's own week of 14 September: away in Rome to the Monday, ill on
+/// the Thursday and Friday. Until 2026-09-20 this read the *altered* diary, so
+/// the two days an absence covered had no slots and the week came back as two
+/// sessions rather than four — silently missing the gym test he was too ill to
+/// do. A session that could not be trained is still a session of the
+/// microcycle; why it did not happen is a state, not an omission.
+#[test]
+fn a_week_keeps_the_sessions_an_absence_covered() {
+    let Ok(plan) = plan(true) else {
+        panic!("the fixture plan is valid")
+    };
+    let Ok(diary) = diary() else {
+        panic!("the fixture diary is valid")
+    };
+    let Some(over) = std::num::NonZeroU8::new(2) else {
+        panic!("two is not zero")
+    };
+
+    let ill = Alteration::new(date(2026, 9, 17), over, Absence::Illness);
+    let diary = Diary::new(diary.patterns().to_vec(), vec![ill]);
+
+    let planned = week(&plan, &diary, date(2026, 9, 16));
+    let read: Vec<String> = planned
+        .iter()
+        .map(|one| format!("{} {}", one.slot.discipline, one.number))
+        .collect();
+
+    assert_eq!(
+        read,
+        vec!["gym 1", "cycling 1", "gym 2", "cycling 2"],
+        "four sessions, numbered per discipline in the order the week runs"
     );
 }

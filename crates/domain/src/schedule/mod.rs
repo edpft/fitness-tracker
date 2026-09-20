@@ -79,9 +79,16 @@ pub use role::{Relative, SessionRole, UnknownRelative};
 /// Roughly when in the day, as the operator says it.
 ///
 /// A closed vocabulary rather than a time of day, because "Monday evening" is
-/// what a life is actually planned in. A range would be false precision: nothing
-/// here needs to know that the evening starts at six, and pretending to would
-/// invite a session at 17:59 being refused.
+/// what a life is actually planned in.
+///
+/// **It has hours, and until 2026-09-20 it deliberately did not.** The doc here
+/// argued that a range would be false precision and "would invite a session at
+/// 17:59 being refused". The argument survives, narrowed to what it was
+/// actually about: the hours answer *how much of this window is left*, and they
+/// never answer *may this session be performed now*. Nothing refuses a session
+/// for being early. What needed them is #185 — on a Saturday evening there is
+/// still time for Friday's gym test, and on the Sunday morning there is not,
+/// and neither sentence is sayable without knowing when an evening ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PartOfDay {
     Morning,
@@ -99,6 +106,96 @@ impl PartOfDay {
             Self::Afternoon => "afternoon",
             Self::Evening => "evening",
         }
+    }
+
+    /// Which part a wall-clock time falls in: 06:00–11:59, 12:00–17:59,
+    /// 18:00–23:59.
+    ///
+    /// `None` from midnight to 05:59, which is not a part of anybody's training
+    /// day. [`DayPart::containing`] is what a caller with a moment in hand
+    /// wants, and says what it does with those six hours.
+    #[must_use]
+    pub fn of(time: jiff::civil::Time) -> Option<Self> {
+        match time.hour() {
+            6..=11 => Some(Self::Morning),
+            12..=17 => Some(Self::Afternoon),
+            18..=23 => Some(Self::Evening),
+            _ => None,
+        }
+    }
+
+    /// The part after this one, within the same day.
+    #[must_use]
+    pub const fn after(self) -> Option<Self> {
+        match self {
+            Self::Morning => Some(Self::Afternoon),
+            Self::Afternoon => Some(Self::Evening),
+            Self::Evening => None,
+        }
+    }
+}
+
+/// A moment in the grain the diary is kept in: a date, and a part of it.
+///
+/// **Ordered, and that is the whole point of the type.** "Is there still time
+/// for Friday's session?" is a comparison between where the day has got to and
+/// where the next session starts, and a date beside a part of a day compares
+/// wrongly as often as not unless the pair is one value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DayPart {
+    pub date: Date,
+    pub part: PartOfDay,
+}
+
+impl DayPart {
+    pub const fn new(date: Date, part: PartOfDay) -> Self {
+        Self { date, part }
+    }
+
+    /// Where a moment sits, for counting what is left of a window.
+    ///
+    /// **A part in progress counts as still usable until it ends**, which is
+    /// the operator's own reading: at eight on a Saturday evening there is *"in
+    /// theory"* still time for Friday's gym test. So this answers with the part
+    /// the clock is in rather than the next one.
+    ///
+    /// **Before 06:00 the answer is that morning.** The day has not begun and
+    /// none of it has been spent, so nothing is lost by saying so — where
+    /// answering "yesterday evening" would hand back a part that has in fact
+    /// ended, and an `Option` would push six hours of every day onto every
+    /// caller.
+    #[must_use]
+    pub fn containing(at: jiff::civil::DateTime) -> Self {
+        Self {
+            date: at.date(),
+            part: PartOfDay::of(at.time()).unwrap_or(PartOfDay::Morning),
+        }
+    }
+
+    /// The part of a day after this one, rolling into tomorrow morning.
+    #[must_use]
+    pub fn next(self) -> Option<Self> {
+        self.part.after().map_or_else(
+            || {
+                self.date
+                    .tomorrow()
+                    .ok()
+                    .map(|date| Self::new(date, PartOfDay::Morning))
+            },
+            |part| Some(Self::new(self.date, part)),
+        )
+    }
+
+    /// The moment a slot on a date begins.
+    #[must_use]
+    pub const fn of_slot(date: Date, slot: TrainingSlot) -> Self {
+        Self::new(date, slot.part)
+    }
+}
+
+impl std::fmt::Display for DayPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.date, self.part)
     }
 }
 
@@ -396,10 +493,47 @@ pub enum Absence {
 
 impl Absence {
     pub const fn as_str(&self) -> &'static str {
+        self.kind().as_str()
+    }
+
+    /// Which of the two this is, without what it carries.
+    ///
+    /// **What a session's state needs and all it needs.** A session skipped for
+    /// a holiday and one skipped for an illness are different facts worth
+    /// telling apart; the zone, the slots and the reason belong to the
+    /// alteration and say nothing about the session.
+    pub const fn kind(&self) -> AbsenceKind {
         match self {
-            Self::Holiday { .. } => "holiday",
+            Self::Holiday { .. } => AbsenceKind::Holiday,
+            Self::Illness => AbsenceKind::Illness,
+        }
+    }
+}
+
+/// Which kind of absence, with nothing it carries.
+///
+/// **Named after [`Absence`]'s own variants**, which #178 settled, rather than
+/// after the distinction between them. An earlier proposal called the pair
+/// `Intentional` and `Illness`: that reads one of the two as the absence of the
+/// other's property, and a holiday is a holiday whether or not it was planned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AbsenceKind {
+    Holiday,
+    Illness,
+}
+
+impl AbsenceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Holiday => "holiday",
             Self::Illness => "illness",
         }
+    }
+}
+
+impl std::fmt::Display for AbsenceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -710,6 +844,87 @@ impl Diary {
 
     fn pattern_on(&self, date: Date) -> Option<&TrainingPattern> {
         self.patterns.iter().rfind(|pattern| pattern.from() <= date)
+    }
+
+    /// Every slot the ordinary week gives one date, before any alteration.
+    ///
+    /// **What a microcycle's sessions are**, and the reason this exists beside
+    /// [`Self::slots_of`] (#185). An absence removes a day's slots, so the
+    /// altered answer makes a session lost to a holiday *vanish* rather than
+    /// report it as lost — and saying "skipped (holiday)" is the whole of what
+    /// a session's state is for. The absence is then read as the reason the
+    /// session did not happen, which is [`Self::taken`].
+    pub fn ordinary_slots_of(&self, date: Date) -> Vec<ScheduledSlot> {
+        self.pattern_on(date)
+            .map(|pattern| {
+                pattern
+                    .slots()
+                    .iter()
+                    .filter(|(slot, _)| slot.weekday == date.weekday())
+                    .map(|(slot, allocated)| ScheduledSlot {
+                        date,
+                        slot: *slot,
+                        discipline: allocated.discipline,
+                        role: allocated.role,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The first slot the ordinary week gives a day after this one.
+    ///
+    /// [`Self::first_after`]'s counterpart, and what closes a session's window:
+    /// a session may be performed until the next one starts, and an absence
+    /// must not be able to *extend* that by deleting the slot that ends it.
+    /// Bounded exactly as [`Self::first_after`] is.
+    pub fn first_ordinary_after(&self, date: Date) -> Option<ScheduledSlot> {
+        let described = self
+            .patterns
+            .iter()
+            .map(TrainingPattern::from)
+            .chain(self.alterations.iter().map(Alteration::last))
+            .max()?
+            .max(date);
+        let horizon = described.checked_add(jiff::Span::new().days(7)).ok()?;
+
+        let mut cursor = date.tomorrow().ok()?;
+        while cursor <= horizon {
+            if let Some(first) = self.ordinary_slots_of(cursor).into_iter().next() {
+                return Some(first);
+            }
+            cursor = cursor.tomorrow().ok()?;
+        }
+        None
+    }
+
+    /// What has taken a part of a day, where an absence has taken it.
+    ///
+    /// `None` is time the operator has. **Any part counts, not only a training
+    /// slot**: a session may be performed at any point in its window, and the
+    /// question here is whether there was room in the day at all.
+    ///
+    /// The three cases an absence has, which #188 restored and #189 recorded:
+    /// slots it does not state take nothing, an empty set takes the whole day,
+    /// and a stated set takes every part it does not keep. The last alteration
+    /// to state slots wins, exactly as [`Self::on`] resolves an overlap.
+    pub fn taken(&self, at: DayPart) -> Option<AbsenceKind> {
+        let mut stated: Option<(&BTreeMap<TrainingSlot, Allocation>, AbsenceKind)> = None;
+        for alteration in self
+            .alterations
+            .iter()
+            .filter(|alteration| alteration.covers(at.date))
+        {
+            if let Some(slots) = alteration.slots() {
+                stated = Some((slots, alteration.absence().kind()));
+            }
+        }
+
+        let (slots, kind) = stated?;
+        let kept = slots
+            .keys()
+            .any(|slot| slot.weekday == at.date.weekday() && slot.part == at.part);
+        (!kept).then_some(kind)
     }
 
     /// Every slot on one date, in the order the day runs, after every
