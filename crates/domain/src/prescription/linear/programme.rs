@@ -17,9 +17,8 @@
 
 use crate::{
     gym::exercise::Exercise,
-    measure::Kg,
     prescription::{
-        anchor::{Anchor, Entry},
+        anchor::Anchor,
         ladder::{InvalidLadder, Ladder, Opening},
         mesocycle::{InconsistentMesocycle, check_primary},
         parameters::GenerationParameters,
@@ -29,20 +28,6 @@ use crate::{
 };
 
 use super::template::{PrimaryPattern, SlotFills};
-
-/// Where a block opens, from what the programme declares and what it anchors on.
-///
-/// One place, so the check `Linear::new` runs and the ladder `prescribe`
-/// builds cannot disagree about which opening is in force.
-fn opening_of(entry: Entry, parameters: &GenerationParameters) -> Opening {
-    entry.declared_opening().map_or_else(
-        || Opening::FromAnchor {
-            anchor: entry.anchor(),
-            drop: parameters.entry_drop,
-        },
-        Opening::Declared,
-    )
-}
 
 fn steps_for(
     exercise: Exercise,
@@ -101,11 +86,6 @@ impl Primary {
 pub struct Linear {
     primary: Primary,
     fills: SlotFills,
-    /// The starting 1RM. Fixed for this block; only its exit test replaces it,
-    /// and that replacement anchors the *next* block.
-    /// The test that anchors the block, and the opening where the block states
-    /// one rather than deriving it from that test.
-    entry: Entry,
     calendar: Calendar,
 }
 
@@ -121,7 +101,6 @@ impl Linear {
     pub fn new(
         primary: Primary,
         fills: SlotFills,
-        entry: Entry,
         calendar: Calendar,
         parameters: &GenerationParameters,
     ) -> Result<Self, InconsistentMesocycle> {
@@ -133,37 +112,21 @@ impl Linear {
             calendar.weekdays(),
         )?;
 
-        // 4. The entry test precedes the block it anchors.
+        // 4. And the climb has to make a ladder over this duration. Checked
+        //    here so an unbuildable plan fails at authoring rather than at the
+        //    first `prescribe`. Training weeks, not calendar ones: a block
+        //    interrupted by a holiday is the same ladder run over a longer
+        //    stretch of the year, not a longer ladder.
         //
-        //    Not pedantry about dates: the test session is in the performed
-        //    record, so a block that contains its own entry test reads that
-        //    session as a gating one *and* opens re-climbing from it — the same
-        //    failure counted twice, once as the block's opening and once as a
-        //    miss inside it. Refusing here is what makes the opening derivation
-        //    safe. See `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
-        if entry.anchor().from() >= calendar.start() {
-            return Err(InconsistentMesocycle::EntryTestIsNotBeforeTheBlock {
-                start: calendar.start(),
-                tested: entry.anchor().from(),
-            });
-        }
-
-        // 5. And the climb has to make a ladder over this duration. Checked here
-        //    so an unbuildable plan fails at authoring rather than at the first
-        //    `prescribe`. Training weeks, not calendar ones: a block interrupted
-        //    by a holiday is the same ladder run over a longer stretch of the
-        //    year, not a longer ladder.
-        Ladder::new(
-            opening_of(entry, parameters),
-            parameters.ladder_climb_per_week,
-            calendar.duration_weeks(),
-            steps_for(primary.exercise, parameters)?,
-        )?;
+        //    **The ladder itself is not built.** It opens from the maximum in
+        //    force when a session is asked for, which is not knowable now — so
+        //    what is checked is the part that depends on neither.
+        steps_for(primary.exercise, parameters)?;
+        Ladder::rises(parameters.ladder_climb_per_week, calendar.duration_weeks())?;
 
         Ok(Self {
             primary,
             fills,
-            entry,
             calendar,
         })
     }
@@ -198,7 +161,6 @@ impl Linear {
     pub fn rehydrate(
         primary: Primary,
         fills: SlotFills,
-        entry: Entry,
         calendar: Calendar,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(
@@ -211,7 +173,6 @@ impl Linear {
         Ok(Self {
             primary,
             fills,
-            entry,
             calendar,
         })
     }
@@ -247,18 +208,6 @@ impl Linear {
         &self.fills
     }
 
-    pub const fn anchor(&self) -> Anchor {
-        self.entry.anchor()
-    }
-
-    /// The entry test and the opening it may be overridden by, together.
-    ///
-    /// The pair rather than either half: `Progression` asks both models for
-    /// this, and splitting it is the mistake `Entry` exists to prevent.
-    pub const fn entry(&self) -> Entry {
-        self.entry
-    }
-
     pub const fn gating_role(&self) -> SessionRole {
         self.primary.gating_role
     }
@@ -277,25 +226,20 @@ impl Linear {
     ///
     /// [`InvalidLadder`] only if the parameters handed in differ from the ones
     /// the programme was authored against.
-    pub fn ladder(&self, parameters: &GenerationParameters) -> Result<Ladder, InvalidLadder> {
+    pub fn ladder(
+        &self,
+        maximum: Anchor,
+        parameters: &GenerationParameters,
+    ) -> Result<Ladder, InvalidLadder> {
         Ladder::new(
-            self.opening(parameters),
+            Opening {
+                maximum,
+                drop: parameters.entry_drop,
+            },
             parameters.ladder_climb_per_week,
             self.calendar.duration_weeks(),
             self.steps(parameters)?,
         )
-    }
-
-    /// Where this block's ladder opens — declared if it was, derived otherwise.
-    #[must_use]
-    pub fn opening(&self, parameters: &GenerationParameters) -> Opening {
-        opening_of(self.entry, parameters)
-    }
-
-    /// The opening as authored, if it was authored at all. For reporting.
-    #[must_use]
-    pub const fn declared_opening(&self) -> Option<Kg> {
-        self.entry.declared_opening()
     }
 
     /// The scale the primary is loaded on.

@@ -24,7 +24,7 @@ use application::{
 };
 use domain::{
     measure::RepCount,
-    prescription::{Mesocycle, SessionRole, Skip, TestTarget, authored::Shape},
+    prescription::{Mesocycle, SessionRole, Skip, authored::Shape},
 };
 use infrastructure::{SqliteGymMesocycleStore, SqlitePlanStore, connect};
 use jiff::civil::Date;
@@ -42,8 +42,6 @@ fn mesocycle(start: Date, weeks: u32) -> Fallible<Mesocycle> {
         Shape::Linear {
             gating: SessionRole::Heavy,
             weeks,
-            anchor: programme::anchor()?,
-            opening: None,
         },
     )?;
     Ok(programme::authoring(answers, &[])??)
@@ -58,7 +56,7 @@ fn test_week(start: Date, skipping: &[Skip]) -> Fallible<Mesocycle> {
         start,
         Shape::Test {
             reps: RepCount::new(1)?,
-            target: TestTarget::Inherited,
+            asserted: None,
             provided: None,
         },
     )?;

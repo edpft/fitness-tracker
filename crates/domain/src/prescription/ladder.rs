@@ -67,28 +67,22 @@ use crate::measure::Kg;
 
 use super::{anchor::Anchor, parameters::Percentage, schedule::WeekIndex, steps::LoadSteps};
 
-/// Where a block opens.
+/// Where a block opens: derived, always, from the maximum in force.
 ///
-/// **Declared or derived, and the type says which.** The derivation reads the
-/// entry test the anchor records; the declaration is what rescues a block whose
-/// opening the derivation cannot reach — one picked up mid-flight, or one whose
-/// test is far enough behind it that nothing off that test is evidence any
-/// more. The operator settled on 2026-08-20 that the escape hatch is always
-/// available rather than conditionally required, so nothing here asks how old a
-/// test is.
-///
-/// The drop travels inside the derived variant rather than beside the enum, so
-/// "declared, and also dropped by 10%" is unwritable.
+/// **There is no declared alternative any more.** A programme used to be able
+/// to state its opening outright, as an escape hatch for a block whose test was
+/// too far behind it for the derivation to mean anything. That hatch existed
+/// because the maximum was authored onto the programme and could go stale
+/// there; a maximum read from the record at the moment a session is prescribed
+/// cannot, so there is nothing left for a declaration to rescue. Stating a
+/// number is still possible — it is stated as a *measurement*, dated, and then
+/// this derivation runs off it like any other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Opening {
-    /// Stated on the programme. Used as authored, on the grid.
-    Declared(Kg),
-    /// Derived from the test that anchors the block.
-    FromAnchor {
-        anchor: Anchor,
-        /// Negative. Taken off the load the test failed.
-        drop: Percentage,
-    },
+pub struct Opening {
+    /// The maximum this block opens from.
+    pub maximum: Anchor,
+    /// Negative. Taken off the load the test failed.
+    pub drop: Percentage,
 }
 
 impl Opening {
@@ -104,20 +98,17 @@ impl Opening {
     /// **A test that failed nothing did not find the ceiling**, so its completed
     /// load is a floor and the block starts by beating it.
     fn load(self, climb_per_week: Kg, steps: &LoadSteps) -> Kg {
-        let load = match self {
-            Self::Declared(load) => load,
-            Self::FromAnchor { anchor, drop } => anchor.failed().map_or_else(
-                || {
-                    Kg::from_grams(
-                        anchor
-                            .load()
-                            .as_grams()
-                            .saturating_add(climb_per_week.as_grams()),
-                    )
-                },
-                |failed| drop.applied_to(failed),
-            ),
-        };
+        let load = self.maximum.failed().map_or_else(
+            || {
+                Kg::from_grams(
+                    self.maximum
+                        .load()
+                        .as_grams()
+                        .saturating_add(climb_per_week.as_grams()),
+                )
+            },
+            |failed| self.drop.applied_to(failed),
+        );
         steps.quantise_loaded(load)
     }
 }
@@ -161,17 +152,35 @@ impl Ladder {
         duration_weeks: u32,
         steps: &LoadSteps,
     ) -> Result<Self, InvalidLadder> {
+        Self::rises(climb_per_week, duration_weeks)?;
+        Ok(Self {
+            opening: opening.load(climb_per_week, steps),
+            climb_per_week,
+            climbing_weeks: duration_weeks,
+        })
+    }
+
+    /// Whether a climb and a duration make a ladder at all.
+    ///
+    /// **Separate from [`Self::new`] because authoring cannot build one.** A
+    /// programme is authored before the maximum it opens from is known, so
+    /// there is no [`Opening`] at that point and nothing to build — but the two
+    /// ways a ladder is refused depend on neither, and catching them at
+    /// authoring is what stops an unbuildable block being stored and failing at
+    /// the first `prescribe`.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidLadder::NoClimbingWeeks`] if the block is too short to climb at
+    /// all, and [`InvalidLadder::DoesNotRise`] if the climb is nothing.
+    pub const fn rises(climb_per_week: Kg, duration_weeks: u32) -> Result<(), InvalidLadder> {
         if duration_weeks < 2 {
             return Err(InvalidLadder::NoClimbingWeeks);
         }
         if climb_per_week.as_grams() == 0 {
             return Err(InvalidLadder::DoesNotRise);
         }
-        Ok(Self {
-            opening: opening.load(climb_per_week, steps),
-            climb_per_week,
-            climbing_weeks: duration_weeks,
-        })
+        Ok(())
     }
 
     pub const fn climbing_weeks(self) -> u32 {

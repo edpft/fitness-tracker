@@ -223,55 +223,6 @@ pub enum PrescriptionError {
     /// and one with no slots at all is not a prescription.
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
-    /// A block claiming to open from an earlier test of its lift, where no such
-    /// test ran.
-    ///
-    /// **What makes decision 0013's table a rule.** Without it the operator could
-    /// open a block on a lift they have never tested by writing `provenance =
-    /// "tested"` beside a number — the evasion 0013 named and, until this check,
-    /// only described. It refuses the claim rather than the choice: a block with
-    /// nothing to inherit may run its own entry test or declare a number.
-    #[error(
-        "the block starting {start} in {plan} opens from a tested {primary} \
-         maximum, and {} produced no {primary} maximum for it to open from",
-        predecessor.map_or_else(
-            || "nothing before it".to_owned(),
-            |date| format!("the mesocycle before it, starting {date},")
-        )
-    )]
-    NoMaximumToOpenFrom {
-        plan: PlanName,
-        start: jiff::civil::Date,
-        primary: &'static str,
-        predecessor: Option<jiff::civil::Date>,
-    },
-    /// The maximum exists in the right lift, and the anchor is not dated to it.
-    ///
-    /// **The other half of "opens from a maximum that exists".** A date inside
-    /// the predecessor is what makes the number that programme's result rather
-    /// than one the operator wrote down beside its name.
-    #[error(
-        "the block starting {start} in {plan} opens from a maximum dated \
-         {tested}, which is not a day the mesocycle starting {predecessor} ran \
-         — so it is not that mesocycle's result"
-    )]
-    MaximumIsNotTheOneBefore {
-        plan: PlanName,
-        start: jiff::civil::Date,
-        tested: jiff::civil::Date,
-        predecessor: jiff::civil::Date,
-    },
-    /// The maximum exists, and is too old to speak for this programme.
-    #[error(
-        "the block in {plan} opens from a maximum measured on {tested}, and a \
-         block starting {start} takes one from the {weeks} weeks before it"
-    )]
-    MaximumIsStale {
-        plan: PlanName,
-        tested: jiff::civil::Date,
-        start: jiff::civil::Date,
-        weeks: i64,
-    },
     /// A test whose target is inherited, with nothing before it to inherit from.
     ///
     /// Refused rather than issued with one slot missing. A test week's whole

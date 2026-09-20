@@ -26,7 +26,7 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Plan, PlanName, Programme},
     prescription::{
-        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar, Entry,
+        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, Calendar,
         GenerationParameters, Linear, LoadSteps, Mesocycle, PerRole, Percentage, Progression,
         ResetProtocol, Scales, SessionRole, Skip, Step, TopSetReps, WarmupStep, Weekdays,
         authored::Shape,
@@ -299,7 +299,44 @@ pub fn named_plan(called: &str, mesocycles: Vec<Mesocycle>) -> Result<Plan, Prog
 ///
 /// As [`plan`].
 pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
-    plan(vec![as_programme(linear)])
+    plan(vec![entry_test()?, as_programme(linear)])
+}
+
+/// The 3 July entry test, as the week in front of the block.
+///
+/// **Here because a programme no longer carries what it opens from.** The block
+/// used to hold [`anchor`] as a field; it now reads the anchor off whatever
+/// measured the lift before it, so the fixture has to put that measurement in
+/// the plan rather than on the programme. The week is the one the record shows
+/// — Monday 29 June to Sunday 5 July, with the test taken on the Friday — and
+/// it asserts [`anchor`] so a store with no performances still resolves.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the week or the test is invalid.
+pub fn entry_test() -> Result<Mesocycle, ProgrammeFixtureError> {
+    let start = Date::new(2026, 6, 29).map_err(invalid)?;
+    let week = domain::prescription::Test::week(
+        start,
+        &[] as &[Skip],
+        weekdays()?,
+        jiff::tz::TimeZone::UTC,
+    )
+    .map_err(invalid)?;
+    Ok(Mesocycle::Test(
+        domain::prescription::Test::new(
+            domain::prescription::Tested::new(
+                PrimaryPattern::KneeDominant,
+                Exercise::Reps(RepsExercise::FrontSquat),
+                domain::measure::RepCount::new(1).map_err(invalid)?,
+            ),
+            fills()?,
+            week,
+            None,
+            Some(anchor()?),
+        )
+        .map_err(invalid)?,
+    ))
 }
 
 /// A set of answers, as the wizard would hand them over.
@@ -373,8 +410,6 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_running(weekdays()?, skips)?,
         &parameters,
     )
@@ -396,8 +431,6 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_from(start, weekdays()?)?,
         &parameters,
     )
@@ -426,8 +459,6 @@ pub fn gating_on_a_role_it_never_runs()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar_running(monday_only, &[])?,
         &parameters,
     ))
@@ -448,8 +479,6 @@ pub fn primary_not_counted_in_reps()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar()?,
         &parameters,
     ))
@@ -472,8 +501,6 @@ pub fn primary_does_not_fill_its_slot()
             SessionRole::Heavy,
         ),
         fills()?,
-        // These fixtures derive their opening from the anchor's entry test.
-        Entry::derived(anchor()?),
         calendar()?,
         &parameters,
     ))

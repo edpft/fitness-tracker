@@ -44,11 +44,11 @@ pub mod test;
 pub mod warmup;
 pub mod workout;
 
-pub use anchor::{Anchor, AnchorProvenance, Anchoring, Entry, InvalidAnchor, UnknownProvenance};
 // `authored::Shape` is deliberately not re-exported here: `shape` is a module
 // at this level and `WorkoutShape` is the shape a session has, so a bare `Shape`
 // at the crate root would read as one of those. Reach it through
 // `prescription::authored::Shape`, beside the `Authored` it belongs to.
+pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance, in_force};
 pub use attempts::Attempts;
 pub use authored::{Authored, AuthoringError};
 // `block::Block` is deliberately not re-exported here: `shape::Block` already
@@ -89,6 +89,6 @@ pub use shape::{
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
 pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
-pub use test::{Test, TestTarget, Tested};
+pub use test::{Test, Tested};
 pub use warmup::ramp as warmup_ramp;
 pub use workout::{DerivedFrom, MesocycleId, PrescribedWorkout};

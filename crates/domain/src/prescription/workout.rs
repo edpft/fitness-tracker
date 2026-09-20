@@ -58,7 +58,8 @@ impl fmt::Display for MesocycleId {
 /// would let a caller get wrong in both directions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedFrom {
-    /// The starting 1RM the programme is anchored on.
+    /// The anchor this session's loads were shares of, resolved as it stood on
+    /// the day the session was issued.
     Anchor(Anchor),
     /// What the test was an attempt at. Recorded because it is a function of
     /// where the record stood when the session was issued, so nothing can
@@ -67,11 +68,11 @@ pub enum DerivedFrom {
 }
 
 impl DerivedFrom {
-    /// The anchor, where the session had one.
+    /// The anchor, where the session derived from one.
     #[must_use]
     pub const fn anchor(self) -> Option<Anchor> {
         match self {
-            Self::Anchor(anchor) => Some(anchor),
+            Self::Anchor(maximum) => Some(maximum),
             Self::Target(_) => None,
         }
     }
@@ -166,7 +167,7 @@ impl PrescribedWorkout {
         self.derived_from
     }
 
-    /// The anchor, where this session had one.
+    /// The anchor, where this session derived from one.
     pub const fn anchor(&self) -> Option<Anchor> {
         self.derived_from.anchor()
     }

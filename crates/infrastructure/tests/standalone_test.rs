@@ -59,7 +59,6 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     let test = test_programme()?;
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(
@@ -98,7 +97,6 @@ async fn corpus_store() -> Result<
     let (parameters, directory, pool) = landed_store().await?;
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(&programme::as_plan(programme::programme()?)?, &parameters)
@@ -162,12 +160,12 @@ fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::erro
         Date::constant(2026, 8, 31),
         Shape::Test {
             reps: domain::measure::RepCount::new(1)?,
-            // What the programme before it stands at, which is the ordinary case
-            // (decision 0013).
-            target: domain::prescription::TestTarget::Inherited,
             // A week that exists only to measure a lift before something else
             // begins was written by nobody.
             provided: None,
+            // Nothing asserted: what the lift is at by then is read off the
+            // record, which is the ordinary case.
+            asserted: None,
         },
     )?;
     Ok(programme::authoring(answers, &[])??)
@@ -335,18 +333,17 @@ fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error:
         Shape::Block {
             gating: SessionRole::Heavy,
             weeks: 10,
-            // What the operator expects to lift. Week one finds out; a result
-            // that differs is answered by re-authoring, which decision 0012
-            // makes a supersession.
-            anchor: Anchor::new(
-                "90".to_owned().try_into()?,
-                None,
-                AnchorProvenance::Asserted,
-                Date::constant(2026, 7, 3),
-            )?,
             entry_test: Some(EntryTest::new(
                 domain::measure::RepCount::new(3)?,
                 Some("60".to_owned().try_into()?),
+                // What the operator expects to lift, because nothing before this
+                // block measured the lift. Week one finds out.
+                Some(Anchor::new(
+                    "90".to_owned().try_into()?,
+                    None,
+                    AnchorProvenance::Asserted,
+                    Date::constant(2026, 7, 3),
+                )?),
             )?),
         },
     )?;
@@ -360,7 +357,6 @@ async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::er
     let block = autumn_block()?;
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(&programme::named_plan("autumn", vec![block])?, &parameters)
@@ -511,12 +507,15 @@ fn provided_test() -> Result<domain::prescription::Mesocycle, Box<dyn std::error
         Date::constant(2026, 8, 31),
         Shape::Test {
             reps: domain::measure::RepCount::new(1)?,
-            // Declared, because a plan's opening week has nothing before it to
-            // inherit a target from.
-            target: domain::prescription::TestTarget::Declared(domain::measure::Kg::from_grams(
-                TARGET_GRAMS,
-            )),
             provided: Some(ProvidedFrom::new(published, vec![4])?),
+            // Asserted, because a plan's opening week has nothing before it to
+            // read an anchor from.
+            asserted: Some(Anchor::new(
+                domain::measure::Kg::from_grams(TARGET_GRAMS),
+                None,
+                AnchorProvenance::Asserted,
+                Date::constant(2026, 8, 31),
+            )?),
         },
     )?;
     Ok(programme::authoring(answers, &[])??)
@@ -535,7 +534,6 @@ async fn with_provided_test(
     let plan = programme::named_plan("published-entry-test", vec![provided_test()?])?;
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(&plan, &parameters)

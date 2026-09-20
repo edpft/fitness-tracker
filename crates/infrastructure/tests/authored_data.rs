@@ -226,11 +226,6 @@ fn a_programme_round_trips_with_every_fill_shape() {
     assert_eq!(read_back.primary_exercise(), authored.primary_exercise());
     assert_eq!(read_back.gating_role(), Some(authored.gating_role()));
     assert_eq!(
-        read_back.anchor(),
-        Some(authored.anchor()),
-        "the anchor round trips"
-    );
-    assert_eq!(
         read_back.calendar().start(),
         authored.calendar().start(),
         "the block's start round trips"
@@ -434,9 +429,7 @@ fn fixture_block() -> Result<domain::prescription::Authored, programme::Programm
         domain::prescription::authored::Shape::Linear {
             gating: domain::prescription::SessionRole::Heavy,
             weeks: 8,
-            anchor: programme::anchor()?,
             // Derived from the anchor, as the fixtures do it.
-            opening: None,
         },
     )
 }

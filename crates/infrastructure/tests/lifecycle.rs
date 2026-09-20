@@ -209,7 +209,6 @@ fn a_performed_prescription_is_not_derived_again() {
         // a derivation that ran would not agree with what was performed.
         Authoring::new(
             SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-            SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             SqliteGenerationParameterStore::new(pool.clone()),
         )
         .author(

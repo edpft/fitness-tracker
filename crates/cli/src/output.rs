@@ -11,8 +11,8 @@ use domain::{
     landing::{LandingStream, RunOutcome, Watermark},
     normalised::{Refusal, RefusalKind},
     prescription::{
-        BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, TestTarget,
-        WeekIndex, WeekPlan,
+        BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, WeekIndex,
+        WeekPlan,
     },
 };
 
@@ -390,25 +390,22 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 "  a test at {} — no anchor, because producing one is what it does",
                 test.reps()
             );
-            match test.target() {
-                TestTarget::Declared(target) => println!(
-                    "  for {target}, declared — nothing before it in this lift to \
-                     take a target from"
+            match test.asserted() {
+                Some(asserted) => println!(
+                    "  asserted at {asserted} — nothing ran before it, so this is \
+                     the number everything after it is read from"
                 ),
-                TestTarget::Inherited => println!(
-                    "  its target comes from the programme before it, as the \
-                     record stands"
+                None => println!(
+                    "  its anchor comes from whatever measured the lift before \
+                     it, as the record stands"
                 ),
             }
         }
-        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
-            match sbs.entry().anchor() {
-                Some(anchor) => println!("  opening maximum {anchor}, and it does not stay fixed"),
-                None => println!(
-                    "  opening from whatever the mesocycle before it measures, \
-                     and it does not stay fixed"
-                ),
-            }
+        Mesocycle::Progression(Progression::Provided { .. }) => {
+            println!(
+                "  opening from whatever the mesocycle before it measures, \
+                 and it does not stay fixed"
+            );
             println!(
                 "  four weeks, stated by the chart: 5×5 @ 80%, 4×3 @ 85%, \
                  3×1 @ 90%, 3×3 @ 75%"
@@ -419,20 +416,12 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
             );
             println!("  week 4 ends on a single, which opens the next cycle");
         }
-        Mesocycle::Progression(Progression::Linear(linear)) => {
-            println!("  anchor {}, fixed for the block", linear.anchor());
-            // Where the opening came from, because "85kg" alone does not say
-            // whether anybody chose it. A declared opening means the anchor's
-            // failed load fed nothing, and that is worth seeing here.
-            match linear.declared_opening() {
-                Some(opening) => {
-                    println!("  opening {opening}kg, declared — not derived from the anchor");
-                }
-                None => println!(
-                    "  opening derived: {} off the anchor's failed load",
-                    parameters.entry_drop
-                ),
-            }
+        Mesocycle::Progression(Progression::Linear(_)) => {
+            println!(
+                "  it opens {} off the failed load of whatever measured the \
+                 lift before it",
+                parameters.entry_drop
+            );
             println!(
                 "  ladder climbs {}kg a week over {} climbing weeks, and none of \
                  them is a test",
@@ -443,13 +432,12 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
         Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             match block.entry_test() {
                 Some(test) => println!(
-                    "  anchor {}, expected — week one measures it at {}",
-                    block.entry().anchor(),
+                    "  week one measures what the rest of it plans from, at {}",
                     test.reps()
                 ),
                 None => println!(
-                    "  anchor {}, its entry test — taken before the block, not in it",
-                    block.entry().anchor()
+                    "  it plans from whatever measured the lift before it, \
+                     which is not a week of this block"
                 ),
             }
             match block.plan() {
@@ -643,24 +631,24 @@ pub fn programme_standing(standing: &application::LadderStanding) {
             linear_standing(linear, standing, parameters);
         }
         Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
-            block_standing(block, parameters);
+            block_standing(block, standing.anchor, parameters);
         }
-        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => sbs_standing(sbs),
+        Mesocycle::Progression(Progression::Provided { .. }) => sbs_standing(standing.anchor),
     }
 }
 
 /// An SBS cycle: where the chart stands, and the one caveat that matters.
-fn sbs_standing(sbs: &domain::prescription::Sbs) {
-    match sbs.entry().anchor() {
+fn sbs_standing(anchor: Option<domain::prescription::Anchor>) {
+    match anchor {
         Some(anchor) => println!(
             "the chart opens from {} ({})",
             anchor.load(),
             anchor.provenance(),
         ),
         // **Nothing to print, and that is the whole of what it says.** A cycle
-        // authored months ahead cannot state what it opens from: the test it
-        // opens from has not happened. It is resolved when a session is asked
-        // for, and refused if that test was never recorded.
+        // authored months ahead states nothing about what it opens from: the
+        // test it opens from has not happened. It is resolved when a session is
+        // asked for, and refused if that test was never recorded.
         None => println!("the chart opens from the mesocycle before it, once that has measured"),
     }
     println!(
@@ -686,13 +674,13 @@ fn test_standing(test: &domain::prescription::Test, standing: &application::Ladd
              there is none in the same lift"
         ),
     }
-    match test.target() {
-        TestTarget::Declared(_) => println!(
-            "  declared, not inherited — nothing before it in this lift to \
-             take a target from"
+    match test.asserted() {
+        Some(_) => println!(
+            "  asserted, not read — nothing ran before it for this lift to take \
+             an anchor from"
         ),
-        TestTarget::Inherited => {
-            println!("  inherited from the programme before it, as the record stands");
+        None => {
+            println!("  read from whatever measured the lift before it, as the record stands");
         }
     }
     let role = domain::prescription::Test::ROLE;
@@ -719,23 +707,21 @@ fn linear_standing(
     standing: &application::LadderStanding,
     parameters: &GenerationParameters,
 ) {
-    println!("anchor {}, fixed for the block", linear.anchor());
-    // Where the opening came from, because "85kg" alone does not say whether
-    // anybody chose it. A declared opening means the anchor's failed load fed
-    // nothing, and that is worth seeing on the report that shows the ladder.
-    match linear.declared_opening() {
-        Some(opening) => println!("opening {opening}kg, declared — not derived from the anchor"),
-        None => println!(
-            "opening derived: {} off the anchor's failed load",
-            parameters.entry_drop
-        ),
-    }
+    let Some(resolved) = standing.anchor else {
+        println!("no anchor: nothing has measured this lift and no test asserts one");
+        return;
+    };
+    println!("anchor {resolved}, as the record stands on the date asked about");
+    println!(
+        "opening derived: {} off the anchor's failed load",
+        parameters.entry_drop
+    );
 
-    let Ok(ladder) = linear.ladder(parameters) else {
+    let Ok(ladder) = linear.ladder(resolved, parameters) else {
         println!("  no ladder: the block is too short to climb");
         return;
     };
-    let anchor = linear.anchor().load();
+    let anchor = resolved.load();
     let Ok(steps) = linear.steps(parameters) else {
         println!("  no ladder: no load scale is authored for the primary's implement");
         return;
@@ -795,17 +781,21 @@ fn linear_standing(
 /// three literature constants — so there is no rung a miss could hold and
 /// nothing for the record to place. That is the difference between the two
 /// models, and printing an arrow here would hide it.
-fn block_standing(block: &BlockPeriodisation, parameters: &GenerationParameters) {
+fn block_standing(
+    block: &BlockPeriodisation,
+    resolved: Option<domain::prescription::Anchor>,
+    parameters: &GenerationParameters,
+) {
+    let Some(resolved) = resolved else {
+        println!("no anchor: nothing has measured this lift and no test asserts one");
+        return;
+    };
     match block.entry_test() {
         Some(test) => println!(
-            "anchor {}, expected — week one measures it at {}",
-            block.entry().anchor(),
+            "anchor {resolved}, and week one measures it again at {}",
             test.reps()
         ),
-        None => println!(
-            "anchor {}, measured — its entry test was taken before this block",
-            block.entry().anchor()
-        ),
+        None => println!("anchor {resolved}, measured before this block rather than in it"),
     }
     let Ok(plan) = block.plan() else {
         println!("  no plan: this duration does not hold three phases");
@@ -815,7 +805,7 @@ fn block_standing(block: &BlockPeriodisation, parameters: &GenerationParameters)
         println!("  no plan: no load scale is authored for the primary's implement");
         return;
     };
-    let anchor = block.entry().anchor().load();
+    let anchor = resolved.load();
 
     println!("  week  phase              sets × reps   of anchor      load");
     // The entry test is week one where there is one, so the phases below start

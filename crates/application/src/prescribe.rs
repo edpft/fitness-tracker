@@ -20,12 +20,12 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
-        Anchor, AnchorProvenance, Anchoring, Attempts, Block, BlockPeriodisation, BlockWeek,
-        DerivedFrom, GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
+        Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
+        GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        PrescriptionState, Programming, Progress, Progression, RECENT_WEEKS, Sbs, SbsDay,
-        SbsSession, SessionRole, SlotId, SupersetMember, Target, Test, TestTarget, WeekKind,
-        WeekPlan, WorkoutShape, is_recent_enough,
+        PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession,
+        SessionRole, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape,
+        anchor,
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
@@ -209,12 +209,17 @@ where
         };
         let progress = self.progress_of(&plan, &programme, &consulted, on).await?;
         let target = self.inheritance(&programme, &consulted, on).await?.target;
+        let anchor = match programme.primary_exercise() {
+            Exercise::Reps(primary) => self.anchor_in_force(primary, on, &consulted).await?,
+            Exercise::Duration(_) | Exercise::Distance(_) => None,
+        };
         Ok(LadderStanding {
             target,
             plan,
             programme_id,
             programme,
             parameters,
+            anchor,
             progress,
             history_through: self.ports.history.newest_performance().await?,
         })
@@ -391,7 +396,10 @@ where
         // cycle that inherits has no authored number, so what it opens from is
         // the predecessor's measurement — and that is what the prescription
         // records it as descending from.
-        let opening = self.opening_anchor(&programme, &consulted).await?;
+        let opening = match programme.primary_exercise() {
+            Exercise::Reps(primary) => self.anchor_in_force(primary, date, &consulted).await?,
+            Exercise::Duration(_) | Exercise::Distance(_) => None,
+        };
 
         let mut items = Vec::new();
         let mut underivable = Vec::new();
@@ -399,6 +407,7 @@ where
             progress,
             inheritance,
             maximum: self.maximum_of(&plan, &programme, &consulted, date).await?,
+            opening,
         };
         for derived in issue_slots(&programme, &consulted, role, week, standing, &history) {
             match derived {
@@ -510,55 +519,114 @@ where
     ///
     /// A session that recorded no working set advances nothing, which is right:
     /// a week nobody trained leaves the maximum where it was.
-    /// What a mesocycle's loads are shares of, resolved.
+    /// What this session's loads are shares of.
     ///
-    /// `None` for a test, which has a target rather than an anchor, and for a
-    /// provided cycle inheriting from a predecessor that measured nothing.
-    async fn opening_anchor(
+    /// **Asked as at the session's own date, because an anchor belongs to a
+    /// microcycle.** It changes week to week: a week that measures something
+    /// leaves a new one behind and the week after it programmes from that. A
+    /// number resolved once for a whole mesocycle could only ever describe its
+    /// first week, which is the shape this replaced.
+    ///
+    /// Three places one can come from, and the latest at or before the date
+    /// wins:
+    ///
+    /// ```text
+    /// a mesocycle that finished    what the record shows it measured
+    /// this mesocycle's entry test  what the record shows that week measured
+    /// a test at the front          the number it asserts, because nothing
+    ///                              before it measured one
+    /// ```
+    ///
+    /// **Only the third is authored**, and its provenance says so. The other two
+    /// are read off the record, which is what lets the same authored cycle be
+    /// run again in January against January's record.
+    ///
+    /// `None` for a lift nothing has measured and no test has asserted.
+    async fn anchor_in_force(
         &self,
-        programme: &Mesocycle,
+        primary: RepsExercise,
+        on: Date,
         consulted: &Consulted<'_>,
     ) -> Result<Option<Anchor>, PrescriptionError> {
-        match programme {
-            Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
-                self.opening_of(sbs, consulted).await
+        let mut candidates = Vec::new();
+
+        if let Some((_, _, current)) = self.ports.programmes.on(on).await? {
+            // A week at the front of a sequence states what it ramps toward,
+            // whether it stands alone or is the first week of a block.
+            if let Some(asserted) = asserted_by(&current) {
+                candidates.push(asserted);
             }
-            Mesocycle::Progression(periodisation) => Ok(periodisation.anchor()),
-            Mesocycle::Test(_) => Ok(None),
+            if let Some(measured) = self.measured_entering(&current, primary, on).await? {
+                candidates.push(measured);
+            }
         }
+
+        if let Some((_, before_plan, before)) = self.ports.programmes.preceding(on).await? {
+            if let Some(asserted) = asserted_by(&before) {
+                candidates.push(asserted);
+            }
+            if let Some(measured) = self.left_behind(&before_plan, &before, consulted).await? {
+                candidates.push(measured);
+            }
+        }
+
+        Ok(anchor::in_force(&candidates, on))
     }
 
-    /// What a cycle opens from: the number it states, or the one before it.
+    /// What this mesocycle's own entry test measured, where it has one and it
+    /// has already run.
     ///
-    /// **An inherited opening is resolved against the record, never the plan.**
-    /// A cycle plans to leave a maximum behind — week 4 day 2 is a one-repetition
-    /// maximum and is not optional — but planning to measure is not measuring. A
-    /// predecessor nobody trained leaves nothing, and this answers `None` rather
-    /// than reaching for the number that cycle was authored with.
+    /// **A block measures its own entry and then programmes from it.** Before
+    /// this, the block was authored with a number saying what the operator
+    /// expected and the test week only confirmed it — a result that differed was
+    /// answered by re-authoring the block. The week is the microcycle that
+    /// produces the anchor the rest of the block is shares of, so it is read
+    /// like any other measurement.
     ///
-    /// **What comes back is a `Tested` anchor dated to the predecessor**, because
-    /// that is what it is: a measurement, taken on a day the record names. It is
-    /// recorded with the prescription like any other, so a session issued in
-    /// November says which test it descended from.
-    async fn opening_of(
+    /// **Only the entry week's sessions count.** Every other week of the block
+    /// lifts heavy without measuring anything, and the heaviest completed set of
+    /// an ordinary week is a working set rather than a maximum — so the
+    /// calendar is asked which week each performance fell in rather than the
+    /// span being taken whole.
+    async fn measured_entering(
         &self,
-        sbs: &Sbs,
-        consulted: &Consulted<'_>,
+        programme: &Mesocycle,
+        primary: RepsExercise,
+        before: Date,
     ) -> Result<Option<Anchor>, PrescriptionError> {
-        match sbs.entry() {
-            Anchoring::Stated(entry) => Ok(Some(entry.anchor())),
-            Anchoring::Inherited => {
-                let Some((_, before_plan, before)) = self
-                    .ports
-                    .programmes
-                    .preceding(sbs.calendar().start())
-                    .await?
-                else {
-                    return Ok(None);
-                };
-                self.left_behind(&before_plan, &before, consulted).await
-            }
+        let Mesocycle::Progression(Progression::BlockPeriodisation(block)) = programme else {
+            return Ok(None);
+        };
+        if block.entry_test().is_none() {
+            return Ok(None);
         }
+        let calendar = block.calendar();
+        let performances = self.ports.history.performances(primary).await?;
+        let entering: Vec<_> = performances
+            .into_iter()
+            .filter(|performance| performance.on < before)
+            .filter(|performance| {
+                matches!(
+                    calendar.place(performance.on),
+                    Ok((WeekKind::Climbing(week), _)) if week == domain::prescription::WeekIndex::FIRST
+                )
+            })
+            .collect();
+        let Some(latest) = entering.iter().map(|performance| performance.on).max() else {
+            return Ok(None);
+        };
+        let Some(completed) = heaviest_completed_in(&entering) else {
+            return Ok(None);
+        };
+        let failed = entering
+            .iter()
+            .flat_map(|performance| performance.sets.iter())
+            .filter_map(|set| match (set.load, set.outcome.completed()) {
+                (Load::Absolute(mass), None) if mass > completed => Some(mass),
+                _ => None,
+            })
+            .max();
+        Ok(Anchor::new(completed, failed, AnchorProvenance::Tested, latest).ok())
     }
 
     /// The maximum a mesocycle actually measured, as the record has it.
@@ -588,7 +656,10 @@ where
                     // Asked the day after it ends, so its own last session — the
                     // one-repetition maximum — counts toward what it leaves.
                     let after = span.end().tomorrow().unwrap_or_else(|_| span.end());
-                    Some(self.sbs_maximum(plan, before, consulted, after).await?)
+                    Some((
+                        self.sbs_maximum(plan, before, consulted, after).await?,
+                        None,
+                    ))
                 }
                 Mesocycle::Test(test) => match test.primary_exercise() {
                     Exercise::Reps(primary) => self.measured_in(primary, span).await?,
@@ -599,22 +670,34 @@ where
                 ) => None,
             };
 
-            Ok(measured.and_then(|load| {
-                Anchor::new(load, None, AnchorProvenance::Tested, span.end()).ok()
+            Ok(measured.and_then(|(load, failed)| {
+                Anchor::new(load, failed, AnchorProvenance::Tested, span.end()).ok()
             }))
         })
     }
 
-    /// What the record says a lift measured inside a span.
+    /// What the record says a lift measured inside a span: the heaviest single
+    /// that went up, and the heaviest that did not above it.
     ///
-    /// The rule is [`heaviest_completed`]; this is the read that supplies it.
+    /// **Both halves, because a block's opening is derived from the second.** A
+    /// test that found the ceiling completed one load and failed the one above
+    /// it; the completed load is the maximum and the failed one is what the
+    /// opening drops off. Reading only the first would silently move every
+    /// derived opening from "the failed load, dropped" to "one climb above what
+    /// went up", which is the same rule's other branch and a different number.
     async fn measured_in(
         &self,
         primary: RepsExercise,
         span: Span,
-    ) -> Result<Option<Kg>, PrescriptionError> {
+    ) -> Result<Option<(Kg, Option<Kg>)>, PrescriptionError> {
         let performances = self.ports.history.performances(primary).await?;
-        Ok(heaviest_completed(&performances, span))
+        let Some(completed) = heaviest_completed(&performances, span) else {
+            return Ok(None);
+        };
+        Ok(Some((
+            completed,
+            heaviest_failed_above(&performances, span, completed),
+        )))
     }
 
     async fn sbs_maximum(
@@ -624,15 +707,20 @@ where
         consulted: &Consulted<'_>,
         before: Date,
     ) -> Result<Kg, PrescriptionError> {
-        let Some(opening) = self.opening_of(sbs, consulted).await? else {
+        let Exercise::Reps(primary) = sbs.primary_exercise() else {
+            return Err(PrescriptionError::NoInheritedMaximum {
+                start: sbs.calendar().start(),
+            });
+        };
+        let Some(opening) = self
+            .anchor_in_force(primary, sbs.calendar().start(), consulted)
+            .await?
+        else {
             return Err(PrescriptionError::NoInheritedMaximum {
                 start: sbs.calendar().start(),
             });
         };
         let mut maximum = opening.load();
-        let Exercise::Reps(primary) = sbs.primary_exercise() else {
-            return Ok(maximum);
-        };
         // The increment is the plate grid's, not a number of this module's:
         // what SBS's `FLOOR` rounds to is whatever the bar can actually hold.
         let Some(steps) = consulted
@@ -699,8 +787,8 @@ where
     ///
     /// **The target is refused across a change of lift.** A front squat maximum
     /// is not evidence about an RDL, so a predecessor training a different lift
-    /// answers the first question with nothing — which is exactly the case
-    /// [`TestTarget::Declared`] exists for. It still answers the second: the
+    /// answers the first question with nothing, and the maximum in force for the
+    /// lift being tested answers it instead. It still answers the second: the
     /// light session is the predecessor's session whatever it was training.
     async fn inheritance(
         &self,
@@ -715,9 +803,16 @@ where
             });
         };
 
-        let declared = match test.target() {
-            TestTarget::Declared(load) => Some(load),
-            TestTarget::Inherited => None,
+        // **What the lift is at, wherever that comes from.** A test used to be
+        // able to state its target outright, for the case where there was
+        // nothing before it to inherit from; that is now a stated measurement
+        // for the lift, read here like any other.
+        let stated = match test.primary_exercise() {
+            Exercise::Reps(primary) => self
+                .anchor_in_force(primary, test.calendar().start(), consulted)
+                .await?
+                .map(Anchor::load),
+            Exercise::Duration(_) | Exercise::Distance(_) => None,
         };
 
         let predecessor = self
@@ -733,7 +828,7 @@ where
             // own result rather than through a target, so a test after one has
             // nothing to inherit either.
             return Ok(Inheritance {
-                target: declared,
+                target: stated,
                 light: None,
             });
         };
@@ -741,15 +836,32 @@ where
         let progress = self
             .progress(&before_plan, &before, consulted, date)
             .await?;
-        let Ok(ladder) = before.ladder(consulted.parameters) else {
+        let before_primary = match before.primary_exercise() {
+            Exercise::Reps(primary) => Some(primary),
+            Exercise::Duration(_) | Exercise::Distance(_) => None,
+        };
+        let before_opening = match before_primary {
+            Some(primary) => {
+                self.anchor_in_force(primary, before.calendar().start(), consulted)
+                    .await?
+            }
+            None => None,
+        };
+        let Some(before_opening) = before_opening else {
             return Ok(Inheritance {
-                target: declared,
+                target: stated,
+                light: None,
+            });
+        };
+        let Ok(ladder) = before.ladder(before_opening, consulted.parameters) else {
+            return Ok(Inheritance {
+                target: stated,
                 light: None,
             });
         };
         let Ok(steps) = before.steps(consulted.parameters) else {
             return Ok(Inheritance {
-                target: declared,
+                target: stated,
                 light: None,
             });
         };
@@ -757,9 +869,12 @@ where
         let inherited = (before.primary_exercise() == test.primary_exercise())
             .then(|| progress.test_target(ladder, steps));
         Ok(Inheritance {
-            // A declared target wins: it is the operator saying what this test
-            // is for, and inheritance is the default rather than an override.
-            target: declared.or(inherited),
+            // **An asserted number wins**, and it is the operator saying what
+            // this week is for. Reading one is the default; a week that states
+            // one states it because nothing behind it measured the lift, and a
+            // ladder's position is not a measurement — the predecessor never
+            // tested, which is exactly why the number was asserted.
+            target: stated.or(inherited),
             light: progress.light_top_set(ladder, steps, consulted.parameters.light_of_heavy),
         })
     }
@@ -844,6 +959,51 @@ where
 /// A failed attempt says what could not be lifted, which is not a maximum. What
 /// was lifted is the heaviest thing that went up, wherever in the session it
 /// sits and whatever the source tagged it.
+/// The heaviest set of a span that did *not* go up, above a load that did.
+///
+/// **A ceiling, not a failure.** What a derived opening drops off is the load a
+/// test proved was too much, so a failed attempt lighter than the heaviest
+/// completed single says nothing — it is a bad day inside the ramp rather than
+/// the top of the range.
+/// The anchor a mesocycle's opening entry test states, where it states one.
+///
+/// **Two shapes of the same week.** A standalone test is a mesocycle of its own;
+/// a block that measures its own entry carries the week in front of its phases.
+/// Either is the first microcycle of a sequence when nothing before it measured
+/// the lift, and either may therefore assert.
+fn asserted_by(programme: &Mesocycle) -> Option<Anchor> {
+    match programme {
+        Mesocycle::Test(test) => test.asserted(),
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => block
+            .entry_test()
+            .and_then(domain::prescription::EntryTest::asserted),
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
+    }
+}
+
+fn heaviest_failed_above(performances: &[Performance], span: Span, completed: Kg) -> Option<Kg> {
+    performances
+        .iter()
+        .filter(|performance| span.covers(performance.on))
+        .flat_map(|performance| performance.sets.iter())
+        .filter_map(|set| match (set.load, set.outcome.completed()) {
+            (Load::Absolute(mass), None) if mass > completed => Some(mass),
+            _ => None,
+        })
+        .max()
+}
+
+fn heaviest_completed_in(performances: &[Performance]) -> Option<Kg> {
+    performances
+        .iter()
+        .flat_map(|performance| performance.sets.iter())
+        .filter_map(|set| match (set.load, set.outcome.completed()) {
+            (Load::Absolute(mass), Some(_)) => Some(mass),
+            _ => None,
+        })
+        .max()
+}
+
 fn heaviest_completed(performances: &[Performance], span: Span) -> Option<Kg> {
     performances
         .iter()
@@ -932,8 +1092,12 @@ struct Standing {
     inheritance: Inheritance,
     /// The maximum an SBS cycle is currently a share of, advanced through the
     /// chart's own table by each rep-max day already performed. `None` for every
-    /// template whose anchor does not move.
+    /// template whose maximum does not move inside the mesocycle.
     maximum: Option<Kg>,
+    /// What this mesocycle's loads are shares of, as the record and the stated
+    /// series had it when it opened. `None` for a test, and for a lift nothing
+    /// has measured.
+    opening: Option<Anchor>,
 }
 
 /// Every position the template issues, derived in order.
@@ -1021,11 +1185,12 @@ fn derived_from(
     opening: Option<Anchor>,
 ) -> Result<DerivedFrom, PrescriptionError> {
     match programme {
-        // **The resolved anchor, not the authored one.** A ladder and a block
-        // state theirs and the two are the same value; a provided cycle that
-        // inherits states none, and what it opens from is the maximum its
-        // predecessor measured. Absent, the session is refused rather than
-        // issued against nothing.
+        // **Resolved, because there is nothing else it could be.** No programme
+        // states a maximum any more: every one of them reads the record and the
+        // stated series for the lift it trains, and what comes back is recorded
+        // here by value so a session issued in November says what it descended
+        // from. Absent, the session is refused rather than issued against
+        // nothing.
         Mesocycle::Progression(_) => {
             opening
                 .map(DerivedFrom::Anchor)
@@ -1113,9 +1278,10 @@ fn primary_slot_item(
     standing: Standing,
 ) -> Derived {
     let Standing {
-        progress,
+        progress: _,
         inheritance,
         maximum,
+        opening: _,
     } = standing;
     let pattern = programme.primary();
     let slot = pattern.slot();
@@ -1138,10 +1304,10 @@ fn primary_slot_item(
 
     let plan = match programme {
         Mesocycle::Progression(Progression::Linear(linear)) => {
-            linear_load(linear, consulted, role, week, progress, steps)
+            linear_load(linear, consulted, role, week, standing, steps)
         }
         Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
-            block_load(block, role, week, steps)
+            block_load(block, role, week, standing.opening, steps)
         }
         Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
             sbs_load(sbs, role, week, steps, maximum)
@@ -1190,10 +1356,16 @@ fn linear_load(
     consulted: &Consulted<'_>,
     role: SessionRole,
     week: WeekKind,
-    progress: Option<Progress>,
+    standing: Standing,
     steps: &LoadSteps,
 ) -> Result<PrimaryLoad, UnderivableReason> {
-    let (Some(progress), Ok(ladder)) = (progress, linear.ladder(consulted.parameters)) else {
+    let Some(opening) = standing.opening else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let (Some(progress), Ok(ladder)) = (
+        standing.progress,
+        linear.ladder(opening, consulted.parameters),
+    ) else {
         return Err(UnderivableReason::NoLadder);
     };
     let WeekKind::Climbing(_) = week else {
@@ -1231,7 +1403,7 @@ fn linear_load(
 /// That limitation is deliberate and visible rather than papered over: the
 /// alternative is to invent a progression the chart does not state.
 fn sbs_load(
-    sbs: &Sbs,
+    _sbs: &Sbs,
     role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
@@ -1248,13 +1420,11 @@ fn sbs_load(
         return Err(UnderivableReason::NoLadder);
     };
 
-    // **What the record says the cycle is at**, falling back to the opening
-    // anchor only when nothing has been read — which is week one, and a cycle
-    // whose primary has no load scale. A cycle that inherits has no authored
-    // number to fall back to: resolving it needs the store, which is the
-    // caller's business, so an unresolved one is underivable here rather than
-    // opened from a guess.
-    let Some(maximum) = maximum.or_else(|| sbs.entry().anchor().map(Anchor::load)) else {
+    // **What the record says the cycle is at.** Resolving it needs the store,
+    // which is the caller's business, so an unresolved one is underivable here
+    // rather than opened from a guess. There is no authored number to fall back
+    // to: a cycle states shares and nothing else.
+    let Some(maximum) = maximum else {
         return Err(UnderivableReason::NoOpeningMaximum);
     };
 
@@ -1313,6 +1483,7 @@ fn block_load(
     block: &BlockPeriodisation,
     role: SessionRole,
     week: WeekKind,
+    opening: Option<Anchor>,
     steps: &LoadSteps,
 ) -> Result<PrimaryLoad, UnderivableReason> {
     // The calendar reports every week as a climbing one; which of them is a test
@@ -1323,15 +1494,16 @@ fn block_load(
     let Some(planned) = block.week(index) else {
         return Err(UnderivableReason::NoLadder);
     };
-    let anchor = block.entry().anchor().load();
+    let Some(anchor) = opening.map(Anchor::load) else {
+        return Err(UnderivableReason::NoOpeningMaximum);
+    };
     let planned = match planned {
         // **The week the block measures what it is about to plan from.** The ramp
-        // builds toward the anchor the block was authored with, expressed at the
-        // repetition count the attempt is performed at — so a triple works up to
-        // the 3RM the operator expects rather than to a one-rep maximum nobody
-        // is attempting. Nothing here reads another programme: what this block
-        // expects is the block's own statement, and the week is where it finds
-        // out whether it was right.
+        // builds toward the maximum in force when the block opened, expressed at
+        // the repetition count the attempt is performed at — so a triple works
+        // up to the 3RM the record implies rather than to a one-rep maximum
+        // nobody is attempting. The week is where it finds out whether that was
+        // still right.
         BlockWeek::Entry(test) => {
             if role == BLOCK_ENTRY_TEST_ROLE {
                 let Some(share) = rep_max(test.reps()) else {
@@ -1754,151 +1926,20 @@ fn progressed_load(
 }
 
 /// Storing an authored plan and the consulted it was generated against.
-pub struct Authoring<P, M, G> {
+pub struct Authoring<P, G> {
     plans: P,
-    mesocycles: M,
     parameters: G,
 }
 
-impl<P, M, G> Authoring<P, M, G> {
-    pub const fn new(plans: P, mesocycles: M, parameters: G) -> Self {
-        Self {
-            plans,
-            mesocycles,
-            parameters,
-        }
+impl<P, G> Authoring<P, G> {
+    pub const fn new(plans: P, parameters: G) -> Self {
+        Self { plans, parameters }
     }
 }
 
-impl<P, M, G> Authoring<P, M, G>
-where
-    P: Sync,
-    M: MesocycleStore + Sync,
-    G: Sync,
-{
-    /// Whether a claimed earlier maximum is one that exists.
-    ///
-    /// **A block's anchor comes from one of three places** (decision 0016): a
-    /// previous test, an entry test of its own, or a declared number. Only the
-    /// first says something about the past, so only the first is checked here —
-    /// and it can only be checked here, because whether such a test happened is a
-    /// fact about the store rather than a claim the plan can settle about
-    /// itself.
-    ///
-    /// The operator's ten compositions are what a claimed test has to survive:
-    ///
-    /// ```text
-    /// test a   → block b   produces a ≠ b            no such test
-    /// test b   → block b   produces b                opens from it
-    /// linear a → block b   produces nothing          no such test
-    /// linear b → block b   produces nothing          no such test
-    /// block a  → block b   produces a ≠ b            no such test
-    /// block b  → block b   produces b, its exit      opens from it
-    ///
-    /// test b  → block b                adjacent      opens from it
-    /// test b  → 1 blank week → block b               opens from it
-    /// test b  → 2 blank weeks → block b              too old
-    /// block b → 1 blank week → block b               opens from it
-    /// block b → 2 blank weeks → block b              too old
-    /// ```
-    ///
-    /// Row four is the one that invites a wrong guess, and it is why the
-    /// predicate is worth having: a linear programme for the *same* lift still
-    /// leaves no maximum, because it never tests. Its last heavy single feels
-    /// like one and is not — and `provenance = "tested"` beside that date is
-    /// exactly what this refuses.
-    ///
-    /// **It refuses a claim, not a choice.** A block that has no test to inherit
-    /// is free to run its own entry test or to declare a number; what it may not
-    /// do is say a measurement happened when none did.
-    ///
-    /// **The predecessor is usually the previous element of a list.** Inside a
-    /// plan the mesocycle before this one is known without asking anything, and
-    /// only the mesocycle that *opens* the plan has to put the question to the
-    /// store — where the answer belongs to the plan that ran before.
-    ///
-    /// # Errors
-    ///
-    /// [`PrescriptionError`] if the store is unavailable, if no test of this lift
-    /// ran before this block, if the anchor is not dated to it, or if it is too
-    /// old to still speak.
-    async fn claimed_maximum_exists(
-        &self,
-        plan: &PlanName,
-        preceding: Option<&Mesocycle>,
-        programme: &Mesocycle,
-    ) -> Result<(), PrescriptionError> {
-        if !programme.claims_an_earlier_maximum() {
-            return Ok(());
-        }
-        let start = programme.calendar().start();
-        let wanted = programme.primary_exercise();
-        let Some(anchor) = programme.anchor() else {
-            return Ok(());
-        };
-
-        let found = match preceding {
-            Some(before) => Some(before.clone()),
-            None => self
-                .mesocycles
-                .preceding(start)
-                .await?
-                .map(|(_, _, before)| before),
-        };
-        let before = match found {
-            Some(before) if before.produces_maximum() == Some(wanted) => before,
-            found => {
-                return Err(PrescriptionError::NoMaximumToOpenFrom {
-                    plan: plan.clone(),
-                    start,
-                    primary: wanted.as_str(),
-                    predecessor: found.map(|before| before.calendar().start()),
-                });
-            }
-        };
-
-        // **Dated to that test, and recent.** Either alone lets a number in from
-        // nowhere: a date inside the predecessor with no bound on age would
-        // accept a maximum from a block that finished in June, and a recent date
-        // with no bound on origin would accept one written down last week.
-        if !before.span().covers(anchor.from()) {
-            return Err(PrescriptionError::MaximumIsNotTheOneBefore {
-                plan: plan.clone(),
-                start,
-                tested: anchor.from(),
-                predecessor: before.calendar().start(),
-            });
-        }
-        if !is_recent_enough(anchor.from(), start) {
-            return Err(PrescriptionError::MaximumIsStale {
-                plan: plan.clone(),
-                tested: anchor.from(),
-                start,
-                weeks: RECENT_WEEKS,
-            });
-        }
-        Ok(())
-    }
-
-    /// Every gym mesocycle of a plan, each checked against what precedes it.
-    async fn claims_are_sound(&self, plan: &Plan) -> Result<(), PrescriptionError> {
-        let Some(gym) = plan.gym() else {
-            return Ok(());
-        };
-        let mesocycles: Vec<&Mesocycle> = gym.mesocycles().collect();
-        for (at, mesocycle) in mesocycles.iter().enumerate() {
-            let preceding = at.checked_sub(1).and_then(|before| mesocycles.get(before));
-            self.claimed_maximum_exists(plan.name(), preceding.copied(), mesocycle)
-                .await?;
-        }
-        Ok(())
-    }
-}
-
-impl<P, M, G> PlanAuthor for Authoring<P, M, G>
+impl<P, G> PlanAuthor for Authoring<P, G>
 where
     P: PlanStore + Sync,
-    M: MesocycleStore + Sync,
     G: GenerationParameterStore + Sync,
 {
     async fn author(
@@ -1923,13 +1964,10 @@ where
             }
         }
 
-        // **And a block claiming to open from an earlier test has to be right
-        // about that** (decision 0016). This is the only rule in the system that
-        // reads another mesocycle in order to refuse this one, and it has to:
-        // whether a measurement happened is a fact about what came before, not
-        // something the plan can settle about itself.
-        self.claims_are_sound(plan).await?;
-
+        // **Nothing here reads another mesocycle any more.** A block used to be
+        // able to claim it opened from a test that had already happened, and
+        // that claim had to be checked against the store; no programme states a
+        // maximum now, so there is no claim left to be wrong.
         // Parameters first: a plan names the version it was authored against,
         // and one stored without them would reference nothing.
         self.parameters

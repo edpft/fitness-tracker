@@ -44,7 +44,7 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,
+    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePlanStore,
     peloton::{
         auth::{PelotonAuth, PelotonCredentials},
         class::PelotonClasses,
@@ -212,7 +212,6 @@ pub async fn generate(
         &pool,
         zone,
         SqlitePlanStore::new(pool.clone(), zone.clone()),
-        SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         SqliteGenerationParameterStore::new(pool.clone()),
         start,
         gym,
@@ -418,7 +417,6 @@ async fn author(
     pool: &infrastructure::SqlitePool,
     zone: &OperatorZone,
     plans: SqlitePlanStore,
-    gym: SqliteGymMesocycleStore,
     parameter_store: SqliteGenerationParameterStore,
     start: Date,
     provider: &GymProvider,
@@ -511,7 +509,7 @@ async fn author(
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let plan = with_both(name, existing.as_ref(), gym_side.clone(), mesocycles)?;
 
-    let (_, authored) = application::prescribe::Authoring::new(plans, gym, parameter_store)
+    let (_, authored) = application::prescribe::Authoring::new(plans, parameter_store)
         .author(&plan, &parameters)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;

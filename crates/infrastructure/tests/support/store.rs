@@ -62,7 +62,6 @@ pub async fn with_programme(
 
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
     .author(&programme::as_plan(programme)?, &programme::parameters()?)

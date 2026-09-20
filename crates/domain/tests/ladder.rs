@@ -41,9 +41,9 @@ fn grid() -> Result<LoadSteps, Box<dyn std::error::Error>> {
 /// -10% is what the operator settled on 2026-08-20. It is passed here rather
 /// than reached for, because the drop is a parameter of the derivation and not
 /// a property of the anchor.
-fn from_test(anchor: Anchor) -> Result<Opening, Box<dyn std::error::Error>> {
-    Ok(Opening::FromAnchor {
-        anchor,
+fn from_test(maximum: Anchor) -> Result<Opening, Box<dyn std::error::Error>> {
+    Ok(Opening {
+        maximum,
         drop: pct("-10%")?,
     })
 }

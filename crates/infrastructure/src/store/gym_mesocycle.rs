@@ -35,9 +35,8 @@ use domain::{
     normalised::OperatorZone,
     plan::{Occupies, PlanName},
     prescription::{
-        Anchor, AnchorProvenance, Anchoring, BlockPeriodisation, Calendar, Entry, Linear,
-        Mesocycle, MesocycleId, PerRole, Progression, Sbs, SessionRole, Skip, SlotId, Test,
-        TestTarget, Tested,
+        Anchor, AnchorProvenance, BlockPeriodisation, Calendar, Linear, Mesocycle, MesocycleId,
+        PerRole, Progression, Sbs, SessionRole, Skip, SlotId, Test, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -188,16 +187,14 @@ pub(super) async fn in_force(
                m.provided_programme AS "provided_programme: String",
                m.primary_pattern AS "primary_pattern!: String",
                m.primary_exercise AS "primary_exercise!: String",
-               m.anchor_grams AS "anchor_grams: i64",
-               m.anchor_provenance AS "anchor_provenance: String",
-               m.anchor_from AS "anchor_from: String",
-               m.anchor_failed_grams AS "anchor_failed_grams: i64",
-               m.opening_grams AS "opening_grams: i64",
+               m.asserted_grams AS "asserted_grams: i64",
+               m.asserted_provenance AS "asserted_provenance: String",
+               m.asserted_from AS "asserted_from: String",
+               m.asserted_failed_grams AS "asserted_failed_grams: i64",
                m.gating_role AS "gating_role: String",
                m.start_date AS "start_date!: String",
                m.duration_weeks AS "duration_weeks!: i64",
                m.test_reps AS "test_reps: i64",
-               m.test_target_grams AS "test_target_grams: i64",
                m.entry_test_reps AS "entry_test_reps: i64",
                m.entry_test_light_grams AS "entry_test_light_grams: i64"
         FROM gym_mesocycle AS m
@@ -245,19 +242,30 @@ pub(super) async fn in_force(
             provided,
         };
         let mesocycle = match row.template.as_str() {
-            "test" => rehydrate_test(common, row.test_reps, row.test_target_grams)?,
+            "test" => rehydrate_test(
+                common,
+                row.test_reps,
+                read_anchor(
+                    row.asserted_grams,
+                    row.asserted_failed_grams,
+                    row.asserted_provenance,
+                    row.asserted_from,
+                )?,
+            )?,
             template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                 common,
                 template,
-                read_entry(
-                    row.anchor_grams,
-                    row.anchor_failed_grams,
-                    row.anchor_provenance,
-                    row.anchor_from,
-                    row.opening_grams,
-                )?,
                 row.gating_role,
-                read_entry_test(row.entry_test_reps, row.entry_test_light_grams)?,
+                read_entry_test(
+                    row.entry_test_reps,
+                    row.entry_test_light_grams,
+                    read_anchor(
+                        row.asserted_grams,
+                        row.asserted_failed_grams,
+                        row.asserted_provenance,
+                        row.asserted_from,
+                    )?,
+                )?,
             )?,
             other => {
                 return Err(corrupt(&format!(
@@ -322,20 +330,17 @@ async fn read_provided(
 /// of programme it is, so a test with an anchor and a linear programme without
 /// one are both refused by the database as well as unrepresentable here.
 struct Columns {
-    anchor_grams: Option<i64>,
+    asserted_grams: Option<i64>,
     provenance: Option<&'static str>,
-    anchor_from: Option<String>,
-    anchor_failed: Option<i64>,
-    declared_opening: Option<i64>,
+    asserted_from: Option<String>,
+    asserted_failed: Option<i64>,
     gating: Option<&'static str>,
     test_reps: Option<i64>,
-    test_target: Option<i64>,
     entry_test_reps: Option<i64>,
     entry_test_light: Option<i64>,
 }
 
 fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
-    let anchor = programme.anchor();
     let entry_test = match programme {
         Mesocycle::Progression(Progression::BlockPeriodisation(block)) => block.entry_test(),
         // An SBS cycle has no entry test: its test is the last session of the
@@ -350,54 +355,43 @@ fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
                 .map_err(|_| corrupt(&"a light load larger than the store can hold"))
         })
         .transpose()?;
-    let (test_reps, test_target) = match programme {
-        Mesocycle::Test(test) => (
-            Some(i64::from(test.reps().as_u32())),
-            match test.target() {
-                TestTarget::Inherited => None,
-                TestTarget::Declared(load) => Some(
-                    i64::try_from(load.as_grams())
-                        .map_err(|_| corrupt(&"a target larger than the store can hold"))?,
-                ),
-            },
-        ),
-        Mesocycle::Progression(_) => (None, None),
+
+    // **Only an entry test carries one, and only the one at the front of a
+    // sequence.** Every other week's anchor is a function of a test that
+    // happened and is read off the record when a session is asked for; this is
+    // the seed, which nothing can derive because nothing came before it. A
+    // standalone test and a block that measures its own entry are the same case
+    // in two shapes.
+    let asserted = match programme {
+        Mesocycle::Test(test) => test.asserted(),
+        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+            block.entry_test().and_then(EntryTest::asserted)
+        }
+        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
     };
+    let test_reps = match programme {
+        Mesocycle::Test(test) => Some(i64::from(test.reps().as_u32())),
+        Mesocycle::Progression(_) => None,
+    };
+
     Ok(Columns {
-        anchor_grams: anchor
+        asserted_grams: asserted
             .map(|anchor| {
                 i64::try_from(anchor.load().as_grams())
                     .map_err(|_| corrupt(&"an anchor larger than the store can hold"))
             })
             .transpose()?,
-        provenance: anchor.map(|anchor| anchor.provenance().as_str()),
-        anchor_from: anchor.map(|anchor| anchor.from().to_string()),
-        anchor_failed: anchor
+        provenance: asserted.map(|anchor| anchor.provenance().as_str()),
+        asserted_from: asserted.map(|anchor| anchor.from().to_string()),
+        asserted_failed: asserted
             .and_then(Anchor::failed)
             .map(|failed| {
                 i64::try_from(failed.as_grams())
                     .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
             })
             .transpose()?,
-        // Only a linear programme may declare one: a block's loads are shares of
-        // its anchor, and a test has no ladder to open.
-        declared_opening: match programme {
-            Mesocycle::Progression(Progression::Linear(linear)) => linear.declared_opening(),
-            // Nor may SBS: every load in the chart is a share of the maximum,
-            // so there is no opening for one to be declared against.
-            Mesocycle::Progression(
-                Progression::BlockPeriodisation(_) | Progression::Provided { .. },
-            )
-            | Mesocycle::Test(_) => None,
-        }
-        .map(|opening| {
-            i64::try_from(opening.as_grams())
-                .map_err(|_| corrupt(&"an opening larger than the store can hold"))
-        })
-        .transpose()?,
         gating: programme.gating_role().map(SessionRole::as_str),
         test_reps,
-        test_target,
         entry_test_reps: entry_test.map(|test| i64::from(test.reps().as_u32())),
         entry_test_light,
     })
@@ -419,31 +413,23 @@ struct Common {
 fn rehydrate_test(
     common: Common,
     test_reps: Option<i64>,
-    test_target_grams: Option<i64>,
+    asserted: Option<Anchor>,
 ) -> Result<Mesocycle, StoreError> {
     let reps = test_reps.ok_or_else(|| corrupt(&"a test with no repetition count"))?;
     let reps = u32::try_from(reps)
         .ok()
         .and_then(|count| RepCount::new(count).ok())
         .ok_or_else(|| corrupt(&"a test at no repetitions"))?;
-    // Null is the ordinary case and means inherited: the target moves as the
-    // record does (decision 0011), so storing one is what a test with nothing to
-    // inherit from does.
-    let target = match test_target_grams {
-        None => TestTarget::Inherited,
-        Some(grams) => TestTarget::Declared(
-            u64::try_from(grams)
-                .map(Kg::from_grams)
-                .map_err(|_| corrupt(&"a target stored as a negative mass"))?,
-        ),
-    };
+    // Null is the ordinary case: a test with something behind it defers to
+    // whatever that measured, which is read off the record when a session is
+    // asked for. A number here is the seed at the front of a sequence.
     Ok(Mesocycle::Test(
         Test::rehydrate(
             Tested::new(common.pattern, common.exercise, reps),
             common.fills,
             common.calendar,
-            target,
             common.provided,
+            asserted,
         )
         .map_err(|error| corrupt(&error))?,
     ))
@@ -453,7 +439,6 @@ fn rehydrate_test(
 fn rehydrate_periodisation(
     common: Common,
     template: &str,
-    entry: Option<Entry>,
     gating_role: Option<String>,
     entry_test: Option<EntryTest>,
 ) -> Result<Mesocycle, StoreError> {
@@ -472,40 +457,26 @@ fn rehydrate_periodisation(
             .ok_or_else(|| corrupt(&"a provided cycle that names no programme"))?;
         // `stored` rather than `new`: the checks ran when it was written, and
         // re-refusing a row now would make a rule change unreadable data.
-        // **A null anchor is the inherited case, not a corrupt row.** Only a
-        // provided cycle may leave it out: it opens from whatever the mesocycle
-        // before it measured, which is not knowable when the plan is authored.
-        let entry = entry.map_or(Anchoring::Inherited, Anchoring::Stated);
         return Ok(Mesocycle::Progression(Progression::Provided {
             from,
             cycle: Sbs::stored(
                 common.pattern,
                 common.exercise,
                 common.fills,
-                entry,
                 common.calendar,
             ),
         }));
     }
 
-    // A ladder and a block are every load a share of their anchor, so an absent
-    // one here is a row the `CHECK` should have refused.
-    let entry = entry.ok_or_else(|| corrupt(&"a programme that climbs from no anchor"))?;
     Ok(Mesocycle::Progression(if template == "linear" {
         Progression::Linear(
-            Linear::rehydrate(primary, common.fills, entry, common.calendar)
+            Linear::rehydrate(primary, common.fills, common.calendar)
                 .map_err(|error| corrupt(&error))?,
         )
     } else {
         Progression::BlockPeriodisation(
-            BlockPeriodisation::rehydrate(
-                primary,
-                common.fills,
-                entry,
-                entry_test,
-                common.calendar,
-            )
-            .map_err(|error| corrupt(&error))?,
+            BlockPeriodisation::rehydrate(primary, common.fills, entry_test, common.calendar)
+                .map_err(|error| corrupt(&error))?,
         )
     }))
 }
@@ -518,6 +489,7 @@ fn rehydrate_periodisation(
 fn read_entry_test(
     reps: Option<i64>,
     light_grams: Option<i64>,
+    asserted: Option<Anchor>,
 ) -> Result<Option<EntryTest>, StoreError> {
     let Some(reps) = reps else {
         return Ok(None);
@@ -534,26 +506,23 @@ fn read_entry_test(
         })
         .transpose()?;
     Ok(Some(
-        EntryTest::new(reps, light).map_err(|error| corrupt(&error))?,
+        EntryTest::new(reps, light, asserted).map_err(|error| corrupt(&error))?,
     ))
 }
 
-/// The anchor and its opening, from the columns a programme that climbs must
-/// carry.
+/// The anchor a test asserts, from the four columns only a test may carry.
 ///
-/// **`None` is an absent anchor, which only a provided cycle may have.** It
-/// inherits: what it opens from is whatever the mesocycle before it measured, so
-/// there is no number to store (issue #86). The `CHECK` still refuses a null
-/// anchor for a ladder or a block, where an absent one is a row that got past
-/// the database — corrupt, and reported as such by the caller rather than
-/// defaulted.
-fn read_entry(
+/// **`None` is the ordinary case**, and it is a statement rather than a gap: a
+/// test with something behind it defers to whatever that measured, and what it
+/// resolves to is read off the record when a session is asked for. A number is
+/// the seed at the front of a sequence, where nothing came before to measure
+/// one.
+fn read_anchor(
     grams: Option<i64>,
     failed_grams: Option<i64>,
     provenance: Option<String>,
     from: Option<String>,
-    opening_grams: Option<i64>,
-) -> Result<Option<Entry>, StoreError> {
+) -> Result<Option<Anchor>, StoreError> {
     let Some(grams) = grams else {
         return Ok(None);
     };
@@ -580,14 +549,7 @@ fn read_entry(
     )
     .map_err(|error| corrupt(&error))?;
 
-    let declared_opening = opening_grams
-        .map(|grams| {
-            u64::try_from(grams)
-                .map(Kg::from_grams)
-                .map_err(|_| corrupt(&"a declared opening stored as a negative mass"))
-        })
-        .transpose()?;
-    Ok(Some(Entry::new(anchor, declared_opening)))
+    Ok(Some(anchor))
 }
 
 impl MesocycleStore for SqliteGymMesocycleStore {
@@ -653,14 +615,12 @@ pub(super) async fn write(
     let provider = provided_from.map(|from| from.programme().provider().to_string());
     let provided_programme = provided_from.map(|from| from.programme().name().to_string());
     let Columns {
-        anchor_grams,
+        asserted_grams,
         provenance,
-        anchor_from,
-        anchor_failed,
-        declared_opening,
+        asserted_from,
+        asserted_failed,
         gating,
         test_reps,
-        test_target,
         entry_test_reps,
         entry_test_light,
     } = columns_of(mesocycle)?;
@@ -670,11 +630,11 @@ pub(super) async fn write(
         INSERT INTO gym_mesocycle (
             plan, ordinal, provider, provided_programme, template,
             primary_pattern, primary_exercise,
-            anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
-            opening_grams, gating_role, start_date, duration_weeks,
-            test_reps, test_target_grams, entry_test_reps, entry_test_light_grams
+            asserted_grams, asserted_provenance, asserted_from, asserted_failed_grams,
+            gating_role, start_date, duration_weeks,
+            test_reps, entry_test_reps, entry_test_light_grams
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id AS "id!: i64"
         "#,
         plan,
@@ -684,16 +644,14 @@ pub(super) async fn write(
         template,
         pattern,
         primary,
-        anchor_grams,
+        asserted_grams,
         provenance,
-        anchor_from,
-        anchor_failed,
-        declared_opening,
+        asserted_from,
+        asserted_failed,
         gating,
         start,
         duration,
         test_reps,
-        test_target,
         entry_test_reps,
         entry_test_light
     )

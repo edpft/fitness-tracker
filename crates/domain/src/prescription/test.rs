@@ -43,8 +43,9 @@ use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
     gym::exercise::Exercise,
-    measure::{Kg, RepCount},
+    measure::RepCount,
     prescription::{
+        anchor::Anchor,
         linear::{PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         repmax::rep_max,
@@ -53,25 +54,6 @@ use crate::{
     },
     provider::ProvidedFrom,
 };
-
-/// What the test is an attempt at.
-///
-/// **Inherited by default, because the target moves as the record does**
-/// (decision 0011). Every rung the predecessor's progression makes raises it, so
-/// a number written into a document at authoring time is stale the first time a
-/// session goes up. This is the one thing a test does *not* resolve at
-/// authoring.
-///
-/// Declared is for the case inheritance cannot answer: a test with nothing
-/// before it, or one whose predecessor trained a different lift — a front squat
-/// target is not evidence about an RDL, so 0013 refuses to carry one across.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TestTarget {
-    /// From the programme before it, as the record stands.
-    Inherited,
-    /// Stated, where there is nothing to inherit from.
-    Declared(Kg),
-}
 
 /// What is being tested, and how it is being measured.
 ///
@@ -136,7 +118,6 @@ pub struct Test {
     fills: SlotFills,
     /// One week, always: [`Test::new`] builds it and nothing else may.
     calendar: Calendar,
-    target: TestTarget,
     /// Which microcycle of which published programme this week is, where it is
     /// one.
     ///
@@ -144,6 +125,26 @@ pub struct Test {
     /// its publisher wrote; a week that exists only to measure a lift before
     /// something else begins was written by nobody, and may not claim otherwise.
     provided: Option<ProvidedFrom>,
+    /// The anchor this week's own loads are shares of, where nothing before it
+    /// can supply one.
+    ///
+    /// **The only authored anchor in the model, and the provenance says why.**
+    /// Every other week reads one off the record — a test happened, and the
+    /// weeks after it are shares of what it measured. A test at the *front* of a
+    /// sequence has nothing behind it to read, so the operator states a number
+    /// and it carries [`AnchorProvenance::Asserted`]: not a measurement, a
+    /// bootstrap.
+    ///
+    /// `None` is the ordinary case, which is a test with a predecessor. It is
+    /// not a missing number — it is a test that defers, and what it defers to is
+    /// resolved when a session is asked for.
+    ///
+    /// **It is the attempt's target as well as the week's anchor**, and those
+    /// are one thing rather than two: what the heavy session works up to is what
+    /// the week is programming from.
+    ///
+    /// [`AnchorProvenance::Asserted`]: crate::prescription::AnchorProvenance::Asserted
+    asserted: Option<Anchor>,
 }
 
 impl Test {
@@ -194,16 +195,16 @@ impl Test {
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
-        target: TestTarget,
         provided: Option<ProvidedFrom>,
+        asserted: Option<Anchor>,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
             tested,
             fills,
             calendar,
-            target,
             provided,
+            asserted,
         })
     }
 
@@ -220,17 +221,23 @@ impl Test {
         tested: Tested,
         fills: SlotFills,
         calendar: Calendar,
-        target: TestTarget,
         provided: Option<ProvidedFrom>,
+        asserted: Option<Anchor>,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(tested, &fills, &calendar)?;
         Ok(Self {
             tested,
             fills,
             calendar,
-            target,
             provided,
+            asserted,
         })
+    }
+
+    /// The anchor this test states, where it is the one at the front.
+    #[must_use]
+    pub const fn asserted(&self) -> Option<Anchor> {
+        self.asserted
     }
 
     /// The four checks that need nothing but the test.
@@ -307,10 +314,6 @@ impl Test {
 
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
-    }
-
-    pub const fn target(&self) -> TestTarget {
-        self.target
     }
 
     /// Whether this slot is the one being tested.
