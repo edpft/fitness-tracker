@@ -15,8 +15,13 @@ one-line comment saying why. Do not ask first. The operator, 2026-09-21: *"If I
 need to revert, I'll tell you, but re-creating an issue is better than keeping
 loads around."*
 
-`gh` is in the flake, so run it as `nix develop --command gh …`. Read the
-current state from the remote. Do not rely on memory of it.
+`gh` is in the flake, so run it as `nix develop --command gh …`, **from the repo
+root**. Both `nix develop` and `gh` fail from a scratch directory, so pass body
+files by absolute path rather than `cd`-ing to them. Read the current state from
+the remote. Do not rely on memory of it.
+
+To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`.
+`--comments` and `--json` refuse to be combined, and `comments` is a JSON field.
 
 ## Issues — every open one
 
