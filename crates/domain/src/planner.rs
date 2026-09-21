@@ -28,7 +28,7 @@ use jiff::civil::Date;
 use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
-    prescription::{Mesocycle, NotScheduled, WeekKind},
+    prescription::{Mesocycle, NotScheduled, Skip, WeekKind},
     schedule::{AbsenceKind, DayPart, Diary, Discipline, Relative, ScheduledSlot, SessionRole},
 };
 
@@ -558,3 +558,175 @@ pub fn microcycle_state(sessions: &[Placed]) -> MicrocycleState {
         },
     }
 }
+
+/// Why a plan could not be rescheduled.
+///
+/// **Not reachable from a plan that authored**, as far as anything here can
+/// tell: moving a mesocycle later or skipping a week inside it only ever gives
+/// a calendar more room. It is a type rather than a panic because § 26 forbids
+/// the panic, and because a diary that changed under a plan might yet find a
+/// way.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Unreschedulable {
+    #[error(transparent)]
+    Calendar(#[from] crate::prescription::InvalidCalendar),
+    #[error(transparent)]
+    Programme(#[from] crate::plan::InvalidProgramme),
+    #[error(transparent)]
+    Plan(#[from] crate::plan::EmptyPlan),
+}
+
+/// The plan as it now stands, given the weeks the concurrent microcycle was
+/// lost in.
+///
+/// **The operator's rule, 2026-09-21: "It should shift all start dates.
+/// That's the point."** And, asked whether the plan as authored should still be
+/// shown: *"Okay, we could see what we originally planned, but that's not what
+/// we did, so why should we care?"* So this is the plan, not a view of it.
+///
+/// **A lost week is an interruption of the mesocycle in force.** The gym's
+/// calendar already has the rule that re-runs it — a week with no session left
+/// in it is not a training week — and a cycling mesocycle is given the same
+/// rule by [`CyclingMesocycle::losing`]. What was issued in the lost week still
+/// belongs to the mesocycle it was issued for, so nothing already recorded is
+/// re-described (§ 12).
+///
+/// **Every later mesocycle starts where the one before it now ends**, and is
+/// read against the diary as it now stands: the interruptions authored with it
+/// named days in weeks it no longer occupies, so they are re-derived for the
+/// weeks it does. A mesocycle nothing pushed is left exactly as authored.
+///
+/// `lost` is the Monday of each lost week, and is the same for both
+/// disciplines: the programme is the concurrent one, and the two start their
+/// mesocycles together. A shift that leaves a later mesocycle unable to
+/// complete is #201's, not this function's.
+///
+/// # Errors
+///
+/// [`Unreschedulable`] where a moved calendar or the programme it belongs to
+/// will not build.
+pub fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, Unreschedulable> {
+    if lost.is_empty() {
+        return Ok(plan.clone());
+    }
+
+    let gym = plan
+        .gym()
+        .map(|programme| -> Result<_, Unreschedulable> {
+            let mut moved = Vec::new();
+            let mut cursor: Option<Date> = None;
+            for mesocycle in programme.mesocycles() {
+                let next = gym_rescheduled(mesocycle, cursor, lost, diary)?;
+                cursor = Some(crate::plan::Occupies::span(&next).end());
+                moved.push(next);
+            }
+            Ok(crate::plan::Programme::new(moved)?)
+        })
+        .transpose()?;
+
+    let cycling = plan
+        .cycling()
+        .map(|programme| -> Result<_, Unreschedulable> {
+            let mut moved = Vec::new();
+            let mut cursor: Option<Date> = None;
+            for mesocycle in programme.mesocycles() {
+                let next = cycling_rescheduled(mesocycle, cursor, lost);
+                cursor = Some(crate::plan::Occupies::span(&next).end());
+                moved.push(next);
+            }
+            Ok(crate::plan::Programme::new(moved)?)
+        })
+        .transpose()?;
+
+    Ok(Plan::new(
+        plan.name().clone(),
+        plan.authored_at(),
+        gym,
+        cycling,
+    )?)
+}
+
+/// One gym mesocycle, started no earlier than `cursor` and with every lost
+/// week inside it skipped.
+fn gym_rescheduled(
+    mesocycle: &Mesocycle,
+    cursor: Option<Date>,
+    lost: &[Date],
+    diary: &Diary,
+) -> Result<Mesocycle, Unreschedulable> {
+    let calendar = mesocycle.calendar();
+    let authored = calendar.start();
+    let start = cursor.map_or(authored, |cursor| cursor.max(authored));
+
+    // **Authored skips where it has not moved; the diary's where it has.**
+    let base: Vec<Skip> = if start == authored {
+        calendar.interruptions().iter().collect()
+    } else {
+        Vec::new()
+    };
+
+    // The span grows with what it skips, and what it skips depends on the span:
+    // walked to a fixed point, which it reaches because every pass can only
+    // add weeks, and a plan's lost weeks are finite.
+    let mut moved = calendar.moved(start, &base)?;
+    for _ in 0..=lost.len().saturating_add(8) {
+        let end = crate::plan::Occupies::span(&mesocycle.recalendared(moved.clone())).end();
+        let mut skips = base.clone();
+        if start != authored {
+            let final_day = end.yesterday().unwrap_or(end);
+            skips.extend(
+                diary
+                    .unavailable(start, final_day, Discipline::Gym)
+                    .into_iter()
+                    .map(Skip::day),
+            );
+        }
+        skips.extend(
+            lost.iter()
+                .filter(|monday| **monday >= start && **monday < end)
+                .map(|monday| Skip::new(*monday, SEVEN_DAYS)),
+        );
+        let next = calendar.moved(start, &skips)?;
+        if next == moved {
+            break;
+        }
+        moved = next;
+    }
+
+    Ok(mesocycle.recalendared(moved))
+}
+
+/// One cycling mesocycle, started no earlier than `cursor` and with every lost
+/// week inside it lost.
+fn cycling_rescheduled(
+    mesocycle: &CyclingMesocycle,
+    cursor: Option<Date>,
+    lost: &[Date],
+) -> CyclingMesocycle {
+    let authored = mesocycle.start();
+    let start = cursor.map_or(authored, |cursor| cursor.max(authored));
+    let mut moved = if start == authored {
+        mesocycle.clone()
+    } else {
+        mesocycle.starting_on(start)
+    };
+    // As for the gym: losing a week lengthens the span, which may reach the
+    // next lost week. `losing` ignores a Monday outside the span, so repeating
+    // until nothing changes is enough.
+    for _ in 0..=lost.len() {
+        let next = lost
+            .iter()
+            .fold(moved.clone(), |held, monday| held.losing(*monday));
+        if next == moved {
+            break;
+        }
+        moved = next;
+    }
+    moved
+}
+
+/// A calendar week, as a run of skipped days.
+const SEVEN_DAYS: std::num::NonZeroU8 = match std::num::NonZeroU8::new(7) {
+    Some(days) => days,
+    None => std::num::NonZeroU8::MIN,
+};

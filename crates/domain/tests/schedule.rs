@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, ScheduledSlot,
-        RecordedSession, SessionRole, TrainingPattern, TrainingSlot, accounted,
+        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, RecordedSession, Relative,
+        ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted,
     },
 };
 use jiff::civil::{Date, Weekday};

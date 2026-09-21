@@ -36,8 +36,8 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqlitePlanStore, SqliteRiddenVenues, connect,
+    SqliteCyclingDeliveryStore, SqliteDiaryStore, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqlitePlanStore, SqliteRiddenVenues, connect,
     peloton::{PelotonClasses, PelotonHoldingRides, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -77,12 +77,13 @@ const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
 /// cannot be delivered.
 pub async fn next(
     database: &Path,
+    zone: &OperatorZone,
     from: Date,
     ftp: Option<Ftp>,
     to: Result<(&PelotonClasses, &PelotonStack), &str>,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
 
     let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
@@ -279,13 +280,14 @@ fn report(
 /// `replace` was not given.
 pub async fn deliver(
     database: &Path,
+    zone: &OperatorZone,
     from: Date,
     replace: bool,
     classes: &PelotonClasses,
     stack: &PelotonStack,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
     let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
         .await

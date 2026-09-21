@@ -19,11 +19,13 @@ mod support;
 use std::num::NonZeroU8;
 
 use application::{
-    CyclingDeliveryStore as _, DestinationName, DiaryAuthor as _, PerformedSessionLog,
-    PlanAuthor as _, PrescribedWorkoutStore as _, PrescriptionDeliveryStore as _, RiddenSession,
-    RiddenSessionLog, StoreError,
+    CyclingDeliveryStore as _, CyclingMesocycleStore, DestinationName, DiaryAuthor as _,
+    DiaryStore as _, MesocycleStore, PerformedSessionLog, PlanAuthor as _,
+    PrescribedWorkoutStore as _, PrescriptionDeliveryStore as _, RiddenSession, RiddenSessionLog,
+    StoreError,
     microcycle::{Microcycle, MicrocyclePorts},
     prescribe::Authoring,
+    reschedule::{Reschedule, Rescheduled},
 };
 use domain::{
     cycling::{
@@ -32,7 +34,8 @@ use domain::{
     },
     measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
-    planner::SessionState,
+    planner::{MicrocycleState, SessionState},
+    prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
     schedule::{
         Absence, AbsenceKind, Alteration, DayPart, Discipline, PartOfDay, Relative, SessionRole,
@@ -40,7 +43,8 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePlanStore,
+    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
 };
 use jiff::civil::Date;
@@ -103,11 +107,7 @@ impl Ridden {
 }
 
 impl RiddenSessionLog for Ridden {
-    async fn ridden_between(
-        &self,
-        from: Date,
-        to: Date,
-    ) -> Result<Vec<RiddenSession>, StoreError> {
+    async fn ridden_between(&self, from: Date, to: Date) -> Result<Vec<RiddenSession>, StoreError> {
         Ok(self
             .sessions
             .iter()
@@ -196,6 +196,64 @@ async fn autumn_on_the_bike() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     .await?;
 
     Ok((pool, directory))
+}
+
+/// A concurrent plan from Monday 14 September: the gym's block and the bike's
+/// test week, then a second cycling mesocycle from the Monday after.
+///
+/// **Both disciplines, because the microcycle is the concurrent one** (#177):
+/// whether a week is lost is read across the two, and what a lost week moves is
+/// both programmes at once.
+async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
+    let directory = tempfile::tempdir()?;
+    let pool = connect(&directory.path().join("test.db")).await?;
+    programme::record_the_week(&pool).await?;
+
+    let rides = [
+        (SessionPosition::new(1)?, endurance()?),
+        (SessionPosition::new(2)?, ftp_test()?),
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeMap<_, _>>();
+    let test_week = CyclingMesocycle::new(
+        CyclingProvenance::Assembled,
+        Date::constant(2026, 9, 14),
+        NonEmpty::of(CyclingMicrocycle::new(rides)?, Vec::new()),
+    )?;
+    let build = test_week.starting_on(Date::constant(2026, 9, 21));
+
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(
+        &Plan::new(
+            PlanName::try_from("2026-autumn".to_owned())?,
+            jiff::Timestamp::now(),
+            Some(Programme::new(vec![programme::as_programme(
+                programme::programme_from(Date::constant(2026, 9, 14))?,
+            )])?),
+            Some(Programme::new(vec![test_week, build])?),
+        )?,
+        &programme::parameters()?,
+    )
+    .await?;
+
+    Ok((pool, directory))
+}
+
+/// Ill from Thursday 17 to Sunday 20 September, as the operator is extending
+/// his record to say.
+async fn ill_to_the_sunday(pool: &SqlitePool) -> Fallible<()> {
+    let over = NonZeroU8::new(4).ok_or("four is not zero")?;
+    SqliteDiaryStore::new(pool.clone())
+        .record_alteration(&Alteration::new(
+            Date::constant(2026, 9, 17),
+            over,
+            Absence::Illness,
+        ))
+        .await?;
+    Ok(())
 }
 
 fn hevy() -> Fallible<DestinationName> {
@@ -381,7 +439,8 @@ fn the_microcycle_reports_a_state_for_every_session() {
                     Date::constant(2026, 9, 19),
                     PartOfDay::Evening,
                 ))
-                .await?,
+                .await?
+                .sessions,
         )
     })
     .expect("a runtime is available")
@@ -438,7 +497,8 @@ fn a_recorded_delivery_makes_a_ride_prescribed() {
                     Date::constant(2026, 9, 20),
                     PartOfDay::Morning,
                 ))
-                .await?,
+                .await?
+                .sessions,
         )
     })
     .expect("a runtime is available")
@@ -486,7 +546,8 @@ fn an_illness_makes_a_prescribed_session_not_performed() {
                     Date::constant(2026, 9, 19),
                     PartOfDay::Evening,
                 ))
-                .await?,
+                .await?
+                .sessions,
         )
     })
     .expect("a runtime is available")
@@ -526,7 +587,10 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
                 gym_performed: Trained::nothing(),
                 cycling_performed: Ridden::of(vec![(
                     Date::constant(2026, 9, 16),
-                    vec![RideVenue::new("725d6185", "45 min Power Zone Endurance Ride")?],
+                    vec![RideVenue::new(
+                        "725d6185",
+                        "45 min Power Zone Endurance Ride",
+                    )?],
                 )]),
             },
             hevy()?,
@@ -539,7 +603,8 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
                     Date::constant(2026, 9, 20),
                     PartOfDay::Evening,
                 ))
-                .await?,
+                .await?
+                .sessions,
         )
     })
     .expect("a runtime is available")
@@ -589,7 +654,8 @@ fn a_ride_the_record_cannot_name_answers_for_whose_turn_it_was() {
                     Date::constant(2026, 9, 20),
                     PartOfDay::Evening,
                 ))
-                .await?,
+                .await?
+                .sessions,
         )
     })
     .expect("a runtime is available")
@@ -600,4 +666,150 @@ fn a_ride_the_record_cannot_name_answers_for_whose_turn_it_was() {
         .find(|session| session.slot.date == Date::constant(2026, 9, 16))
         .expect("the Wednesday is a session of the week");
     assert_eq!(wednesday.state, SessionState::Performed);
+}
+
+/// **#177's acceptance, against a real store.** The operator's week of 14
+/// September: the Monday lost to Rome, the entry test delivered for the Friday
+/// and lost to illness, the Sunday lost too, and the one ride of the week the
+/// *easier* one. Neither essential session was performed.
+///
+/// Run on the Monday after, the week is read as lost, and the plan moves: the
+/// week of 21 September is the microcycle of the 14th run again — the gym's
+/// first climbing week, the bike's FTP test on the Wednesday — and the next
+/// cycling mesocycle starts on the 28th rather than the 21st.
+#[test]
+fn a_week_that_lost_both_essential_sessions_runs_again() {
+    let (standing, gym, wednesday, next_mesocycle) = corpus::block_on(async {
+        let (pool, _directory) = autumn_together().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+        ill_to_the_sunday(&pool).await?;
+
+        let standing = Microcycle::new(
+            MicrocyclePorts {
+                diary: SqliteDiaryStore::new(pool.clone()),
+                plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                // The last gym session he did, a week before the plan began.
+                // It answers for nothing in it.
+                gym_performed: Trained::on(vec![Date::constant(2026, 9, 7)]),
+                cycling_performed: Ridden::of(vec![(
+                    Date::constant(2026, 9, 16),
+                    vec![RideVenue::new(
+                        "725d6185",
+                        "45 min Power Zone Endurance Ride",
+                    )?],
+                )]),
+            },
+            hevy()?,
+            peloton()?,
+        )
+        .standing(DayPart::new(
+            Date::constant(2026, 9, 21),
+            PartOfDay::Evening,
+        ))
+        .await?;
+
+        let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
+        let reschedule = Reschedule::new(standing.lost.clone(), diary);
+        let gym = Rescheduled::new(
+            SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            reschedule.clone(),
+        );
+        let bike = Rescheduled::new(
+            SqliteCyclingMesocycleStore::new(pool.clone()),
+            SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            reschedule,
+        );
+
+        let monday = Date::constant(2026, 9, 21);
+        let (_, _, block) = MesocycleStore::on(&gym, monday)
+            .await?
+            .ok_or("the block answers for the Monday")?;
+        let gym_week = block.calendar().place(monday)?.0;
+
+        let wednesday = Date::constant(2026, 9, 23);
+        let (_, _, riding) = CyclingMesocycleStore::on(&bike, wednesday)
+            .await?
+            .ok_or("the test week answers for the Wednesday")?;
+        let ridden = riding
+            .microcycle_of(wednesday)
+            .and_then(|number| riding.microcycle(number))
+            .and_then(|week| week.for_role(SessionRole::new(Relative::Higher, Relative::Lower)))
+            .map(|(_, ride)| ride.at().first().called().to_owned());
+
+        let (_, _, following) = CyclingMesocycleStore::following(&bike, wednesday)
+            .await?
+            .ok_or("a second cycling mesocycle follows")?;
+
+        Ok::<_, Box<dyn std::error::Error>>((standing, gym_week, ridden, following.start()))
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Incomplete)]
+    );
+    assert_eq!(standing.lost, vec![Date::constant(2026, 9, 14)]);
+    assert_eq!(
+        gym,
+        WeekKind::Climbing(WeekIndex::FIRST),
+        "the gym's first week runs again"
+    );
+    assert_eq!(
+        wednesday.as_deref(),
+        Some("10 min FTP Warm Up Ride"),
+        "the FTP test takes the Wednesday"
+    );
+    assert_eq!(
+        next_mesocycle,
+        Date::constant(2026, 9, 28),
+        "the next mesocycle moves back a week"
+    );
+}
+
+/// **A week whose essential sessions were performed moves nothing**, whatever
+/// else it lost. Rome still takes the Monday; the entry test is done on the
+/// Saturday and the FTP test on the Wednesday, so the plan runs as written.
+#[test]
+fn a_week_that_kept_both_essential_sessions_moves_nothing() {
+    let standing = corpus::block_on(async {
+        let (pool, _directory) = autumn_together().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+
+        Ok::<_, Box<dyn std::error::Error>>(
+            Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::on(vec![Date::constant(2026, 9, 19)]),
+                    cycling_performed: Ridden::of(vec![(
+                        Date::constant(2026, 9, 16),
+                        vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+                    )]),
+                },
+                hevy()?,
+                peloton()?,
+            )
+            .standing(DayPart::new(
+                Date::constant(2026, 9, 21),
+                PartOfDay::Evening,
+            ))
+            .await?,
+        )
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)]
+    );
+    assert!(standing.lost.is_empty(), "{:?}", standing.lost);
 }

@@ -91,6 +91,17 @@ pub struct Linear {
 }
 
 impl Linear {
+    /// The same mesocycle on another calendar of the same length (#177).
+    ///
+    /// **Only the dates move.** Everything validated against the duration —
+    /// the ladder, the phases, the chart — is unchanged because the duration
+    /// is, which is why this skips the checks `new` runs.
+    pub(crate) fn recalendared(&self, calendar: Calendar) -> Self {
+        Self {
+            calendar,
+            ..self.clone()
+        }
+    }
     /// Build, running the three checks the type system cannot.
     ///
     /// # Errors

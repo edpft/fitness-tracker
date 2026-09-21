@@ -14,6 +14,7 @@ mod output;
 mod paths;
 mod plan;
 mod prescribing;
+mod rescheduling;
 mod scheduling;
 mod setup;
 mod wiring;
@@ -1040,6 +1041,7 @@ async fn cycling_command_run(
         let (classes, stack) = plan::peloton(credentials)?;
         return cycling::deliver(
             database,
+            zone,
             from,
             delivering.get_flag("replace"),
             &classes,
@@ -1086,7 +1088,7 @@ async fn cycling_command_run(
     // sent nothing, which is the half that was missing (#184).
     let peloton = plan::peloton(credentials);
     let to = to_peloton(&peloton);
-    cycling::next(database, from, ftp, to).await
+    cycling::next(database, zone, from, ftp, to).await
 }
 
 /// The destination, or the reason there is not one.

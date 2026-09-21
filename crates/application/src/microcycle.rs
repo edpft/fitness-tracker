@@ -14,8 +14,10 @@
 
 use domain::{
     plan::Plan,
-    planner::{self, Filled, Recorded, SessionState},
-    schedule::{DayPart, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
+    planner::{self, Filled, MicrocycleState, Placed, Recorded, SessionState, Unreschedulable},
+    schedule::{
+        DayPart, Diary, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted,
+    },
 };
 use jiff::civil::Date;
 
@@ -30,7 +32,29 @@ pub struct Session {
     pub slot: ScheduledSlot,
     /// Which of its discipline's sessions in this microcycle, from one.
     pub number: u8,
+    /// Whether the plan has a session for the slot at all.
+    ///
+    /// A slot outside every mesocycle, or in a week its programme skips, is
+    /// still the operator's time and still reported — but it is owed nothing,
+    /// so the microcycle machine does not read it.
+    pub programmed: bool,
     pub state: SessionState,
+}
+
+/// Where a plan stands on a day.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Standing {
+    /// Every session of this week, in the order the week runs.
+    pub sessions: Vec<Session>,
+    /// Each earlier week since the plan began, and how its concurrent
+    /// microcycle ended.
+    pub weeks: Vec<(Date, MicrocycleState)>,
+    /// The Mondays of the weeks that were lost, and so re-run.
+    ///
+    /// What every other reader of the plan needs to see it as it now stands:
+    /// hand it to [`planner::rescheduled`], or to the stores in
+    /// [`crate::reschedule`].
+    pub lost: Vec<Date>,
 }
 
 impl Session {
@@ -96,28 +120,90 @@ where
         }
     }
 
-    /// Every session of the calendar week containing `now`, with its state.
+    /// Where the plan stands on `now`: every week since it began, and every
+    /// session of this one.
     ///
-    /// In the order the week runs. An empty answer is a week the diary says
-    /// nothing about, which is a real state and not a fault.
+    /// **Two machines, walked together** (#177). Each week before this one is
+    /// read as a concurrent microcycle, and a week that lost its essential
+    /// sessions is re-run — the plan is rescheduled so that the next week holds
+    /// the same microcycle, and every mesocycle after it starts a week later.
+    /// Then this week is read against the plan as it now stands.
+    ///
+    /// **Derived on every read, never stored**, as a ladder's position is. A
+    /// workout that lands late and turns out to have been the entry test undoes
+    /// the shift on the next run, where a stored shift would stand wrong for
+    /// ever.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something
-    /// unreadable.
-    pub async fn standing(&self, now: DayPart) -> Result<Vec<Session>, StoreError> {
+    /// unreadable, including a plan that will not reschedule.
+    pub async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
         let diary = self.ports.diary.diary().await?;
-        let Some(plan) = self.plan_covering(now.date).await? else {
-            return Ok(Vec::new());
+        let Some(authored) = self.plan_begun_by(now.date).await? else {
+            return Ok(Standing::default());
         };
 
-        let week = planner::week(&plan, &diary, now.date);
+        let this_week = planner::commencing(now.date);
+        let mut monday = authored.window().span().start();
+        monday = planner::commencing(monday);
+
+        let mut lost: Vec<Date> = Vec::new();
+        let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
+        while monday < this_week {
+            let plan = rescheduled(&authored, &lost, &diary)?;
+            let sunday = monday
+                .checked_add(jiff::Span::new().days(6))
+                .unwrap_or(monday);
+            let sessions = self
+                .week_of(&plan, &diary, monday, now, sunday.min(now.date))
+                .await?;
+            let state = planner::microcycle_state(&placed(&sessions));
+            if matches!(
+                state,
+                MicrocycleState::Incomplete | MicrocycleState::PartiallyCompleted { .. }
+            ) {
+                lost.push(monday);
+            }
+            weeks.push((monday, state));
+            let Ok(next) = monday.checked_add(jiff::Span::new().weeks(1)) else {
+                break;
+            };
+            monday = next;
+        }
+
+        let plan = rescheduled(&authored, &lost, &diary)?;
+        let sessions = self.week_of(&plan, &diary, now.date, now, now.date).await?;
+        Ok(Standing {
+            sessions,
+            weeks,
+            lost,
+        })
+    }
+
+    /// Every session of the calendar week containing `containing`, with its
+    /// state, against a plan already rescheduled.
+    ///
+    /// In the order the week runs. An empty answer is a week the diary says
+    /// nothing about, which is a real state and not a fault. `performed_by` is
+    /// the last day the record is read to: today for this week, and the week's
+    /// own Sunday for one already over, so that a later week's session never
+    /// answers for an earlier week's slot.
+    async fn week_of(
+        &self,
+        plan: &Plan,
+        diary: &Diary,
+        containing: Date,
+        now: DayPart,
+        performed_by: Date,
+    ) -> Result<Vec<Session>, StoreError> {
+        let week = planner::week(plan, diary, containing);
         if week.is_empty() {
             return Ok(Vec::new());
         }
 
         let slots: Vec<ScheduledSlot> = week.iter().map(|planned| planned.slot).collect();
-        let performed = self.performed(&week, now.date).await?;
+        let performed = self.performed(&week, performed_by).await?;
         let answered = accounted(&slots, &performed);
 
         // **What closes the last session's window comes from the diary**, not
@@ -143,11 +229,12 @@ where
             sessions.push(Session {
                 slot,
                 number: planned.number,
+                programmed: planned.session.is_ok(),
                 state: planner::state_of(
                     DayPart::new(slot.date, slot.slot.part),
                     closes,
                     now,
-                    &diary,
+                    diary,
                     recorded,
                 ),
             });
@@ -156,15 +243,22 @@ where
         Ok(sessions)
     }
 
-    /// The plan whose span covers a date, if one does.
-    async fn plan_covering(&self, date: Date) -> Result<Option<Plan>, StoreError> {
+    /// The plan that has begun by a date: the latest whose authored start is
+    /// on or before it.
+    ///
+    /// **Not the one whose span covers it**, because the span is the one
+    /// authored and rescheduling moves its end: a plan three weeks behind still
+    /// answers for the three weeks past where it was written to finish. Two
+    /// plans never overlap, so the latest to have started is the one in force.
+    async fn plan_begun_by(&self, date: Date) -> Result<Option<Plan>, StoreError> {
         let Some(window) = self
             .ports
             .plans
             .windows()
             .await?
             .into_iter()
-            .find(|window| window.span().covers(date))
+            .filter(|window| window.span().start() <= date)
+            .max_by_key(|window| window.span().start())
         else {
             return Ok(None);
         };
@@ -233,12 +327,10 @@ where
             .ridden_between(from, today)
             .await?
         {
-            recorded.push(
-                ridden_as(week, &ridden).map_or_else(
-                    || RecordedSession::unnamed(ridden.on, Discipline::Cycling),
-                    |role| RecordedSession::named(ridden.on, Discipline::Cycling, role),
-                ),
-            );
+            recorded.push(ridden_as(week, &ridden).map_or_else(
+                || RecordedSession::unnamed(ridden.on, Discipline::Cycling),
+                |role| RecordedSession::named(ridden.on, Discipline::Cycling, role),
+            ));
         }
 
         Ok(recorded)
@@ -267,4 +359,28 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
             .then(|| ride.role()),
         Ok(Filled::Gym { .. }) | Err(_) => None,
     })
+}
+
+/// The plan as it now stands, as the store's error.
+///
+/// **A plan that authored should always reschedule** — moving a mesocycle later
+/// and skipping a week in it only ever give its calendar room — so a refusal is
+/// something in the store this program could not have meant.
+fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, StoreError> {
+    planner::rescheduled(plan, lost, diary).map_err(|error: Unreschedulable| StoreError::Corrupt {
+        detail: format!("{} will not reschedule: {error}", plan.name()),
+    })
+}
+
+/// The sessions the microcycle machine reads: the ones the plan programmes.
+fn placed(sessions: &[Session]) -> Vec<Placed> {
+    sessions
+        .iter()
+        .filter(|session| session.programmed)
+        .map(|session| Placed {
+            discipline: session.slot.discipline,
+            role: session.slot.role,
+            state: session.state,
+        })
+        .collect()
 }

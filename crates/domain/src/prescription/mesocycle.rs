@@ -111,6 +111,17 @@ impl Mesocycle {
         }
     }
 
+    /// The same mesocycle on another calendar of the same length (#177).
+    #[must_use]
+    pub fn recalendared(&self, calendar: Calendar) -> Self {
+        match self {
+            Self::Test(test) => Self::Test(test.recalendared(calendar)),
+            Self::Progression(periodisation) => {
+                Self::Progression(periodisation.recalendared(calendar))
+            }
+        }
+    }
+
     /// The slot this programme's primary lift fills.
     ///
     /// For a test that is the lift being tested, which is the *next*
@@ -211,6 +222,19 @@ impl Progression {
             Self::Linear(linear) => linear.calendar(),
             Self::BlockPeriodisation(block) => block.calendar(),
             Self::Provided { cycle: sbs, .. } => sbs.calendar(),
+        }
+    }
+
+    fn recalendared(&self, calendar: Calendar) -> Self {
+        match self {
+            Self::Linear(linear) => Self::Linear(linear.recalendared(calendar)),
+            Self::BlockPeriodisation(block) => {
+                Self::BlockPeriodisation(block.recalendared(calendar))
+            }
+            Self::Provided { from, cycle } => Self::Provided {
+                from: from.clone(),
+                cycle: cycle.recalendared(calendar),
+            },
         }
     }
 

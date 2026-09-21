@@ -384,6 +384,26 @@ impl Calendar {
         self.start
     }
 
+    /// This calendar's length and week, from another start with other skips.
+    ///
+    /// **What rescheduling asks of a calendar** (#177): a mesocycle that has
+    /// moved, or that has lost a week, is the same number of training weeks run
+    /// against the same week of slots — only where it starts and what it skips
+    /// have changed.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidCalendar`] as [`Self::new`] gives it.
+    pub fn moved(&self, start: Date, interruptions: &[Skip]) -> Result<Self, InvalidCalendar> {
+        Self::new(
+            start,
+            self.duration_weeks,
+            interruptions,
+            self.week.clone(),
+            self.zone.clone(),
+        )
+    }
+
     /// Training weeks, which is what the ladder is laid out over.
     pub const fn duration_weeks(&self) -> u32 {
         self.duration_weeks

@@ -760,23 +760,23 @@ impl application::RiddenSessionLog for SqliteCyclingSessionLog {
             if day < from || day > to {
                 continue;
             }
-            let at = match seen.iter().position(|id| *id == row.session) {
-                Some(at) => at,
-                None => {
-                    seen.push(row.session);
-                    sessions.push(application::RiddenSession {
-                        on: day,
-                        at: BTreeSet::new(),
-                    });
-                    seen.len().saturating_sub(1)
-                }
+            let at = if let Some(at) = seen.iter().position(|id| *id == row.session) {
+                at
+            } else {
+                seen.push(row.session);
+                sessions.push(application::RiddenSession {
+                    on: day,
+                    at: BTreeSet::new(),
+                });
+                seen.len().saturating_sub(1)
             };
             let (Some(reference), Some(called)) = (row.reference, row.called) else {
                 continue;
             };
-            let venue = RideVenue::new(&reference, &called).map_err(|error| StoreError::Corrupt {
-                detail: error.to_string(),
-            })?;
+            let venue =
+                RideVenue::new(&reference, &called).map_err(|error| StoreError::Corrupt {
+                    detail: error.to_string(),
+                })?;
             if let Some(session) = sessions.get_mut(at) {
                 session.at.insert(venue);
             }

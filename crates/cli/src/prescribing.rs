@@ -15,12 +15,12 @@ use application::{
 use domain::normalised::OperatorZone;
 use infrastructure::{
     HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, connect,
+    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    connect,
 };
 use jiff::civil::Date;
 
-use crate::{Failure, catalogue, config, exit, output};
+use crate::{Failure, catalogue, config, exit, output, rescheduling};
 
 /// Report the parameters every prescription is generated against (§ 14).
 ///
@@ -69,7 +69,7 @@ pub async fn standing(
 
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+        programmes: rescheduling::gym(&pool, zone).await?,
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
@@ -107,10 +107,10 @@ pub async fn prescribe(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
+    let programmes = rescheduling::gym(&pool, zone).await?;
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+        programmes: rescheduling::gym(&pool, zone).await?,
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
@@ -143,7 +143,7 @@ pub async fn prescribe(
 /// answers for the date it was given, so a day the block skips is refused when
 /// the prescription is derived. Only the porcelain searches — see [`next`].
 async fn resolve(
-    programmes: &SqliteGymMesocycleStore,
+    programmes: &rescheduling::GymMesocycles,
     zone: &OperatorZone,
     given: Option<&str>,
 ) -> Result<Option<Date>, Failure> {
@@ -174,7 +174,7 @@ pub async fn next(
     let pool = connect(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let programmes = SqliteGymMesocycleStore::new(pool, zone.clone());
+    let programmes = rescheduling::gym(&pool, zone).await?;
 
     let from = match from {
         Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
@@ -183,7 +183,10 @@ pub async fn next(
     search(&programmes, from).await
 }
 
-async fn search(programmes: &SqliteGymMesocycleStore, from: Date) -> Result<Option<Date>, Failure> {
+async fn search(
+    programmes: &rescheduling::GymMesocycles,
+    from: Date,
+) -> Result<Option<Date>, Failure> {
     let found = application::prescribe::next_session(programmes, from)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -219,19 +222,14 @@ pub async fn deliver(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
+    let programmes = rescheduling::gym(&pool, zone).await?;
     let Some(date) = resolve(&programmes, zone, date).await? else {
         return Ok(());
     };
 
     let prescriptions = SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned());
     if preview {
-        return preview_delivery(
-            prescriptions,
-            SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
-            date,
-        )
-        .await;
+        return preview_delivery(prescriptions, rescheduling::gym(&pool, zone).await?, date).await;
     }
 
     // **The destination is passed in rather than named here.** It used to be the
@@ -267,7 +265,7 @@ pub async fn deliver(
 
     let delivering = Delivering::new(DeliveryPorts {
         prescriptions,
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+        programmes: rescheduling::gym(&pool, zone).await?,
         deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
         destination,
     });
@@ -288,7 +286,7 @@ pub async fn deliver(
 /// no-op and lose the session entirely. The rendering is the real one.
 async fn preview_delivery(
     prescriptions: SqlitePrescribedWorkoutStore,
-    programmes: SqliteGymMesocycleStore,
+    programmes: rescheduling::GymMesocycles,
     date: Date,
 ) -> Result<(), Failure> {
     let destination = HevyRoutinePreview::new()
@@ -398,7 +396,7 @@ pub async fn compare(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = SqliteGymMesocycleStore::new(pool.clone(), zone.clone());
+    let programmes = rescheduling::gym(&pool, zone).await?;
     let comparing = Comparing::new(ComparisonPorts {
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
         workouts: SqlitePerformedWorkoutReader::new(pool),

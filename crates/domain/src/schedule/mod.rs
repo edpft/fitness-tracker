@@ -1114,9 +1114,7 @@ pub fn accounted(slots: &[ScheduledSlot], performed: &[RecordedSession]) -> Vec<
         let whose_turn = slots
             .iter()
             .enumerate()
-            .filter(|(_, slot)| {
-                slot.discipline == session.discipline && slot.date <= session.date
-            })
+            .filter(|(_, slot)| slot.discipline == session.discipline && slot.date <= session.date)
             .map(|(at, _)| at)
             .next_back();
         claim(&mut answered, whose_turn);
