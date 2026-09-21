@@ -917,7 +917,7 @@ pub fn rescheduled(weeks: &[(jiff::civil::Date, domain::planner::MicrocycleState
                     "the microcycle of Monday {monday} was partially completed: {completed} \
                      performed its essential session and {lost} did not, so it runs again and \
                      everything after it moves back a week. {completed} repeats it too, until \
-                     a holding week can be chosen in its place (#201)"
+                     a holding week can be chosen in its place (#190)"
                 );
             }
             MicrocycleState::Running | MicrocycleState::Completed => continue,
