@@ -15,3 +15,5 @@ jobs:
   # appears here as a new job, with no change to this workflow.
   checks:
     uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@main
+    with:
+      prebuild: .#cargoArtifacts
