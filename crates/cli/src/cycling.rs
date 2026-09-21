@@ -128,13 +128,18 @@ pub async fn next(
     println!();
     match to {
         Ok((classes, stack)) => {
+            // **`next` replaces whatever the stack holds** (the operator,
+            // 2026-09-21: "The default behaviour should be replace"). It is the
+            // command he trains from, and it named a `--replace` it did not
+            // take, so there was no way through from it at all (#121). What it
+            // replaced is said, not silently discarded.
             deliver_ride(
                 &SqliteCyclingDeliveryStore::new(pool),
                 &programme,
                 &next,
                 classes,
                 stack,
-                false,
+                true,
             )
             .await
         }
@@ -384,6 +389,13 @@ async fn deliver_ride<S: application::CyclingDeliveryStore + Sync>(
         .set(&rides)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    if !held.is_empty() {
+        println!(
+            "  replaced   the {} class(es) that were in the stack",
+            held.count()
+        );
+    }
 
     for venue in next.ride.at().iter() {
         println!("  delivered  {venue}");
