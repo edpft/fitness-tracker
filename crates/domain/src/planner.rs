@@ -462,8 +462,9 @@ pub enum MicrocycleState {
     ///
     /// The one that lost it re-runs its microcycle; the one that completed
     /// rides a holding week, so that the two still start the next mesocycle
-    /// together (decision 0034). This is the transition #179 and #180 exist
-    /// for.
+    /// together (decision 0034). Cycling's holding week is #180's and the
+    /// gym's is the linear template; choosing one here is #190's, and until
+    /// then both disciplines re-run the week.
     ///
     /// **Two disciplines, which is what the tool runs.** A third makes this a
     /// pair of lists rather than a pair of names, and that is the edit to make
