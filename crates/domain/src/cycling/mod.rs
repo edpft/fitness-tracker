@@ -32,8 +32,9 @@ pub mod zone;
 
 pub use delivered::DeliveredRide;
 pub use mesocycle::{
-    CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, InvalidCyclingMesocycle,
-    InvalidMicrocycle, InvalidSessionPosition, PlannedRide, SessionPosition,
+    CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingProvenance,
+    InvalidCyclingMesocycle, InvalidMicrocycle, InvalidSessionPosition, PlannedRide,
+    SessionPosition,
 };
 pub use performed::PerformedSession;
 pub use ride::{

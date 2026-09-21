@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMicrocycle, CyclingSession, Interval, PlannedRide, PowerZone,
-        Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, CyclingSession, Interval,
+        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     gym::exercise::{DurationExercise, Exercise, RepsExercise},
     measure::{PositiveDuration, RepCount},
@@ -24,7 +24,7 @@ use domain::{
         BlockPeriodisation, EntryTest, Fill, Mesocycle, Primary, PrimaryPattern, Progression, Skip,
         SlotFills, StaticFill,
     },
-    provider::{ExternalProgramme, ProgrammeName, Provider},
+    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{
         Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
         TrainingPattern, TrainingSlot,
@@ -146,7 +146,12 @@ fn gym() -> Built<Mesocycle> {
 }
 
 /// One ride: a warm-up, one zone held, and a name.
-fn ride(seconds: u64, called: &str, published: u32, role: SessionRole) -> Built<PlannedRide> {
+fn ride(
+    seconds: u64,
+    called: &str,
+    published: PublishedAt,
+    role: SessionRole,
+) -> Built<PlannedRide> {
     let session = CyclingSession::new(
         PositiveDuration::from_seconds(600)?,
         Ride::Intervals(NonEmpty::new(vec![Interval::new(
@@ -155,7 +160,7 @@ fn ride(seconds: u64, called: &str, published: u32, role: SessionRole) -> Built<
         )])?),
         None,
     );
-    Ok(PlannedRide::new(
+    Ok(PlannedRide::provided(
         session,
         NonEmpty::of(
             RideVenue::new("0bc8a790d8ca49cc8355cc7411842ca9", called)?,
@@ -176,15 +181,16 @@ fn ride(seconds: u64, called: &str, published: u32, role: SessionRole) -> Built<
 fn cycling(test: bool) -> Built<CyclingMesocycle> {
     let mut weeks = Vec::with_capacity(4);
     for ordinal in 1..=4_u32 {
+        let at = |session| PublishedAt::new(ordinal, session);
         let (first, second) = if test {
             (
-                ride(2700, "45 min Power Zone Endurance Ride", 1, easier())?,
-                ride(1200, "20 min FTP Test Ride", 3, harder())?,
+                ride(2700, "45 min Power Zone Endurance Ride", at(1)?, easier())?,
+                ride(1200, "20 min FTP Test Ride", at(3)?, harder())?,
             )
         } else {
             (
-                ride(1800, "45 min Power Zone Ride", 1, harder())?,
-                ride(2400, "60 min Power Zone Endurance Ride", 3, easier())?,
+                ride(1800, "45 min Power Zone Ride", at(1)?, harder())?,
+                ride(2400, "60 min Power Zone Endurance Ride", at(3)?, easier())?,
             )
         };
         weeks.push(CyclingMicrocycle::new(
@@ -194,15 +200,14 @@ fn cycling(test: bool) -> Built<CyclingMesocycle> {
             ]
             .into_iter()
             .collect(),
-            ordinal,
         )?);
     }
 
     Ok(CyclingMesocycle::new(
-        ExternalProgramme::new(
+        CyclingProvenance::Provided(ExternalProgramme::new(
             Provider::try_from("Peloton".to_owned())?,
             ProgrammeName::try_from("Build Your Power Zones".to_owned())?,
-        ),
+        )),
         date(2026, 9, 21),
         NonEmpty::new(weeks)?,
     )?)

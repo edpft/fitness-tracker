@@ -155,7 +155,7 @@ fn a_delivered_ride(on: Date) -> Fallible<DeliveredRide> {
     Ok(DeliveredRide {
         prescribed_for: on,
         destination: peloton()?,
-        programme: ProgrammeName::try_from("Power Zone test".to_owned())?,
+        programme: Some(ProgrammeName::try_from("Power Zone test".to_owned())?),
         microcycle: 1,
         session: SessionPosition::new(1)?,
         classes: NonEmpty::of(
@@ -187,7 +187,10 @@ fn a_delivered_ride_keeps_every_class_that_went() {
     assert_eq!(held.classes.iter().count(), 2);
     assert!(held.wrote("725d6185"), "the ride itself");
     assert!(held.wrote("9cc35942"), "and the cool-down chosen for it");
-    assert_eq!(held.programme.as_str(), "Power Zone test");
+    assert_eq!(
+        held.programme.as_ref().map(ProgrammeName::as_str),
+        Some("Power Zone test")
+    );
 }
 
 /// **Delivering again for a date replaces what went.**

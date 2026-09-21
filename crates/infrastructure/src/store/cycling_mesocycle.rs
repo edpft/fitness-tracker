@@ -26,12 +26,12 @@ use std::collections::BTreeMap;
 use application::{CyclingMesocycleStore, StoreError};
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, Interval, PlannedRide, PowerZone,
-        Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMesocycleId, CyclingMicrocycle, CyclingProvenance, Interval,
+        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
     plan::{Occupies, PlanName},
-    provider::{ExternalProgramme, ProgrammeName, Provider},
+    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{Relative, SessionRole},
     sequence::NonEmpty,
 };
@@ -62,8 +62,8 @@ pub(super) async fn in_force(
         r#"
         SELECT m.id AS "id!: i64", m.plan AS "plan!: i64",
                pl.name AS "plan_name!: String",
-               m.provider AS "provider!: String",
-               m.provided_programme AS "provided_programme!: String",
+               m.provider AS "provider: String",
+               m.provided_programme AS "provided_programme: String",
                m.start_date AS "start_date!: String"
         FROM cycling_mesocycle AS m
         JOIN plan AS pl ON pl.id = m.plan
@@ -80,10 +80,17 @@ pub(super) async fn in_force(
     let mut mesocycles = Vec::with_capacity(rows.len());
     for row in rows {
         let plan = PlanName::try_from(row.plan_name).map_err(|error| corrupt(&error))?;
-        let published = ExternalProgramme::new(
-            Provider::try_from(row.provider).map_err(|error| corrupt(&error))?,
-            ProgrammeName::try_from(row.provided_programme).map_err(|error| corrupt(&error))?,
-        );
+        // Both columns or neither, which the `CHECK` also says. A mesocycle
+        // naming a provider and no programme is a half-written row rather than
+        // an assembled week.
+        let provenance = match (row.provider, row.provided_programme) {
+            (Some(provider), Some(name)) => CyclingProvenance::Provided(ExternalProgramme::new(
+                Provider::try_from(provider).map_err(|error| corrupt(&error))?,
+                ProgrammeName::try_from(name).map_err(|error| corrupt(&error))?,
+            )),
+            (None, None) => CyclingProvenance::Assembled,
+            _ => return Err(corrupt(&"a mesocycle naming half of a published programme")),
+        };
         let start = row
             .start_date
             .parse::<Date>()
@@ -92,7 +99,7 @@ pub(super) async fn in_force(
         let microcycles = read_microcycles(pool, row.id).await?;
         let microcycles = NonEmpty::new(microcycles)
             .map_err(|_| corrupt(&"a cycling mesocycle with no microcycle in it"))?;
-        let mesocycle = CyclingMesocycle::new(published, start, microcycles)
+        let mesocycle = CyclingMesocycle::new(provenance, start, microcycles)
             .map_err(|error| corrupt(&error))?;
         mesocycles.push((row.plan, plan, CyclingMesocycleId::new(row.id), mesocycle));
     }
@@ -111,8 +118,7 @@ async fn read_microcycles(
 ) -> Result<Vec<CyclingMicrocycle>, StoreError> {
     let rows = sqlx::query!(
         r#"
-        SELECT ordinal AS "ordinal!: i64",
-               published_ordinal AS "published_ordinal!: i64"
+        SELECT ordinal AS "ordinal!: i64"
         FROM cycling_microcycle
         WHERE mesocycle = ?
         ORDER BY ordinal
@@ -125,10 +131,10 @@ async fn read_microcycles(
 
     let mut microcycles = Vec::with_capacity(rows.len());
     for row in rows {
-        let number = u32::try_from(row.published_ordinal)
-            .map_err(|_| corrupt(&"a published microcycle number the domain cannot hold"))?;
+        // The published week is the rides', not the microcycle's: it was a
+        // column here until 2026-09-20 and a second place for one fact.
         let rides = read_rides(pool, id, row.ordinal).await?;
-        microcycles.push(CyclingMicrocycle::new(rides, number).map_err(|error| corrupt(&error))?);
+        microcycles.push(CyclingMicrocycle::new(rides).map_err(|error| corrupt(&error))?);
     }
     Ok(microcycles)
 }
@@ -141,7 +147,8 @@ async fn read_rides(
     let rows = sqlx::query!(
         r#"
         SELECT session AS "session!: i64",
-               published_session AS "published_session!: i64",
+               published_microcycle AS "published_microcycle: i64",
+               published_session AS "published_session: i64",
                intensity AS "intensity!: String",
                volume AS "volume!: String",
                warm_up_seconds AS "warm_up_seconds!: i64",
@@ -180,17 +187,22 @@ async fn read_rides(
             }
         };
 
-        let published = u32::try_from(row.published_session)
-            .map_err(|_| corrupt(&"a published session number the domain cannot hold"))?;
-        rides.insert(
-            position_of(row.session)?,
-            PlannedRide::new(
-                domain::cycling::CyclingSession::new(warm_up, ride, cool_down),
-                read_venues(pool, id, microcycle, row.session).await?,
-                published,
-                role_of(&row.intensity, &row.volume)?,
-            ),
-        );
+        let session = domain::cycling::CyclingSession::new(warm_up, ride, cool_down);
+        let venues = read_venues(pool, id, microcycle, row.session).await?;
+        let role = role_of(&row.intensity, &row.volume)?;
+
+        // Both columns or neither, which the `CHECK` also says: "µ5 session 3"
+        // is one coordinate, and half of it locates nothing.
+        let planned = match (row.published_microcycle, row.published_session) {
+            (Some(week), Some(number)) => {
+                let at = PublishedAt::new(number_of(week)?, number_of(number)?)
+                    .map_err(|error| corrupt(&error))?;
+                PlannedRide::provided(session, venues, at, role)
+            }
+            (None, None) => PlannedRide::assembled(session, venues, role),
+            _ => return Err(corrupt(&"a ride naming half of a published coordinate")),
+        };
+        rides.insert(position_of(row.session)?, planned);
     }
     Ok(rides)
 }
@@ -255,6 +267,11 @@ async fn read_venues(
     NonEmpty::new(venues).map_err(|_| corrupt(&"a ride with nowhere to do it"))
 }
 
+/// One half of a published coordinate, as the store holds it.
+fn number_of(value: i64) -> Result<u32, StoreError> {
+    u32::try_from(value).map_err(|_| corrupt(&"a published number the domain cannot hold"))
+}
+
 fn position_of(session: i64) -> Result<SessionPosition, StoreError> {
     u8::try_from(session)
         .ok()
@@ -316,8 +333,12 @@ pub(super) async fn write(
     ordinal: i64,
     mesocycle: &CyclingMesocycle,
 ) -> Result<CyclingMesocycleId, StoreError> {
-    let provider = mesocycle.programme().provider().to_string();
-    let programme = mesocycle.programme().name().to_string();
+    let provider = mesocycle
+        .programme()
+        .map(|published| published.provider().to_string());
+    let programme = mesocycle
+        .programme()
+        .map(|published| published.name().to_string());
     let start = mesocycle.start().to_string();
 
     let id = sqlx::query!(
@@ -342,15 +363,14 @@ pub(super) async fn write(
     for (at, microcycle) in mesocycle.microcycles().iter().enumerate() {
         let week = i64::try_from(at + 1)
             .map_err(|_| corrupt(&"more microcycles than the store can number"))?;
-        let published_ordinal = i64::from(microcycle.published_ordinal());
+
         sqlx::query!(
             r"
-            INSERT INTO cycling_microcycle (mesocycle, ordinal, published_ordinal)
-            VALUES (?, ?, ?)
+            INSERT INTO cycling_microcycle (mesocycle, ordinal)
+            VALUES (?, ?)
             ",
             id,
-            week,
-            published_ordinal
+            week
         )
         .execute(&mut **tx)
         .await
@@ -380,21 +400,23 @@ async fn write_ride(
         Ride::Intervals(_) => None,
     };
 
-    let published = i64::from(planned.published_session());
+    let published_microcycle = planned.published().map(|at| i64::from(at.microcycle()));
+    let published_session = planned.published().map(|at| i64::from(at.session()));
     let intensity = planned.role().intensity().as_str();
     let volume = planned.role().volume().as_str();
     sqlx::query!(
         r"
         INSERT INTO cycling_ride (
-            mesocycle, microcycle, session, published_session,
+            mesocycle, microcycle, session, published_microcycle, published_session,
             intensity, volume, warm_up_seconds, cool_down_seconds, effort_seconds
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         mesocycle,
         microcycle,
         session,
-        published,
+        published_microcycle,
+        published_session,
         intensity,
         volume,
         warm_up,

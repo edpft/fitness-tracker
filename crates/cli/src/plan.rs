@@ -32,14 +32,14 @@ use std::path::Path;
 use application::{Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
-        Answer, CyclingMesocycle, CyclingMicrocycle, PlannedRide, PublishedProgramme,
-        SessionPosition,
+        Answer, CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, PlannedRide,
+        PublishedProgramme, SessionPosition,
     },
     gym::exercise::RepsExercise,
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
     prescription::PrimaryPattern,
-    provider::{ExternalProgramme, ProgrammeName, Provider},
+    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{Discipline, Relative, SessionRole},
     sequence::NonEmpty,
 };
@@ -554,7 +554,7 @@ async fn author(
         .iter()
         .map(|mesocycle| {
             (
-                mesocycle.programme().name().to_string(),
+                mesocycle.provenance().to_string(),
                 mesocycle.duration_weeks(),
                 mesocycle.start(),
             )
@@ -723,16 +723,21 @@ fn build(
             } else {
                 SessionRole::new(Relative::Lower, Relative::Higher)
             };
-            rides.insert(position, PlannedRide::new(ride, at, session, role));
+            let at_published =
+                PublishedAt::new(*number, session).map_err(|error| Failure::usage(&error))?;
+            rides.insert(
+                position,
+                PlannedRide::provided(ride, at, at_published, role),
+            );
         }
-        weeks.push(CyclingMicrocycle::new(rides, *number).map_err(|error| Failure::usage(&error))?);
+        weeks.push(CyclingMicrocycle::new(rides).map_err(|error| Failure::usage(&error))?);
     }
 
     CyclingMesocycle::new(
-        ExternalProgramme::new(
+        CyclingProvenance::Provided(ExternalProgramme::new(
             Provider::try_from(PELOTON.to_owned()).map_err(|error| Failure::usage(&error))?,
             read.published.clone(),
-        ),
+        )),
         start,
         NonEmpty::new(weeks).map_err(|error| Failure::usage(&error))?,
     )

@@ -171,17 +171,18 @@ fn report(
     // is what had a two-session week reporting "session 3".
     let week = programme.microcycle(microcycle);
     let sessions = week.map_or(0, CyclingMicrocycle::session_count);
-    let published = week.map_or_else(String::new, |one| {
-        format!(
-            "{} µ{} session {}",
-            programme.programme(),
-            one.published_ordinal(),
-            planned.published_session()
-        )
+    // **Blank for a week nobody published** (#180). A holding microcycle's
+    // rides come out of the catalogue one at a time; there is no µ5 session 3
+    // to point back at, and printing the provenance of the *classes* here would
+    // claim a programme that does not exist.
+    let published = planned.published().map_or_else(String::new, |at| {
+        programme
+            .programme()
+            .map_or_else(|| at.to_string(), |named| format!("{named} {at}"))
     });
     println!(
         "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
-        programme.programme(),
+        programme.provenance(),
         programme.duration_weeks(),
         position_number = position.as_u8(),
     );
@@ -290,7 +291,7 @@ pub async fn deliver(
 
     println!(
         "{} — microcycle {} of {}, session {} of {}",
-        programme.programme(),
+        programme.provenance(),
         next.microcycle,
         programme.duration_weeks(),
         next.session.as_u8(),
@@ -489,7 +490,7 @@ async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
         .record(&DeliveredRide {
             prescribed_for: next.date,
             destination,
-            programme: programme.programme().name().clone(),
+            programme: programme.programme().map(|named| named.name().clone()),
             microcycle,
             session: next.session,
             classes: written,

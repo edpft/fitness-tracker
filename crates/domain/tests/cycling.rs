@@ -10,16 +10,17 @@
 
 use domain::{
     cycling::{
-        BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle, CyclingSession,
-        Ftp, FtpProvenance, Interval, PerformedSession, PlannedRide, PowerZone, Resistance, Ride,
-        RideRecord, RideSample, RideVenue, SessionPosition, Speed, Watts, ZoneProfile,
-        bottom_level, diverges, mesocycles, partition, span, zones_lost,
+        BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle,
+        CyclingProvenance, CyclingSession, Ftp, FtpProvenance, Interval, PerformedSession,
+        PlannedRide, PowerZone, Resistance, Ride, RideRecord, RideSample, RideVenue,
+        SessionPosition, Speed, Watts, ZoneProfile, bottom_level, diverges, mesocycles, partition,
+        span, zones_lost,
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, SourceRecordId},
     measure::{Duration, Metres, PositiveDuration},
     normalised::{OperatorZone, StartedAt},
     plan::Occupies,
-    provider::{ExternalProgramme, ProgrammeName, Provider},
+    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
@@ -51,7 +52,7 @@ fn ride(
     zone: PowerZone,
     seconds: u64,
     called: &str,
-    published_session: u32,
+    published: PublishedAt,
     role: SessionRole,
 ) -> Result<PlannedRide, Box<dyn std::error::Error>> {
     let duration = PositiveDuration::from_seconds(seconds)?;
@@ -61,10 +62,10 @@ fn ride(
         Some(PositiveDuration::from_seconds(60)?),
     );
     let venue = RideVenue::new("0bc8a790d8ca49cc8355cc7411842ca9", called)?;
-    Ok(PlannedRide::new(
+    Ok(PlannedRide::provided(
         session,
         NonEmpty::of(venue, Vec::new()),
-        published_session,
+        published,
         role,
     ))
 }
@@ -78,16 +79,22 @@ fn microcycle(number: u32) -> Result<CyclingMicrocycle, Box<dyn std::error::Erro
                 PowerZone::Two,
                 1800,
                 "45 min Power Zone Endurance Ride",
-                1,
+                PublishedAt::new(number, 1)?,
                 harder(),
             )?,
         ),
         (
             SessionPosition::new(2)?,
-            ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3, easier())?,
+            ride(
+                PowerZone::Four,
+                2400,
+                "60 min Power Zone Ride",
+                PublishedAt::new(number, 3)?,
+                easier(),
+            )?,
         ),
     ];
-    Ok(CyclingMicrocycle::new(rides.into_iter().collect(), number)?)
+    Ok(CyclingMicrocycle::new(rides.into_iter().collect())?)
 }
 
 /// *Build Your Power Zones*, published by Peloton.
@@ -107,7 +114,7 @@ fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
         microcycle(5)?,
     ])?;
     Ok(CyclingMesocycle::new(
-        build()?,
+        CyclingProvenance::Provided(build()?),
         date(2026, 9, 21),
         microcycles,
     )?)
@@ -119,16 +126,16 @@ fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
 #[test]
 fn a_microcycle_says_which_published_one_it_is() {
     let programme = programme().expect("the fixture programme is valid");
-    let numbers: Vec<u32> = programme
+    let numbers: Vec<Option<u32>> = programme
         .microcycles()
         .iter()
         .map(CyclingMicrocycle::published_ordinal)
         .collect();
-    assert_eq!(numbers, vec![1, 2, 4, 5]);
+    assert_eq!(numbers, vec![Some(1), Some(2), Some(4), Some(5)]);
     assert_eq!(
         programme
             .microcycle(3)
-            .map(CyclingMicrocycle::published_ordinal),
+            .and_then(CyclingMicrocycle::published_ordinal),
         Some(4),
         "the programme's third microcycle is the published fourth",
     );
@@ -165,8 +172,8 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
     assert_eq!(number, 3, "three weeks after the start is microcycle three");
     assert_eq!(position.as_u8(), 2, "Sunday is the second ride of the week");
     assert_eq!(
-        ride.published_session(),
-        3,
+        ride.published().map(PublishedAt::session),
+        Some(3),
         "and it is the published third session, which is not what it is called",
     );
     assert_eq!(
@@ -188,14 +195,14 @@ fn a_week_counts_its_own_sessions_and_keeps_the_published_numbers() {
     assert_eq!(week.session_count(), 2, "two rides, so two of two");
     let ours: Vec<u8> = week.rides().keys().map(|at| at.as_u8()).collect();
     assert_eq!(ours, vec![1, 2], "numbered from one, in the order ridden");
-    let published: Vec<u32> = week
+    let published: Vec<Option<u32>> = week
         .rides()
         .values()
-        .map(PlannedRide::published_session)
+        .map(|ride| ride.published().map(PublishedAt::session))
         .collect();
     assert_eq!(
         published,
-        vec![1, 3],
+        vec![Some(1), Some(3)],
         "taken from the published first and third"
     );
 }
@@ -246,11 +253,16 @@ fn microcycles_that_ride_different_roles_are_refused() {
     let odd = CyclingMicrocycle::new(
         std::iter::once((
             SessionPosition::new(1).expect("session one"),
-            ride(PowerZone::Two, 1800, "45 min Power Zone Ride", 1, easier())
-                .expect("a planned ride"),
+            ride(
+                PowerZone::Two,
+                1800,
+                "45 min Power Zone Ride",
+                PublishedAt::new(2, 1).expect("a published coordinate"),
+                easier(),
+            )
+            .expect("a planned ride"),
         ))
         .collect(),
-        2,
     )
     .expect("one ride is a microcycle");
 
@@ -258,7 +270,7 @@ fn microcycles_that_ride_different_roles_are_refused() {
         NonEmpty::new(vec![microcycle(1).expect("a microcycle"), odd]).expect("two microcycles");
 
     let refused = CyclingMesocycle::new(
-        build().expect("the published programme"),
+        CyclingProvenance::Provided(build().expect("the published programme")),
         date(2026, 9, 21),
         microcycles,
     );
@@ -289,25 +301,30 @@ fn a_test_week_rides_the_same_roles_at_different_positions() {
                     PowerZone::Two,
                     2700,
                     "45 min Power Zone Endurance Ride",
-                    1,
+                    PublishedAt::new(2, 1).expect("a published coordinate"),
                     easier(),
                 )
                 .expect("a planned ride"),
             ),
             (
                 SessionPosition::new(2).expect("session two"),
-                ride(PowerZone::Four, 1200, "20 min FTP Test Ride", 3, harder())
-                    .expect("a planned ride"),
+                ride(
+                    PowerZone::Four,
+                    1200,
+                    "20 min FTP Test Ride",
+                    PublishedAt::new(2, 3).expect("a published coordinate"),
+                    harder(),
+                )
+                .expect("a planned ride"),
             ),
         ]
         .into_iter()
         .collect(),
-        2,
     )
     .expect("two rides is a microcycle");
 
     let accepted = CyclingMesocycle::new(
-        build().expect("the published programme"),
+        CyclingProvenance::Provided(build().expect("the published programme")),
         date(2026, 9, 21),
         NonEmpty::new(vec![ordinary, test_week]).expect("two microcycles"),
     );
@@ -325,18 +342,29 @@ fn a_microcycle_rides_each_role_once() {
         [
             (
                 SessionPosition::new(1).expect("session one"),
-                ride(PowerZone::Two, 1800, "45 min Power Zone Ride", 1, harder())
-                    .expect("a planned ride"),
+                ride(
+                    PowerZone::Two,
+                    1800,
+                    "45 min Power Zone Ride",
+                    PublishedAt::new(1, 1).expect("a published coordinate"),
+                    harder(),
+                )
+                .expect("a planned ride"),
             ),
             (
                 SessionPosition::new(2).expect("session two"),
-                ride(PowerZone::Four, 2400, "60 min Power Zone Ride", 3, harder())
-                    .expect("a planned ride"),
+                ride(
+                    PowerZone::Four,
+                    2400,
+                    "60 min Power Zone Ride",
+                    PublishedAt::new(1, 3).expect("a published coordinate"),
+                    harder(),
+                )
+                .expect("a planned ride"),
             ),
         ]
         .into_iter()
         .collect(),
-        1,
     );
     assert!(repeated.is_err(), "both rides are the harder one");
 }
@@ -355,25 +383,30 @@ fn the_shorter_harder_ride_takes_the_wednesday_whatever_its_position() {
                     PowerZone::Two,
                     2700,
                     "45 min Power Zone Endurance Ride",
-                    1,
+                    PublishedAt::new(1, 1).expect("a published coordinate"),
                     easier(),
                 )
                 .expect("a planned ride"),
             ),
             (
                 SessionPosition::new(2).expect("session two"),
-                ride(PowerZone::Four, 1200, "20 min FTP Test Ride", 2, harder())
-                    .expect("a planned ride"),
+                ride(
+                    PowerZone::Four,
+                    1200,
+                    "20 min FTP Test Ride",
+                    PublishedAt::new(1, 2).expect("a published coordinate"),
+                    harder(),
+                )
+                .expect("a planned ride"),
             ),
         ]
         .into_iter()
         .collect(),
-        1,
     )
     .expect("two rides is a microcycle");
 
     let mesocycle = CyclingMesocycle::new(
-        build().expect("the published programme"),
+        CyclingProvenance::Provided(build().expect("the published programme")),
         date(2026, 9, 21),
         NonEmpty::new(vec![test_week]).expect("one microcycle"),
     )
@@ -427,7 +460,7 @@ fn the_operator_s_own_cool_down_is_added_to_the_class_s() {
         PowerZone::Two,
         1800,
         "45 min Power Zone Endurance Ride",
-        1,
+        PublishedAt::new(1, 1).expect("a published coordinate"),
         harder(),
     )
     .expect("the fixture ride is valid");
@@ -850,7 +883,7 @@ fn a_date_months_after_the_start_resolves_to_the_right_microcycle() {
     )
     .expect("thirteen is non-empty");
     let long = CyclingMesocycle::new(
-        build().expect("the published programme"),
+        CyclingProvenance::Provided(build().expect("the published programme")),
         date(2026, 9, 21),
         microcycles,
     )

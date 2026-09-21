@@ -36,7 +36,12 @@ pub struct DeliveredRide {
     pub prescribed_for: Date,
     pub destination: DestinationName,
     /// The published programme the ride was taken from.
-    pub programme: ProgrammeName,
+    ///
+    /// `None` for a holding microcycle (#180), which nobody published. Naming
+    /// Peloton here would be true of the class and false of the week: the
+    /// classes below say where the ride was done, and there is no programme
+    /// this was the nth session of.
+    pub programme: Option<ProgrammeName>,
     /// Which microcycle of the mesocycle, counting from one.
     pub microcycle: u32,
     /// Where the ride sat in its week, in the mesocycle's own numbering.

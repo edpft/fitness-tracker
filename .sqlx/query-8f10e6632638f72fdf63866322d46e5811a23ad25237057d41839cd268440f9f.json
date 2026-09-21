@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session AS \"session!: i64\",\n               published_session AS \"published_session!: i64\",\n               intensity AS \"intensity!: String\",\n               volume AS \"volume!: String\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE mesocycle = ? AND microcycle = ?\n        ORDER BY session\n        ",
+  "query": "\n        SELECT session AS \"session!: i64\",\n               published_microcycle AS \"published_microcycle: i64\",\n               published_session AS \"published_session: i64\",\n               intensity AS \"intensity!: String\",\n               volume AS \"volume!: String\",\n               warm_up_seconds AS \"warm_up_seconds!: i64\",\n               cool_down_seconds AS \"cool_down_seconds: i64\",\n               effort_seconds AS \"effort_seconds: i64\"\n        FROM cycling_ride\n        WHERE mesocycle = ? AND microcycle = ?\n        ORDER BY session\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "published_session!: i64",
+        "name": "published_microcycle: i64",
         "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_ride",
+            "name": "published_microcycle"
+          }
+        }
+      },
+      {
+        "name": "published_session: i64",
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "intensity!: String",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "volume!: String",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "warm_up_seconds!: i64",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "cool_down_seconds: i64",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "effort_seconds: i64",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -86,7 +97,8 @@
     },
     "nullable": [
       false,
-      false,
+      true,
+      true,
       false,
       false,
       false,
@@ -94,5 +106,5 @@
       true
     ]
   },
-  "hash": "6c6db566dcad6bda0c40f9f50feb67a501ab001350d275f147f1d2939d7def7f"
+  "hash": "8f10e6632638f72fdf63866322d46e5811a23ad25237057d41839cd268440f9f"
 }

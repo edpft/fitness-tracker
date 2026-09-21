@@ -11,12 +11,12 @@ mod support;
 use application::{CyclingMesocycleStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMicrocycle, CyclingSession, Interval, PlannedRide, PowerZone,
-        Ride, RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, CyclingSession, Interval,
+        PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
-    provider::{ExternalProgramme, ProgrammeName, Provider},
+    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
@@ -91,7 +91,7 @@ macro_rules! run {
 fn intervals(
     reference: &str,
     called: &str,
-    published: u32,
+    published: PublishedAt,
     role: SessionRole,
 ) -> Fallible<PlannedRide> {
     let runs = [
@@ -116,7 +116,7 @@ fn intervals(
         Ride::Intervals(NonEmpty::new(runs)?),
         Some(PositiveDuration::from_seconds(60)?),
     );
-    Ok(PlannedRide::new(
+    Ok(PlannedRide::provided(
         session,
         NonEmpty::of(RideVenue::new(reference, called)?, Vec::new()),
         published,
@@ -125,13 +125,13 @@ fn intervals(
 }
 
 /// The FTP warm-up and the test itself: one session, two places, no cool-down.
-fn ftp_test() -> Fallible<PlannedRide> {
+fn ftp_test(published: PublishedAt) -> Fallible<PlannedRide> {
     let session = CyclingSession::new(
         PositiveDuration::from_seconds(600)?,
         Ride::Effort(PositiveDuration::from_seconds(1200)?),
         None,
     );
-    Ok(PlannedRide::new(
+    Ok(PlannedRide::provided(
         session,
         NonEmpty::of(
             RideVenue::new("1eabf70b20744f48b99259f93889ced5", "10 min FTP Warmup Ride")?,
@@ -140,7 +140,7 @@ fn ftp_test() -> Fallible<PlannedRide> {
                 "20 min FTP Test Ride",
             )?],
         ),
-        3,
+        published,
         // The test is the week's higher-intensity, shorter ride, whatever
         // Peloton numbers it.
         SessionRole::new(Relative::Higher, Relative::Lower),
@@ -165,12 +165,12 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
         )
     };
     let second = if test {
-        ftp_test()?
+        ftp_test(PublishedAt::new(published, 3)?)?
     } else {
         intervals(
             "414a518108ea4c5cada00ab9899a9d8d",
             "60 min Power Zone Ride",
-            3,
+            PublishedAt::new(published, 3)?,
             second_role,
         )?
     };
@@ -180,7 +180,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
             intervals(
                 "9f8f3af689cc4f0db9afa013d4676ed6",
                 "45 min Power Zone Endurance Ride",
-                1,
+                PublishedAt::new(published, 1)?,
                 first_role,
             )?,
         ),
@@ -188,10 +188,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
         // third — numbered as his, with the published number kept beside it.
         (SessionPosition::new(2)?, second),
     ];
-    Ok(CyclingMicrocycle::new(
-        rides.into_iter().collect(),
-        published,
-    )?)
+    Ok(CyclingMicrocycle::new(rides.into_iter().collect())?)
 }
 
 fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMesocycle> {
@@ -200,10 +197,10 @@ fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMeso
         .map(|number| microcycle(*number, test))
         .collect::<Fallible<Vec<_>>>()?;
     Ok(CyclingMesocycle::new(
-        ExternalProgramme::new(
+        CyclingProvenance::Provided(ExternalProgramme::new(
             Provider::try_from("Peloton".to_owned())?,
             ProgrammeName::try_from("Build Your Power Zones".to_owned())?,
-        ),
+        )),
         start,
         NonEmpty::new(weeks)?,
     )?)

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id           AS \"id!: i64\",\n                   programme    AS \"programme!: String\",\n                   microcycle   AS \"microcycle!: i64\",\n                   session      AS \"session!: i64\",\n                   delivered_at AS \"delivered_at!: String\"\n              FROM cycling_delivery\n             WHERE prescribed_for = ? AND destination = ?\n            ",
+  "query": "\n            SELECT id           AS \"id!: i64\",\n                   programme    AS \"programme: String\",\n                   microcycle   AS \"microcycle!: i64\",\n                   session      AS \"session!: i64\",\n                   delivered_at AS \"delivered_at!: String\"\n              FROM cycling_delivery\n             WHERE prescribed_for = ? AND destination = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
         }
       },
       {
-        "name": "programme!: String",
+        "name": "programme: String",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
@@ -64,11 +64,11 @@
     },
     "nullable": [
       false,
-      false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "106a81791f9bd491a40aa7b234c18c75b6b5fbc4761ce4a224669776ae195ad1"
+  "hash": "d97004fc41c2542093b102b230694997958253776da4b1ad2330360b8df5b5e3"
 }
