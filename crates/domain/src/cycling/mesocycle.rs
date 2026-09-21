@@ -569,6 +569,22 @@ impl CyclingMesocycle {
         self.start
     }
 
+    /// The same mesocycle, beginning on another Monday.
+    ///
+    /// **What a holding week costs the weeks after it** (#180). Inserting one
+    /// occupies a week nothing else can, and a plan refuses two mesocycles over
+    /// one day — so everything after it moves back by the same amount. Nothing
+    /// about what is ridden changes, which is why this copies rather than
+    /// re-validates: the parts that `new` checks are unchanged by the date.
+    #[must_use]
+    pub fn starting_on(&self, start: Date) -> Self {
+        Self {
+            provenance: self.provenance.clone(),
+            start,
+            microcycles: self.microcycles.clone(),
+        }
+    }
+
     pub const fn microcycles(&self) -> &NonEmpty<CyclingMicrocycle> {
         &self.microcycles
     }

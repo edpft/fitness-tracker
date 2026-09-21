@@ -18,7 +18,9 @@ use std::{
 use jiff::{Timestamp, civil::Date};
 
 use domain::analytical::Weighed;
-use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, DeliveredRide, Ftp, RideVenue};
+use domain::cycling::{
+    CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
+};
 use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -1154,6 +1156,22 @@ pub trait HoldingRides {
         &self,
         role: SessionRole,
     ) -> impl Future<Output = Result<Vec<RideVenue>, SourceError>> + Send;
+
+    /// What one class prescribes: its warm-up, its zone plan and its cool-down.
+    ///
+    /// **A second call on purpose.** Candidates come back by the hundred from
+    /// one listing and each one's content is a request of its own, so fetching
+    /// them all to choose one would be a hundred requests to discard
+    /// ninety-nine. This asks only about the class actually taken.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the credential, or
+    /// describes a class this adapter cannot read as a session.
+    fn session_at(
+        &self,
+        venue: &RideVenue,
+    ) -> impl Future<Output = Result<CyclingSession, SourceError>> + Send;
 }
 
 /// Which classes have already been ridden.

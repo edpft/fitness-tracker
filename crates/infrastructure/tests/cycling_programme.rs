@@ -17,7 +17,7 @@ use domain::{
     measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Relative, SessionRole, TrainingWeek},
+    schedule::{Diary, PartOfDay, Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -222,6 +222,16 @@ fn riding_week() -> Fallible<TrainingWeek> {
     ])?)
 }
 
+/// A diary that says nothing: no patterns, no alterations, no absences.
+///
+/// **What "no illness that week" looks like.** The easing rule (#180) reads the
+/// diary for a cycling slot lost to illness; an empty one has none, so these
+/// suites get the ordinary role. The week is supplied separately because that
+/// is how `next_ride` takes it.
+fn quiet_diary() -> Diary {
+    Diary::new(Vec::new(), Vec::new())
+}
+
 /// Every interval, every venue and the order of both, exactly as authored.
 #[test]
 fn an_authored_mesocycle_round_trips_exactly() {
@@ -380,7 +390,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
     let (_, next) = run!(application::cycling::next_ride(
         &opened.cycling,
         date(2026, 10, 19),
-        &riding_week().expect("the fixture week is valid")
+        &riding_week().expect("the fixture week is valid"),
+        &quiet_diary()
     ));
     assert_eq!(next.date, date(2026, 10, 21));
     assert_eq!(next.microcycle, 1);
@@ -389,7 +400,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
     let (_, next) = run!(application::cycling::next_ride(
         &opened.cycling,
         date(2026, 10, 12),
-        &riding_week().expect("the fixture week is valid")
+        &riding_week().expect("the fixture week is valid"),
+        &quiet_diary()
     ));
     assert_eq!(next.date, date(2026, 10, 14));
     assert_eq!(next.microcycle, 4, "the fourth week of the first mesocycle");
@@ -402,4 +414,213 @@ fn an_unauthored_store_holds_no_cycling_mesocycle() {
     let (opened, _directory) = opened!();
     assert!(run!(opened.cycling.on(date(2026, 9, 23))).is_none());
     assert!(run!(opened.plans.windows()).is_empty());
+}
+
+/// A holding week: two 45-minute classes, roled by kind rather than by length.
+///
+/// **The same duration on purpose.** The operator named a 45-minute Power Zone
+/// ride and a 45-minute Power Zone Endurance ride on 2026-09-20, and the role
+/// comparison admits equality so that the week is expressible at all. A fixture
+/// of two different lengths would pass whether the roles were stated or derived.
+fn holding(start: Date) -> Fallible<CyclingMesocycle> {
+    let ride = |reference: &str, called: &str, role| -> Fallible<PlannedRide> {
+        let session = CyclingSession::new(
+            PositiveDuration::from_seconds(300)?,
+            Ride::Intervals(NonEmpty::new(vec![Interval::new(
+                PowerZone::Three,
+                PositiveDuration::from_seconds(2_400)?,
+            )])?),
+            None,
+        );
+        Ok(PlannedRide::assembled(
+            session,
+            NonEmpty::of(RideVenue::new(reference, called)?, Vec::new()),
+            role,
+        ))
+    };
+
+    let week = CyclingMicrocycle::new(
+        [
+            (
+                SessionPosition::new(1)?,
+                ride(
+                    "newest-power-zone",
+                    "45 min Power Zone Ride",
+                    SessionRole::new(Relative::Higher, Relative::Lower),
+                )?,
+            ),
+            (
+                SessionPosition::new(2)?,
+                ride(
+                    "newest-endurance",
+                    "45 min Power Zone Endurance Ride",
+                    SessionRole::new(Relative::Lower, Relative::Higher),
+                )?,
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )?;
+
+    Ok(CyclingMesocycle::new(
+        CyclingProvenance::Assembled,
+        start,
+        NonEmpty::new(vec![week])?,
+    )?)
+}
+
+/// **A holding week survives the store, and still names no programme.**
+///
+/// Everything else authored here is microcycles of *Build Your Power Zones*;
+/// this is two classes picked out of the catalogue because the gym is repeating
+/// a week (#180). The provenance is the whole difference, and it has to come
+/// back as it went in — a holding week that read back as `Provided` would claim
+/// a programme nobody published and offer a way back to a microcycle that does
+/// not exist.
+#[test]
+fn a_holding_week_round_trips_naming_no_programme() {
+    let (opened, _directory) = opened!();
+    let Ok(authored) = holding(date(2026, 9, 21)) else {
+        panic!("the fixture holding week is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored.clone()]) else {
+        panic!("the fixture plan is valid")
+    };
+
+    run!(author(&opened, &plan));
+
+    let read = run!(opened.cycling.on(date(2026, 9, 23)));
+    let Some((_, _, held)) = read else {
+        panic!("the holding week covers the Wednesday")
+    };
+
+    assert_eq!(held, authored, "exactly as authored");
+    assert_eq!(held.provenance(), &CyclingProvenance::Assembled);
+    assert_eq!(held.programme(), None, "nobody published this week");
+    assert_eq!(held.provided_from(), None);
+    let Some(week) = held.microcycle(1) else {
+        panic!("a holding mesocycle has one microcycle")
+    };
+    assert_eq!(
+        week.published_ordinal(),
+        None,
+        "it is not the nth week of anything"
+    );
+    for ride in week.rides().values() {
+        assert_eq!(ride.published(), None, "and no ride names a published one");
+    }
+}
+
+/// **The holding week's Wednesday rides the harder class, and the Sunday the
+/// easier one** — the two rides being the same length.
+///
+/// This is #180's acceptance line. What places each ride is its role meeting a
+/// slot of the same role (#63); with equal durations nothing else could.
+#[test]
+fn a_holding_week_puts_the_power_zone_ride_on_the_wednesday() {
+    let (opened, _directory) = opened!();
+    let Ok(authored) = holding(date(2026, 9, 21)) else {
+        panic!("the fixture holding week is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored]) else {
+        panic!("the fixture plan is valid")
+    };
+    run!(author(&opened, &plan));
+
+    let week = riding_week().expect("the fixture week is valid");
+
+    let (_, wednesday) = run!(application::cycling::next_ride(
+        &opened.cycling,
+        date(2026, 9, 21),
+        &week,
+        &quiet_diary()
+    ));
+    assert_eq!(wednesday.date, date(2026, 9, 23));
+    assert_eq!(
+        wednesday.ride.at().first().called(),
+        "45 min Power Zone Ride"
+    );
+
+    let (_, sunday) = run!(application::cycling::next_ride(
+        &opened.cycling,
+        date(2026, 9, 24),
+        &week,
+        &quiet_diary()
+    ));
+    assert_eq!(sunday.date, date(2026, 9, 27));
+    assert_eq!(
+        sunday.ride.at().first().called(),
+        "45 min Power Zone Endurance Ride"
+    );
+}
+
+/// **With the Sunday lost to illness, the surviving Wednesday rides the easier
+/// class.**
+///
+/// The operator, 2026-09-20: *"if one session was lost to illness, the
+/// remaining session would be easier."* The slot still asks for the
+/// higher-intensity role; the week answers with the lower-intensity ride
+/// because a session that week was lost to illness. #180's second acceptance
+/// line.
+#[test]
+fn an_illness_that_week_eases_the_surviving_wednesday() {
+    let (opened, _directory) = opened!();
+    let Ok(authored) = holding(date(2026, 9, 21)) else {
+        panic!("the fixture holding week is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored]) else {
+        panic!("the fixture plan is valid")
+    };
+    run!(author(&opened, &plan));
+
+    let Some(one) = std::num::NonZeroU8::new(1) else {
+        panic!("one is not zero")
+    };
+    let Ok(zone) = domain::normalised::OperatorZone::try_from("Europe/London") else {
+        panic!("Europe/London is a zone")
+    };
+    let slots: std::collections::BTreeMap<_, _> = [
+        (
+            domain::schedule::TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
+            domain::schedule::Allocation::new(
+                domain::schedule::Discipline::Cycling,
+                SessionRole::new(Relative::Higher, Relative::Lower),
+            ),
+        ),
+        (
+            domain::schedule::TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
+            domain::schedule::Allocation::new(
+                domain::schedule::Discipline::Cycling,
+                SessionRole::new(Relative::Lower, Relative::Higher),
+            ),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    let diary = Diary::new(
+        vec![domain::schedule::TrainingPattern::new(
+            date(2026, 1, 1),
+            zone,
+            slots,
+        )],
+        vec![domain::schedule::Alteration::new(
+            date(2026, 9, 27),
+            one,
+            domain::schedule::Absence::Illness,
+        )],
+    );
+
+    let (_, wednesday) = run!(application::cycling::next_ride(
+        &opened.cycling,
+        date(2026, 9, 21),
+        &riding_week().expect("the fixture week is valid"),
+        &diary
+    ));
+    assert_eq!(wednesday.date, date(2026, 9, 23));
+    assert_eq!(
+        wednesday.ride.at().first().called(),
+        "45 min Power Zone Endurance Ride",
+        "the Sunday was lost to illness, so the Wednesday rides the easier class"
+    );
 }

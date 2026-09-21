@@ -18,11 +18,14 @@
 
 use application::{HoldingRides, SourceError};
 use domain::{
-    cycling::RideVenue,
+    cycling::{CyclingSession, RideVenue},
     schedule::{Relative, SessionRole},
 };
 
-use super::class::{POWER_ZONE_ENDURANCE_SERIES, POWER_ZONE_SERIES, PelotonClasses};
+use super::{
+    class::{POWER_ZONE_ENDURANCE_SERIES, POWER_ZONE_SERIES, PelotonClasses},
+    provider,
+};
 
 /// How long both holding rides are, in seconds.
 ///
@@ -73,6 +76,15 @@ impl HoldingRides for PelotonHoldingRides<'_> {
                 })
             })
             .collect()
+    }
+
+    async fn session_at(&self, venue: &RideVenue) -> Result<CyclingSession, SourceError> {
+        let class = self.classes.class(venue.reference()).await?;
+        // **One class, one session.** The FTP pair is two classes and one
+        // session (decision 0033) and goes through the same function; a holding
+        // ride is the degenerate case of it, so the joining rule is stated once.
+        let (session, _) = provider::session((1, 1), std::slice::from_ref(&class))?;
+        Ok(session)
     }
 }
 

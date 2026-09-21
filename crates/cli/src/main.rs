@@ -296,6 +296,15 @@ fn cycling_command() -> ClapCommand {
                 )),
         )
         .subcommand(
+            ClapCommand::new("hold")
+                .about("Give cycling a week that holds its place while the gym repeats one")
+                .arg(Arg::new("from").long("from").value_name("date").help(
+                    "Which week holds, as YYYY-MM-DD. Any day in it names the \
+                     week; defaults to this one. Later cycling mesocycles move \
+                     back by a week",
+                )),
+        )
+        .subcommand(
             ClapCommand::new("deliver")
                 .about("Deliver the next cycling session to Peloton, with its cool down")
                 .arg(Arg::new("date").long("date").value_name("date").help(
@@ -821,7 +830,13 @@ async fn authored_command(
             Some(deliver_command_run(sub, &zone, database, credentials).await)
         }
         "next" => Some(next_command_run(sub, database, credentials, stated_timezone).await),
-        "cycling" => Some(cycling_command_run(sub, database, credentials).await),
+        "cycling" => {
+            let zone = match zone(sub) {
+                Ok(zone) => zone,
+                Err(error) => return Some(Err(error.into())),
+            };
+            Some(cycling_command_run(sub, &zone, database, credentials).await)
+        }
         "plan" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
@@ -994,6 +1009,7 @@ async fn plan_command_run(
 /// `cycling next`, once its arguments are in hand.
 async fn cycling_command_run(
     sub: &ArgMatches,
+    zone: &domain::normalised::OperatorZone,
     database: &Path,
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
@@ -1002,6 +1018,15 @@ async fn cycling_command_run(
             Failure::message(format!("{value:?} is not a date: {error}"), exit::USAGE)
         })
     };
+
+    if let Some(("hold", holding)) = sub.subcommand() {
+        let from = match holding.get_one::<String>("from") {
+            Some(value) => parse_date(value)?,
+            None => jiff::Zoned::now().date(),
+        };
+        let (classes, _) = plan::peloton(credentials)?;
+        return cycling::hold(database, zone, from, &classes).await;
+    }
 
     if let Some(("deliver", delivering)) = sub.subcommand() {
         let from = match delivering.get_one::<String>("date") {
