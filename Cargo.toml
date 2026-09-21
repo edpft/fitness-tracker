@@ -132,6 +132,20 @@ indexing_slicing = "warn"
 [workspace.metadata.crane]
 name = "workspace"
 
+# **clap checks an argument read against the arguments defined only in a debug
+# build.** In release, reading one never defined returns `None` and the caller
+# falls back as though it had simply not been passed. #198 read `timezone` in
+# the `cycling` arm without defining it: every `fitness cycling` subcommand
+# panicked in `cargo nextest run`, while the flake — which builds release — was
+# green and the installed build silently ignored `--timezone`.
+#
+# Kept on for clap alone, so the release checks see what a debug build sees. It
+# costs a slice comparison per argument read, and it turns the only failure it
+# can produce — the program reading an argument it never defined — from a silent
+# wrong answer into a panic the test suite catches before it merges.
+[profile.release.package.clap_builder]
+debug-assertions = true
+
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
