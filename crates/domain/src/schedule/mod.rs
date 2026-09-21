@@ -995,14 +995,75 @@ impl std::fmt::Display for ScheduledSlot {
     }
 }
 
+/// One session the record holds, and what the record says it was.
+///
+/// Named for the record rather than for the act, because a session performed
+/// and a session the record *holds* are not the same set: a workout the source
+/// has not served yet happened and is not here.
+///
+/// **What can be said differs by discipline, and that is the record talking**
+/// rather than a hole in the model. A performed ride names the class it was
+/// ridden to, and a class is one of the planned rides or none of them — so
+/// cycling can say which session of the microcycle a ride *was*. A gym workout
+/// performed against no prescription names the day it was done and nothing
+/// else.
+///
+/// `role` of `None` is therefore not "unknown, assume the usual": it is the
+/// record declining to say, and [`accounted`] falls back to asking whose turn
+/// it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RecordedSession {
+    /// The day it was performed on.
+    pub date: Date,
+    pub discipline: Discipline,
+    /// What it was, where the record names it.
+    pub role: Option<SessionRole>,
+}
+
+impl RecordedSession {
+    /// A session the record can say nothing about beyond its day.
+    #[must_use]
+    pub const fn unnamed(date: Date, discipline: Discipline) -> Self {
+        Self {
+            date,
+            discipline,
+            role: None,
+        }
+    }
+
+    /// A session the record names.
+    #[must_use]
+    pub const fn named(date: Date, discipline: Discipline, role: SessionRole) -> Self {
+        Self {
+            date,
+            discipline,
+            role: Some(role),
+        }
+    }
+}
+
 /// Which planned sessions the record accounts for, one answer per slot.
 ///
-/// **A session answers for the slot whose turn it was**: the latest slot of
-/// its discipline on or before the day it was performed. The operator,
-/// 2026-09-19: *"if the previous prescribed session was performed since we
-/// last checked, that's fine, the slot doesn't have to match"* — a test missed
-/// through illness on the Friday and performed on the Saturday is that test,
-/// because the Friday is the last gym slot the Saturday is after.
+/// **A role is matched, never conferred** (#177). The operator, 2026-09-20, on
+/// the endurance ride he performed in what the week holds as the shorter,
+/// harder slot:
+///
+/// > I didn't complete a FTP test last week so an FTP is still owed. The fact
+/// > that the endurance ride was on a Wednesday [...] doesn't change what it
+/// > was!
+///
+/// So a named session answers for the slot of its discipline that holds its
+/// role, **whatever day it landed on** — before that slot as readily as after.
+/// This is § 11 at the scheduling layer: the slot never re-describes what was
+/// performed in it. Until this was read, the Wednesday ride marked the FTP slot
+/// done and the FTP test went unridden into the first Build mesocycle.
+///
+/// **Where the record names nothing, the slot whose turn it was answers**: the
+/// latest slot of its discipline on or before the day it was performed. The
+/// operator, 2026-09-19: *"if the previous prescribed session was performed
+/// since we last checked, that's fine, the slot doesn't have to match"* — a
+/// test missed through illness on the Friday and performed on the Saturday is
+/// that test, because the Friday is the last gym slot the Saturday is after.
 ///
 /// **Read from the session rather than from the slot**, which is the
 /// correction #185 forced. Walking the slots instead and giving each the
@@ -1011,30 +1072,54 @@ impl std::fmt::Display for ScheduledSlot {
 /// done on the Sunday would answer for the *Monday* six days earlier and leave
 /// the Friday looking missed.
 ///
-/// **A slot takes one session.** Two performed on one slot's watch fill it
-/// once; there is no second slot for the second to reach back to.
+/// **A slot takes one session**, and the named pass runs first so that it
+/// cannot be robbed by an unnamed one. Two performed on one slot's watch fill
+/// it once; there is no second slot for the second to reach back to.
 ///
-/// `slots` is in the order the week runs, and `performed` is each discipline's
-/// session dates; a discipline absent from it has performed nothing.
+/// `slots` is in the order the week runs.
 #[must_use]
-pub fn accounted(
-    slots: &[ScheduledSlot],
-    performed: &BTreeMap<Discipline, Vec<Date>>,
-) -> Vec<bool> {
+pub fn accounted(slots: &[ScheduledSlot], performed: &[RecordedSession]) -> Vec<bool> {
     let mut answered = vec![false; slots.len()];
 
-    for (discipline, dates) in performed {
-        for date in dates {
-            let whose_turn = slots
-                .iter()
-                .enumerate()
-                .filter(|(_, slot)| slot.discipline == *discipline && slot.date <= *date)
-                .map(|(at, _)| at)
-                .next_back();
-            if let Some(answer) = whose_turn.and_then(|at| answered.get_mut(at)) {
-                *answer = true;
-            }
+    let claim = |answered: &mut Vec<bool>, at: Option<usize>| {
+        if let Some(answer) = at.and_then(|at| answered.get_mut(at)) {
+            *answer = true;
         }
+    };
+
+    for session in performed {
+        let Some(role) = session.role else {
+            continue;
+        };
+        let held = slots
+            .iter()
+            .enumerate()
+            .find(|(at, slot)| {
+                slot.discipline == session.discipline
+                    && slot.role == role
+                    && !answered.get(*at).copied().unwrap_or(false)
+            })
+            .map(|(at, _)| at);
+        claim(&mut answered, held);
+    }
+
+    for session in performed {
+        if session.role.is_some() {
+            continue;
+        }
+        // **Unchanged from #185, including its ceiling.** The latest slot on
+        // or before the day, claimed or not: a second unnamed session does not
+        // reach further back for a slot of its own, because reaching back is
+        // exactly what that rule rejected.
+        let whose_turn = slots
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| {
+                slot.discipline == session.discipline && slot.date <= session.date
+            })
+            .map(|(at, _)| at)
+            .next_back();
+        claim(&mut answered, whose_turn);
     }
 
     answered

@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.landing_record_id AS \"session!: i64\",\n                   first.started_at_utc AS \"started_at_utc!: String\",\n                   first.zone           AS \"zone!: String\",\n                   part.venue_reference AS \"reference: String\",\n                   part.venue_called    AS \"called: String\"\n              FROM cycling_session AS s\n              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id\n              JOIN bike_plus_ride AS part ON part.landing_record_id = s.landing_record_id\n             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?\n             ORDER BY first.started_at_utc ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "reference: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "venue_reference"
+          }
+        }
+      },
+      {
+        "name": "called: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "venue_called"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "129c05518f66ac8fa50fc1464693127f8f352149a0db5ec2fe88332c9398aa4a"
+}

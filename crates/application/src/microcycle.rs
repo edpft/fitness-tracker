@@ -12,18 +12,16 @@
 //! Delivering the first one still to be prescribed is the caller's, and
 //! rescheduling what was lost is #177's.
 
-use std::collections::BTreeMap;
-
 use domain::{
     plan::Plan,
-    planner::{self, Recorded, SessionState},
-    schedule::{DayPart, Discipline, ScheduledSlot, accounted},
+    planner::{self, Filled, Recorded, SessionState},
+    schedule::{DayPart, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
 };
 use jiff::civil::Date;
 
 use crate::{
     CyclingDeliveryStore, DestinationName, DiaryStore, PerformedSessionLog, PlanStore,
-    PrescriptionDeliveryStore, StoreError,
+    PrescriptionDeliveryStore, RiddenSessionLog, StoreError,
 };
 
 /// One session of the microcycle, and where it stands.
@@ -57,6 +55,10 @@ pub struct MicrocyclePorts<D, P, G, C, Y, L> {
     /// Where a delivered ride is recorded.
     pub cycling_deliveries: C,
     pub gym_performed: Y,
+    /// **Asked what was ridden, not merely when.** A ride names the class it
+    /// was ridden to, which says which session of the microcycle it *was*
+    /// (#177); the gym's record has no such answer, which is why the two are
+    /// different ports rather than one asked twice.
     pub cycling_performed: L,
 }
 
@@ -76,7 +78,7 @@ where
     G: PrescriptionDeliveryStore + Sync,
     C: CyclingDeliveryStore + Sync,
     Y: PerformedSessionLog + Sync,
-    L: PerformedSessionLog + Sync,
+    L: RiddenSessionLog + Sync,
 {
     /// **The destinations are arguments**, because which sink a discipline has
     /// is a fact about the build rather than about the core: the catalogue
@@ -115,7 +117,7 @@ where
         }
 
         let slots: Vec<ScheduledSlot> = week.iter().map(|planned| planned.slot).collect();
-        let performed = self.performed(&slots, now.date).await?;
+        let performed = self.performed(&week, now.date).await?;
         let answered = accounted(&slots, &performed);
 
         // **What closes the last session's window comes from the diary**, not
@@ -192,36 +194,77 @@ where
         }
     }
 
-    /// Each discipline's session dates, from the microcycle's first slot to
-    /// the day being asked about.
+    /// What the record holds for this microcycle, and what it says each
+    /// session was.
     ///
     /// Bounded at `today` because a session cannot have been performed in the
     /// future, and asking beyond it would let next week's ride answer for this
     /// week's slot.
+    ///
+    /// **The gym's sessions go in unnamed.** A Hevy workout names the day it
+    /// was done; what session of the microcycle it *was* is only knowable where
+    /// it was performed against a prescription, and reading that join is work
+    /// nothing yet needs — the fallback in [`accounted`] gives the gym exactly
+    /// the behaviour it had before (#177).
     async fn performed(
         &self,
-        slots: &[ScheduledSlot],
+        week: &[planner::Planned<'_>],
         today: Date,
-    ) -> Result<BTreeMap<Discipline, Vec<Date>>, StoreError> {
-        let mut performed = BTreeMap::new();
-        let Some(from) = slots.iter().map(|slot| slot.date).min() else {
-            return Ok(performed);
+    ) -> Result<Vec<RecordedSession>, StoreError> {
+        let Some(from) = week.iter().map(|planned| planned.slot.date).min() else {
+            return Ok(Vec::new());
         };
         if from > today {
-            return Ok(performed);
+            return Ok(Vec::new());
         }
 
-        performed.insert(
-            Discipline::Gym,
-            self.ports.gym_performed.dates_between(from, today).await?,
-        );
-        performed.insert(
-            Discipline::Cycling,
-            self.ports
-                .cycling_performed
-                .dates_between(from, today)
-                .await?,
-        );
-        Ok(performed)
+        let mut recorded: Vec<RecordedSession> = self
+            .ports
+            .gym_performed
+            .dates_between(from, today)
+            .await?
+            .into_iter()
+            .map(|date| RecordedSession::unnamed(date, Discipline::Gym))
+            .collect();
+
+        for ridden in self
+            .ports
+            .cycling_performed
+            .ridden_between(from, today)
+            .await?
+        {
+            recorded.push(
+                ridden_as(week, &ridden).map_or_else(
+                    || RecordedSession::unnamed(ridden.on, Discipline::Cycling),
+                    |role| RecordedSession::named(ridden.on, Discipline::Cycling, role),
+                ),
+            );
+        }
+
+        Ok(recorded)
     }
+}
+
+/// Which session of the microcycle a ride was, from the class it was ridden to.
+///
+/// **Identity, not resemblance.** A planned ride names the classes it is ridden
+/// at and a performed one names the classes it was ridden at, in one vocabulary
+/// (§ 11) — so this is a comparison of references the destination issued and
+/// nothing here interprets them. The operator's own case: the 45 min Power Zone
+/// Endurance Ride he rode on Wednesday 16 September is the week's *lower*
+/// intensity session, whatever day it landed on, and the FTP test is still
+/// owed.
+///
+/// `None` where nothing matches — a ride taken under his own steam, or one
+/// normalised before the class was recorded — and the record then says only
+/// when it was.
+fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Option<SessionRole> {
+    week.iter().find_map(|planned| match planned.session {
+        Ok(Filled::Cycling { ride, .. }) => ride
+            .at()
+            .iter()
+            .any(|venue| ridden.at.contains(venue))
+            .then(|| ride.role()),
+        Ok(Filled::Gym { .. }) | Err(_) => None,
+    })
 }
