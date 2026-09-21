@@ -14,4 +14,6 @@ jobs:
   # The flake owns what runs: add an entry to `checks` in flake.nix and it
   # appears here as a new job, with no change to this workflow.
   checks:
-    uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@main
+    uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@ci/nix-checks-prebuild
+    with:
+      prebuild: .#cargoArtifacts

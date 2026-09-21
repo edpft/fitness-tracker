@@ -548,6 +548,11 @@
           # stub. Both are exposed by name.
           default = cli;
           inherit cli web;
+
+          # Named for CI rather than for anyone to install: each check runs on
+          # its own runner, and `prebuild` builds this once and caches it for
+          # all of them instead of every job building every dependency.
+          inherit cargoArtifacts;
         };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
