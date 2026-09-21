@@ -45,12 +45,12 @@ use std::collections::BTreeMap;
 use jiff::civil::Date;
 
 use crate::{
-    provider::{ExternalProgramme, InvalidProvision, ProvidedFrom},
+    provider::{ExternalProgramme, InvalidProvision, ProvidedFrom, PublishedAt},
     schedule::{SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 
-use super::session::CyclingSession;
+use super::{session::CyclingSession, venue::RideVenue};
 
 /// Which session of a microcycle, counting from one.
 ///
@@ -109,61 +109,6 @@ impl std::fmt::Display for SessionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidVenue {
-    #[error("a ride has to be done somewhere, and an empty reference names nowhere")]
-    EmptyReference,
-    #[error("a destination that names a place calls it something")]
-    EmptyName,
-}
-
-/// What a destination calls one place a ride is done.
-///
-/// Validated for emptiness and nothing else, exactly as
-/// [`DeliveryReference`](crate::prescription::DeliveryReference) is: the
-/// reference belongs to the system that issued it, and imposing a shape on it
-/// would be this side inventing a rule the issuer never agreed to.
-///
-/// **The name is carried beside the reference** because it is what a
-/// prescription prints. It identifies nothing — two Peloton classes really do
-/// share a title — so nothing reads it but the report.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RideVenue {
-    reference: String,
-    called: String,
-}
-
-impl RideVenue {
-    /// # Errors
-    ///
-    /// [`InvalidVenue`] if either half is empty once trimmed.
-    pub fn new(reference: &str, called: &str) -> Result<Self, InvalidVenue> {
-        let reference = reference.trim().to_owned();
-        let called = called.trim().to_owned();
-        if reference.is_empty() {
-            return Err(InvalidVenue::EmptyReference);
-        }
-        if called.is_empty() {
-            return Err(InvalidVenue::EmptyName);
-        }
-        Ok(Self { reference, called })
-    }
-
-    pub fn reference(&self) -> &str {
-        &self.reference
-    }
-
-    pub fn called(&self) -> &str {
-        &self.called
-    }
-}
-
-impl std::fmt::Display for RideVenue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.called)
-    }
-}
-
 /// One ride, and where it is done.
 ///
 /// **A session is one or more places** (decision 0033). The FTP warm-up and the
@@ -173,21 +118,41 @@ impl std::fmt::Display for RideVenue {
 pub struct PlannedRide {
     session: CyclingSession,
     at: NonEmpty<RideVenue>,
-    published_session: u32,
+    published: Option<PublishedAt>,
     role: SessionRole,
 }
 
 impl PlannedRide {
-    pub const fn new(
+    /// A ride taken from a published programme, at a stated coordinate in it.
+    pub const fn provided(
         session: CyclingSession,
         at: NonEmpty<RideVenue>,
-        published_session: u32,
+        published: PublishedAt,
         role: SessionRole,
     ) -> Self {
         Self {
             session,
             at,
-            published_session,
+            published: Some(published),
+            role,
+        }
+    }
+
+    /// A ride chosen here rather than taken from a programme.
+    ///
+    /// **The role is stated because nothing can derive it** (#180). A holding
+    /// week's two rides are the same length, and the volume comparison admits
+    /// equality, so which is the harder one is a fact about the *kind* of class
+    /// rather than about its duration.
+    pub const fn assembled(
+        session: CyclingSession,
+        at: NonEmpty<RideVenue>,
+        role: SessionRole,
+    ) -> Self {
+        Self {
+            session,
+            at,
+            published: None,
             role,
         }
     }
@@ -205,7 +170,7 @@ impl PlannedRide {
     /// into it. The operator, 2026-09-20: *"the comparison is after the number
     /// of sessions have been decided"*.
     ///
-    /// **It is this, and not [`Self::published_session`], that decides the
+    /// **It is this, and not [`Self::published`], that decides the
     /// weekday.** Peloton puts the FTP test second in its test microcycle,
     /// which would land it on the Sunday; it is the higher-intensity, shorter
     /// session, so it goes in the Wednesday slot. The operator, 2026-09-19:
@@ -220,13 +185,16 @@ impl PlannedRide {
         &self.at
     }
 
-    /// Which session of the published microcycle this was.
+    /// Where in a published programme this ride came from.
     ///
-    /// The counterpart of [`CyclingMicrocycle::published_ordinal`], and kept for
-    /// the same reason: a re-authoring that wants the session the operator did
-    /// not take has to know which one it is asking the provider for.
-    pub const fn published_session(&self) -> u32 {
-        self.published_session
+    /// Kept so a re-authoring that wants the session the operator did *not*
+    /// take knows which microcycle of which programme to ask for.
+    ///
+    /// `None` for a ride nobody published — a holding week's (#180), chosen out
+    /// of the catalogue one class at a time. A mesocycle's rides agree about
+    /// this: [`CyclingMesocycle::new`] refuses a mixture.
+    pub const fn published(&self) -> Option<PublishedAt> {
+        self.published
     }
 }
 
@@ -234,8 +202,20 @@ impl PlannedRide {
 pub enum InvalidMicrocycle {
     #[error("a microcycle with no ride in it is a week off, not a microcycle")]
     NoRides,
-    #[error("a published programme's microcycles count from one, so there is no microcycle 0")]
-    ZeroPublishedOrdinal,
+    /// Some of the week's rides name a published microcycle and some do not.
+    ///
+    /// A week is taken from a published programme or it is not; there is no
+    /// half of one. A mixture would leave [`CyclingMicrocycle::published_ordinal`]
+    /// with two answers and no way to prefer either.
+    #[error("some rides of this microcycle name a published week and some name none")]
+    MixedProvenance,
+    /// Two rides claiming to be from different published microcycles.
+    ///
+    /// The week is one week. Rides from µ2 and µ4 in one microcycle is a
+    /// transcription error rather than an unusual programme, and nothing below
+    /// could say which of them the week is.
+    #[error("this microcycle's rides come from published weeks {first} and {second}")]
+    SplitPublishedWeek { first: u32, second: u32 },
     /// Two rides the planner cannot tell apart.
     ///
     /// A role is what places a ride in the week (issue #63), so a microcycle
@@ -253,7 +233,6 @@ pub enum InvalidMicrocycle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclingMicrocycle {
     rides: BTreeMap<SessionPosition, PlannedRide>,
-    published_ordinal: u32,
 }
 
 impl CyclingMicrocycle {
@@ -261,13 +240,10 @@ impl CyclingMicrocycle {
     ///
     /// [`InvalidMicrocycle::NoRides`] if it prescribes nothing,
     /// [`InvalidMicrocycle::RepeatedRole`] if two of its rides are the same
-    /// thing relative to each other, and
-    /// [`InvalidMicrocycle::ZeroPublishedOrdinal`] for a published numbering
-    /// that counts from zero.
-    pub fn new(
-        rides: BTreeMap<SessionPosition, PlannedRide>,
-        published_ordinal: u32,
-    ) -> Result<Self, InvalidMicrocycle> {
+    /// thing relative to each other, [`InvalidMicrocycle::MixedProvenance`] if
+    /// only some of them name a published week, and
+    /// [`InvalidMicrocycle::SplitPublishedWeek`] if they name two.
+    pub fn new(rides: BTreeMap<SessionPosition, PlannedRide>) -> Result<Self, InvalidMicrocycle> {
         if rides.is_empty() {
             return Err(InvalidMicrocycle::NoRides);
         }
@@ -280,13 +256,33 @@ impl CyclingMicrocycle {
                 return Err(InvalidMicrocycle::RepeatedRole { role: ride.role() });
             }
         }
-        if published_ordinal == 0 {
-            return Err(InvalidMicrocycle::ZeroPublishedOrdinal);
+
+        // The week's provenance is its rides', and they have to agree: a
+        // microcycle *is* one week of one programme, or of none.
+        let mut published: Option<u32> = None;
+        for (index, ride) in rides.values().enumerate() {
+            match (index, ride.published()) {
+                (0, Some(at)) => published = Some(at.microcycle()),
+                (0, None) => published = None,
+                (_, Some(at)) => match published {
+                    None => return Err(InvalidMicrocycle::MixedProvenance),
+                    Some(first) if first != at.microcycle() => {
+                        return Err(InvalidMicrocycle::SplitPublishedWeek {
+                            first,
+                            second: at.microcycle(),
+                        });
+                    }
+                    Some(_) => {}
+                },
+                (_, None) => {
+                    if published.is_some() {
+                        return Err(InvalidMicrocycle::MixedProvenance);
+                    }
+                }
+            }
         }
-        Ok(Self {
-            rides,
-            published_ordinal,
-        })
+
+        Ok(Self { rides })
     }
 
     pub const fn rides(&self) -> &BTreeMap<SessionPosition, PlannedRide> {
@@ -332,9 +328,21 @@ impl CyclingMicrocycle {
     ///
     /// An answer of µ1-2-4-5 keeps the four numbers the programme uses, so the
     /// third microcycle here says 4. Which programme they are microcycles *of*
-    /// is [`CyclingMesocycle::programme`], said once rather than on every week.
-    pub const fn published_ordinal(&self) -> u32 {
-        self.published_ordinal
+    /// is [`CyclingMesocycle::provenance`], said once rather than on every week.
+    ///
+    /// **Derived from the rides, not stored beside them.** It was a field until
+    /// 2026-09-20, which made it a second place for a fact the rides already
+    /// carry and left it free to disagree with them. [`Self::new`] refuses a
+    /// week whose rides name two published microcycles or only some of them, so
+    /// reading the first ride's answers for all of them.
+    ///
+    /// `None` for a week nobody published (#180).
+    #[must_use]
+    pub fn published_ordinal(&self) -> Option<u32> {
+        self.rides
+            .values()
+            .next()
+            .and_then(|ride| ride.published().map(PublishedAt::microcycle))
     }
 
     /// How many sessions the week holds. What "the second of two" counts
@@ -376,6 +384,16 @@ pub enum InvalidCyclingMesocycle {
     /// of them.
     #[error(transparent)]
     NotASelection(#[from] InvalidProvision),
+    /// The mesocycle and its weeks disagree about who published them.
+    ///
+    /// Not reachable through the parts: a week knows whether *its own* rides
+    /// name a published microcycle, and this knows whether a programme was
+    /// named, and only here can the two be compared.
+    #[error("this mesocycle says it is {says}, and {weeks}")]
+    ProvenanceDiffers {
+        says: &'static str,
+        weeks: &'static str,
+    },
 }
 
 /// A row identity, given by the store.
@@ -398,15 +416,56 @@ impl std::fmt::Display for CyclingMesocycleId {
     }
 }
 
+/// Where a mesocycle's weeks came from.
+///
+/// **A variant rather than a nullable programme**, which is how the gym says
+/// the same thing: `Progression::Provided` carries its `ProvidedFrom` beside
+/// its payload, and the derived kinds carry neither. An `Option<ExternalProgramme>`
+/// would have made "no programme" a missing field rather than a kind of
+/// mesocycle.
+///
+/// **Two kinds, and the second arrived with #180.** Until 2026-09-20 a cycling
+/// mesocycle was always microcycles of a Peloton programme, taken whole. A
+/// holding week is not: it is classes picked out of the catalogue because the
+/// other discipline is repeating a week, and the published programme it would
+/// otherwise be a microcycle of does not exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CyclingProvenance {
+    /// Microcycles of a published programme, taken in that programme's order.
+    Provided(ExternalProgramme),
+    /// Assembled here, a class at a time.
+    ///
+    /// **It names no programme on purpose.** Calling Peloton the provider would
+    /// be true of the classes and false of the week: nobody published this
+    /// microcycle, and a re-authoring has nothing to ask for. What the classes
+    /// are is recorded where it belongs — in the venues each ride names.
+    Assembled,
+}
+
+impl CyclingProvenance {
+    /// The published programme, where one published it.
+    #[must_use]
+    pub const fn programme(&self) -> Option<&ExternalProgramme> {
+        match self {
+            Self::Provided(programme) => Some(programme),
+            Self::Assembled => None,
+        }
+    }
+}
+
+impl std::fmt::Display for CyclingProvenance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Provided(programme) => write!(f, "{programme}"),
+            Self::Assembled => f.write_str("a holding microcycle"),
+        }
+    }
+}
+
 /// An authored cycling mesocycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclingMesocycle {
-    /// The published programme these microcycles were taken from.
-    ///
-    /// **Always present on this side.** A cycling mesocycle is microcycles of a
-    /// Peloton programme; there is no derived kind of one, which is why this is
-    /// not an `Option` as the gym's provider is.
-    programme: ExternalProgramme,
+    provenance: CyclingProvenance,
     /// The Monday microcycle one begins on.
     start: Date,
     microcycles: NonEmpty<CyclingMicrocycle>,
@@ -423,8 +482,11 @@ impl CyclingMesocycle {
     /// [`InvalidCyclingMesocycle::NotASelection`] where two microcycles claim
     /// the same published week. A selection takes each week once, and µ1-2-2-4
     /// is not one anybody made.
+    ///
+    /// [`InvalidCyclingMesocycle::ProvenanceDiffers`] where the weeks and the
+    /// mesocycle disagree about whether anybody published this.
     pub fn new(
-        programme: ExternalProgramme,
+        provenance: CyclingProvenance,
         start: Date,
         microcycles: NonEmpty<CyclingMicrocycle>,
     ) -> Result<Self, InvalidCyclingMesocycle> {
@@ -439,45 +501,88 @@ impl CyclingMesocycle {
                 });
             }
         }
-        ProvidedFrom::new(
-            programme.clone(),
-            microcycles
-                .iter()
-                .map(CyclingMicrocycle::published_ordinal)
-                .collect(),
-        )?;
+
+        // The weeks say what they are and so does this; the two must agree.
+        // A `Provided` mesocycle of unpublished weeks would leave
+        // `provided_from` with a programme and no numbers, and an `Assembled`
+        // one of published weeks would throw away the way back to them.
+        let ordinals: Vec<Option<u32>> = microcycles
+            .iter()
+            .map(CyclingMicrocycle::published_ordinal)
+            .collect();
+        match &provenance {
+            CyclingProvenance::Provided(programme) => {
+                let published: Option<Vec<u32>> = ordinals.iter().copied().collect();
+                let published = published.ok_or(InvalidCyclingMesocycle::ProvenanceDiffers {
+                    says: "taken from a published programme",
+                    weeks: "at least one week names none",
+                })?;
+                ProvidedFrom::new(programme.clone(), published)?;
+            }
+            CyclingProvenance::Assembled => {
+                if ordinals.iter().any(Option::is_some) {
+                    return Err(InvalidCyclingMesocycle::ProvenanceDiffers {
+                        says: "assembled here",
+                        weeks: "at least one week names a published microcycle",
+                    });
+                }
+            }
+        }
+
         Ok(Self {
-            programme,
+            provenance,
             start,
             microcycles,
         })
     }
 
-    pub const fn programme(&self) -> &ExternalProgramme {
-        &self.programme
+    pub const fn provenance(&self) -> &CyclingProvenance {
+        &self.provenance
+    }
+
+    /// The published programme, where one published it.
+    #[must_use]
+    pub const fn programme(&self) -> Option<&ExternalProgramme> {
+        self.provenance.programme()
     }
 
     /// Which microcycles of which published programme this is.
     ///
-    /// **Derived rather than stored.** The numbers are on the microcycles and
-    /// the programme is on the mesocycle, so a stored copy would be a second
-    /// place for one fact and free to disagree with the rows it was built from.
-    /// `new` refuses a mesocycle whose numbers do not make a selection, so this
-    /// answers.
+    /// **Derived rather than stored.** The numbers are on the rides and the
+    /// programme is here, so a stored copy would be a second place for one fact
+    /// and free to disagree with the rows it was built from. `new` refuses a
+    /// mesocycle whose numbers do not make a selection, so this answers.
+    ///
+    /// `None` for a mesocycle nobody published (#180).
     #[must_use]
     pub fn provided_from(&self) -> Option<ProvidedFrom> {
-        ProvidedFrom::new(
-            self.programme.clone(),
-            self.microcycles
-                .iter()
-                .map(CyclingMicrocycle::published_ordinal)
-                .collect(),
-        )
-        .ok()
+        let programme = self.provenance.programme()?;
+        let published: Option<Vec<u32>> = self
+            .microcycles
+            .iter()
+            .map(CyclingMicrocycle::published_ordinal)
+            .collect();
+        ProvidedFrom::new(programme.clone(), published?).ok()
     }
 
     pub const fn start(&self) -> Date {
         self.start
+    }
+
+    /// The same mesocycle, beginning on another Monday.
+    ///
+    /// **What a holding week costs the weeks after it** (#180). Inserting one
+    /// occupies a week nothing else can, and a plan refuses two mesocycles over
+    /// one day — so everything after it moves back by the same amount. Nothing
+    /// about what is ridden changes, which is why this copies rather than
+    /// re-validates: the parts that `new` checks are unchanged by the date.
+    #[must_use]
+    pub fn starting_on(&self, start: Date) -> Self {
+        Self {
+            provenance: self.provenance.clone(),
+            start,
+            microcycles: self.microcycles.clone(),
+        }
     }
 
     pub const fn microcycles(&self) -> &NonEmpty<CyclingMicrocycle> {

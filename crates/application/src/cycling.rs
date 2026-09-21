@@ -18,7 +18,8 @@
 
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition},
-    schedule::TrainingWeek,
+    planner,
+    schedule::{Diary, Discipline, TrainingWeek},
 };
 use jiff::civil::Date;
 
@@ -59,6 +60,7 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     store: &S,
     from: Date,
     week: &TrainingWeek,
+    diary: &Diary,
 ) -> Result<(CyclingMesocycle, NextRide), PrescriptionError> {
     let covering = store.on(from).await?;
     let covered = covering.is_some();
@@ -66,7 +68,7 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     // no riding day left defers to the one after it — a mesocycle whose last
     // ride is on the Sunday is still the programme in force on the Saturday.
     if let Some((id, _, programme)) = covering
-        && let Some(found) = ride_in(&programme, id, from, week)
+        && let Some(found) = ride_in(&programme, id, from, week, diary)
     {
         return Ok((programme, found));
     }
@@ -81,19 +83,43 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
             PrescriptionError::NoPlan { date: from }
         });
     };
-    let found = ride_in(&programme, id, from, week)
+    let found = ride_in(&programme, id, from, week, diary)
         .ok_or(PrescriptionError::NoSessionScheduled { from })?;
     Ok((programme, found))
 }
 
+/// The ride one programme puts on the next day it rides.
+///
+/// **An illness in the same microcycle eases what survives it** (#180). The
+/// slot's own role says what the week ordinarily asks of this day; if another
+/// cycling slot that week was lost to illness, the operator's rule is that the
+/// remaining session is the easier one, and the week is asked for that ride
+/// instead.
+///
+/// A microcycle that has no ride in the eased role falls back to the one the
+/// slot asked for: a week holding a single session is still a week to ride,
+/// and answering nothing would be worse than answering the harder ride.
 fn ride_in(
     programme: &CyclingMesocycle,
     id: CyclingMesocycleId,
     from: Date,
     week: &TrainingWeek,
+    diary: &Diary,
 ) -> Option<NextRide> {
     let date = programme.next_riding_day(from, week)?;
     let (microcycle, session, ride) = programme.on(date, week)?;
+
+    let asked = week.role_on(date.weekday())?;
+    let eased = planner::eased_by_illness(diary, date, Discipline::Cycling, asked);
+    let (session, ride) = if eased == asked {
+        (session, ride)
+    } else {
+        programme
+            .microcycle(microcycle)
+            .and_then(|held| held.for_role(eased))
+            .unwrap_or((session, ride))
+    };
+
     Some(NextRide {
         programme: id,
         date,

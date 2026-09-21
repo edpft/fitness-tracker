@@ -166,6 +166,74 @@ impl fmt::Display for ExternalProgramme {
     }
 }
 
+/// Where in a published programme one session came from.
+///
+/// **One coordinate, not two fields.** "µ5 session 3" locates a session in a
+/// published programme, and the two numbers are meaningless apart: a session
+/// ordinal with no microcycle names nothing. Carrying them separately made
+/// each of them independently optional, and a ride that knew its session but
+/// not its week was a state nothing refused (§ 24).
+///
+/// **The published numbering, never ours.** An answer of µ1-2-4-5 keeps the
+/// numbers the programme itself uses, so the third microcycle here says 5. It
+/// is the way back to what was not chosen: a re-authoring that wants the week's
+/// third session knows which microcycle of which programme to ask for.
+///
+/// **Absent for a mesocycle nobody published.** A holding week (#180) is
+/// assembled from classes chosen one at a time, and there is no programme to
+/// be the fifth microcycle of. That is why this is carried as an `Option` on a
+/// ride rather than as a number every ride must invent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PublishedAt {
+    microcycle: u32,
+    session: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidPublishedAt {
+    #[error("a published programme's microcycles count from one, so there is no microcycle 0")]
+    ZeroMicrocycle,
+    #[error("a published microcycle's sessions count from one, so there is no session 0")]
+    ZeroSession,
+}
+
+impl PublishedAt {
+    /// # Errors
+    ///
+    /// [`InvalidPublishedAt`] where either number counts from zero. A
+    /// publisher numbering from one is not an assumption: it is what every
+    /// programme this build reads does, and a zero here would be a
+    /// transcription error rather than an unusual programme.
+    pub const fn new(microcycle: u32, session: u32) -> Result<Self, InvalidPublishedAt> {
+        if microcycle == 0 {
+            return Err(InvalidPublishedAt::ZeroMicrocycle);
+        }
+        if session == 0 {
+            return Err(InvalidPublishedAt::ZeroSession);
+        }
+        Ok(Self {
+            microcycle,
+            session,
+        })
+    }
+
+    /// Which microcycle of the published programme.
+    pub const fn microcycle(self) -> u32 {
+        self.microcycle
+    }
+
+    /// Which session of that microcycle.
+    pub const fn session(self) -> u32 {
+        self.session
+    }
+}
+
+impl fmt::Display for PublishedAt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "µ{} session {}", self.microcycle, self.session)
+    }
+}
+
 /// Which microcycles of which external programme a mesocycle is.
 ///
 /// **The published numbering, never ours.** An answer of µ1-2-4-5 keeps the four

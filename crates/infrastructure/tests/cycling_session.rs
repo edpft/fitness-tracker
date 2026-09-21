@@ -72,13 +72,14 @@ fn workout(id: &str, kind: Kind, start: i64, end: i64) -> String {
 }
 
 fn ridden(id: &str, kind: Kind, discipline: &str, device: &str, start: i64, end: i64) -> String {
+    let at = class_id(id);
     let (workout_type, class) = match kind {
         Kind::Freestyle => ("freestyle", "null".to_owned()),
-        Kind::Main => ("class", class_of(POWER_ZONE_SERIES, &[])),
-        Kind::CoolDown => ("class", class_of(POWER_ZONE_SERIES, &[COOL_DOWN])),
-        Kind::LowImpact => ("class", class_of(POWER_ZONE_SERIES, &[LOW_IMPACT])),
-        Kind::WarmUp => ("class", class_of(FTP_WARM_UP_SERIES, &[])),
-        Kind::Test => ("class", class_of(FTP_TEST_SERIES, &[])),
+        Kind::Main => ("class", class_of(&at, POWER_ZONE_SERIES, &[])),
+        Kind::CoolDown => ("class", class_of(&at, POWER_ZONE_SERIES, &[COOL_DOWN])),
+        Kind::LowImpact => ("class", class_of(&at, POWER_ZONE_SERIES, &[LOW_IMPACT])),
+        Kind::WarmUp => ("class", class_of(&at, FTP_WARM_UP_SERIES, &[])),
+        Kind::Test => ("class", class_of(&at, FTP_TEST_SERIES, &[])),
     };
     format!(
         r#"{{"id":"{id}","fitness_discipline":"{discipline}","device_type":"{device}",
@@ -87,13 +88,24 @@ fn ridden(id: &str, kind: Kind, discipline: &str, device: &str, start: i64, end:
     )
 }
 
-fn class_of(series: &str, class_types: &[&str]) -> String {
+/// The class a workout was ridden to.
+///
+/// **One per workout**, so a suite asserting which class a ride names cannot
+/// pass by accident: a single shared id would make every ride's venue equal and
+/// the assertion vacuous.
+fn class_id(workout: &str) -> String {
+    format!("class-of-{workout}")
+}
+
+fn class_of(id: &str, series: &str, class_types: &[&str]) -> String {
     let types = class_types
         .iter()
         .map(|id| format!("\"{id}\""))
         .collect::<Vec<_>>()
         .join(",");
-    format!(r#"{{"title":"a class","series_id":"{series}","class_type_ids":[{types}]}}"#)
+    format!(
+        r#"{{"id":"{id}","title":"a class","series_id":"{series}","class_type_ids":[{types}]}}"#
+    )
 }
 
 /// The average power every fixture graph states.
@@ -1068,5 +1080,99 @@ fn rides_a_long_way_apart_are_separate_sessions() {
         let summary = derive(&pool).await.expect("a derivation");
         assert_eq!(summary.workouts_written.as_usize(), 2);
         assert!(summary.reconciles());
+    });
+}
+
+/// **The class a ride was ridden to reaches the store, and reads back.**
+///
+/// This is what answers *"the newest that hasn't already been taken"* (#180).
+/// Until 2026-09-20 nothing above raw held a class id: the payload carried one
+/// and `bike_plus_ride` had no column for it, so a holding microcycle could
+/// have offered the operator a ride he did last Tuesday.
+///
+/// **Every ride of a session, not only the main one.** A cool-down is a class
+/// he has taken too, and a selection that saw only main rides would offer one
+/// back.
+#[test]
+fn every_ride_records_the_class_it_was_ridden_to() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("main", workout("main", Kind::Main, 100, 1900)),
+                ("cool", workout("cool", Kind::CoolDown, 1970, 2270)),
+            ],
+            vec![
+                ("main", graph(&[1], &[93], None, "10.0", "km")),
+                ("cool", graph(&[1], &[40], None, "1.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 1, "one session");
+
+        let ridden = application::RiddenVenues::ridden(&infrastructure::SqliteRiddenVenues::new(
+            pool.clone(),
+        ))
+        .await
+        .expect("the venues read back");
+
+        let references: Vec<&str> = {
+            let mut seen: Vec<&str> = ridden
+                .iter()
+                .map(domain::cycling::RideVenue::reference)
+                .collect();
+            seen.sort_unstable();
+            seen
+        };
+        assert_eq!(references, vec!["class-of-cool", "class-of-main"]);
+    });
+}
+
+/// **A class ridden twice is one entry, not two.** The operator rides the same
+/// cool-down over and over — 126 of them in his record share a handful of
+/// classes — and a selection asking "has this been ridden" wants a set.
+#[test]
+fn a_class_ridden_twice_is_named_once() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        // Two sessions far enough apart not to group, both ridden to the same
+        // class: `class_id` keys on the workout id, so they are given the same
+        // one by hand here.
+        let same = r#"{"id":"%ID%","fitness_discipline":"cycling","device_type":"home_bike_plus",
+            "is_outdoor":false,"start_time":%START%,"end_time":%END%,"distance":1.3213,
+            "workout_type":"class",
+            "ride":{"id":"one-class","title":"45 min Power Zone Ride",
+                    "series_id":"0f63c48726fa4533a928cae5358d94d7","class_type_ids":[]}}"#;
+        let build = |id: &str, start: i64, end: i64| {
+            same.replace("%ID%", id)
+                .replace("%START%", &start.to_string())
+                .replace("%END%", &end.to_string())
+        };
+
+        let (pool, _directory) = landed(
+            vec![
+                ("first", build("first", 100, 1900)),
+                ("second", build("second", 40_000, 41_800)),
+            ],
+            vec![
+                ("first", graph(&[1], &[93], None, "10.0", "km")),
+                ("second", graph(&[1], &[93], None, "10.0", "km")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+
+        let summary = derive(&pool).await.expect("a derivation");
+        assert_eq!(summary.workouts_written.as_usize(), 2, "two sessions");
+
+        let ridden = application::RiddenVenues::ridden(&infrastructure::SqliteRiddenVenues::new(
+            pool.clone(),
+        ))
+        .await
+        .expect("the venues read back");
+        assert_eq!(ridden.len(), 1, "{ridden:?}");
     });
 }

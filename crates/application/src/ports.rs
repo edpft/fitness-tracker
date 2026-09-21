@@ -10,12 +10,17 @@
 //! runtime or inside an HTTP handler. One line per method now is cheaper than
 //! re-declaring every port when the `web` ring gains a surface.
 
-use std::{collections::BTreeMap, future::Future};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+};
 
 use jiff::{Timestamp, civil::Date};
 
 use domain::analytical::Weighed;
-use domain::cycling::{CyclingMesocycle, CyclingMesocycleId, DeliveredRide, Ftp};
+use domain::cycling::{
+    CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
+};
 use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -1123,6 +1128,78 @@ pub trait FtpHistory {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<Ftp>, StoreError>> + Send;
+}
+
+/// The classes a holding microcycle could be built from.
+///
+/// **It asks in roles and answers in venues**, so no source identifier crosses
+/// it (§ 16). What makes a class the higher-intensity holding ride is a fact
+/// about Peloton's catalogue — a series id and a length — and it lives in
+/// Peloton's adapter beside the exercise mapping's equivalent, keyed on the
+/// vocabulary this crate owns.
+///
+/// **Newest first, and nothing excluded.** Which of these has been ridden is a
+/// question about the operator's record rather than about the catalogue, so
+/// this hands back the source's order and [`choose`](crate::holding::choose)
+/// does the skipping.
+pub trait HoldingRides {
+    /// Every class that could fill one role of a holding week, newest first.
+    ///
+    /// An empty list is a real answer, not an error: it says the catalogue
+    /// holds no class of that shape.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the credential,
+    /// or answers something the adapter cannot read.
+    fn candidates(
+        &self,
+        role: SessionRole,
+    ) -> impl Future<Output = Result<Vec<RideVenue>, SourceError>> + Send;
+
+    /// What one class prescribes: its warm-up, its zone plan and its cool-down.
+    ///
+    /// **A second call on purpose.** Candidates come back by the hundred from
+    /// one listing and each one's content is a request of its own, so fetching
+    /// them all to choose one would be a hundred requests to discard
+    /// ninety-nine. This asks only about the class actually taken.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the credential, or
+    /// describes a class this adapter cannot read as a session.
+    fn session_at(
+        &self,
+        venue: &RideVenue,
+    ) -> impl Future<Output = Result<CyclingSession, SourceError>> + Send;
+}
+
+/// Which classes have already been ridden.
+///
+/// **The question a holding microcycle asks before it chooses** (#180). The
+/// operator: the holding rides are *"the newest that hasn't already been
+/// taken"*, and taken means ridden — not merely prescribed. So this reads the
+/// performed side (§ 11) and nothing else.
+///
+/// **References, not rides.** What the caller needs is a set to exclude a
+/// candidate from; handing back whole [`BikePlusRide`](domain::cycling::BikePlusRide)s
+/// would be a great deal of series data to answer a question about identity.
+///
+/// A reader and nothing more. What writes them is the Peloton derivation.
+pub trait RiddenVenues {
+    /// Every class the record says was ridden, in no particular order.
+    ///
+    /// **Silent about rows that predate the column.** A ride normalised before
+    /// 2026-09-20 names no class, because nothing read one; those rides are
+    /// absent here rather than represented by a placeholder (§ 37). The cost is
+    /// that a class ridden only before a re-normalisation may be offered again,
+    /// which is why re-normalising is part of what #180 asks for.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn ridden(&self) -> impl Future<Output = Result<BTreeSet<RideVenue>, StoreError>> + Send;
 }
 
 /// A cycling mesocycle, read out of the plan that holds it.

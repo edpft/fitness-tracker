@@ -57,7 +57,7 @@ pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
     PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionLog,
-    SqliteCyclingSessionStore, SqliteFtpHistory,
+    SqliteCyclingSessionStore, SqliteFtpHistory, SqliteRiddenVenues,
 };
 pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;

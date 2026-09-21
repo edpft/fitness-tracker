@@ -34,7 +34,7 @@ use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     cycling::{
         BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries, PerformedSession, RideRecord,
-        RideSample, Watts,
+        RideSample, RideVenue, Watts,
     },
     landing::{EventKind, Provenance},
     measure::{BeatsPerMinute, Duration, Metres},
@@ -48,7 +48,7 @@ use crate::{scribe::Scribe, store::PelotonRideSampleLandingStore};
 use super::{
     account::{LandedRide, SessionAccount},
     payload::{PerformanceGraph, WorkoutRecord, number},
-    sessions::{RideRole, is_low_impact, role_of},
+    sessions::{FREESTYLE, RideRole, is_low_impact, role_of},
 };
 
 /// What Peloton calls a ride.
@@ -257,6 +257,7 @@ fn ride_from(
     }
 
     let (instant, duration) = span_of(&workout)?;
+    let at = venue_of(&workout)?;
 
     // Everything above is the workout record's. Everything below needs the
     // graph, which is the other half of what the source says about this ride.
@@ -290,6 +291,7 @@ fn ride_from(
     Ok((
         BikePlusRide::new(RideRecord {
             started_at: StartedAt::new(instant, zone.clone()),
+            at,
             duration,
             distance,
             average_power,
@@ -304,6 +306,30 @@ fn ride_from(
         }),
         noted,
     ))
+}
+
+/// The class this ride was ridden to.
+///
+/// **Refused rather than defaulted where the record names none** (§ 37). A
+/// freestyle ride carries no class and is already refused by
+/// [`not_a_bike_plus_ride`]; what reaches here and names no class is a record
+/// this adapter has misunderstood, and inventing a venue for it would put a
+/// ride in the store at a place that does not exist.
+fn venue_of(workout: &WorkoutRecord) -> Result<RideVenue, RefusalReason> {
+    let unreadable =
+        |field: &'static str, detail: String| RefusalReason::UnreadableValue { field, detail };
+
+    let class = workout
+        .ride
+        .as_ref()
+        .ok_or_else(|| unreadable("ride", "a ride ridden to no class".to_owned()))?;
+    let (Some(id), Some(title)) = (class.id.as_deref(), class.title.as_deref()) else {
+        return Err(unreadable(
+            "ride.id",
+            "a class with no id or no title".to_owned(),
+        ));
+    };
+    RideVenue::new(id, title).map_err(|error| unreadable("ride.id", error.to_string()))
 }
 
 /// When the ride started, and how long it lasted.
@@ -338,9 +364,19 @@ fn span_of(workout: &WorkoutRecord) -> Result<(Timestamp, Duration), RefusalReas
 
 /// Why this record is not a ride on a Bike+, if it is not.
 ///
-/// Three questions rather than one, because `device_type` is the platform: a
+/// Four questions rather than one, because `device_type` is the platform: a
 /// yoga class taken on the bike's screen answers `home_bike_plus` too, and an
 /// outdoor ride synced in from a Garmin answers `cycling`.
+///
+/// **The fourth is freestyle, and it was missing until 2026-09-20.**
+/// [`role_of`](super::sessions::role_of) has asked it since grouping was
+/// written — a freestyle ride is [`RideRole::NotARide`] — and this asked only
+/// the other three, so a Just Ride reached the body of [`ride_from`] and was
+/// refused later, by the session it failed to make. Harmless while nothing in
+/// between needed a class; not harmless once a ride names the class it was
+/// ridden to (#180), because a freestyle ride names none and the refusal would
+/// have read as an unreadable value rather than as a case this model has no
+/// entity for.
 fn not_a_bike_plus_ride(workout: &WorkoutRecord) -> Option<RefusalReason> {
     let discipline = workout.fitness_discipline.as_deref().unwrap_or("unstated");
     let device = workout
@@ -348,6 +384,11 @@ fn not_a_bike_plus_ride(workout: &WorkoutRecord) -> Option<RefusalReason> {
         .as_deref()
         .unwrap_or("an unstated device");
 
+    if workout.workout_type.as_deref() == Some(FREESTYLE) {
+        return Some(RefusalReason::Unmodelled {
+            detail: format!("a freestyle {discipline} workout, which is part of no class"),
+        });
+    }
     if workout.is_outdoor == Some(true) {
         return Some(RefusalReason::Unmodelled {
             detail: format!("an outdoor {discipline} workout"),

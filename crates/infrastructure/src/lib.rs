@@ -36,7 +36,7 @@ pub use store::{
     SqliteNormalisationRunLog, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
     SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
+    SqliteRiddenVenues, SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
     WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};

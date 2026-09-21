@@ -23,20 +23,22 @@
 
 use std::path::Path;
 
-use application::{DiaryStore as _, FtpHistory};
+use application::{DiaryStore as _, FtpHistory, PlanAuthor as _, PlanStore as _};
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, DeliveredRide, Ftp, PlannedRide, Ride,
         RideVenue, SessionPosition, clock,
     },
     measure::PositiveDuration,
-    schedule::{Discipline, TrainingWeek},
+    normalised::OperatorZone,
+    plan::{Plan, Programme},
+    schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 use infrastructure::{
     SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory,
-    connect,
-    peloton::{PelotonClasses, PelotonStack},
+    SqliteGenerationParameterStore, SqlitePlanStore, SqliteRiddenVenues, connect,
+    peloton::{PelotonClasses, PelotonHoldingRides, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -81,9 +83,9 @@ pub async fn next(
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingMesocycleStore::new(pool.clone());
-    let week = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
+    let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
 
-    let (programme, next) = application::cycling::next_ride(&store, from, &week)
+    let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
         .map_err(|error| match error {
             application::PrescriptionError::NoPlan { .. } => Failure::message(
@@ -171,17 +173,18 @@ fn report(
     // is what had a two-session week reporting "session 3".
     let week = programme.microcycle(microcycle);
     let sessions = week.map_or(0, CyclingMicrocycle::session_count);
-    let published = week.map_or_else(String::new, |one| {
-        format!(
-            "{} µ{} session {}",
-            programme.programme(),
-            one.published_ordinal(),
-            planned.published_session()
-        )
+    // **Blank for a week nobody published** (#180). A holding microcycle's
+    // rides come out of the catalogue one at a time; there is no µ5 session 3
+    // to point back at, and printing the provenance of the *classes* here would
+    // claim a programme that does not exist.
+    let published = planned.published().map_or_else(String::new, |at| {
+        programme
+            .programme()
+            .map_or_else(|| at.to_string(), |named| format!("{named} {at}"))
     });
     println!(
         "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
-        programme.programme(),
+        programme.provenance(),
         programme.duration_weeks(),
         position_number = position.as_u8(),
     );
@@ -283,14 +286,14 @@ pub async fn deliver(
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let store = SqliteCyclingMesocycleStore::new(pool.clone());
-    let week = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
-    let (programme, next) = application::cycling::next_ride(&store, from, &week)
+    let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
+    let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 
     println!(
         "{} — microcycle {} of {}, session {} of {}",
-        programme.programme(),
+        programme.provenance(),
         next.microcycle,
         programme.duration_weeks(),
         next.session.as_u8(),
@@ -426,12 +429,21 @@ fn whoever(instructor: Option<&infrastructure::peloton::Instructor>) -> String {
 /// bare session ordinal — and issue #63 replaced it with a role on each ride
 /// and a role on each slot. Which weekday takes which is the schedule's, so it
 /// is read at the point of asking.
-async fn cycling_week(diary: &SqliteDiaryStore, from: Date) -> Result<TrainingWeek, Failure> {
+/// Cycling's week, and the diary it came from.
+///
+/// **Both, because the ride depends on both.** The week says which weekday
+/// rides which role; the diary says whether a slot that week was lost to
+/// illness, which eases what survives it (#180). Reading the diary twice would
+/// be two reads that could disagree.
+async fn cycling_week(
+    diary: &SqliteDiaryStore,
+    from: Date,
+) -> Result<(TrainingWeek, Diary), Failure> {
     let diary = diary
         .diary()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    diary
+    let week = diary
         .training_week(from, Discipline::Cycling)
         .ok_or_else(|| {
             Failure::message(
@@ -441,7 +453,8 @@ async fn cycling_week(diary: &SqliteDiaryStore, from: Date) -> Result<TrainingWe
                 ),
                 exit::USAGE,
             )
-        })
+        })?;
+    Ok((week, diary))
 }
 
 /// Write down the session that has just gone to the stack.
@@ -489,7 +502,7 @@ async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
         .record(&DeliveredRide {
             prescribed_for: next.date,
             destination,
-            programme: programme.programme().name().clone(),
+            programme: programme.programme().map(|named| named.name().clone()),
             microcycle,
             session: next.session,
             classes: written,
@@ -497,4 +510,160 @@ async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
         })
         .await
         .map_err(Failure::from)
+}
+
+/// `fitness cycling hold` — give cycling a week that holds its place.
+///
+/// **What a discipline does while the other repeats a week** (#177 rule 4).
+/// The gym missed its entry test and runs that microcycle again; cycling has
+/// nothing to repeat and must not run ahead, so it rides a week that trains
+/// without advancing the programme. The two stay aligned at their mesocycle
+/// boundaries, which is decision 0034.
+///
+/// **It takes the newest class of each kind the operator has not ridden.** The
+/// catalogue says which classes could be the harder and the easier ride; the
+/// record says which he has already done. Neither question is asked of the
+/// other.
+///
+/// **Later cycling mesocycles move back a week.** A holding week occupies one,
+/// and a plan refuses two mesocycles over one day — so inserting one without
+/// shifting what follows would be refused, and shifting is what "holds its
+/// place" means. The gym side is untouched: it is the discipline that is
+/// repeating, and its dates are already where they should be.
+///
+/// # Errors
+///
+/// [`Failure`] if the store is unavailable, if no plan covers the week, if
+/// Peloton cannot be reached, or if every candidate class has been ridden.
+pub async fn hold(
+    database: &Path,
+    zone: &OperatorZone,
+    start: Date,
+    classes: &PelotonClasses,
+) -> Result<(), Failure> {
+    let pool = connect(database).await?;
+    let parameters = SqliteGenerationParameterStore::new(pool.clone());
+    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+
+    // The Monday of the week asked for. A microcycle begins on a Monday and a
+    // date in the middle of one names that week rather than a new one.
+    let start = monday_of(start)?;
+
+    // **The plan is found by the date, not named on the command line.** One
+    // plan answers for a day — that is the overlap rule — so asking which would
+    // be asking a question the store has already settled.
+    let windows = plans
+        .windows()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let name = windows
+        .iter()
+        .find(|window| window.span().covers(start))
+        .map(|window| window.name().clone())
+        .ok_or_else(|| {
+            Failure::message(
+                format!("no plan covers the week of {start}. Author one first: fitness plan"),
+                exit::USAGE,
+            )
+        })?;
+    let plan = plans
+        .named(&name)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+        .ok_or_else(|| {
+            Failure::message(format!("no plan is authored under {name}"), exit::STORE)
+        })?;
+
+    let held = application::holding::mesocycle(
+        &PelotonHoldingRides::new(classes),
+        &SqliteRiddenVenues::new(pool.clone()),
+        start,
+        SessionRole::new(Relative::Higher, Relative::Lower),
+        SessionRole::new(Relative::Lower, Relative::Higher),
+    )
+    .await
+    .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    report_holding(&held, start);
+
+    let cycling = with_holding(&plan, held, start)?;
+    let gym = plan
+        .gym()
+        .map(|programme| programme.mesocycles().cloned().collect::<Vec<_>>());
+
+    let rewritten = Plan::new(
+        name.clone(),
+        jiff::Timestamp::now(),
+        gym.map(Programme::new)
+            .transpose()
+            .map_err(|error| Failure::usage(&error))?,
+        Some(Programme::new(cycling).map_err(|error| Failure::usage(&error))?),
+    )
+    .map_err(|error| Failure::usage(&error))?;
+
+    let settings = crate::wizard::ready(&parameters).await?;
+    application::prescribe::Authoring::new(plans, parameters)
+        .author(&rewritten, &settings)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+
+    println!("  {name} re-authored. fitness cycling next answers from the holding week.");
+    Ok(())
+}
+
+/// The plan's cycling side with a holding week put into it.
+///
+/// **Everything on or after the held week moves back by one.** A plan refuses
+/// two mesocycles over one day, so a week inserted into an occupied calendar
+/// has to push rather than overlap — and pushing is what holding the place
+/// means. Anything that ended before the held week is left exactly where it is:
+/// it already happened.
+fn with_holding(
+    plan: &Plan,
+    held: domain::cycling::CyclingMesocycle,
+    start: Date,
+) -> Result<Vec<domain::cycling::CyclingMesocycle>, Failure> {
+    let mut mesocycles = Vec::new();
+    let mut later = Vec::new();
+    for mesocycle in plan.cycling().into_iter().flat_map(Programme::mesocycles) {
+        if mesocycle.start() < start {
+            mesocycles.push(mesocycle.clone());
+        } else {
+            later.push(mesocycle);
+        }
+    }
+    mesocycles.push(held);
+    for mesocycle in later {
+        let moved = mesocycle
+            .start()
+            .checked_add(jiff::Span::new().weeks(1))
+            .map_err(|error| Failure::usage(&error))?;
+        mesocycles.push(mesocycle.starting_on(moved));
+    }
+    Ok(mesocycles)
+}
+
+/// The Monday of the week a date falls in.
+fn monday_of(date: Date) -> Result<Date, Failure> {
+    let back = i64::from(date.weekday().to_monday_zero_offset());
+    date.checked_sub(jiff::Span::new().days(back))
+        .map_err(|error| Failure::usage(&error))
+}
+
+/// What the holding week holds, before it is authored.
+fn report_holding(held: &domain::cycling::CyclingMesocycle, start: Date) {
+    println!("a holding microcycle, from Monday {start}\n");
+    let Some(week) = held.microcycle(1) else {
+        return;
+    };
+    for (position, ride) in week.rides() {
+        let minutes = ride.session().total().as_seconds() / 60;
+        println!(
+            "  {position}   {:<44} {} min   {}",
+            ride.at().first().called(),
+            minutes,
+            ride.role(),
+        );
+    }
+    println!();
 }

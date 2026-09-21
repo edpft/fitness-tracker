@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT m.id AS \"id!: i64\", m.plan AS \"plan!: i64\",\n               pl.name AS \"plan_name!: String\",\n               m.provider AS \"provider!: String\",\n               m.provided_programme AS \"provided_programme!: String\",\n               m.start_date AS \"start_date!: String\"\n        FROM cycling_mesocycle AS m\n        JOIN plan AS pl ON pl.id = m.plan\n        WHERE pl.authored_at = (\n            SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = pl.name\n        )\n        ORDER BY m.start_date ASC, m.id ASC\n        ",
+  "query": "\n        SELECT m.id AS \"id!: i64\", m.plan AS \"plan!: i64\",\n               pl.name AS \"plan_name!: String\",\n               m.provider AS \"provider: String\",\n               m.provided_programme AS \"provided_programme: String\",\n               m.start_date AS \"start_date!: String\"\n        FROM cycling_mesocycle AS m\n        JOIN plan AS pl ON pl.id = m.plan\n        WHERE pl.authored_at = (\n            SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = pl.name\n        )\n        ORDER BY m.start_date ASC, m.id ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
         }
       },
       {
-        "name": "provider!: String",
+        "name": "provider: String",
         "ordinal": 3,
         "type_info": "Text",
         "origin": {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "provided_programme!: String",
+        "name": "provided_programme: String",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
@@ -77,10 +77,10 @@
       false,
       false,
       false,
-      false,
-      false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "269d8d71b9c94546c1f973f73911264d35b2f91514058ffe9f01bf90ea8d02fd"
+  "hash": "30898bb5eb4ea801aa7c6da8665794a775fda12a468dbb820d1dd23886a5ca97"
 }

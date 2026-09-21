@@ -43,7 +43,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
         let Some(row) = sqlx::query!(
             r#"
             SELECT id           AS "id!: i64",
-                   programme    AS "programme!: String",
+                   programme    AS "programme: String",
                    microcycle   AS "microcycle!: i64",
                    session      AS "session!: i64",
                    delivered_at AS "delivered_at!: String"
@@ -99,7 +99,10 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
         Ok(Some(DeliveredRide {
             prescribed_for: date,
             destination: destination.clone(),
-            programme: ProgrammeName::try_from(row.programme)
+            programme: row
+                .programme
+                .map(ProgrammeName::try_from)
+                .transpose()
                 .map_err(|error| corrupt(error.to_string()))?,
             microcycle,
             session,
@@ -114,7 +117,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
     async fn record(&self, delivered: &DeliveredRide) -> Result<(), StoreError> {
         let prescribed_for = delivered.prescribed_for.to_string();
         let destination = delivered.destination.to_string();
-        let programme = delivered.programme.to_string();
+        let programme = delivered.programme.as_ref().map(ToString::to_string);
         let microcycle = i64::from(delivered.microcycle);
         let session = i64::from(delivered.session.as_u8());
         let delivered_at = delivered.delivered_at.to_string();

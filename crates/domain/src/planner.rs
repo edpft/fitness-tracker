@@ -29,7 +29,7 @@ use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
     prescription::{Mesocycle, NotScheduled, WeekKind},
-    schedule::{AbsenceKind, DayPart, Diary, Discipline, ScheduledSlot, SessionRole},
+    schedule::{AbsenceKind, DayPart, Diary, Discipline, Relative, ScheduledSlot, SessionRole},
 };
 
 /// What answers for one slot.
@@ -346,5 +346,55 @@ fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
                 ride,
             })
         }
+    }
+}
+
+/// The role a slot actually rides, once an illness in its own week is counted.
+///
+/// **The operator's rule, 2026-09-20**, settling what #177's rule 5 and #180's
+/// description both got wrong:
+///
+/// > "The illness rule was that if one session was lost to illness, the
+/// > remaining session would be easier, so by definition, there can't be two
+/// > sessions after illness in a microcycle."
+///
+/// So an illness **consumes** a slot rather than refilling every slot with an
+/// easier session. Within the microcycle it falls in, whatever slot survives
+/// rides the lower-intensity session — whichever slot that is, and whatever its
+/// own role says.
+///
+/// **Only illness, and only this discipline's.** A holiday is time away and
+/// says nothing about fitness; illness is assumed to have cost some, which is
+/// why the kind is recorded (#178). And a gym session lost to illness does not
+/// ease a ride: the two disciplines are held apart deliberately, and what
+/// happens when one waits for the other is the *plan's* business (#177) rather
+/// than this slot's.
+///
+/// **It reads the ordinary week, not the altered one.** An absence takes a
+/// day's slots away, so asking the altered week which slots this one shares a
+/// microcycle with would hide the very slot that was lost.
+#[must_use]
+pub fn eased_by_illness(
+    diary: &Diary,
+    date: Date,
+    discipline: Discipline,
+    ordinary: SessionRole,
+) -> SessionRole {
+    let monday = commencing(date);
+    let lost = (0..7)
+        .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
+        .flat_map(|day| diary.ordinary_slots_of(day))
+        .filter(|slot| slot.discipline == discipline)
+        // A slot is only *lost* if it is not this one: the session being
+        // prescribed has not been missed, whatever the day around it says.
+        .filter(|slot| slot.date != date)
+        .any(|slot| {
+            diary.taken(DayPart::new(slot.date, slot.slot.part)) == Some(AbsenceKind::Illness)
+        });
+
+    if lost {
+        SessionRole::new(Relative::Lower, Relative::Higher)
+    } else {
+        ordinary
     }
 }

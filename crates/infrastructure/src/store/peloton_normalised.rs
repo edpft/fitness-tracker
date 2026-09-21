@@ -27,7 +27,9 @@
 
 use application::{AccountReader, NormalisedEntityStore, PerformedSessionLog, StoreError};
 use domain::{
-    cycling::{BikePlusRide, Ftp, FtpProvenance, HeartRateSeries, PerformedSession, Watts},
+    cycling::{
+        BikePlusRide, Ftp, FtpProvenance, HeartRateSeries, PerformedSession, RideVenue, Watts,
+    },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -37,7 +39,7 @@ use domain::{
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::peloton::{LandedRide, SessionAccount, group};
 
@@ -398,6 +400,49 @@ async fn write_ftp(
     Ok(())
 }
 
+/// The four per-second series the bike produced.
+///
+/// **Its own function because the ride's own row is already long enough.** A
+/// ride writes one row and then some hundreds of these, and the two have
+/// nothing to say to each other beyond the id.
+async fn write_samples(
+    tx: &mut Transaction<'_, Sqlite>,
+    ride_id: i64,
+    ride: &BikePlusRide,
+) -> Result<(), StoreError> {
+    for sample in ride.samples().iter() {
+        let at = seconds_for_storage(sample.at)?;
+        let power = i64::from(sample.power.as_u32());
+        let cadence = i64::from(sample.cadence.as_revolutions_per_minute());
+        let resistance = i64::from(sample.resistance.as_percentage());
+        let speed = i64::try_from(sample.speed.as_millimetres_per_hour()).map_err(|_| {
+            StoreError::Corrupt {
+                detail: "a speed larger than the store can hold".to_owned(),
+            }
+        })?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO bike_plus_ride_sample (
+                ride, at_seconds, power_watts, cadence_rpm,
+                resistance_percentage, speed_millimetres_per_hour
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            ride_id,
+            at,
+            power,
+            cadence,
+            resistance,
+            speed,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
+}
+
 async fn write_ride(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
@@ -429,15 +474,19 @@ async fn write_ride(
     let event_kind = event.kind().as_str().to_owned();
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());
 
+    let venue_reference = ride.at().reference();
+    let venue_called = ride.at().called();
+
     sqlx::query!(
         r#"
         INSERT INTO bike_plus_ride (
             landing_record_id, samples_record_id, source_record_id,
             started_at_utc, zone, duration_seconds, distance_millimetres,
             average_power_watts, heart_rate_declared_missing_seconds,
-            endpoint, event_kind, event_time, run_id, session, role
+            endpoint, event_kind, event_time, run_id, session, role,
+            venue_reference, venue_called
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         ride_id,
         samples_id,
@@ -454,41 +503,14 @@ async fn write_ride(
         run_id,
         session_id,
         role,
+        venue_reference,
+        venue_called,
     )
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
 
-    for sample in ride.samples().iter() {
-        let at = seconds_for_storage(sample.at)?;
-        let power = i64::from(sample.power.as_u32());
-        let cadence = i64::from(sample.cadence.as_revolutions_per_minute());
-        let resistance = i64::from(sample.resistance.as_percentage());
-        let speed = i64::try_from(sample.speed.as_millimetres_per_hour()).map_err(|_| {
-            StoreError::Corrupt {
-                detail: "a speed larger than the store can hold".to_owned(),
-            }
-        })?;
-
-        sqlx::query!(
-            r#"
-            INSERT INTO bike_plus_ride_sample (
-                ride, at_seconds, power_watts, cadence_rpm,
-                resistance_percentage, speed_millimetres_per_hour
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-            ride_id,
-            at,
-            power,
-            cadence,
-            resistance,
-            speed,
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| store_error(&error))?;
-    }
+    write_samples(tx, ride_id, ride).await?;
 
     if let Some(series) = ride.heart_rate() {
         for sample in series.samples().iter() {
@@ -580,6 +602,48 @@ impl application::FtpHistory for SqliteFtpHistory {
         Ftp::new(watts, from, provenance)
             .map(Some)
             .map_err(|error| corrupt(error.to_string()))
+    }
+}
+
+/// Every class the record says was ridden.
+///
+/// **A reader over the same rows the derivation writes.** `venue_reference` is
+/// filled by every normalisation from 2026-09-20 onward; a row written before
+/// that has none, and is skipped rather than guessed at (§ 37). Re-normalising
+/// the stream fills them all, which is why #180 asks for it.
+#[derive(Debug, Clone)]
+pub struct SqliteRiddenVenues {
+    pool: SqlitePool,
+}
+
+impl SqliteRiddenVenues {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl application::RiddenVenues for SqliteRiddenVenues {
+    async fn ridden(&self) -> Result<BTreeSet<RideVenue>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT DISTINCT venue_reference AS "reference!: String",
+                            venue_called    AS "called!: String"
+              FROM bike_plus_ride
+             WHERE venue_reference IS NOT NULL
+               AND venue_called IS NOT NULL
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        rows.into_iter()
+            .map(|row| {
+                RideVenue::new(&row.reference, &row.called).map_err(|error| StoreError::Corrupt {
+                    detail: error.to_string(),
+                })
+            })
+            .collect()
     }
 }
 
