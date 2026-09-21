@@ -36,8 +36,8 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqlitePlanStore, SqliteRiddenVenues, connect,
+    SqliteCyclingDeliveryStore, SqliteDiaryStore, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqlitePlanStore, SqliteRiddenVenues, connect,
     peloton::{PelotonClasses, PelotonHoldingRides, PelotonStack},
 };
 use jiff::civil::{Date, Weekday};
@@ -77,12 +77,13 @@ const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
 /// cannot be delivered.
 pub async fn next(
     database: &Path,
+    zone: &OperatorZone,
     from: Date,
     ftp: Option<Ftp>,
     to: Result<(&PelotonClasses, &PelotonStack), &str>,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
 
     let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
@@ -127,13 +128,18 @@ pub async fn next(
     println!();
     match to {
         Ok((classes, stack)) => {
+            // **`next` replaces whatever the stack holds** (the operator,
+            // 2026-09-21: "The default behaviour should be replace"). It is the
+            // command he trains from, and it named a `--replace` it did not
+            // take, so there was no way through from it at all (#121). What it
+            // replaced is said, not silently discarded.
             deliver_ride(
                 &SqliteCyclingDeliveryStore::new(pool),
                 &programme,
                 &next,
                 classes,
                 stack,
-                false,
+                true,
             )
             .await
         }
@@ -279,13 +285,14 @@ fn report(
 /// `replace` was not given.
 pub async fn deliver(
     database: &Path,
+    zone: &OperatorZone,
     from: Date,
     replace: bool,
     classes: &PelotonClasses,
     stack: &PelotonStack,
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
-    let store = SqliteCyclingMesocycleStore::new(pool.clone());
+    let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
     let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
@@ -382,6 +389,13 @@ async fn deliver_ride<S: application::CyclingDeliveryStore + Sync>(
         .set(&rides)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
+
+    if !held.is_empty() {
+        println!(
+            "  replaced   the {} class(es) that were in the stack",
+            held.count()
+        );
+    }
 
     for venue in next.ride.at().iter() {
         println!("  delivered  {venue}");

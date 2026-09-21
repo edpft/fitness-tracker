@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, ScheduledSlot,
-        SessionRole, TrainingPattern, TrainingSlot, accounted,
+        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, RecordedSession, Relative,
+        ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -533,7 +533,7 @@ fn a_session_performed_after_its_slot_accounts_for_it() {
     let saturday = date(2026, 9, 19).expect("a real Saturday");
 
     let due = [slot(friday, PartOfDay::Evening, Discipline::Gym)];
-    let performed = BTreeMap::from([(Discipline::Gym, vec![saturday])]);
+    let performed = [RecordedSession::unnamed(saturday, Discipline::Gym)];
 
     assert_eq!(accounted(&due, &performed), vec![true]);
 }
@@ -552,7 +552,7 @@ fn a_session_answers_for_the_slot_whose_turn_it_was() {
         slot(monday, PartOfDay::Evening, Discipline::Gym),
         slot(friday, PartOfDay::Evening, Discipline::Gym),
     ];
-    let performed = BTreeMap::from([(Discipline::Gym, vec![saturday])]);
+    let performed = [RecordedSession::unnamed(saturday, Discipline::Gym)];
 
     assert_eq!(accounted(&due, &performed), vec![false, true]);
 }
@@ -569,7 +569,10 @@ fn a_session_each_fills_both_slots() {
         slot(monday, PartOfDay::Evening, Discipline::Gym),
         slot(friday, PartOfDay::Evening, Discipline::Gym),
     ];
-    let performed = BTreeMap::from([(Discipline::Gym, vec![tuesday, saturday])]);
+    let performed = [
+        RecordedSession::unnamed(tuesday, Discipline::Gym),
+        RecordedSession::unnamed(saturday, Discipline::Gym),
+    ];
 
     assert_eq!(accounted(&due, &performed), vec![true, true]);
 }
@@ -587,9 +590,97 @@ fn one_slot_takes_one_session() {
         slot(monday, PartOfDay::Evening, Discipline::Gym),
         slot(friday, PartOfDay::Evening, Discipline::Gym),
     ];
-    let performed = BTreeMap::from([(Discipline::Gym, vec![tuesday, wednesday])]);
+    let performed = [
+        RecordedSession::unnamed(tuesday, Discipline::Gym),
+        RecordedSession::unnamed(wednesday, Discipline::Gym),
+    ];
 
     assert_eq!(accounted(&due, &performed), vec![true, false]);
+}
+
+/// **A named session answers for the slot holding its role, whatever day it
+/// landed on** — the operator's own case, 2026-09-20. The 45 min Power Zone
+/// Endurance Ride he rode on Wednesday 16 September is the week's easier,
+/// longer session; the Wednesday slot holds the FTP test, which is still owed.
+///
+/// Before #177 this ride marked the Wednesday done and the FTP test went
+/// unridden into the first Build mesocycle.
+#[test]
+fn a_named_session_answers_for_the_slot_holding_its_role() {
+    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
+    let sunday = date(2026, 9, 20).expect("a real Sunday");
+
+    let due = [
+        slot(wednesday, PartOfDay::Evening, Discipline::Cycling),
+        slot(sunday, PartOfDay::Morning, Discipline::Cycling),
+    ];
+    assert_eq!(due[0].role, harder(), "the Wednesday holds the FTP test");
+
+    let performed = [RecordedSession::named(
+        wednesday,
+        Discipline::Cycling,
+        easier(),
+    )];
+
+    assert_eq!(accounted(&due, &performed), vec![false, true]);
+}
+
+/// **And a named session reaches forward as readily as back.** A slot never
+/// re-describes what was performed in it (§ 11), so the day it happened on
+/// does not enter the question at all.
+#[test]
+fn a_named_session_answers_for_a_slot_it_was_performed_before() {
+    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
+    let sunday = date(2026, 9, 20).expect("a real Sunday");
+
+    let due = [slot(sunday, PartOfDay::Morning, Discipline::Cycling)];
+    let performed = [RecordedSession::named(
+        wednesday,
+        Discipline::Cycling,
+        easier(),
+    )];
+
+    assert_eq!(accounted(&due, &performed), vec![true]);
+}
+
+/// **Two named sessions fill the slots their roles hold**, in either order.
+#[test]
+fn two_named_sessions_fill_the_slots_their_roles_hold() {
+    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
+    let sunday = date(2026, 9, 20).expect("a real Sunday");
+
+    let due = [
+        slot(wednesday, PartOfDay::Evening, Discipline::Cycling),
+        slot(sunday, PartOfDay::Morning, Discipline::Cycling),
+    ];
+    let performed = [
+        RecordedSession::named(wednesday, Discipline::Cycling, easier()),
+        RecordedSession::named(sunday, Discipline::Cycling, harder()),
+    ];
+
+    assert_eq!(accounted(&due, &performed), vec![true, true]);
+}
+
+/// **A named session cannot be robbed by an unnamed one.** The named pass runs
+/// first, so a gym workout the record says nothing about does not take the slot
+/// a ride has already answered for.
+#[test]
+fn the_named_pass_runs_before_the_unnamed_one() {
+    let wednesday = date(2026, 9, 16).expect("a real Wednesday");
+    let sunday = date(2026, 9, 20).expect("a real Sunday");
+
+    let due = [
+        slot(wednesday, PartOfDay::Evening, Discipline::Cycling),
+        slot(sunday, PartOfDay::Morning, Discipline::Cycling),
+    ];
+    let performed = [
+        RecordedSession::unnamed(sunday, Discipline::Cycling),
+        RecordedSession::named(wednesday, Discipline::Cycling, easier()),
+    ];
+
+    // The named ride takes the Sunday; the unnamed one falls back to whose turn
+    // it was, which on the Sunday is the Sunday — already answered.
+    assert_eq!(accounted(&due, &performed), vec![false, true]);
 }
 
 /// **A session before the slot does not account for it**, and nor does one of
@@ -601,10 +692,10 @@ fn a_session_before_its_slot_or_of_another_discipline_does_not_count() {
     let thursday = date(2026, 9, 17).expect("a real Thursday");
 
     let due = [slot(wednesday, PartOfDay::Evening, Discipline::Cycling)];
-    let performed = BTreeMap::from([
-        (Discipline::Cycling, vec![tuesday]),
-        (Discipline::Gym, vec![thursday]),
-    ]);
+    let performed = [
+        RecordedSession::unnamed(tuesday, Discipline::Cycling),
+        RecordedSession::unnamed(thursday, Discipline::Gym),
+    ];
 
     assert_eq!(accounted(&due, &performed), vec![false]);
 }

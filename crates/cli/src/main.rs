@@ -14,6 +14,7 @@ mod output;
 mod paths;
 mod plan;
 mod prescribing;
+mod rescheduling;
 mod scheduling;
 mod setup;
 mod wiring;
@@ -282,6 +283,10 @@ fn cycling_command() -> ClapCommand {
         .about("What is done on a bike: which ride is next, and what it means in watts")
         .subcommand_required(true)
         .arg_required_else_help(true)
+        // Read by the `"cycling"` arm, which resolves the zone before any
+        // subcommand runs. Its absence panicked every debug build from #198 on,
+        // and a release build said nothing: see `[profile.release.package]`.
+        .arg(timezone_argument())
         .subcommand(
             ClapCommand::new("next")
                 .about("The next cycling session at or after a date")
@@ -1036,6 +1041,7 @@ async fn cycling_command_run(
         let (classes, stack) = plan::peloton(credentials)?;
         return cycling::deliver(
             database,
+            zone,
             from,
             delivering.get_flag("replace"),
             &classes,
@@ -1082,7 +1088,7 @@ async fn cycling_command_run(
     // sent nothing, which is the half that was missing (#184).
     let peloton = plan::peloton(credentials);
     let to = to_peloton(&peloton);
-    cycling::next(database, from, ftp, to).await
+    cycling::next(database, zone, from, ftp, to).await
 }
 
 /// The destination, or the reason there is not one.

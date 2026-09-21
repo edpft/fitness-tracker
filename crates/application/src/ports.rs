@@ -950,6 +950,47 @@ pub trait PerformedSessionLog {
     ) -> impl Future<Output = Result<Vec<Date>, StoreError>> + Send;
 }
 
+/// One cycling session the record holds, and the classes it was ridden to.
+///
+/// **The join § 11 exists for.** A [`RideVenue`] names a place a ride is *to
+/// be* done and a place one *was* done, deliberately in one vocabulary — so
+/// "which planned session was this?" is a comparison rather than a translation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RiddenSession {
+    /// The calendar day it started on, in the zone it was ridden in.
+    pub on: Date,
+    /// Every class it was ridden to. More than one because a session is not a
+    /// class: an FTP test is a warm-up and an effort, and both are here.
+    pub at: BTreeSet<RideVenue>,
+}
+
+/// What was ridden in a span, and where.
+///
+/// **A second port beside [`PerformedSessionLog`] rather than a widening of
+/// it.** The gym's record cannot answer this: a Hevy workout names the day it
+/// was done, and what session of the microcycle it *was* is only knowable where
+/// it was performed against a prescription. Widening the shared port would have
+/// made every gym adapter answer a question about classes with an empty set,
+/// which is a shape saying the gym has no venues rather than that the question
+/// does not arise (§ 37).
+pub trait RiddenSessionLog {
+    /// One entry per session ridden between the two days, both included,
+    /// oldest first.
+    ///
+    /// **Silent about rows that predate the column**, as [`RiddenVenues`] is: a
+    /// ride normalised before 2026-09-20 names no class and comes back with an
+    /// empty set, which reads downstream as a session the record cannot name.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn ridden_between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<RiddenSession>, StoreError>> + Send;
+}
+
 /// Weigh-ins, as the analytical layer reads them.
 ///
 /// **A mass and a moment, not the whole weigh-in.** Relative strength needs

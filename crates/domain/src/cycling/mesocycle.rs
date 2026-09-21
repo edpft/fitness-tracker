@@ -469,6 +469,14 @@ pub struct CyclingMesocycle {
     /// The Monday microcycle one begins on.
     start: Date,
     microcycles: NonEmpty<CyclingMicrocycle>,
+    /// The Mondays of weeks the concurrent microcycle was lost in, ascending.
+    ///
+    /// **Derived when the plan is read, never authored or stored** (#177). A
+    /// week whose essential sessions were not performed is run again, so the
+    /// microcycle it held moves to the week after and everything behind it
+    /// moves with it — which is what a gym calendar does with a week it skips,
+    /// and this is the same idea for a mesocycle with no calendar of its own.
+    lost: Vec<Date>,
 }
 
 impl CyclingMesocycle {
@@ -533,6 +541,7 @@ impl CyclingMesocycle {
             provenance,
             start,
             microcycles,
+            lost: Vec::new(),
         })
     }
 
@@ -582,7 +591,49 @@ impl CyclingMesocycle {
             provenance: self.provenance.clone(),
             start,
             microcycles: self.microcycles.clone(),
+            // A mesocycle that has moved begins afresh: a week it lost was lost
+            // where it used to be, and that week is not in the moved span.
+            lost: Vec::new(),
         }
+    }
+
+    /// The same mesocycle, with the week beginning `monday` lost (#177).
+    ///
+    /// The microcycle that week held is ridden the week after, and the span
+    /// grows by one. A Monday outside the span, or already lost, changes
+    /// nothing.
+    #[must_use]
+    pub fn losing(&self, monday: Date) -> Self {
+        let mut lost = self.lost.clone();
+        let inside = monday >= self.start && monday < self.end();
+        if inside && !lost.contains(&monday) {
+            lost.push(monday);
+            lost.sort_unstable();
+        }
+        Self {
+            lost,
+            ..self.clone()
+        }
+    }
+
+    /// The Mondays of the weeks this mesocycle lost.
+    #[must_use]
+    pub fn lost(&self) -> &[Date] {
+        &self.lost
+    }
+
+    /// Calendar weeks occupied: every microcycle, and every week lost.
+    #[must_use]
+    pub const fn calendar_weeks(&self) -> usize {
+        self.duration_weeks().saturating_add(self.lost.len())
+    }
+
+    /// The day after the last one this mesocycle occupies.
+    fn end(&self) -> Date {
+        let weeks = i64::try_from(self.calendar_weeks()).unwrap_or(i64::MAX);
+        self.start
+            .checked_add(jiff::Span::new().weeks(weeks))
+            .unwrap_or(self.start)
     }
 
     pub const fn microcycles(&self) -> &NonEmpty<CyclingMicrocycle> {
@@ -608,13 +659,26 @@ impl CyclingMesocycle {
     /// `None` before the start or after the last microcycle. **Calendar weeks
     /// from the start date**, so a week the operator misses is a week of the
     /// programme all the same — the same rule the gym's calendar applies.
+    ///
+    /// **A lost week answers `None`**, and every week after it one microcycle
+    /// earlier than its calendar position would say (#177): the microcycle it
+    /// held was not completed, so it is the one run next.
     #[must_use]
     pub fn microcycle_of(&self, date: Date) -> Option<usize> {
         if date < self.start {
             return None;
         }
         let days = date.since(self.start).ok()?.get_days();
-        let number = usize::try_from(days / 7).ok()?.checked_add(1)?;
+        let week = usize::try_from(days / 7).ok()?;
+        let monday = self
+            .start
+            .checked_add(jiff::Span::new().weeks(i64::try_from(week).ok()?))
+            .ok()?;
+        if self.lost.contains(&monday) {
+            return None;
+        }
+        let before = self.lost.iter().filter(|lost| **lost < monday).count();
+        let number = week.checked_sub(before)?.checked_add(1)?;
         (number <= self.duration_weeks()).then_some(number)
     }
 

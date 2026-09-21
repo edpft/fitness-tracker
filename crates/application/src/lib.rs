@@ -23,6 +23,7 @@ pub mod microcycle;
 pub mod normalise;
 pub mod ports;
 pub mod prescribe;
+pub mod reschedule;
 pub mod status;
 pub mod strength;
 
@@ -41,8 +42,8 @@ pub use ports::{
     PerformedWorkoutReader, PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore,
     Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionLifecycle, RawExtent, RefusalReport, RefusalReporter, RefusalStore, ReplyStatus,
-    ResumptionPointResetter, ResumptionPointStore, RiddenVenues, RunLock, RunSummary,
-    SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation, Translator,
-    UnderivableReason, UnderivableSlot, Unexpressed, WeighInHistory, WorkoutEventSource,
-    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
+    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
+    RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation,
+    Translator, UnderivableReason, UnderivableSlot, Unexpressed, WeighInHistory,
+    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
 };

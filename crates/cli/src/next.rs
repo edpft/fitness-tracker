@@ -22,22 +22,17 @@
 
 use std::path::Path;
 
-use application::{
-    DiaryStore as _,
-    microcycle::{Microcycle, MicrocyclePorts},
-};
+use application::DiaryStore as _;
 use domain::{
     normalised::OperatorZone,
     planner::SessionState,
     schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot},
 };
-use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteCyclingSessionLog, SqliteDiaryStore,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescriptionDeliveryStore, connect,
-};
+use infrastructure::{SqliteDiaryStore, connect};
 
 use crate::{
-    Failure, catalogue, config, cycling, exit, gym, output, plan, wiring, wiring::Command,
+    Failure, catalogue, config, cycling, exit, gym, output, plan, rescheduling, wiring,
+    wiring::Command,
 };
 
 /// Collect everything, report the microcycle, and deliver what is next.
@@ -74,26 +69,16 @@ pub async fn next(
     }
     println!();
 
-    // 2. Where the microcycle stands.
+    // 2. Where the plan stands: every week since it began, and this one.
     let pool = connect(database).await?;
-    let standing = Microcycle::new(
-        MicrocyclePorts {
-            diary: SqliteDiaryStore::new(pool.clone()),
-            plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
-            gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
-            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-            gym_performed: SqlitePerformedWorkoutReader::new(pool.clone()),
-            cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
-        },
-        destination(Discipline::Gym)?,
-        destination(Discipline::Cycling)?,
-    )
-    .standing(now)
-    .await?;
+    let standing = rescheduling::standing(&pool, zone, now).await?;
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     pool.close().await;
 
-    if standing.is_empty() {
+    output::rescheduled(&standing.weeks);
+
+    let sessions = &standing.sessions;
+    if sessions.is_empty() {
         // **Two empty answers, and they are different facts.** A week the
         // diary holds nothing for is a week off; a week it holds slots for
         // that no plan covers is a plan to author.
@@ -108,15 +93,15 @@ pub async fn next(
         }
         return Ok(());
     }
-    output::microcycle(&standing);
+    output::microcycle(sessions);
     println!();
 
     // 3. The first still to be prescribed, which is the one delivered.
-    let Some(next) = standing
+    let Some(next) = sessions
         .iter()
         .find(|session| session.state == SessionState::ToBePrescribed)
     else {
-        let after = standing
+        let after = sessions
             .last()
             .and_then(|last| diary.first_ordinary_after(last.slot.date));
         output::microcycle_complete(after);
@@ -150,7 +135,7 @@ fn moment(zone: &OperatorZone, date: Option<&str>, part: Option<&str>) -> Result
 }
 
 /// Where a discipline's sessions are put, as the catalogue names it.
-fn destination(discipline: Discipline) -> Result<application::DestinationName, Failure> {
+pub fn destination(discipline: Discipline) -> Result<application::DestinationName, Failure> {
     let known = known(discipline)?;
     application::DestinationName::try_from(known.delivers_to().name().to_owned())
         .map_err(|error| Failure::usage(&error))
@@ -221,7 +206,7 @@ async fn run(
         Discipline::Cycling => {
             let peloton = plan::peloton(credentials);
             let to = crate::to_peloton(&peloton);
-            cycling::next(database, next.date, None, to).await
+            cycling::next(database, zone, next.date, None, to).await
         }
     }
 }

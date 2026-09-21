@@ -708,6 +708,83 @@ impl PerformedSessionLog for SqliteCyclingSessionLog {
     }
 }
 
+impl application::RiddenSessionLog for SqliteCyclingSessionLog {
+    async fn ridden_between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<application::RiddenSession>, StoreError> {
+        // Widened in SQL and narrowed in Rust, as `dates_between` is and for
+        // the same reason: the day depends on the zone on each row.
+        let lower = from
+            .checked_sub(jiff::Span::new().days(1))
+            .map_err(|_| StoreError::Corrupt {
+                detail: "a date before the calendar".to_owned(),
+            })?
+            .to_string();
+        let upper = to
+            .checked_add(jiff::Span::new().days(2))
+            .map_err(|_| StoreError::Corrupt {
+                detail: "a date beyond the calendar".to_owned(),
+            })?
+            .to_string();
+
+        // **Every ride of the session, not only the first.** A session's day is
+        // its first ride's, and the classes it was ridden to are all of them —
+        // an FTP test is a warm-up class and an effort class, and a planned
+        // session naming either is the session this was.
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.landing_record_id AS "session!: i64",
+                   first.started_at_utc AS "started_at_utc!: String",
+                   first.zone           AS "zone!: String",
+                   part.venue_reference AS "reference: String",
+                   part.venue_called    AS "called: String"
+              FROM cycling_session AS s
+              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id
+              JOIN bike_plus_ride AS part ON part.landing_record_id = s.landing_record_id
+             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
+             ORDER BY first.started_at_utc ASC
+            "#,
+            lower,
+            upper,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut sessions: Vec<application::RiddenSession> = Vec::new();
+        let mut seen: Vec<i64> = Vec::new();
+        for row in rows {
+            let day = super::history::day_of(&row.started_at_utc, &row.zone)?;
+            if day < from || day > to {
+                continue;
+            }
+            let at = if let Some(at) = seen.iter().position(|id| *id == row.session) {
+                at
+            } else {
+                seen.push(row.session);
+                sessions.push(application::RiddenSession {
+                    on: day,
+                    at: BTreeSet::new(),
+                });
+                seen.len().saturating_sub(1)
+            };
+            let (Some(reference), Some(called)) = (row.reference, row.called) else {
+                continue;
+            };
+            let venue =
+                RideVenue::new(&reference, &called).map_err(|error| StoreError::Corrupt {
+                    detail: error.to_string(),
+                })?;
+            if let Some(session) = sessions.get_mut(at) {
+                session.at.insert(venue);
+            }
+        }
+        Ok(sessions)
+    }
+}
+
 /// Both of Peloton's landing tables, counted as one.
 ///
 /// **What a Peloton derivation actually reads.** A cycling session composes

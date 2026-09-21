@@ -28,7 +28,7 @@ use jiff::civil::Date;
 use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
-    prescription::{Mesocycle, NotScheduled, WeekKind},
+    prescription::{Mesocycle, NotScheduled, Skip, WeekKind},
     schedule::{AbsenceKind, DayPart, Diary, Discipline, Relative, ScheduledSlot, SessionRole},
 };
 
@@ -398,3 +398,336 @@ pub fn eased_by_illness(
         ordinary
     }
 }
+
+/// One session of the microcycle, as the microcycle's own machine reads it.
+///
+/// **Flat rather than the application's `Session`.** What decides a microcycle
+/// is the discipline, the role and the state; the number and the part of the
+/// day are the report's business and carrying them here would make this look
+/// like a view model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placed {
+    pub discipline: Discipline,
+    pub role: SessionRole,
+    pub state: SessionState,
+}
+
+/// The session a microcycle is not a microcycle without.
+///
+/// **Higher intensity, lower volume — and the code already said so twice.**
+/// `Mesocycle::gating_role` answers this for every progression, and
+/// `Test::ROLE` is the same pair because the test *is* the heavy session. The
+/// operator, 2026-09-19, on making it the rule at this level: *"That does make
+/// life easier, because then we don't need a separate rule for test
+/// microcycles."*
+pub const ESSENTIAL: SessionRole = SessionRole::new(Relative::Higher, Relative::Lower);
+
+/// What one discipline's microcycle did with the session the plan needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owed {
+    /// Its essential session can still be performed.
+    Running,
+    /// Its essential session was performed. This programme may advance.
+    Completed,
+    /// The window closed with the essential session unperformed.
+    Lost,
+    /// The week holds no essential session of this discipline, so it owes
+    /// nothing. A real state: the diary allocates the week, and a week it gives
+    /// one discipline nothing is a week that discipline is not in.
+    Absent,
+}
+
+/// Where the concurrent microcycle stands as a whole.
+///
+/// **The programme is the concurrent one** (the operator, 2026-09-21):
+///
+/// > From the perspective of `fitness next`, the "programme" is the concurrent
+/// > programme, i.e. both the gym and cycling programmes moving together. [...]
+/// > So, for the concurrent programme, there should probably be a partially
+/// > completed state.
+///
+/// This is the second of the two machines. [`SessionState`] decides what is
+/// delivered into a slot; this decides *which microcycle the week is*, and so
+/// what re-runs. Asked session by session, the answer on Monday 21 September
+/// is "Monday's gym session" — and nothing in that framing can say the test
+/// microcycle did not complete, so the week would be silently spent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicrocycleState {
+    /// A discipline's essential session can still be performed.
+    Running,
+    /// Every discipline's essential session was performed. Both programmes
+    /// advance together.
+    Completed,
+    /// One discipline's essential session was performed and another's was not.
+    ///
+    /// The one that lost it re-runs its microcycle; the one that completed
+    /// rides a holding week, so that the two still start the next mesocycle
+    /// together (decision 0034). Cycling's holding week is #180's and the
+    /// gym's is the linear template; choosing one here is #190's, and until
+    /// then both disciplines re-run the week.
+    ///
+    /// **Two disciplines, which is what the tool runs.** A third makes this a
+    /// pair of lists rather than a pair of names, and that is the edit to make
+    /// when a third arrives rather than now.
+    PartiallyCompleted {
+        completed: Discipline,
+        lost: Discipline,
+    },
+    /// No discipline's essential session was performed. Every one of them
+    /// re-runs its microcycle, and no holding week is reached — which is the
+    /// operator's week of 14 September 2026.
+    Incomplete,
+}
+
+impl fmt::Display for MicrocycleState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => f.write_str("running"),
+            Self::Completed => f.write_str("completed"),
+            Self::PartiallyCompleted { completed, lost } => {
+                write!(f, "partially completed ({completed} did, {lost} did not)")
+            }
+            Self::Incomplete => f.write_str("incomplete"),
+        }
+    }
+}
+
+/// What one discipline's microcycle did, from the states of its sessions.
+///
+/// **Only the essential session is read.** Every other session of the week is
+/// a session the operator may lose without the plan standing still — which is
+/// the whole reason the essential one is named. The light gym session lost to
+/// Rome on 14 September cost the microcycle nothing; the entry test lost to
+/// illness on the 18th cost it everything.
+#[must_use]
+pub fn owed_by(sessions: &[Placed], discipline: Discipline) -> Owed {
+    let Some(essential) = sessions
+        .iter()
+        .find(|session| session.discipline == discipline && session.role == ESSENTIAL)
+    else {
+        return Owed::Absent;
+    };
+
+    match essential.state {
+        SessionState::Performed => Owed::Completed,
+        SessionState::ToBePrescribed | SessionState::Prescribed => Owed::Running,
+        SessionState::Skipped { .. }
+        | SessionState::NotPrescribed
+        | SessionState::NotPerformed { .. } => Owed::Lost,
+    }
+}
+
+/// Where the concurrent microcycle stands, from every session in it.
+///
+/// **Derived on every read, never stored**, as `progress_after` is: a stored
+/// position is a second source of truth about a series the record already
+/// determines, and asking twice would then advance it twice.
+///
+/// A week holding no session at all is [`MicrocycleState::Completed`] — it owes
+/// nothing, so nothing is waiting on it. That is the same answer a week every
+/// discipline finished gets, and deliberately: what the caller does with this
+/// is decide whether the plan moves on, and in both cases it does.
+#[must_use]
+pub fn microcycle_state(sessions: &[Placed]) -> MicrocycleState {
+    let read: Vec<(Discipline, Owed)> = Discipline::ALL
+        .iter()
+        .copied()
+        .map(|discipline| (discipline, owed_by(sessions, discipline)))
+        .collect();
+
+    if read.iter().any(|(_, owed)| *owed == Owed::Running) {
+        return MicrocycleState::Running;
+    }
+
+    let completed: Vec<Discipline> = read
+        .iter()
+        .filter(|(_, owed)| *owed == Owed::Completed)
+        .map(|(discipline, _)| *discipline)
+        .collect();
+    let lost: Vec<Discipline> = read
+        .iter()
+        .filter(|(_, owed)| *owed == Owed::Lost)
+        .map(|(discipline, _)| *discipline)
+        .collect();
+
+    match (completed.first(), lost.first()) {
+        (_, None) => MicrocycleState::Completed,
+        (None, Some(_)) => MicrocycleState::Incomplete,
+        (Some(completed), Some(lost)) => MicrocycleState::PartiallyCompleted {
+            completed: *completed,
+            lost: *lost,
+        },
+    }
+}
+
+/// Why a plan could not be rescheduled.
+///
+/// **Not reachable from a plan that authored**, as far as anything here can
+/// tell: moving a mesocycle later or skipping a week inside it only ever gives
+/// a calendar more room. It is a type rather than a panic because § 26 forbids
+/// the panic, and because a diary that changed under a plan might yet find a
+/// way.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Unreschedulable {
+    #[error(transparent)]
+    Calendar(#[from] crate::prescription::InvalidCalendar),
+    #[error(transparent)]
+    Programme(#[from] crate::plan::InvalidProgramme),
+    #[error(transparent)]
+    Plan(#[from] crate::plan::EmptyPlan),
+}
+
+/// The plan as it now stands, given the weeks the concurrent microcycle was
+/// lost in.
+///
+/// **The operator's rule, 2026-09-21: "It should shift all start dates.
+/// That's the point."** And, asked whether the plan as authored should still be
+/// shown: *"Okay, we could see what we originally planned, but that's not what
+/// we did, so why should we care?"* So this is the plan, not a view of it.
+///
+/// **A lost week is an interruption of the mesocycle in force.** The gym's
+/// calendar already has the rule that re-runs it — a week with no session left
+/// in it is not a training week — and a cycling mesocycle is given the same
+/// rule by [`CyclingMesocycle::losing`]. What was issued in the lost week still
+/// belongs to the mesocycle it was issued for, so nothing already recorded is
+/// re-described (§ 12).
+///
+/// **Every later mesocycle starts where the one before it now ends**, and is
+/// read against the diary as it now stands: the interruptions authored with it
+/// named days in weeks it no longer occupies, so they are re-derived for the
+/// weeks it does. A mesocycle nothing pushed is left exactly as authored.
+///
+/// `lost` is the Monday of each lost week, and is the same for both
+/// disciplines: the programme is the concurrent one, and the two start their
+/// mesocycles together. A shift that leaves a later mesocycle unable to
+/// complete is #201's, not this function's.
+///
+/// # Errors
+///
+/// [`Unreschedulable`] where a moved calendar or the programme it belongs to
+/// will not build.
+pub fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, Unreschedulable> {
+    if lost.is_empty() {
+        return Ok(plan.clone());
+    }
+
+    let gym = plan
+        .gym()
+        .map(|programme| -> Result<_, Unreschedulable> {
+            let mut moved = Vec::new();
+            let mut cursor: Option<Date> = None;
+            for mesocycle in programme.mesocycles() {
+                let next = gym_rescheduled(mesocycle, cursor, lost, diary)?;
+                cursor = Some(crate::plan::Occupies::span(&next).end());
+                moved.push(next);
+            }
+            Ok(crate::plan::Programme::new(moved)?)
+        })
+        .transpose()?;
+
+    let cycling = plan
+        .cycling()
+        .map(|programme| -> Result<_, Unreschedulable> {
+            let mut moved = Vec::new();
+            let mut cursor: Option<Date> = None;
+            for mesocycle in programme.mesocycles() {
+                let next = cycling_rescheduled(mesocycle, cursor, lost);
+                cursor = Some(crate::plan::Occupies::span(&next).end());
+                moved.push(next);
+            }
+            Ok(crate::plan::Programme::new(moved)?)
+        })
+        .transpose()?;
+
+    Ok(Plan::new(
+        plan.name().clone(),
+        plan.authored_at(),
+        gym,
+        cycling,
+    )?)
+}
+
+/// One gym mesocycle, started no earlier than `cursor` and with every lost
+/// week inside it skipped.
+fn gym_rescheduled(
+    mesocycle: &Mesocycle,
+    cursor: Option<Date>,
+    lost: &[Date],
+    diary: &Diary,
+) -> Result<Mesocycle, Unreschedulable> {
+    let calendar = mesocycle.calendar();
+    let authored = calendar.start();
+    let start = cursor.map_or(authored, |cursor| cursor.max(authored));
+
+    // **Authored skips where it has not moved; the diary's where it has.**
+    let base: Vec<Skip> = if start == authored {
+        calendar.interruptions().iter().collect()
+    } else {
+        Vec::new()
+    };
+
+    // The span grows with what it skips, and what it skips depends on the span:
+    // walked to a fixed point, which it reaches because every pass can only
+    // add weeks, and a plan's lost weeks are finite.
+    let mut moved = calendar.moved(start, &base)?;
+    for _ in 0..=lost.len().saturating_add(8) {
+        let end = crate::plan::Occupies::span(&mesocycle.recalendared(moved.clone())).end();
+        let mut skips = base.clone();
+        if start != authored {
+            let final_day = end.yesterday().unwrap_or(end);
+            skips.extend(
+                diary
+                    .unavailable(start, final_day, Discipline::Gym)
+                    .into_iter()
+                    .map(Skip::day),
+            );
+        }
+        skips.extend(
+            lost.iter()
+                .filter(|monday| **monday >= start && **monday < end)
+                .map(|monday| Skip::new(*monday, SEVEN_DAYS)),
+        );
+        let next = calendar.moved(start, &skips)?;
+        if next == moved {
+            break;
+        }
+        moved = next;
+    }
+
+    Ok(mesocycle.recalendared(moved))
+}
+
+/// One cycling mesocycle, started no earlier than `cursor` and with every lost
+/// week inside it lost.
+fn cycling_rescheduled(
+    mesocycle: &CyclingMesocycle,
+    cursor: Option<Date>,
+    lost: &[Date],
+) -> CyclingMesocycle {
+    let authored = mesocycle.start();
+    let start = cursor.map_or(authored, |cursor| cursor.max(authored));
+    let mut moved = if start == authored {
+        mesocycle.clone()
+    } else {
+        mesocycle.starting_on(start)
+    };
+    // As for the gym: losing a week lengthens the span, which may reach the
+    // next lost week. `losing` ignores a Monday outside the span, so repeating
+    // until nothing changes is enough.
+    for _ in 0..=lost.len() {
+        let next = lost
+            .iter()
+            .fold(moved.clone(), |held, monday| held.losing(*monday));
+        if next == moved {
+            break;
+        }
+        moved = next;
+    }
+    moved
+}
+
+/// A calendar week, as a run of skipped days.
+const SEVEN_DAYS: std::num::NonZeroU8 = match std::num::NonZeroU8::new(7) {
+    Some(days) => days,
+    None => std::num::NonZeroU8::MIN,
+};

@@ -134,7 +134,7 @@ impl Occupies for CyclingMesocycle {
     fn span(&self) -> Span {
         Span::new(
             self.start(),
-            u32::try_from(self.duration_weeks()).unwrap_or(u32::MAX),
+            u32::try_from(self.calendar_weeks()).unwrap_or(u32::MAX),
         )
     }
 }

@@ -894,6 +894,41 @@ fn derived_phrase(
     }
 }
 
+/// Every week since the plan began that did not complete, and what that means
+/// for this one (#177).
+///
+/// **Only the weeks that moved something**: a completed week is the plan
+/// running as written and says nothing worth a line. Nothing is printed when
+/// every week completed.
+pub fn rescheduled(weeks: &[(jiff::civil::Date, domain::planner::MicrocycleState)]) {
+    use domain::planner::MicrocycleState;
+
+    let mut said = false;
+    for (monday, state) in weeks {
+        match state {
+            MicrocycleState::Incomplete => {
+                println!(
+                    "the microcycle of Monday {monday} was incomplete: no essential session \
+                     was performed, so it runs again and everything after it moves back a week"
+                );
+            }
+            MicrocycleState::PartiallyCompleted { completed, lost } => {
+                println!(
+                    "the microcycle of Monday {monday} was partially completed: {completed} \
+                     performed its essential session and {lost} did not, so it runs again and \
+                     everything after it moves back a week. {completed} repeats it too, until \
+                     a holding week can be chosen in its place (#190)"
+                );
+            }
+            MicrocycleState::Running | MicrocycleState::Completed => continue,
+        }
+        said = true;
+    }
+    if said {
+        println!();
+    }
+}
+
 /// Where every session of the microcycle stands, in the order the week runs.
 ///
 /// **From the first session, not from the last slot** (#185). The operator, on

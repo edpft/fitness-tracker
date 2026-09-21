@@ -149,6 +149,17 @@ pub struct Test {
 }
 
 impl Test {
+    /// The same mesocycle on another calendar of the same length (#177).
+    ///
+    /// **Only the dates move.** Everything validated against the duration —
+    /// the ladder, the phases, the chart — is unchanged because the duration
+    /// is, which is why this skips the checks `new` runs.
+    pub(crate) fn recalendared(&self, calendar: Calendar) -> Self {
+        Self {
+            calendar,
+            ..self.clone()
+        }
+    }
     /// The week a test occupies.
     ///
     /// One, by definition. A test that ran for two weeks would be two attempts
