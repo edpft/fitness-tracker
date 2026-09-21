@@ -398,3 +398,163 @@ pub fn eased_by_illness(
         ordinary
     }
 }
+
+/// One session of the microcycle, as the microcycle's own machine reads it.
+///
+/// **Flat rather than the application's `Session`.** What decides a microcycle
+/// is the discipline, the role and the state; the number and the part of the
+/// day are the report's business and carrying them here would make this look
+/// like a view model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placed {
+    pub discipline: Discipline,
+    pub role: SessionRole,
+    pub state: SessionState,
+}
+
+/// The session a microcycle is not a microcycle without.
+///
+/// **Higher intensity, lower volume — and the code already said so twice.**
+/// `Mesocycle::gating_role` answers this for every progression, and
+/// `Test::ROLE` is the same pair because the test *is* the heavy session. The
+/// operator, 2026-09-19, on making it the rule at this level: *"That does make
+/// life easier, because then we don't need a separate rule for test
+/// microcycles."*
+pub const ESSENTIAL: SessionRole = SessionRole::new(Relative::Higher, Relative::Lower);
+
+/// What one discipline's microcycle did with the session the plan needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owed {
+    /// Its essential session can still be performed.
+    Running,
+    /// Its essential session was performed. This programme may advance.
+    Completed,
+    /// The window closed with the essential session unperformed.
+    Lost,
+    /// The week holds no essential session of this discipline, so it owes
+    /// nothing. A real state: the diary allocates the week, and a week it gives
+    /// one discipline nothing is a week that discipline is not in.
+    Absent,
+}
+
+/// Where the concurrent microcycle stands as a whole.
+///
+/// **The programme is the concurrent one** (the operator, 2026-09-21):
+///
+/// > From the perspective of `fitness next`, the "programme" is the concurrent
+/// > programme, i.e. both the gym and cycling programmes moving together. [...]
+/// > So, for the concurrent programme, there should probably be a partially
+/// > completed state.
+///
+/// This is the second of the two machines. [`SessionState`] decides what is
+/// delivered into a slot; this decides *which microcycle the week is*, and so
+/// what re-runs. Asked session by session, the answer on Monday 21 September
+/// is "Monday's gym session" — and nothing in that framing can say the test
+/// microcycle did not complete, so the week would be silently spent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicrocycleState {
+    /// A discipline's essential session can still be performed.
+    Running,
+    /// Every discipline's essential session was performed. Both programmes
+    /// advance together.
+    Completed,
+    /// One discipline's essential session was performed and another's was not.
+    ///
+    /// The one that lost it re-runs its microcycle; the one that completed
+    /// rides a holding week, so that the two still start the next mesocycle
+    /// together (decision 0034). This is the transition #179 and #180 exist
+    /// for.
+    ///
+    /// **Two disciplines, which is what the tool runs.** A third makes this a
+    /// pair of lists rather than a pair of names, and that is the edit to make
+    /// when a third arrives rather than now.
+    PartiallyCompleted {
+        completed: Discipline,
+        lost: Discipline,
+    },
+    /// No discipline's essential session was performed. Every one of them
+    /// re-runs its microcycle, and no holding week is reached — which is the
+    /// operator's week of 14 September 2026.
+    Incomplete,
+}
+
+impl fmt::Display for MicrocycleState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => f.write_str("running"),
+            Self::Completed => f.write_str("completed"),
+            Self::PartiallyCompleted { completed, lost } => {
+                write!(f, "partially completed ({completed} did, {lost} did not)")
+            }
+            Self::Incomplete => f.write_str("incomplete"),
+        }
+    }
+}
+
+/// What one discipline's microcycle did, from the states of its sessions.
+///
+/// **Only the essential session is read.** Every other session of the week is
+/// a session the operator may lose without the plan standing still — which is
+/// the whole reason the essential one is named. The light gym session lost to
+/// Rome on 14 September cost the microcycle nothing; the entry test lost to
+/// illness on the 18th cost it everything.
+#[must_use]
+pub fn owed_by(sessions: &[Placed], discipline: Discipline) -> Owed {
+    let Some(essential) = sessions
+        .iter()
+        .find(|session| session.discipline == discipline && session.role == ESSENTIAL)
+    else {
+        return Owed::Absent;
+    };
+
+    match essential.state {
+        SessionState::Performed => Owed::Completed,
+        SessionState::ToBePrescribed | SessionState::Prescribed => Owed::Running,
+        SessionState::Skipped { .. }
+        | SessionState::NotPrescribed
+        | SessionState::NotPerformed { .. } => Owed::Lost,
+    }
+}
+
+/// Where the concurrent microcycle stands, from every session in it.
+///
+/// **Derived on every read, never stored**, as `progress_after` is: a stored
+/// position is a second source of truth about a series the record already
+/// determines, and asking twice would then advance it twice.
+///
+/// A week holding no session at all is [`MicrocycleState::Completed`] — it owes
+/// nothing, so nothing is waiting on it. That is the same answer a week every
+/// discipline finished gets, and deliberately: what the caller does with this
+/// is decide whether the plan moves on, and in both cases it does.
+#[must_use]
+pub fn microcycle_state(sessions: &[Placed]) -> MicrocycleState {
+    let read: Vec<(Discipline, Owed)> = Discipline::ALL
+        .iter()
+        .copied()
+        .map(|discipline| (discipline, owed_by(sessions, discipline)))
+        .collect();
+
+    if read.iter().any(|(_, owed)| *owed == Owed::Running) {
+        return MicrocycleState::Running;
+    }
+
+    let completed: Vec<Discipline> = read
+        .iter()
+        .filter(|(_, owed)| *owed == Owed::Completed)
+        .map(|(discipline, _)| *discipline)
+        .collect();
+    let lost: Vec<Discipline> = read
+        .iter()
+        .filter(|(_, owed)| *owed == Owed::Lost)
+        .map(|(discipline, _)| *discipline)
+        .collect();
+
+    match (completed.first(), lost.first()) {
+        (_, None) => MicrocycleState::Completed,
+        (None, Some(_)) => MicrocycleState::Incomplete,
+        (Some(completed), Some(lost)) => MicrocycleState::PartiallyCompleted {
+            completed: *completed,
+            lost: *lost,
+        },
+    }
+}
