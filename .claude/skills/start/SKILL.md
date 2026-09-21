@@ -48,8 +48,8 @@ Before the PR, run whatever the change prints and read every line as the
 operator would:
 
 - **Vocabulary.** A term that is not a name in `domain` is raised with him as a
-  question, with a concrete example. It is not quietly reworded: see "Words are
-  the model" in CLAUDE.md.
+  question, with a concrete example. It is not quietly reworded: see "Words highlight
+  concepts" in CLAUDE.md.
 - **Prose habits.** Cut commentary, cut his own rules quoted back to him, and cut
   any question the tool can answer for itself (a date it was already given, a
   choice with one possible answer).
