@@ -170,6 +170,15 @@ empty file inside the sandbox while passing on your machine.
 
 ## Conventions
 
+- **Words highlight concepts, and concepts are the model.** What the tool
+  prints, what the issues say and what the types are called are one vocabulary.
+  A new word, or two words for one thing, points at a concept, so it is a domain
+  question for the operator, not a wording fix: either the text is wrong or the
+  model is missing a concept. "Weeks of phases" was hiding the non-test weeks; "cycle" beside
+  "mesocycle" was one concept with two names. Verbs are the standard ones (add,
+  remove, list, change) unless a domain term fits better; the operator,
+  2026-08-24: *"don't let random terms drift in because we used them once in a
+  conversation"*.
 - **Standard traits over bespoke methods.** A validated newtype implements
   `TryFrom<String>` and gets the rest — `as_str`, `AsRef`, `Display`,
   `TryFrom<&str>`, `FromStr` — from the macros in `domain::landing::newtype`.
