@@ -66,6 +66,7 @@
 //! empty set is "none at all". Those are different facts, and collapsing them
 //! would make training away as usual cancel every session of the trip.
 
+mod holiday;
 mod role;
 
 use std::{collections::BTreeMap, num::NonZeroU8};
@@ -74,6 +75,7 @@ use jiff::civil::{Date, Weekday};
 
 use crate::normalised::OperatorZone;
 
+pub use holiday::{Holidays, PublicHoliday, SchoolHoliday};
 pub use role::{Relative, SessionRole, UnknownRelative};
 
 /// Roughly when in the day, as the operator says it.

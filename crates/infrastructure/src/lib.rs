@@ -6,6 +6,7 @@
 //! Nothing here leaks upward: every vendor error is translated at the boundary
 //! into the application's own view of failure.
 
+pub mod calendar;
 pub mod credentials;
 pub mod garmin;
 pub mod hevy;
@@ -17,6 +18,7 @@ pub mod store;
 pub mod token;
 pub mod withings;
 
+pub use calendar::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 pub use credentials::{Credential, CredentialError, Credentials};
 pub use garmin::{GarminAuth, GarminCredentials, GarminHrv, GarminHrvTranslator};
 pub use hevy::{

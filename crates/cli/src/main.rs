@@ -9,6 +9,7 @@ mod catalogue;
 mod config;
 mod cycling;
 mod gym;
+mod holidays;
 mod next;
 mod output;
 mod paths;
@@ -160,6 +161,10 @@ fn command() -> ClapCommand {
         .subcommand(programme_command())
         .subcommand(parameters_command())
         .subcommand(schedule_command())
+        .subcommand(
+            ClapCommand::new("holidays")
+                .about("List the school and public holidays still to come, as their sources publish them"),
+        )
         .subcommand(
             ClapCommand::new("reset")
                 .about(
@@ -857,6 +862,7 @@ async fn authored_command(
         name if catalogue::discipline(name).is_some() => {
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
         }
+        "holidays" => Some(holidays::list().await),
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
             Some(("alter", _)) => scheduling::alter(database).await,
