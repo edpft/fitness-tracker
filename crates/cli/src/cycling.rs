@@ -173,28 +173,19 @@ fn report(
     session: &CyclingSession,
     ftp: Option<Ftp>,
 ) {
-    // **Both numbers are the programme's own, and the provenance line carries
-    // the published ones.** Microcycle 3 of 4 may be Build's fourth, and session
-    // 2 of 2 may be its third; printing the published numbering as the headline
-    // is what had a two-session week reporting "session 3".
+    // **Both numbers are the programme's own, and the publisher's are not
+    // printed** (#211). Microcycle 3 of 4 may be Build's fourth, and session 2
+    // of 2 may be its third; the published numbering matters to plan authoring,
+    // which maps a publisher's programme onto ours, and to nothing here.
     let week = programme.microcycle(microcycle);
     let sessions = week.map_or(0, CyclingMicrocycle::session_count);
-    // **Blank for a week nobody published** (#180). A holding microcycle's
-    // rides come out of the catalogue one at a time; there is no µ5 session 3
-    // to point back at, and printing the provenance of the *classes* here would
-    // claim a programme that does not exist.
-    let published = planned.published().map_or_else(String::new, |at| {
-        programme
-            .programme()
-            .map_or_else(|| at.to_string(), |named| format!("{named} {at}"))
-    });
     println!(
         "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
         programme.provenance(),
         programme.duration_weeks(),
         position_number = position.as_u8(),
     );
-    println!("{}, {date}   {published}", weekday_name(date.weekday()));
+    println!("{}, {date}", weekday_name(date.weekday()));
     println!();
 
     // **The driving adapter knows where this build's rides are done.** A venue
