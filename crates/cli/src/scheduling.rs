@@ -294,7 +294,7 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
 pub async fn alter(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
-    println!("Which absence departs from the ordinary pattern: a holiday, or an illness?");
+    println!("Which absence departs from the ordinary pattern: a family holiday, or an illness?");
 
     let start = ask_until("From which date? ", parse_date)?;
     let days = ask_until("How many days? [1] ", |typed| {
@@ -339,7 +339,7 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             None
         };
 
-        // **Only a holiday is asked why.** It has somewhere to be and a week to
+        // **Only a family holiday is asked why.** It has somewhere to be and a week to
         // rearrange, and "Rome" is what makes the rearrangement readable six
         // months later. That the operator was too ill to train is the whole of
         // an illness, and the previous question already asked it.
@@ -351,7 +351,7 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             }
         })?;
 
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone,
             slots,
             reason,

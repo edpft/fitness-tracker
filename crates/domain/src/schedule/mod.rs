@@ -478,10 +478,13 @@ pub enum Absence {
     /// not the same as any zone; `None` slots are "the ordinary week stands",
     /// and an empty set is "no room to train at all".
     ///
-    /// **Only a holiday is asked why.** It has somewhere to be and a week to
-    /// rearrange, so "Rome" is what makes the rearrangement readable six months
-    /// later. Illness explains itself.
-    Holiday {
+    /// **A family holiday, not a school or public one**, which are facts about
+    /// the world rather than the operator's own time away (2026-09-22).
+    ///
+    /// **Only a family holiday is asked why.** It has somewhere to be and a
+    /// week to rearrange, so "Rome" is what makes the rearrangement readable
+    /// six months later. Illness explains itself.
+    FamilyHoliday {
         zone: Option<OperatorZone>,
         slots: Option<BTreeMap<TrainingSlot, Allocation>>,
         reason: String,
@@ -504,7 +507,7 @@ impl Absence {
     /// alteration and say nothing about the session.
     pub const fn kind(&self) -> AbsenceKind {
         match self {
-            Self::Holiday { .. } => AbsenceKind::Holiday,
+            Self::FamilyHoliday { .. } => AbsenceKind::FamilyHoliday,
             Self::Illness => AbsenceKind::Illness,
         }
     }
@@ -518,14 +521,16 @@ impl Absence {
 /// other's property, and a holiday is a holiday whether or not it was planned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AbsenceKind {
-    Holiday,
+    FamilyHoliday,
     Illness,
 }
 
 impl AbsenceKind {
+    /// The stable key. Persisted, so it outlives a rename — which is why a
+    /// family holiday is still stored as `holiday`.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Holiday => "holiday",
+            Self::FamilyHoliday => "holiday",
             Self::Illness => "illness",
         }
     }
@@ -533,7 +538,10 @@ impl AbsenceKind {
 
 impl std::fmt::Display for AbsenceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(match self {
+            Self::FamilyHoliday => "family holiday",
+            Self::Illness => "illness",
+        })
     }
 }
 
@@ -572,7 +580,7 @@ impl Alteration {
     /// The zone a holiday is spent in, when it is not the ordinary one.
     pub const fn zone(&self) -> Option<&OperatorZone> {
         match &self.absence {
-            Absence::Holiday { zone, .. } => zone.as_ref(),
+            Absence::FamilyHoliday { zone, .. } => zone.as_ref(),
             Absence::Illness => None,
         }
     }
@@ -581,7 +589,7 @@ impl Alteration {
     /// when the ordinary week stands.
     pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, Allocation>> {
         match &self.absence {
-            Absence::Holiday { slots, .. } => slots.as_ref(),
+            Absence::FamilyHoliday { slots, .. } => slots.as_ref(),
             Absence::Illness => Some(&NO_SLOTS),
         }
     }
@@ -591,7 +599,7 @@ impl Alteration {
     /// authored-data analogue of. Illness needs no explanation beyond itself.
     pub const fn reason(&self) -> Option<&str> {
         match &self.absence {
-            Absence::Holiday { reason, .. } => Some(reason.as_str()),
+            Absence::FamilyHoliday { reason, .. } => Some(reason.as_str()),
             Absence::Illness => None,
         }
     }
@@ -851,7 +859,7 @@ impl Diary {
     /// **What a microcycle's sessions are**, and the reason this exists beside
     /// [`Self::slots_of`] (#185). An absence removes a day's slots, so the
     /// altered answer makes a session lost to a holiday *vanish* rather than
-    /// report it as lost — and saying "skipped (holiday)" is the whole of what
+    /// report it as lost — and saying "skipped (family holiday)" is the whole of what
     /// a session's state is for. The absence is then read as the reason the
     /// session did not happen, which is [`Self::taken`].
     pub fn ordinary_slots_of(&self, date: Date) -> Vec<ScheduledSlot> {

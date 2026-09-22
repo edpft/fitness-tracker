@@ -133,7 +133,7 @@ fn a_pattern_and_its_alterations_round_trip() {
     let alteration = Alteration::new(
         date(2026, 9, 14),
         days!(1),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(BTreeMap::new()),
             reason: "away, and unable to train".to_owned(),
@@ -173,7 +173,7 @@ fn an_illness_is_not_a_holiday() {
     let holiday = Alteration::new(
         date(2026, 10, 5),
         days!(3),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: Some(zone!("Europe/Rome")),
             slots: Some(BTreeMap::new()),
             reason: "Rome".to_owned(),
@@ -231,7 +231,7 @@ fn training_away_as_usual_is_not_a_holiday_with_no_room() {
     let as_usual = Alteration::new(
         date(2026, 10, 5),
         days!(1),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: Some(zone!("Europe/Rome")),
             slots: None,
             reason: "in Rome, training as usual".to_owned(),
@@ -261,7 +261,7 @@ fn restating_an_absence_can_make_it_illness() {
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(2),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(slots(&[(
                 Weekday::Monday,
@@ -296,7 +296,7 @@ fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(1),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(BTreeMap::new()),
             reason: "away, and unable to train".to_owned(),
@@ -431,7 +431,7 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(7),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(slots(&[
                 (

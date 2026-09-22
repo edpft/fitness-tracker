@@ -137,7 +137,7 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
         .record_alteration(&Alteration::new(
             date(2026, 9, 14),
             days!(1),
-            Absence::Holiday {
+            Absence::FamilyHoliday {
                 zone: None,
                 slots: Some(BTreeMap::new()),
                 reason: "away, and unable to train".to_owned(),
@@ -183,7 +183,7 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
             .record_alteration(&Alteration::new(
                 date(2026, 12, 7),
                 days!(14),
-                Absence::Holiday {
+                Absence::FamilyHoliday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
                     reason: "away in December".to_owned(),
@@ -303,7 +303,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 25),
                 days!(1),
-                Absence::Holiday {
+                Absence::FamilyHoliday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
                     reason: "a wedding".to_owned(),
@@ -357,7 +357,7 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 21),
                 days!(1),
-                Absence::Holiday {
+                Absence::FamilyHoliday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
                     reason: "called away".to_owned(),
@@ -436,7 +436,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
             .record_alteration(&Alteration::new(
                 performed_on,
                 days!(1),
-                Absence::Holiday {
+                Absence::FamilyHoliday {
                     zone: None,
                     slots: Some(BTreeMap::new()),
                     reason: "written off, and then trained anyway".to_owned(),
