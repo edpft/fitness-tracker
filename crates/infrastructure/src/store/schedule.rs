@@ -20,8 +20,8 @@ use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
-        TrainingPattern, TrainingSlot, TrainingWeek,
+        Absence, Allocation, Alteration, Diary, Discipline, GymClosure, PartOfDay, Relative,
+        SessionRole, TrainingPattern, TrainingSlot, TrainingWeek,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -193,7 +193,8 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        Ok(Diary::new(patterns, read_alterations(&self.pool).await?))
+        Ok(Diary::new(patterns, read_alterations(&self.pool).await?)
+            .with_closures(read_closures(&self.pool).await?))
     }
 }
 
@@ -269,6 +270,30 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
         ));
     }
     Ok(alterations)
+}
+
+/// Every run of days the gym is shut.
+async fn read_closures(pool: &SqlitePool) -> Result<Vec<GymClosure>, StoreError> {
+    let rows = sqlx::query!(
+        r"
+        SELECT start_date, days, reason
+        FROM gym_closure
+        ORDER BY start_date
+        "
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    rows.into_iter()
+        .map(|row| {
+            let days = u8::try_from(row.days)
+                .ok()
+                .and_then(std::num::NonZeroU8::new)
+                .ok_or_else(|| corrupt(&"a gym closure covering no days"))?;
+            Ok(GymClosure::new(date_of(&row.start_date)?, days, row.reason))
+        })
+        .collect()
 }
 
 impl DiaryAuthor for SqliteDiaryStore {
@@ -407,5 +432,31 @@ impl DiaryAuthor for SqliteDiaryStore {
         }
 
         tx.commit().await.map_err(|error| store_error(&error))
+    }
+
+    async fn record_closure(&self, closure: &GymClosure) -> Result<(), StoreError> {
+        let authored_at = Timestamp::now().to_string();
+        let start = closure.start().to_string();
+        let days = i64::from(closure.days().get());
+        let reason = closure.reason();
+
+        sqlx::query!(
+            r"
+            INSERT INTO gym_closure (authored_at, start_date, days, reason)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (start_date) DO UPDATE
+                SET authored_at = excluded.authored_at,
+                    days        = excluded.days,
+                    reason      = excluded.reason
+            ",
+            authored_at,
+            start,
+            days,
+            reason
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(())
     }
 }

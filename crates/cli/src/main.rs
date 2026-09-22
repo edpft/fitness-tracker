@@ -507,6 +507,9 @@ fn schedule_command() -> ClapCommand {
             ClapCommand::new("alter").about("Ask about a holiday or an illness, and record it"),
         )
         .subcommand(
+            ClapCommand::new("close").about("Ask which days the gym is closed, and record them"),
+        )
+        .subcommand(
             ClapCommand::new("show")
                 .about("Report the ordinary pattern and everything that departs from it"),
         )
@@ -859,6 +862,7 @@ async fn authored_command(
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
             Some(("alter", _)) => scheduling::alter(database).await,
+            Some(("close", _)) => scheduling::close(database).await,
             Some(("show", _)) => scheduling::show(database).await,
             _ => Err(Failure::message("no schedule command given", exit::USAGE)),
         }),

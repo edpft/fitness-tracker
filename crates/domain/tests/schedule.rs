@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, RecordedSession, Relative,
-        ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted,
+        Absence, Allocation, Alteration, Diary, Discipline, GymClosure, PartOfDay, RecordedSession,
+        Relative, ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -729,4 +729,105 @@ fn illness_empties_the_day_and_keeps_the_zone() {
     assert_eq!(ill.zone, rome, "still in Rome");
     assert!(ill.slots.is_empty(), "no room to train while ill");
     assert_eq!(diary.alterations()[2].slots(), Some(&BTreeMap::new()));
+}
+
+/// The ordinary week with the gym shut on Christmas Day, a Friday in 2026.
+fn christmas() -> Built<Diary> {
+    let pattern = TrainingPattern::new(date(2026, 1, 1)?, zone("Europe/London")?, ordinary());
+    let closed = GymClosure::new(date(2026, 12, 25)?, days(1)?, "Christmas Day".to_owned());
+    Ok(Diary::new(vec![pattern], vec![]).with_closures(vec![closed]))
+}
+
+/// **A closure takes the gym's slot and nothing else** (#181).
+///
+/// Friday evening is the gym's harder session, and on Christmas Day the gym is
+/// shut. The operator cycles at home, so Sunday's ride is untouched.
+#[test]
+fn a_gym_closure_takes_only_the_gyms_slots() {
+    let diary = christmas().expect("the diary builds");
+    let friday = date(2026, 12, 25).expect("Christmas Day");
+    let sunday = date(2026, 12, 27).expect("the Sunday after");
+
+    assert!(
+        diary.slots_on(friday, Discipline::Gym).is_empty(),
+        "the gym is shut"
+    );
+    assert_eq!(
+        diary.slots_on(sunday, Discipline::Cycling),
+        vec![(
+            TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
+            easier()
+        )],
+        "the ride at home stands"
+    );
+}
+
+/// What a shifted gym mesocycle skips, and what a cycling one does not.
+#[test]
+fn a_gym_closure_is_a_day_the_gym_cannot_run() {
+    let diary = christmas().expect("the diary builds");
+    let monday = date(2026, 12, 21).expect("the Monday of Christmas week");
+    let sunday = date(2026, 12, 27).expect("its Sunday");
+
+    assert_eq!(
+        diary.unavailable(monday, sunday, Discipline::Gym),
+        vec![date(2026, 12, 25).expect("Christmas Day")]
+    );
+    assert!(
+        diary
+            .unavailable(monday, sunday, Discipline::Cycling)
+            .is_empty(),
+        "no cycling day is lost"
+    );
+}
+
+/// **A closure outranks an alteration that gives the gym the day.** A
+/// holiday may move the gym's session onto a Friday morning; if the gym is shut
+/// that Friday, there is still no gym session to be had.
+#[test]
+fn a_gym_closure_outranks_an_alteration() {
+    let friday = date(2026, 12, 25).expect("Christmas Day");
+    let pattern = TrainingPattern::new(
+        date(2026, 1, 1).expect("a real date"),
+        zone("Europe/London").expect("a real zone"),
+        ordinary(),
+    );
+    let off_work = Alteration::new(
+        date(2026, 12, 24).expect("Christmas Eve"),
+        days(2).expect("two days"),
+        Absence::Holiday {
+            zone: None,
+            slots: Some(
+                [(
+                    TrainingSlot::new(Weekday::Friday, PartOfDay::Morning),
+                    gym(harder()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            reason: "off work".to_owned(),
+        },
+    );
+    let diary = Diary::new(vec![pattern], vec![off_work]).with_closures(vec![GymClosure::new(
+        friday,
+        days(1).expect("one day"),
+        "Christmas Day".to_owned(),
+    )]);
+
+    assert!(diary.slots_on(friday, Discipline::Gym).is_empty());
+}
+
+/// A closure ends when its days run out, as an alteration does.
+#[test]
+fn a_gym_closure_ends_when_its_days_run_out() {
+    let diary = christmas().expect("the diary builds");
+    let next_monday = date(2026, 12, 28).expect("a real Monday");
+
+    assert_eq!(
+        diary.slots_on(next_monday, Discipline::Gym),
+        vec![(
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+            easier()
+        )]
+    );
 }

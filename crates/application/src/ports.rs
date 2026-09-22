@@ -37,7 +37,7 @@ use domain::prescription::{
     Anchor, GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId,
 };
-use domain::schedule::{Alteration, Diary, SessionRole, TrainingPattern};
+use domain::schedule::{Alteration, Diary, GymClosure, SessionRole, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{
@@ -1945,5 +1945,18 @@ pub trait DiaryAuthor {
     fn record_alteration(
         &self,
         alteration: &Alteration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Record a run of days the gym is shut.
+    ///
+    /// Keyed on the day it starts, as an alteration is, so re-stating the
+    /// closure that begins on Christmas Day corrects it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_closure(
+        &self,
+        closure: &GymClosure,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

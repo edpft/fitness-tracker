@@ -12,8 +12,8 @@ use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
-        TrainingPattern, TrainingSlot,
+        Absence, Allocation, Alteration, Discipline, GymClosure, PartOfDay, Relative,
+        SessionRole, TrainingPattern, TrainingSlot,
     },
 };
 use infrastructure::{SqliteDiaryStore, connect};
@@ -476,4 +476,50 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
             .is_empty(),
         "which is the gym's and not cycling's"
     );
+}
+
+/// **Christmas Day, from the store** (#181): the gym's Friday is gone and the
+/// ride at home on the Sunday is not.
+#[test]
+fn a_gym_closure_round_trips_and_takes_the_gyms_day() {
+    let (store, _directory) = opened!();
+
+    run!(store.record_pattern(&TrainingPattern::new(
+        date(2026, 8, 24),
+        zone!("Europe/London"),
+        ordinary_pattern()
+    )));
+    let christmas = GymClosure::new(date(2026, 12, 25), days!(1), "Christmas Day".to_owned());
+    run!(store.record_closure(&christmas));
+
+    let diary = run!(store.diary());
+    assert_eq!(diary.closures(), [christmas]);
+
+    let (monday, sunday) = (date(2026, 12, 21), date(2026, 12, 27));
+    assert_eq!(
+        diary.unavailable(monday, sunday, Discipline::Gym),
+        [date(2026, 12, 25)]
+    );
+    assert!(
+        diary
+            .unavailable(monday, sunday, Discipline::Cycling)
+            .is_empty()
+    );
+}
+
+/// Re-stating a closure from the same date corrects it.
+#[test]
+fn restating_a_gym_closure_corrects_it() {
+    let (store, _directory) = opened!();
+
+    run!(store.record_closure(&GymClosure::new(
+        date(2026, 12, 25),
+        days!(1),
+        "Christmas Day".to_owned()
+    )));
+    let corrected = GymClosure::new(date(2026, 12, 25), days!(2), "Christmas".to_owned());
+    run!(store.record_closure(&corrected));
+
+    let diary = run!(store.diary());
+    assert_eq!(diary.closures(), [corrected], "one closure, corrected");
 }

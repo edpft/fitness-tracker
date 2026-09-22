@@ -65,6 +65,12 @@
 //! A holiday's `None` slots are "the ordinary week stands" and `Some` of an
 //! empty set is "none at all". Those are different facts, and collapsing them
 //! would make training away as usual cancel every session of the trip.
+//!
+//! ## And one that is not the operator's
+//!
+//! A [`GymClosure`] is a run of days the gym is shut. Both shapes above are
+//! about the operator; this one is about the world, and it takes only the
+//! gym's slots.
 
 mod role;
 
@@ -608,6 +614,60 @@ impl Alteration {
     }
 }
 
+/// A run of days the gym is shut.
+///
+/// **A fact about the world, not an absence** (#181). The operator,
+/// 2026-09-19: *"Christmas day isn't trainable because, 1) I'll be with my
+/// family but 2) the gym will be closed. This isn't a regular absence, it's an
+/// external fact about the world."* So it is held beside the alterations rather
+/// than among them: an alteration is the operator's availability, and this is
+/// the gym's.
+///
+/// **The gym's, and only the gym's.** It names no discipline because nothing
+/// else closes: the operator cycles at home. A closure takes the gym's slots on
+/// the days it covers and leaves every cycling slot where it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GymClosure {
+    start: Date,
+    days: NonZeroU8,
+    reason: String,
+}
+
+impl GymClosure {
+    pub const fn new(start: Date, days: NonZeroU8, reason: String) -> Self {
+        Self {
+            start,
+            days,
+            reason,
+        }
+    }
+
+    pub const fn start(&self) -> Date {
+        self.start
+    }
+
+    pub const fn days(&self) -> NonZeroU8 {
+        self.days
+    }
+
+    /// Why — a public holiday, a refurbishment. Asked for the reason a
+    /// holiday's is: an unexplained closure is unreadable six months later.
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    /// The last day this covers.
+    pub fn last(&self) -> Date {
+        self.start
+            .checked_add(jiff::Span::new().days(i64::from(self.days.get()) - 1))
+            .unwrap_or(self.start)
+    }
+
+    pub fn covers(&self, date: Date) -> bool {
+        date >= self.start && date <= self.last()
+    }
+}
+
 /// What a given day actually looks like.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Availability {
@@ -649,6 +709,7 @@ impl Availability {
 pub struct Diary {
     patterns: Vec<TrainingPattern>,
     alterations: Vec<Alteration>,
+    closures: Vec<GymClosure>,
 }
 
 impl Diary {
@@ -659,7 +720,14 @@ impl Diary {
         Self {
             patterns,
             alterations,
+            closures: Vec::new(),
         }
+    }
+
+    /// The same diary, with the days the gym is shut.
+    #[must_use]
+    pub fn with_closures(self, closures: Vec<GymClosure>) -> Self {
+        Self { closures, ..self }
     }
 
     pub fn patterns(&self) -> &[TrainingPattern] {
@@ -668,6 +736,10 @@ impl Diary {
 
     pub fn alterations(&self) -> &[Alteration] {
         &self.alterations
+    }
+
+    pub fn closures(&self) -> &[GymClosure] {
+        &self.closures
     }
 
     /// What a date looks like: the pattern in force, as amended by any
@@ -681,6 +753,11 @@ impl Diary {
     /// overlap. Refusing an overlap would be stricter and worse: a long trip
     /// with a different arrangement in the middle of it is a perfectly ordinary
     /// thing to describe that way.
+    ///
+    /// **A gym closure is applied after every alteration**, and takes the gym's
+    /// slots whatever the alteration gave it. The alteration says when the
+    /// operator can train; the closure says the gym is shut, and a slot the gym
+    /// holds on a day it is shut is not one anybody can train in.
     pub fn on(&self, date: Date) -> Option<Availability> {
         let pattern = self.pattern_on(date)?;
 
@@ -700,6 +777,12 @@ impl Diary {
             if let Some(slots) = alteration.slots() {
                 availability.slots.clone_from(slots);
             }
+        }
+
+        if self.closures.iter().any(|closure| closure.covers(date)) {
+            availability
+                .slots
+                .retain(|_, allocated| allocated.discipline != Discipline::Gym);
         }
 
         Some(availability)

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO gym_closure (authored_at, start_date, days, reason)\n            VALUES (?, ?, ?, ?)\n            ON CONFLICT (start_date) DO UPDATE\n                SET authored_at = excluded.authored_at,\n                    days        = excluded.days,\n                    reason      = excluded.reason\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "4730a57ee8e0feab0d267c474ad4bf59ba3863c2ef6cf696d71849a33ae80565"
+}

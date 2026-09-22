@@ -27,8 +27,8 @@ use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
-        TrainingPattern, TrainingSlot,
+        Absence, Allocation, Alteration, Discipline, GymClosure, PartOfDay, Relative,
+        SessionRole, TrainingPattern, TrainingSlot,
     },
 };
 use infrastructure::{SqliteDiaryStore, connect};
@@ -90,6 +90,17 @@ fn parse_date(typed: &str) -> Result<Date, String> {
     typed
         .parse()
         .map_err(|_| format!("{typed:?} is not a date — try 2026-09-14"))
+}
+
+fn parse_days(typed: &str) -> Result<NonZeroU8, String> {
+    if typed.is_empty() {
+        return NonZeroU8::new(1).ok_or_else(|| "one is not zero".to_owned());
+    }
+    typed
+        .parse::<u8>()
+        .ok()
+        .and_then(NonZeroU8::new)
+        .ok_or_else(|| format!("{typed:?} is not a number of days from 1 to 255"))
 }
 
 fn parse_zone(typed: &str) -> Result<OperatorZone, String> {
@@ -297,16 +308,7 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
     println!("Which absence departs from the ordinary pattern: a holiday, or an illness?");
 
     let start = ask_until("From which date? ", parse_date)?;
-    let days = ask_until("How many days? [1] ", |typed| {
-        if typed.is_empty() {
-            return NonZeroU8::new(1).ok_or_else(|| "one is not zero".to_owned());
-        }
-        typed
-            .parse::<u8>()
-            .ok()
-            .and_then(NonZeroU8::new)
-            .ok_or_else(|| format!("{typed:?} is not a number of days from 1 to 255"))
-    })?;
+    let days = ask_until("How many days? [1] ", parse_days)?;
 
     // **Illness is asked first, because it settles everything else.** It is only
     // illness when it prevents training, so it has no slots and no zone to ask
@@ -367,6 +369,36 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     output::alteration_recorded(&alteration);
+    Ok(())
+}
+
+/// Ask which days the gym is closed and record them.
+///
+/// **Not an alteration**, so none of its questions are asked: a closure is the
+/// gym's, not the operator's, and it takes the gym's slots and nothing else.
+pub async fn close(database: &Path) -> Result<(), Failure> {
+    interactive()?;
+
+    println!("When is the gym closed?");
+    let start = ask_until("From which date? ", parse_date)?;
+    let days = ask_until("How many days? [1] ", parse_days)?;
+    let reason = ask_until("Why? ", |typed| {
+        if typed.is_empty() {
+            Err("a closure nobody explained is unreadable six months later".to_owned())
+        } else {
+            Ok(typed.to_owned())
+        }
+    })?;
+
+    let closure = GymClosure::new(start, days, reason);
+
+    store(database)
+        .await?
+        .record_closure(&closure)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::closure_recorded(&closure);
     Ok(())
 }
 

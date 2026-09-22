@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT start_date, days, reason\n        FROM gym_closure\n        ORDER BY start_date\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "start_date",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_closure",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "name": "days",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_closure",
+            "name": "days"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_closure",
+            "name": "reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3340932f047e9935c8a738618d9359d8b45672caa4e68713297e704854a0c68f"
+}

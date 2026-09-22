@@ -1480,6 +1480,20 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
     }
 }
 
+fn closure_line(closure: &domain::schedule::GymClosure) {
+    let span = if closure.days().get() == 1 {
+        closure.start().to_string()
+    } else {
+        format!("{} to {}", closure.start(), closure.last())
+    };
+    println!("  {span} — gym closed: {}", closure.reason());
+}
+
+pub fn closure_recorded(closure: &domain::schedule::GymClosure) {
+    println!("\nrecorded");
+    closure_line(closure);
+}
+
 pub fn pattern_recorded(pattern: &domain::schedule::TrainingPattern) {
     println!(
         "\nrecorded, from {} ({})",
@@ -1519,12 +1533,20 @@ pub fn schedule(diary: &domain::schedule::Diary) {
     // as often a course, a visitor or a late finish as it is a trip.
     if diary.alterations().is_empty() {
         println!("\nno alterations");
-        return;
+    } else {
+        println!("\nalterations");
+        for alteration in diary.alterations() {
+            alteration_line(alteration);
+        }
     }
 
-    println!("\nalterations");
-    for alteration in diary.alterations() {
-        alteration_line(alteration);
+    if diary.closures().is_empty() {
+        println!("\nno gym closures");
+    } else {
+        println!("\ngym closures");
+        for closure in diary.closures() {
+            closure_line(closure);
+        }
     }
 }
 
