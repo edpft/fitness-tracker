@@ -367,7 +367,7 @@ fn absent(on: jiff::civil::Date, absence: Absence) -> Built<Diary> {
 /// A holiday that keeps the ordinary week, so only its kind differs from an
 /// illness.
 fn holiday() -> Absence {
-    Absence::Holiday {
+    Absence::FamilyHoliday {
         zone: None,
         slots: Some(BTreeMap::new()),
         reason: "Rome".to_owned(),

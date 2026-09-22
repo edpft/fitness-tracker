@@ -504,7 +504,8 @@ fn schedule_command() -> ClapCommand {
                 .about("Ask when you ordinarily have room to train, and record it"),
         )
         .subcommand(
-            ClapCommand::new("alter").about("Ask about a holiday or an illness, and record it"),
+            ClapCommand::new("alter")
+                .about("Ask about a family holiday or an illness, and record it"),
         )
         .subcommand(
             ClapCommand::new("show")

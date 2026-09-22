@@ -295,7 +295,7 @@ async fn away_over_the_monday(pool: &SqlitePool) -> Fallible<()> {
         .record_alteration(&Alteration::new(
             Date::constant(2026, 9, 11),
             over,
-            Absence::Holiday {
+            Absence::FamilyHoliday {
                 zone: None,
                 slots: Some(std::collections::BTreeMap::new()),
                 reason: "No holiday, no gym access".to_owned(),
@@ -459,7 +459,7 @@ fn the_microcycle_reports_a_state_for_every_session() {
     assert_eq!(
         read,
         vec![
-            "gym 1 2026-09-14 — skipped (holiday)",
+            "gym 1 2026-09-14 — skipped (family holiday)",
             "cycling 1 2026-09-16 — performed",
             "gym 2 2026-09-18 — prescribed",
             "cycling 2 2026-09-20 — to be prescribed",

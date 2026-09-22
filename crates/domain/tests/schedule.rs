@@ -83,7 +83,7 @@ fn september() -> Built<Diary> {
     let first = Alteration::new(
         date(2026, 8, 29)?,
         days(7)?,
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(BTreeMap::new()),
             reason: "away with family; no free weights where we are staying".to_owned(),
@@ -94,7 +94,7 @@ fn september() -> Built<Diary> {
     let second = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: Some(zone("Europe/Rome")?),
             slots: Some(BTreeMap::new()),
             reason: "away with family in Rome".to_owned(),
@@ -303,7 +303,7 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
         vec![Alteration::new(
             monday,
             days(1).expect("one day"),
-            Absence::Holiday {
+            Absence::FamilyHoliday {
                 zone: None,
                 slots: Some(morning_only),
                 reason: "trains in the morning, away from lunchtime".to_owned(),

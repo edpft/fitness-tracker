@@ -77,7 +77,7 @@ fn september() -> Built<Diary> {
     let rome = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: Some(zone("Europe/Rome")?),
             slots: Some(BTreeMap::new()),
             reason: "No holiday, no gym access".to_owned(),
@@ -150,7 +150,7 @@ fn the_week_of_14_september_reads_as_the_operator_described_it() {
             NEITHER,
         ),
         SessionState::Skipped {
-            absence: AbsenceKind::Holiday
+            absence: AbsenceKind::FamilyHoliday
         },
         "gym 1 fell inside the Rome holiday, and nothing had been prescribed"
     );
@@ -329,7 +329,7 @@ fn a_holiday_that_states_no_slots_skips_nothing() {
     let away = Alteration::new(
         date(2026, 9, 14).expect("a real Monday"),
         days(7).expect("seven days"),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: Some(zone("Europe/Rome").expect("a real zone")),
             slots: None,
             reason: "away, training at the usual times".to_owned(),
@@ -368,7 +368,7 @@ fn a_holiday_that_states_slots_takes_the_parts_it_leaves_out() {
     let away = Alteration::new(
         date(2026, 9, 18).expect("a real Friday"),
         days(2).expect("two days"),
-        Absence::Holiday {
+        Absence::FamilyHoliday {
             zone: None,
             slots: Some(kept),
             reason: "the hotel gym is only free on the Saturday morning".to_owned(),
@@ -386,7 +386,7 @@ fn a_holiday_that_states_slots_takes_the_parts_it_leaves_out() {
     );
     assert_eq!(
         diary.taken(at(saturday, PartOfDay::Evening)),
-        Some(AbsenceKind::Holiday),
+        Some(AbsenceKind::FamilyHoliday),
     );
 
     assert_eq!(

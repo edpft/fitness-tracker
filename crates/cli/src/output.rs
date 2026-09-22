@@ -1463,9 +1463,9 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
     };
 
     match alteration.reason() {
-        Some(reason) => println!("  {span} — {}: {reason}", alteration.absence().as_str()),
+        Some(reason) => println!("  {span} — {}: {reason}", alteration.absence().kind()),
         // An illness has no reason, so there is nothing for a colon to introduce.
-        None => println!("  {span} — {}", alteration.absence().as_str()),
+        None => println!("  {span} — {}", alteration.absence().kind()),
     }
 
     if let Some(zone) = alteration.zone() {

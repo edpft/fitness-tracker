@@ -224,7 +224,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
 
         let absence = match alteration.absence.as_str() {
             "illness" => Absence::Illness,
-            "holiday" if alteration.states_slots == 0 => Absence::Holiday {
+            "holiday" if alteration.states_slots == 0 => Absence::FamilyHoliday {
                 zone: alteration.zone.as_deref().map(zone_of).transpose()?,
                 slots: None,
                 reason: reason_of(alteration.reason)?,
@@ -244,7 +244,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
                 .await
                 .map_err(|error| store_error(&error))?;
 
-                Absence::Holiday {
+                Absence::FamilyHoliday {
                     zone: alteration.zone.as_deref().map(zone_of).transpose()?,
                     reason: reason_of(alteration.reason)?,
                     slots: Some(
