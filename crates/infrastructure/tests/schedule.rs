@@ -12,8 +12,8 @@ use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Discipline, GymClosure, PartOfDay, Relative,
-        SessionRole, TrainingPattern, TrainingSlot,
+        Absence, Allocation, Alteration, Discipline, GymClosure, PartOfDay, Relative, SessionRole,
+        TrainingPattern, TrainingSlot,
     },
 };
 use infrastructure::{SqliteDiaryStore, connect};

@@ -797,14 +797,10 @@ fn a_gym_closure_outranks_an_alteration() {
         days(2).expect("two days"),
         Absence::Holiday {
             zone: None,
-            slots: Some(
-                [(
-                    TrainingSlot::new(Weekday::Friday, PartOfDay::Morning),
-                    gym(harder()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            slots: Some(BTreeMap::from([(
+                TrainingSlot::new(Weekday::Friday, PartOfDay::Morning),
+                gym(harder()),
+            )])),
             reason: "off work".to_owned(),
         },
     );
