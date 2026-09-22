@@ -1579,6 +1579,47 @@ pub fn comparison(comparison: &application::compare::Comparison) {
     }
 }
 
+/// Every school and public holiday, in the order they fall.
+pub fn holidays(holidays: &domain::schedule::Holidays) {
+    let mut lines: Vec<(jiff::civil::Date, String)> = holidays
+        .school()
+        .iter()
+        .map(|holiday| {
+            let span = if holiday.days().get() == 1 {
+                holiday.start().to_string()
+            } else {
+                format!("{} to {}", holiday.start(), holiday.last())
+            };
+            (holiday.start(), format!("school holiday  {span}"))
+        })
+        .chain(holidays.public().iter().map(|holiday| {
+            (
+                holiday.date(),
+                format!("public holiday  {}  {}", holiday.date(), holiday.name()),
+            )
+        }))
+        .collect();
+    lines.sort();
+
+    if lines.is_empty() {
+        println!("no school or public holidays published from today");
+    }
+    for (_, line) in lines {
+        println!("{line}");
+    }
+
+    // **Where the sources stop, said outright**: past it there is no data,
+    // which is not the same as no holiday.
+    let reach = |to: Option<jiff::civil::Date>| {
+        to.map_or_else(|| "nowhere".to_owned(), |to| to.to_string())
+    };
+    println!(
+        "\nschool holidays published to {}; public holidays to {}",
+        reach(holidays.school_published_to()),
+        reach(holidays.public_published_to()),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::derived_phrase;

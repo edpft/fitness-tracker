@@ -37,7 +37,7 @@ use domain::prescription::{
     Anchor, GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId,
 };
-use domain::schedule::{Alteration, Diary, SessionRole, TrainingPattern};
+use domain::schedule::{Alteration, Diary, Holidays, SessionRole, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{
@@ -1893,6 +1893,22 @@ pub trait PrescriptionDeliverer {
 // and every discipline reads it while none owns it. Nothing here allocates a
 // slot to anything: which of the operator's evenings the gym may use is
 // planning, and planning waits.
+
+/// Where the school and public holidays come from.
+///
+/// **A thing that is read, never written**: both are facts about the world
+/// (#181), set by the school and by the government, so the answer is fetched
+/// each time and nothing is stored (§ 14). One source may know only one kind,
+/// and [`Holidays::and`] is where two meet.
+pub trait HolidayCalendar {
+    /// Every holiday the source currently publishes.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable or serves something this
+    /// adapter cannot read.
+    fn holidays(&self) -> impl Future<Output = Result<Holidays, SourceError>> + Send;
+}
 
 /// Everything the operator has said about their week.
 pub trait DiaryStore {
