@@ -28,7 +28,7 @@ use jiff::civil::Date;
 use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
-    prescription::{Mesocycle, NotScheduled, Skip, WeekKind},
+    prescription::{GymMesocycle, NotScheduled, Skip, WeekKind},
     schedule::{AbsenceKind, DayPart, Diary, Discipline, Relative, ScheduledSlot, SessionRole},
 };
 
@@ -41,7 +41,7 @@ pub enum Filled<'a> {
     /// prescribed — from the programme, the record and the parameters — and
     /// deriving it needs a store this module has no business holding.
     Gym {
-        mesocycle: &'a Mesocycle,
+        mesocycle: &'a GymMesocycle,
         week: WeekKind,
     },
     /// The ride itself, which is authored in full and needs nothing read.
@@ -415,7 +415,7 @@ pub struct Placed {
 /// The session a microcycle is not a microcycle without.
 ///
 /// **Higher intensity, lower volume — and the code already said so twice.**
-/// `Mesocycle::gating_role` answers this for every progression, and
+/// `GymMesocycle::gating_role` answers this for every progression, and
 /// `Test::ROLE` is the same pair because the test *is* the heavy session. The
 /// operator, 2026-09-19, on making it the rule at this level: *"That does make
 /// life easier, because then we don't need a separate rule for test
@@ -650,11 +650,11 @@ pub fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, Un
 /// One gym mesocycle, started no earlier than `cursor` and with every lost
 /// week inside it skipped.
 fn gym_rescheduled(
-    mesocycle: &Mesocycle,
+    mesocycle: &GymMesocycle,
     cursor: Option<Date>,
     lost: &[Date],
     diary: &Diary,
-) -> Result<Mesocycle, Unreschedulable> {
+) -> Result<GymMesocycle, Unreschedulable> {
     let calendar = mesocycle.calendar();
     let authored = calendar.start();
     let start = cursor.map_or(authored, |cursor| cursor.max(authored));

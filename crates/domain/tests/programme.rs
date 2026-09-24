@@ -18,7 +18,7 @@ use domain::{
     plan::Occupies,
     prescription::{
         Authored, AuthoringError, BlockPeriodisation, BlockWeek, ByIntensity, EntryTest, Fill,
-        InconsistentMesocycle, Mesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
+        GymMesocycle, InconsistentMesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
         StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed::seed,
     },
     schedule::{Relative, SessionRole, TrainingWeek},
@@ -173,7 +173,7 @@ fn a_test_occupies_one_week() {
         panic!("a front squat single on the heavy day is a test")
     };
     assert_eq!(test.calendar().duration_weeks(), 1);
-    let span = Mesocycle::Test(test).span();
+    let span = GymMesocycle::Test(test).span();
     let Ok(monday) = Date::new(2026, 9, 14) else {
         panic!("14 September is a date")
     };
@@ -271,7 +271,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
 
     assert!(matches!(
         refused,
-        Err(AuthoringError::Mesocycle(
+        Err(AuthoringError::GymMesocycle(
             InconsistentMesocycle::TestNeverRunsItsSession { .. }
         ))
     ));
@@ -368,14 +368,14 @@ fn a_test_gates_nothing_and_a_block_gates_a_role() {
     ) else {
         panic!("a front squat single on the heavy day is a test")
     };
-    let programme = Mesocycle::Test(test);
+    let programme = GymMesocycle::Test(test);
     assert_eq!(programme.template(), "test");
     assert_eq!(programme.gating_role(), None, "and gates nothing");
 
     let Ok(Ok(block)) = block(None) else {
         panic!("a tested anchor makes a block")
     };
-    let programme = Mesocycle::Progression(Progression::BlockPeriodisation(block));
+    let programme = GymMesocycle::Progression(Progression::BlockPeriodisation(block));
     assert_eq!(programme.template(), "block");
     assert_eq!(
         programme.gating_role(),

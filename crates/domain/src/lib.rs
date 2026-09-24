@@ -13,6 +13,7 @@ pub mod body;
 pub mod cycling;
 pub mod gym;
 pub mod landing;
+pub mod macrocycle;
 pub mod measure;
 mod newtype;
 pub mod normalised;

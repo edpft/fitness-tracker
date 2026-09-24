@@ -21,8 +21,8 @@ use domain::{
     plan::{Plan, PlanName, Programme},
     planner::{self, Filled, Planned, week},
     prescription::{
-        BlockPeriodisation, EntryTest, Fill, Mesocycle, Primary, PrimaryPattern, Progression, Skip,
-        SlotFills, StaticFill,
+        BlockPeriodisation, EntryTest, Fill, GymMesocycle, Primary, PrimaryPattern, Progression,
+        Skip, SlotFills, StaticFill,
     },
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{
@@ -118,7 +118,7 @@ fn fills() -> Built<SlotFills> {
 ///
 /// **It states no weekday.** Its calendar is built against the diary's week,
 /// which is where Monday and Friday come from.
-fn gym() -> Built<Mesocycle> {
+fn gym() -> Built<GymMesocycle> {
     let diary = diary()?;
     let week = diary
         .training_week(date(2026, 9, 21), Discipline::Gym)
@@ -131,7 +131,7 @@ fn gym() -> Built<Mesocycle> {
         week,
         TimeZone::UTC,
     )?;
-    Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
+    Ok(GymMesocycle::Progression(Progression::BlockPeriodisation(
         BlockPeriodisation::new(
             Primary::new(
                 PrimaryPattern::KneeDominant,

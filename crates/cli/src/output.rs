@@ -11,7 +11,7 @@ use domain::{
     landing::{LandingStream, RunOutcome, Watermark},
     normalised::{Refusal, RefusalKind},
     prescription::{
-        BlockPeriodisation, GenerationParameters, Linear, Mesocycle, Progression, WeekIndex,
+        BlockPeriodisation, GenerationParameters, GymMesocycle, Linear, Progression, WeekIndex,
         WeekPlan,
     },
 };
@@ -324,7 +324,7 @@ pub fn programme_authored(
     id: domain::plan::PlanId,
     authored: application::Authored,
     plan: &domain::plan::Plan,
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     parameters: &domain::prescription::GenerationParameters,
 ) {
     let calendar = programme.calendar();
@@ -393,10 +393,13 @@ pub fn programme_authored(
 /// Split out because it is three unrelated reports sharing a `match`, and
 /// because what the parameters say is a separate question from what the
 /// programme does with them.
-fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::GenerationParameters) {
+fn authored_plan(
+    programme: &GymMesocycle,
+    parameters: &domain::prescription::GenerationParameters,
+) {
     let calendar = programme.calendar();
     match programme {
-        Mesocycle::Test(test) => {
+        GymMesocycle::Test(test) => {
             println!(
                 "  a test at {} — no anchor, because producing one is what it does",
                 test.reps()
@@ -412,7 +415,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 ),
             }
         }
-        Mesocycle::Progression(Progression::Provided { .. }) => {
+        GymMesocycle::Progression(Progression::Provided { .. }) => {
             println!(
                 "  opening from whatever the mesocycle before it measures, \
                  and it does not stay fixed"
@@ -427,7 +430,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
             );
             println!("  week 4 ends on a single, which opens the next cycle");
         }
-        Mesocycle::Progression(Progression::Linear(_)) => {
+        GymMesocycle::Progression(Progression::Linear(_)) => {
             println!(
                 "  it opens {} off the failed load of whatever measured the \
                  lift before it",
@@ -440,7 +443,7 @@ fn authored_plan(programme: &Mesocycle, parameters: &domain::prescription::Gener
                 calendar.duration_weeks(),
             );
         }
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             match block.entry_test() {
                 Some(test) => println!(
                     "  week one measures what the rest of it plans from, at {}",
@@ -637,14 +640,14 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     }
 
     match programme {
-        Mesocycle::Test(test) => test_standing(test, standing),
-        Mesocycle::Progression(Progression::Linear(linear)) => {
+        GymMesocycle::Test(test) => test_standing(test, standing),
+        GymMesocycle::Progression(Progression::Linear(linear)) => {
             linear_standing(linear, standing, parameters);
         }
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_standing(block, standing.anchor, parameters);
         }
-        Mesocycle::Progression(Progression::Provided { .. }) => sbs_standing(standing.anchor),
+        GymMesocycle::Progression(Progression::Provided { .. }) => sbs_standing(standing.anchor),
     }
 }
 
@@ -892,6 +895,45 @@ fn derived_phrase(
         // else — this line read "for 95, test" until someone looked.
         (DerivedFrom::Target(target), _) => format!("for {target}kg"),
     }
+}
+
+/// The macrocycle a date is in, and its phase (#224).
+///
+/// **Said even when it cannot be known**: past the school calendar's reach, or
+/// with the calendar unreachable, there is no data, which is not the same as
+/// no term.
+pub fn macrocycle(
+    date: jiff::civil::Date,
+    holidays: Result<&domain::schedule::Holidays, &str>,
+    mesocycle: Option<domain::plan::Span>,
+) {
+    use domain::macrocycle::Macrocycle;
+
+    let holidays = match holidays {
+        Ok(holidays) => holidays,
+        Err(reason) => {
+            println!("macrocycle unknown: the school calendar could not be read ({reason})\n");
+            return;
+        }
+    };
+    let Some(macrocycle) = Macrocycle::on(date, holidays) else {
+        let reach = holidays
+            .school_published_to()
+            .map_or_else(|| "nowhere".to_owned(), |to| to.to_string());
+        println!("macrocycle unknown: the school calendar is published to {reach}\n");
+        return;
+    };
+    let kind = holidays
+        .kind(&macrocycle.holiday())
+        .map_or_else(|| "holiday".to_owned(), |kind| kind.to_string());
+    println!(
+        "macrocycle {macrocycle}, {} phase: term {} to {}, transition {} to {} ({kind})\n",
+        macrocycle.phase(date, mesocycle),
+        macrocycle.start(),
+        macrocycle.last_day_of_term(),
+        macrocycle.transition(),
+        macrocycle.last(),
+    );
 }
 
 /// Every week since the plan began that did not complete, and what that means
@@ -1579,8 +1621,12 @@ pub fn comparison(comparison: &application::compare::Comparison) {
     }
 }
 
-/// Every school and public holiday, in the order they fall.
-pub fn holidays(holidays: &domain::schedule::Holidays) {
+/// Every school and public holiday from a date, in the order they fall.
+///
+/// All of them are passed, past ones included, because the macrocycle a
+/// holiday ends starts where the one before it ended.
+pub fn holidays(all: &domain::schedule::Holidays, from: jiff::civil::Date) {
+    let holidays = &all.clone().since(from);
     let mut lines: Vec<(jiff::civil::Date, String)> = holidays
         .school()
         .iter()
@@ -1596,10 +1642,16 @@ pub fn holidays(holidays: &domain::schedule::Holidays) {
                 .kind(holiday)
                 .map_or_else(|| "unknown".to_owned(), |kind| kind.to_string());
             let weeks = holiday.weeks();
+            // The transition of the macrocycle it ends, which a half term
+            // does not.
+            let ends = domain::macrocycle::Macrocycle::on(holiday.start(), all)
+                .filter(|macrocycle| macrocycle.holiday() == *holiday)
+                .map(|macrocycle| format!("  transition of {macrocycle}"))
+                .unwrap_or_default();
             (
                 holiday.start(),
                 format!(
-                    "school holiday  {span}  {kind:<9}  weeks {} to {}",
+                    "school holiday  {span}  {kind:<9}  weeks {} to {}{ends}",
                     weeks.start(),
                     weeks.end()
                 ),

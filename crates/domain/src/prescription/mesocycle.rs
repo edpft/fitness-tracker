@@ -7,10 +7,10 @@
 //! "progresses": how it progresses.
 //!
 //! ```text
-//! Mesocycle ─┬─ Test         one week, no ladder, a maximum
-//!            └─ Progression ─┬─ Linear              a fixed increment a week
-//!                            ├─ BlockPeriodisation  phases to a planned endpoint
-//!                            └─ Sbs                 a published chart
+//! GymMesocycle ─┬─ Test         one week, no ladder, a maximum
+//!               └─ Progression ─┬─ Linear              a fixed increment a week
+//!                               ├─ BlockPeriodisation  phases to a planned endpoint
+//!                               └─ Sbs                 a published chart
 //! ```
 //!
 //! Flattening these into one enum would put `Linear` and `Test` side by side and
@@ -25,6 +25,11 @@
 //! below was `Periodisation` in the same move — block periodisation is one way
 //! of progressing rather than the category all of them belong to.
 //!
+//! **And `Mesocycle` until 2026-09-24** (#224). The hierarchy is now
+//! `macrocycle → phase → mesocycle → microcycle → session`, and the mesocycle
+//! at that level is the concurrent one: a gym mesocycle and a cycling
+//! mesocycle together ([`crate::plan::Mesocycle`]). This is the gym's half.
+//!
 //! **`Sbs` is a name still owed a replacement.** It labels the method after the
 //! publisher of one chart, where its siblings are named for what they do — and
 //! the operator, 2026-09-06, on there being other SBS programmes: *Squat 2x Int*
@@ -36,7 +41,7 @@
 //! selecting a template is selecting among mesocycle types, so a `Template`
 //! enum beside this one would be a second copy of the same distinction, free to
 //! disagree with it. What the store needs is a stable string, and
-//! [`Mesocycle::template`] derives it from the variant in force.
+//! [`GymMesocycle::template`] derives it from the variant in force.
 
 use crate::{
     gym::exercise::Exercise,
@@ -52,7 +57,7 @@ use crate::{
 
 /// What was authored: one programme, of whichever kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mesocycle {
+pub enum GymMesocycle {
     Test(crate::prescription::test::Test),
     Progression(Progression),
 }
@@ -88,7 +93,7 @@ pub enum Progression {
     },
 }
 
-impl Mesocycle {
+impl GymMesocycle {
     /// The stable key. Persisted, so it outlives a rename.
     pub const fn template(&self) -> &'static str {
         match self {

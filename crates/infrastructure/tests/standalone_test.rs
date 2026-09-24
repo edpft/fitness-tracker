@@ -159,7 +159,7 @@ async fn landed_store() -> Result<
 /// The questions ask every slot unconditionally, so there was never anything
 /// left to inherit — and the fixture fills here are the same ones the programme
 /// before it was authored with.
-fn test_programme() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
+fn test_programme() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
         Date::constant(2026, 8, 31),
         Shape::Test {
@@ -331,7 +331,7 @@ fn a_test_week_issues_every_slot() {
 /// **Ten phase weeks, and eleven calendar weeks.** The number counts phases
 /// whether or not there is an entry test; the week in front is added by the
 /// presence of the entry test and by nothing else.
-fn autumn_block() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
+fn autumn_block() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
         Date::constant(2026, 8, 31),
         Shape::Block {
@@ -502,7 +502,7 @@ const TAPER_GRAMS: u64 = 70_000;
 /// **µ4, because that is the only microcycle an entry test can be.** *Squat 2x
 /// Int* µ4 is a taper and a one-repetition maximum; the test is the second of
 /// those, and the week's other session is the first.
-fn provided_test() -> Result<domain::prescription::Mesocycle, Box<dyn std::error::Error>> {
+fn provided_test() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
     let published = ExternalProgramme::new(
         "Stronger By Science".to_owned().try_into()?,
         "Squat 2x Int".to_owned().try_into()?,

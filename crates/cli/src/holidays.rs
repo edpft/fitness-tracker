@@ -5,6 +5,7 @@
 //! nothing. During either, the ordinary week cannot be assumed to hold.
 
 use application::HolidayCalendar as _;
+use domain::schedule::Holidays;
 use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 
 use crate::{Failure, output};
@@ -16,11 +17,20 @@ const SCHOOL_CALENDAR: &str = "https://hemplandprimary.co.uk/?rhc_action=get_ica
 
 /// List every school and public holiday from today.
 pub async fn list() -> Result<(), Failure> {
+    output::holidays(&read().await?, jiff::Zoned::now().date());
+    Ok(())
+}
+
+/// Every school and public holiday both sources publish, past ones included:
+/// a macrocycle starts where the holiday before it ended.
+///
+/// # Errors
+///
+/// [`Failure`] if either source cannot be read.
+pub async fn read() -> Result<Holidays, Failure> {
     let school = SchoolCalendar::new(SCHOOL_CALENDAR).holidays().await?;
     let public = BankHolidays::new(GOV_UK_BANK_HOLIDAYS).holidays().await?;
-
-    output::holidays(&school.and(public).since(jiff::Zoned::now().date()));
-    Ok(())
+    Ok(school.and(public))
 }
 
 #[cfg(test)]

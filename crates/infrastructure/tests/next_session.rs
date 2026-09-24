@@ -24,7 +24,7 @@ use application::{
 };
 use domain::{
     measure::RepCount,
-    prescription::{Mesocycle, Skip, authored::Shape},
+    prescription::{GymMesocycle, Skip, authored::Shape},
     schedule::{Relative, SessionRole},
 };
 use infrastructure::{SqliteGymMesocycleStore, SqlitePlanStore, connect};
@@ -37,7 +37,7 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 ///
 /// The template does not matter here: every mesocycle's calendar is what the
 /// search asks, and linear is the one whose span is simply its weeks.
-fn mesocycle(start: Date, weeks: u32) -> Fallible<Mesocycle> {
+fn mesocycle(start: Date, weeks: u32) -> Fallible<GymMesocycle> {
     let answers = programme::authored(
         start,
         Shape::Linear {
@@ -52,7 +52,7 @@ fn mesocycle(start: Date, weeks: u32) -> Fallible<Mesocycle> {
 ///
 /// A test rather than a one-week linear block, which is refused — and a test
 /// week is what opens the autumn.
-fn test_week(start: Date, skipping: &[Skip]) -> Fallible<Mesocycle> {
+fn test_week(start: Date, skipping: &[Skip]) -> Fallible<GymMesocycle> {
     let answers = programme::authored(
         start,
         Shape::Test {

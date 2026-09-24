@@ -46,8 +46,8 @@ use domain::{
     // named for what it holds: the plan a duration divides into.
     prescription::{
         Anchor, AnchorProvenance, Authored, Block, ByIntensity, Calendar, EntryTest, Fill,
-        GenerationParameters, InvalidBlock, LoadSteps, Mesocycle, PrimaryPattern, Skip, SlotFills,
-        SlotId, StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
+        GenerationParameters, GymMesocycle, InvalidBlock, LoadSteps, PrimaryPattern, Skip,
+        SlotFills, SlotId, StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
@@ -1105,10 +1105,10 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
 fn with_gym(
     name: PlanName,
     existing: Option<&Plan>,
-    mesocycle: Mesocycle,
+    mesocycle: GymMesocycle,
 ) -> Result<Plan, Failure> {
     let start = mesocycle.calendar().start();
-    let mut gym: Vec<Mesocycle> = existing
+    let mut gym: Vec<GymMesocycle> = existing
         .and_then(Plan::gym)
         .map(|programme| {
             programme
@@ -1245,7 +1245,7 @@ pub async fn gym_side(
     zone: &OperatorZone,
     parameters: &GenerationParameters,
     outline: &GymOutline<'_>,
-) -> Result<Vec<Mesocycle>, Failure> {
+) -> Result<Vec<GymMesocycle>, Failure> {
     let GymOutline {
         start,
         pattern,

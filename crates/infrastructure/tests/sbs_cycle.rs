@@ -14,7 +14,7 @@ mod support;
 
 use application::{MesocycleStore as _, PlanAuthor as _, prescribe::Authoring};
 use domain::{
-    prescription::{Mesocycle, Progression, authored::Shape},
+    prescription::{GymMesocycle, Progression, authored::Shape},
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
 };
 use jiff::civil::Date;
@@ -43,7 +43,7 @@ fn provided() -> Result<ProvidedFrom, Box<dyn std::error::Error>> {
 /// **It states nothing about what it opens from**, because no cycle does any
 /// more: the anchor belongs to the microcycle and is read off whatever measured
 /// the lift before it, when a session is asked for.
-fn cycle() -> Result<Mesocycle, Box<dyn std::error::Error>> {
+fn cycle() -> Result<GymMesocycle, Box<dyn std::error::Error>> {
     let answers = programme::authored(
         Date::new(2026, 9, 14)?,
         Shape::Provided { from: provided()? },
@@ -56,7 +56,7 @@ fn the_answers_author_an_sbs_cycle() {
     let programme = cycle().expect("the answers author");
 
     assert_eq!(programme.template(), "sbs");
-    let Mesocycle::Progression(Progression::Provided { from, .. }) = &programme else {
+    let GymMesocycle::Progression(Progression::Provided { from, .. }) = &programme else {
         panic!("a provided cycle knows where it came from")
     };
     assert_eq!(from.programme().name().as_str(), "Squat 2x Int");
@@ -64,7 +64,7 @@ fn the_answers_author_an_sbs_cycle() {
     assert!(
         matches!(
             programme,
-            Mesocycle::Progression(Progression::Provided { .. })
+            GymMesocycle::Progression(Progression::Provided { .. })
         ),
         "and it is a periodisation, beside linear and block",
     );
@@ -118,7 +118,10 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
                 panic!("the cycle authored above answers for a day inside it")
             };
             assert!(
-                matches!(read, Mesocycle::Progression(Progression::Provided { .. })),
+                matches!(
+                    read,
+                    GymMesocycle::Progression(Progression::Provided { .. })
+                ),
                 "a row with no anchor reads back as a provided cycle, not as a \
                  row that got past the database",
             );

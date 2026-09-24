@@ -64,7 +64,7 @@ pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
     Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,
 };
-pub use mesocycle::{InconsistentMesocycle, Mesocycle, Progression, check_primary};
+pub use mesocycle::{GymMesocycle, InconsistentMesocycle, Progression, check_primary};
 pub use parameters::{GenerationParameters, InvalidPercentage, Percentage, Scales};
 pub use programming::{
     AccessoryScheme, BackOff, InvalidProgramming, Programming, ResetProtocol, TopSetReps,

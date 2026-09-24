@@ -35,7 +35,7 @@ use domain::{
     normalised::OperatorZone,
     plan::{Occupies, PlanName},
     prescription::{
-        Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, Linear, Mesocycle,
+        Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, GymMesocycle, Linear,
         MesocycleId, Progression, Sbs, Skip, SlotId, Test, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
@@ -181,7 +181,7 @@ impl SqliteGymMesocycleStore {
 pub(super) async fn in_force(
     pool: &SqlitePool,
     zone: &OperatorZone,
-) -> Result<Vec<(i64, PlanName, MesocycleId, Mesocycle)>, StoreError> {
+) -> Result<Vec<(i64, PlanName, MesocycleId, GymMesocycle)>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT m.id AS "id!: i64", m.plan AS "plan!: i64",
@@ -354,13 +354,13 @@ struct Columns {
     entry_test_light: Option<i64>,
 }
 
-fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
+fn columns_of(programme: &GymMesocycle) -> Result<Columns, StoreError> {
     let entry_test = match programme {
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => block.entry_test(),
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => block.entry_test(),
         // An SBS cycle has no entry test: its test is the last session of the
         // last week, not a week in front (decision 0024).
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
-        | Mesocycle::Test(_) => None,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
+        | GymMesocycle::Test(_) => None,
     };
     let entry_test_light = entry_test
         .and_then(EntryTest::light)
@@ -377,15 +377,15 @@ fn columns_of(programme: &Mesocycle) -> Result<Columns, StoreError> {
     // standalone test and a block that measures its own entry are the same case
     // in two shapes.
     let asserted = match programme {
-        Mesocycle::Test(test) => test.asserted(),
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+        GymMesocycle::Test(test) => test.asserted(),
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block.entry_test().and_then(EntryTest::asserted)
         }
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
     };
     let test_reps = match programme {
-        Mesocycle::Test(test) => Some(i64::from(test.reps().as_u32())),
-        Mesocycle::Progression(_) => None,
+        GymMesocycle::Test(test) => Some(i64::from(test.reps().as_u32())),
+        GymMesocycle::Progression(_) => None,
     };
 
     Ok(Columns {
@@ -431,7 +431,7 @@ fn rehydrate_test(
     common: Common,
     test_reps: Option<i64>,
     asserted: Option<Anchor>,
-) -> Result<Mesocycle, StoreError> {
+) -> Result<GymMesocycle, StoreError> {
     let reps = test_reps.ok_or_else(|| corrupt(&"a test with no repetition count"))?;
     let reps = u32::try_from(reps)
         .ok()
@@ -440,7 +440,7 @@ fn rehydrate_test(
     // Null is the ordinary case: a test with something behind it defers to
     // whatever that measured, which is read off the record when a session is
     // asked for. A number here is the seed at the front of a sequence.
-    Ok(Mesocycle::Test(
+    Ok(GymMesocycle::Test(
         Test::rehydrate(
             Tested::new(common.pattern, common.exercise, reps),
             common.fills,
@@ -458,7 +458,7 @@ fn rehydrate_periodisation(
     template: &str,
     gating: Option<SessionRole>,
     entry_test: Option<EntryTest>,
-) -> Result<Mesocycle, StoreError> {
+) -> Result<GymMesocycle, StoreError> {
     let gating =
         gating.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
     let primary = Primary::new(common.pattern, common.exercise, gating);
@@ -470,7 +470,7 @@ fn rehydrate_periodisation(
             .ok_or_else(|| corrupt(&"a provided cycle that names no programme"))?;
         // `stored` rather than `new`: the checks ran when it was written, and
         // re-refusing a row now would make a rule change unreadable data.
-        return Ok(Mesocycle::Progression(Progression::Provided {
+        return Ok(GymMesocycle::Progression(Progression::Provided {
             from,
             cycle: Sbs::stored(
                 common.pattern,
@@ -481,7 +481,7 @@ fn rehydrate_periodisation(
         }));
     }
 
-    Ok(Mesocycle::Progression(if template == "linear" {
+    Ok(GymMesocycle::Progression(if template == "linear" {
         Progression::Linear(
             Linear::rehydrate(primary, common.fills, common.calendar)
                 .map_err(|error| corrupt(&error))?,
@@ -569,7 +569,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn on(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         Ok(in_force(&self.pool, &self.zone)
             .await?
             .into_iter()
@@ -580,7 +580,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn preceding(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         // The latest mesocycle that has finished by this date. `in_force` is
         // ordered by start, so the last one whose span ends at or before the
         // date is the one immediately before it.
@@ -594,7 +594,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn following(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         // Ordered by start, so the first one beginning after the date is the
         // next in the sequence.
         Ok(in_force(&self.pool, &self.zone)
@@ -617,7 +617,7 @@ pub(super) async fn write(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     plan: i64,
     ordinal: i64,
-    mesocycle: &Mesocycle,
+    mesocycle: &GymMesocycle,
 ) -> Result<MesocycleId, StoreError> {
     let template = mesocycle.template();
     let pattern = mesocycle.primary().as_str();
@@ -717,7 +717,7 @@ async fn write_microcycles(
 async fn write_fills(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
-    mesocycle: &Mesocycle,
+    mesocycle: &GymMesocycle,
 ) -> Result<(), StoreError> {
     for fill in flatten(mesocycle.fills()) {
         let slot_key = fill.slot.as_str();
@@ -758,11 +758,13 @@ async fn write_fills(
 /// A provided progression must say; a derived one — linear, or block
 /// periodisation — was provided by nobody and may not claim to be; a test may be
 /// either.
-const fn provided_of(mesocycle: &Mesocycle) -> Option<&ProvidedFrom> {
+const fn provided_of(mesocycle: &GymMesocycle) -> Option<&ProvidedFrom> {
     match mesocycle {
-        Mesocycle::Progression(Progression::Provided { from, .. }) => Some(from),
-        Mesocycle::Test(test) => test.provided(),
-        Mesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_)) => None,
+        GymMesocycle::Progression(Progression::Provided { from, .. }) => Some(from),
+        GymMesocycle::Test(test) => test.provided(),
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_)) => {
+            None
+        }
     }
 }
 

@@ -23,7 +23,7 @@ use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
     planner,
-    prescription::{Mesocycle, MesocycleId},
+    prescription::{GymMesocycle, MesocycleId},
     schedule::Diary,
 };
 use jiff::civil::Date;
@@ -146,7 +146,7 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
     async fn gym(
         &self,
         pick: Pick,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         for (authored, now) in self.both().await? {
             let (Some(authored_gym), Some(now_gym)) = (authored.gym(), now.gym()) else {
                 continue;
@@ -169,14 +169,14 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
     async fn on(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         self.gym(Pick::On(date)).await
     }
 
     async fn preceding(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         // **A plan with nothing before the date still has a predecessor
         // somewhere**: the mesocycle at the very front of a plan inherits from
         // the plan before it, which rescheduling does not touch.
@@ -189,7 +189,7 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
     async fn following(
         &self,
         date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError> {
+    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
         self.gym(Pick::Following(date)).await
     }
 }
