@@ -89,10 +89,10 @@ impl PublicHoliday {
         }
     }
 
-    /// The same holiday, naming the school holiday that contains it: Christmas
-    /// Day names Christmas, Good Friday and Easter Monday name Easter, and the
-    /// Summer bank holiday names Summer. Which ones do is the source's to say,
-    /// since only it knows what it calls them.
+    /// The same holiday, naming the school holiday that contains it: Good
+    /// Friday and Easter Monday name Easter, and the Summer bank holiday names
+    /// Summer. Which ones do is the source's to say, since only it knows what
+    /// it calls them. Christmas needs no source: see [`Holidays::kind`].
     #[must_use]
     pub fn naming(self, kind: SchoolHolidayKind) -> Self {
         Self {
@@ -224,9 +224,20 @@ impl Holidays {
     /// falls inside the late-May half term every year. And **not the longest**,
     /// because what is longest depends on how far the school's feed reaches.
     ///
+    /// **Christmas is read from the date**, not from gov.uk: Christmas Day is
+    /// always the 25th of December, where Easter moves from year to year. So
+    /// a Christmas holiday is known past gov.uk's reach.
+    ///
     /// `None` where gov.uk has not published as far as the holiday's last day
     /// and nothing it has published names it: a half term there is a guess.
     pub fn kind(&self, holiday: &SchoolHoliday) -> Option<SchoolHolidayKind> {
+        let christmas = (holiday.start().year()..=holiday.last().year())
+            .filter_map(|year| Date::new(year, 12, 25).ok())
+            .any(|day| day >= holiday.start() && day <= holiday.last());
+        if christmas {
+            return Some(SchoolHolidayKind::Christmas);
+        }
+
         let named = self
             .public
             .iter()

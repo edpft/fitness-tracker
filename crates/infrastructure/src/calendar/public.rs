@@ -99,14 +99,10 @@ pub fn public_holidays(served: &str) -> Result<Holidays, SourceError> {
         })
 }
 
-/// The school holiday a gov.uk title names, if it names one.
-///
-/// **By title, whatever the notes say.** Christmas Day 2027 is a Saturday and
-/// gov.uk lists it only as its substitute on Monday the 27th, which the
-/// Christmas holiday still contains.
+/// The school holiday a gov.uk title names, if it names one. Not Christmas,
+/// which is always the 25th of December and needs no source.
 fn names(title: &str) -> Option<SchoolHolidayKind> {
     match title {
-        "Christmas Day" => Some(SchoolHolidayKind::Christmas),
         "Good Friday" | "Easter Monday" => Some(SchoolHolidayKind::Easter),
         "Summer bank holiday" => Some(SchoolHolidayKind::Summer),
         _ => None,
@@ -148,8 +144,9 @@ mod tests {
         );
     }
 
-    /// **The titles are gov.uk's, as it serves them**, and a substitute day
-    /// names what its title does. The Spring bank holiday names nothing.
+    /// **The titles are gov.uk's, as it serves them.** The Spring bank
+    /// holiday names nothing, and nor does Christmas Day, which is read from
+    /// the date.
     #[test]
     fn christmas_easter_and_summer_are_named_by_their_titles() {
         let served = r#"{
@@ -176,7 +173,7 @@ mod tests {
                 Some(SchoolHolidayKind::Easter),
                 None,
                 Some(SchoolHolidayKind::Summer),
-                Some(SchoolHolidayKind::Christmas),
+                None,
                 None,
             ]
         );

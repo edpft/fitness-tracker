@@ -168,7 +168,7 @@ fn the_school_year() -> Option<Holidays> {
     let public = |on, name: &str| PublicHoliday::new(on, name.to_owned());
     let public = Holidays::from_public(
         vec![
-            public(date(2026, 12, 25), "Christmas Day").naming(SchoolHolidayKind::Christmas),
+            public(date(2026, 12, 25), "Christmas Day"),
             public(date(2026, 12, 28), "Boxing Day, substitute day"),
             public(date(2027, 1, 1), "New Year’s Day"),
             public(date(2027, 3, 26), "Good Friday").naming(SchoolHolidayKind::Easter),
@@ -242,5 +242,23 @@ fn past_gov_uks_reach_a_school_holiday_is_unknown() {
         kind(date(2027, 7, 27)),
         None,
         "gov.uk has not reached the summer"
+    );
+}
+
+/// **Christmas is known past gov.uk's reach**, because Christmas Day is
+/// always the 25th of December. The school's Christmas 2027, with gov.uk
+/// published only to the spring of that year.
+#[test]
+fn christmas_is_known_past_gov_uks_reach() {
+    let Some(fourteen) = NonZeroU8::new(14) else {
+        panic!("fourteen is not zero")
+    };
+    let christmas = SchoolHoliday::new(date(2027, 12, 20), fourteen);
+    let holidays = Holidays::from_school(vec![christmas], Some(date(2028, 1, 2)))
+        .and(Holidays::from_public(Vec::new(), Some(date(2027, 5, 3))));
+
+    assert_eq!(
+        holidays.kind(&christmas),
+        Some(SchoolHolidayKind::Christmas)
     );
 }
