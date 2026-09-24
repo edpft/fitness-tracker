@@ -75,7 +75,7 @@ use jiff::civil::{Date, Weekday};
 
 use crate::normalised::OperatorZone;
 
-pub use holiday::{Holidays, PublicHoliday, SchoolHoliday};
+pub use holiday::{Holidays, PublicHoliday, SchoolHoliday, SchoolHolidayKind};
 pub use role::{Relative, SessionRole, UnknownRelative};
 
 /// Roughly when in the day, as the operator says it.
