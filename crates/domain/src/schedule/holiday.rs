@@ -13,14 +13,18 @@
 //! plan's last mesocycle, pushed back a week into Christmas: the adaptation is
 //! to drop the mesocycle, not to programme around the holiday.
 
-use std::num::NonZeroU8;
+use std::{num::NonZeroU8, ops::RangeInclusive};
 
 use jiff::civil::Date;
 
+use crate::prescription::succession::monday_of;
+
 /// A run of days the school is on holiday.
 ///
-/// **No name**, because the school's own calendar gives none worth keeping:
-/// every holiday in it, Christmas and summer included, is titled "Half term".
+/// **No name of its own**, because the school's calendar gives none worth
+/// keeping: every holiday in it, Christmas and summer included, is titled
+/// "Half term". Which one it is comes from the public holidays it contains:
+/// see [`Holidays::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SchoolHoliday {
     start: Date,
@@ -46,18 +50,73 @@ impl SchoolHoliday {
             .checked_add(jiff::Span::new().days(i64::from(self.days.get()) - 1))
             .unwrap_or(self.start)
     }
+
+    /// **The weeks it touches, Monday to Sunday.** The school's calendar is
+    /// the school's, and its holidays start and end on any day: the Summer
+    /// holiday of 2027 runs from a Tuesday. A microcycle runs Monday to
+    /// Sunday, so the weeks it touches are a separate question from the days.
+    pub fn weeks(&self) -> RangeInclusive<Date> {
+        let sunday = monday_of(self.last())
+            .checked_add(jiff::Span::new().days(6))
+            .unwrap_or_else(|_| self.last());
+        monday_of(self.start)..=sunday
+    }
 }
 
-/// A public holiday: one day, and what it is called.
+/// Which school holiday one is (#223). Christmas, Easter and Summer bound a
+/// term; a half term does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SchoolHolidayKind {
+    Christmas,
+    Easter,
+    Summer,
+    HalfTerm,
+}
+
+impl std::fmt::Display for SchoolHolidayKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Christmas => "Christmas",
+            Self::Easter => "Easter",
+            Self::Summer => "Summer",
+            Self::HalfTerm => "half term",
+        })
+    }
+}
+
+/// A public holiday: one day, what it is called, and the school holiday it
+/// names, if any.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PublicHoliday {
     date: Date,
     name: String,
+    names: Option<SchoolHolidayKind>,
 }
 
 impl PublicHoliday {
     pub const fn new(date: Date, name: String) -> Self {
-        Self { date, name }
+        Self {
+            date,
+            name,
+            names: None,
+        }
+    }
+
+    /// The same holiday, naming the school holiday that contains it: Good
+    /// Friday and Easter Monday name Easter, and the Summer bank holiday names
+    /// Summer. Which ones do is the source's to say, since only it knows what
+    /// it calls them. Christmas needs no source: see [`Holidays::kind`].
+    #[must_use]
+    pub fn naming(self, kind: SchoolHolidayKind) -> Self {
+        Self {
+            names: Some(kind),
+            ..self
+        }
+    }
+
+    /// The school holiday that contains this one is named for it.
+    pub const fn names(&self) -> Option<SchoolHolidayKind> {
+        self.names
     }
 
     pub const fn date(&self) -> Date {
@@ -168,6 +227,41 @@ impl Holidays {
                 .collect(),
             ..self
         }
+    }
+
+    /// Which school holiday this is (#223, settled in discussion #199): the
+    /// one containing Christmas Day is Christmas, Good Friday or Easter Monday
+    /// Easter, and the Summer bank holiday Summer. Any other is a half term.
+    ///
+    /// **Containing a public holiday is not enough**: the Spring bank holiday
+    /// falls inside the late-May half term every year. And **not the longest**,
+    /// because what is longest depends on how far the school's feed reaches.
+    ///
+    /// **Christmas is read from the date**, not from gov.uk: Christmas Day is
+    /// always the 25th of December, where Easter moves from year to year. So
+    /// a Christmas holiday is known past gov.uk's reach.
+    ///
+    /// `None` where gov.uk has not published as far as the holiday's last day
+    /// and nothing it has published names it: a half term there is a guess.
+    pub fn kind(&self, holiday: &SchoolHoliday) -> Option<SchoolHolidayKind> {
+        let christmas = (holiday.start().year()..=holiday.last().year())
+            .filter_map(|year| Date::new(year, 12, 25).ok())
+            .any(|day| day >= holiday.start() && day <= holiday.last());
+        if christmas {
+            return Some(SchoolHolidayKind::Christmas);
+        }
+
+        let named = self
+            .public
+            .iter()
+            .filter(|public| public.date() >= holiday.start() && public.date() <= holiday.last())
+            .find_map(PublicHoliday::names);
+        if named.is_some() {
+            return named;
+        }
+        self.public_to
+            .is_some_and(|to| to >= holiday.last())
+            .then_some(SchoolHolidayKind::HalfTerm)
     }
 
     /// Whether any day from `first` to `last` falls in a school or public

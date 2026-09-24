@@ -1590,7 +1590,20 @@ pub fn holidays(holidays: &domain::schedule::Holidays) {
             } else {
                 format!("{} to {}", holiday.start(), holiday.last())
             };
-            (holiday.start(), format!("school holiday  {span}"))
+            // **Unknown, not a half term**, past gov.uk's reach: a half
+            // term there would be a guess.
+            let kind = holidays
+                .kind(holiday)
+                .map_or_else(|| "unknown".to_owned(), |kind| kind.to_string());
+            let weeks = holiday.weeks();
+            (
+                holiday.start(),
+                format!(
+                    "school holiday  {span}  {kind:<9}  weeks {} to {}",
+                    weeks.start(),
+                    weeks.end()
+                ),
+            )
         })
         .chain(holidays.public().iter().map(|holiday| {
             (

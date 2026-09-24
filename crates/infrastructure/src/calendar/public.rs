@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 
 use application::{HolidayCalendar, SourceError};
-use domain::schedule::{Holidays, PublicHoliday};
+use domain::schedule::{Holidays, PublicHoliday, SchoolHolidayKind};
 use jiff::civil::Date;
 use serde::Deserialize;
 
@@ -80,12 +80,17 @@ pub fn public_holidays(served: &str) -> Result<Holidays, SourceError> {
                     event.title, event.date
                 ),
             })?;
+            let names = names(&event.title);
             let name = if event.notes.is_empty() {
                 event.title
             } else {
                 format!("{}, {}", event.title, event.notes.to_lowercase())
             };
-            Ok(PublicHoliday::new(date, name))
+            let holiday = PublicHoliday::new(date, name);
+            Ok(match names {
+                Some(kind) => holiday.naming(kind),
+                None => holiday,
+            })
         })
         .collect::<Result<Vec<_>, SourceError>>()
         .map(|holidays| {
@@ -94,9 +99,20 @@ pub fn public_holidays(served: &str) -> Result<Holidays, SourceError> {
         })
 }
 
+/// The school holiday a gov.uk title names, if it names one. Not Christmas,
+/// which is always the 25th of December and needs no source.
+fn names(title: &str) -> Option<SchoolHolidayKind> {
+    match title {
+        "Good Friday" | "Easter Monday" => Some(SchoolHolidayKind::Easter),
+        "Summer bank holiday" => Some(SchoolHolidayKind::Summer),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{GOV_UK_BANK_HOLIDAYS, public_holidays};
+    use domain::schedule::SchoolHolidayKind;
     use jiff::civil::date;
 
     /// Two divisions, as gov.uk serves them, and only England and Wales read.
@@ -124,6 +140,41 @@ mod tests {
             [
                 (date(2026, 12, 25), "Christmas Day"),
                 (date(2026, 12, 28), "Boxing Day, substitute day"),
+            ]
+        );
+    }
+
+    /// **The titles are gov.uk's, as it serves them.** The Spring bank
+    /// holiday names nothing, and nor does Christmas Day, which is read from
+    /// the date.
+    #[test]
+    fn christmas_easter_and_summer_are_named_by_their_titles() {
+        let served = r#"{
+            "england-and-wales": {"division": "england-and-wales", "events": [
+                {"title": "Good Friday", "date": "2027-03-26", "notes": "", "bunting": false},
+                {"title": "Easter Monday", "date": "2027-03-29", "notes": "", "bunting": true},
+                {"title": "Spring bank holiday", "date": "2027-05-31", "notes": "", "bunting": true},
+                {"title": "Summer bank holiday", "date": "2027-08-30", "notes": "", "bunting": true},
+                {"title": "Christmas Day", "date": "2027-12-27", "notes": "Substitute day", "bunting": true},
+                {"title": "Boxing Day", "date": "2027-12-28", "notes": "Substitute day", "bunting": true}
+            ]}
+        }"#;
+        let holidays = public_holidays(served).expect("the list reads");
+
+        let named: Vec<Option<SchoolHolidayKind>> = holidays
+            .public()
+            .iter()
+            .map(domain::schedule::PublicHoliday::names)
+            .collect();
+        assert_eq!(
+            named,
+            [
+                Some(SchoolHolidayKind::Easter),
+                Some(SchoolHolidayKind::Easter),
+                None,
+                Some(SchoolHolidayKind::Summer),
+                None,
+                None,
             ]
         );
     }
