@@ -35,7 +35,7 @@ pub fn weeks_between(from: Date, to: Date) -> i64 {
 }
 
 /// The Monday of a date's week.
-fn monday_of(date: Date) -> Date {
+pub(crate) fn monday_of(date: Date) -> Date {
     let back = i64::from(date.weekday().to_monday_zero_offset());
     date.checked_sub(jiff::Span::new().days(back))
         .unwrap_or(date)

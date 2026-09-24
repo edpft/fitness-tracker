@@ -13,9 +13,11 @@
 //! plan's last mesocycle, pushed back a week into Christmas: the adaptation is
 //! to drop the mesocycle, not to programme around the holiday.
 
-use std::num::NonZeroU8;
+use std::{num::NonZeroU8, ops::RangeInclusive};
 
 use jiff::civil::Date;
+
+use crate::prescription::succession::monday_of;
 
 /// A run of days the school is on holiday.
 ///
@@ -47,6 +49,17 @@ impl SchoolHoliday {
         self.start
             .checked_add(jiff::Span::new().days(i64::from(self.days.get()) - 1))
             .unwrap_or(self.start)
+    }
+
+    /// **The weeks it touches, Monday to Sunday.** The school's calendar is
+    /// the school's, and its holidays start and end on any day: the Summer
+    /// holiday of 2027 runs from a Tuesday. A microcycle runs Monday to
+    /// Sunday, so the weeks it touches are a separate question from the days.
+    pub fn weeks(&self) -> RangeInclusive<Date> {
+        let sunday = monday_of(self.last())
+            .checked_add(jiff::Span::new().days(6))
+            .unwrap_or_else(|_| self.last());
+        monday_of(self.start)..=sunday
     }
 }
 

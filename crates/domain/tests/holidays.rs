@@ -262,3 +262,20 @@ fn christmas_is_known_past_gov_uks_reach() {
         Some(SchoolHolidayKind::Christmas)
     );
 }
+
+/// **The school's calendar is the school's; our weeks are ours.** Half term
+/// runs Monday to Friday and touches one week; the Summer holiday starts on a
+/// Tuesday, so its first week starts the Monday before.
+#[test]
+fn a_school_holiday_touches_whole_weeks_monday_to_sunday() {
+    let holidays = the_school_year().expect("the holidays build");
+    let weeks: Vec<_> = holidays.school().iter().map(SchoolHoliday::weeks).collect();
+
+    assert_eq!(
+        weeks[0],
+        date(2026, 10, 26)..=date(2026, 11, 1),
+        "October half term"
+    );
+    assert_eq!(weeks[1], date(2026, 12, 21)..=date(2027, 1, 3), "Christmas");
+    assert_eq!(weeks[5], date(2027, 7, 26)..=date(2027, 9, 5), "Summer");
+}
