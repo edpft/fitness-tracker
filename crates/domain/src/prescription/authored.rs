@@ -1,4 +1,4 @@
-//! What the operator answered, and the [`Mesocycle`] it makes.
+//! What the operator answered, and the [`GymMesocycle`] it makes.
 //!
 //! **This replaced a document format.** Until 2026-09-06 a programme was a TOML
 //! file: the wizard asked its questions, wrote one, and the reader parsed it
@@ -25,7 +25,7 @@ use crate::{
         anchor::Anchor,
         block::{BlockPeriodisation, EntryTest},
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
-        mesocycle::{InconsistentMesocycle, Mesocycle, Progression},
+        mesocycle::{GymMesocycle, InconsistentMesocycle, Progression},
         parameters::GenerationParameters,
         sbs::{self, Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, Skip},
@@ -47,7 +47,7 @@ pub enum AuthoringError {
     #[error("these weeks do not make a calendar: {0}")]
     Calendar(#[from] InvalidCalendar),
     #[error(transparent)]
-    Mesocycle(#[from] InconsistentMesocycle),
+    GymMesocycle(#[from] InconsistentMesocycle),
 }
 
 /// What every programme is asked, whatever its template.
@@ -130,9 +130,9 @@ pub enum Shape {
 }
 
 impl Shape {
-    /// The stable key, matching [`Mesocycle::template`].
+    /// The stable key, matching [`GymMesocycle::template`].
     ///
-    /// Here as well as on `Mesocycle` because the wizard names the template
+    /// Here as well as on `GymMesocycle` because the wizard names the template
     /// before it has a programme to ask.
     #[must_use]
     pub const fn template(&self) -> &'static str {
@@ -214,7 +214,7 @@ pub fn programme(
     interruptions: &[Skip],
     zone: TimeZone,
     parameters: &GenerationParameters,
-) -> Result<Mesocycle, AuthoringError> {
+) -> Result<GymMesocycle, AuthoringError> {
     let Authored {
         start,
         pattern,
@@ -235,7 +235,7 @@ pub fn programme(
                 );
             }
             let calendar = Test::week(start, interruptions, week, zone)?;
-            Ok(Mesocycle::Test(Test::new(
+            Ok(GymMesocycle::Test(Test::new(
                 Tested::new(pattern, primary_exercise, reps),
                 fills,
                 calendar,
@@ -246,7 +246,7 @@ pub fn programme(
         Shape::Linear { gating, weeks } => {
             gates_on_a_session_the_week_offers(&week, gating)?;
             let calendar = Calendar::new(start, weeks, interruptions, week, zone)?;
-            Ok(Mesocycle::Progression(Progression::Linear(Linear::new(
+            Ok(GymMesocycle::Progression(Progression::Linear(Linear::new(
                 Primary::new(pattern, primary_exercise, gating),
                 fills,
                 calendar,
@@ -267,7 +267,7 @@ pub fn programme(
                 week,
                 zone,
             )?;
-            Ok(Mesocycle::Progression(Progression::BlockPeriodisation(
+            Ok(GymMesocycle::Progression(Progression::BlockPeriodisation(
                 BlockPeriodisation::new(
                     Primary::new(pattern, primary_exercise, gating),
                     fills,
@@ -279,7 +279,7 @@ pub fn programme(
         Shape::Provided { from } => {
             gates_on_a_session_the_week_offers(&week, sbs::GATING)?;
             let calendar = Calendar::new(start, WEEKS, interruptions, week, zone)?;
-            Ok(Mesocycle::Progression(Progression::Provided {
+            Ok(GymMesocycle::Progression(Progression::Provided {
                 from,
                 cycle: Sbs::new(pattern, primary_exercise, fills, calendar)?,
             }))

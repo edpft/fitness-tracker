@@ -1,10 +1,20 @@
 //! The authored unit: a plan, its programmes, and the days they occupy.
 //!
-//! The operator's hierarchy, 2026-09-06:
+//! **Neither `plan` nor `programme` is a level any more** (#224). The
+//! operator, 2026-09-24, amending his hierarchy of 2026-09-06:
 //!
 //! ```text
-//! macrocycle → plan → programme → mesocycle → microcycle → session
+//! macrocycle → phase → mesocycle → microcycle → session
 //! ```
+//!
+//! where the macrocycle is a school term and the holiday that ends it
+//! ([`crate::macrocycle`]), and the mesocycle is a gym and a cycling mesocycle
+//! together ([`Mesocycle`]). `Plan` and `Programme` stay only as the way
+//! mesocycles are stored and superseded, and go when #222 realises mesocycles
+//! one at a time instead of authoring a plan of them.
+//!
+//! What follows is how they came to be, under the hierarchy of 2026-09-06:
+//! `macrocycle → plan → programme → mesocycle → microcycle → session`.
 //!
 //! The autumn is **one plan**. It holds a cycling programme and a gym
 //! programme, and each of those holds four mesocycles: one entry test and three
@@ -36,7 +46,7 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     cycling::CyclingMesocycle,
     newtype::string_name,
-    prescription::Mesocycle,
+    prescription::GymMesocycle,
     sequence::{NonEmpty, TooShort},
 };
 
@@ -124,7 +134,7 @@ pub trait Occupies {
     fn span(&self) -> Span;
 }
 
-impl Occupies for Mesocycle {
+impl Occupies for GymMesocycle {
     fn span(&self) -> Span {
         Span::new(self.calendar().start(), self.calendar().calendar_weeks())
     }
@@ -378,7 +388,7 @@ pub struct EmptyPlan;
 pub struct Plan {
     name: PlanName,
     authored_at: Timestamp,
-    gym: Option<Programme<Mesocycle>>,
+    gym: Option<Programme<GymMesocycle>>,
     cycling: Option<Programme<CyclingMesocycle>>,
 }
 
@@ -389,7 +399,7 @@ impl Plan {
     pub fn new(
         name: PlanName,
         authored_at: Timestamp,
-        gym: Option<Programme<Mesocycle>>,
+        gym: Option<Programme<GymMesocycle>>,
         cycling: Option<Programme<CyclingMesocycle>>,
     ) -> Result<Self, EmptyPlan> {
         if gym.is_none() && cycling.is_none() {
@@ -411,7 +421,7 @@ impl Plan {
         self.authored_at
     }
 
-    pub const fn gym(&self) -> Option<&Programme<Mesocycle>> {
+    pub const fn gym(&self) -> Option<&Programme<GymMesocycle>> {
         self.gym.as_ref()
     }
 
@@ -440,5 +450,61 @@ impl Plan {
     #[must_use]
     pub fn window(&self) -> PlanWindow {
         PlanWindow::new(self.name.clone(), self.span())
+    }
+
+    /// The mesocycle running on a date, both disciplines' halves of it.
+    ///
+    /// `None` for a day neither programme covers: a gap, or outside the plan.
+    #[must_use]
+    pub fn mesocycle_on(&self, date: Date) -> Option<Mesocycle<'_>> {
+        let gym = self
+            .gym
+            .as_ref()
+            .and_then(|programme| programme.on(date))
+            .map(|(_, mesocycle)| mesocycle);
+        let cycling = self
+            .cycling
+            .as_ref()
+            .and_then(|programme| programme.on(date))
+            .map(|(_, mesocycle)| mesocycle);
+        let span = gym
+            .map(Occupies::span)
+            .into_iter()
+            .chain(cycling.map(Occupies::span))
+            .reduce(Span::joined)?;
+        Some(Mesocycle { gym, cycling, span })
+    }
+}
+
+/// A mesocycle at its level of the hierarchy: a gym mesocycle and a cycling
+/// mesocycle together (#224).
+///
+/// The operator, 2026-09-24: the hierarchy is `macrocycle → phase → mesocycle
+/// → microcycle → session`, and the mesocycle in it is the concurrent one. Its
+/// halves are each discipline's own type; this is the composition of them.
+///
+/// **Either half may be missing** while plans are still authored a discipline
+/// at a time: a gym-only plan is what the store held all summer. Never both,
+/// since then there is no mesocycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mesocycle<'a> {
+    gym: Option<&'a GymMesocycle>,
+    cycling: Option<&'a CyclingMesocycle>,
+    span: Span,
+}
+
+impl<'a> Mesocycle<'a> {
+    pub const fn gym(&self) -> Option<&'a GymMesocycle> {
+        self.gym
+    }
+
+    pub const fn cycling(&self) -> Option<&'a CyclingMesocycle> {
+        self.cycling
+    }
+
+    /// The days it occupies: from the earlier half's start to the later
+    /// half's end.
+    pub const fn span(&self) -> Span {
+        self.span
     }
 }

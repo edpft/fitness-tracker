@@ -34,7 +34,7 @@ use domain::normalised::{
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
-    Anchor, GenerationParameters, Mesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
+    Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId,
 };
 use domain::schedule::{Alteration, Diary, Holidays, SessionRole, TrainingPattern};
@@ -1056,7 +1056,7 @@ pub trait MesocycleStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
 
     /// The mesocycle immediately before a date, if there is one.
     ///
@@ -1080,7 +1080,7 @@ pub trait MesocycleStore {
     fn preceding(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
 
     /// The first mesocycle to begin after a date, if there is one.
     ///
@@ -1096,7 +1096,7 @@ pub trait MesocycleStore {
     fn following(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, Mesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.
@@ -1447,7 +1447,7 @@ pub struct Prescription {
 pub struct LadderStanding {
     pub plan: PlanName,
     pub programme_id: MesocycleId,
-    pub programme: Mesocycle,
+    pub programme: GymMesocycle,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.
     /// Where the record puts the programme, for the one template that has a

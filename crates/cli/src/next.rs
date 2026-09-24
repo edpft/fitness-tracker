@@ -31,7 +31,7 @@ use domain::{
 use infrastructure::{SqliteDiaryStore, connect};
 
 use crate::{
-    Failure, catalogue, config, cycling, exit, gym, output, plan, rescheduling, wiring,
+    Failure, catalogue, config, cycling, exit, gym, holidays, output, plan, rescheduling, wiring,
     wiring::Command,
 };
 
@@ -75,6 +75,12 @@ pub async fn next(
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     pool.close().await;
 
+    let holidays = holidays::read().await;
+    output::macrocycle(
+        now.date,
+        holidays.as_ref().map_err(Failure::message_text),
+        standing.mesocycle,
+    );
     output::rescheduled(&standing.weeks);
 
     let sessions = &standing.sessions;

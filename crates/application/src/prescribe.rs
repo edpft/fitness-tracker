@@ -21,7 +21,7 @@ use domain::{
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
-        GatingTopSet, GenerationParameters, Linear, LoadSteps, Mesocycle, Position,
+        GatingTopSet, GenerationParameters, GymMesocycle, Linear, LoadSteps, Position,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
         PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession, SlotId,
         SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
@@ -464,22 +464,22 @@ where
     async fn progress_of(
         &self,
         plan: &PlanName,
-        programme: &Mesocycle,
+        programme: &GymMesocycle,
         consulted: &Consulted<'_>,
         before: Date,
     ) -> Result<Option<Progress>, PrescriptionError> {
         match programme {
-            Mesocycle::Progression(Progression::Linear(linear)) => {
+            GymMesocycle::Progression(Progression::Linear(linear)) => {
                 Ok(Some(self.progress(plan, linear, consulted, before).await?))
             }
             // **Neither has a rung.** A block's loads are shares of a fixed
             // anchor; an SBS cycle's are shares of a maximum that moves, but it
             // moves off measured results rather than off a ladder position, so
             // there is still nothing here for a miss to hold.
-            Mesocycle::Progression(
+            GymMesocycle::Progression(
                 Progression::BlockPeriodisation(_) | Progression::Provided { .. },
             )
-            | Mesocycle::Test(_) => Ok(None),
+            | GymMesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -491,16 +491,18 @@ where
     async fn maximum_of(
         &self,
         plan: &PlanName,
-        programme: &Mesocycle,
+        programme: &GymMesocycle,
         consulted: &Consulted<'_>,
         before: Date,
     ) -> Result<Option<Kg>, PrescriptionError> {
         match programme {
-            Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+            GymMesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
                 Ok(Some(self.sbs_maximum(plan, sbs, consulted, before).await?))
             }
-            Mesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_))
-            | Mesocycle::Test(_) => Ok(None),
+            GymMesocycle::Progression(
+                Progression::Linear(_) | Progression::BlockPeriodisation(_),
+            )
+            | GymMesocycle::Test(_) => Ok(None),
         }
     }
 
@@ -590,11 +592,11 @@ where
     /// span being taken whole.
     async fn measured_entering(
         &self,
-        programme: &Mesocycle,
+        programme: &GymMesocycle,
         primary: RepsExercise,
         before: Date,
     ) -> Result<Option<Anchor>, PrescriptionError> {
-        let Mesocycle::Progression(Progression::BlockPeriodisation(block)) = programme else {
+        let GymMesocycle::Progression(Progression::BlockPeriodisation(block)) = programme else {
             return Ok(None);
         };
         if block.entry_test().is_none() {
@@ -631,7 +633,7 @@ where
 
     /// The maximum a mesocycle actually measured, as the record has it.
     ///
-    /// **Two things measure one** ([`Mesocycle::produces_maximum`]): a test week,
+    /// **Two things measure one** ([`GymMesocycle::produces_maximum`]): a test week,
     /// which is the whole of what it is for, and a provided cycle, whose last
     /// session is a one-repetition maximum. A ladder measures nothing even when
     /// its last single felt like a test.
@@ -644,7 +646,7 @@ where
     fn left_behind<'a>(
         &'a self,
         plan: &'a PlanName,
-        mesocycle: &'a Mesocycle,
+        mesocycle: &'a GymMesocycle,
         consulted: &'a Consulted<'a>,
     ) -> std::pin::Pin<
         Box<dyn Future<Output = Result<Option<Anchor>, PrescriptionError>> + Send + 'a>,
@@ -652,7 +654,7 @@ where
         Box::pin(async move {
             let span = mesocycle.span();
             let measured = match mesocycle {
-                Mesocycle::Progression(Progression::Provided { cycle: before, .. }) => {
+                GymMesocycle::Progression(Progression::Provided { cycle: before, .. }) => {
                     // Asked the day after it ends, so its own last session — the
                     // one-repetition maximum — counts toward what it leaves.
                     let after = span.end().tomorrow().unwrap_or_else(|_| span.end());
@@ -661,11 +663,11 @@ where
                         None,
                     ))
                 }
-                Mesocycle::Test(test) => match test.primary_exercise() {
+                GymMesocycle::Test(test) => match test.primary_exercise() {
                     Exercise::Reps(primary) => self.measured_in(primary, span).await?,
                     Exercise::Duration(_) | Exercise::Distance(_) => None,
                 },
-                Mesocycle::Progression(
+                GymMesocycle::Progression(
                     Progression::Linear(_) | Progression::BlockPeriodisation(_),
                 ) => None,
             };
@@ -792,11 +794,11 @@ where
     /// light session is the predecessor's session whatever it was training.
     async fn inheritance(
         &self,
-        programme: &Mesocycle,
+        programme: &GymMesocycle,
         consulted: &Consulted<'_>,
         date: Date,
     ) -> Result<Inheritance, PrescriptionError> {
-        let Mesocycle::Test(test) = programme else {
+        let GymMesocycle::Test(test) = programme else {
             return Ok(Inheritance {
                 target: None,
                 light: None,
@@ -820,7 +822,7 @@ where
             .programmes
             .preceding(test.calendar().start())
             .await?;
-        let Some((_, before_plan, Mesocycle::Progression(Progression::Linear(before)))) =
+        let Some((_, before_plan, GymMesocycle::Progression(Progression::Linear(before)))) =
             predecessor
         else {
             // Nothing before it, or a predecessor with no ladder to read a
@@ -971,13 +973,13 @@ where
 /// a block that measures its own entry carries the week in front of its phases.
 /// Either is the first microcycle of a sequence when nothing before it measured
 /// the lift, and either may therefore assert.
-fn asserted_by(programme: &Mesocycle) -> Option<Anchor> {
+fn asserted_by(programme: &GymMesocycle) -> Option<Anchor> {
     match programme {
-        Mesocycle::Test(test) => test.asserted(),
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => block
+        GymMesocycle::Test(test) => test.asserted(),
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => block
             .entry_test()
             .and_then(domain::prescription::EntryTest::asserted),
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
     }
 }
 
@@ -1106,7 +1108,7 @@ struct Standing {
 /// derivation each position gets — the primary its top set and back-offs, and
 /// everything else double progression, a hold, or its authored numbers.
 fn issue_slots(
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     consulted: &Consulted<'_>,
     role: SessionRole,
     week: WeekKind,
@@ -1152,16 +1154,16 @@ const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::new(Relative::Higher, Re
 /// test is decided by the phase plan and nothing else. A standalone test week is
 /// a test week on both its sessions: the week is what it is, and which session
 /// is the attempt is the role's business.
-fn week_of(programme: &Mesocycle, placed: WeekKind) -> WeekKind {
+fn week_of(programme: &GymMesocycle, placed: WeekKind) -> WeekKind {
     match programme {
-        Mesocycle::Test(_) => WeekKind::Test,
+        GymMesocycle::Test(_) => WeekKind::Test,
         // A linear programme's weeks are all climbing weeks, and an SBS cycle's
         // are too: **week 4 is not a test week even though it ends on a test**,
         // because its first session is a taper the chart states in full. Calling
         // the week a test would send the light session looking for a predecessor
         // to inherit from, which an SBS cycle never needs.
-        Mesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => placed,
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => placed,
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
             };
@@ -1180,7 +1182,7 @@ fn week_of(programme: &Mesocycle, placed: WeekKind) -> WeekKind {
 /// unanswerable, so it is refused rather than issued incomplete.
 fn derived_from(
     plan: &PlanName,
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     inheritance: Inheritance,
     opening: Option<Anchor>,
 ) -> Result<DerivedFrom, PrescriptionError> {
@@ -1191,14 +1193,14 @@ fn derived_from(
         // here by value so a session issued in November says what it descended
         // from. Absent, the session is refused rather than issued against
         // nothing.
-        Mesocycle::Progression(_) => {
+        GymMesocycle::Progression(_) => {
             opening
                 .map(DerivedFrom::Anchor)
                 .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
                     start: programme.calendar().start(),
                 })
         }
-        Mesocycle::Test(test) => {
+        GymMesocycle::Test(test) => {
             inheritance
                 .target
                 .map(DerivedFrom::Target)
@@ -1271,7 +1273,7 @@ enum PrimaryLoad {
 
 /// The primary slot: a warm-up ramp, and then whatever this template asks for.
 fn primary_slot_item(
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     consulted: &Consulted<'_>,
     role: SessionRole,
     week: WeekKind,
@@ -1303,16 +1305,16 @@ fn primary_slot_item(
     };
 
     let plan = match programme {
-        Mesocycle::Progression(Progression::Linear(linear)) => {
+        GymMesocycle::Progression(Progression::Linear(linear)) => {
             linear_load(linear, consulted, role, week, standing, steps)
         }
-        Mesocycle::Progression(Progression::BlockPeriodisation(block)) => {
+        GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_load(block, role, week, standing.opening, steps)
         }
-        Mesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
+        GymMesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
             sbs_load(sbs, role, week, steps, maximum)
         }
-        Mesocycle::Test(test) => test_load(test, consulted, role, inheritance, steps),
+        GymMesocycle::Test(test) => test_load(test, consulted, role, inheritance, steps),
     };
     let plan = match plan {
         Ok(plan) => plan,
@@ -1636,7 +1638,7 @@ fn provided_other_session(test: &Test) -> Option<SbsDay> {
 /// slot in it is then reported, the failure with its own reason and the rest as
 /// withheld.
 fn group(
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     consulted: &Consulted<'_>,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1688,7 +1690,7 @@ fn group(
 
 /// Any slot that is not the primary: double progression, a hold, or static.
 fn accessory_slot(
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     consulted: &Consulted<'_>,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,
@@ -1705,7 +1707,7 @@ fn accessory_slot(
 /// Separate from [`accessory_slot`] because a supersetted position needs the
 /// exercise without the item wrapped around it.
 fn accessory_exercise(
-    programme: &Mesocycle,
+    programme: &GymMesocycle,
     consulted: &Consulted<'_>,
     role: SessionRole,
     history: &BTreeMap<RepsExercise, LastPerformance>,

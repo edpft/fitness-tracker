@@ -13,7 +13,7 @@
 //! rescheduling what was lost is #177's.
 
 use domain::{
-    plan::Plan,
+    plan::{Plan, Span},
     planner::{self, Filled, MicrocycleState, Placed, Recorded, SessionState, Unreschedulable},
     schedule::{
         DayPart, Diary, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted,
@@ -55,6 +55,10 @@ pub struct Standing {
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
     pub lost: Vec<Date>,
+    /// The days of the mesocycle running now, both disciplines' halves
+    /// together, as the plan now stands: what says which phase of the
+    /// macrocycle this is (#224).
+    pub mesocycle: Option<Span>,
 }
 
 impl Session {
@@ -174,10 +178,14 @@ where
 
         let plan = rescheduled(&authored, &lost, &diary)?;
         let sessions = self.week_of(&plan, &diary, now.date, now, now.date).await?;
+        let mesocycle = plan
+            .mesocycle_on(now.date)
+            .map(|mesocycle| mesocycle.span());
         Ok(Standing {
             sessions,
             weeks,
             lost,
+            mesocycle,
         })
     }
 

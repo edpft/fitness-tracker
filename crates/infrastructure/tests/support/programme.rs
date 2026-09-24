@@ -27,7 +27,7 @@ use domain::{
     plan::{Plan, PlanName, Programme},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, ByIntensity, Calendar,
-        GenerationParameters, Linear, LoadSteps, Mesocycle, Percentage, PrescribedWorkout,
+        GenerationParameters, GymMesocycle, Linear, LoadSteps, Percentage, PrescribedWorkout,
         Progression, ResetProtocol, Scales, Skip, Step, TopSetReps, WarmupStep,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
@@ -345,7 +345,7 @@ pub fn name(text: &str) -> Result<PlanName, ProgrammeFixtureError> {
 ///
 /// [`ProgrammeFixtureError`] if the name is unusable or the mesocycles do not
 /// make a programme.
-pub fn plan(mesocycles: Vec<Mesocycle>) -> Result<Plan, ProgrammeFixtureError> {
+pub fn plan(mesocycles: Vec<GymMesocycle>) -> Result<Plan, ProgrammeFixtureError> {
     named_plan(FIXTURE_NAME, mesocycles)
 }
 
@@ -354,7 +354,10 @@ pub fn plan(mesocycles: Vec<Mesocycle>) -> Result<Plan, ProgrammeFixtureError> {
 /// # Errors
 ///
 /// As [`plan`].
-pub fn named_plan(called: &str, mesocycles: Vec<Mesocycle>) -> Result<Plan, ProgrammeFixtureError> {
+pub fn named_plan(
+    called: &str,
+    mesocycles: Vec<GymMesocycle>,
+) -> Result<Plan, ProgrammeFixtureError> {
     Plan::new(
         name(called)?,
         jiff::Timestamp::now(),
@@ -385,7 +388,7 @@ pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] if the week or the test is invalid.
-pub fn entry_test() -> Result<Mesocycle, ProgrammeFixtureError> {
+pub fn entry_test() -> Result<GymMesocycle, ProgrammeFixtureError> {
     let start = Date::new(2026, 6, 29).map_err(invalid)?;
     let week = domain::prescription::Test::week(
         start,
@@ -394,7 +397,7 @@ pub fn entry_test() -> Result<Mesocycle, ProgrammeFixtureError> {
         jiff::tz::TimeZone::UTC,
     )
     .map_err(invalid)?;
-    Ok(Mesocycle::Test(
+    Ok(GymMesocycle::Test(
         domain::prescription::Test::new(
             domain::prescription::Tested::new(
                 PrimaryPattern::KneeDominant,
@@ -443,7 +446,7 @@ pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureE
 pub fn authoring(
     answers: Authored,
     interruptions: &[Skip],
-) -> Result<Result<Mesocycle, AuthoringError>, ProgrammeFixtureError> {
+) -> Result<Result<GymMesocycle, AuthoringError>, ProgrammeFixtureError> {
     Ok(domain::prescription::authored::programme(
         answers,
         fills()?,
@@ -456,10 +459,10 @@ pub fn authoring(
 /// A linear programme, as one of the three things a programme can be.
 ///
 /// The fixtures below build a `Linear` because that is what they are about;
-/// every port takes a `Mesocycle`, so this is the one line between them.
+/// every port takes a `GymMesocycle`, so this is the one line between them.
 #[must_use]
-pub const fn as_programme(linear: Linear) -> Mesocycle {
-    Mesocycle::Progression(Progression::Linear(linear))
+pub const fn as_programme(linear: Linear) -> GymMesocycle {
+    GymMesocycle::Progression(Progression::Linear(linear))
 }
 
 pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
@@ -524,7 +527,7 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
 /// [`ProgrammeFixtureError`] only if a literal here is invalid; the programme
 /// itself is expected to be refused, which the caller asserts.
 pub fn gating_on_a_role_it_never_runs()
--> Result<Result<Mesocycle, AuthoringError>, ProgrammeFixtureError> {
+-> Result<Result<GymMesocycle, AuthoringError>, ProgrammeFixtureError> {
     // Monday only, and Monday is the easier session — so a gate on the harder
     // one never fires.
     let monday_only = TrainingWeek::new(vec![(

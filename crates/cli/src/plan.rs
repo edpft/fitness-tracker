@@ -605,7 +605,7 @@ async fn author(
 fn with_both(
     name: PlanName,
     existing: Option<&Plan>,
-    gym: Vec<domain::prescription::Mesocycle>,
+    gym: Vec<domain::prescription::GymMesocycle>,
     mesocycles: Vec<CyclingMesocycle>,
 ) -> Result<Plan, Failure> {
     // **Both sides replaced, since this command now authors both.** It carried
