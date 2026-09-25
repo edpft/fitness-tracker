@@ -21,10 +21,10 @@ use domain::{
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
-        GatingTopSet, GenerationParameters, GymMesocycle, Ladder, Linear, LoadSteps, Opening, Position,
-        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession, SlotId,
-        SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
+        GatingTopSet, GenerationParameters, GymMesocycle, Ladder, Linear, LoadSteps, Opening,
+        Position, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
+        PrescribedWorkout, PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay,
+        SbsSession, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
@@ -1200,11 +1200,11 @@ fn derived_from(
     // A holding week is the linear template whatever mesocycle it follows, so
     // it descends from the anchor it opened from as any progression does.
     if week == WeekKind::Holding {
-        return opening
-            .map(DerivedFrom::Anchor)
-            .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
+        return opening.map(DerivedFrom::Anchor).ok_or_else(|| {
+            PrescriptionError::NoInheritedMaximum {
                 start: programme.calendar().start(),
-            });
+            }
+        });
     }
     match programme {
         // **Resolved, because there is nothing else it could be.** No programme

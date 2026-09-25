@@ -23,9 +23,7 @@
 
 use std::path::Path;
 
-use application::{
-    DiaryStore as _, FtpHistory, PlanAuthor as _, PlanStore as _, cycling::Due,
-};
+use application::{DiaryStore as _, FtpHistory, PlanAuthor as _, PlanStore as _, cycling::Due};
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, DeliveredRide, Ftp, PlannedRide, Ride,
@@ -139,7 +137,12 @@ pub async fn next(
         .map_err(|error| Failure::usage(&error))?;
     let session = next.ride.session().with_extra_cool_down(extra);
 
-    report(&heading(&programme, &next, published.is_none()), &next, &session, ftp);
+    report(
+        &heading(&programme, &next, published.is_none()),
+        &next,
+        &session,
+        ftp,
+    );
 
     println!();
     match to {

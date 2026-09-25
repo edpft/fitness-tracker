@@ -378,7 +378,11 @@ impl Calendar {
         skips.sort_unstable();
         skips.dedup();
 
-        let mut holding: Vec<Date> = holding.iter().copied().filter(|day| *day >= start).collect();
+        let mut holding: Vec<Date> = holding
+            .iter()
+            .copied()
+            .filter(|day| *day >= start)
+            .collect();
         holding.sort_unstable();
         holding.dedup();
 

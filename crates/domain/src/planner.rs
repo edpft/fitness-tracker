@@ -709,11 +709,7 @@ pub enum Unreschedulable {
 ///
 /// [`Unreschedulable`] where a moved calendar or the programme it belongs to
 /// will not build.
-pub fn rescheduled(
-    plan: &Plan,
-    reruns: &[Rerun],
-    diary: &Diary,
-) -> Result<Plan, Unreschedulable> {
+pub fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, Unreschedulable> {
     if reruns.is_empty() {
         return Ok(plan.clone());
     }

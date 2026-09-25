@@ -276,9 +276,7 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
             jiff::Timestamp::now(),
             Some(Programme::new(vec![
                 programme::entry_test_from(Date::constant(2026, 9, 14))?,
-                programme::as_programme(programme::programme_from(Date::constant(
-                    2026, 9, 21,
-                ))?),
+                programme::as_programme(programme::programme_from(Date::constant(2026, 9, 21))?),
             ])?),
             Some(Programme::new(vec![test_week, build])?),
         )?,
@@ -1017,7 +1015,10 @@ fn the_ftp_test_ridden_and_the_1rm_test_missed_holds_the_bike() {
         panic!("a holding ride is due, not {:?}", after.due)
     };
     assert_eq!(day.date, Date::constant(2026, 9, 23));
-    assert_eq!(day.role, SessionRole::new(Relative::Higher, Relative::Lower));
+    assert_eq!(
+        day.role,
+        SessionRole::new(Relative::Higher, Relative::Lower)
+    );
     assert_eq!(day.week, 1, "the first week this mesocycle holds");
     assert_eq!(after.wednesday, None, "no ride of the programme is due");
     assert_eq!(

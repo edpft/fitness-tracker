@@ -8,9 +8,7 @@
 use std::collections::BTreeSet;
 
 use application::{
-    HoldingRides, RiddenVenues, SourceError, StoreError,
-    cycling::HoldingDay,
-    holding,
+    HoldingRides, RiddenVenues, SourceError, StoreError, cycling::HoldingDay, holding,
 };
 use domain::{
     cycling::{CyclingMesocycleId, CyclingSession, Interval, PowerZone, Ride, RideVenue},
@@ -91,7 +89,10 @@ fn the_harder_holding_ride_is_the_first_session_and_its_classes_own() {
     assert_eq!(ride.microcycle, 1);
     assert_eq!(ride.date, Date::constant(2026, 9, 30));
     assert_eq!(ride.ride.at().first().reference(), "pz");
-    assert_eq!(ride.ride.session().ride().peak_zone(), Some(PowerZone::Four));
+    assert_eq!(
+        ride.ride.session().ride().peak_zone(),
+        Some(PowerZone::Four)
+    );
     assert_eq!(
         ride.ride.role(),
         SessionRole::new(Relative::Higher, Relative::Lower)

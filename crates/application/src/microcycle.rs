@@ -378,8 +378,10 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
 /// and skipping a week in it only ever give its calendar room — so a refusal is
 /// something in the store this program could not have meant.
 fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, StoreError> {
-    planner::rescheduled(plan, reruns, diary).map_err(|error: Unreschedulable| StoreError::Corrupt {
-        detail: format!("{} will not reschedule: {error}", plan.name()),
+    planner::rescheduled(plan, reruns, diary).map_err(|error: Unreschedulable| {
+        StoreError::Corrupt {
+            detail: format!("{} will not reschedule: {error}", plan.name()),
+        }
     })
 }
 
