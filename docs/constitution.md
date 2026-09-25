@@ -1,7 +1,17 @@
 <!--
 Sync Impact Report
-- Version: 4.0.0, amended 2026-09-19. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 4.1.0, amended 2026-09-25. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 4.1.0 — § 19 widened to every driving adapter, and § 20's frontend line scoped to the web.
+  The terminal is a frontend as much as the browser: it requests, renders and interacts, and
+  business rules live behind the application's use cases. MINOR: a rule materially widened.
+  § 19 spoke of "the frontend" and "the API", which read as the web alone, so rules drifted
+  into `cli` unremarked; the plan wizard computes a one-rep maximum from the record. The
+  operator, 2026-09-25, withdrawing parity between the two interfaces as the goal: "What I
+  really want is for the domain to be independent for the interface layer. Aspiring for
+  feature parity between the cli and web interface was just one way of trying to ensure
+  that." § 20 said "Frontend: server-rendered HTML", which the widened § 19 would have made a
+  requirement on the terminal. No decision record: he stated the rule rather than argued it.
 - 4.0.0 — § 12 no longer requires authored data to keep its history; only what is in force is
   required. MAJOR: a rule is removed. The operator, 2026-09-19, while settling the export of the
   authored side (#151): "I don't think authored data needs to keep it's history". § 14 already
@@ -211,11 +221,11 @@ The state is **derived from the relations and never stored**: a status column wo
 
 **18.** Where an LLM is used it sits behind a port like any other external system, and the model is swappable without touching domain logic.
 
-**19.** **The frontend contains no domain logic.** It requests, renders and interacts; derivation, aggregation and business rules live behind the API. A frontend needing to compute something the API doesn't serve is evidence of a missing endpoint, not a place for logic.
+**19.** **A frontend contains no domain logic.** Every driving adapter is a frontend, the terminal as much as the browser. It requests, renders and interacts; derivation, aggregation and business rules live behind the application's use cases. A frontend needing to compute something no use case serves is evidence of a missing use case, not a place for logic.
 
 ## V. Languages
 
-**20.** Backend: Rust. Frontend: server-rendered HTML from Rust templates, HTMX for client interactivity, server-rendered SVG for visualisation. No authored application JavaScript or TypeScript. Vendored libraries driven entirely by markup or data attributes (htmx itself) are exempt as tooling; a library requiring authored client code is not vendorable under this rule — it is an amendment.
+**20.** Backend: Rust. Web frontend: server-rendered HTML from Rust templates, HTMX for client interactivity, server-rendered SVG for visualisation. No authored application JavaScript or TypeScript. Vendored libraries driven entirely by markup or data attributes (htmx itself) are exempt as tooling; a library requiring authored client code is not vendorable under this rule — it is an amendment.
 
 **21.** No third language for application code. Build, CI and operational tooling are exempt. Interface languages confined to their adapter — SQL at the store, query or template syntaxes at their respective ports — are the adapter's vendor surface, not application languages. Logic expressible in the application language does not migrate into them.
 
@@ -289,4 +299,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 4.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-19
+**Version**: 4.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-25
