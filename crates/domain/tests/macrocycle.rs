@@ -3,7 +3,7 @@
 use std::num::NonZeroU8;
 
 use domain::{
-    macrocycle::{Macrocycle, Phase, Term},
+    macrocycle::{Chain, Concurrent, Cycling, Macrocycle, Phase, Term},
     plan::Span,
     schedule::{Holidays, PublicHoliday, SchoolHoliday, SchoolHolidayKind},
 };
@@ -135,4 +135,151 @@ fn outside_the_calendar_there_is_no_macrocycle() {
 
     assert_eq!(Macrocycle::on(date(2027, 10, 1), &holidays), None);
     assert_eq!(Macrocycle::on(date(2026, 7, 1), &holidays), None);
+}
+
+fn autumn_2026() -> Option<Macrocycle> {
+    Macrocycle::on(date(2026, 9, 24), &calendar()?)
+}
+
+/// **Scenario 1 of #222: the entry tests are performed w/c 21 September.**
+/// The term runs SBS + Build, SBS + Peak 1, SBS + Peak 2, and the last test
+/// week is w/c 14 December.
+#[test]
+fn tests_on_21_september_run_build_then_peak_to_the_end_of_term() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BuildThenPeak;
+    let tested = Some(Cycling::Hold { holding: 0 });
+
+    let first = autumn.next(chain, tested, date(2026, 9, 28));
+    assert_eq!(first, Some(Concurrent::progressing(Cycling::Build)));
+
+    let second = autumn.next(chain, Some(Cycling::Build), date(2026, 10, 26));
+    assert_eq!(second, Some(Concurrent::progressing(Cycling::Peak1)));
+
+    let third = autumn.next(chain, Some(Cycling::Peak1), date(2026, 11, 23));
+    assert_eq!(third, Some(Concurrent::progressing(Cycling::Peak2)));
+}
+
+/// **Scenario 2 of #222: the entry tests slip to w/c 28 September.** Peak 1
+/// would fit on 2 November, but nothing ending in tests fits after it, so both
+/// disciplines hold for two weeks and test w/c 16 November. Build opens from
+/// those tests and ends the term.
+#[test]
+fn tests_on_28_september_hold_in_november_and_build_again() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BuildThenPeak;
+
+    let first = autumn.next(chain, Some(Cycling::Hold { holding: 0 }), date(2026, 10, 5));
+    assert_eq!(first, Some(Concurrent::progressing(Cycling::Build)));
+
+    let held = autumn.next(chain, Some(Cycling::Build), date(2026, 11, 2));
+    assert_eq!(held, Some(Concurrent::hold(2)));
+
+    let last = autumn.next(
+        chain,
+        Some(Cycling::Hold { holding: 2 }),
+        date(2026, 11, 23),
+    );
+    assert_eq!(last, Some(Concurrent::progressing(Cycling::Build)));
+}
+
+/// **A term starts from the entry tests**: nothing carries across the
+/// holiday, so the first thing committed is a hold that ends in them, as
+/// late as still leaves the chain room.
+#[test]
+fn a_term_opens_with_a_hold_that_ends_in_the_entry_tests() {
+    let first =
+        autumn_2026()
+            .expect("autumn 2026")
+            .next(Chain::BuildThenPeak, None, date(2026, 9, 7));
+    assert_eq!(
+        first,
+        Some(Concurrent::hold(2)),
+        "two holding weeks and the tests w/c 21 September leave exactly twelve"
+    );
+}
+
+#[test]
+fn base_then_build_runs_base_one_base_two_and_build() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BaseThenBuild;
+
+    let first = autumn.next(chain, Some(Cycling::Hold { holding: 0 }), date(2026, 9, 28));
+    assert_eq!(first, Some(Concurrent::progressing(Cycling::Base1)));
+    let second = autumn.next(chain, Some(Cycling::Base1), date(2026, 10, 26));
+    assert_eq!(second, Some(Concurrent::progressing(Cycling::Base2)));
+    let third = autumn.next(chain, Some(Cycling::Base2), date(2026, 11, 23));
+    assert_eq!(third, Some(Concurrent::progressing(Cycling::Build)));
+}
+
+/// **Base 1 → hold → Build** when a lost week leaves no room for Base 2 and
+/// Build after it. Base 1 has no exit test, so Build cannot follow it directly.
+#[test]
+fn a_disrupted_base_holds_and_then_builds() {
+    let held = autumn_2026().expect("autumn 2026").next(
+        Chain::BaseThenBuild,
+        Some(Cycling::Base1),
+        date(2026, 11, 2),
+    );
+    assert_eq!(held, Some(Concurrent::hold(2)));
+}
+
+/// **Never across the holiday**, and never nothing while term remains.
+#[test]
+fn nothing_is_committed_that_runs_into_christmas() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BuildThenPeak;
+
+    let last_week = autumn.next(chain, Some(Cycling::Build), date(2026, 12, 14));
+    assert_eq!(
+        last_week,
+        Some(Concurrent::hold(0)),
+        "one week is a test week"
+    );
+
+    let three = autumn.next(chain, Some(Cycling::Build), date(2026, 11, 30));
+    assert_eq!(
+        three,
+        Some(Concurrent::hold(2)),
+        "a hold to the end of term"
+    );
+
+    assert_eq!(
+        autumn.next(chain, Some(Cycling::Build), date(2026, 12, 21)),
+        None
+    );
+}
+
+#[test]
+fn every_mesocycle_committed_through_the_term_ends_by_the_transition() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    for chain in [Chain::BaseThenBuild, Chain::BuildThenPeak] {
+        for weeks_in in 0..15_i64 {
+            let start = date(2026, 9, 7)
+                .checked_add(jiff::Span::new().weeks(weeks_in))
+                .expect("a date in term");
+            for previous in [
+                None,
+                Some(Cycling::Hold { holding: 0 }),
+                Some(Cycling::Base1),
+                Some(Cycling::Build),
+                Some(Cycling::Peak1),
+            ] {
+                let Some(next) = autumn.next(chain, previous, start) else {
+                    continue;
+                };
+                let end = start
+                    .checked_add(jiff::Span::new().weeks(i64::from(next.weeks())))
+                    .expect("a date");
+                assert!(
+                    end <= autumn.transition(),
+                    "{next} from {start} after {previous:?} runs into Christmas"
+                );
+                assert!(
+                    next.cycling().may_follow(previous),
+                    "{next} may not follow {previous:?}"
+                );
+            }
+        }
+    }
 }
