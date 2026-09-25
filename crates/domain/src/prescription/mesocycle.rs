@@ -197,9 +197,9 @@ impl GymMesocycle {
     #[must_use]
     pub fn tests_in(&self, week: WeekKind) -> bool {
         match (self, week) {
-            (_, WeekKind::Holding) => false,
+            (_, WeekKind::Holding)
+            | (Self::Progression(Progression::Linear(_)), WeekKind::Climbing(_)) => false,
             (Self::Test(_), _) | (_, WeekKind::Test) => true,
-            (Self::Progression(Progression::Linear(_)), WeekKind::Climbing(_)) => false,
             (Self::Progression(Progression::BlockPeriodisation(block)), WeekKind::Climbing(at)) => {
                 block.kind(at) == Some(WeekKind::Test)
             }

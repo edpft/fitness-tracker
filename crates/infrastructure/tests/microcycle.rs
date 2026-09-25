@@ -890,17 +890,19 @@ async fn after(
     gym_performed: Trained,
     cycling_performed: Ridden,
 ) -> Fallible<After> {
+    let (gym_destination, cycling_destination) = (hevy()?, peloton()?);
+    let zone = corpus::zone()?;
     let standing = Microcycle::new(
         MicrocyclePorts {
             diary: SqliteDiaryStore::new(pool.clone()),
-            plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
             gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
             cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
             gym_performed,
             cycling_performed,
         },
-        hevy()?,
-        peloton()?,
+        gym_destination,
+        cycling_destination,
     )
     .standing(DayPart::new(
         Date::constant(2026, 9, 21),
@@ -911,13 +913,13 @@ async fn after(
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     let reschedule = Reschedule::new(standing.reruns.clone(), diary.clone());
     let gym = Rescheduled::new(
-        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+        SqlitePlanStore::new(pool.clone(), zone.clone()),
         reschedule.clone(),
     );
     let bike = Rescheduled::new(
         SqliteCyclingMesocycleStore::new(pool.clone()),
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), zone.clone()),
         reschedule,
     );
 
