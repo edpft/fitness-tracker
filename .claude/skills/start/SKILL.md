@@ -14,6 +14,18 @@ This skill is that prompt. `$ARGUMENTS` is the issue number or URL.
 
 - `git fetch`, switch to `main`, pull. If the tree is not clean, stop and say
   what is uncommitted.
+- Free disk before building anything. `target/` regularly fills the root
+  filesystem (116 GB on 2026-09-19, 94 GB on 2026-09-25), and a full disk kills
+  builds and test runs midway with exit 137 or ENOSPC:
+
+  ```
+  rm -rf target/debug/incremental
+  find target/debug/deps target/debug/examples target/debug/build \
+    -maxdepth 1 -mtime +0 -exec rm -rf {} +
+  df -h /
+  ```
+
+  It all regenerates. Say how much was freed in one line.
 - Before saying anything about a PR, look it up on the remote
   (`gh pr list --state all --search "<issue>"`, `gh pr view`). The remote is
   the only source of truth for what has merged.
