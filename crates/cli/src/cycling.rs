@@ -110,12 +110,12 @@ pub async fn next(
         Due::Holding(day) => match to {
             Ok((classes, _)) => (chosen(&pool, classes, day).await?, None),
             Err(why) => {
-                println!(
-                    "{}, {}: a holding ride, the newest {} class not yet ridden",
-                    weekday_name(day.date.weekday()),
-                    day.date,
-                    day.role,
-                );
+                let position = match day.role.intensity() {
+                    Relative::Higher => 1,
+                    Relative::Lower => 2,
+                };
+                println!("a holding microcycle — session {position} of 2");
+                println!("{}, {}", weekday_name(day.date.weekday()), day.date);
                 println!();
                 output::not_delivered(why);
                 return Ok(());
