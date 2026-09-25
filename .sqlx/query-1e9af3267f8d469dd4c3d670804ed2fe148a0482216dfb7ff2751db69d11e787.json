@@ -1,0 +1,40 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT p.id AS \"id!: i64\",\n                   (SELECT COALESCE(MAX(ordinal), 0) FROM gym_mesocycle\n                    WHERE plan = p.id) AS \"gym!: i64\",\n                   (SELECT COALESCE(MAX(ordinal), 0) FROM cycling_mesocycle\n                    WHERE plan = p.id) AS \"cycling!: i64\"\n            FROM plan AS p\n            WHERE p.name = ?\n            ORDER BY p.authored_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "gym!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "cycling!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1e9af3267f8d469dd4c3d670804ed2fe148a0482216dfb7ff2751db69d11e787"
+}

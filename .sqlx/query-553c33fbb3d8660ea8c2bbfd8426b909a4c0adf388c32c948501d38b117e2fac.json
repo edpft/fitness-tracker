@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\"\n            FROM plan AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = p.name\n            )\n            ORDER BY id ASC\n            ",
+  "query": "\n            SELECT id AS \"id!: i64\", name AS \"name!: String\",\n                   authored_at AS \"authored_at!: String\",\n                   chain AS \"chain: String\"\n            FROM plan AS p\n            WHERE p.authored_at = (\n                SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = p.name\n            )\n            ORDER BY id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "authored_at"
           }
         }
+      },
+      {
+        "name": "chain: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "chain"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +54,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "ef2af4ae5d06d49c754347070066a896bc308b4a01402a77e4b1a459897ca378"
+  "hash": "553c33fbb3d8660ea8c2bbfd8426b909a4c0adf388c32c948501d38b117e2fac"
 }
