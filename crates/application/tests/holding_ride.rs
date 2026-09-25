@@ -63,7 +63,7 @@ impl RiddenVenues for Fresh {
     }
 }
 
-fn day(role: SessionRole) -> HoldingDay {
+const fn day(role: SessionRole) -> HoldingDay {
     HoldingDay {
         programme: CyclingMesocycleId::new(1),
         date: Date::constant(2026, 9, 30),
