@@ -34,7 +34,7 @@ use domain::{
     },
     measure::PositiveDuration,
     plan::{Plan, PlanName, Programme},
-    planner::{MicrocycleState, SessionState},
+    planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
     schedule::{
@@ -233,6 +233,53 @@ async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
             Some(Programme::new(vec![programme::as_programme(
                 programme::programme_from(Date::constant(2026, 9, 14))?,
             )])?),
+            Some(Programme::new(vec![test_week, build])?),
+        )?,
+        &programme::parameters()?,
+    )
+    .await?;
+
+    Ok((pool, directory))
+}
+
+/// The operator's autumn as it began: both disciplines' entry tests in the
+/// week of 14 September, the gym's linear block and the bike's next mesocycle
+/// from the 21st.
+///
+/// **Both halves test that week**, which is what #190 turns on: a discipline
+/// that completed its test holds while the other re-runs its own.
+async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
+    let directory = tempfile::tempdir()?;
+    let pool = connect(&directory.path().join("test.db")).await?;
+    programme::record_the_week(&pool).await?;
+
+    let rides = [
+        (SessionPosition::new(1)?, endurance()?),
+        (SessionPosition::new(2)?, ftp_test()?),
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeMap<_, _>>();
+    let test_week = CyclingMesocycle::new(
+        CyclingProvenance::Assembled,
+        Date::constant(2026, 9, 14),
+        NonEmpty::of(CyclingMicrocycle::new(rides)?, Vec::new()),
+    )?;
+    let build = test_week.starting_on(Date::constant(2026, 9, 21));
+
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(
+        &Plan::new(
+            PlanName::try_from("2026-autumn".to_owned())?,
+            jiff::Timestamp::now(),
+            Some(Programme::new(vec![
+                programme::entry_test_from(Date::constant(2026, 9, 14))?,
+                programme::as_programme(programme::programme_from(Date::constant(
+                    2026, 9, 21,
+                ))?),
+            ])?),
             Some(Programme::new(vec![test_week, build])?),
         )?,
         &programme::parameters()?,
@@ -712,7 +759,7 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         .await?;
 
         let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-        let reschedule = Reschedule::new(standing.lost.clone(), diary);
+        let reschedule = Reschedule::new(standing.reruns.clone(), diary);
         let gym = Rescheduled::new(
             SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             SqlitePlanStore::new(pool.clone(), corpus::zone()?),
@@ -753,7 +800,13 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         standing.weeks,
         vec![(Date::constant(2026, 9, 14), MicrocycleState::Incomplete)]
     );
-    assert_eq!(standing.lost, vec![Date::constant(2026, 9, 14)]);
+    assert_eq!(
+        standing.reruns,
+        vec![Rerun {
+            monday: Date::constant(2026, 9, 14),
+            holding: None
+        }]
+    );
     assert_eq!(
         gym,
         WeekKind::Climbing(WeekIndex::FIRST),
@@ -811,5 +864,215 @@ fn a_week_that_kept_both_essential_sessions_moves_nothing() {
         standing.weeks,
         vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)]
     );
-    assert!(standing.lost.is_empty(), "{:?}", standing.lost);
+    assert!(standing.reruns.is_empty(), "{:?}", standing.reruns);
+}
+
+/// The plan as it stands on Monday 21 September, read the way `fitness next`
+/// and the prescriber read it.
+struct After {
+    standing: application::microcycle::Standing,
+    /// Which gym mesocycle answers for the Mondays of the 21st and the 28th,
+    /// and what its calendar makes of each.
+    gym: Vec<(&'static str, WeekKind)>,
+    /// Whether the bike holds on Wednesday the 23rd, and what it rides if not.
+    holds: bool,
+    wednesday: Option<String>,
+    /// Where the second cycling mesocycle now starts.
+    next_mesocycle: Date,
+    /// What `cycling next` finds due from the Monday.
+    due: application::cycling::Due,
+}
+
+/// The week of 14 September read on the Monday after, from what the record
+/// says was done.
+async fn after(
+    pool: &SqlitePool,
+    gym_performed: Trained,
+    cycling_performed: Ridden,
+) -> Fallible<After> {
+    let standing = Microcycle::new(
+        MicrocyclePorts {
+            diary: SqliteDiaryStore::new(pool.clone()),
+            plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            gym_performed,
+            cycling_performed,
+        },
+        hevy()?,
+        peloton()?,
+    )
+    .standing(DayPart::new(
+        Date::constant(2026, 9, 21),
+        PartOfDay::Evening,
+    ))
+    .await?;
+
+    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
+    let reschedule = Reschedule::new(standing.reruns.clone(), diary.clone());
+    let gym = Rescheduled::new(
+        SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        reschedule.clone(),
+    );
+    let bike = Rescheduled::new(
+        SqliteCyclingMesocycleStore::new(pool.clone()),
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        reschedule,
+    );
+
+    let mut weeks = Vec::new();
+    for monday in [Date::constant(2026, 9, 21), Date::constant(2026, 9, 28)] {
+        let (_, _, block) = MesocycleStore::on(&gym, monday)
+            .await?
+            .ok_or("the block answers for the Monday")?;
+        weeks.push((block.template(), block.calendar().place(monday)?.0));
+    }
+
+    let wednesday = Date::constant(2026, 9, 23);
+    let (_, _, riding) = CyclingMesocycleStore::on(&bike, wednesday)
+        .await?
+        .ok_or("the test week answers for the Wednesday")?;
+    let ridden = riding
+        .microcycle_of(wednesday)
+        .and_then(|number| riding.microcycle(number))
+        .and_then(|week| week.for_role(SessionRole::new(Relative::Higher, Relative::Lower)))
+        .map(|(_, ride)| ride.at().first().called().to_owned());
+
+    let (_, _, following) = CyclingMesocycleStore::following(&bike, wednesday)
+        .await?
+        .ok_or("a second cycling mesocycle follows")?;
+
+    let monday = Date::constant(2026, 9, 21);
+    let riding_week = diary
+        .training_week(monday, Discipline::Cycling)
+        .ok_or("cycling has a week")?;
+    let (_, due) = application::cycling::next_ride(&bike, monday, &riding_week, &diary).await?;
+
+    Ok(After {
+        standing,
+        gym: weeks,
+        holds: riding.holds_on(wednesday),
+        wednesday: ridden,
+        next_mesocycle: following.start(),
+        due,
+    })
+}
+
+/// **#190, the FTP test ridden and the 1RM test missed.** The Wednesday ride
+/// was the test; the entry test delivered for the Friday was lost to illness.
+///
+/// The gym re-runs its test week on the 21st. Cycling does not ride the FTP
+/// test again: it holds, and the Wednesday is a holding ride rather than any
+/// ride of the programme. Both start their next mesocycle on the 28th.
+#[test]
+fn the_ftp_test_ridden_and_the_1rm_test_missed_holds_the_bike() {
+    let after = corpus::block_on(async {
+        let (pool, _directory) = autumn_tested().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+        ill_to_the_sunday(&pool).await?;
+        after(
+            &pool,
+            Trained::on(vec![Date::constant(2026, 9, 7)]),
+            Ridden::of(vec![(
+                Date::constant(2026, 9, 16),
+                vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+            )]),
+        )
+        .await
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        after.standing.weeks,
+        vec![(
+            Date::constant(2026, 9, 14),
+            MicrocycleState::PartiallyCompleted {
+                completed: Discipline::Cycling,
+                lost: Discipline::Gym,
+            }
+        )]
+    );
+    assert_eq!(
+        after.standing.reruns,
+        vec![Rerun {
+            monday: Date::constant(2026, 9, 14),
+            holding: Some(Discipline::Cycling),
+        }]
+    );
+    assert_eq!(
+        after.gym,
+        vec![
+            ("test", WeekKind::Climbing(WeekIndex::FIRST)),
+            ("linear", WeekKind::Climbing(WeekIndex::FIRST)),
+        ],
+        "the gym's entry test runs again, and its block starts on the 28th"
+    );
+    assert!(after.holds, "the bike holds on the Wednesday");
+    let application::cycling::Due::Holding(day) = after.due else {
+        panic!("a holding ride is due, not {:?}", after.due)
+    };
+    assert_eq!(day.date, Date::constant(2026, 9, 23));
+    assert_eq!(day.role, SessionRole::new(Relative::Higher, Relative::Lower));
+    assert_eq!(day.week, 1, "the first week this mesocycle holds");
+    assert_eq!(after.wednesday, None, "no ride of the programme is due");
+    assert_eq!(
+        after.next_mesocycle,
+        Date::constant(2026, 9, 28),
+        "the next mesocycle moves back a week, as the gym's does"
+    );
+}
+
+/// **#190, the other way round.** The entry test was done on the Saturday; the
+/// one ride of the week was the easier one, so the FTP test was missed.
+///
+/// Cycling re-runs its test week, FTP test and all. The gym holds on the 21st
+/// and starts its block on the 28th, one week later than written — the week
+/// the bike's next mesocycle starts too.
+#[test]
+fn the_1rm_test_done_and_the_ftp_test_missed_holds_the_gym() {
+    let after = corpus::block_on(async {
+        let (pool, _directory) = autumn_tested().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+        after(
+            &pool,
+            Trained::on(vec![Date::constant(2026, 9, 19)]),
+            Ridden::of(vec![(
+                Date::constant(2026, 9, 16),
+                vec![RideVenue::new(
+                    "725d6185",
+                    "45 min Power Zone Endurance Ride",
+                )?],
+            )]),
+        )
+        .await
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        after.standing.reruns,
+        vec![Rerun {
+            monday: Date::constant(2026, 9, 14),
+            holding: Some(Discipline::Gym),
+        }]
+    );
+    assert_eq!(
+        after.gym,
+        vec![
+            ("test", WeekKind::Holding),
+            ("linear", WeekKind::Climbing(WeekIndex::FIRST)),
+        ],
+        "the gym holds on the 21st, after its test, and starts its block on the 28th"
+    );
+    assert!(!after.holds);
+    assert_eq!(
+        after.wednesday.as_deref(),
+        Some("10 min FTP Warm Up Ride"),
+        "the FTP test takes the Wednesday again"
+    );
+    assert_eq!(after.next_mesocycle, Date::constant(2026, 9, 28));
 }

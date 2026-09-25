@@ -175,6 +175,13 @@ impl CyclingSession {
         self.cool_down
     }
 
+    /// Whether this session is the FTP test: a ride that states how long and
+    /// leaves the intensity to be discovered.
+    #[must_use]
+    pub const fn is_test(&self) -> bool {
+        matches!(self.ride, Ride::Effort(_))
+    }
+
     /// Warm-up, ride and cool-down together — what the session costs in time.
     #[must_use]
     pub fn total(&self) -> PositiveDuration {

@@ -19,7 +19,7 @@
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition},
     planner,
-    schedule::{Diary, Discipline, TrainingWeek},
+    schedule::{Diary, Discipline, SessionRole, TrainingWeek},
 };
 use jiff::civil::Date;
 
@@ -36,6 +36,41 @@ pub struct NextRide {
     /// Which session of that microcycle.
     pub session: SessionPosition,
     pub ride: PlannedRide,
+}
+
+/// What is due on the next riding day.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Due {
+    /// A ride of the programme, authored in full.
+    Ride(NextRide),
+    /// A ride of a holding week (#190), which nobody has chosen yet.
+    ///
+    /// **Chosen when it is delivered**, from the catalogue: the newest class of
+    /// this role not yet ridden ([`crate::holding::choose`]). So it needs the
+    /// network where a ride of the programme does not.
+    Holding(HoldingDay),
+}
+
+impl Due {
+    /// The ride of the programme, where that is what is due.
+    #[must_use]
+    pub fn ride(self) -> Option<NextRide> {
+        match self {
+            Self::Ride(ride) => Some(ride),
+            Self::Holding(_) => None,
+        }
+    }
+}
+
+/// A day of a holding week, and what kind of ride it asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HoldingDay {
+    pub programme: CyclingMesocycleId,
+    pub date: Date,
+    /// Which of this mesocycle's holding weeks, counting from one.
+    pub week: usize,
+    /// The role the slot rides, once an illness in the same week is counted.
+    pub role: SessionRole,
 }
 
 /// The first ride at or after a date.
@@ -61,7 +96,7 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     from: Date,
     week: &TrainingWeek,
     diary: &Diary,
-) -> Result<(CyclingMesocycle, NextRide), PrescriptionError> {
+) -> Result<(CyclingMesocycle, Due), PrescriptionError> {
     let covering = store.on(from).await?;
     let covered = covering.is_some();
     // The programme covering the date answers first, and only a programme with
@@ -88,7 +123,7 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     Ok((programme, found))
 }
 
-/// The ride one programme puts on the next day it rides.
+/// What one programme puts on the next day it rides, or holds.
 ///
 /// **An illness in the same microcycle eases what survives it** (#180). The
 /// slot's own role says what the week ordinarily asks of this day; if another
@@ -105,12 +140,25 @@ fn ride_in(
     from: Date,
     week: &TrainingWeek,
     diary: &Diary,
-) -> Option<NextRide> {
+) -> Option<Due> {
     let date = programme.next_riding_day(from, week)?;
-    let (microcycle, session, ride) = programme.on(date, week)?;
-
     let asked = week.role_on(date.weekday())?;
     let eased = planner::eased_by_illness(diary, date, Discipline::Cycling, asked);
+
+    if programme.holds_on(date) {
+        let week = programme
+            .held()
+            .iter()
+            .take_while(|monday| **monday <= date)
+            .count();
+        return Some(Due::Holding(HoldingDay {
+            programme: id,
+            date,
+            week,
+            role: eased,
+        }));
+    }
+    let (microcycle, session, ride) = programme.on(date, week)?;
     let (session, ride) = if eased == asked {
         (session, ride)
     } else {
@@ -120,11 +168,11 @@ fn ride_in(
             .unwrap_or((session, ride))
     };
 
-    Some(NextRide {
+    Some(Due::Ride(NextRide {
         programme: id,
         date,
         microcycle,
         session,
         ride: ride.clone(),
-    })
+    }))
 }

@@ -89,7 +89,7 @@ pub async fn next(
         holidays.as_ref().map_err(Failure::message_text),
         standing.mesocycle,
     );
-    output::rescheduled(&standing.weeks);
+    output::rescheduled(&standing.weeks, &standing.reruns);
 
     let sessions = &standing.sessions;
     if sessions.is_empty() {

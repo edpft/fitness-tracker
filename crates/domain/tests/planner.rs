@@ -228,6 +228,7 @@ fn line(planned: &Planned<'_>) -> String {
     let what = match &planned.session {
         Ok(Filled::Gym { week, .. }) => format!("gym, {week}"),
         Ok(Filled::Cycling { ride, .. }) => ride.at().first().called().to_owned(),
+        Ok(Filled::CyclingHolding { .. }) => "a holding ride".to_owned(),
         Err(unfilled) => format!("nothing: {unfilled}"),
     };
     format!(

@@ -298,24 +298,23 @@ fn the_rate_is_authored_and_the_endpoint_is_wherever_the_calendar_stops() {
     );
 }
 
-/// The shortest block opens where the ladder opens and climbs once.
+/// The shortest block opens where the ladder opens, and that is all it does.
 ///
-/// Two weeks is the shortest the store will hold — `CHECK (duration_weeks >= 2)`
-/// — and under decision 0013 both of them climb, where the second used to be a
-/// test. The first week is still the opening, having had no week in which to
-/// climb to it.
+/// One week is the holding week a discipline rides while the other re-runs its
+/// test (#190). Under decision 0013 every week of a linear block climbs, so the
+/// one week is the opening, having had no week in which to climb to it.
 #[test]
-fn the_shortest_block_opens_and_climbs_once() {
+fn the_shortest_block_opens_and_nothing_more() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
     let Ok(opening) = from_test(anchor) else {
         panic!("-10% is a percentage")
     };
-    let Ok(ladder) = Ladder::new(opening, climb, 2, &increment) else {
-        panic!("two weeks is the shortest block")
+    let Ok(ladder) = Ladder::new(opening, climb, 1, &increment) else {
+        panic!("one week is the shortest block")
     };
-    assert_eq!(ladder.climbing_weeks(), 2);
+    assert_eq!(ladder.climbing_weeks(), 1);
 
     // -10% off the failed 95 is 85.5, which is 85 on the grid.
     let (Ok(only), Ok(expected)) = (week(1), kg("85")) else {
@@ -325,14 +324,13 @@ fn the_shortest_block_opens_and_climbs_once() {
 }
 
 #[test]
-fn a_block_too_short_to_climb_is_refused() {
+fn a_block_of_no_weeks_is_refused() {
     let (Ok(climb), Ok(increment), Ok(anchor)) = (kg("2.5"), grid(), ceiling("90", "95")) else {
         panic!("the fixture values are all valid")
     };
     let Ok(opening) = from_test(anchor) else {
         panic!("-10% is a percentage")
     };
-    assert!(Ladder::new(opening, climb, 1, &increment).is_err());
     assert!(Ladder::new(opening, climb, 0, &increment).is_err());
 }
 

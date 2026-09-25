@@ -23,15 +23,18 @@
 
 use std::path::Path;
 
-use application::{DiaryStore as _, FtpHistory, PlanAuthor as _, PlanStore as _};
+use application::{
+    DiaryStore as _, FtpHistory, PlanAuthor as _, PlanStore as _, cycling::Due,
+};
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingSession, DeliveredRide, Ftp, PlannedRide, Ride,
-        RideVenue, SessionPosition, clock,
+        RideVenue, clock,
     },
     measure::PositiveDuration,
     normalised::OperatorZone,
     plan::{Plan, Programme},
+    provider::ProgrammeName,
     schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
@@ -86,7 +89,7 @@ pub async fn next(
     let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
 
-    let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
+    let (programme, due) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
         .map_err(|error| match error {
             application::PrescriptionError::NoPlan { .. } => Failure::message(
@@ -98,6 +101,27 @@ pub async fn next(
             ),
             other => Failure::message(other.to_string(), exit::USAGE),
         })?;
+
+    // **A holding ride is chosen before it can be shown** (#190), so the
+    // catalogue is asked here and a Peloton that cannot be reached costs the
+    // answer as well as the delivery.
+    let (next, published) = match due {
+        Due::Ride(next) => (next, programme.programme().map(|from| from.name().clone())),
+        Due::Holding(day) => match to {
+            Ok((classes, _)) => (chosen(&pool, classes, day).await?, None),
+            Err(why) => {
+                println!(
+                    "{}, {}: a holding ride, the newest {} class not yet ridden",
+                    weekday_name(day.date.weekday()),
+                    day.date,
+                    day.role,
+                );
+                println!();
+                output::not_delivered(why);
+                return Ok(());
+            }
+        },
+    };
 
     // **In force on the session's date, not on today's.** The next ride may be
     // a fortnight away, and a test ridden between now and then is the one that
@@ -115,15 +139,7 @@ pub async fn next(
         .map_err(|error| Failure::usage(&error))?;
     let session = next.ride.session().with_extra_cool_down(extra);
 
-    report(
-        &programme,
-        next.date,
-        next.microcycle,
-        next.session,
-        &next.ride,
-        &session,
-        ftp,
-    );
+    report(&heading(&programme, &next, published.is_none()), &next, &session, ftp);
 
     println!();
     match to {
@@ -135,7 +151,7 @@ pub async fn next(
             // replaced is said, not silently discarded.
             deliver_ride(
                 &SqliteCyclingDeliveryStore::new(pool),
-                &programme,
+                published,
                 &next,
                 classes,
                 stack,
@@ -164,27 +180,57 @@ const fn weekday_name(weekday: Weekday) -> &'static str {
     }
 }
 
-fn report(
+/// Where a ride sits, as its first line says it.
+///
+/// **Both numbers are the programme's own, and the publisher's are not
+/// printed** (#211). Microcycle 3 of 4 may be Build's fourth, and session 2 of
+/// 2 may be its third; the published numbering matters to plan authoring, which
+/// maps a publisher's programme onto ours, and to nothing here. A holding ride
+/// is no microcycle of the programme, so it says what it is instead.
+fn heading(
     programme: &CyclingMesocycle,
-    date: Date,
-    microcycle: usize,
-    position: SessionPosition,
-    planned: &PlannedRide,
+    next: &application::cycling::NextRide,
+    holding: bool,
+) -> String {
+    let position = next.session.as_u8();
+    if holding {
+        return format!("a holding microcycle — session {position} of 2");
+    }
+    let sessions = programme
+        .microcycle(next.microcycle)
+        .map_or(0, CyclingMicrocycle::session_count);
+    format!(
+        "{} — microcycle {} of {}, session {position} of {sessions}",
+        programme.provenance(),
+        next.microcycle,
+        programme.duration_weeks(),
+    )
+}
+
+/// The ride a holding day asks for, chosen from the catalogue now (#190).
+async fn chosen(
+    pool: &infrastructure::SqlitePool,
+    classes: &PelotonClasses,
+    day: application::cycling::HoldingDay,
+) -> Result<application::cycling::NextRide, Failure> {
+    application::holding::ride(
+        &PelotonHoldingRides::new(classes),
+        &SqliteRiddenVenues::new(pool.clone()),
+        day,
+    )
+    .await
+    .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))
+}
+
+fn report(
+    heading: &str,
+    next: &application::cycling::NextRide,
     session: &CyclingSession,
     ftp: Option<Ftp>,
 ) {
-    // **Both numbers are the programme's own, and the publisher's are not
-    // printed** (#211). Microcycle 3 of 4 may be Build's fourth, and session 2
-    // of 2 may be its third; the published numbering matters to plan authoring,
-    // which maps a publisher's programme onto ours, and to nothing here.
-    let week = programme.microcycle(microcycle);
-    let sessions = week.map_or(0, CyclingMicrocycle::session_count);
-    println!(
-        "{} — microcycle {microcycle} of {}, session {position_number} of {sessions}",
-        programme.provenance(),
-        programme.duration_weeks(),
-        position_number = position.as_u8(),
-    );
+    let planned: &PlannedRide = &next.ride;
+    let date = next.date;
+    println!("{heading}");
     println!("{}, {date}", weekday_name(date.weekday()));
     println!();
 
@@ -285,25 +331,20 @@ pub async fn deliver(
     let pool = connect(database).await?;
     let store = crate::rescheduling::cycling(&pool, zone).await?;
     let (week, diary) = cycling_week(&SqliteDiaryStore::new(pool.clone()), from).await?;
-    let (programme, next) = application::cycling::next_ride(&store, from, &week, &diary)
+    let (programme, due) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+    let (next, published) = match due {
+        Due::Ride(next) => (next, programme.programme().map(|from| from.name().clone())),
+        Due::Holding(day) => (chosen(&pool, classes, day).await?, None),
+    };
 
-    println!(
-        "{} — microcycle {} of {}, session {} of {}",
-        programme.provenance(),
-        next.microcycle,
-        programme.duration_weeks(),
-        next.session.as_u8(),
-        programme
-            .microcycle(next.microcycle)
-            .map_or(0, CyclingMicrocycle::session_count),
-    );
+    println!("{}", heading(&programme, &next, published.is_none()));
     println!("{}, {}", weekday_name(next.date.weekday()), next.date);
     println!();
     deliver_ride(
         &SqliteCyclingDeliveryStore::new(pool),
-        &programme,
+        published,
         &next,
         classes,
         stack,
@@ -326,7 +367,7 @@ pub async fn deliver(
 /// no authored record at all.
 async fn deliver_ride<S: application::CyclingDeliveryStore + Sync>(
     recording: &S,
-    programme: &CyclingMesocycle,
+    published: Option<ProgrammeName>,
     next: &application::cycling::NextRide,
     classes: &PelotonClasses,
     stack: &PelotonStack,
@@ -397,7 +438,7 @@ async fn deliver_ride<S: application::CyclingDeliveryStore + Sync>(
         whoever(taught_by.as_ref())
     );
 
-    record_delivery(recording, programme, next, &cool_down).await?;
+    record_delivery(recording, published, next, &cool_down).await?;
     println!();
 
     // **A total of zero is Peloton's answer, not a failure.** It counts a
@@ -469,7 +510,7 @@ async fn cycling_week(
 /// and a second spelling of it is a second thing that can disagree.
 async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
     recording: &S,
-    programme: &CyclingMesocycle,
+    published: Option<ProgrammeName>,
     next: &application::cycling::NextRide,
     cool_down: &infrastructure::peloton::ClassSummary,
 ) -> Result<(), Failure> {
@@ -507,7 +548,7 @@ async fn record_delivery<S: application::CyclingDeliveryStore + Sync>(
         .record(&DeliveredRide {
             prescribed_for: next.date,
             destination,
-            programme: programme.programme().map(|named| named.name().clone()),
+            programme: published,
             microcycle,
             session: next.session,
             classes: written,

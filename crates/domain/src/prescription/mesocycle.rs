@@ -48,8 +48,8 @@ use crate::{
     prescription::{
         block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
-        sbs::Sbs,
-        schedule::Calendar,
+        sbs::{Sbs, SbsDay, SbsSession, chart},
+        schedule::{Calendar, WeekKind},
     },
     provider::ProvidedFrom,
     schedule::SessionRole,
@@ -184,6 +184,31 @@ impl GymMesocycle {
                 Some(sbs.primary_exercise())
             }
             Self::Progression(Progression::Linear(_)) => None,
+        }
+    }
+
+    /// Whether the essential session of a week of this mesocycle is a test.
+    ///
+    /// **What makes a microcycle a test microcycle, for the gym** (#190): the
+    /// one question the concurrent microcycle asks of each discipline, and asked
+    /// of the session rather than the week, because the week does not always
+    /// know. SBS week 4 places as a climbing week — its first session is a taper
+    /// the chart states in full — and its second is the one-repetition maximum.
+    #[must_use]
+    pub fn tests_in(&self, week: WeekKind) -> bool {
+        match (self, week) {
+            (_, WeekKind::Holding) => false,
+            (Self::Test(_), _) | (_, WeekKind::Test) => true,
+            (Self::Progression(Progression::Linear(_)), WeekKind::Climbing(_)) => false,
+            (Self::Progression(Progression::BlockPeriodisation(block)), WeekKind::Climbing(at)) => {
+                block.kind(at) == Some(WeekKind::Test)
+            }
+            (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(at)) => {
+                matches!(
+                    chart::day(at.as_u32(), SbsSession::Second),
+                    Ok(SbsDay::Test { .. })
+                )
+            }
         }
     }
 

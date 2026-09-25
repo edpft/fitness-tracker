@@ -887,7 +887,9 @@ fn derived_phrase(
 
     match (derived_from, week) {
         (DerivedFrom::Anchor(anchor), WeekKind::Test) => format!("against {anchor}"),
-        (DerivedFrom::Anchor(anchor), WeekKind::Climbing(_)) => format!("anchor {anchor}"),
+        (DerivedFrom::Anchor(anchor), WeekKind::Climbing(_) | WeekKind::Holding) => {
+            format!("anchor {anchor}")
+        }
         // A standalone test has no anchor at all: what it derived from is what
         // the record put it at, and that is the number worth naming.
         //
@@ -955,27 +957,40 @@ pub fn not_committed(due: &crate::committing::Due, why: &str) {
 /// **Only the weeks that moved something**: a completed week is the plan
 /// running as written and says nothing worth a line. Nothing is printed when
 /// every week completed.
-pub fn rescheduled(weeks: &[(jiff::civil::Date, domain::planner::MicrocycleState)]) {
+pub fn rescheduled(
+    weeks: &[(jiff::civil::Date, domain::planner::MicrocycleState)],
+    reruns: &[domain::planner::Rerun],
+) {
     use domain::planner::MicrocycleState;
 
     let mut said = false;
     for (monday, state) in weeks {
-        match state {
-            MicrocycleState::Incomplete => {
+        let holding = reruns
+            .iter()
+            .find(|rerun| rerun.monday == *monday)
+            .and_then(|rerun| rerun.holding);
+        match (state, holding) {
+            (MicrocycleState::Incomplete, _) => {
                 println!(
                     "the microcycle of Monday {monday} was incomplete: no essential session \
                      was performed, so it runs again and everything after it moves back a week"
                 );
             }
-            MicrocycleState::PartiallyCompleted { completed, lost } => {
+            (MicrocycleState::PartiallyCompleted { completed, lost }, Some(_)) => {
                 println!(
                     "the microcycle of Monday {monday} was partially completed: {completed} \
-                     performed its essential session and {lost} did not, so it runs again and \
-                     everything after it moves back a week. {completed} repeats it too, until \
-                     a holding week can be chosen in its place (#190)"
+                     did its test and {lost} did not, so {lost} runs its test again while \
+                     {completed} holds for a week, and everything after it moves back a week"
                 );
             }
-            MicrocycleState::Running | MicrocycleState::Completed => continue,
+            (MicrocycleState::PartiallyCompleted { completed, lost }, None) => {
+                println!(
+                    "the microcycle of Monday {monday} was partially completed: {completed} \
+                     performed its essential session and {lost} did not, so it runs again \
+                     for both and everything after it moves back a week"
+                );
+            }
+            (MicrocycleState::Running | MicrocycleState::Completed, _) => continue,
         }
         said = true;
     }

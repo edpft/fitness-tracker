@@ -89,7 +89,7 @@ pub async fn due(
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     let plans = ReschedulingPlans::new(
         SqlitePlanStore::new(pool.clone(), zone.clone()),
-        Reschedule::new(standing.lost, diary.clone()),
+        Reschedule::new(standing.reruns, diary.clone()),
     );
     let Some(plan) = in_force(&plans, &macrocycle).await? else {
         return Ok(None);
@@ -256,16 +256,6 @@ async fn gym_side(
             };
             match holding {
                 0 => vec![(start, test)],
-                // **A holding week of one is not buildable yet**: the linear
-                // template climbs, and refuses a mesocycle too short to climb
-                // in. That is #190's to relax.
-                1 => {
-                    return Err(Failure::message(
-                        "a gym hold of one week cannot be built yet: the linear template \
-                         needs two weeks (#190)",
-                        exit::USAGE,
-                    ));
-                }
                 weeks => vec![
                     (
                         start,

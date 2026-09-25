@@ -66,7 +66,7 @@ pub async fn reschedule(pool: &SqlitePool, zone: &OperatorZone) -> Result<Resche
     let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
     let standing = standing(pool, zone, DayPart::containing(here.datetime())).await?;
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    Ok(Reschedule::new(standing.lost, diary))
+    Ok(Reschedule::new(standing.reruns, diary))
 }
 
 /// The gym's mesocycles, as the plan now stands.

@@ -115,6 +115,13 @@ impl fmt::Display for WeekIndex {
 pub enum WeekKind {
     Climbing(WeekIndex),
     Test,
+    /// A week this mesocycle holds while the other discipline re-runs its
+    /// test microcycle (#190).
+    ///
+    /// **Not a week of the block**, so it advances no training week: it sits
+    /// after the test this mesocycle completed, and whatever follows it starts
+    /// where it would have started a week earlier.
+    Holding,
 }
 
 impl WeekKind {
@@ -123,13 +130,14 @@ impl WeekKind {
         match self {
             Self::Climbing(_) => "climbing",
             Self::Test => "test",
+            Self::Holding => "holding",
         }
     }
 
     pub const fn index(self) -> Option<WeekIndex> {
         match self {
             Self::Climbing(week) => Some(week),
-            Self::Test => None,
+            Self::Test | Self::Holding => None,
         }
     }
 }
@@ -139,6 +147,7 @@ impl fmt::Display for WeekKind {
         match self {
             Self::Climbing(week) => write!(f, "week {week}"),
             Self::Test => f.write_str("test"),
+            Self::Holding => f.write_str("holding"),
         }
     }
 }
@@ -316,6 +325,14 @@ pub struct Calendar {
     /// the problem; a programme owning a copy of it was.
     week: TrainingWeek,
     zone: TimeZone,
+    /// The first days of the weeks this block holds (#190), ascending.
+    ///
+    /// **Derived when the plan is read, never authored or stored**, as a lost
+    /// week is. Where the other discipline missed the test this block
+    /// completed, this block rides a holding week while that one re-runs its
+    /// test, so that both start the next mesocycle together. A holding week is
+    /// not a training week, so it costs the block a calendar week and no rung.
+    holding: Vec<Date>,
 }
 
 impl Calendar {
@@ -336,6 +353,17 @@ impl Calendar {
         week: TrainingWeek,
         zone: TimeZone,
     ) -> Result<Self, InvalidCalendar> {
+        Self::holding_on(start, duration_weeks, interruptions, &[], week, zone)
+    }
+
+    fn holding_on(
+        start: Date,
+        duration_weeks: u32,
+        interruptions: &[Skip],
+        holding: &[Date],
+        week: TrainingWeek,
+        zone: TimeZone,
+    ) -> Result<Self, InvalidCalendar> {
         if duration_weeks == 0 {
             return Err(InvalidCalendar::NoWeeks);
         }
@@ -350,12 +378,17 @@ impl Calendar {
         skips.sort_unstable();
         skips.dedup();
 
+        let mut holding: Vec<Date> = holding.iter().copied().filter(|day| *day >= start).collect();
+        holding.sort_unstable();
+        holding.dedup();
+
         let calendar = Self {
             start,
             duration_weeks,
             interruptions: Interruptions { skips },
             week,
             zone,
+            holding,
         };
 
         // The span has to be resolved before an interruption can be called
@@ -395,13 +428,40 @@ impl Calendar {
     ///
     /// [`InvalidCalendar`] as [`Self::new`] gives it.
     pub fn moved(&self, start: Date, interruptions: &[Skip]) -> Result<Self, InvalidCalendar> {
-        Self::new(
+        self.moved_holding(start, interruptions, &[])
+    }
+
+    /// As [`Self::moved`], holding the weeks that begin on `holding` (#190).
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidCalendar`] as [`Self::new`] gives it.
+    pub fn moved_holding(
+        &self,
+        start: Date,
+        interruptions: &[Skip],
+        holding: &[Date],
+    ) -> Result<Self, InvalidCalendar> {
+        Self::holding_on(
             start,
             self.duration_weeks,
             interruptions,
+            holding,
             self.week.clone(),
             self.zone.clone(),
         )
+    }
+
+    /// The first days of the weeks this block holds, ascending.
+    pub fn holding(&self) -> &[Date] {
+        &self.holding
+    }
+
+    /// Whether a calendar week from the start is one this block holds.
+    fn holds(&self, week: i64) -> bool {
+        self.holding
+            .iter()
+            .any(|day| self.week_offset(*day) == week)
     }
 
     /// Training weeks, which is what the ladder is laid out over.
@@ -430,8 +490,10 @@ impl Calendar {
             .map(|skip| self.week_offset(skip.last()).max(0))
             .max()
             .unwrap_or(0);
+        let held = i64::try_from(self.holding.len()).unwrap_or(i64::MAX);
         let ceiling = i64::from(self.duration_weeks)
             .saturating_add(reach)
+            .saturating_add(held)
             .saturating_add(1);
 
         let mut training = 0_u32;
@@ -439,7 +501,14 @@ impl Calendar {
             if self.week_runs(week) {
                 training = training.saturating_add(1);
                 if training == self.duration_weeks {
-                    return u32::try_from(week + 1).ok();
+                    // **A hold after the last training week is still the
+                    // block's**: it follows the test this block completed, and
+                    // what comes next starts after it.
+                    let mut last = week;
+                    while self.holds(last.saturating_add(1)) {
+                        last = last.saturating_add(1);
+                    }
+                    return u32::try_from(last + 1).ok();
                 }
             }
         }
@@ -459,7 +528,7 @@ impl Calendar {
     /// gap in it. The old whole-week behaviour falls out as the case where
     /// nothing survives.
     fn week_runs(&self, week: i64) -> bool {
-        week_runs(self.start, week, &self.week, &self.interruptions)
+        !self.holds(week) && week_runs(self.start, week, &self.week, &self.interruptions)
     }
 
     /// How many training weeks fit between two dates.
@@ -552,6 +621,10 @@ impl Calendar {
 
         if let Some(skip) = self.interruptions.covering(date) {
             return Err(NotScheduled::Interrupted { date, skip });
+        }
+
+        if self.holds(offset) {
+            return Ok((WeekKind::Holding, role));
         }
 
         // The training week: calendar weeks elapsed, less the ones the block
