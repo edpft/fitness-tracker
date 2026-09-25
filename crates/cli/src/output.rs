@@ -941,15 +941,12 @@ pub fn committed(due: &crate::committing::Due) {
     println!("committed {}: {}\n", due.concurrent, due.span);
 }
 
-/// A concurrent mesocycle that is due and could not be built.
+/// A concurrent mesocycle the macrocycle chose and that could not be built.
 ///
 /// **Said out loud**, as a delivery that did not happen is: the week still
 /// reports, and the next run tries again.
 pub fn not_committed(due: &crate::committing::Due, why: &str) {
-    println!(
-        "{} is due, {}: not committed: {why}\n",
-        due.concurrent, due.span
-    );
+    println!("not committed {}, {}: {why}\n", due.concurrent, due.span);
 }
 
 /// Every week since the plan began that did not complete, and what that means
