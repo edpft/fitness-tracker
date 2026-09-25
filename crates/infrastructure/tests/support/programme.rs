@@ -413,6 +413,30 @@ pub fn entry_test() -> Result<GymMesocycle, ProgrammeFixtureError> {
     ))
 }
 
+/// The same entry test, in a week of the operator's choosing and his zone.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if the week or the test is invalid.
+pub fn entry_test_from(start: Date) -> Result<GymMesocycle, ProgrammeFixtureError> {
+    let week = domain::prescription::Test::week(start, &[] as &[Skip], weekdays()?, zone()?)
+        .map_err(invalid)?;
+    Ok(GymMesocycle::Test(
+        domain::prescription::Test::new(
+            domain::prescription::Tested::new(
+                PrimaryPattern::KneeDominant,
+                Exercise::Reps(RepsExercise::FrontSquat),
+                domain::measure::RepCount::new(1).map_err(invalid)?,
+            ),
+            fills()?,
+            week,
+            None,
+            Some(anchor()?),
+        )
+        .map_err(invalid)?,
+    ))
+}
+
 /// A set of answers, as the wizard would hand them over.
 ///
 /// **The one place these tests name a template.** What used to be a TOML

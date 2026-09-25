@@ -393,6 +393,7 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
         &riding_week().expect("the fixture week is valid"),
         &quiet_diary()
     ));
+    let next = next.ride().expect("a ride of the programme is due");
     assert_eq!(next.date, date(2026, 10, 21));
     assert_eq!(next.microcycle, 1);
 
@@ -403,6 +404,7 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
         &riding_week().expect("the fixture week is valid"),
         &quiet_diary()
     ));
+    let next = next.ride().expect("a ride of the programme is due");
     assert_eq!(next.date, date(2026, 10, 14));
     assert_eq!(next.microcycle, 4, "the fourth week of the first mesocycle");
 }
@@ -535,6 +537,7 @@ fn a_holding_week_puts_the_power_zone_ride_on_the_wednesday() {
         &week,
         &quiet_diary()
     ));
+    let wednesday = wednesday.ride().expect("a ride of the programme is due");
     assert_eq!(wednesday.date, date(2026, 9, 23));
     assert_eq!(
         wednesday.ride.at().first().called(),
@@ -547,6 +550,7 @@ fn a_holding_week_puts_the_power_zone_ride_on_the_wednesday() {
         &week,
         &quiet_diary()
     ));
+    let sunday = sunday.ride().expect("a ride of the programme is due");
     assert_eq!(sunday.date, date(2026, 9, 27));
     assert_eq!(
         sunday.ride.at().first().called(),
@@ -617,6 +621,7 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
         &riding_week().expect("the fixture week is valid"),
         &diary
     ));
+    let wednesday = wednesday.ride().expect("a ride of the programme is due");
     assert_eq!(wednesday.date, date(2026, 9, 23));
     assert_eq!(
         wednesday.ride.at().first().called(),

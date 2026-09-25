@@ -71,6 +71,7 @@ fn week_of(calendar: &Calendar, on: Date) -> Option<u32> {
     match calendar.place(on).ok()? {
         (WeekKind::Climbing(week), _) => Some(week.as_u32()),
         (WeekKind::Test, _) => Some(calendar.duration_weeks()),
+        (WeekKind::Holding, _) => None,
     }
 }
 

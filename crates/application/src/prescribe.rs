@@ -21,10 +21,10 @@ use domain::{
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
-        GatingTopSet, GenerationParameters, GymMesocycle, Linear, LoadSteps, Position,
-        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay, SbsSession, SlotId,
-        SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
+        GatingTopSet, GenerationParameters, GymMesocycle, Ladder, Linear, LoadSteps, Opening,
+        Position, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
+        PrescribedWorkout, PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay,
+        SbsSession, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
@@ -396,9 +396,14 @@ where
         // cycle that inherits has no authored number, so what it opens from is
         // the predecessor's measurement — and that is what the prescription
         // records it as descending from.
-        let opening = match programme.primary_exercise() {
-            Exercise::Reps(primary) => self.anchor_in_force(primary, date, &consulted).await?,
-            Exercise::Duration(_) | Exercise::Distance(_) => None,
+        //
+        // **A holding week opens from the test its own mesocycle just did**
+        // (#190, decision 0009), which is the one measurement nothing else
+        // reads while the mesocycle is still in force.
+        let opening = match (week, programme.primary_exercise()) {
+            (WeekKind::Holding, _) => self.left_behind(&plan, &programme, &consulted).await?,
+            (_, Exercise::Reps(primary)) => self.anchor_in_force(primary, date, &consulted).await?,
+            (_, Exercise::Duration(_) | Exercise::Distance(_)) => None,
         };
 
         let mut items = Vec::new();
@@ -430,7 +435,7 @@ where
             date,
             role,
             recorded,
-            derived_from(&plan, &programme, inheritance, opening)?,
+            derived_from(&plan, &programme, week, inheritance, opening)?,
             parameters,
             parameters_at,
             programme_id,
@@ -664,7 +669,9 @@ where
                     ))
                 }
                 GymMesocycle::Test(test) => match test.primary_exercise() {
-                    Exercise::Reps(primary) => self.measured_in(primary, span).await?,
+                    Exercise::Reps(primary) => {
+                        self.measured_in(primary, measuring(mesocycle)).await?
+                    }
                     Exercise::Duration(_) | Exercise::Distance(_) => None,
                 },
                 GymMesocycle::Progression(
@@ -1155,6 +1162,9 @@ const BLOCK_ENTRY_TEST_ROLE: SessionRole = SessionRole::new(Relative::Higher, Re
 /// a test week on both its sessions: the week is what it is, and which session
 /// is the attempt is the role's business.
 fn week_of(programme: &GymMesocycle, placed: WeekKind) -> WeekKind {
+    if placed == WeekKind::Holding {
+        return placed;
+    }
     match programme {
         GymMesocycle::Test(_) => WeekKind::Test,
         // A linear programme's weeks are all climbing weeks, and an SBS cycle's
@@ -1183,9 +1193,19 @@ fn week_of(programme: &GymMesocycle, placed: WeekKind) -> WeekKind {
 fn derived_from(
     plan: &PlanName,
     programme: &GymMesocycle,
+    week: WeekKind,
     inheritance: Inheritance,
     opening: Option<Anchor>,
 ) -> Result<DerivedFrom, PrescriptionError> {
+    // A holding week is the linear template whatever mesocycle it follows, so
+    // it descends from the anchor it opened from as any progression does.
+    if week == WeekKind::Holding {
+        return opening.map(DerivedFrom::Anchor).ok_or_else(|| {
+            PrescriptionError::NoInheritedMaximum {
+                start: programme.calendar().start(),
+            }
+        });
+    }
     match programme {
         // **Resolved, because there is nothing else it could be.** No programme
         // states a maximum any more: every one of them reads the record and the
@@ -1305,6 +1325,7 @@ fn primary_slot_item(
     };
 
     let plan = match programme {
+        _ if week == WeekKind::Holding => holding_load(consulted, role, standing.opening, steps),
         GymMesocycle::Progression(Progression::Linear(linear)) => {
             linear_load(linear, consulted, role, week, standing, steps)
         }
@@ -1388,6 +1409,62 @@ fn linear_load(
             reps: consulted.programming.top_set_reps.get(role).as_rep_count(),
         })
     })
+}
+
+/// A holding week's load: one week of the linear template, opened from the test
+/// the mesocycle just did (#190).
+///
+/// **Decision 0009's opening, run for one week.** A test that failed a load
+/// opens below it by the entry drop; one that failed nothing opens one climb
+/// above what it completed. The lighter session is its usual share of the
+/// heavier one.
+fn holding_load(
+    consulted: &Consulted<'_>,
+    role: SessionRole,
+    opening: Option<Anchor>,
+    steps: &LoadSteps,
+) -> Result<PrimaryLoad, UnderivableReason> {
+    let Some(maximum) = opening else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let Ok(ladder) = Ladder::new(
+        Opening {
+            maximum,
+            drop: consulted.parameters.entry_drop,
+        },
+        consulted.parameters.ladder_climb_per_week,
+        1,
+        steps,
+    ) else {
+        return Err(UnderivableReason::NoLadder);
+    };
+    let week = domain::prescription::WeekIndex::FIRST;
+    let load = match role.intensity() {
+        Relative::Higher => ladder.heavy_top_set(week, steps),
+        Relative::Lower => ladder.light_top_set(week, steps, consulted.parameters.light_of_heavy),
+    };
+    load.map_or(Err(UnderivableReason::NoLadder), |load| {
+        Ok(PrimaryLoad::TopSet {
+            load,
+            reps: consulted.programming.top_set_reps.get(role).as_rep_count(),
+        })
+    })
+}
+
+/// The part of a mesocycle's span it measured in: everything before the first
+/// week it holds.
+///
+/// **A holding week measures nothing.** Its heavy single is a rung of a linear
+/// climb, and letting it answer for the test it follows would move the next
+/// mesocycle's opening off a set nobody took as a maximum.
+fn measuring(mesocycle: &GymMesocycle) -> Span {
+    let span = mesocycle.span();
+    mesocycle
+        .calendar()
+        .holding()
+        .first()
+        .and_then(|first| u32::try_from((*first - span.start()).get_days() / 7).ok())
+        .map_or(span, |weeks| Span::new(span.start(), weeks))
 }
 
 /// A block's week, as its own phase plan states it.

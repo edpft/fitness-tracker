@@ -171,10 +171,16 @@ impl Ladder {
     ///
     /// # Errors
     ///
-    /// [`InvalidLadder::NoClimbingWeeks`] if the block is too short to climb at
-    /// all, and [`InvalidLadder::DoesNotRise`] if the climb is nothing.
+    /// [`InvalidLadder::NoClimbingWeeks`] for a block of no weeks, and
+    /// [`InvalidLadder::DoesNotRise`] if the climb is nothing.
+    ///
+    /// **One week is a block** (#190). It opens and does not get to climb,
+    /// which is exactly the holding week a discipline rides while the other
+    /// re-runs its test: the linear template, opened from the test it just did.
+    /// This refused anything under two until then, from when a block's last
+    /// week was its test and one week would have been nothing but the test.
     pub const fn rises(climb_per_week: Kg, duration_weeks: u32) -> Result<(), InvalidLadder> {
-        if duration_weeks < 2 {
+        if duration_weeks < 1 {
             return Err(InvalidLadder::NoClimbingWeeks);
         }
         if climb_per_week.as_grams() == 0 {

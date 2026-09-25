@@ -140,6 +140,7 @@ fn notes(session: &Deliverable) -> String {
     let week = match session.workout.week() {
         WeekKind::Climbing(index) => format!("week {}", index.as_u32()),
         WeekKind::Test => "test".to_owned(),
+        WeekKind::Holding => "holding".to_owned(),
     };
     format!(
         "{} · {} · {}",

@@ -22,7 +22,7 @@
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
-    planner,
+    planner::{self, Rerun},
     prescription::{GymMesocycle, MesocycleId},
     schedule::Diary,
 };
@@ -30,19 +30,19 @@ use jiff::civil::Date;
 
 use crate::{CyclingMesocycleStore, MesocycleStore, PlanStore, StoreError};
 
-/// Which weeks were lost, and the diary a moved mesocycle is read against.
+/// Which weeks run again, and the diary a moved mesocycle is read against.
 ///
 /// What [`crate::microcycle::Standing`] hands every other reader.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reschedule {
-    lost: Vec<Date>,
+    reruns: Vec<Rerun>,
     diary: Diary,
 }
 
 impl Reschedule {
     #[must_use]
-    pub const fn new(lost: Vec<Date>, diary: Diary) -> Self {
-        Self { lost, diary }
+    pub const fn new(reruns: Vec<Rerun>, diary: Diary) -> Self {
+        Self { reruns, diary }
     }
 
     /// Nothing lost: every plan reads exactly as authored.
@@ -51,14 +51,14 @@ impl Reschedule {
         Self::default()
     }
 
-    /// The Mondays of the weeks re-run.
+    /// The weeks run again.
     #[must_use]
-    pub fn lost(&self) -> &[Date] {
-        &self.lost
+    pub fn reruns(&self) -> &[Rerun] {
+        &self.reruns
     }
 
     fn apply(&self, plan: &Plan) -> Result<Plan, StoreError> {
-        planner::rescheduled(plan, &self.lost, &self.diary).map_err(|error| StoreError::Corrupt {
+        planner::rescheduled(plan, &self.reruns, &self.diary).map_err(|error| StoreError::Corrupt {
             detail: format!("{} will not reschedule: {error}", plan.name()),
         })
     }

@@ -14,7 +14,9 @@
 
 use domain::{
     plan::{Plan, Span},
-    planner::{self, Filled, MicrocycleState, Placed, Recorded, SessionState, Unreschedulable},
+    planner::{
+        self, Filled, MicrocycleState, Placed, Recorded, Rerun, SessionState, Unreschedulable,
+    },
     schedule::{
         DayPart, Diary, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted,
     },
@@ -38,6 +40,8 @@ pub struct Session {
     /// still the operator's time and still reported — but it is owed nothing,
     /// so the microcycle machine does not read it.
     pub programmed: bool,
+    /// Whether the plan has a test in the slot: the 1RM test or the FTP test.
+    pub test: bool,
     pub state: SessionState,
 }
 
@@ -49,12 +53,12 @@ pub struct Standing {
     /// Each earlier week since the plan began, and how its concurrent
     /// microcycle ended.
     pub weeks: Vec<(Date, MicrocycleState)>,
-    /// The Mondays of the weeks that were lost, and so re-run.
+    /// The weeks that run again, and which discipline holds instead.
     ///
     /// What every other reader of the plan needs to see it as it now stands:
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
-    pub lost: Vec<Date>,
+    pub reruns: Vec<Rerun>,
     /// The days of the mesocycle running now, both disciplines' halves
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
@@ -152,22 +156,20 @@ where
         let mut monday = authored.window().span().start();
         monday = planner::commencing(monday);
 
-        let mut lost: Vec<Date> = Vec::new();
+        let mut reruns: Vec<Rerun> = Vec::new();
         let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
         while monday < this_week {
-            let plan = rescheduled(&authored, &lost, &diary)?;
+            let plan = rescheduled(&authored, &reruns, &diary)?;
             let sunday = monday
                 .checked_add(jiff::Span::new().days(6))
                 .unwrap_or(monday);
             let sessions = self
                 .week_of(&plan, &diary, monday, now, sunday.min(now.date))
                 .await?;
-            let state = planner::microcycle_state(&placed(&sessions));
-            if matches!(
-                state,
-                MicrocycleState::Incomplete | MicrocycleState::PartiallyCompleted { .. }
-            ) {
-                lost.push(monday);
+            let placed = placed(&sessions);
+            let state = planner::microcycle_state(&placed);
+            if let Some(rerun) = planner::rerun(monday, state, &placed) {
+                reruns.push(rerun);
             }
             weeks.push((monday, state));
             let Ok(next) = monday.checked_add(jiff::Span::new().weeks(1)) else {
@@ -176,7 +178,7 @@ where
             monday = next;
         }
 
-        let plan = rescheduled(&authored, &lost, &diary)?;
+        let plan = rescheduled(&authored, &reruns, &diary)?;
         let sessions = self.week_of(&plan, &diary, now.date, now, now.date).await?;
         let mesocycle = plan
             .mesocycle_on(now.date)
@@ -184,7 +186,7 @@ where
         Ok(Standing {
             sessions,
             weeks,
-            lost,
+            reruns,
             mesocycle,
         })
     }
@@ -238,6 +240,7 @@ where
                 slot,
                 number: planned.number,
                 programmed: planned.session.is_ok(),
+                test: planned.session.as_ref().is_ok_and(Filled::is_test),
                 state: planner::state_of(
                     DayPart::new(slot.date, slot.slot.part),
                     closes,
@@ -365,7 +368,7 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
             .iter()
             .any(|venue| ridden.at.contains(venue))
             .then(|| ride.role()),
-        Ok(Filled::Gym { .. }) | Err(_) => None,
+        Ok(Filled::Gym { .. } | Filled::CyclingHolding { .. }) | Err(_) => None,
     })
 }
 
@@ -374,9 +377,11 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
 /// **A plan that authored should always reschedule** — moving a mesocycle later
 /// and skipping a week in it only ever give its calendar room — so a refusal is
 /// something in the store this program could not have meant.
-fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, StoreError> {
-    planner::rescheduled(plan, lost, diary).map_err(|error: Unreschedulable| StoreError::Corrupt {
-        detail: format!("{} will not reschedule: {error}", plan.name()),
+fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, StoreError> {
+    planner::rescheduled(plan, reruns, diary).map_err(|error: Unreschedulable| {
+        StoreError::Corrupt {
+            detail: format!("{} will not reschedule: {error}", plan.name()),
+        }
     })
 }
 
@@ -389,6 +394,7 @@ fn placed(sessions: &[Session]) -> Vec<Placed> {
             discipline: session.slot.discipline,
             role: session.slot.role,
             state: session.state,
+            test: session.test,
         })
         .collect()
 }

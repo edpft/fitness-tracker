@@ -288,3 +288,39 @@ pub async fn weeks<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
         }
     })
 }
+
+/// The ride a day of a holding week asks for, chosen now (#190).
+///
+/// **One ride, not the week.** A holding week that follows a test is worked out
+/// on every run rather than written to the plan, so its rides are chosen as
+/// each is delivered: the newest class of the day's role not yet ridden. The
+/// harder ride is the week's first session and the easier its second, as in
+/// [`microcycle`].
+///
+/// # Errors
+///
+/// [`NoHoldingRide`] as [`choose`] gives it, or where the chosen class will not
+/// read as a session.
+pub async fn ride<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
+    catalogue: &C,
+    record: &R,
+    day: crate::cycling::HoldingDay,
+) -> Result<crate::cycling::NextRide, NoHoldingRide> {
+    let venue = choose(catalogue, record, day.role).await?;
+    let session = catalogue.session_at(&venue).await?;
+    let position = match day.role.intensity() {
+        domain::schedule::Relative::Higher => 1,
+        domain::schedule::Relative::Lower => 2,
+    };
+    let session_position =
+        SessionPosition::new(position).map_err(|_| NoHoldingRide::Unbuildable {
+            detail: "a session position counting from zero".to_owned(),
+        })?;
+    Ok(crate::cycling::NextRide {
+        programme: day.programme,
+        date: day.date,
+        microcycle: day.week,
+        session: session_position,
+        ride: PlannedRide::assembled(session, NonEmpty::of(venue, Vec::new()), day.role),
+    })
+}

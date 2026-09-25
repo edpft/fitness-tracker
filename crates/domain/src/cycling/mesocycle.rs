@@ -477,6 +477,14 @@ pub struct CyclingMesocycle {
     /// moves with it — which is what a gym calendar does with a week it skips,
     /// and this is the same idea for a mesocycle with no calendar of its own.
     lost: Vec<Date>,
+    /// The Mondays of the weeks this mesocycle holds, ascending (#190).
+    ///
+    /// **Derived when the plan is read, never authored or stored**, as a lost
+    /// week is. Where the gym missed the test this mesocycle's rider completed,
+    /// the week after it is a holding microcycle while the gym re-runs its test,
+    /// so the two start the next mesocycle together. Its rides are chosen from
+    /// the catalogue when each one is delivered, so nothing here names them.
+    holding: Vec<Date>,
 }
 
 impl CyclingMesocycle {
@@ -542,6 +550,7 @@ impl CyclingMesocycle {
             start,
             microcycles,
             lost: Vec::new(),
+            holding: Vec::new(),
         })
     }
 
@@ -594,6 +603,7 @@ impl CyclingMesocycle {
             // A mesocycle that has moved begins afresh: a week it lost was lost
             // where it used to be, and that week is not in the moved span.
             lost: Vec::new(),
+            holding: Vec::new(),
         }
     }
 
@@ -622,10 +632,47 @@ impl CyclingMesocycle {
         &self.lost
     }
 
-    /// Calendar weeks occupied: every microcycle, and every week lost.
+    /// The same mesocycle, holding the week beginning `monday` (#190).
+    ///
+    /// The span grows by one and every microcycle after the hold is ridden a
+    /// week later. **The week straight after the last one counts as inside**:
+    /// a hold follows the test microcycle its rider completed, and that is
+    /// usually the last. A Monday anywhere else, or already held, changes
+    /// nothing.
+    #[must_use]
+    pub fn holding(&self, monday: Date) -> Self {
+        let mut holding = self.holding.clone();
+        let inside = monday > self.start && monday <= self.end();
+        if inside && !holding.contains(&monday) {
+            holding.push(monday);
+            holding.sort_unstable();
+        }
+        Self {
+            holding,
+            ..self.clone()
+        }
+    }
+
+    /// The Mondays of the weeks this mesocycle holds.
+    #[must_use]
+    pub fn held(&self) -> &[Date] {
+        &self.holding
+    }
+
+    /// Whether the week a date falls in is one this mesocycle holds.
+    #[must_use]
+    pub fn holds_on(&self, date: Date) -> bool {
+        self.monday_of(date)
+            .is_some_and(|monday| self.holding.contains(&monday))
+    }
+
+    /// Calendar weeks occupied: every microcycle, every week lost, and every
+    /// week held.
     #[must_use]
     pub const fn calendar_weeks(&self) -> usize {
-        self.duration_weeks().saturating_add(self.lost.len())
+        self.duration_weeks()
+            .saturating_add(self.lost.len())
+            .saturating_add(self.holding.len())
     }
 
     /// The day after the last one this mesocycle occupies.
@@ -663,23 +710,37 @@ impl CyclingMesocycle {
     /// **A lost week answers `None`**, and every week after it one microcycle
     /// earlier than its calendar position would say (#177): the microcycle it
     /// held was not completed, so it is the one run next.
+    ///
+    /// **A held week answers `None` too** (#190), and moves every week after
+    /// it back one in the same way: it rides no microcycle of this programme.
     #[must_use]
     pub fn microcycle_of(&self, date: Date) -> Option<usize> {
+        let monday = self.monday_of(date)?;
+        if self.lost.contains(&monday) || self.holding.contains(&monday) {
+            return None;
+        }
+        let days = monday.since(self.start).ok()?.get_days();
+        let week = usize::try_from(days / 7).ok()?;
+        let before = self
+            .lost
+            .iter()
+            .chain(self.holding.iter())
+            .filter(|skipped| **skipped < monday)
+            .count();
+        let number = week.checked_sub(before)?.checked_add(1)?;
+        (number <= self.duration_weeks()).then_some(number)
+    }
+
+    /// The first day of the programme week a date falls in, counted from the
+    /// start. `None` before the start.
+    fn monday_of(&self, date: Date) -> Option<Date> {
         if date < self.start {
             return None;
         }
         let days = date.since(self.start).ok()?.get_days();
-        let week = usize::try_from(days / 7).ok()?;
-        let monday = self
-            .start
-            .checked_add(jiff::Span::new().weeks(i64::try_from(week).ok()?))
-            .ok()?;
-        if self.lost.contains(&monday) {
-            return None;
-        }
-        let before = self.lost.iter().filter(|lost| **lost < monday).count();
-        let number = week.checked_sub(before)?.checked_add(1)?;
-        (number <= self.duration_weeks()).then_some(number)
+        self.start
+            .checked_add(jiff::Span::new().weeks(i64::from(days / 7)))
+            .ok()
     }
 
     /// What is ridden on a date: which microcycle, which session, and the ride.
@@ -704,16 +765,18 @@ impl CyclingMesocycle {
         Some((number, position, ride))
     }
 
-    /// The first date at or after `from` that this programme rides.
+    /// The first date at or after `from` that this programme rides, or holds.
     ///
     /// Looks a week ahead and no further: the week names weekdays, so if none
-    /// of the next seven days rides, none ever will.
+    /// of the next seven days rides, none ever will. **A held day counts**: it
+    /// is a day this mesocycle has a ride for, chosen when it is delivered.
     #[must_use]
     pub fn next_riding_day(&self, from: Date, week: &TrainingWeek) -> Option<Date> {
         let from = from.max(self.start);
         (0..7).find_map(|offset| {
             let date = from.checked_add(jiff::Span::new().days(offset)).ok()?;
-            self.on(date, week).map(|_| date)
+            let held = self.holds_on(date) && week.role_on(date.weekday()).is_some();
+            (held || self.on(date, week).is_some()).then_some(date)
         })
     }
 }

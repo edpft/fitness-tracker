@@ -664,3 +664,126 @@ fn the_published_taper_does_not_defer_to_a_predecessor() {
         "the chart's share of the target, not where the ladder before it stands"
     );
 }
+
+// ---------------------------------------------------------------------------
+// A holding week after a test the gym completed (#190).
+
+type HoldingPrescriber = Prescribing<
+    SqliteExerciseHistory,
+    application::reschedule::Rescheduled<SqliteGymMesocycleStore, SqlitePlanStore>,
+    SqliteGenerationParameterStore,
+    SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
+>;
+
+/// A test in the week of 29 June, which holds the corpus's one failed attempt,
+/// and the week after it held because the bike missed its own test.
+async fn held_after_the_test()
+-> Result<(HoldingPrescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
+    use application::DiaryStore as _;
+
+    let (parameters, directory, pool) = landed_store().await?;
+    let answers = programme::authored(
+        Date::constant(2026, 6, 29),
+        Shape::Test {
+            reps: domain::measure::RepCount::new(1)?,
+            provided: None,
+            asserted: None,
+        },
+    )?;
+    let test = programme::authoring(answers, &[])??;
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool.clone()),
+    )
+    .author(&programme::named_plan("held", vec![test])?, &parameters)
+    .await?;
+
+    let diary = infrastructure::SqliteDiaryStore::new(pool.clone())
+        .diary()
+        .await?;
+    let reschedule = application::reschedule::Reschedule::new(
+        vec![domain::planner::Rerun {
+            monday: Date::constant(2026, 6, 29),
+            holding: Some(domain::schedule::Discipline::Gym),
+        }],
+        diary,
+    );
+
+    Ok((
+        Prescribing::new(PrescriptionPorts {
+            history: SqliteExerciseHistory::new(pool.clone()),
+            programmes: application::reschedule::Rescheduled::new(
+                SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+                SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                reschedule,
+            ),
+            parameters: SqliteGenerationParameterStore::new(pool.clone()),
+            prescriptions: SqlitePrescribedWorkoutStore::new(
+                pool.clone(),
+                "Europe/London".to_owned(),
+            ),
+            lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
+        }),
+        directory,
+    ))
+}
+
+/// The primary's first working set: the top set, for a linear session.
+fn top_set(workout: &domain::prescription::PrescribedWorkout) -> Option<domain::gym::Load> {
+    let Some(PrescribedItem::Exercise { exercise, .. }) =
+        workout.shape().item_for(SlotId::KneeDominant)
+    else {
+        return None;
+    };
+    let domain::prescription::PrescribedExercise::ForReps { sets, .. } = exercise else {
+        return None;
+    };
+    sets.iter()
+        .find(|set| !set.warmup)
+        .and_then(|set| set.prescription.load())
+}
+
+/// **The holding week is one week of the linear template, opened from the test
+/// just done** (decision 0009). The test of 3 July failed a load, so the week
+/// opens below it by the entry drop, and the anchor it descends from is the
+/// test's own result rather than anything asserted.
+#[test]
+fn a_holding_week_opens_the_linear_template_from_the_test_just_done() {
+    let (prescriber, _directory) = match corpus::block_on(held_after_the_test()) {
+        Ok(Ok(ready)) => ready,
+        Ok(Err(error)) => panic!("the corpus lands, derives and authors: {error}"),
+        Err(error) => panic!("a runtime is available: {error}"),
+    };
+    let heavy = run!(prescriber.prescribe(Date::constant(2026, 7, 10)));
+    let light = run!(prescriber.prescribe(Date::constant(2026, 7, 6)));
+
+    assert_eq!(heavy.workout.week(), WeekKind::Holding);
+    assert_eq!(light.workout.week(), WeekKind::Holding);
+
+    let DerivedFrom::Anchor(anchor) = heavy.workout.derived_from() else {
+        panic!("a holding week descends from an anchor, not a target")
+    };
+    assert_eq!(anchor.provenance(), AnchorProvenance::Tested);
+    let failed = anchor.failed().expect("the test of 3 July failed a load");
+
+    let parameters = programme::parameters().expect("the fixture parameters are valid");
+    let steps = parameters
+        .scales
+        .for_exercise(domain::gym::Exercise::Reps(
+            domain::gym::RepsExercise::FrontSquat,
+        ))
+        .expect("the front squat has a scale");
+    let opening = steps.quantise_loaded(parameters.entry_drop.applied_to(failed));
+
+    assert_eq!(
+        top_set(&heavy.workout),
+        Some(domain::gym::Load::Absolute(opening)),
+        "the heavy single opens below the failed load by the entry drop"
+    );
+    let lighter = top_set(&light.workout);
+    assert!(
+        matches!(lighter, Some(domain::gym::Load::Absolute(load)) if load < opening),
+        "the light session is a share of the heavy one: {lighter:?}"
+    );
+}

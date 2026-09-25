@@ -558,6 +558,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 
         let week = match row.week_kind.as_str() {
             "test" => WeekKind::Test,
+            "holding" => WeekKind::Holding,
             "climbing" => {
                 let index = row
                     .week_index

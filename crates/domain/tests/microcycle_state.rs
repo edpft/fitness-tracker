@@ -7,9 +7,13 @@
 //! bike's; it is the week, and what re-runs is decided across both.
 
 use domain::{
-    planner::{ESSENTIAL, MicrocycleState, Owed, Placed, SessionState, microcycle_state, owed_by},
+    planner::{
+        ESSENTIAL, MicrocycleState, Owed, Placed, Rerun, SessionState, microcycle_state, owed_by,
+        rerun,
+    },
     schedule::{AbsenceKind, Discipline, Relative, SessionRole},
 };
+use jiff::civil::{Date, date};
 
 /// The easier, longer session of the week: never the essential one.
 const fn supporting() -> SessionRole {
@@ -21,8 +25,22 @@ const fn session(discipline: Discipline, role: SessionRole, state: SessionState)
         discipline,
         role,
         state,
+        test: false,
     }
 }
+
+/// The essential session of a test microcycle: the 1RM test or the FTP test.
+const fn test(discipline: Discipline, state: SessionState) -> Placed {
+    Placed {
+        discipline,
+        role: ESSENTIAL,
+        state,
+        test: true,
+    }
+}
+
+/// The Monday of the entry test week the operator re-ran.
+const MONDAY: Date = date(2026, 9, 21);
 
 /// **The operator's week of 14 September 2026.** The light gym session went to
 /// Rome, the entry test to illness; the Wednesday ride was the *easier* one, so
@@ -166,4 +184,102 @@ fn every_way_of_not_performing_the_essential_session_loses_it() {
         let week = [session(Discipline::Gym, ESSENTIAL, state)];
         assert_eq!(owed_by(&week, Discipline::Gym), Owed::Lost, "{state}");
     }
+}
+
+/// **The FTP test ridden and the 1RM test missed** (#190). The gym re-runs its
+/// test week; cycling holds, because it would otherwise have to ride the test
+/// again.
+#[test]
+fn a_test_completed_holds_while_the_test_missed_re_runs() {
+    let week = [
+        test(
+            Discipline::Gym,
+            SessionState::NotPerformed {
+                absence: Some(AbsenceKind::Illness),
+            },
+        ),
+        test(Discipline::Cycling, SessionState::Performed),
+    ];
+
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&week), &week),
+        Some(Rerun {
+            monday: MONDAY,
+            holding: Some(Discipline::Cycling),
+        })
+    );
+}
+
+/// **And the other way round**: the 1RM test done and the FTP test missed.
+#[test]
+fn the_gym_holds_when_its_test_was_done_and_the_ride_was_not() {
+    let week = [
+        test(Discipline::Gym, SessionState::Performed),
+        test(Discipline::Cycling, SessionState::NotPrescribed),
+    ];
+
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&week), &week),
+        Some(Rerun {
+            monday: MONDAY,
+            holding: Some(Discipline::Gym),
+        })
+    );
+}
+
+/// **A partially completed week that tested nothing re-runs for both.** The
+/// operator, 2026-09-25: *"if the partially completed microcycle is a non-test
+/// microcycle, we should just repeat the microcycle."*
+#[test]
+fn a_partially_completed_week_of_no_test_re_runs_for_both() {
+    let week = [
+        session(Discipline::Gym, ESSENTIAL, SessionState::Performed),
+        session(
+            Discipline::Cycling,
+            ESSENTIAL,
+            SessionState::NotPerformed { absence: None },
+        ),
+    ];
+
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&week), &week),
+        Some(Rerun {
+            monday: MONDAY,
+            holding: None,
+        })
+    );
+}
+
+/// **The discipline that holds is the one that completed its test**, not any
+/// discipline that had one: a test missed is re-run, never held.
+#[test]
+fn a_test_missed_is_never_held() {
+    let week = [
+        test(Discipline::Gym, SessionState::NotPrescribed),
+        session(Discipline::Cycling, ESSENTIAL, SessionState::Performed),
+    ];
+
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&week), &week),
+        Some(Rerun {
+            monday: MONDAY,
+            holding: None,
+        })
+    );
+}
+
+/// A week that completed, or has not finished, runs nothing again.
+#[test]
+fn a_completed_or_running_week_runs_nothing_again() {
+    let done = [
+        test(Discipline::Gym, SessionState::Performed),
+        test(Discipline::Cycling, SessionState::Performed),
+    ];
+    let running = [
+        test(Discipline::Gym, SessionState::Performed),
+        test(Discipline::Cycling, SessionState::Prescribed),
+    ];
+
+    assert_eq!(rerun(MONDAY, microcycle_state(&done), &done), None);
+    assert_eq!(rerun(MONDAY, microcycle_state(&running), &running), None);
 }
