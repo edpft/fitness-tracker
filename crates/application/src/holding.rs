@@ -121,11 +121,39 @@ pub async fn both<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
     higher: SessionRole,
     lower: SessionRole,
 ) -> Result<(RideVenue, RideVenue), NoHoldingRide> {
-    let first = choose(catalogue, record, higher).await?;
+    besides(catalogue, record, higher, lower, &BTreeSet::new()).await
+}
+
+/// Both rides of a holding week, neither of them one already `taken`.
+///
+/// **What lets a hold run longer than a week** (#222): each week's classes are
+/// taken before the next week's are chosen, so two weeks of one hold never
+/// prescribe the same class.
+async fn besides<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
+    catalogue: &C,
+    record: &R,
+    higher: SessionRole,
+    lower: SessionRole,
+    taken: &BTreeSet<RideVenue>,
+) -> Result<(RideVenue, RideVenue), NoHoldingRide> {
+    let offered = catalogue.candidates(higher).await?;
+    if offered.is_empty() {
+        return Err(NoHoldingRide::NoneOffered { role: higher });
+    }
+    let ridden = record.ridden().await?;
+    let considered = offered.len();
+    let first = offered
+        .into_iter()
+        .find(|candidate| !ridden.contains(candidate) && !taken.contains(candidate))
+        .ok_or(NoHoldingRide::AllRidden {
+            role: higher,
+            considered,
+        })?;
     // The one already chosen is not available to the other role, whatever the
     // catalogue says. Cheaper than a second rule about series being disjoint,
     // and it holds if they ever stop being.
-    let taken: BTreeSet<RideVenue> = std::iter::once(first.clone()).collect();
+    let mut taken = taken.clone();
+    taken.insert(first.clone());
     let offered = catalogue.candidates(lower).await?;
     if offered.is_empty() {
         return Err(NoHoldingRide::NoneOffered { role: lower });
@@ -165,7 +193,17 @@ pub async fn microcycle<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
     higher: SessionRole,
     lower: SessionRole,
 ) -> Result<CyclingMicrocycle, NoHoldingRide> {
-    let (harder, easier) = both(catalogue, record, higher, lower).await?;
+    microcycle_besides(catalogue, record, higher, lower, &BTreeSet::new()).await
+}
+
+async fn microcycle_besides<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
+    catalogue: &C,
+    record: &R,
+    higher: SessionRole,
+    lower: SessionRole,
+    taken: &BTreeSet<RideVenue>,
+) -> Result<CyclingMicrocycle, NoHoldingRide> {
+    let (harder, easier) = besides(catalogue, record, higher, lower, taken).await?;
 
     let mut rides = BTreeMap::new();
     for (position, venue, role) in [(1_u8, &harder, higher), (2, &easier, lower)] {
@@ -210,5 +248,43 @@ pub async fn mesocycle<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
     )
     .map_err(|error| NoHoldingRide::Unbuildable {
         detail: error.to_string(),
+    })
+}
+
+/// Several holding microcycles as one mesocycle: the holding weeks of a hold
+/// (#222), before the test week that ends it.
+///
+/// **No class twice.** Each week's rides are the newest not yet ridden and not
+/// already taken by an earlier week of this hold.
+///
+/// # Errors
+///
+/// [`NoHoldingRide`] as [`microcycle`] gives it, for whichever week fails first.
+pub async fn weeks<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
+    catalogue: &C,
+    record: &R,
+    start: Date,
+    count: std::num::NonZeroU32,
+    higher: SessionRole,
+    lower: SessionRole,
+) -> Result<CyclingMesocycle, NoHoldingRide> {
+    let mut taken = BTreeSet::new();
+    let mut held = Vec::new();
+    for _ in 0..count.get() {
+        let week = microcycle_besides(catalogue, record, higher, lower, &taken).await?;
+        taken.extend(
+            week.rides()
+                .values()
+                .flat_map(|ride| ride.at().iter().cloned().collect::<Vec<_>>()),
+        );
+        held.push(week);
+    }
+    let weeks = NonEmpty::new(held).map_err(|_| NoHoldingRide::Unbuildable {
+        detail: "a hold of no weeks".to_owned(),
+    })?;
+    CyclingMesocycle::new(CyclingProvenance::Assembled, start, weeks).map_err(|error| {
+        NoHoldingRide::Unbuildable {
+            detail: error.to_string(),
+        }
     })
 }

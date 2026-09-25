@@ -31,8 +31,8 @@ use domain::{
 use infrastructure::{SqliteDiaryStore, connect};
 
 use crate::{
-    Failure, catalogue, config, cycling, exit, gym, holidays, output, plan, rescheduling, wiring,
-    wiring::Command,
+    Failure, catalogue, committing, config, cycling, exit, gym, holidays, output, plan,
+    rescheduling, wiring, wiring::Command,
 };
 
 /// Collect everything, report the microcycle, and deliver what is next.
@@ -69,8 +69,16 @@ pub async fn next(
     }
     println!();
 
-    // 2. Where the plan stands: every week since it began, and this one.
+    // 2. The next concurrent mesocycle, if the one before it has ended (#222).
     let pool = connect(database).await?;
+    if let Some(due) = committing::due(&pool, zone, now).await? {
+        match committing::commit(&pool, zone, &due, credentials).await {
+            Ok(()) => output::committed(&due),
+            Err(failure) => output::not_committed(&due, &failure.message),
+        }
+    }
+
+    // 3. Where the plan stands: every week since it began, and this one.
     let standing = rescheduling::standing(&pool, zone, now).await?;
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     pool.close().await;
@@ -102,7 +110,7 @@ pub async fn next(
     output::microcycle(sessions);
     println!();
 
-    // 3. The first still to be prescribed, which is the one delivered.
+    // 4. The first still to be prescribed, which is the one delivered.
     let Some(next) = sessions
         .iter()
         .find(|session| session.state == SessionState::ToBePrescribed)

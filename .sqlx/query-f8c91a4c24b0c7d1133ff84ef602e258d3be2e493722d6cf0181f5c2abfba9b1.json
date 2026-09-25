@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            INSERT INTO plan (name, authored_at)\n            VALUES (?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "query": "\n            INSERT INTO plan (name, authored_at, chain)\n            VALUES (?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "ac8a97646a3a05a73321642a3a0516e6864d7ecb2404e6d3e212f81a31250160"
+  "hash": "f8c91a4c24b0c7d1133ff84ef602e258d3be2e493722d6cf0181f5c2abfba9b1"
 }

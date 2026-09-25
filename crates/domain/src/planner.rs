@@ -639,12 +639,11 @@ pub fn rescheduled(plan: &Plan, lost: &[Date], diary: &Diary) -> Result<Plan, Un
         })
         .transpose()?;
 
-    Ok(Plan::new(
-        plan.name().clone(),
-        plan.authored_at(),
-        gym,
-        cycling,
-    )?)
+    let moved = Plan::new(plan.name().clone(), plan.authored_at(), gym, cycling)?;
+    Ok(match plan.chain() {
+        Some(chain) => moved.following(chain),
+        None => moved,
+    })
 }
 
 /// One gym mesocycle, started no earlier than `cursor` and with every lost
