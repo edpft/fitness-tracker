@@ -128,10 +128,14 @@ declared in `application` — the standard hexagonal position, because a port is
 defined by what the core needs rather than by what an adapter offers.
 
 Two driving adapters, both operator entry points, both composition roots, both
-at ring 3 and neither depending on the other. `cli` is being built first; the
-two are meant to reach feature parity, which is both a convenience and the
-demonstration that the hexagonal split is real. A capability that only one of
-them can invoke is a sign the capability has been built into a transport.
+at ring 3 and neither depending on the other, and both frontends (§ 19).
+
+**The goal is a domain independent of the interface, not parity between the
+two.** The operator withdrew parity on 2026-09-25: it was only ever a way of
+checking independence. `web` is for what a browser does better, visualising
+data and the wizards that set up the tool and start a macrocycle, and `cli`
+keeps the rest. A capability that the other interface would have to
+reimplement to offer has been built into a transport.
 
 `application` re-exports its ports and errors at the crate root but keeps its
 use cases behind `extract`, `normalise` and `status`. That is not tidiness: it
