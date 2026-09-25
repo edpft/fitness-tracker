@@ -33,6 +33,10 @@ issues, the place for recording open questions is the GitHub discussions."*
 - **Milestones** — the order of work, and why it is that order. The sequence
   *within* a milestone is issue dependencies (`gh issue edit N --add-blocked-by
   M`), not prose. An issue in no milestone is backlog.
+
+  A description says what the milestone is for and why it comes in this order,
+  and nothing else. No issue numbers, no status. State lives on the issues and
+  order in their dependencies.
 - **`docs/decisions/`** — why the model is the shape it is. Numbered, dated, and
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.

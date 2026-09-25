@@ -50,8 +50,8 @@ To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`
 - **Complete**: every issue it needs is in it, blockers included.
 - **Relevant**: every issue in it is needed for what the milestone names.
   Move the rest to the backlog.
-- **Accurate**: the description still says what the milestone is for and why
-  it comes in this order.
+- **Accurate**: the description passes the rule in CLAUDE.md's milestones
+  bullet.
 
 ## Discussions — every open one
 
