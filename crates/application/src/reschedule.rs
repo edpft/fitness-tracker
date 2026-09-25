@@ -273,4 +273,13 @@ impl<P: PlanStore + Sync> PlanStore for ReschedulingPlans<P> {
     async fn author(&self, plan: &Plan) -> Result<PlanId, StoreError> {
         self.plans.author(plan).await
     }
+
+    async fn commit(
+        &self,
+        plan: &PlanName,
+        gym: &[GymMesocycle],
+        cycling: &[CyclingMesocycle],
+    ) -> Result<(), StoreError> {
+        self.plans.commit(plan, gym, cycling).await
+    }
 }

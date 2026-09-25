@@ -6,6 +6,7 @@
 //! code.
 
 mod catalogue;
+mod committing;
 mod config;
 mod cycling;
 mod gym;

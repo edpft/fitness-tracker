@@ -45,6 +45,7 @@ use jiff::{Timestamp, civil::Date};
 
 use crate::{
     cycling::CyclingMesocycle,
+    macrocycle::Chain,
     newtype::string_name,
     prescription::GymMesocycle,
     sequence::{NonEmpty, TooShort},
@@ -390,6 +391,10 @@ pub struct Plan {
     authored_at: Timestamp,
     gym: Option<Programme<GymMesocycle>>,
     cycling: Option<Programme<CyclingMesocycle>>,
+    /// The cycling chain the macrocycle follows (#222). `None` for a plan
+    /// written before chains were stated, which nothing can be committed
+    /// against until it is stated again.
+    chain: Option<Chain>,
 }
 
 impl Plan {
@@ -410,7 +415,19 @@ impl Plan {
             authored_at,
             gym,
             cycling,
+            chain: None,
         })
+    }
+
+    /// The same plan, following a chain.
+    #[must_use]
+    pub const fn following(mut self, chain: Chain) -> Self {
+        self.chain = Some(chain);
+        self
+    }
+
+    pub const fn chain(&self) -> Option<Chain> {
+        self.chain
     }
 
     pub const fn name(&self) -> &PlanName {

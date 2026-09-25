@@ -18,8 +18,11 @@
 
 use application::{PlanStore, StoreError};
 use domain::{
+    cycling::CyclingMesocycle,
+    macrocycle::Chain,
     normalised::OperatorZone,
     plan::{Plan, PlanId, PlanName, PlanWindow, Programme},
+    prescription::GymMesocycle,
 };
 use sqlx::SqlitePool;
 
@@ -51,7 +54,8 @@ impl SqlitePlanStore {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64", name AS "name!: String",
-                   authored_at AS "authored_at!: String"
+                   authored_at AS "authored_at!: String",
+                   chain AS "chain: String"
             FROM plan AS p
             WHERE p.authored_at = (
                 SELECT MAX(q.authored_at) FROM plan AS q WHERE q.name = p.name
@@ -103,6 +107,10 @@ impl SqlitePlanStore {
 
             let plan = Plan::new(name, authored_at, gym_side, cycling_side)
                 .map_err(|error| corrupt(&error))?;
+            let plan = match row.chain {
+                Some(chain) => plan.following(chain.parse().map_err(|error| corrupt(&error))?),
+                None => plan,
+            };
             plans.push((PlanId::new(row.id), plan));
         }
         Ok(plans)
@@ -137,14 +145,16 @@ impl PlanStore for SqlitePlanStore {
 
         let name = plan.name().to_string();
         let authored_at = plan.authored_at().to_string();
+        let chain = plan.chain().map(Chain::as_str);
         let id = sqlx::query!(
             r#"
-            INSERT INTO plan (name, authored_at)
-            VALUES (?, ?)
+            INSERT INTO plan (name, authored_at, chain)
+            VALUES (?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             name,
-            authored_at
+            authored_at,
+            chain
         )
         .fetch_one(&mut *tx)
         .await
@@ -164,6 +174,52 @@ impl PlanStore for SqlitePlanStore {
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(PlanId::new(id))
+    }
+
+    async fn commit(
+        &self,
+        plan: &PlanName,
+        gym: &[GymMesocycle],
+        cycling: &[CyclingMesocycle],
+    ) -> Result<(), StoreError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+
+        let name = plan.to_string();
+        let found = sqlx::query!(
+            r#"
+            SELECT p.id AS "id!: i64",
+                   (SELECT COALESCE(MAX(ordinal), 0) FROM gym_mesocycle
+                    WHERE plan = p.id) AS "gym!: i64",
+                   (SELECT COALESCE(MAX(ordinal), 0) FROM cycling_mesocycle
+                    WHERE plan = p.id) AS "cycling!: i64"
+            FROM plan AS p
+            WHERE p.name = ?
+            ORDER BY p.authored_at DESC
+            LIMIT 1
+            "#,
+            name
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?
+        .ok_or_else(|| corrupt(&format!("no plan is authored under {plan}")))?;
+
+        let mut ordinal = found.gym;
+        for mesocycle in gym {
+            ordinal = ordinal.saturating_add(1);
+            gym_mesocycle::write(&mut tx, found.id, ordinal, mesocycle).await?;
+        }
+        let mut ordinal = found.cycling;
+        for mesocycle in cycling {
+            ordinal = ordinal.saturating_add(1);
+            cycling_mesocycle::write(&mut tx, found.id, ordinal, mesocycle).await?;
+        }
+
+        tx.commit().await.map_err(|error| store_error(&error))
     }
 }
 

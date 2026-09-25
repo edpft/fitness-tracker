@@ -107,18 +107,18 @@ const PROGRESSIONS: usize = 3;
 pub const SBS_MICROCYCLES: u32 = 4;
 
 /// One published programme, read once.
-struct Read {
+pub struct Read {
     name: &'static str,
     published: ProgrammeName,
-    fetched: Fetched,
-    programme: PublishedProgramme,
+    pub fetched: Fetched,
+    pub programme: PublishedProgramme,
 }
 
 /// One cycling mesocycle, named, with what it answers.
-struct Offered<'a> {
+pub struct Offered<'a> {
     name: String,
     own: usize,
-    answer: Option<Answer>,
+    pub answer: Option<Answer>,
     from: &'a Read,
 }
 
@@ -240,7 +240,10 @@ pub async fn generate(
 /// session each rides.** That is the same split the gym wizard uses: the diary
 /// offers the discipline's ordinary days, and what runs on them is the
 /// programme's to fix.
-async fn cycling_weekdays(diary: &SqliteDiaryStore, start: Date) -> Result<Vec<Weekday>, Failure> {
+pub async fn cycling_weekdays(
+    diary: &SqliteDiaryStore,
+    start: Date,
+) -> Result<Vec<Weekday>, Failure> {
     let diary = diary
         .diary()
         .await
@@ -386,7 +389,7 @@ fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
 }
 
 /// Read one published programme: every class it places, and what it trains.
-async fn fetch(classes: &PelotonClasses, name: &'static str) -> Result<Read, Failure> {
+pub async fn fetch(classes: &PelotonClasses, name: &'static str) -> Result<Read, Failure> {
     let placements = placements(name)?;
     let fetched = provider::fetch(classes, &placements)
         .await
@@ -401,7 +404,7 @@ async fn fetch(classes: &PelotonClasses, name: &'static str) -> Result<Read, Fai
 }
 
 /// Split a programme and ask each mesocycle for the shape wanted.
-fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offered<'_>> {
+pub fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offered<'_>> {
     read.programme
         .mesocycles()
         .into_iter()
@@ -434,7 +437,7 @@ fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offere
 /// themselves, which is what makes this answerable for a microcycle chosen out
 /// of the middle of a programme — Build's µ5 is a test week whether it is ridden
 /// as Build's fifth or as our fourth.
-fn measures(read: &Read, microcycle: u32, sessions: &[u32]) -> bool {
+pub fn measures(read: &Read, microcycle: u32, sessions: &[u32]) -> bool {
     sessions.iter().any(|session| {
         read.fetched
             .get(&(microcycle, *session))
@@ -442,7 +445,7 @@ fn measures(read: &Read, microcycle: u32, sessions: &[u32]) -> bool {
     })
 }
 
-fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
+pub fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
     let number = read.programme.microcycles().first().copied()?;
 
     let mut taken: Vec<u32> = read
@@ -653,7 +656,7 @@ fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
 /// have nothing in them to tell apart, and the published order is the only
 /// thing left; it is a fallback rather than a rule, and the case has not
 /// arisen.
-fn build(
+pub fn build(
     start: Date,
     read: &Read,
     microcycles: &[u32],

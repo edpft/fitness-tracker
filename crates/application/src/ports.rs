@@ -1140,6 +1140,24 @@ pub trait PlanStore {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn author(&self, plan: &Plan) -> impl Future<Output = Result<PlanId, StoreError>> + Send;
+
+    /// Add one concurrent mesocycle to the plan in force under a name (#222).
+    ///
+    /// **Appended, never re-authored.** What is already in the plan keeps its
+    /// identity, so a prescription issued against it still belongs to it. The
+    /// side of each discipline is one mesocycle or two, since a hold is its
+    /// holding weeks and then a test week.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or nothing is authored under
+    /// the name.
+    fn commit(
+        &self,
+        plan: &PlanName,
+        gym: &[GymMesocycle],
+        cycling: &[CyclingMesocycle],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// The FTP series, read by the date a value was in force.
