@@ -319,7 +319,9 @@ impl fmt::Display for Cycling {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Hold { holding: 0 } => formatter.write_str("FTP test"),
-            Self::Hold { holding } => write!(formatter, "hold ({holding} weeks, then FTP test)"),
+            Self::Hold { holding } => {
+                write!(formatter, "hold ({}, then FTP test)", Weeks(*holding))
+            }
             Self::Base1 => formatter.write_str("Base 1"),
             Self::Base2 => formatter.write_str("Base 2"),
             Self::Build => formatter.write_str("Build"),
@@ -352,8 +354,22 @@ impl fmt::Display for Gym {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Hold { holding: 0 } => formatter.write_str("1RM test"),
-            Self::Hold { holding } => write!(formatter, "hold ({holding} weeks, then 1RM test)"),
+            Self::Hold { holding } => {
+                write!(formatter, "hold ({}, then 1RM test)", Weeks(*holding))
+            }
             Self::Sbs => formatter.write_str("SBS"),
+        }
+    }
+}
+
+/// A count of weeks, as a person would say it.
+struct Weeks(u32);
+
+impl fmt::Display for Weeks {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            1 => formatter.write_str("1 week"),
+            weeks => write!(formatter, "{weeks} weeks"),
         }
     }
 }
@@ -405,7 +421,7 @@ impl fmt::Display for Concurrent {
         match (self.gym, self.cycling) {
             (Gym::Hold { holding: 0 }, Cycling::Hold { .. }) => formatter.write_str("test week"),
             (Gym::Hold { holding }, Cycling::Hold { .. }) => {
-                write!(formatter, "hold ({holding} weeks, then a test week)")
+                write!(formatter, "hold ({}, then a test week)", Weeks(holding))
             }
             (gym, cycling) => write!(formatter, "{gym} + {cycling}"),
         }
