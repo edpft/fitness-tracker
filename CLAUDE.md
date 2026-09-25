@@ -37,13 +37,17 @@ issues, the place for recording open questions is the GitHub discussions."*
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.
 
-  **Write one only when there was a decision to make.** The operator's advice,
-  2026-09-05, after this agent produced three records in a day: a decision record
-  earns its place when there was genuine disagreement about approach — between
-  contributors, or with a position someone held and changed. *"if there was only
-  ever one answer, there was no decision to make."* Being wrong and then being
-  corrected is not a disagreement; it is one party catching up, and it belongs in
-  a commit message rather than in a numbered record.
+  **Write one only when there was a decision to make.** A decision record
+  justifies a choice between genuinely different solutions when there was not, at
+  first, agreement about which to choose. The operator, 2026-09-05, after this
+  agent produced three records in a day: *"if there was only ever one answer,
+  there was no decision to make."* On 2026-09-25 he added that this project has
+  one person on it, and that it has rarely, if ever, met that test. Two things
+  look like it and are not. The operator changing his mind on new data, or on a
+  new angle on old data, is one position replaced by another, not a
+  disagreement. An agent being wrong and then corrected is one party catching up.
+  Both belong in a commit message, or for the constitution in its amendment log,
+  rather than in a numbered record.
 
   **The same test governs open questions**, which live in the discussions: a
   question is only open if resolving it unblocks something. A thing nobody needs an answer
