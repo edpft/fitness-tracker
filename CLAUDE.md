@@ -36,10 +36,9 @@ issues, the place for recording open questions is the GitHub discussions."*
 
   **A milestone is a capability the operator wants**, and every issue in it is a
   step towards that capability. The operator, 2026-09-26: *"identify the high
-  level capabilities I actually want, and working towards them."* A step that is
-  only worth doing for the capability is an issue in its milestone, not a
-  milestone of its own. A date belongs on a milestone only when something real
-  falls on it.
+  level capabilities I actually want, and working towards them."* A step towards
+  a capability is an issue in its milestone, not a milestone of its own. A date
+  belongs on a milestone only when something real falls on it.
 
   A description says what the milestone is for and why it comes in this order,
   and nothing else. No issue numbers, no status. State lives on the issues and
