@@ -27,6 +27,15 @@ issues, the place for recording open questions is the GitHub discussions."*
 - **GitHub issues** — tasks and progress. What is to be done, what was done, and
   what a change turned out to cost. Comment on the issue as the work lands
   rather than at the end, and close it when its own "done when" is met.
+
+  **Every open issue is one of three things, and its labels say which.** A
+  `bug` is something broken: it needs no milestone and carries no priority,
+  because a real bug is always fixed. A `chore` is maintenance that makes the
+  system better without a new capability: no milestone, and `should` or `could`
+  relative to other chores — a chore that must be done is not a chore. Anything
+  else is a step towards a capability (`enhancement` or `documentation`): it is
+  in that capability's milestone, and `must`, `should` or `could` relative to
+  it. A follow-up inherits its parent's milestone.
 - **GitHub discussions** — open questions. A question does not go in the
   milestone, in a decision record or in a comment in the code; it goes here, where
   the operator can answer it and where the answer is findable afterwards.
