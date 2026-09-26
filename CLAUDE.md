@@ -27,12 +27,34 @@ issues, the place for recording open questions is the GitHub discussions."*
 - **GitHub issues** — tasks and progress. What is to be done, what was done, and
   what a change turned out to cost. Comment on the issue as the work lands
   rather than at the end, and close it when its own "done when" is met.
+
+  **Every open issue is one of three things, and its labels say which.** A
+  `bug` is something broken: it needs no milestone and carries no priority,
+  because a real bug is always fixed. A `chore` is maintenance that makes the
+  system better without a new capability: no milestone, and `should` or `could`
+  relative to other chores — a chore that must be done is not a chore. Anything
+  else is a step towards a capability (`enhancement` or `documentation`): it is
+  in that capability's milestone, and `must`, `should` or `could` relative to
+  it. A follow-up inherits its parent's milestone.
 - **GitHub discussions** — open questions. A question does not go in the
   milestone, in a decision record or in a comment in the code; it goes here, where
   the operator can answer it and where the answer is findable afterwards.
+  **Ideas** go here too, in the Ideas category: something the operator is not
+  after as a capability but does not rule out (operator, 2026-09-26). An idea
+  is not an issue in the backlog.
 - **Milestones** — the order of work, and why it is that order. The sequence
   *within* a milestone is issue dependencies (`gh issue edit N --add-blocked-by
   M`), not prose. An issue in no milestone is backlog.
+
+  **A milestone is a capability the operator wants**, and every issue in it is a
+  step towards that capability. The operator, 2026-09-26: *"identify the high
+  level capabilities I actually want, and working towards them."* A step towards
+  a capability is an issue in its milestone, not a milestone of its own. A date
+  belongs on a milestone only when something real falls on it.
+
+  A description says what the milestone is for and why it comes in this order,
+  and nothing else. No issue numbers, no status. State lives on the issues and
+  order in their dependencies.
 - **`docs/decisions/`** — why the model is the shape it is. Numbered, dated, and
   amended in place rather than superseded silently. A decision that turns out
   wrong gets amended and says so.

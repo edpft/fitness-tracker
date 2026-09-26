@@ -1,7 +1,14 @@
 <!--
 Sync Impact Report
-- Version: 4.1.0, amended 2026-09-25. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 4.2.0, amended 2026-09-26. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 4.2.0 — § I widened from the platforms in use to every platform the operator uses or has
+  used, and keeping the data made a purpose in itself. MINOR: a rule materially widened. The
+  operator, 2026-09-26, believing the document said storing data without a purpose was bad:
+  "it's my data about my body and my activities, I don't want to find that it's lost one day
+  because the platform it was stored is no longer available. Also, in some cases, it's only by
+  extracting this data that we discover how to link it." It never said so; the idea came from
+  agent reasoning that ranked sources by what read them. No decision record: he stated the rule.
 - 4.1.0 — § 19 widened to every driving adapter, and § 20's frontend line scoped to the web.
   The terminal is a frontend as much as the browser: it requests, renders and interacts, and
   business rules live behind the application's use cases. MINOR: a rule materially widened.
@@ -100,7 +107,9 @@ How each rule is enforced is a question for § X, and is not recorded rule by ru
 
 ## I. Purpose
 
-A single system for ingesting, storing and analysing personal health and fitness data across all platforms in use. The analytical layer is deliberately open-ended: the system's job is to make future analysis possible, not to serve a fixed set of metrics.
+One place for the operator's health and fitness data: ingesting it from every platform he uses or has used, storing it, and viewing and analysing it. It is his data, and keeping it is a purpose in itself. It must outlive any platform that recorded it, and the platforms in use are meant to become input vectors for this one, and perhaps one day to be unnecessary.
+
+The analytical layer is deliberately open-ended: the system's job is to make future analysis possible, not to serve a fixed set of metrics. Work aims at named capabilities, but a source is worth ingesting before anything reads it, because extracting it is often how we find out what it links to and what can be derived from it.
 
 Single user, single operator. No multi-tenancy; no auth model beyond credential handling (§ VIII).
 
@@ -299,4 +308,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 4.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-25
+**Version**: 4.2.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-26

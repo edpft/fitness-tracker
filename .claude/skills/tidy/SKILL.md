@@ -41,6 +41,9 @@ To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`
   add `gh issue edit <n> --add-blocked-by <m>`.
 - An issue in a milestone is not blocked by an issue in a later milestone or in
   the backlog. Move the blocker in, or remove the link if it no longer holds.
+- **Typed and prioritised**: every open issue has the type and priority
+  CLAUDE.md's issues bullet gives it. An issue that changes milestone has its
+  priority set again.
 
 ## Milestones
 
@@ -50,8 +53,8 @@ To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`
 - **Complete**: every issue it needs is in it, blockers included.
 - **Relevant**: every issue in it is needed for what the milestone names.
   Move the rest to the backlog.
-- **Accurate**: the description still says what the milestone is for and why
-  it comes in this order.
+- **Accurate**: the description passes the rule in CLAUDE.md's milestones
+  bullet.
 
 ## Discussions — every open one
 
