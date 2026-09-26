@@ -30,6 +30,9 @@ issues, the place for recording open questions is the GitHub discussions."*
 - **GitHub discussions** — open questions. A question does not go in the
   milestone, in a decision record or in a comment in the code; it goes here, where
   the operator can answer it and where the answer is findable afterwards.
+  **Ideas** go here too, in the Ideas category: something the operator is not
+  after as a capability but does not rule out (operator, 2026-09-26). An idea
+  is not an issue in the backlog.
 - **Milestones** — the order of work, and why it is that order. The sequence
   *within* a milestone is issue dependencies (`gh issue edit N --add-blocked-by
   M`), not prose. An issue in no milestone is backlog.
