@@ -86,8 +86,10 @@ fn a_deletion_withdraws_the_workout_it_names_in_either_order() {
         .records
         .iter()
         .find(|record| {
-            let domain::landing::Provenance::Event(event) = record.provenance();
-            *event.kind() == domain::landing::EventKind::Updated
+            record
+                .provenance()
+                .as_event()
+                .is_some_and(|event| *event.kind() == domain::landing::EventKind::Updated)
         })
         .map(domain::landing::LandedRecord::id)
     else {

@@ -1,8 +1,10 @@
-//! Raw landing for `garmin.hrv`.
+//! Raw landing for `spreadsheets.files`.
 //!
-//! **A copy of [`super::withings_landing`] rather than a generalisation of it**,
-//! for the reason that file gives: a table name inside `sqlx::query!` cannot
-//! be a parameter.
+//! **A copy of [`super::garmin_activity_file_landing`] rather than a
+//! generalisation of it**, for the reason that file gives in turn: a table name
+//! inside `sqlx::query!` cannot be a parameter. The columns differ where the
+//! provenance does: a file has a path and a modification time where a feed has
+//! an endpoint, an event kind and an event time.
 
 use application::{LandingStore, StoreError};
 use domain::landing::{
@@ -12,20 +14,25 @@ use sqlx::SqlitePool;
 
 use super::{count_from_storage, digest_from_row, run_id_for_storage, store_error};
 
-/// The landing table for Garmin's nightly HRV answers.
+/// The landing table for the operator's historical spreadsheets: one record
+/// per file, holding its bytes exactly as they were.
+///
+/// **A file's identity is the digest of its bytes**, which the adapter sets as
+/// its source record id. So a byte-identical copy is the same record served
+/// again and lands nothing, and two versions that differ land as two.
 #[derive(Debug, Clone)]
-pub struct GarminHrvLandingStore {
+pub struct SpreadsheetFileLandingStore {
     pool: SqlitePool,
     stream: LandingStream,
 }
 
-impl GarminHrvLandingStore {
+impl SpreadsheetFileLandingStore {
     /// Which stream this table holds.
     ///
-    /// Declared beside the queries that name `garmin_hrv_landing`, for the
+    /// Declared beside the queries that name `spreadsheet_file_landing`, for the
     /// reason given on [`super::landing::HevyWorkoutLandingStore::STREAM`]:
     /// this is the one link no type can check.
-    pub const STREAM: &'static str = "garmin.hrv";
+    pub const STREAM: &'static str = "spreadsheets.files";
 
     /// # Errors
     ///
@@ -39,7 +46,7 @@ impl GarminHrvLandingStore {
     }
 }
 
-impl LandingStore for GarminHrvLandingStore {
+impl LandingStore for SpreadsheetFileLandingStore {
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
@@ -52,7 +59,7 @@ impl LandingStore for GarminHrvLandingStore {
         let row = sqlx::query!(
             r#"
             SELECT COALESCE(revision_digest, payload_digest) AS "payload_digest!: Vec<u8>"
-            FROM garmin_hrv_landing
+            FROM spreadsheet_file_landing
             WHERE source_record_id = ?
             ORDER BY id DESC
             LIMIT 1
@@ -86,7 +93,7 @@ impl LandingStore for GarminHrvLandingStore {
         let next = sqlx::query!(
             r#"
             SELECT COALESCE(MAX(serve_ordinal), -1) AS "highest!: i64"
-            FROM garmin_hrv_landing
+            FROM spreadsheet_file_landing
             WHERE run_id = ?
             "#,
             run_id
@@ -101,13 +108,19 @@ impl LandingStore for GarminHrvLandingStore {
         for record in &records {
             ordinal = ordinal.saturating_add(1);
 
-            let event = super::served_by_a_feed(record.provenance())?;
+            let Some(file) = record.provenance().as_file() else {
+                return Err(StoreError::Corrupt {
+                    detail: format!(
+                        "{} was served by a feed, where a folder was expected",
+                        record.provenance()
+                    ),
+                });
+            };
 
-            let endpoint = event.endpoint().as_str();
             let fetched_at = record.fetched_at().to_string();
             let source_record_id = record.source_record_id().as_str();
-            let event_kind = event.kind().as_str();
-            let event_time = event.occurred_at().map(|at| at.to_string());
+            let path = file.path().as_str();
+            let modified_at = file.modified_at().to_string();
             let payload = record.payload().as_bytes();
             let digest = record.digest();
             let digest = digest.as_bytes().as_slice();
@@ -116,18 +129,17 @@ impl LandingStore for GarminHrvLandingStore {
 
             sqlx::query!(
                 r#"
-                INSERT INTO garmin_hrv_landing (
-                    endpoint, fetched_at, source_record_id, event_kind,
-                    event_time, payload, payload_digest, revision_digest,
+                INSERT INTO spreadsheet_file_landing (
+                    fetched_at, source_record_id, path, modified_at,
+                    payload, payload_digest, revision_digest,
                     run_id, serve_ordinal
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
-                endpoint,
                 fetched_at,
                 source_record_id,
-                event_kind,
-                event_time,
+                path,
+                modified_at,
                 payload,
                 digest,
                 revision,
@@ -150,7 +162,7 @@ impl LandingStore for GarminHrvLandingStore {
     }
 
     async fn count(&self) -> Result<RecordCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM garmin_hrv_landing"#)
+        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM spreadsheet_file_landing"#)
             .fetch_one(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
@@ -159,25 +171,15 @@ impl LandingStore for GarminHrvLandingStore {
     }
 }
 
-/// How much raw this stream holds, for the derivation's status.
-///
-/// A second, narrower answer to a question [`application::LandingStore`] can
-/// also answer, and separate because reporting how far behind a derivation is
-/// needs the count and must not be handed an `append`.
-impl application::RawExtent for GarminHrvLandingStore {
-    async fn records(&self) -> Result<RecordCount, StoreError> {
-        application::LandingStore::count(self).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{GarminHrvLandingStore, LandingStream};
+    use super::{LandingStream, SpreadsheetFileLandingStore};
 
     /// The constant every run's identity is derived from must name a stream.
     #[test]
     fn the_declared_stream_is_a_stream() {
-        let stream = LandingStream::try_from(GarminHrvLandingStore::STREAM).expect("a stream name");
-        assert_eq!(stream.to_string(), "garmin.hrv");
+        let stream =
+            LandingStream::try_from(SpreadsheetFileLandingStore::STREAM).expect("a stream name");
+        assert_eq!(stream.to_string(), "spreadsheets.files");
     }
 }

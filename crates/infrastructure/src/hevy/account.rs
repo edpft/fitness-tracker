@@ -12,7 +12,7 @@
 
 use application::SourceAccount;
 use domain::{
-    landing::{EventKind, LandedRecord, Provenance},
+    landing::{EventKind, LandedRecord},
     sequence::NonEmpty,
 };
 
@@ -128,6 +128,8 @@ pub fn supersede(records: Vec<LandedRecord>) -> (Vec<LandedRecord>, Vec<LandedRe
 /// Whether this record is the source asserting a workout, rather than
 /// withdrawing one or saying something we do not translate.
 fn is_serving(record: &LandedRecord) -> bool {
-    let Provenance::Event(event) = record.provenance();
-    *event.kind() == EventKind::Updated
+    record
+        .provenance()
+        .as_event()
+        .is_some_and(|event| *event.kind() == EventKind::Updated)
 }

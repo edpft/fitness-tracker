@@ -9,7 +9,7 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use application::{SourceError, SourceEvent, WorkoutEventSource};
-use domain::landing::{EventKind, EventTime, Provenance, Watermark};
+use domain::landing::{EventKind, EventProvenance, EventTime, Watermark};
 use infrastructure::{HevyWorkoutEvents, PageNumber, RetryPolicy};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -24,14 +24,15 @@ fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 
 /// What the source said happened. In the provenance rather than beside it,
 /// because an event kind is true of a feed of events and not of every source.
-const fn kind_of(event: &SourceEvent) -> &EventKind {
-    let Provenance::Event(served) = &event.provenance;
-    served.kind()
+fn kind_of(event: &SourceEvent) -> Option<&EventKind> {
+    event.provenance.as_event().map(EventProvenance::kind)
 }
 
-fn endpoint_of(event: &SourceEvent) -> &str {
-    let Provenance::Event(served) = &event.provenance;
-    served.endpoint().as_str()
+fn endpoint_of(event: &SourceEvent) -> Option<&str> {
+    event
+        .provenance
+        .as_event()
+        .map(|served| served.endpoint().as_str())
 }
 
 fn source(base: &str) -> HevyWorkoutEvents {
@@ -133,7 +134,7 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
         assert_eq!(batch.resume, Some(PageNumber::from(2)));
 
         let update = batch.events.first().expect("an update");
-        assert_eq!(kind_of(update), &EventKind::Updated);
+        assert_eq!(kind_of(update), Some(&EventKind::Updated));
         assert_eq!(update.source_record_id.as_str(), "b459cba5");
         assert_eq!(
             update.provenance.occurred_at(),
@@ -141,7 +142,7 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
         );
         // The adapter stamps the endpoint it called, so provenance is real
         // rather than a constant the application supplied.
-        assert_eq!(endpoint_of(update), "/v1/workouts/events");
+        assert_eq!(endpoint_of(update), Some("/v1/workouts/events"));
 
         // The payload is the event object as served. `superset_id` is the
         // singular spelling the API actually uses, against the documented
@@ -155,7 +156,7 @@ fn a_page_splits_into_one_event_per_workout_with_bytes_intact() {
         // A deletion names its workout at the top level rather than inside a
         // body, and carries `deleted_at` as its event time.
         let deletion = batch.events.get(1).expect("a deletion");
-        assert_eq!(kind_of(deletion), &EventKind::Deleted);
+        assert_eq!(kind_of(deletion), Some(&EventKind::Deleted));
         assert_eq!(deletion.source_record_id.as_str(), "93d50b8d");
         assert_eq!(
             deletion.provenance.occurred_at(),
@@ -184,7 +185,7 @@ fn an_unrecognised_event_kind_survives() {
             .expect("an unknown kind is still an event");
 
         let event = batch.events.first().expect("one event");
-        assert_eq!(kind_of(event).as_str(), "archived");
+        assert_eq!(kind_of(event).map(EventKind::as_str), Some("archived"));
         assert_eq!(event.source_record_id.as_str(), "w9");
     });
 }

@@ -35,10 +35,7 @@ fn to_the_second(value: &str) -> String {
 }
 
 pub fn run_succeeded(summary: &RunSummary) {
-    println!(
-        "run {} succeeded: {} events seen, {} records landed",
-        summary.run_id, summary.events_seen, summary.records_landed
-    );
+    folder_landed(summary);
 
     match (summary.resumption_point, summary.resumption_point_moved) {
         (Some(mark), true) => println!("resumption point advanced to {mark}"),
@@ -47,8 +44,20 @@ pub fn run_succeeded(summary: &RunSummary) {
     }
 }
 
+/// A run over a folder, which is read whole every time and so has no
+/// resumption point to report.
+pub fn folder_landed(summary: &RunSummary) {
+    println!(
+        "run {} succeeded: {} events seen, {} records landed",
+        summary.run_id, summary.events_seen, summary.records_landed
+    );
+}
+
 /// Never having run is a fact to report, not an error to raise.
-pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
+///
+/// `resumes` is false for a stream read from a folder, which has no
+/// resumption point to report.
+pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>, resumes: bool) {
     // As wide as the longest name this build can collect, so every stream's
     // columns line up with the header's.
     let width = crate::catalogue::KNOWN
@@ -78,9 +87,12 @@ pub fn status(standing: &StreamStatus, derivation: Option<&DerivationStatus>) {
         standing.records_held.to_string()
     );
 
-    match standing.resumption_point {
-        Some(mark) => println!("\nresumption point: {mark}"),
-        None => println!("\nresumption point: unset — the next run collects the full history"),
+    match (resumes, standing.resumption_point) {
+        (false, _) => {}
+        (true, Some(mark)) => println!("\nresumption point: {mark}"),
+        (true, None) => {
+            println!("\nresumption point: unset — the next run collects the full history");
+        }
     }
 
     match derivation {

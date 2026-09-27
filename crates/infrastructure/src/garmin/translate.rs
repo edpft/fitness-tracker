@@ -26,7 +26,7 @@ use domain::{
         HrvBaseline, HrvReading, HrvStatus, LastNight, MeasurementWindow, OvernightHrv,
         OvernightHrvRecord, WeeklyStatus,
     },
-    landing::{EventKind, LandedRecord, Provenance},
+    landing::{EventKind, LandedRecord},
     measure::HeartRateVariability,
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
@@ -277,7 +277,7 @@ impl Translator for GarminHrvTranslator {
         let record = account.night();
         let mut scribe = Scribe::new(record);
 
-        let Provenance::Event(event) = record.provenance();
+        let event = crate::store::served_by_a_feed(record.provenance())?;
         match event.kind() {
             // The endpoint serves a night as it now stands and reports no
             // deletion. Were it to, the night goes with the record.

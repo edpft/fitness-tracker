@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO spreadsheet_file_landing (\n                    fetched_at, source_record_id, path, modified_at,\n                    payload, payload_digest, revision_digest,\n                    run_id, serve_ordinal\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "1435a69854ef48b98fc1907941ab55907a6a940a132718ea8110fb0f3d55d634"
+}

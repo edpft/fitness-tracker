@@ -21,21 +21,23 @@ use application::{
     extract::{Extraction, ExtractionPorts},
     status::ExtractionStatus,
 };
-use domain::landing::{EventKind, LandingRecord, Provenance, RecordCount, RunOutcome, Watermark};
+use domain::landing::{EventKind, LandingRecord, RecordCount, RunOutcome, Watermark};
 
 /// Whether the source's last word on a record was that it is gone.
 ///
 /// A plain match rather than a method on the kind: the two variants that carry
 /// meaning are distinguishable precisely so a caller can ask this itself.
 fn is_deletion(record: &LandingRecord) -> bool {
-    kind_of(record) == EventKind::Deleted
+    kind_of(record) == Some(EventKind::Deleted)
 }
 
 /// What the source said happened, which lives in the record's provenance
 /// because it is true of an events feed rather than of every source.
-fn kind_of(record: &LandingRecord) -> EventKind {
-    let Provenance::Event(event) = record.provenance();
-    event.kind().clone()
+fn kind_of(record: &LandingRecord) -> Option<EventKind> {
+    record
+        .provenance()
+        .as_event()
+        .map(|event| event.kind().clone())
 }
 use support::{
     FakeLock, FakeSource, Fallible, FixedClock, InMemoryLanding, InMemoryResumption, InMemoryRuns,
@@ -265,6 +267,45 @@ fn an_edited_workout_lands_again_and_the_earlier_record_survives() {
     });
 }
 
+/// **Twice in one batch is still one serving.** What a record is compared
+/// against is the latest account of it, and within a batch that may be one
+/// this run has not yet written.
+#[test]
+fn a_payload_served_twice_in_one_batch_lands_once() {
+    runtime().expect("a tokio runtime").block_on(async {
+        let twice = vec![vec![
+            updated("w1", r#"{"title":"same"}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
+            updated("w1", r#"{"title":"same"}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
+        ]];
+        let (extraction, seen) =
+            harness(FakeSource::serving(twice), FakeLock::free()).expect("a harness");
+
+        let run = extraction.extract().await.expect("a run");
+
+        assert_eq!(run.records_landed, RecordCount::from(1));
+        assert_eq!(seen.landing.for_id("w1").len(), 1);
+    });
+}
+
+/// The same rule as across runs: an edit and its reversal are three servings,
+/// whether or not a batch boundary falls between them.
+#[test]
+fn an_edit_and_its_reversal_in_one_batch_land_three_records() {
+    runtime().expect("a tokio runtime").block_on(async {
+        let there_and_back = vec![vec![
+            updated("w1", r#"{"title":"x"}"#, "2026-08-01T00:00:00Z").expect("a fixture"),
+            updated("w1", r#"{"title":"y"}"#, "2026-08-02T00:00:00Z").expect("a fixture"),
+            updated("w1", r#"{"title":"x"}"#, "2026-08-03T00:00:00Z").expect("a fixture"),
+        ]];
+        let (extraction, seen) =
+            harness(FakeSource::serving(there_and_back), FakeLock::free()).expect("a harness");
+
+        extraction.extract().await.expect("a run");
+
+        assert_eq!(seen.landing.for_id("w1").len(), 3);
+    });
+}
+
 // --- Scenario 4: a workout is deleted --------------------------------------
 
 #[test]
@@ -299,7 +340,7 @@ fn a_deletion_lands_a_record_and_alters_nothing() {
         let held = seen.landing.for_id("w1");
         assert_eq!(held.len(), 2);
         assert_eq!(held.first(), Some(&landed), "nothing is altered");
-        assert_eq!(held.last().map(kind_of), Some(EventKind::Deleted));
+        assert_eq!(held.last().and_then(kind_of), Some(EventKind::Deleted));
         // And the workout is no longer live, by the SC-001 reading.
         assert_eq!(live_workouts(&seen.landing), 0);
     });

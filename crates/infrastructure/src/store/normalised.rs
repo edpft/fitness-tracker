@@ -240,7 +240,7 @@ async fn write_workout(
     let started_at = workout.started_at().instant().to_string();
     let zone = workout.started_at().zone().id();
 
-    let domain::landing::Provenance::Event(event) = workout.provenance();
+    let event = super::served_by_a_feed(workout.provenance())?;
     let endpoint = event.endpoint().as_str();
     let event_kind = event.kind().as_str();
     let event_time = event.occurred_at().map(|at| at.to_string());

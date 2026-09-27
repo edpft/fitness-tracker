@@ -36,7 +36,7 @@ use domain::{
         BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries, PerformedSession, RideRecord,
         RideSample, RideVenue, Watts,
     },
-    landing::{EventKind, Provenance},
+    landing::EventKind,
     measure::{BeatsPerMinute, Duration, Metres},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
@@ -105,7 +105,7 @@ impl Translator for PelotonSessionTranslator {
         // whole session, because a session missing one of its rides is not that
         // session.
         for landed in account.rides().iter() {
-            let Provenance::Event(event) = landed.ride.provenance();
+            let event = crate::store::served_by_a_feed(landed.ride.provenance())?;
             match event.kind() {
                 EventKind::Deleted => {
                     return Ok(Translation::Retraction {

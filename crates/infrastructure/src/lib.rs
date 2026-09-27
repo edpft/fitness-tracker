@@ -14,6 +14,7 @@ pub mod lock;
 pub mod peloton;
 pub mod private_file;
 pub mod scribe;
+pub mod spreadsheets;
 pub mod store;
 pub mod token;
 pub mod withings;
@@ -27,19 +28,20 @@ pub use hevy::{
 };
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
+pub use spreadsheets::SpreadsheetFiles;
 pub use store::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
     HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SqliteCyclingDeliveryStore,
-    SqliteCyclingMesocycleStore, SqliteCyclingSessionLog, SqliteCyclingSessionStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteRiddenVenues, SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
-    WithingsWeighInAccountReader, connect,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileLandingStore,
+    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionLog,
+    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
+    SqliteOvernightHrvStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteRiddenVenues, SqliteWeighInHistory, SqliteWeighInStore,
+    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

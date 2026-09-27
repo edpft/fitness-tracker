@@ -22,7 +22,7 @@ use domain::{
         NerveReading, PulseWaveVelocity, Rhythm, Segment, Segments, SkinConductance,
         VascularReading, VisceralFat, WeighInRecord,
     },
-    landing::{EventKind, LandedRecord, Provenance},
+    landing::{EventKind, LandedRecord},
     measure::{BeatsPerMinute, Kg},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
@@ -489,7 +489,7 @@ impl Translator for WithingsWeighInTranslator {
         let mut scribe = Scribe::new(account.groups().first());
 
         for record in account.groups().iter() {
-            let Provenance::Event(event) = record.provenance();
+            let event = crate::store::served_by_a_feed(record.provenance())?;
             match event.kind() {
                 // `getmeas` never reports a deletion. Were it to, the weigh-in
                 // goes with the group.

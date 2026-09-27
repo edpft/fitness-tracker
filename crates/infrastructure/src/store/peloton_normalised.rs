@@ -469,7 +469,7 @@ async fn write_ride(
         .map(seconds_for_storage)
         .transpose()?;
 
-    let domain::landing::Provenance::Event(event) = ride.provenance();
+    let event = super::served_by_a_feed(ride.provenance())?;
     let endpoint = event.endpoint().as_str().to_owned();
     let event_kind = event.kind().as_str().to_owned();
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());

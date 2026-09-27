@@ -9,8 +9,7 @@
 
 use application::{LandingStore, StoreError};
 use domain::landing::{
-    InvalidStream, LandingRecord, LandingStream, PayloadDigest, Provenance, RecordCount, RunId,
-    SourceRecordId,
+    InvalidStream, LandingRecord, LandingStream, PayloadDigest, RecordCount, RunId, SourceRecordId,
 };
 use sqlx::SqlitePool;
 
@@ -105,10 +104,7 @@ impl LandingStore for PelotonRideLandingStore {
         for record in &records {
             ordinal = ordinal.saturating_add(1);
 
-            // Exhaustive for the same reason it is on Hevy's table: these
-            // columns are an HTTP feed's, and a second `Provenance` variant
-            // must fail to compile here rather than land with blanks.
-            let Provenance::Event(event) = record.provenance();
+            let event = super::served_by_a_feed(record.provenance())?;
 
             let endpoint = event.endpoint().as_str();
             let fetched_at = record.fetched_at().to_string();

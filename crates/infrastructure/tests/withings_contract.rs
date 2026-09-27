@@ -209,7 +209,7 @@ fn measurements_page_by_offset_and_land_the_bytes_served() {
             FIRST_GROUP.as_bytes(),
             "the bytes as served, spacing and all"
         );
-        let domain::landing::Provenance::Event(provenance) = &event.provenance;
+        let provenance = event.provenance.as_event().expect("served by a feed");
         assert_eq!(provenance.endpoint().as_str(), "/measure");
         let resume = first.resume.expect("there is more");
         assert_eq!(resume.offset(), 5);
