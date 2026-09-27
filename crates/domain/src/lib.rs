@@ -23,3 +23,4 @@ pub mod prescription;
 pub mod provider;
 pub mod schedule;
 pub mod sequence;
+// trial for #261: a Rust change must build its checks
