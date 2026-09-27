@@ -114,7 +114,7 @@ fn a_deletion_is_a_record_like_any_other() {
         body,
     );
 
-    let Provenance::Event(event) = record.provenance();
+    let event = record.provenance().as_event().expect("served by a feed");
     assert_eq!(event.kind(), &EventKind::Deleted);
     assert_eq!(event.occurred_at(), None);
 }

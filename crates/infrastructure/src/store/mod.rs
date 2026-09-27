@@ -31,12 +31,13 @@ pub mod resumption;
 pub mod run_log;
 pub mod schedule;
 pub mod settings;
+pub mod spreadsheet_file_landing;
 pub mod withings_landing;
 pub mod withings_normalised;
 
 use application::StoreError;
 use domain::{
-    landing::{PayloadDigest, RunId},
+    landing::{EventProvenance, PayloadDigest, Provenance, RunId},
     normalised::NormalisationRunId,
 };
 
@@ -68,6 +69,7 @@ pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
+pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
 pub use withings_landing::WithingsMeasurementLandingStore;
 pub use withings_normalised::{
     SqliteWeighInHistory, SqliteWeighInStore, WithingsWeighInAccountReader,
@@ -90,6 +92,17 @@ fn store_error(error: &sqlx::Error) -> StoreError {
             detail: error.to_string(),
         },
     }
+}
+
+/// The feed's account of a record, where only a feed could have served it.
+///
+/// Every table but one holds what an HTTP feed served, and records reach them
+/// only through that feed's adapter. A record read from a folder arriving at
+/// one of them is something this program could not have put there.
+pub(crate) fn served_by_a_feed(provenance: &Provenance) -> Result<&EventProvenance, StoreError> {
+    provenance.as_event().ok_or_else(|| StoreError::Corrupt {
+        detail: format!("{provenance} was read from a folder, where a feed was expected"),
+    })
 }
 
 /// SQLite counts rows in `i64` and a run id does not go negative, so the two

@@ -10,7 +10,7 @@
 //! something it cannot do. That is a mistake rather than an invocation error,
 //! and it says so.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use application::{
     DerivationStatus, DerivationStatusReporter, ExtractionError, ExtractionStatusReporter,
@@ -31,11 +31,11 @@ use infrastructure::{
     GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
     HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
-    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
-    WithingsWeighInTranslator, connect, garmin,
+    PelotonWorkouts, SpreadsheetFileLandingStore, SpreadsheetFiles, SqliteCyclingSessionStore,
+    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog,
+    SqliteOvernightHrvStore, SqliteRefusalStore, SqliteResumptionPointStore, SqliteWeighInStore,
+    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -51,6 +51,9 @@ use crate::{catalogue::KnownStream, config::SourceAccess};
 /// runs left behind and must keep working with no credential and no network.
 pub enum Command {
     Extract(SourceAccess),
+    /// Land every file in a folder the operator named. What `extract` means for
+    /// a stream served by a folder rather than a system.
+    ExtractFolder(PathBuf),
     /// Derive the normalised layer from what raw already holds. Contacts no
     /// source, which is why it carries a zone rather than a credential.
     Normalise(OperatorZone),
@@ -117,6 +120,8 @@ pub enum WiringError {
     Stream(#[from] domain::landing::InvalidStream),
     #[error("{stream} lands, and nothing derives it yet")]
     NothingDerives { stream: &'static str },
+    #[error("{stream} is collected from its source, not a folder")]
+    NotAFolder { stream: &'static str },
 }
 
 /// Carry out `command` against `known`, with whatever adapters that stream
@@ -142,6 +147,7 @@ pub async fn run(
         WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
         GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
+        SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -174,6 +180,9 @@ async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, Wir
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
+            stream: PelotonRideLandingStore::STREAM,
+        }),
         Command::Extract(access) => {
             collect_rides(access, landing, samples_landing, resumption, runs, database).await
         }
@@ -319,6 +328,9 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
+            stream: GarminHrvLandingStore::STREAM,
+        }),
         Command::Extract(access) => {
             let SourceAccess::EmailPassword {
                 base_url,
@@ -432,6 +444,9 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
+            stream: GarminActivityLandingStore::STREAM,
+        }),
         Command::Extract(access) => {
             collect_activities(
                 access,
@@ -576,6 +591,9 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
+            stream: WithingsMeasurementLandingStore::STREAM,
+        }),
         Command::Extract(access) => {
             let SourceAccess::OAuthClient {
                 base_url,
@@ -669,6 +687,9 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
     let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
+            stream: HevyWorkoutLandingStore::STREAM,
+        }),
         Command::Extract(access) => {
             let SourceAccess::ApiKey {
                 base_url, api_key, ..
@@ -752,12 +773,61 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
     }
 }
 
+/// The operator's historical spreadsheets: every file in the folder named, once
+/// per distinct content (#263).
+///
+/// **Nothing derives them yet.** What each sheet covers, and which of two
+/// versions is right, is normalisation's work, read off what has landed.
+async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = SpreadsheetFileLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::ExtractFolder(folder) => {
+            let extraction = Extraction::new(ExtractionPorts {
+                source: SpreadsheetFiles::new(folder),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+        }
+        Command::Extract(_) => Err(WiringError::WrongCredential {
+            stream: SpreadsheetFileLandingStore::STREAM.to_owned(),
+            wanted: "a folder",
+            given: "a credential",
+        }),
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
+            stream: SpreadsheetFileLandingStore::STREAM,
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(landing, resumption, runs)
+                .reset()
+                .await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
         GarminHrvLandingStore, HevyWorkoutLandingStore, PelotonRideLandingStore,
-        PelotonRideSampleLandingStore, WithingsMeasurementLandingStore,
+        PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
+        WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -782,6 +852,7 @@ mod tests {
             GarminActivityLandingStore::STREAM,
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
+            SpreadsheetFileLandingStore::STREAM,
         ];
 
         for known in &KNOWN {

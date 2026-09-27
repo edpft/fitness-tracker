@@ -32,7 +32,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
-use catalogue::{Credential, KnownSource, KnownStream};
+use catalogue::{Credential, KnownSource, KnownStream, ServedBy};
 use config::{ConfigError, SourceAccess};
 use wiring::{Command, Outcome, WiringError};
 
@@ -110,7 +110,15 @@ fn command() -> ClapCommand {
                 .arg(Arg::new("base-url").long("base-url").help(
                     "Override the source's API root for this run. \
                              Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
-                )),
+                ))
+                .arg(
+                    Arg::new("from")
+                        .long("from")
+                        .value_name("folder")
+                        .value_parser(value_parser!(PathBuf))
+                        .conflicts_with("base-url")
+                        .help("The folder to land, for a stream read from one"),
+                ),
         )
         .subcommand(
             ClapCommand::new("normalise")
@@ -633,13 +641,14 @@ impl From<WiringError> for Failure {
             WiringError::Normalisation(error) => Self::from(error),
             WiringError::Status(error) => Self::from(error),
             WiringError::Store(error) => Self::from(error),
-            // Both of these are mistakes in this build rather than in the
-            // invocation — a stream named but not wired, or an adapter
-            // declaring a stream name that is not one — so neither reads as a
-            // usage error the operator could act on.
+            // Mistakes in this build rather than in the invocation — a stream
+            // named but not wired, an adapter declaring a stream name that is
+            // not one, or an arm handed a way in its stream does not have — so
+            // none reads as a usage error the operator could act on.
             WiringError::Unwired { .. }
             | WiringError::Stream(_)
-            | WiringError::WrongCredential { .. } => Self::message(error.to_string(), exit::STORE),
+            | WiringError::WrongCredential { .. }
+            | WiringError::NotAFolder { .. } => Self::message(error.to_string(), exit::STORE),
             // Not a mistake in this build: the stream really does land, and
             // asking it to derive is something the operator can stop doing.
             WiringError::NothingDerives { .. } => Self::message(error.to_string(), exit::USAGE),
@@ -1159,15 +1168,37 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         .map_err(|error| Failure::usage(&error))?;
     let command = match name {
         "extract" => {
+            let command = match (known.served_by(), sub.get_one::<PathBuf>("from")) {
+                (ServedBy::Folder { .. }, Some(folder)) => Command::ExtractFolder(folder.clone()),
+                (ServedBy::Folder { .. }, None) => {
+                    return Err(Failure::message(
+                        format!(
+                            "{} is read from a folder: name it with --from",
+                            known.name()
+                        ),
+                        exit::USAGE,
+                    ));
+                }
+                (ServedBy::System(_), Some(_)) => {
+                    return Err(Failure::message(
+                        format!(
+                            "{} is collected from its source, not a folder: drop --from",
+                            known.name()
+                        ),
+                        exit::USAGE,
+                    ));
+                }
+                (ServedBy::System(_), None) => Command::Extract(source_access(
+                    known,
+                    sub.get_one::<String>("base-url").cloned(),
+                    &credentials,
+                )?),
+            };
             // Printed before the run begins, so a long first collection says
             // what it is doing. The completion line carries the run number,
             // which only the store can assign.
             output::run_started(&stream);
-            Command::Extract(source_access(
-                known,
-                sub.get_one::<String>("base-url").cloned(),
-                &credentials,
-            )?)
+            command
         }
         "normalise" => {
             let zone = config::timezone(
@@ -1203,7 +1234,11 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         Ok(outcome) => outcome,
         Err(error) => return Err(rejected_credential(error, origin.as_deref())),
     };
-    report(&stream, outcome);
+    report(
+        &stream,
+        matches!(known.served_by(), ServedBy::System(_)),
+        outcome,
+    );
 
     // § 38 on the prescribed side: which programme is in force, where its ladder
     // stands, and how current the record it derives from is. Appended to `status`
@@ -1335,7 +1370,16 @@ fn source_access(
     base_url: Option<String>,
     credentials: &infrastructure::Credentials,
 ) -> Result<SourceAccess, Failure> {
-    source_access_for(known.source(), base_url, credentials)
+    let Some(system) = known.system() else {
+        return Err(Failure::message(
+            format!(
+                "{} is read from a folder, not a system: name it with --from",
+                known.name()
+            ),
+            exit::USAGE,
+        ));
+    };
+    source_access_for(system, base_url, credentials)
 }
 
 /// The same resolution, for a source this invocation reaches without collecting
@@ -1396,8 +1440,11 @@ pub(crate) fn source_access_for(
     })
 }
 
-fn report(stream: &LandingStream, outcome: Outcome) {
+/// `resumes` is false for a stream read from a folder, which is read whole and
+/// has no resumption point to report.
+fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) {
     match outcome {
+        Outcome::Extracted(summary) if !resumes => output::folder_landed(&summary),
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
         Outcome::ExtractedEach(summaries) => {
             for summary in &summaries {
@@ -1409,7 +1456,7 @@ fn report(stream: &LandingStream, outcome: Outcome) {
         Outcome::Reported {
             extraction,
             derivation,
-        } => output::status(&extraction, derivation.as_deref()),
+        } => output::status(&extraction, derivation.as_deref(), resumes),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }
 }

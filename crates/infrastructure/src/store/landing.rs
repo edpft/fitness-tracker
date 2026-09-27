@@ -2,8 +2,7 @@
 
 use application::{LandingStore, StoreError};
 use domain::landing::{
-    InvalidStream, LandingRecord, LandingStream, PayloadDigest, Provenance, RecordCount, RunId,
-    SourceRecordId,
+    InvalidStream, LandingRecord, LandingStream, PayloadDigest, RecordCount, RunId, SourceRecordId,
 };
 use sqlx::SqlitePool;
 
@@ -117,9 +116,8 @@ impl LandingStore for HevyWorkoutLandingStore {
             // This table is the landing table for an HTTP events feed, and its
             // columns say so. A record that reached us some other way belongs
             // in a table shaped for that, not in this one with three columns
-            // left blank — so the destructuring is deliberately exhaustive,
-            // and a second variant will fail to compile here.
-            let Provenance::Event(event) = record.provenance();
+            // left blank, so it is refused rather than written.
+            let event = super::served_by_a_feed(record.provenance())?;
 
             let endpoint = event.endpoint().as_str();
             let fetched_at = record.fetched_at().to_string();

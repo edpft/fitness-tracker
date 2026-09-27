@@ -156,20 +156,53 @@ impl KnownSource {
 
 /// A stream this build can collect, and what it takes to reach it.
 pub struct KnownStream {
-    source: &'static KnownSource,
+    served_by: ServedBy,
     entity: &'static str,
+}
+
+/// What a stream is collected from.
+///
+/// **A folder is not a system with its credential missing.** The historical
+/// spreadsheets have no API root, no credential and nothing to register, and
+/// filing them in [`SOURCES`] would give every one of those an empty answer.
+/// They are a folder the operator names on each run.
+#[derive(Clone, Copy)]
+pub enum ServedBy {
+    /// A system this build talks to, with the credential and API root it holds.
+    System(&'static KnownSource),
+    /// A folder the operator names with `--from`. `name` is the source half of
+    /// the stream's name.
+    Folder { name: &'static str },
+}
+
+impl ServedBy {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::System(source) => source.name,
+            Self::Folder { name } => name,
+        }
+    }
 }
 
 impl KnownStream {
     /// The name an operator types, and the one every message prints back.
     pub fn name(&self) -> String {
-        format!("{}{}{}", self.source.name, SEPARATOR, self.entity)
+        format!("{}{}{}", self.served_by.name(), SEPARATOR, self.entity)
     }
 
-    /// What serves this stream. Where the credential and the API root come
-    /// from, and what a destination of the same system shares with it.
-    pub const fn source(&self) -> &'static KnownSource {
-        self.source
+    /// What this stream is collected from.
+    pub const fn served_by(&self) -> ServedBy {
+        self.served_by
+    }
+
+    /// The system that serves this stream, if a system does. Where the
+    /// credential and the API root come from, and what a destination of the
+    /// same system shares with it.
+    pub const fn system(&self) -> Option<&'static KnownSource> {
+        match self.served_by {
+            ServedBy::System(source) => Some(source),
+            ServedBy::Folder { .. } => None,
+        }
     }
 
     /// # Errors
@@ -248,24 +281,26 @@ pub const SOURCES: [KnownSource; 4] = [
 ///
 /// **Withings serves measurements**, which is ours and not Withings' word
 /// (`getmeas`, `measuregrps`): one record is what one reading produced.
-pub const KNOWN: [KnownStream; 5] = [
+///
+/// **The spreadsheets serve files**: one record is one file, whatever it holds.
+pub const KNOWN: [KnownStream; 6] = [
     KnownStream {
-        source: &SOURCES[0],
+        served_by: ServedBy::System(&SOURCES[0]),
         entity: "workouts",
     },
     KnownStream {
-        source: &SOURCES[1],
+        served_by: ServedBy::System(&SOURCES[1]),
         entity: "rides",
     },
     KnownStream {
-        source: &SOURCES[2],
+        served_by: ServedBy::System(&SOURCES[2]),
         entity: "measurements",
     },
     // **Garmin serves more than these two**, and the entity is what makes room
     // for the rest: sleep and resting heart rate are each a stream of their own,
     // resuming and locking independently.
     KnownStream {
-        source: &SOURCES[3],
+        served_by: ServedBy::System(&SOURCES[3]),
         entity: "hrv",
     },
     // **All of them, not the gym ones.** Garmin serves one activity list and
@@ -275,8 +310,14 @@ pub const KNOWN: [KnownStream; 5] = [
     // category it does not have (§ II.3); separating rides from gym sessions is
     // normalisation's job, from the type each record states.
     KnownStream {
-        source: &SOURCES[3],
+        served_by: ServedBy::System(&SOURCES[3]),
         entity: "activities",
+    },
+    KnownStream {
+        served_by: ServedBy::Folder {
+            name: "spreadsheets",
+        },
+        entity: "files",
     },
 ];
 
@@ -414,7 +455,7 @@ mod tests {
         assert_eq!(gym.collects().name(), "hevy.workouts");
         assert_eq!(gym.delivers_to().name(), "hevy");
         assert_eq!(
-            gym.collects().source().name(),
+            gym.collects().system().expect("served by a system").name(),
             gym.delivers_to().name(),
             "and they are the same system, which is what a round trip means"
         );
@@ -424,8 +465,18 @@ mod tests {
     #[test]
     fn the_environment_variables_are_named_after_the_source() {
         let hevy = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
-        assert_eq!(hevy.source().api_key_variable(), "HEVY_API_KEY");
-        assert_eq!(hevy.source().base_url_variable(), "HEVY_API_BASE_URL");
+        assert_eq!(
+            hevy.system()
+                .expect("served by a system")
+                .api_key_variable(),
+            "HEVY_API_KEY"
+        );
+        assert_eq!(
+            hevy.system()
+                .expect("served by a system")
+                .base_url_variable(),
+            "HEVY_API_BASE_URL"
+        );
     }
 
     /// The second kind of credential, and what it derives.
@@ -512,8 +563,17 @@ mod tests {
         assert_eq!(hevy.default_base_url(), "https://api.hevyapp.com");
 
         let stream = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
-        assert_eq!(stream.source().name(), hevy.name());
-        assert_eq!(stream.source().api_key_variable(), hevy.api_key_variable());
+        assert_eq!(
+            stream.system().expect("served by a system").name(),
+            hevy.name()
+        );
+        assert_eq!(
+            stream
+                .system()
+                .expect("served by a system")
+                .api_key_variable(),
+            hevy.api_key_variable()
+        );
     }
 
     /// The base URL is the root. A base that already carried `/v1` composed
@@ -522,6 +582,11 @@ mod tests {
     #[test]
     fn the_default_base_url_carries_no_version_segment() {
         let hevy = lookup("hevy.workouts").expect("hevy.workouts is in the catalogue");
-        assert_eq!(hevy.source().default_base_url(), "https://api.hevyapp.com");
+        assert_eq!(
+            hevy.system()
+                .expect("served by a system")
+                .default_base_url(),
+            "https://api.hevyapp.com"
+        );
     }
 }

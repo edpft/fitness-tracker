@@ -22,10 +22,13 @@ pub use ids::{
     NegativeLandingRecordId, STREAM_SEPARATOR, SourceName, SourceRecordId,
 };
 pub use payload::{InvalidPayload, PayloadDigest, RawPayload, WrongDigestWidth};
-pub use provenance::{Endpoint, EventProvenance, InvalidEndpoint, Provenance};
+pub use provenance::{
+    Endpoint, EventProvenance, FilePath, FileProvenance, InvalidEndpoint, InvalidFilePath,
+    Provenance,
+};
 pub use record::{LandedRecord, LandingRecord};
 pub use run::{
     EventCount, ExtractionRun, FailureReason, NegativeRunId, RecordCount, RunId, RunOutcome,
     UnknownFailureReason,
 };
-pub use time::{EventTime, FetchedAt, InvalidTimestamp, Watermark};
+pub use time::{EventTime, FetchedAt, InvalidTimestamp, ModifiedAt, Watermark};

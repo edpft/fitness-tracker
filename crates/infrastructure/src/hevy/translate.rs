@@ -26,7 +26,7 @@ use domain::{
         GymWorkout, Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind,
         SignedKg, Superset, WorkoutItem, exercise::Exercise,
     },
-    landing::{EventKind, LandedRecord, Provenance},
+    landing::{EventKind, LandedRecord},
     measure::{Distance, Duration, Kg, Metres, RepCount},
     normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
@@ -77,7 +77,7 @@ impl Translator for HevySessionTranslator {
         // and keeping the rest would assert something the source has stopped
         // saying. The use case does the withdrawing, off `composes`.
         for record in account.workouts().iter() {
-            let Provenance::Event(event) = record.provenance();
+            let event = crate::store::served_by_a_feed(record.provenance())?;
             match event.kind() {
                 EventKind::Deleted => {
                     return Ok(Translation::Retraction {

@@ -170,6 +170,7 @@ pub fn report(stream: &domain::landing::LandingStream, outcome: wiring::Outcome)
     match outcome {
         wiring::Outcome::Extracted(summary) => output::run_succeeded(&summary),
         wiring::Outcome::Derived(summary) => output::derivation_succeeded(&summary),
-        other => crate::report(stream, other),
+        // Every discipline collects from a system, never a folder.
+        other => crate::report(stream, true, other),
     }
 }

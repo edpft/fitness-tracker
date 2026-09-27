@@ -14,7 +14,7 @@ use domain::{
     body::{BodyScanWeighIn, Composition, MeasuredBy, Rhythm, Segment},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
-        LandingRecord, LandingRecordId, LandingStream, Provenance, RawPayload, SourceRecordId,
+        LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     measure::Kg,
     normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
@@ -363,7 +363,7 @@ async fn write_part(
     let landed_as = from.landed_as.as_i64();
     let source_record_id = from.source_record_id.as_str().to_owned();
     let algorithm = stored(from.algorithm)?;
-    let Provenance::Event(event) = &from.provenance;
+    let event = super::served_by_a_feed(&from.provenance)?;
     let endpoint = event.endpoint().as_str().to_owned();
     let event_kind = event.kind().as_str().to_owned();
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());

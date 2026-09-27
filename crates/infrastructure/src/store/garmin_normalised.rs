@@ -18,7 +18,7 @@ use domain::{
     body::{HrvReading, HrvStatus, OvernightHrv},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
-        LandingRecord, LandingRecordId, LandingStream, Provenance, RawPayload, SourceRecordId,
+        LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     normalised::{NormalisationRunId, WorkoutCount},
 };
@@ -201,7 +201,7 @@ async fn write_night(
     let low_upper = milliseconds(weekly.baseline.low_upper.as_milliseconds());
     let balanced_low = milliseconds(weekly.baseline.balanced_low.as_milliseconds());
     let balanced_upper = milliseconds(weekly.baseline.balanced_upper.as_milliseconds());
-    let Provenance::Event(event) = night.provenance();
+    let event = super::served_by_a_feed(night.provenance())?;
     let endpoint = event.endpoint().as_str().to_owned();
     let event_kind = event.kind().as_str().to_owned();
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());

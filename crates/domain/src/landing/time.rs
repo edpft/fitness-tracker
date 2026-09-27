@@ -44,6 +44,16 @@ pub struct EventTime(Timestamp);
 
 instant!(EventTime);
 
+/// When a file was last modified, as the filesystem it was read from says.
+///
+/// Not an [`EventTime`]: a modification says when somebody last saved the
+/// file, which is neither when anything in it happened nor a position a feed
+/// could resume from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModifiedAt(Timestamp);
+
+instant!(ModifiedAt);
+
 /// Where extraction resumes from.
 ///
 /// Reconstructible state: losing it costs a re-fetch, never a fact. It is

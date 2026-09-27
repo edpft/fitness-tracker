@@ -234,7 +234,7 @@ proptest! {
     /// argument, so there is no instance without it.
     #[test]
     fn every_workout_carries_provenance_and_a_zone(workout in workout()) {
-        let Provenance::Event(event) = workout.provenance();
+        let event = workout.provenance().as_event().expect("served by a feed");
         prop_assert_eq!(event.kind().as_str(), "updated");
         prop_assert_eq!(workout.started_at().zone().id(), "Europe/London");
         prop_assert!(!workout.source_record_id().as_str().is_empty());

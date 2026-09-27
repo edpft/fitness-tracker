@@ -114,7 +114,7 @@ where
                     newest_event = Some(newest_event.map_or(at, |seen| seen.max(at)));
                 }
 
-                if let Some(record) = self.landed_if_changed(&event, fetched_at).await? {
+                if let Some(record) = self.landed_if_changed(&event, &to_land, fetched_at).await? {
                     to_land.push(record);
                 }
             }
@@ -143,16 +143,29 @@ where
     /// record, not against any of them: a workout edited to X, then Y, then
     /// back to X is the source serving three payloads, and the third differs
     /// from what is current even though it matches what came first.
+    ///
+    /// **The most recent may not be written yet.** A batch is appended whole,
+    /// so a record served twice in one batch would find neither serving in the
+    /// store and land twice. What this batch is about to land is asked first.
     async fn landed_if_changed(
         &self,
         event: &SourceEvent,
+        pending: &[LandingRecord],
         fetched_at: domain::landing::FetchedAt,
     ) -> Result<Option<LandingRecord>, ExtractionError> {
         // **The revision, not the payload's digest.** For most sources they are
         // the same value; where they differ, the difference is the part of the
         // payload that is not about us, and comparing on it would land a record
         // because a stranger's counter ticked. See `SourceEvent::revision`.
-        let held = self.landing.latest_digest(&event.source_record_id).await?;
+        let pending = pending
+            .iter()
+            .rev()
+            .find(|record| *record.source_record_id() == event.source_record_id)
+            .map(LandingRecord::revision);
+        let held = match pending {
+            Some(revision) => Some(revision),
+            None => self.landing.latest_digest(&event.source_record_id).await?,
+        };
         if held == Some(event.revision) {
             return Ok(None);
         }

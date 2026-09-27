@@ -11,7 +11,7 @@ use application::{
     WorkoutExtractor,
     extract::{Extraction, ExtractionPorts},
 };
-use domain::landing::{EventKind, EventProvenance, LandingRecord, Provenance, RecordCount};
+use domain::landing::{EventKind, EventProvenance, LandingRecord, RecordCount};
 use support::{
     FakeLock, FakeSource, Fallible, FixedClock, InMemoryLanding, InMemoryResumption, InMemoryRuns,
     deleted, event_at, events_endpoint, hevy_workouts, updated,
@@ -19,9 +19,11 @@ use support::{
 
 /// What the source said happened, which lives in the record's provenance
 /// because it is true of an events feed rather than of every source.
-fn kind_of(record: &LandingRecord) -> EventKind {
-    let Provenance::Event(event) = record.provenance();
-    event.kind().clone()
+fn kind_of(record: &LandingRecord) -> Option<EventKind> {
+    record
+        .provenance()
+        .as_event()
+        .map(|event| event.kind().clone())
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
@@ -65,7 +67,7 @@ fn a_deletion_for_a_workout_never_landed_is_landed_anyway() {
         assert_eq!(summary.records_landed, RecordCount::from(1));
         let held = landing.for_id("never-seen");
         assert_eq!(held.len(), 1);
-        assert_eq!(held.first().map(kind_of), Some(EventKind::Deleted));
+        assert_eq!(held.first().and_then(kind_of), Some(EventKind::Deleted));
     });
 }
 
@@ -178,7 +180,7 @@ fn an_unrecognised_event_kind_is_landed_with_its_kind_verbatim() {
         let held = landing.for_id("w1");
         assert_eq!(held.len(), 1);
         assert_eq!(
-            held.first().map(|record| kind_of(record).to_string()),
+            held.first().and_then(kind_of).map(|kind| kind.to_string()),
             Some("archived".to_owned())
         );
     });
@@ -198,7 +200,7 @@ fn every_landed_record_carries_its_provenance() {
         extraction.extract().await.expect("a run");
 
         let record = landing.records().first().cloned().expect("a record");
-        let Provenance::Event(event) = record.provenance();
+        let event = record.provenance().as_event().expect("served by a feed");
         assert_eq!(record.stream().to_string(), "hevy.workouts");
         assert_eq!(event.endpoint().as_str(), "/v1/workouts/events");
         assert_eq!(record.source_record_id().as_str(), "w1");
