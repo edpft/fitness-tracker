@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO manual_weigh_in (weigh_in, landing_record_id, sheet, cell)\n            VALUES (?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "2d735f7cfe9844bcee447cdb5600bcc1957a0093df4c1957fef946466035c2ff"
+}

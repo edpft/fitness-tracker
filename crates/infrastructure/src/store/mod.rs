@@ -32,6 +32,7 @@ pub mod run_log;
 pub mod schedule;
 pub mod settings;
 pub mod spreadsheet_file_landing;
+pub mod spreadsheet_normalised;
 pub mod weigh_in;
 pub mod withings_landing;
 pub mod withings_normalised;
@@ -71,7 +72,8 @@ pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
 pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
-pub use weigh_in::{SpreadsheetFileAccountReader, SqliteManualWeighInStore, SqliteWeighInHistory};
+pub use spreadsheet_normalised::SqliteSpreadsheetStore;
+pub use weigh_in::{SpreadsheetFileAccountReader, SqliteWeighInHistory};
 pub use withings_landing::WithingsMeasurementLandingStore;
 pub use withings_normalised::{SqliteWeighInStore, WithingsWeighInAccountReader};
 

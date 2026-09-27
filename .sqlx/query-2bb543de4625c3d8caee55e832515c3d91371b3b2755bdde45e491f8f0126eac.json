@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT workout AS \"workout!: i64\", item_position AS \"item!: i64\",\n               exercise_position AS \"exercise!: i64\", position AS \"position!: i64\",\n               load_kind AS \"load_kind!: String\", load_grams AS \"load_grams!: i64\",\n               reps AS \"reps: i64\", duration_seconds AS \"duration: i64\",\n               distance_mm AS \"distance: i64\", rir AS \"rir: String\",\n               set_kind AS \"set_kind!: String\"\n        FROM performed_set\n        ORDER BY workout, item_position, exercise_position, position\n        ",
+  "query": "\n        SELECT w.landing_record_id AS \"workout!: i64\", s.item_position AS \"item!: i64\",\n               s.exercise_position AS \"exercise!: i64\", s.position AS \"position!: i64\",\n               s.load_kind AS \"load_kind!: String\", s.load_grams AS \"load_grams!: i64\",\n               s.reps AS \"reps: i64\", s.duration_seconds AS \"duration: i64\",\n               s.distance_mm AS \"distance: i64\", s.rir AS \"rir: String\",\n               s.set_kind AS \"set_kind!: String\"\n        FROM performed_set AS s\n        JOIN gym_workout AS w ON w.id = s.workout\n        ORDER BY w.landing_record_id, s.item_position, s.exercise_position, s.position\n        ",
   "describe": {
     "columns": [
       {
@@ -9,8 +9,8 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "performed_set",
-            "name": "workout"
+            "table": "gym_workout",
+            "name": "landing_record_id"
           }
         }
       },
@@ -133,8 +133,8 @@
       false,
       false,
       false,
-      false,
-      false,
+      true,
+      true,
       true,
       true,
       true,
@@ -142,5 +142,5 @@
       false
     ]
   },
-  "hash": "9866910120ed49860871252f7ff7a17418f5193064c98ae9cb83fda874a287ce"
+  "hash": "2bb543de4625c3d8caee55e832515c3d91371b3b2755bdde45e491f8f0126eac"
 }

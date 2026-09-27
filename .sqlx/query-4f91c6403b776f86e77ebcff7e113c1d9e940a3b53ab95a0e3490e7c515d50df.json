@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT count(*) AS \"count!: i64\" FROM gym_session",
+  "query": "SELECT count(*) AS \"count!: i64\" FROM gym_session WHERE stream = ?",
   "describe": {
     "columns": [
       {
@@ -11,11 +11,11 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "7fd9ad16aef468018676825f35ffe1e9eafeae9c2b8456107f2a88fc256e1505"
+  "hash": "4f91c6403b776f86e77ebcff7e113c1d9e940a3b53ab95a0e3490e7c515d50df"
 }

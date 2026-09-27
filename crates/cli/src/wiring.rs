@@ -32,10 +32,10 @@ use infrastructure::{
     HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
     PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetFiles,
-    SpreadsheetWeighInTranslator, SqliteCyclingSessionStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteManualWeighInStore, SqliteNormalisationRunLog,
-    SqliteOvernightHrvStore, SqliteRefusalStore, SqliteResumptionPointStore, SqliteWeighInStore,
-    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    SpreadsheetTranslator, SqliteCyclingSessionStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
+    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
@@ -775,7 +775,8 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 }
 
 /// The operator's historical spreadsheets: every file in the folder named, once
-/// per distinct content (#263), and derived into manual weigh-ins (#273).
+/// per distinct content (#263), and derived into manual weigh-ins (#273) and
+/// manual gym sessions (#274).
 async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = SpreadsheetFileLandingStore::new(pool.clone())?;
@@ -803,8 +804,8 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: SpreadsheetFileAccountReader::new(pool.clone())?,
-                    translator: SpreadsheetWeighInTranslator,
-                    workouts: SqliteManualWeighInStore::new(pool.clone())?,
+                    translator: SpreadsheetTranslator,
+                    workouts: SqliteSpreadsheetStore::new(pool.clone())?,
                     refusals: SqliteRefusalStore::new(
                         pool.clone(),
                         SpreadsheetFileLandingStore::STREAM,
@@ -826,7 +827,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
         Command::Status => {
             let derivation = DerivationStanding::new(
                 SpreadsheetFileLandingStore::new(pool.clone())?,
-                SqliteManualWeighInStore::new(pool.clone())?,
+                SqliteSpreadsheetStore::new(pool.clone())?,
                 SqliteRefusalStore::new(pool.clone(), SpreadsheetFileLandingStore::STREAM)?,
                 SqliteNormalisationRunLog::new(pool),
             )

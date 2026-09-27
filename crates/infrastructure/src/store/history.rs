@@ -208,9 +208,9 @@ impl ExerciseHistory for SqliteExerciseHistory {
                    s.outcome AS "outcome!: String", s.reps AS "reps: i64",
                    s.set_kind AS "set_kind!: String"
             FROM gym_workout AS w
-            JOIN performed_exercise AS e ON e.workout = w.landing_record_id
+            JOIN performed_exercise AS e ON e.workout = w.id
             JOIN performed_set AS s
-              ON s.workout = w.landing_record_id
+              ON s.workout = w.id
              AND s.item_position = e.item_position
              AND s.exercise_position = e.position
             -- The published id resolved back to the session it was issued from.
@@ -234,6 +234,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
             LEFT JOIN gym_mesocycle AS m ON m.id = session.mesocycle
             LEFT JOIN plan AS prescriber ON prescriber.id = m.plan
             WHERE e.exercise = ?
+              AND w.stream = 'hevy.workouts'
               AND NOT EXISTS (
                     SELECT 1
                     FROM gym_workout AS superseding
@@ -242,6 +243,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                     JOIN hevy_workout_landing AS this
                         ON this.id = w.landing_record_id
                     WHERE superseding.source_record_id = w.source_record_id
+                      AND superseding.stream = 'hevy.workouts'
                       AND later.serve_ordinal > this.serve_ordinal
               )
             ORDER BY w.started_at_utc ASC, e.item_position ASC, s.position ASC
@@ -286,7 +288,8 @@ impl ExerciseHistory for SqliteExerciseHistory {
             r#"
             SELECT w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String"
             FROM gym_workout AS w
-            WHERE NOT EXISTS (
+            WHERE w.stream = 'hevy.workouts'
+              AND NOT EXISTS (
                     SELECT 1
                     FROM gym_workout AS superseding
                     JOIN hevy_workout_landing AS later
@@ -294,6 +297,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
                     JOIN hevy_workout_landing AS this
                         ON this.id = w.landing_record_id
                     WHERE superseding.source_record_id = w.source_record_id
+                      AND superseding.stream = 'hevy.workouts'
                       AND later.serve_ordinal > this.serve_ordinal
             )
             ORDER BY w.started_at_utc DESC
@@ -575,7 +579,8 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
         // added.
         let sessions = sqlx::query!(
             r#"
-            SELECT s.landing_record_id AS "session!: i64",
+            SELECT s.id AS "session!: i64",
+                   w.id AS "workout!: i64",
                    w.landing_record_id AS "landed_as!: i64",
                    w.source_record_id AS "source_record_id!: String",
                    w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
@@ -585,9 +590,11 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                    first.started_at_utc AS "session_started_at!: String",
                    first.zone AS "session_zone!: String"
             FROM gym_session AS s
-            JOIN gym_workout AS first ON first.landing_record_id = s.landing_record_id
-            JOIN gym_workout AS w ON w.session = s.landing_record_id
-            WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
+            JOIN gym_workout AS first
+              ON first.landing_record_id = s.landing_record_id AND first.stream = s.stream
+            JOIN gym_workout AS w ON w.session = s.id
+            WHERE s.stream = 'hevy.workouts'
+              AND first.started_at_utc >= ? AND first.started_at_utc < ?
             ORDER BY first.started_at_utc ASC, s.landing_record_id ASC,
                      w.started_at_utc ASC, w.landing_record_id ASC
             "#,
@@ -616,6 +623,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
             }
             parts.push(
                 self.assemble(WorkoutRow {
+                    workout: row.workout,
                     landed_as: row.landed_as,
                     source_record_id: row.source_record_id,
                     on_utc: row.on_utc,
@@ -659,7 +667,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                    w.performed_against AS "performed_against!: String"
             FROM gym_workout AS w
             JOIN prescription_delivery AS d ON d.reference = w.performed_against
-            WHERE d.prescription = ? AND w.session IS NOT NULL
+            WHERE d.prescription = ? AND w.stream = 'hevy.workouts'
             ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
             LIMIT 1
             "#,
@@ -705,12 +713,13 @@ fn push_session(
 }
 
 impl SqlitePerformedWorkoutReader {
-    /// One session, by the landing record it is keyed on, with its workouts in
+    /// One session, by its key, with its workouts in
     /// the order they were performed.
     async fn session(&self, session: i64) -> Result<PerformedGymSession, StoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT w.landing_record_id AS "landed_as!: i64",
+            SELECT w.id AS "workout!: i64",
+                   w.landing_record_id AS "landed_as!: i64",
                    w.source_record_id AS "source_record_id!: String",
                    w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
@@ -730,6 +739,7 @@ impl SqlitePerformedWorkoutReader {
         for row in rows {
             parts.push(
                 self.assemble(WorkoutRow {
+                    workout: row.workout,
                     landed_as: row.landed_as,
                     source_record_id: row.source_record_id,
                     on_utc: row.on_utc,
@@ -754,7 +764,7 @@ impl SqlitePerformedWorkoutReader {
     /// Shared by every query so that a column read one way in one and another
     /// way in the other is not a thing that can happen.
     async fn assemble(&self, row: WorkoutRow) -> Result<GymWorkout, StoreError> {
-        let items = self.items_of(row.landed_as).await?;
+        let items = self.items_of(row.workout).await?;
         let started_at = start_of(&row.on_utc, &row.zone)?;
         let provenance = provenance_of(&row.endpoint, &row.event_kind, row.event_time)?;
         let source_record_id = domain::landing::SourceRecordId::try_from(
@@ -791,6 +801,8 @@ impl SqlitePerformedWorkoutReader {
 
 /// One `gym_workout` row, as both of the reader's queries select it.
 struct WorkoutRow {
+    /// The row's own key, which is what its items hang off.
+    workout: i64,
     landed_as: i64,
     source_record_id: String,
     on_utc: String,

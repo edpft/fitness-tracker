@@ -152,6 +152,14 @@ pub fn write_load(exercise: Exercise, load: Load) -> Result<WrittenLoad, Unwrita
     })
 }
 
+/// An exercise known only from the historical spreadsheets (#274), with no
+/// Hevy template anyone has looked up. Prescribing one is refused as
+/// unwritable rather than written to a guessed template.
+const SPREADSHEETS_ONLY: Writable = Writable {
+    added: None,
+    assisted: None,
+};
+
 /// The table. Total over the vocabulary, and exhaustive per measure, so adding
 /// an exercise is a compile error until someone says where it is written.
 ///
@@ -652,8 +660,22 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("1006DF48"),
                 assisted: None,
             }, // Seated Palms Up Wrist Curl
+            RepsExercise::BatWings
+            | RepsExercise::BicepCurlBarbell
+            | RepsExercise::CableCrossover
+            | RepsExercise::ClapPushUp
+            | RepsExercise::CloseGripBenchPressBarbell
+            | RepsExercise::FacePullCable
+            | RepsExercise::HipThrustBarbell
+            | RepsExercise::LandmineRotation
+            | RepsExercise::PauseSquatBarbell
+            | RepsExercise::PullUpNegative
+            | RepsExercise::SeatedCalfRaiseMachine
+            | RepsExercise::SingleArmRowDumbbell
+            | RepsExercise::StandingCalfRaiseDumbbell => SPREADSHEETS_ONLY,
         },
         Exercise::Duration(exercise) => match exercise {
+            DurationExercise::SuitcaseHold => SPREADSHEETS_ONLY,
             DurationExercise::AirBike => Writable {
                 added: Some("43573BB8"),
                 assisted: None,
@@ -787,11 +809,34 @@ mod tests {
         }
     }
 
+    /// The exercises only the historical spreadsheets name (#274). Nothing has
+    /// prescribed them, and their Hevy templates have not been looked up.
+    const SPREADSHEETS_ONLY: &[Exercise] = &[
+        Exercise::Reps(RepsExercise::BatWings),
+        Exercise::Reps(RepsExercise::BicepCurlBarbell),
+        Exercise::Reps(RepsExercise::CableCrossover),
+        Exercise::Reps(RepsExercise::ClapPushUp),
+        Exercise::Reps(RepsExercise::CloseGripBenchPressBarbell),
+        Exercise::Reps(RepsExercise::FacePullCable),
+        Exercise::Reps(RepsExercise::HipThrustBarbell),
+        Exercise::Reps(RepsExercise::LandmineRotation),
+        Exercise::Reps(RepsExercise::PauseSquatBarbell),
+        Exercise::Reps(RepsExercise::PullUpNegative),
+        Exercise::Reps(RepsExercise::SeatedCalfRaiseMachine),
+        Exercise::Reps(RepsExercise::SingleArmRowDumbbell),
+        Exercise::Reps(RepsExercise::StandingCalfRaiseDumbbell),
+        Exercise::Duration(DurationExercise::SuitcaseHold),
+    ];
+
     /// Total: the vocabulary is ours, and an exercise with nowhere to be written
-    /// is a session that cannot be delivered.
+    /// is a session that cannot be delivered — except the ones only a
+    /// spreadsheet has recorded, which are named above rather than skipped.
     #[test]
     fn every_exercise_can_be_written_somewhere() {
         for exercise in every_exercise() {
+            if SPREADSHEETS_ONLY.contains(&exercise) {
+                continue;
+            }
             let Writable { added, assisted } = writable(exercise);
             assert!(
                 added.is_some() || assisted.is_some(),

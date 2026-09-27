@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n                INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)\n                VALUES (?, ?, ?, ?)\n                RETURNING id AS \"id!: i64\"\n                ",
+  "query": "\n            INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)\n            VALUES (?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       null
     ]
   },
-  "hash": "59dd5750a266f5225374ba1049f0a8b336ec656621abbac7ac243e8c15b29e5d"
+  "hash": "d79774118949594f3215f7c1d6cb3c805b6a690cdcb55d303075c79feaddd62c"
 }

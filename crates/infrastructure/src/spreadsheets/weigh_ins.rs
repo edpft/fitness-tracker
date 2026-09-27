@@ -17,19 +17,16 @@
 //! saved that May, which is a placeholder for days not yet reached and not a
 //! reading.
 
-use std::io::Cursor;
-
 use application::{NormalisationError, Translation, ports::Translator};
-use calamine::{Data, Reader as _, open_workbook_auto_from_rs};
 use domain::{
     body::{Cell, CellRef, ManualWeighIn, SheetName},
     landing::{FileProvenance, LandedRecord},
     measure::Kg,
     normalised::{OperatorZone, RefusalLocus, RefusalReason},
-    sequence::NonEmpty,
 };
 use jiff::civil::Date;
 
+use super::sheet::{Sheet, Value};
 use crate::scribe::Scribe;
 
 /// How a sheet lays its weigh-ins out.
@@ -125,145 +122,6 @@ const HEADER_WITHIN: u32 = 6;
 /// A date as the CSV export wrote it: `Mon 01 Jan 18`.
 const CSV_DATE: &str = "%a %d %b %y";
 
-/// One cell's content, as far as a weigh-in needs to know.
-#[derive(Debug, Clone, PartialEq)]
-enum Value {
-    Empty,
-    Number(f64),
-    Text(String),
-    Day(Date),
-    /// Anything else: a time of day, a boolean, an error such as `#REF!`.
-    Other(String),
-}
-
-impl Value {
-    fn from_cell(cell: &Data) -> Self {
-        match cell {
-            Data::Empty => Self::Empty,
-            Data::Float(number) => Self::Number(*number),
-            Data::Int(number) => i32::try_from(*number).map_or_else(
-                |_| Self::Other(number.to_string()),
-                |n| Self::Number(f64::from(n)),
-            ),
-            Data::String(text) => Self::Text(text.clone()),
-            Data::DateTime(at) if at.is_datetime() => {
-                let (year, month, day, hour, minute, second, milli) = at.to_ymd_hms_milli();
-                let midnight = hour == 0 && minute == 0 && second == 0 && milli == 0;
-                let date = i16::try_from(year)
-                    .ok()
-                    .and_then(|year| Date::new(year, month.cast_signed(), day.cast_signed()).ok());
-                match date {
-                    Some(date) if midnight => Self::Day(date),
-                    _ => Self::Other(format!("{cell}")),
-                }
-            }
-            Data::DateTimeIso(text) => text
-                .parse::<Date>()
-                .map_or_else(|_| Self::Other(text.clone()), Self::Day),
-            other => Self::Other(format!("{other}")),
-        }
-    }
-
-    fn text(&self) -> Option<&str> {
-        match self {
-            Self::Text(text) => Some(text.trim()),
-            _ => None,
-        }
-    }
-}
-
-/// One sheet of a workbook, addressed as the workbook addresses it.
-struct Sheet {
-    name: String,
-    /// Where the first cell held sits, zero-based. A sheet whose first row or
-    /// column is empty starts further in.
-    origin: (u32, u32),
-    rows: Vec<Vec<Value>>,
-}
-
-impl Sheet {
-    fn get(&self, row: u32, column: u32) -> &Value {
-        const EMPTY: &Value = &Value::Empty;
-        let (Some(row), Some(column)) = (
-            row.checked_sub(self.origin.0),
-            column.checked_sub(self.origin.1),
-        ) else {
-            return EMPTY;
-        };
-        usize::try_from(row)
-            .ok()
-            .zip(usize::try_from(column).ok())
-            .and_then(|(row, column)| self.rows.get(row)?.get(column))
-            .unwrap_or(EMPTY)
-    }
-
-    fn height(&self) -> u32 {
-        u32::try_from(self.rows.len())
-            .unwrap_or(u32::MAX)
-            .saturating_add(self.origin.0)
-    }
-
-    fn width(&self) -> u32 {
-        let widest = self.rows.iter().map(Vec::len).max().unwrap_or(0);
-        u32::try_from(widest)
-            .unwrap_or(u32::MAX)
-            .saturating_add(self.origin.1)
-    }
-}
-
-/// Every sheet of a workbook, or why it could not be read as one.
-fn workbook(bytes: &[u8]) -> Result<Vec<Sheet>, String> {
-    let mut workbook =
-        open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
-    let mut sheets = Vec::new();
-    for name in workbook.sheet_names() {
-        let range = workbook
-            .worksheet_range(&name)
-            .map_err(|error| format!("sheet {name:?}: {error}"))?;
-        sheets.push(Sheet {
-            origin: range.start().unwrap_or((0, 0)),
-            rows: range
-                .rows()
-                .map(|row| row.iter().map(Value::from_cell).collect())
-                .collect(),
-            name,
-        });
-    }
-    Ok(sheets)
-}
-
-/// A CSV file as the one sheet a spreadsheet program shows it as, named after
-/// the file. Every cell is text; the layout decides what it means.
-fn csv(bytes: &[u8], file: &FileProvenance) -> Result<Vec<Sheet>, String> {
-    let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
-    let name = file
-        .path()
-        .as_str()
-        .rsplit('/')
-        .next()
-        .and_then(|name| name.rsplit_once('.'))
-        .map_or_else(|| file.path().to_string(), |(stem, _)| stem.to_owned());
-    let rows = text
-        .lines()
-        .map(|line| {
-            line.split(',')
-                .map(|cell| {
-                    if cell.is_empty() {
-                        Value::Empty
-                    } else {
-                        Value::Text(cell.to_owned())
-                    }
-                })
-                .collect()
-        })
-        .collect();
-    Ok(vec![Sheet {
-        name,
-        origin: (0, 0),
-        rows,
-    }])
-}
-
 /// Reads manual weigh-ins out of a landed spreadsheet.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SpreadsheetWeighInTranslator;
@@ -279,61 +137,24 @@ impl Translator for SpreadsheetWeighInTranslator {
         record: &LandedRecord,
         _zone: &OperatorZone,
     ) -> Result<Translation<ManualWeighIn>, NormalisationError> {
-        let mut scribe = Scribe::new(record);
-        let Some(file) = record.provenance().as_file() else {
-            return Ok(scribe.only(
-                RefusalLocus::Record,
-                RefusalReason::UnreadablePayload {
-                    detail: format!("{} was served by a feed, not a folder", record.provenance()),
-                },
-            ));
-        };
-
-        let bytes = record.payload().as_bytes();
-        let sheets = if file.path().as_str().to_lowercase().ends_with(".csv") {
-            csv(bytes, file)
-        } else {
-            workbook(bytes)
-        };
-        let sheets = match sheets {
-            Ok(sheets) => sheets,
-            Err(detail) => {
-                return Ok(scribe.only(
-                    RefusalLocus::Record,
-                    RefusalReason::Unmodelled {
-                        detail: format!(
-                            "{}, a file that is not a spreadsheet ({detail}),",
-                            file.path()
-                        ),
-                    },
-                ));
-            }
-        };
-
-        let mut weigh_ins = Vec::new();
-        for sheet in &sheets {
-            read_sheet(record, file, sheet, &mut scribe, &mut weigh_ins);
-        }
-
-        let refusals = scribe.into_refusals();
-        if let Ok(entities) = NonEmpty::new(weigh_ins) {
-            return Ok(Translation::Entities { entities, refusals });
-        }
-        Ok(NonEmpty::new(refusals).map_or_else(
-            |_| {
-                Scribe::new(record).only(
-                    RefusalLocus::Record,
-                    RefusalReason::Unmodelled {
-                        detail: format!(
-                            "{}, a spreadsheet of something other than weigh-ins,",
-                            file.path()
-                        ),
-                    },
-                )
-            },
-            Translation::Refused,
-        ))
+        super::translate_with(record, "weigh-ins", |file, sheets, scribe| {
+            Ok(read_weigh_ins(record, file, sheets, scribe))
+        })
     }
+}
+
+/// Every weigh-in in a workbook's sheets.
+pub(super) fn read_weigh_ins(
+    record: &LandedRecord,
+    file: &FileProvenance,
+    sheets: &[Sheet],
+    scribe: &mut Scribe,
+) -> Vec<ManualWeighIn> {
+    let mut weigh_ins = Vec::new();
+    for sheet in sheets {
+        read_sheet(record, file, sheet, scribe, &mut weigh_ins);
+    }
+    weigh_ins
 }
 
 /// The weigh-ins in one sheet, if it is laid out as weigh-ins.
@@ -419,7 +240,7 @@ fn weigh_in(
         Value::Text(text) if matches!(text.trim(), "" | "???") => return,
         Value::Number(number) => Kg::try_from(number.to_string()),
         Value::Text(text) => Kg::try_from(text.trim()),
-        Value::Day(_) | Value::Other(_) => {
+        Value::Day(_) | Value::Time(_) | Value::Other(_) => {
             return refuse(scribe, &at, "mass", &format!("{mass:?} is not a mass"));
         }
     };
@@ -435,7 +256,7 @@ fn weigh_in(
             Ok(day) => day,
             Err(error) => return refuse(scribe, &at, "date", &format!("{text:?}: {error}")),
         },
-        Value::Empty | Value::Number(_) | Value::Other(_) => {
+        Value::Empty | Value::Number(_) | Value::Time(_) | Value::Other(_) => {
             return refuse(scribe, &at, "date", &format!("{date:?} is not a day"));
         }
     };

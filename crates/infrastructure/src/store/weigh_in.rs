@@ -8,11 +8,12 @@
 //! Body Scan's composition in `body_scan_weigh_in`, and a spreadsheet's cell in
 //! `manual_weigh_in`.
 //!
-//! Three adapters here, for the reason [`super::withings_normalised`] gives for
-//! two: the spreadsheet reader has no `append`, the manual store writes the
-//! derivation, and the history reads the mass back for relative strength.
+//! Two adapters here and the writer's half of a third: the spreadsheet reader
+//! has no `append`, the history reads the mass back for relative strength, and
+//! [`super::spreadsheet_normalised`] writes the derivation, weigh-ins and gym
+//! sessions together, through the functions below.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError, WeighInHistory};
+use application::{AccountReader, StoreError, WeighInHistory};
 use domain::{
     analytical::Weighed,
     body::ManualWeighIn,
@@ -21,14 +22,11 @@ use domain::{
         LandingRecordId, LandingStream, ModifiedAt, RawPayload, SourceRecordId,
     },
     measure::Kg,
-    normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
+    normalised::{OperatorZone, StartedAt},
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::{
-    SpreadsheetFileLandingStore, corrupt, count_from_storage, normalisation_run_for_storage,
-    store_error,
-};
+use super::{SpreadsheetFileLandingStore, corrupt, count_from_storage, store_error};
 
 /// Raw, read-only, for the historical spreadsheets. One account per file.
 #[derive(Debug, Clone)]
@@ -101,106 +99,72 @@ impl AccountReader for SpreadsheetFileAccountReader {
     }
 }
 
-/// The normalised layer for manual weigh-ins.
-#[derive(Debug, Clone)]
-pub struct SqliteManualWeighInStore {
-    pool: SqlitePool,
-    stream: LandingStream,
+/// Every manual weigh-in, in place of the ones this stream wrote before.
+///
+/// Called by the spreadsheets' store inside its own transaction, beside the
+/// gym sessions the same files derive.
+pub(super) async fn replace_manual_weigh_ins(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    stream: &str,
+    weigh_ins: &[ManualWeighIn],
+) -> Result<(), StoreError> {
+    sqlx::query!("DELETE FROM manual_weigh_in")
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    sqlx::query!("DELETE FROM weigh_in WHERE stream = ?", stream)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+    for weigh_in in weigh_ins {
+        let on_day = weigh_in.on().to_string();
+        let mass = i64::try_from(weigh_in.mass().as_grams()).map_err(|error| corrupt(&error))?;
+        let cell = weigh_in.written_in();
+        let landed_as = cell.landed_as.as_i64();
+        let sheet = cell.sheet.as_str();
+        let reference = cell.cell.as_str();
+
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)
+            VALUES (?, ?, ?, ?)
+            RETURNING id AS "id!: i64"
+            "#,
+            stream,
+            on_day,
+            mass,
+            run_id,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO manual_weigh_in (weigh_in, landing_record_id, sheet, cell)
+            VALUES (?, ?, ?, ?)
+            "#,
+            row.id,
+            landed_as,
+            sheet,
+            reference,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
 }
 
-impl SqliteManualWeighInStore {
-    /// # Errors
-    ///
-    /// [`InvalidStream`] if the landing store's stream constant is not a stream
-    /// name.
-    pub fn new(pool: SqlitePool) -> Result<Self, InvalidStream> {
-        Ok(Self {
-            pool,
-            stream: LandingStream::try_from(SpreadsheetFileLandingStore::STREAM)?,
-        })
-    }
-}
-
-impl NormalisedEntityStore for SqliteManualWeighInStore {
-    type Entity = ManualWeighIn;
-
-    fn stream(&self) -> &LandingStream {
-        &self.stream
-    }
-
-    async fn replace(
-        &self,
-        run: NormalisationRunId,
-        weigh_ins: Vec<ManualWeighIn>,
-    ) -> Result<WorkoutCount, StoreError> {
-        let run_id = normalisation_run_for_storage(run)?;
-        let stream = self.stream.to_string();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| store_error(&error))?;
-
-        sqlx::query!("DELETE FROM manual_weigh_in")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        sqlx::query!("DELETE FROM weigh_in WHERE stream = ?", stream)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-
-        let written = weigh_ins.len();
-        for weigh_in in weigh_ins {
-            let on_day = weigh_in.on().to_string();
-            let mass =
-                i64::try_from(weigh_in.mass().as_grams()).map_err(|error| corrupt(&error))?;
-            let cell = weigh_in.written_in();
-            let landed_as = cell.landed_as.as_i64();
-            let sheet = cell.sheet.as_str();
-            let reference = cell.cell.as_str();
-
-            let row = sqlx::query!(
-                r#"
-                INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)
-                VALUES (?, ?, ?, ?)
-                RETURNING id AS "id!: i64"
-                "#,
-                stream,
-                on_day,
-                mass,
-                run_id,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO manual_weigh_in (weigh_in, landing_record_id, sheet, cell)
-                VALUES (?, ?, ?, ?)
-                "#,
-                row.id,
-                landed_as,
-                sheet,
-                reference,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
-
-        tx.commit().await.map_err(|error| store_error(&error))?;
-        Ok(WorkoutCount::from(written))
-    }
-
-    async fn count(&self) -> Result<WorkoutCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM manual_weigh_in"#)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
-        count_from_storage(Some(row.total)).map(WorkoutCount::from)
-    }
+/// How many manual weigh-ins the spreadsheets derived.
+pub(super) async fn count_manual_weigh_ins(pool: &SqlitePool) -> Result<usize, StoreError> {
+    let row = sqlx::query!(r#"SELECT COUNT(*) AS "total!: i64" FROM manual_weigh_in"#)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+    count_from_storage(Some(row.total))
 }
 
 /// Weigh-ins, read back for relative strength.
