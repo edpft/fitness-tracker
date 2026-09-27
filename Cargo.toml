@@ -85,6 +85,9 @@ clap = { version = "4.6.6", features = ["derive", "env"] }
 # the rule against an `--api-key` flag is untouched; this is what makes the
 # prompt no worse than the flag it replaces.
 rpassword = "7.5.4"
+# The historical spreadsheets (#273). Pure Rust, and lenient where openpyxl is
+# not: two of the operator's workbooks have stylesheets it refuses to parse.
+calamine = "0.36.1"
 
 # Test-only.
 proptest = "1.11.0"

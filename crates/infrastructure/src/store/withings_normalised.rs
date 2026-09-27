@@ -1,23 +1,27 @@
 //! The normalised layer for `withings.measurements`, and the account raw is
 //! derived from.
 //!
-//! Two adapters and a reader, for the reason [`super::peloton_normalised`] has
-//! them: the account reader has no `append`, the store writes the derivation,
-//! and the history reads back what relative strength needs.
+//! Two adapters, for the reason [`super::peloton_normalised`] has them: the
+//! account reader has no `append`, and the store writes the derivation.
+//!
+//! **A Body Scan step is a weigh-in and its composition.** The mass goes in
+//! `weigh_in`, which every source writes to (§ 6: body mass is
+//! source-independent), and everything else the scale measured hangs off that
+//! row. Relative strength reads the mass back through
+//! [`super::weigh_in::SqliteWeighInHistory`].
 //!
 //! **Which groups make a weigh-in is not decided here.** That is Withings
 //! knowledge and lives in [`crate::withings::account`]; this reads rows.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError, WeighInHistory};
+use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    analytical::Weighed,
     body::{BodyScanWeighIn, Composition, MeasuredBy, Rhythm, Segment},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     measure::Kg,
-    normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
+    normalised::{NormalisationRunId, StartedAt, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
@@ -167,10 +171,15 @@ impl NormalisedEntityStore for SqliteWeighInStore {
                 .await
                 .map_err(|error| store_error(&error))?;
         }
+        let stream = self.stream.to_string();
+        sqlx::query!("DELETE FROM weigh_in WHERE stream = ?", stream)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
 
         let written = weigh_ins.len();
         for weigh_in in weigh_ins {
-            write_weigh_in(&mut tx, run_id, &weigh_in).await?;
+            write_weigh_in(&mut tx, run_id, &stream, &weigh_in).await?;
         }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
@@ -186,10 +195,12 @@ impl NormalisedEntityStore for SqliteWeighInStore {
     }
 }
 
-/// The weigh-in's own row: when, and what the body is made of.
+/// The weigh-in's own row, when and how heavy, in the table every source
+/// writes to; then what the body is made of, linked to it.
 async fn write_composition(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
+    stream: &str,
     measured_at: &StartedAt,
     composition: &Composition,
 ) -> Result<(), StoreError> {
@@ -208,20 +219,34 @@ async fn write_composition(
     let metabolic_rate = i64::from(composition.basal_metabolic_rate.as_u32());
     let metabolic_age = i64::from(composition.metabolic_age.as_tenths_of_a_year());
 
+    let weigh_in = sqlx::query!(
+        r#"
+        INSERT INTO weigh_in (stream, measured_at_utc, zone, mass_grams, run_id)
+        VALUES (?, ?, ?, ?, ?)
+        RETURNING id AS "id!: i64"
+        "#,
+        stream,
+        measured_at,
+        zone,
+        mass,
+        run_id,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+
     sqlx::query!(
         r#"
         INSERT INTO body_scan_weigh_in (
-            landing_record_id, measured_at_utc, zone, mass_grams, fat_free_mass_grams,
+            landing_record_id, weigh_in, fat_free_mass_grams,
             fat_mass_grams, muscle_mass_grams, body_water_grams, extracellular_water_grams,
             intracellular_water_grams, bone_mass_grams, visceral_fat_tenths,
             basal_metabolic_rate_kcal, metabolic_age_tenths, run_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         id,
-        measured_at,
-        zone,
-        mass,
+        weigh_in.id,
         fat_free,
         fat,
         muscle,
@@ -243,11 +268,12 @@ async fn write_composition(
 async fn write_weigh_in(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
+    stream: &str,
     weigh_in: &BodyScanWeighIn,
 ) -> Result<(), StoreError> {
     let composition = weigh_in.composition();
     let id = composition.from.landed_as.as_i64();
-    write_composition(tx, run_id, weigh_in.measured_at(), composition).await?;
+    write_composition(tx, run_id, stream, weigh_in.measured_at(), composition).await?;
 
     let segments = &composition.segments;
     for (name, segment) in [
@@ -388,48 +414,4 @@ async fn write_part(
     .await
     .map_err(|error| store_error(&error))?;
     Ok(())
-}
-
-/// Weigh-ins, read back for relative strength.
-#[derive(Debug, Clone)]
-pub struct SqliteWeighInHistory {
-    pool: SqlitePool,
-}
-
-impl SqliteWeighInHistory {
-    pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-impl WeighInHistory for SqliteWeighInHistory {
-    async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT measured_at_utc AS "measured_at!: String",
-                   zone AS "zone!: String",
-                   mass_grams AS "mass_grams!: i64"
-            FROM body_scan_weigh_in
-            ORDER BY measured_at_utc ASC
-            "#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        rows.into_iter()
-            .map(|row| {
-                let instant = row
-                    .measured_at
-                    .parse::<jiff::Timestamp>()
-                    .map_err(|error| corrupt(&error))?;
-                let zone = OperatorZone::try_from(row.zone).map_err(|error| corrupt(&error))?;
-                let grams = u64::try_from(row.mass_grams).map_err(|error| corrupt(&error))?;
-                Ok(Weighed {
-                    at: StartedAt::new(instant, zone),
-                    mass: Kg::from_grams(grams),
-                })
-            })
-            .collect()
-    }
 }

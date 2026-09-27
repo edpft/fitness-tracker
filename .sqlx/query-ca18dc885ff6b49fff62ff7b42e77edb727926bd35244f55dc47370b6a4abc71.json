@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM manual_weigh_in",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "ca18dc885ff6b49fff62ff7b42e77edb727926bd35244f55dc47370b6a4abc71"
+}

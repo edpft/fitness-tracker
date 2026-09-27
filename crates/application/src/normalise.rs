@@ -193,6 +193,14 @@ where
                         .composed
                         .saturating_add(account.records().saturating_sub(account.superseded()));
                 }
+                Ok(Translation::Entities { entities, refusals }) => {
+                    derived.entities.extend(entities.into_vec());
+                    derived.refusals.extend(refusals);
+                    derived.superseded = derived.superseded.saturating_add(account.superseded());
+                    derived.composed = derived
+                        .composed
+                        .saturating_add(account.records().saturating_sub(account.superseded()));
+                }
                 Ok(Translation::Retraction { of }) => derived.retracted.push(of),
                 Ok(Translation::Refused(refusals)) => {
                     // A superseded serving inside a refused account is counted

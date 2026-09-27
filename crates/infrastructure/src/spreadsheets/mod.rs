@@ -149,3 +149,7 @@ fn unreadable(path: &Path, error: &std::io::Error) -> SourceError {
         detail: format!("{}: {error}", path.display()),
     }
 }
+
+mod weigh_ins;
+
+pub use weigh_ins::SpreadsheetWeighInTranslator;

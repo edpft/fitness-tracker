@@ -31,8 +31,9 @@ use infrastructure::{
     GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
     HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SpreadsheetFileLandingStore, SpreadsheetFiles, SqliteCyclingSessionStore,
-    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog,
+    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetFiles,
+    SpreadsheetWeighInTranslator, SqliteCyclingSessionStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteManualWeighInStore, SqliteNormalisationRunLog,
     SqliteOvernightHrvStore, SqliteRefusalStore, SqliteResumptionPointStore, SqliteWeighInStore,
     TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
@@ -774,15 +775,12 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 }
 
 /// The operator's historical spreadsheets: every file in the folder named, once
-/// per distinct content (#263).
-///
-/// **Nothing derives them yet.** What each sheet covers, and which of two
-/// versions is right, is normalisation's work, read off what has landed.
+/// per distinct content (#263), and derived into manual weigh-ins (#273).
 async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = SpreadsheetFileLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::ExtractFolder(folder) => {
@@ -801,14 +799,44 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
-            stream: SpreadsheetFileLandingStore::STREAM,
-        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: SpreadsheetFileAccountReader::new(pool.clone())?,
+                    translator: SpreadsheetWeighInTranslator,
+                    workouts: SqliteManualWeighInStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        SpreadsheetFileLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), SpreadsheetFileLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                SpreadsheetFileLandingStore::new(pool.clone())?,
+                SqliteManualWeighInStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), SpreadsheetFileLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {
