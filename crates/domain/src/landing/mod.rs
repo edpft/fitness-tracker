@@ -14,6 +14,7 @@ pub mod payload;
 pub mod provenance;
 pub mod record;
 pub mod run;
+pub mod sheet;
 pub mod time;
 
 pub use event::{EventKind, RawEventKind};
@@ -31,4 +32,5 @@ pub use run::{
     EventCount, ExtractionRun, FailureReason, NegativeRunId, RecordCount, RunId, RunOutcome,
     UnknownFailureReason,
 };
+pub use sheet::{Cell, CellRef, InvalidCellRef, InvalidSheetName, SheetCell, SheetName};
 pub use time::{EventTime, FetchedAt, InvalidTimestamp, ModifiedAt, Watermark};

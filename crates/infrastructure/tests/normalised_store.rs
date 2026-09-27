@@ -89,14 +89,15 @@ async fn content(pool: &SqlitePool) -> Result<Vec<String>, Box<dyn std::error::E
 
     for row in sqlx::query!(
         r#"
-        SELECT workout AS "workout!: i64", item_position AS "item!: i64",
-               exercise_position AS "exercise!: i64", position AS "position!: i64",
-               load_kind AS "load_kind!: String", load_grams AS "load_grams!: i64",
-               reps AS "reps: i64", duration_seconds AS "duration: i64",
-               distance_mm AS "distance: i64", rir AS "rir: String",
-               set_kind AS "set_kind!: String"
-        FROM performed_set
-        ORDER BY workout, item_position, exercise_position, position
+        SELECT w.landing_record_id AS "workout!: i64", s.item_position AS "item!: i64",
+               s.exercise_position AS "exercise!: i64", s.position AS "position!: i64",
+               s.load_kind AS "load_kind!: String", s.load_grams AS "load_grams!: i64",
+               s.reps AS "reps: i64", s.duration_seconds AS "duration: i64",
+               s.distance_mm AS "distance: i64", s.rir AS "rir: String",
+               s.set_kind AS "set_kind!: String"
+        FROM performed_set AS s
+        JOIN gym_workout AS w ON w.id = s.workout
+        ORDER BY w.landing_record_id, s.item_position, s.exercise_position, s.position
         "#
     )
     .fetch_all(pool)
@@ -137,15 +138,11 @@ fn the_stored_layer_holds_what_the_derivation_produced() {
             .fetch_one(&pool)
             .await?
             .n;
-        // Every workout points at a session, and at one that exists. The column
-        // is nullable only because SQLite cannot add a `NOT NULL` one to a table
-        // with rows, so this is the constraint the schema could not carry.
+        // Every workout points at a session that exists.
         let orphaned = sqlx::query!(
             r#"
             SELECT count(*) AS "n!: i64" FROM gym_workout AS w
-            WHERE w.session IS NULL
-               OR NOT EXISTS (SELECT 1 FROM gym_session AS s
-                              WHERE s.landing_record_id = w.session)
+            WHERE NOT EXISTS (SELECT 1 FROM gym_session AS s WHERE s.id = w.session)
             "#
         )
         .fetch_one(&pool)

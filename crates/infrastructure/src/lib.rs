@@ -28,7 +28,10 @@ pub use hevy::{
 };
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
-pub use spreadsheets::{SpreadsheetFiles, SpreadsheetWeighInTranslator};
+pub use spreadsheets::{
+    SpreadsheetEntity, SpreadsheetFiles, SpreadsheetSessionTranslator, SpreadsheetTranslator,
+    SpreadsheetWeighInTranslator,
+};
 pub use store::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
@@ -37,11 +40,11 @@ pub use store::{
     SpreadsheetFileLandingStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionLog, SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteManualWeighInStore,
-    SqliteNormalisationRunLog, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteRiddenVenues, SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
+    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog,
+    SqliteOperatorSettingsStore, SqliteOvernightHrvStore, SqlitePerformedWorkoutReader,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteRefusalStore, SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore,
+    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
     WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};

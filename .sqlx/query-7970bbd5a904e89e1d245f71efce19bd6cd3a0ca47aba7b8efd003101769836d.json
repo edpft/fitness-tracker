@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workout_item WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7970bbd5a904e89e1d245f71efce19bd6cd3a0ca47aba7b8efd003101769836d"
+}

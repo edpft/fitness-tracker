@@ -177,8 +177,8 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        136,
-        "the vocabulary this build has needed so far"
+        150,
+        "the vocabulary this build has needed so far: 136, and 14 from the spreadsheets (#274)"
     );
 }
 
@@ -201,7 +201,8 @@ fn a_position_held_one_side_at_a_time_is_held_twice() {
         let expected = match exercise {
             DurationExercise::CouchStretch
             | DurationExercise::NinetyNinety
-            | DurationExercise::PigeonStretch => Sides::Separately,
+            | DurationExercise::PigeonStretch
+            | DurationExercise::SuitcaseHold => Sides::Separately,
             _ => Sides::Together,
         };
         assert_eq!(exercise.sides(), expected, "{exercise}");

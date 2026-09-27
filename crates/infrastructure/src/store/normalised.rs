@@ -19,7 +19,10 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    gym::{GymWorkout, Load, PerformedExercise, PerformedGymSession, Set, SetKind, WorkoutItem},
+    gym::{
+        GymWorkout, Load, ManualSet, PerformedExercise, PerformedGymSession, Set, SetKind,
+        WorkoutItem,
+    },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -153,6 +156,7 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
         sessions: Vec<PerformedGymSession>,
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
         let mut tx = self
             .pool
             .begin()
@@ -162,31 +166,12 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
         // One transaction, and a replacement rather than an update. A
         // half-applied derivation is not a function of anything, and a
         // derivation that failed part-way must leave the previous one standing.
-        sqlx::query!("DELETE FROM performed_set")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        sqlx::query!("DELETE FROM performed_exercise")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        sqlx::query!("DELETE FROM workout_item")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        sqlx::query!("DELETE FROM gym_workout")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        // Last, because the workouts above point at it.
-        sqlx::query!("DELETE FROM gym_session")
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
+        // Only this stream's rows: the tables hold every source's sessions.
+        clear_stream(&mut tx, &stream).await?;
 
         let written = sessions.len();
         for session in &sessions {
-            write_session(&mut tx, run_id, session).await?;
+            write_session(&mut tx, run_id, &stream, session).await?;
         }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
@@ -197,33 +182,83 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
     /// count is what a `status` line reports as derived — so counting the parts
     /// would report 167 where the layer holds 146.
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
-        let row = sqlx::query!(r#"SELECT count(*) AS "count!: i64" FROM gym_session"#)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let stream = self.stream.to_string();
+        let row = sqlx::query!(
+            r#"SELECT count(*) AS "count!: i64" FROM gym_session WHERE stream = ?"#,
+            stream
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(count_from_storage(Some(row.count))?))
     }
+}
+
+/// Every row one stream wrote into the gym tables, children first.
+///
+/// Shared with the spreadsheets' store, because the tables are every source's
+/// (constitution § 3.1) and a derivation replaces only its own stream.
+pub(super) async fn clear_stream(
+    tx: &mut Transaction<'_, Sqlite>,
+    stream: &str,
+) -> Result<(), StoreError> {
+    sqlx::query!(
+        "DELETE FROM performed_set WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM performed_exercise WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM workout_item WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!("DELETE FROM gym_workout WHERE stream = ?", stream)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    // Last, because the workouts above point at it.
+    sqlx::query!("DELETE FROM gym_session WHERE stream = ?", stream)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    Ok(())
 }
 
 /// One session and every workout it was performed as.
 async fn write_session(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
+    stream: &str,
     session: &PerformedGymSession,
 ) -> Result<(), StoreError> {
-    let session_id = session.landed_as().as_i64();
+    let landed_as = session.landed_as().as_i64();
 
-    sqlx::query!(
-        "INSERT INTO gym_session (landing_record_id, run_id) VALUES (?, ?)",
-        session_id,
+    let row = sqlx::query!(
+        r#"
+        INSERT INTO gym_session (stream, landing_record_id, run_id) VALUES (?, ?, ?)
+        RETURNING id AS "id!: i64"
+        "#,
+        stream,
+        landed_as,
         run_id
     )
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
 
     for workout in session.workouts().iter() {
-        write_workout(tx, run_id, workout, session_id).await?;
+        write_workout(tx, run_id, stream, workout, row.id).await?;
     }
 
     Ok(())
@@ -232,6 +267,7 @@ async fn write_session(
 async fn write_workout(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
+    stream: &str,
     workout: &GymWorkout,
     session: i64,
 ) -> Result<(), StoreError> {
@@ -251,14 +287,16 @@ async fn write_workout(
         .performed_against()
         .map(application::DeliveryReference::as_str);
 
-    sqlx::query!(
+    let row = sqlx::query!(
         r#"
         INSERT INTO gym_workout (
-            landing_record_id, source_record_id, started_at_utc, zone,
+            stream, landing_record_id, source_record_id, started_at_utc, zone,
             endpoint, event_kind, event_time, run_id, performed_against, session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id AS "id!: i64"
         "#,
+        stream,
         landing_record_id,
         source_record_id,
         started_at,
@@ -270,9 +308,10 @@ async fn write_workout(
         performed_against,
         session
     )
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
+    let workout_id = row.id;
 
     for (position, item) in workout.items().iter().enumerate() {
         let position = count_for_storage(position)?;
@@ -280,7 +319,7 @@ async fn write_workout(
 
         sqlx::query!(
             "INSERT INTO workout_item (workout, position, is_superset) VALUES (?, ?, ?)",
-            landing_record_id,
+            workout_id,
             position,
             is_superset
         )
@@ -290,7 +329,7 @@ async fn write_workout(
 
         for (member, exercise) in item.exercises().enumerate() {
             let member = count_for_storage(member)?;
-            write_exercise(tx, landing_record_id, position, member, exercise).await?;
+            write_exercise(tx, workout_id, position, member, exercise).await?;
         }
     }
 
@@ -375,19 +414,46 @@ async fn write_exercise(
 }
 
 /// The parts of a set row that do not depend on its measure.
-struct Row {
+pub(super) struct Row {
     workout: i64,
     item_position: i64,
     exercise_position: i64,
     position: i64,
-    load_kind: &'static str,
-    load_grams: i64,
+    /// Both `None` only where a sheet did not record the load. Hevy always
+    /// does.
+    load_kind: Option<&'static str>,
+    load_grams: Option<i64>,
     /// `Performed<M>` projected. A failed attempt writes no measure at all,
     /// which is what the `0003` CHECK constraints hold.
     outcome: &'static str,
     rir: Option<String>,
     set_kind: &'static str,
     rest_after_seconds: Option<i64>,
+    /// The sheet and cell a spreadsheet recorded the set in. `None` for a
+    /// feed.
+    sheet: Option<String>,
+    cell: Option<String>,
+}
+
+/// A load as the two columns it is stored in.
+///
+/// SQLite stores signed integers, so the domain's unsigned mass narrows here
+/// and nowhere else. A relative load is already signed.
+fn load_columns(load: Load) -> (&'static str, i64) {
+    match load {
+        Load::Absolute(mass) => (
+            "absolute",
+            i64::try_from(mass.as_grams()).unwrap_or(i64::MAX),
+        ),
+        Load::Relative(delta) => ("relative", delta.as_grams()),
+    }
+}
+
+const fn set_kind_column(kind: SetKind) -> &'static str {
+    match kind {
+        SetKind::Working => "working",
+        SetKind::Warmup => "warmup",
+    }
 }
 
 impl Row {
@@ -398,37 +464,57 @@ impl Row {
         position: i64,
         set: &Set<M>,
     ) -> Self {
-        // SQLite stores signed integers, so the domain's unsigned mass narrows
-        // here and nowhere else. A relative load is already signed.
-        let (load_kind, load_grams) = match set.load {
-            Load::Absolute(mass) => (
-                "absolute",
-                i64::try_from(mass.as_grams()).unwrap_or(i64::MAX),
-            ),
-            Load::Relative(delta) => ("relative", delta.as_grams()),
-        };
+        let (load_kind, load_grams) = load_columns(set.load);
         Self {
             workout,
             item_position,
             exercise_position,
             position,
-            load_kind,
-            load_grams,
+            load_kind: Some(load_kind),
+            load_grams: Some(load_grams),
             outcome: set.outcome.as_str(),
             rir: set.intensity.map(|rir| rir.as_str().to_owned()),
-            set_kind: match set.kind {
-                SetKind::Working => "working",
-                SetKind::Warmup => "warmup",
-            },
+            set_kind: set_kind_column(set.kind),
             rest_after_seconds: set
                 .rest_after
                 .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
+            sheet: None,
+            cell: None,
+        }
+    }
+
+    /// A set a sheet recorded, which may not say what the load was.
+    ///
+    /// A sheet records no supersets, so every item is one exercise and the
+    /// exercise is the first member of its item.
+    pub(super) fn manual<M>(
+        workout: i64,
+        item_position: i64,
+        position: i64,
+        set: &ManualSet<M>,
+    ) -> Self {
+        let load = set.load.map(load_columns);
+        Self {
+            workout,
+            item_position,
+            exercise_position: 0,
+            position,
+            load_kind: load.map(|(kind, _)| kind),
+            load_grams: load.map(|(_, grams)| grams),
+            outcome: set.outcome.as_str(),
+            rir: set.intensity.map(|rir| rir.as_str().to_owned()),
+            set_kind: set_kind_column(set.kind),
+            rest_after_seconds: set
+                .rest_after
+                .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
+            sheet: Some(set.written_in.sheet.to_string()),
+            cell: Some(set.written_in.cell.to_string()),
         }
     }
 }
 
 /// A set row under construction, so the four measures share one `INSERT`.
-struct SetWrite<'tx, 'conn> {
+pub(super) struct SetWrite<'tx, 'conn> {
     tx: &'tx mut Transaction<'conn, Sqlite>,
     row: Row,
     reps: Option<i64>,
@@ -436,7 +522,7 @@ struct SetWrite<'tx, 'conn> {
     distance: Option<i64>,
 }
 
-const fn write_set<'tx, 'conn>(
+pub(super) const fn write_set<'tx, 'conn>(
     tx: &'tx mut Transaction<'conn, Sqlite>,
     row: Row,
 ) -> SetWrite<'tx, 'conn> {
@@ -450,12 +536,12 @@ const fn write_set<'tx, 'conn>(
 }
 
 impl SetWrite<'_, '_> {
-    const fn reps(mut self, reps: Option<i64>) -> Self {
+    pub(super) const fn reps(mut self, reps: Option<i64>) -> Self {
         self.reps = reps;
         self
     }
 
-    const fn duration(mut self, duration: Option<i64>) -> Self {
+    pub(super) const fn duration(mut self, duration: Option<i64>) -> Self {
         self.duration = duration;
         self
     }
@@ -465,7 +551,7 @@ impl SetWrite<'_, '_> {
         self
     }
 
-    async fn execute(self) -> Result<(), StoreError> {
+    pub(super) async fn execute(self) -> Result<(), StoreError> {
         let row = self.row;
         sqlx::query!(
             r#"
@@ -473,9 +559,9 @@ impl SetWrite<'_, '_> {
                 workout, item_position, exercise_position, position,
                 load_kind, load_grams, outcome,
                 reps, duration_seconds, distance_mm,
-                rir, set_kind, rest_after_seconds
+                rir, set_kind, rest_after_seconds, sheet, cell
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             row.workout,
             row.item_position,
@@ -489,7 +575,9 @@ impl SetWrite<'_, '_> {
             self.distance,
             row.rir,
             row.set_kind,
-            row.rest_after_seconds
+            row.rest_after_seconds,
+            row.sheet,
+            row.cell
         )
         .execute(&mut **self.tx)
         .await

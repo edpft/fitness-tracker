@@ -16,10 +16,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
-use domain::landing::{
-    FilePath, FileProvenance, ModifiedAt, RawPayload, SourceRecordId, Watermark,
+use application::{
+    EventBatch, NormalisationError, SourceError, SourceEvent, Translation, WorkoutEventSource,
+    ports::Translator,
 };
+use domain::{
+    body::ManualWeighIn,
+    gym::ManualGymSession,
+    landing::{
+        FilePath, FileProvenance, LandedRecord, ModifiedAt, RawPayload, SourceRecordId, Watermark,
+    },
+    normalised::{NormalisedEntity, OperatorZone, RefusalLocus, RefusalReason},
+    sequence::NonEmpty,
+};
+
+use self::sheet::Sheet;
+use crate::scribe::Scribe;
 
 /// Every file under one folder, as it is on disk.
 #[derive(Debug, Clone)]
@@ -150,6 +162,122 @@ fn unreadable(path: &Path, error: &std::io::Error) -> SourceError {
     }
 }
 
+mod sessions;
+mod sheet;
 mod weigh_ins;
 
+pub use sessions::SpreadsheetSessionTranslator;
 pub use weigh_ins::SpreadsheetWeighInTranslator;
+
+/// Everything one spreadsheet derives, each thing an entity of its own.
+///
+/// A sum rather than two derivations because the stream is one: one landed
+/// file can hold both a year of weigh-ins and a training log, and the stream
+/// has one run log and one set of refusals (#274).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpreadsheetEntity {
+    WeighIn(ManualWeighIn),
+    GymSession(ManualGymSession),
+}
+
+impl NormalisedEntity for SpreadsheetEntity {
+    fn composes(&self) -> Vec<&SourceRecordId> {
+        match self {
+            Self::WeighIn(weigh_in) => weigh_in.composes(),
+            Self::GymSession(session) => session.composes(),
+        }
+    }
+}
+
+/// Reads weigh-ins and gym sessions out of a landed spreadsheet, in one pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SpreadsheetTranslator;
+
+impl Translator for SpreadsheetTranslator {
+    type Account = LandedRecord;
+    type Entity = SpreadsheetEntity;
+
+    /// The zone is not consulted: everything a sheet records is a day.
+    fn translate(
+        &self,
+        record: &LandedRecord,
+        _zone: &OperatorZone,
+    ) -> Result<Translation<SpreadsheetEntity>, NormalisationError> {
+        translate_with(
+            record,
+            "weigh-ins or gym sessions",
+            |file, sheets, scribe| {
+                let weigh_ins = weigh_ins::read_weigh_ins(record, file, sheets, scribe);
+                let sessions = sessions::read_sessions(record, file, sheets, scribe)?;
+                Ok(weigh_ins
+                    .into_iter()
+                    .map(SpreadsheetEntity::WeighIn)
+                    .chain(sessions.into_iter().map(SpreadsheetEntity::GymSession))
+                    .collect())
+            },
+        )
+    }
+}
+
+/// Open a landed file as sheets, let `read` find what it holds, and say what
+/// became of it.
+///
+/// A file that yields nothing and refuses nothing is a spreadsheet of something
+/// else — a food diary, a triathlon plan — and that is said once, as the one
+/// reason, because an account that yields nothing says why (§ 37).
+fn translate_with<E>(
+    record: &LandedRecord,
+    what: &str,
+    read: impl FnOnce(&FileProvenance, &[Sheet], &mut Scribe) -> Result<Vec<E>, NormalisationError>,
+) -> Result<Translation<E>, NormalisationError> {
+    let mut scribe = Scribe::new(record);
+    let Some(file) = record.provenance().as_file() else {
+        return Ok(scribe.only(
+            RefusalLocus::Record,
+            RefusalReason::UnreadablePayload {
+                detail: format!("{} was served by a feed, not a folder", record.provenance()),
+            },
+        ));
+    };
+
+    let bytes = record.payload().as_bytes();
+    let sheets = if file.path().as_str().to_lowercase().ends_with(".csv") {
+        sheet::csv(bytes, file)
+    } else {
+        sheet::workbook(bytes)
+    };
+    let sheets = match sheets {
+        Ok(sheets) => sheets,
+        Err(detail) => {
+            return Ok(scribe.only(
+                RefusalLocus::Record,
+                RefusalReason::Unmodelled {
+                    detail: format!(
+                        "{}, a file that is not a spreadsheet ({detail}),",
+                        file.path()
+                    ),
+                },
+            ));
+        }
+    };
+
+    let entities = read(file, &sheets, &mut scribe)?;
+    let refusals = scribe.into_refusals();
+    if let Ok(entities) = NonEmpty::new(entities) {
+        return Ok(Translation::Entities { entities, refusals });
+    }
+    Ok(NonEmpty::new(refusals).map_or_else(
+        |_| {
+            Scribe::new(record).only(
+                RefusalLocus::Record,
+                RefusalReason::Unmodelled {
+                    detail: format!(
+                        "{}, a spreadsheet of something other than {what},",
+                        file.path()
+                    ),
+                },
+            )
+        },
+        Translation::Refused,
+    ))
+}

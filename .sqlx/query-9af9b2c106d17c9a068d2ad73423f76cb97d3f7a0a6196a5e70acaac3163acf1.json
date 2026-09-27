@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT w.session AS \"session!: i64\",\n                   w.performed_against AS \"performed_against!: String\"\n            FROM gym_workout AS w\n            JOIN prescription_delivery AS d ON d.reference = w.performed_against\n            WHERE d.prescription = ? AND w.session IS NOT NULL\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT w.session AS \"session!: i64\",\n                   w.performed_against AS \"performed_against!: String\"\n            FROM gym_workout AS w\n            JOIN prescription_delivery AS d ON d.reference = w.performed_against\n            WHERE d.prescription = ? AND w.stream = 'hevy.workouts'\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -30,9 +30,9 @@
       "Right": 1
     },
     "nullable": [
-      true,
+      false,
       true
     ]
   },
-  "hash": "647426c6fde96f1d94067f49e4f256ce165ce7a09eedc60b89eedc0c50f19fcd"
+  "hash": "9af9b2c106d17c9a068d2ad73423f76cb97d3f7a0a6196a5e70acaac3163acf1"
 }

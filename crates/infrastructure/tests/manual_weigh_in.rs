@@ -175,9 +175,9 @@ mod store {
         normalised::OperatorZone,
     };
     use infrastructure::{
-        SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetWeighInTranslator,
-        SqliteExtractionRunLog, SqliteManualWeighInStore, SqliteNormalisationRunLog,
-        SqliteRefusalStore, SqliteWeighInHistory, connect,
+        SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
+        SqliteExtractionRunLog, SqliteNormalisationRunLog, SqliteRefusalStore,
+        SqliteSpreadsheetStore, SqliteWeighInHistory, connect,
     };
     use sqlx::SqlitePool;
 
@@ -214,8 +214,8 @@ mod store {
         let normalisation = Normalisation::new(
             NormalisationPorts {
                 raw: SpreadsheetFileAccountReader::new(pool.clone())?,
-                translator: SpreadsheetWeighInTranslator,
-                workouts: SqliteManualWeighInStore::new(pool.clone())?,
+                translator: SpreadsheetTranslator,
+                workouts: SqliteSpreadsheetStore::new(pool.clone())?,
                 refusals: SqliteRefusalStore::new(
                     pool.clone(),
                     SpreadsheetFileLandingStore::STREAM,

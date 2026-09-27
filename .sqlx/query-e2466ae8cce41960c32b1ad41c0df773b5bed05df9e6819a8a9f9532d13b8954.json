@@ -1,11 +1,22 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\"\n            FROM gym_workout AS w\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            ",
+  "query": "\n            SELECT w.id AS \"workout!: i64\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\"\n            FROM gym_workout AS w\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            ",
   "describe": {
     "columns": [
       {
-        "name": "landed_as!: i64",
+        "name": "workout!: i64",
         "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "landed_as!: i64",
+        "ordinal": 1,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -16,7 +27,7 @@
       },
       {
         "name": "source_record_id!: String",
-        "ordinal": 1,
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "on_utc!: String",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "zone!: String",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "endpoint!: String",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "event_kind!: String",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "event_time: String",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "performed_against: String",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -99,12 +110,13 @@
       false,
       false,
       false,
-      false,
-      false,
-      false,
+      true,
+      true,
+      true,
+      true,
       true,
       true
     ]
   },
-  "hash": "0906b4bb45c0f3174e76520f72c32c08a37a5490dccd3ab34885f1666abd3d57"
+  "hash": "e2466ae8cce41960c32b1ad41c0df773b5bed05df9e6819a8a9f9532d13b8954"
 }
