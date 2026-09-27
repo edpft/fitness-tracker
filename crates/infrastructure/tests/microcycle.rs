@@ -47,43 +47,45 @@ use infrastructure::{
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
 };
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 use sqlx::SqlitePool;
 use support::{corpus, programme};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// Whatever dates it was built with, whatever it is asked.
+/// Whatever moments it was built with, whatever it is asked.
 ///
 /// A test adapter for [`PerformedSessionLog`]: the question the standing puts
-/// to the record is only which days hold a session, and a real reader would
+/// to the record is only when each session started, and a real reader would
 /// need a landed and derived corpus per discipline to answer it.
 struct Trained {
-    dates: Vec<Date>,
+    started: Vec<DateTime>,
 }
 
 impl Trained {
     const fn nothing() -> Self {
-        Self { dates: Vec::new() }
+        Self {
+            started: Vec::new(),
+        }
     }
 
-    const fn on(dates: Vec<Date>) -> Self {
-        Self { dates }
+    const fn at(started: Vec<DateTime>) -> Self {
+        Self { started }
     }
 }
 
 impl PerformedSessionLog for Trained {
-    async fn dates_between(&self, from: Date, to: Date) -> Result<Vec<Date>, StoreError> {
+    async fn started_between(&self, from: Date, to: Date) -> Result<Vec<DateTime>, StoreError> {
         Ok(self
-            .dates
+            .started
             .iter()
             .copied()
-            .filter(|date| *date >= from && *date <= to)
+            .filter(|started| started.date() >= from && started.date() <= to)
             .collect())
     }
 }
 
-/// Rides on given days, at given classes.
+/// Rides at given moments, at given classes.
 ///
 /// A test adapter for [`RiddenSessionLog`]. The classes are what makes a ride
 /// answer for the slot holding *its* role rather than for whichever slot it
@@ -91,7 +93,7 @@ impl PerformedSessionLog for Trained {
 /// where the record cannot say — a ride normalised before the column existed,
 /// or one taken under the operator's own steam.
 struct Ridden {
-    sessions: Vec<(Date, Vec<RideVenue>)>,
+    sessions: Vec<(DateTime, Vec<RideVenue>)>,
 }
 
 impl Ridden {
@@ -101,7 +103,7 @@ impl Ridden {
         }
     }
 
-    const fn of(sessions: Vec<(Date, Vec<RideVenue>)>) -> Self {
+    const fn of(sessions: Vec<(DateTime, Vec<RideVenue>)>) -> Self {
         Self { sessions }
     }
 }
@@ -111,9 +113,9 @@ impl RiddenSessionLog for Ridden {
         Ok(self
             .sessions
             .iter()
-            .filter(|(date, _)| *date >= from && *date <= to)
-            .map(|(date, at)| RiddenSession {
-                on: *date,
+            .filter(|(started, _)| started.date() >= from && started.date() <= to)
+            .map(|(started, at)| RiddenSession {
+                started: *started,
                 at: at.iter().cloned().collect(),
             })
             .collect())
@@ -472,7 +474,10 @@ fn the_microcycle_reports_a_state_for_every_session() {
                 gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
                 cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
                 gym_performed: Trained::nothing(),
-                cycling_performed: Ridden::of(vec![(Date::constant(2026, 9, 16), Vec::new())]),
+                cycling_performed: Ridden::of(vec![(
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                    Vec::new(),
+                )]),
             },
             hevy()?,
             peloton()?,
@@ -631,7 +636,7 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
                 cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
                 gym_performed: Trained::nothing(),
                 cycling_performed: Ridden::of(vec![(
-                    Date::constant(2026, 9, 16),
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
                     vec![RideVenue::new(
                         "725d6185",
                         "45 min Power Zone Endurance Ride",
@@ -642,10 +647,13 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
             peloton()?,
         );
 
+        // The Saturday evening, while the Friday's gym session can still be
+        // done: by the Sunday nothing in the week is owed and it has ended
+        // (#281).
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 20),
+                    Date::constant(2026, 9, 19),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -687,16 +695,22 @@ fn a_ride_the_record_cannot_name_answers_for_whose_turn_it_was() {
                 gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
                 cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
                 gym_performed: Trained::nothing(),
-                cycling_performed: Ridden::of(vec![(Date::constant(2026, 9, 16), Vec::new())]),
+                cycling_performed: Ridden::of(vec![(
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                    Vec::new(),
+                )]),
             },
             hevy()?,
             peloton()?,
         );
 
+        // The Saturday evening, while the Friday's gym session can still be
+        // done: by the Sunday nothing in the week is owed and it has ended
+        // (#281).
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 20),
+                    Date::constant(2026, 9, 19),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -738,9 +752,9 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
                 cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
                 // The last gym session he did, a week before the plan began.
                 // It answers for nothing in it.
-                gym_performed: Trained::on(vec![Date::constant(2026, 9, 7)]),
+                gym_performed: Trained::at(vec![Date::constant(2026, 9, 7).at(19, 0, 0, 0)]),
                 cycling_performed: Ridden::of(vec![(
-                    Date::constant(2026, 9, 16),
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
                     vec![RideVenue::new(
                         "725d6185",
                         "45 min Power Zone Endurance Ride",
@@ -839,9 +853,9 @@ fn a_week_that_kept_both_essential_sessions_moves_nothing() {
                     plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
                     gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
                     cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-                    gym_performed: Trained::on(vec![Date::constant(2026, 9, 19)]),
+                    gym_performed: Trained::at(vec![Date::constant(2026, 9, 19).at(10, 0, 0, 0)]),
                     cycling_performed: Ridden::of(vec![(
-                        Date::constant(2026, 9, 16),
+                        Date::constant(2026, 9, 16).at(19, 0, 0, 0),
                         vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
                     )]),
                 },
@@ -974,9 +988,9 @@ fn the_ftp_test_ridden_and_the_1rm_test_missed_holds_the_bike() {
         ill_to_the_sunday(&pool).await?;
         after(
             &pool,
-            Trained::on(vec![Date::constant(2026, 9, 7)]),
+            Trained::at(vec![Date::constant(2026, 9, 7).at(19, 0, 0, 0)]),
             Ridden::of(vec![(
-                Date::constant(2026, 9, 16),
+                Date::constant(2026, 9, 16).at(19, 0, 0, 0),
                 vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
             )]),
         )
@@ -1042,9 +1056,9 @@ fn the_1rm_test_done_and_the_ftp_test_missed_holds_the_gym() {
         gym_delivered_for_the_friday(&pool).await?;
         after(
             &pool,
-            Trained::on(vec![Date::constant(2026, 9, 19)]),
+            Trained::at(vec![Date::constant(2026, 9, 19).at(10, 0, 0, 0)]),
             Ridden::of(vec![(
-                Date::constant(2026, 9, 16),
+                Date::constant(2026, 9, 16).at(19, 0, 0, 0),
                 vec![RideVenue::new(
                     "725d6185",
                     "45 min Power Zone Endurance Ride",
@@ -1078,4 +1092,153 @@ fn the_1rm_test_done_and_the_ftp_test_missed_holds_the_gym() {
         "the FTP test takes the Wednesday again"
     );
     assert_eq!(after.next_mesocycle, Date::constant(2026, 9, 28));
+}
+
+/// The week of 14 September read at `now`, from what the record says was done.
+async fn standing_at(
+    gym_performed: Trained,
+    cycling_performed: Ridden,
+    now: DayPart,
+) -> Fallible<application::microcycle::Standing> {
+    let (pool, _directory) = autumn_together().await?;
+    away_over_the_monday(&pool).await?;
+    let (gym_destination, cycling_destination) = (hevy()?, peloton()?);
+    let zone = corpus::zone()?;
+    Ok(Microcycle::new(
+        MicrocyclePorts {
+            diary: SqliteDiaryStore::new(pool.clone()),
+            plans: SqlitePlanStore::new(pool.clone(), zone),
+            gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            gym_performed,
+            cycling_performed,
+        },
+        gym_destination,
+        cycling_destination,
+    )
+    .standing(now)
+    .await?)
+}
+
+/// The FTP test on the Wednesday, and the endurance ride — the Sunday's
+/// session — at a given moment.
+fn both_rides(endurance: DateTime) -> Fallible<Ridden> {
+    Ok(Ridden::of(vec![
+        (
+            Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+            vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+        ),
+        (
+            endurance,
+            vec![RideVenue::new(
+                "725d6185",
+                "45 min Power Zone Endurance Ride",
+            )?],
+        ),
+    ]))
+}
+
+/// **#281, the operator's own case.** The Sunday ride is the last session
+/// still owed; riding it ends the microcycle there and then, so on the Sunday
+/// evening the week of the 21st is already the current one.
+#[test]
+fn performing_the_final_session_ends_the_microcycle() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
+        both_rides(Date::constant(2026, 9, 20).at(9, 0, 0, 0)).expect("rides"),
+        DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Evening),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_eq!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)]
+    );
+    assert_eq!(
+        standing
+            .sessions
+            .first()
+            .map(|session| (session.slot.date, session.state)),
+        Some((Date::constant(2026, 9, 21), SessionState::ToBePrescribed)),
+        "the next microcycle's first session is the one to prescribe"
+    );
+}
+
+/// **Until the window closes the microcycle is still current**, whatever the
+/// calendar says: on the Monday morning the Sunday ride can still be ridden,
+/// because nothing is slotted before the Monday evening.
+#[test]
+fn an_unperformed_final_session_holds_the_microcycle_until_its_window_closes() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
+        Ridden::nothing(),
+        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 14)));
+    assert!(standing.weeks.is_empty(), "{:?}", standing.weeks);
+    assert_eq!(
+        standing
+            .sessions
+            .last()
+            .map(|session| (session.slot.date, session.state)),
+        Some((Date::constant(2026, 9, 20), SessionState::ToBePrescribed)),
+    );
+}
+
+/// A final session ridden inside its window on the next morning is that
+/// microcycle's, and ends it.
+///
+/// Nothing else settles it early: the Monday gym is covered by the holiday
+/// and the Friday's was done.
+#[test]
+fn a_final_session_performed_the_next_morning_is_its_own_microcycles() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
+        both_rides(Date::constant(2026, 9, 21).at(7, 0, 0, 0)).expect("rides"),
+        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Afternoon),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_eq!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)]
+    );
+}
+
+/// **The session that closes the window is the next microcycle's.** Nothing
+/// was trained after the Wednesday; the gym on the Monday evening is gym 1 of
+/// the week of the 21st, and does not stand in for the Friday it came after.
+#[test]
+fn the_session_that_closes_the_window_belongs_to_the_next_microcycle() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 21).at(19, 0, 0, 0)]),
+        Ridden::of(vec![(
+            Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+            vec![RideVenue::new("4d302bef", "20 min FTP Test Ride").expect("a venue")],
+        )]),
+        DayPart::new(Date::constant(2026, 9, 22), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_ne!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)],
+        "the Friday was not trained"
+    );
+    assert_eq!(
+        standing
+            .sessions
+            .first()
+            .map(|session| (session.slot.date, session.state)),
+        Some((Date::constant(2026, 9, 21), SessionState::Performed)),
+    );
 }

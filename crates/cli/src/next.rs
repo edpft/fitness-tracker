@@ -96,7 +96,9 @@ pub async fn next(
         // **Two empty answers, and they are different facts.** A week the
         // diary holds nothing for is a week off; a week it holds slots for
         // that no plan covers is a plan to author.
-        let monday = domain::planner::commencing(now.date);
+        let monday = standing
+            .commencing
+            .unwrap_or_else(|| domain::planner::commencing(now.date));
         let has_slots = (0..7)
             .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
             .any(|date| !diary.ordinary_slots_of(date).is_empty());

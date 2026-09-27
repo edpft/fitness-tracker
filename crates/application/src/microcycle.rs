@@ -18,10 +18,11 @@ use domain::{
         self, Filled, MicrocycleState, Placed, Recorded, Rerun, SessionState, Unreschedulable,
     },
     schedule::{
-        DayPart, Diary, Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted,
+        DayPart, Diary, Discipline, PartOfDay, RecordedSession, ScheduledSlot, SessionRole,
+        accounted,
     },
 };
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 
 use crate::{
     CyclingDeliveryStore, DestinationName, DiaryStore, PerformedSessionLog, PlanStore,
@@ -48,10 +49,12 @@ pub struct Session {
 /// Where a plan stands on a day.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Standing {
-    /// Every session of this week, in the order the week runs.
+    /// The Monday the current microcycle commences: the first week that has
+    /// not ended, which is not always the one containing today (#281).
+    pub commencing: Option<Date>,
+    /// Every session of the current microcycle, in the order it runs.
     pub sessions: Vec<Session>,
-    /// Each earlier week since the plan began, and how its concurrent
-    /// microcycle ended.
+    /// Each earlier microcycle since the plan began, and how it ended.
     pub weeks: Vec<(Date, MicrocycleState)>,
     /// The weeks that run again, and which discipline holds instead.
     ///
@@ -59,10 +62,58 @@ pub struct Standing {
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
     pub reruns: Vec<Rerun>,
-    /// The days of the mesocycle running now, both disciplines' halves
+    /// The days of the current microcycle's mesocycle, both disciplines' halves
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
     pub mesocycle: Option<Span>,
+}
+
+/// One week read against the plan, and when it ended if it has.
+struct Week {
+    sessions: Vec<Session>,
+    /// Where the next microcycle's record starts: `None` while this one is
+    /// still current.
+    ended: Option<Boundary>,
+}
+
+/// Where one microcycle's record ends and the next one's begins.
+///
+/// **Two kinds, because a session stops being completable two ways** (#281).
+/// Performing it settles it at that performance, so whatever is performed after
+/// the last one — even in the same part of the day — is the next microcycle's.
+/// A window closing settles it at the part of the day it closes on, and the
+/// record knows a session's part only as [`DayPart::containing`] reads it.
+#[derive(Debug, Clone, Copy)]
+enum Boundary {
+    After(DateTime),
+    From(DayPart),
+}
+
+impl Boundary {
+    /// Whether a session started at `started` is on the later side.
+    fn admits(self, started: DateTime) -> bool {
+        match self {
+            Self::After(performed) => started > performed,
+            Self::From(part) => DayPart::containing(started) >= part,
+        }
+    }
+
+    /// Whichever of the two comes later. A performance in a part of the day
+    /// is later than that part beginning.
+    fn later(self, other: Self) -> Self {
+        let key = |boundary: Self| match boundary {
+            Self::After(performed) => (DayPart::containing(performed), Some(performed)),
+            Self::From(part) => (part, None),
+        };
+        if key(other) > key(self) { other } else { self }
+    }
+
+    fn date(self) -> Date {
+        match self {
+            Self::After(performed) => performed.date(),
+            Self::From(part) => part.date,
+        }
+    }
 }
 
 impl Session {
@@ -128,14 +179,22 @@ where
         }
     }
 
-    /// Where the plan stands on `now`: every week since it began, and every
-    /// session of this one.
+    /// Where the plan stands on `now`: every microcycle since it began, and
+    /// every session of the current one.
     ///
-    /// **Two machines, walked together** (#177). Each week before this one is
-    /// read as a concurrent microcycle, and a week that lost its essential
+    /// **Two machines, walked together** (#177). Each microcycle that has ended
+    /// is read as a concurrent microcycle, and one that lost its essential
     /// sessions is re-run — the plan is rescheduled so that the next week holds
     /// the same microcycle, and every mesocycle after it starts a week later.
-    /// Then this week is read against the plan as it now stands.
+    /// Then the first that has not ended is read against the plan as it now
+    /// stands.
+    ///
+    /// **A microcycle ends once none of its sessions can still be completed**
+    /// (operator, 2026-09-27, #281) — not at midnight on the Sunday. Riding the
+    /// Sunday session, when it is the last one owed, makes the next week
+    /// current that evening; not riding it leaves this one current until the
+    /// Monday evening slot closes its window. A session performed belongs to
+    /// the microcycle that was current when it was.
     ///
     /// **Derived on every read, never stored**, as a ladder's position is. A
     /// workout that lands late and turns out to have been the entry test undoes
@@ -152,69 +211,74 @@ where
             return Ok(Standing::default());
         };
 
-        let this_week = planner::commencing(now.date);
-        let mut monday = authored.window().span().start();
-        monday = planner::commencing(monday);
-
+        let mut monday = planner::commencing(authored.window().span().start());
+        let mut opens: Option<Boundary> = None;
         let mut reruns: Vec<Rerun> = Vec::new();
         let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
-        while monday < this_week {
+        loop {
             let plan = rescheduled(&authored, &reruns, &diary)?;
-            let sunday = monday
-                .checked_add(jiff::Span::new().days(6))
-                .unwrap_or(monday);
-            let sessions = self
-                .week_of(&plan, &diary, monday, now, sunday.min(now.date))
-                .await?;
-            let placed = placed(&sessions);
+            let week = self.week_of(&plan, &diary, monday, opens, now).await?;
+            let Some(ended) = week.ended else {
+                let mesocycle = plan
+                    .mesocycle_on(monday)
+                    .or_else(|| plan.mesocycle_on(now.date))
+                    .map(|mesocycle| mesocycle.span());
+                return Ok(Standing {
+                    commencing: Some(monday),
+                    sessions: week.sessions,
+                    weeks,
+                    reruns,
+                    mesocycle,
+                });
+            };
+
+            let placed = placed(&week.sessions);
             let state = planner::microcycle_state(&placed);
             if let Some(rerun) = planner::rerun(monday, state, &placed) {
                 reruns.push(rerun);
             }
             weeks.push((monday, state));
-            let Ok(next) = monday.checked_add(jiff::Span::new().weeks(1)) else {
-                break;
-            };
-            monday = next;
+            opens = Some(ended);
+            monday = monday
+                .checked_add(jiff::Span::new().weeks(1))
+                .map_err(|_| StoreError::Corrupt {
+                    detail: "a microcycle beyond the calendar".to_owned(),
+                })?;
         }
-
-        let plan = rescheduled(&authored, &reruns, &diary)?;
-        let sessions = self.week_of(&plan, &diary, now.date, now, now.date).await?;
-        let mesocycle = plan
-            .mesocycle_on(now.date)
-            .map(|mesocycle| mesocycle.span());
-        Ok(Standing {
-            sessions,
-            weeks,
-            reruns,
-            mesocycle,
-        })
     }
 
-    /// Every session of the calendar week containing `containing`, with its
-    /// state, against a plan already rescheduled.
+    /// Every session of the week commencing `monday`, with its state, against
+    /// a plan already rescheduled — and whether it has ended by `now`.
     ///
-    /// In the order the week runs. An empty answer is a week the diary says
-    /// nothing about, which is a real state and not a fault. `performed_by` is
-    /// the last day the record is read to: today for this week, and the week's
-    /// own Sunday for one already over, so that a later week's session never
-    /// answers for an earlier week's slot.
+    /// In the order the week runs. An empty week is one the diary says nothing
+    /// about, which is a real state and not a fault; it ends with the calendar
+    /// week, since nothing in it can end it sooner.
+    ///
+    /// `opens` is where the microcycle before it ended, and so where this one's
+    /// record starts; `None` for the first week of the plan.
     async fn week_of(
         &self,
         plan: &Plan,
         diary: &Diary,
-        containing: Date,
+        monday: Date,
+        opens: Option<Boundary>,
         now: DayPart,
-        performed_by: Date,
-    ) -> Result<Vec<Session>, StoreError> {
-        let week = planner::week(plan, diary, containing);
+    ) -> Result<Week, StoreError> {
+        let week = planner::week(plan, diary, monday);
         if week.is_empty() {
-            return Ok(Vec::new());
+            let next = monday
+                .checked_add(jiff::Span::new().weeks(1))
+                .map_err(|_| StoreError::Corrupt {
+                    detail: "a microcycle beyond the calendar".to_owned(),
+                })?;
+            let next = DayPart::new(next, PartOfDay::Morning);
+            return Ok(Week {
+                sessions: Vec::new(),
+                ended: (next <= now).then_some(Boundary::From(next)),
+            });
         }
 
         let slots: Vec<ScheduledSlot> = week.iter().map(|planned| planned.slot).collect();
-        let performed = self.performed(&week, performed_by).await?;
-        let answered = accounted(&slots, &performed);
 
         // **What closes the last session's window comes from the diary**, not
         // from the end of the week: a Sunday session is still performable on
@@ -224,9 +288,34 @@ where
             .and_then(|last| diary.first_ordinary_after(last.date))
             .map(|slot| DayPart::new(slot.date, slot.slot.part));
 
+        let recorded = self.performed(&week, opens, after, now.date).await?;
+        let sessions_of = |upto: usize| -> Vec<RecordedSession> {
+            recorded
+                .iter()
+                .take(upto)
+                .map(|(_, session)| *session)
+                .collect()
+        };
+        let answered = accounted(&slots, &sessions_of(recorded.len()));
+
+        // When each slot was first answered: the moment of the session that,
+        // read in order, first made it performed.
+        let mut performed_at: Vec<Option<DateTime>> = vec![None; slots.len()];
+        for (upto, (started, _)) in recorded.iter().enumerate() {
+            let so_far = accounted(&slots, &sessions_of(upto.saturating_add(1)));
+            for (at, done) in performed_at.iter_mut().zip(so_far) {
+                if done && at.is_none() {
+                    *at = Some(*started);
+                }
+            }
+        }
+
         let mut sessions = Vec::with_capacity(week.len());
+        let mut settled: Option<Boundary> = None;
+        let mut outstanding = false;
         for (at, planned) in week.iter().enumerate() {
             let slot = planned.slot;
+            let begins = DayPart::new(slot.date, slot.slot.part);
             let closes = slots
                 .get(at.saturating_add(1))
                 .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)));
@@ -235,23 +324,50 @@ where
                 prescribed: self.prescribed(slot).await?,
                 performed: answered.get(at).copied().unwrap_or(false),
             };
+            let state = planner::state_of(begins, closes, now, diary, recorded);
+
+            // **When it stopped being completable**: performed at the session
+            // that performed it, skipped at its slot, and otherwise when its
+            // window closed.
+            let since = match state {
+                SessionState::ToBePrescribed | SessionState::Prescribed => {
+                    outstanding = true;
+                    None
+                }
+                SessionState::Performed => Some(
+                    performed_at
+                        .get(at)
+                        .copied()
+                        .flatten()
+                        .map_or(Boundary::From(begins), Boundary::After),
+                ),
+                SessionState::Skipped { .. } => Some(Boundary::From(begins)),
+                SessionState::NotPrescribed | SessionState::NotPerformed { .. } => {
+                    Some(Boundary::From(closes.unwrap_or(begins)))
+                }
+            };
+            settled = match (settled, since) {
+                (Some(settled), Some(since)) => Some(settled.later(since)),
+                (settled, since) => settled.or(since),
+            };
 
             sessions.push(Session {
                 slot,
                 number: planned.number,
                 programmed: planned.session.is_ok(),
                 test: planned.session.as_ref().is_ok_and(Filled::is_test),
-                state: planner::state_of(
-                    DayPart::new(slot.date, slot.slot.part),
-                    closes,
-                    now,
-                    diary,
-                    recorded,
-                ),
+                state,
             });
         }
 
-        Ok(sessions)
+        // **Ended once nothing in it can still be completed** (operator,
+        // 2026-09-27): the last session that could be completed has been, or
+        // its window has closed. Not merely once the final slot is answered —
+        // a ride matched by class to the Sunday may be ridden on the Wednesday,
+        // with the Wednesday's own session still owed.
+        let ended = if outstanding { None } else { settled };
+
+        Ok(Week { sessions, ended })
     }
 
     /// The plan that has begun by a date: the latest whose authored start is
@@ -299,12 +415,14 @@ where
         }
     }
 
-    /// What the record holds for this microcycle, and what it says each
-    /// session was.
+    /// What the record holds for this microcycle, when each session started,
+    /// and what it says each was — oldest first.
     ///
-    /// Bounded at `today` because a session cannot have been performed in the
-    /// future, and asking beyond it would let next week's ride answer for this
-    /// week's slot.
+    /// **From where the microcycle before it ended to where this one's final
+    /// window closes**, and never past `today`: a session cannot have been
+    /// performed in the future, and reading beyond the window would let next
+    /// week's ride answer for this week's slot. The first week of a plan reads
+    /// from its first slot's day.
     ///
     /// **The gym's sessions go in unnamed.** A Hevy workout names the day it
     /// was done; what session of the microcycle it *was* is only knowable where
@@ -314,36 +432,58 @@ where
     async fn performed(
         &self,
         week: &[planner::Planned<'_>],
+        opens: Option<Boundary>,
+        closes: Option<DayPart>,
         today: Date,
-    ) -> Result<Vec<RecordedSession>, StoreError> {
-        let Some(from) = week.iter().map(|planned| planned.slot.date).min() else {
+    ) -> Result<Vec<(DateTime, RecordedSession)>, StoreError> {
+        let Some(first) = week.iter().map(|planned| planned.slot.date).min() else {
             return Ok(Vec::new());
         };
-        if from > today {
+        let from = opens.map_or(first, Boundary::date);
+        let to = closes.map_or(today, |closes| closes.date.min(today));
+        if from > to {
             return Ok(Vec::new());
         }
+        let within = |started: DateTime| {
+            opens.is_none_or(|opens| opens.admits(started))
+                && closes.is_none_or(|closes| DayPart::containing(started) < closes)
+        };
 
-        let mut recorded: Vec<RecordedSession> = self
+        let mut recorded: Vec<(DateTime, RecordedSession)> = self
             .ports
             .gym_performed
-            .dates_between(from, today)
+            .started_between(from, to)
             .await?
             .into_iter()
-            .map(|date| RecordedSession::unnamed(date, Discipline::Gym))
+            .filter(|started| within(*started))
+            .map(|started| {
+                (
+                    started,
+                    RecordedSession::unnamed(started.date(), Discipline::Gym),
+                )
+            })
             .collect();
 
         for ridden in self
             .ports
             .cycling_performed
-            .ridden_between(from, today)
+            .ridden_between(from, to)
             .await?
         {
-            recorded.push(ridden_as(week, &ridden).map_or_else(
-                || RecordedSession::unnamed(ridden.on, Discipline::Cycling),
-                |role| RecordedSession::named(ridden.on, Discipline::Cycling, role),
+            if !within(ridden.started) {
+                continue;
+            }
+            let on = ridden.started.date();
+            recorded.push((
+                ridden.started,
+                ridden_as(week, &ridden).map_or_else(
+                    || RecordedSession::unnamed(on, Discipline::Cycling),
+                    |role| RecordedSession::named(on, Discipline::Cycling, role),
+                ),
             ));
         }
 
+        recorded.sort_by_key(|(started, _)| *started);
         Ok(recorded)
     }
 }

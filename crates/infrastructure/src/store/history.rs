@@ -50,7 +50,7 @@ use domain::{
     schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 use sqlx::SqlitePool;
 
 use super::store_error;
@@ -165,13 +165,19 @@ fn fulfilled_of(
 /// stored instant's UTC date is the day trained (§ II.3). An evening session in
 /// British Summer Time is the case that breaks the naive reading.
 pub(super) fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
+    Ok(moment_of(started_at_utc, zone)?.date())
+}
+
+/// A stored UTC instant as the wall clock read in the zone it was recorded
+/// against, for the same reason as [`day_of`].
+pub(super) fn moment_of(started_at_utc: &str, zone: &str) -> Result<DateTime, StoreError> {
     let instant: jiff::Timestamp = started_at_utc.parse().map_err(|_| StoreError::Corrupt {
         detail: format!("{started_at_utc:?} is not an instant"),
     })?;
     let tz = jiff::tz::TimeZone::get(zone).map_err(|_| StoreError::Corrupt {
         detail: format!("{zone:?} is not a zone this build knows"),
     })?;
-    Ok(instant.to_zoned(tz).date())
+    Ok(instant.to_zoned(tz).datetime())
 }
 
 impl ExerciseHistory for SqliteExerciseHistory {
@@ -536,16 +542,15 @@ fn sets_of<M>(
     })
 }
 
-/// The gym's dates, read through [`PerformedWorkoutReader::between`] so that a
-/// session is what that reader says it is — split routines and all — and a day
-/// is the one it is filed under.
+/// When the gym's sessions started, read through [`PerformedWorkoutReader::between`] so that a
+/// session is what that reader says it is — split routines and all.
 impl PerformedSessionLog for SqlitePerformedWorkoutReader {
-    async fn dates_between(&self, from: Date, to: Date) -> Result<Vec<Date>, StoreError> {
+    async fn started_between(&self, from: Date, to: Date) -> Result<Vec<DateTime>, StoreError> {
         Ok(self
             .between(from, to)
             .await?
             .iter()
-            .map(|session| session.started_at().wall_clock().date())
+            .map(|session| session.started_at().wall_clock().datetime())
             .collect())
     }
 }

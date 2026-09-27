@@ -86,6 +86,7 @@ pub async fn due(
     };
 
     let standing = rescheduling::standing(pool, zone, now).await?;
+    let current = standing.commencing;
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     let plans = ReschedulingPlans::new(
         SqlitePlanStore::new(pool.clone(), zone.clone()),
@@ -98,9 +99,11 @@ pub async fn due(
         return Ok(None);
     };
 
-    // **Due once the plan has run out**, and from this Monday if it ran out
-    // earlier: a week nothing was committed for is not given back.
-    let monday = planner::commencing(now.date);
+    // **Due once the plan has run out**, and from the current microcycle if it
+    // ran out earlier: a week nothing was committed for is not given back.
+    // The current microcycle, not the calendar week, because riding the
+    // Sunday session starts the next one that evening (#281).
+    let monday = current.unwrap_or_else(|| planner::commencing(now.date));
     let end = plan.span().end();
     if end > monday {
         return Ok(None);
