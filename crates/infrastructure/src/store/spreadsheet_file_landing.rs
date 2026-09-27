@@ -171,6 +171,15 @@ impl LandingStore for SpreadsheetFileLandingStore {
     }
 }
 
+/// How much raw a derivation of the spreadsheets has to read. The count the
+/// landing store already answers, and separate because reporting how far
+/// behind a derivation is needs the count and must not be handed an `append`.
+impl application::RawExtent for SpreadsheetFileLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LandingStream, SpreadsheetFileLandingStore};

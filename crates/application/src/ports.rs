@@ -363,6 +363,17 @@ pub enum Translation<E> {
         entity: Box<E>,
         refusals: Vec<Refusal>,
     },
+    /// Several entities from one account, where the source filed many things
+    /// in one record.
+    ///
+    /// A spreadsheet is one landed file, and one of the operator's holds 365
+    /// weigh-ins. Each is an entity of its own (§ 3.1), so the account yields
+    /// all of them. Non-empty for [`Self::Refused`]'s reason: an account that
+    /// yields nothing says why.
+    Entities {
+        entities: NonEmpty<E>,
+        refusals: Vec<Refusal>,
+    },
     /// The source withdrew a record it previously served. Carries no refusals,
     /// because nothing was rejected.
     Retraction { of: SourceRecordId },

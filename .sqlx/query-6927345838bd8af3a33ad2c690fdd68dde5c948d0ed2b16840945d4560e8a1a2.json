@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM weigh_in WHERE stream = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "6927345838bd8af3a33ad2c690fdd68dde5c948d0ed2b16840945d4560e8a1a2"
+}

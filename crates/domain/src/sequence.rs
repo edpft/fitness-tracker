@@ -80,6 +80,19 @@ impl<T> NonEmpty<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         iter::once(&self.head).chain(self.tail.iter())
     }
+
+    /// Give up the guarantee, where it has done its work.
+    ///
+    /// Named rather than an owning `IntoIterator`, for the reason given on the
+    /// borrowed one below. The one caller is a derivation pooling every
+    /// account's entities into a single list, where "this account yielded at
+    /// least one" was already acted on.
+    pub fn into_vec(self) -> Vec<T> {
+        let mut items = Vec::with_capacity(self.tail.len().saturating_add(1));
+        items.push(self.head);
+        items.extend(self.tail);
+        items
+    }
 }
 
 /// Two or more, in order.

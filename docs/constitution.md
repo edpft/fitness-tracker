@@ -1,7 +1,18 @@
 <!--
 Sync Impact Report
-- Version: 4.2.0, amended 2026-09-26. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 4.3.0, amended 2026-09-27. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 4.3.0 — § 3.1 gains a rule: a normalised table follows the kind of observation, not the
+  device, and every row names its method; § 6's class decides only whether rows of different
+  methods form one series. An observation meaningless without another from the same
+  measurement is linked to it. MINOR: a rule added. Settled with the operator while bringing
+  the historical spreadsheets' weigh-ins in (#273): body mass is source-independent, so a Body
+  Scan step and a figure typed into a spreadsheet are one kind of row; and composition is
+  recorded by the Body Scan, InBody and the sheets alike, so "method-dependent means
+  device-shaped" was wrong. The operator, on composition: "without a body weight measurement
+  from the same device a body fat percentage is meaningless." The Body Scan's composition is
+  still in a table of its own until #275. No decision record: the rule was worked out with him
+  and there was no second position.
 - 4.2.0 — § I widened from the platforms in use to every platform the operator uses or has
   used, and keeping the data made a purpose in itself. MINOR: a rule materially widened. The
   operator, 2026-09-26, believing the document said storing data without a purpose was bad:
@@ -157,6 +168,8 @@ What the source once said stays in raw (§ II.1), the retraction is itself a lan
 
 It models domain entities — a gym session of ordered exercises and sets; a cycling session of the rides it was ridden as, each with its summary and samples; a body measurement — whose definitions are declared, version-controlled and owned here, extending § 8 from identity to structure. Sources are translated into these entities, never the reverse: no source's format shapes the domain, and a new or historical source is an adapter question, not a modelling one. A standalone reading is the degenerate entity. Component observations keep the source's native temporal resolution — never resampled, aggregated or interpolated — and belong to their parent entity. Two sources recording one real-world event produce two entities here, and that is correct.
 
+**A table follows the kind of observation, not the device that made it.** Where sources record the same kind of thing — a body mass, a body-fat percentage — their entities share a table, and every row names its method: the device and its algorithm, or where the operator wrote it down. § 6's class decides only whether rows of different methods may form one series, never whether they share a table. An observation that means nothing without another from the same measurement — a body-fat percentage without the mass it was measured against — is linked to it, and never stands alone.
+
 - **Provenance is mandatory:** the source that produced the observation, whatever version or algorithm identifier the source exposes, and the identifier by which the source names this record — which is what makes same-source supersession mechanically detectable at § 4. Provenance records what a source actually tells us; it is not inferred or invented.
 - **Units canonicalised** (kg, metres, seconds, bpm, watts).
 - **Timestamps carry an IANA timezone identifier and are never naive.** 8pm stays 8pm: wall-clock time is what is entered and what is displayed. Which physical encoding carries it — wall clock plus zone, or instant plus zone — is an implementation choice, because given the zone the two are losslessly interconvertible. An offset is not a substitute: it records the rule that applied at one instant, not the rule that applies across an interval. Arithmetic and calendar bucketing therefore resolve through the zone, and a system that assumes every local day is 24 hours long is wrong twice a year. Where a source supplies only a UTC instant, the zone is taken from declared operator configuration — a versioned input to deterministic translation (§ 9), not an inference about the source. Exceptions (e.g. travel) are corrected through the edit overlay.
@@ -308,4 +321,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 4.2.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-26
+**Version**: 4.3.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-27

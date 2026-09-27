@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   path AS \"path!: String\",\n                   modified_at AS \"modified_at!: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM spreadsheet_file_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "fetched_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "fetched_at"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "path!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "name": "modified_at!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "modified_at"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 5,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "spreadsheet_file_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b8197f704e67ee9c3d848a41a64b5e8c913eab32c373c7a438e3d1ec31039813"
+}
