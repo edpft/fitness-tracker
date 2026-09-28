@@ -21,9 +21,18 @@ pub enum InvalidMass {
 const SCALE: i64 = 1_000;
 const PLACES: usize = 3;
 
-/// Grams in a pound, exactly. The international avoirdupois pound is defined in
-/// terms of the kilogram, so the conversion is exact rather than approximate.
-const GRAMS_PER_POUND: i64 = 453_592;
+/// Thousandths of a gram in a pound, exactly: the international avoirdupois
+/// pound is 453.59237 g, defined in terms of the kilogram, so the conversion is
+/// exact rather than approximate. Held at the same scale as a parsed decimal so
+/// the multiplication below stays integral.
+///
+/// It read `GRAMS_PER_POUND` until 2026-09-28, and [`Kg::from_pounds`] divided
+/// the product by [`SCALE`] once rather than twice — so 115 lb came back as
+/// 52,163,080 g, fifty-two tonnes. Nothing had called it: Beyond The White
+/// Board's export is the first source to state a load in pounds (#285), and its
+/// first real use found it. The property test alongside asserted the same wrong
+/// arithmetic, which is why it passed.
+const MILLIGRAMS_PER_POUND: i64 = 453_592;
 
 /// Parse a decimal string into thousandths, exactly.
 ///
@@ -137,11 +146,12 @@ impl Kg {
                 value: value.to_owned(),
             });
         }
-        // Thousandths of a pound times grams per pound, divided back down by
-        // the thousandth. Integer throughout, so nothing rounds twice.
+        // Thousandths of a pound times thousandths of a gram per pound, so the
+        // product is scaled twice and divided back down twice. Integer
+        // throughout, so nothing rounds twice.
         let grams = thousandths_of_a_pound
-            .checked_mul(GRAMS_PER_POUND)
-            .map(|scaled| scaled / SCALE)
+            .checked_mul(MILLIGRAMS_PER_POUND)
+            .map(|scaled| scaled / SCALE / SCALE)
             .ok_or_else(|| InvalidMass::NotDecimal {
                 value: value.to_owned(),
             })?;

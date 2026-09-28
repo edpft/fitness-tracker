@@ -1,4 +1,5 @@
-//! A gym session the operator logged in a spreadsheet himself (#274).
+//! A gym session the operator logged himself: in a spreadsheet (#274), or in
+//! Beyond The White Board, the gym's own log (#285).
 //!
 //! **A day, not an instant.** No sheet records when in the day he trained, and
 //! some record only the week: `CT 2017` gives a week number and the day is the
@@ -15,12 +16,31 @@
 //! joins the two). So [`ManualSet::load`] is optional, and `None` means exactly
 //! that the sheet does not say.
 //!
+//! **A set names its copy by the record it landed as** (operator, 2026-09-28:
+//! *"if you only need an Id, just use the Id"*). The file and its digest belong
+//! to the copy, and the session names each copy once in [`ManualGymSession::copies`];
+//! repeating them on every set held one copy of the path and one of the
+//! 64-character digest per set, which is also what pushed [`ManualItem`] past
+//! clippy's size difference between variants.
+//!
 //! **One session however many copies of its workbook hold it** (operator,
 //! 2026-09-28). A workbook saved in several places is one record revised, not
 //! several recordings, so its copies are merged before a session derives: every
 //! detail any copy adds is kept, and where two copies state different values
 //! for one fact the most recent workbook wins. A session therefore draws on
 //! more than one file, and each set names the copy it was taken from.
+//!
+//! **Its own count, because the count may be missing too.** Beyond The White
+//! Board writes down the gym's workout, and a line of it may name a movement
+//! and no number: "Burpee" in four rounds is four sets of burpees, however
+//! many were in each (operator, 2026-09-28). So a completed set's measure is
+//! optional in the same way its load is, and `Completed(None)` means exactly
+//! that the log does not say. It is not `Option<Performed<M>>`, which would
+//! say it is unknown whether the set happened.
+//!
+//! **Supersets, because the gym's workouts are in rounds.** A round of
+//! thrusters and burpees is a superset, as the operator recorded such rounds in
+//! Hevy. No spreadsheet records one.
 //!
 //! **Only what was performed.** A session derives here only where something
 //! shows it was done: a note, an RPE, reps in reserve, a performed column, or a
@@ -34,10 +54,10 @@ use std::fmt;
 use jiff::civil::Date;
 
 use crate::{
-    landing::{Cell, FilePath, LandingRecordId, SourceRecordId},
+    landing::{FilePath, LandingRecordId, SheetCell, SourceRecordId},
     measure::{Duration, Metres, RepCount},
     normalised::NormalisedEntity,
-    sequence::NonEmpty,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 
 use super::{
@@ -54,21 +74,25 @@ pub struct ManualSet<M> {
     /// `None` where the sheet does not record the load, which is not the same
     /// as no load: an unloaded set is `Some` of [`Load::UNLOADED`].
     pub load: Option<Load>,
-    pub outcome: Performed<M>,
+    /// `Completed(None)` where the log says the set was done and not how much
+    /// of it.
+    pub outcome: Performed<Option<M>>,
     pub intensity: Option<Rir>,
     pub kind: SetKind,
     pub rest_after: Option<Duration>,
-    /// The file, sheet and cell holding the set's count. A set names its own
+    /// Which of the session's copies the set was taken from. The id is enough:
+    /// the file and its digest belong to the copy, which the session names
+    /// once, and a set that repeated them would hold one copy of each per set.
+    pub copy: LandingRecordId,
+    /// Where in that copy the set's count is written. A set names its own
     /// because a session need not sit on one sheet, or in one file: the 2018
     /// `1RM` sheets keep each lift on a sheet of its own, `CT 2017` keeps the
     /// trunk work apart from the lifts it was done with, and a session merged
     /// from copies of its workbook takes each set from the copy that says it.
-    pub written_in: Cell,
+    pub at: SheetCell,
 }
 
 /// One exercise and the sets performed of it, in order.
-///
-/// No supersets: no sheet records one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManualExercise {
     ForReps {
@@ -109,10 +133,38 @@ impl ManualExercise {
             Self::ForDistance { sets, .. } => sets.count(),
         }
     }
+
+    /// The copies its sets were taken from, in the order written.
+    pub fn copies(&self) -> Vec<LandingRecordId> {
+        match self {
+            Self::ForReps { sets, .. } => sets.iter().map(|set| set.copy).collect(),
+            Self::ForDuration { sets, .. } => sets.iter().map(|set| set.copy).collect(),
+            Self::ForDistance { sets, .. } => sets.iter().map(|set| set.copy).collect(),
+        }
+    }
 }
 
-/// The copy of a workbook a session is dated by: the most recent one that
-/// holds it. Which file, sheet and cell each set came from, the set says.
+/// One position in a session's order: an exercise, or exercises performed
+/// back to back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManualItem {
+    Exercise(ManualExercise),
+    Superset(AtLeastTwo<ManualExercise>),
+}
+
+impl ManualItem {
+    /// Every exercise in this item, in order: one, or a superset's members.
+    pub fn exercises(&self) -> impl Iterator<Item = &ManualExercise> {
+        let (one, members) = match self {
+            Self::Exercise(exercise) => (Some(exercise), None),
+            Self::Superset(members) => (None, Some(members.iter())),
+        };
+        one.into_iter().chain(members.into_iter().flatten())
+    }
+}
+
+/// One copy of a log a session drew on: the file, and the record it landed as.
+/// Which copy each set came from, the set says, by this record's id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Logged {
     pub landed_as: LandingRecordId,
@@ -131,64 +183,56 @@ impl fmt::Display for Logged {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualGymSession {
     on: Date,
-    logged: Logged,
-    exercises: NonEmpty<ManualExercise>,
+    copies: NonEmpty<Logged>,
+    items: NonEmpty<ManualItem>,
 }
 
 impl ManualGymSession {
-    pub const fn new(on: Date, logged: Logged, exercises: NonEmpty<ManualExercise>) -> Self {
-        Self {
-            on,
-            logged,
-            exercises,
-        }
+    /// `copies` are the copies it drew sets from, the one it is dated by first.
+    pub const fn new(on: Date, copies: NonEmpty<Logged>, items: NonEmpty<ManualItem>) -> Self {
+        Self { on, copies, items }
     }
 
     pub const fn on(&self) -> Date {
         self.on
     }
 
-    /// The most recent copy of its workbook that holds it.
+    /// The most recent copy of its log that holds it, which is the one it is
+    /// dated by.
     pub const fn logged(&self) -> &Logged {
-        &self.logged
+        self.copies.first()
     }
 
-    /// The exercises, in the order performed.
-    pub const fn exercises(&self) -> &NonEmpty<ManualExercise> {
-        &self.exercises
+    /// Every copy it drew a set from, the one it is dated by first.
+    pub const fn copies(&self) -> &NonEmpty<Logged> {
+        &self.copies
+    }
+
+    /// The items, in the order performed.
+    pub const fn items(&self) -> &NonEmpty<ManualItem> {
+        &self.items
+    }
+
+    /// Every exercise, in the order performed, supersets flattened.
+    pub fn exercises(&self) -> impl Iterator<Item = &ManualExercise> {
+        self.items.iter().flat_map(ManualItem::exercises)
     }
 
     pub fn set_count(&self) -> usize {
-        self.exercises
-            .iter()
+        self.exercises()
             .map(ManualExercise::set_count)
             .sum::<usize>()
     }
 }
 
 impl NormalisedEntity for ManualGymSession {
-    /// Every copy it drew a set from, as well as the one it is dated by.
+    /// Every copy it drew a set from, as well as the one it is dated by, which
+    /// is what [`Self::copies`] holds.
     fn composes(&self) -> Vec<&SourceRecordId> {
-        let mut records = vec![&self.logged.source_record_id];
-        for exercise in self.exercises.iter() {
-            let cells: Vec<&Cell> = match exercise {
-                ManualExercise::ForReps { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-                ManualExercise::ForDuration { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-                ManualExercise::ForDistance { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-            };
-            for cell in cells {
-                if !records.contains(&&cell.source_record_id) {
-                    records.push(&cell.source_record_id);
-                }
-            }
-        }
-        records
+        self.copies
+            .iter()
+            .map(|copy| &copy.source_record_id)
+            .collect()
     }
 }
 
@@ -198,9 +242,9 @@ impl fmt::Display for ManualGymSession {
             f,
             "{} — {} exercises, {} sets, {}",
             self.on,
-            self.exercises.count(),
+            self.exercises().count(),
             self.set_count(),
-            self.logged
+            self.logged()
         )
     }
 }

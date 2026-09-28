@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   path AS \"path!: String\",\n                   modified_at AS \"modified_at!: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM btwb_export_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "fetched_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "fetched_at"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "path!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "name": "modified_at!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "modified_at"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 5,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "btwb_export_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "207efa31b72fb00a1748c8a27ef9a573fd4e40a98fcbef401c39374d521a84ef"
+}

@@ -21,6 +21,11 @@ Hevy = "Hevy"
 # are current English and the constitution is not ours to edit for a linter.
 unparseable = "unparseable"
 
+# The deltoid, shortened, which is what the gym and both sources call it: BTWB
+# writes "Rear Delt Raises" and Hevy "Rear Delt Reverse Fly". The word is the
+# operator's vocabulary and the checker reads it as "dealt".
+delt = "delt"
+
 [default.extend-identifiers]
 # The plural of SQL's CHECK constraint, in a migration comment. Listed as an
 # identifier rather than a word because the splitter reads `CHECKs` as `CHEC`

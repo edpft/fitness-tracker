@@ -54,6 +54,13 @@
 //! pull, two calf raises and ten others that Hevy never served. Their names are
 //! the operator's, settled with him on 2026-09-27.
 //!
+//! Twenty-five more arrived with Beyond The White Board (#285), the gym's own
+//! log, whose names are the more accurate record of what the class did
+//! (operator, 2026-09-28). Two implements arrived with them: a sandbag and a
+//! medicine ball. `overhead-plate-raise` became `lu-raise` the same day, which
+//! is what the movement is called; Hevy's `Overhead Plate Raise` still maps to
+//! it.
+//!
 //! The six fewer than 134 are collapses, and they are all the same collapse: a
 //! variant that differs only in how the movement is loaded is not a different
 //! movement. Assisted and unassisted are one exercise, weighted and unweighted
@@ -98,6 +105,8 @@ pub enum Implement {
     Band,
     Plate,
     Sled,
+    Sandbag,
+    MedicineBall,
     Bodyweight,
 }
 
@@ -112,6 +121,8 @@ impl Implement {
         Self::Band,
         Self::Plate,
         Self::Sled,
+        Self::Sandbag,
+        Self::MedicineBall,
         Self::Bodyweight,
     ];
 
@@ -126,6 +137,8 @@ impl Implement {
             Self::Band => "band",
             Self::Plate => "plate",
             Self::Sled => "sled",
+            Self::Sandbag => "sandbag",
+            Self::MedicineBall => "medicine-ball",
             Self::Bodyweight => "bodyweight",
         }
     }
@@ -235,6 +248,7 @@ vocabulary! {
         BicepCurlDumbbell => "bicep-curl-dumbbell", Dumbbell,
         BirdDog => "bird-dog", Bodyweight,
         BoxJump => "box-jump", Bodyweight,
+        BroadJump => "broad-jump", Bodyweight,
         BulgarianSplitSquatBarbell => "bulgarian-split-squat-barbell", Barbell,
         BulgarianSplitSquatDumbbell => "bulgarian-split-squat-dumbbell", Dumbbell,
         Burpee => "burpee", Bodyweight,
@@ -250,12 +264,16 @@ vocabulary! {
         ClapPushUp => "clap-push-up", Bodyweight,
         CleanAndPress => "clean-and-press", Barbell,
         CloseGripBenchPressBarbell => "close-grip-bench-press-barbell", Barbell,
+        CloseGripPushUp => "close-grip-push-up", Bodyweight,
         Crunch => "crunch", Bodyweight,
+        CrushGripCurlKettlebell => "crush-grip-curl-kettlebell", Kettlebell,
+        CyclistSquat => "cyclist-squat", Bodyweight,
         DeadBug => "dead-bug", Bodyweight,
         DeadliftBarbell => "deadlift-barbell", Barbell,
         DeadliftDumbbell => "deadlift-dumbbell", Dumbbell,
         DeclineCrunch => "decline-crunch", Bodyweight,
         DeficitPushups => "deficit-pushups", Bodyweight,
+        DevilPressDumbbell => "devil-press-dumbbell", Dumbbell,
         DownwardDogToPlancheLean => "downward-dog-to-planche-lean", Bodyweight,
         DropSnatch => "drop-snatch", Barbell,
         DumbbellSnatch => "dumbbell-snatch", Dumbbell,
@@ -264,14 +282,18 @@ vocabulary! {
         FrontLeverRaise => "front-lever-raise", Bodyweight,
         FrontRaiseBand => "front-raise-band", Band,
         FrontSquat => "front-squat", Barbell,
+        FrontSquatDumbbell => "front-squat-dumbbell", Dumbbell,
         GobletSquat => "goblet-squat", Dumbbell,
         GoodMorningBarbell => "good-morning-barbell", Barbell,
         HammerCurlCable => "hammer-curl-cable", Cable,
         HammerCurlDumbbell => "hammer-curl-dumbbell", Dumbbell,
         HammerTwists => "hammer-twists", Bodyweight,
+        HandstandShoulderTap => "handstand-shoulder-tap", Bodyweight,
         HangHighPull => "hang-high-pull", Barbell,
         HangSnatch => "hang-snatch", Barbell,
+        HangSnatchDumbbell => "hang-snatch-dumbbell", Dumbbell,
         HangingKneeRaise => "hanging-knee-raise", Bodyweight,
+        HangingLSitComplex => "hanging-l-sit-complex", Bodyweight,
         HipSnatch => "hip-snatch", Barbell,
         HipThrustBarbell => "hip-thrust-barbell", Barbell,
         InclineBenchPressBarbell => "incline-bench-press-barbell", Barbell,
@@ -289,18 +311,19 @@ vocabulary! {
         LegExtensionMachine => "leg-extension-machine", Machine,
         LegPressMachine => "leg-press-machine", Machine,
         LowRowSuspension => "low-row-suspension", Bodyweight,
+        LuRaise => "lu-raise", Plate,
         LungeDumbbell => "lunge-dumbbell", Dumbbell,
         LyingLegCurlMachine => "lying-leg-curl-machine", Machine,
         MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat", Barbell,
         NeutralGripPullUp => "neutral-grip-pull-up", Bodyweight,
         NordicHamstringsCurls => "nordic-hamstrings-curls", Bodyweight,
-        OverheadPlateRaise => "overhead-plate-raise", Plate,
         OverheadPressBarbell => "overhead-press-barbell", Barbell,
         OverheadPressDumbbell => "overhead-press-dumbbell", Dumbbell,
         OverheadSquat => "overhead-squat", Barbell,
         OverheadTricepsExtensionCable => "overhead-triceps-extension-cable", Cable,
         PauseSquatBarbell => "pause-squat-barbell", Barbell,
         PendlayRowBarbell => "pendlay-row-barbell", Barbell,
+        PikeCompression => "pike-compression", Bodyweight,
         PikePullThrough => "pike-pull-through", Bodyweight,
         PlankPushup => "plank-pushup", Bodyweight,
         Pogo => "pogo", Bodyweight,
@@ -311,11 +334,19 @@ vocabulary! {
         PullUp => "pull-up", Bodyweight,
         PullUpNegative => "pull-up-negative", Bodyweight,
         PushPress => "push-press", Barbell,
+        PushPressDumbbell => "push-press-dumbbell", Dumbbell,
         PushUp => "push-up", Bodyweight,
+        RearDeltRaiseDumbbell => "rear-delt-raise-dumbbell", Dumbbell,
         RenegadeRowDumbbell => "renegade-row-dumbbell", Dumbbell,
+        ReverseLungeBarbell => "reverse-lunge-barbell", Barbell,
+        RingDip => "ring-dip", Bodyweight,
         RingPushups => "ring-pushups", Bodyweight,
         RingRows => "ring-rows", Bodyweight,
         RomanianDeadliftBarbell => "romanian-deadlift-barbell", Barbell,
+        RowKettlebell => "row-kettlebell", Kettlebell,
+        SandbagGoodMorning => "sandbag-good-morning", Sandbag,
+        SandbagSquat => "sandbag-squat", Sandbag,
+        SandbagToShoulder => "sandbag-to-shoulder", Sandbag,
         ScapularPullUps => "scapular-pull-ups", Bodyweight,
         SeatedCableRowVGripCable => "seated-cable-row-v-grip-cable", Cable,
         SeatedCalfRaiseMachine => "seated-calf-raise-machine", Machine,
@@ -326,6 +357,8 @@ vocabulary! {
         ShoulderInternalExternalRotation => "shoulder-internal-external-rotation", Band,
         ShrugDumbbell => "shrug-dumbbell", Dumbbell,
         SingleArmCableRow => "single-arm-cable-row", Cable,
+        SingleArmCleanAndJerkKettlebell => "single-arm-clean-and-jerk-kettlebell", Kettlebell,
+        SingleArmDevilPressDumbbell => "single-arm-devil-press-dumbbell", Dumbbell,
         SingleArmLateralRaiseCable => "single-arm-lateral-raise-cable", Cable,
         SingleArmRowDumbbell => "single-arm-row-dumbbell", Dumbbell,
         SingleArmTricepExtensionDumbbell => "single-arm-tricep-extension-dumbbell", Dumbbell,
@@ -335,6 +368,7 @@ vocabulary! {
         SissySquat => "sissy-squat", Bodyweight,
         SitUp => "sit-up", Bodyweight,
         SkullcrusherBarbell => "skullcrusher-barbell", Barbell,
+        SkullcrusherKettlebell => "skullcrusher-kettlebell", Kettlebell,
         SleeperStretch => "sleeper-stretch", Bodyweight,
         Snatch => "snatch", Barbell,
         SnatchBalance => "snatch-balance", Barbell,
@@ -342,14 +376,17 @@ vocabulary! {
         SplitSquatDumbbell => "split-squat-dumbbell", Dumbbell,
         SquatBarbell => "squat-barbell", Barbell,
         StandingCalfRaiseDumbbell => "standing-calf-raise-dumbbell", Dumbbell,
+        StepUpDumbbell => "step-up-dumbbell", Dumbbell,
         StraightArmLatPulldownCable => "straight-arm-lat-pulldown-cable", Cable,
         ThrusterBarbell => "thruster-barbell", Barbell,
+        ThrusterDumbbell => "thruster-dumbbell", Dumbbell,
         ThrusterKettlebell => "thruster-kettlebell", Kettlebell,
         ToeTouch => "toe-touch", Bodyweight,
         ToesToBar => "toes-to-bar", Bodyweight,
         TricepsExtensionBarbell => "triceps-extension-barbell", Barbell,
         TricepsExtensionCable => "triceps-extension-cable", Cable,
         VUp => "v-up", Bodyweight,
+        WallBall => "wall-ball", MedicineBall,
         WallClimbs => "wall-climbs", Bodyweight,
         WeightedJumpSquat => "weighted-jump-squat", Dumbbell,
         WristExtensionDumbbell => "wrist-extension-dumbbell", Dumbbell,
@@ -371,6 +408,7 @@ vocabulary! {
         JumpRope => "jump-rope", Bodyweight,
         NinetyNinety => "ninety-ninety", Bodyweight,
         PigeonStretch => "pigeon-stretch", Bodyweight,
+        SkiErg => "ski-erg", Machine,
         SledPush => "sled-push", Sled,
         SquattingGroinStretch => "squatting-groin-stretch", Bodyweight,
         StandingStraddleFold => "standing-straddle-fold", Bodyweight,
@@ -424,7 +462,7 @@ impl DurationExercise {
     /// Whether this position is held on both sides at once or on each in turn.
     ///
     /// Exhaustive and hand-written rather than a column on the vocabulary
-    /// macro: twelve members can be read in one screen, adding a thirteenth is
+    /// macro: thirteen members can be read in one screen, adding a fourteenth is
     /// a compile error until someone says which it is, and the question is
     /// meaningless for the exercises counted in reps.
     pub const fn sides(self) -> Sides {
@@ -440,6 +478,7 @@ impl DurationExercise {
             // Both legs, both arms, or no side to speak of. A squatting groin
             // stretch and a standing straddle fold open both hips at once.
             Self::AirBike
+            | Self::SkiErg
             | Self::DeadHang
             | Self::HandstandHold
             | Self::JumpRope

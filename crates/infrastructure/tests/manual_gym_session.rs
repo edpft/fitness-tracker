@@ -3,7 +3,7 @@
 
 use application::{Translation, ports::Translator};
 use domain::{
-    gym::{ManualExercise, ManualGymSession, ManualSet},
+    gym::{ManualExercise, ManualGymSession, ManualSet, Performed},
     landing::{
         FetchedAt, FilePath, FileProvenance, LandedRecord, LandingRecord, LandingRecordId,
         LandingStream, ModifiedAt, RawPayload, SourceRecordId,
@@ -57,30 +57,29 @@ fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
         .rest_after
         .map(|rest| format!(" rest {}s", rest.as_seconds()))
         .unwrap_or_default();
-    format!(
-        "{load} × {}{intensity}{rest} [{}!{}]",
-        set.outcome, set.written_in.sheet, set.written_in.cell
-    )
+    let outcome = match &set.outcome {
+        Performed::Completed(Some(measure)) => measure.to_string(),
+        Performed::Completed(None) => "?".to_owned(),
+        Performed::Failed => "failed".to_owned(),
+    };
+    format!("{load} × {outcome}{intensity}{rest} [{}]", set.at)
 }
 
-/// Which file each set was taken from, in order.
+/// Which file each set was taken from, in order. A set names its copy by the
+/// record it landed as, and the session names the copies.
 fn files(session: &ManualGymSession) -> Vec<String> {
     session
         .exercises()
-        .iter()
-        .flat_map(|exercise| match exercise {
-            ManualExercise::ForReps { sets, .. } => sets
+        .flat_map(ManualExercise::copies)
+        .map(|copy| {
+            session
+                .copies()
                 .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect::<Vec<_>>(),
-            ManualExercise::ForDuration { sets, .. } => sets
-                .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect(),
-            ManualExercise::ForDistance { sets, .. } => sets
-                .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect(),
+                .find(|logged| logged.landed_as == copy)
+                .map_or_else(
+                    || format!("landing record {copy}"),
+                    |logged| logged.file.to_string(),
+                )
         })
         .collect()
 }
@@ -93,7 +92,6 @@ fn described(sessions: &[&ManualGymSession]) -> Vec<String> {
         .map(|session| {
             let exercises: Vec<String> = session
                 .exercises()
-                .iter()
                 .map(|exercise| {
                     let sets: Vec<String> = match exercise {
                         ManualExercise::ForReps { sets, .. } => sets.iter().map(set).collect(),

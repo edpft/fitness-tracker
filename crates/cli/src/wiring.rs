@@ -26,15 +26,15 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    BtwbExportLandingStore, FileRunLock, FolderFiles, GarminActivityFileLandingStore,
-    GarminActivityLandingStore, GarminAuth, GarminCredentials, GarminExerciseSetLandingStore,
-    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
-    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
-    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
-    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-    SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
+    BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth, GarminCredentials,
+    GarminExerciseSetLandingStore, GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore,
+    GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
+    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
+    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
     SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
     WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
@@ -852,13 +852,13 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
     }
 }
 
-/// Beyond The White Board's export: the file it sent, landed whole (#265).
-/// Nothing derives it yet (#285).
+/// Beyond The White Board's export: the file it sent, landed whole (#265), and
+/// derived as the gym sessions it records (#285).
 async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = BtwbExportLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
-    let runs = SqliteExtractionRunLog::new(pool);
+    let runs = SqliteExtractionRunLog::new(pool.clone());
 
     match command {
         Command::ExtractFolder(folder) => {
@@ -877,14 +877,44 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
-            stream: BtwbExportLandingStore::STREAM,
-        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: BtwbExportAccountReader::new(pool.clone())?,
+                    translator: BtwbTranslator,
+                    workouts: SqliteBtwbStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        BtwbExportLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), BtwbExportLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                BtwbExportLandingStore::new(pool.clone())?,
+                SqliteBtwbStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), BtwbExportLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {

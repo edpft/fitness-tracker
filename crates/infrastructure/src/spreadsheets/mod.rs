@@ -8,7 +8,7 @@ use application::{
 use domain::{
     body::ManualWeighIn,
     gym::{Logged, ManualGymSession},
-    landing::{Cell, FileProvenance, LandedRecord, SheetCell, SourceRecordId},
+    landing::{FileProvenance, LandedRecord, SourceRecordId},
     normalised::{NormalisedEntity, OperatorZone, Refusal, RefusalLocus, RefusalReason},
     sequence::NonEmpty,
 };
@@ -22,6 +22,7 @@ mod sheet;
 mod weigh_ins;
 
 pub use sessions::SpreadsheetSessionTranslator;
+pub(crate) use sessions::load_of;
 pub use weigh_ins::SpreadsheetWeighInTranslator;
 
 /// Everything one spreadsheet derives, each thing an entity of its own.
@@ -32,7 +33,11 @@ pub use weigh_ins::SpreadsheetWeighInTranslator;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpreadsheetEntity {
     WeighIn(ManualWeighIn),
-    GymSession(ManualGymSession),
+    /// Boxed because a session is a workout and a weigh-in is a day and a
+    /// mass: 424 bytes against 120, which is a size difference clippy refuses
+    /// in an enum. This sum is how one pass hands back both, so the
+    /// indirection is on the way out of the translation and not in the model.
+    GymSession(Box<ManualGymSession>),
 }
 
 impl NormalisedEntity for SpreadsheetEntity {
@@ -142,17 +147,6 @@ impl Opened<'_> {
             file: self.file.path().clone(),
         }
     }
-
-    /// A cell of this copy.
-    fn cell(&self, at: SheetCell) -> Cell {
-        Cell {
-            landed_as: self.record.id(),
-            source_record_id: self.record.source_record_id().clone(),
-            file: self.file.path().clone(),
-            sheet: at.sheet,
-            cell: at.cell,
-        }
-    }
 }
 
 /// Reads weigh-ins and gym sessions out of a landed spreadsheet, in one pass.
@@ -182,7 +176,7 @@ impl Translator for SpreadsheetTranslator {
                 entities.extend(
                     sessions::read_sessions(copies, scribe)?
                         .into_iter()
-                        .map(SpreadsheetEntity::GymSession),
+                        .map(|session| SpreadsheetEntity::GymSession(Box::new(session))),
                 );
             }
             Ok(entities)

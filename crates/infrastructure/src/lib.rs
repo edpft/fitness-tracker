@@ -6,6 +6,7 @@
 //! Nothing here leaks upward: every vendor error is translated at the boundary
 //! into the application's own view of failure.
 
+pub mod btwb;
 pub mod calendar;
 pub mod credentials;
 pub mod folder;
@@ -20,6 +21,7 @@ pub mod store;
 pub mod token;
 pub mod withings;
 
+pub use btwb::{BtwbTranslator, Exports};
 pub use calendar::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 pub use credentials::{Credential, CredentialError, Credentials};
 pub use folder::FolderFiles;
@@ -35,19 +37,19 @@ pub use spreadsheets::{
     SpreadsheetWeighInTranslator, Workbook,
 };
 pub use store::{
-    BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
-    GarminExerciseSetLandingStore, GarminHrvAccountReader, GarminHrvLandingStore,
-    HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
-    SpreadsheetFileLandingStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteCyclingSessionLog, SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog,
-    SqliteOperatorSettingsStore, SqliteOvernightHrvStore, SqlitePerformedWorkoutReader,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteRefusalStore, SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore,
-    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
-    WithingsWeighInAccountReader, connect,
+    BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
+    GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminHrvAccountReader,
+    GarminHrvLandingStore, HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SqliteBtwbStore,
+    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionLog,
+    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
+    SqliteOvernightHrvStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory,
+    SqliteWeighInStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

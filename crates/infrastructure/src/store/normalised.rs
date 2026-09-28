@@ -485,13 +485,11 @@ impl Row {
         }
     }
 
-    /// A set a sheet recorded, which may not say what the load was.
-    ///
-    /// A sheet records no supersets, so every item is one exercise and the
-    /// exercise is the first member of its item.
+    /// A set the operator logged himself, which may not say what the load was.
     pub(super) fn manual<M>(
         workout: i64,
         item_position: i64,
+        exercise_position: i64,
         position: i64,
         set: &ManualSet<M>,
     ) -> Self {
@@ -499,7 +497,7 @@ impl Row {
         Self {
             workout,
             item_position,
-            exercise_position: 0,
+            exercise_position,
             position,
             load_kind: load.map(|(kind, _)| kind),
             load_grams: load.map(|(_, grams)| grams),
@@ -509,9 +507,9 @@ impl Row {
             rest_after_seconds: set
                 .rest_after
                 .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
-            landing_record_id: Some(set.written_in.landed_as.as_i64()),
-            sheet: Some(set.written_in.sheet.to_string()),
-            cell: Some(set.written_in.cell.to_string()),
+            landing_record_id: Some(set.copy.as_i64()),
+            sheet: Some(set.at.sheet.to_string()),
+            cell: Some(set.at.cell.to_string()),
         }
     }
 }

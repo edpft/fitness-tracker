@@ -30,7 +30,8 @@ use std::{collections::BTreeMap, fmt};
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        Load, ManualExercise, ManualGymSession, ManualSet, Performed, Rir, SetKind, SignedKg,
+        Load, ManualExercise, ManualGymSession, ManualItem, ManualSet, Performed, Rir, SetKind,
+        SignedKg,
         exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     },
     landing::{CellRef, SheetCell, SheetName},
@@ -366,18 +367,28 @@ fn finish(
     let mut built = Vec::new();
     for (exercise, sets) in exercises {
         if let Some(exercise) = performed_exercise(exercise, sets, copies, &what, scribe) {
-            built.push(exercise);
+            built.push(ManualItem::Exercise(exercise));
         }
     }
-    let Ok(exercises) = NonEmpty::new(built) else {
+    let Ok(items) = NonEmpty::new(built) else {
         unmodelled(scribe, format!("{what} ({on}) records no set"));
         return Ok(None);
     };
-    Ok(Some(ManualGymSession::new(
-        on,
-        dated_by.logged(),
-        exercises,
-    )))
+    // The copy it is dated by first, then every other copy a set came from.
+    let mut drawn_from = vec![dated_by.logged()];
+    for item in &items {
+        for copy in item.exercises().flat_map(ManualExercise::copies) {
+            if !drawn_from.iter().any(|logged| logged.landed_as == copy)
+                && let Some(opened) = copies.iter().find(|opened| opened.record.id() == copy)
+            {
+                drawn_from.push(opened.logged());
+            }
+        }
+    }
+    let Ok(drawn_from) = NonEmpty::new(drawn_from) else {
+        return Ok(None);
+    };
+    Ok(Some(ManualGymSession::new(on, drawn_from, items)))
 }
 
 /// A warm-up of nothing on an exercise that is never done with nothing.
@@ -488,16 +499,20 @@ fn manual_set<M>(
     outcome: Performed<M>,
     copies: &[Opened<'_>],
 ) -> Option<ManualSet<M>> {
-    let written_in = copies.get(entry.copy)?.cell(entry.written_in);
+    let copy = copies.get(entry.copy)?.record.id();
     Some(ManualSet {
         load: entry
             .load
             .map(|mass| load_of(exercise, mass, entry.bodyweight)),
-        outcome,
+        outcome: match outcome {
+            Performed::Completed(measure) => Performed::Completed(Some(measure)),
+            Performed::Failed => Performed::Failed,
+        },
         intensity: entry.intensity,
         kind: entry.kind,
         rest_after: entry.rest_after,
-        written_in,
+        copy,
+        at: entry.written_in,
     })
 }
 
@@ -507,11 +522,12 @@ fn manual_set<M>(
 /// bodyweight, as the Hevy adapter reads them. A sheet writes the weight added,
 /// so 0 is plain bodyweight — except that `CT 2017` writes the body weight
 /// itself, which is plain bodyweight too.
-fn load_of(exercise: Exercise, mass: Kg, bodyweight: Option<Kg>) -> Load {
+pub fn load_of(exercise: Exercise, mass: Kg, bodyweight: Option<Kg>) -> Load {
     let relative = matches!(
         exercise,
         Exercise::Reps(
             RepsExercise::ChestDip
+                | RepsExercise::RingDip
                 | RepsExercise::PullUp
                 | RepsExercise::PullUpNegative
                 | RepsExercise::ChinUp
