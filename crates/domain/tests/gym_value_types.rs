@@ -82,7 +82,7 @@ proptest! {
             prop_assert!(false, "{text} lb is a mass");
             return Ok(());
         };
-        prop_assert_eq!(mass.as_grams(), u64::from(pounds) * 453_592);
+        prop_assert_eq!(mass.as_grams(), u64::from(pounds) * 453_592 / 1_000);
     }
 
     /// Zero is a real observation on the relative axis — it is a plain

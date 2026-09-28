@@ -419,7 +419,7 @@ mod tests {
                     .iter()
                     .map(|set| {
                         let count = set.count.map_or_else(|| "?".to_owned(), |c| c.to_string());
-                        let load = set.load.map(|kg| format!(" @{kg}")).unwrap_or_default();
+                        let load = set.load.map(|kg| format!(" @{kg} kg")).unwrap_or_default();
                         let time = set.seconds.map(|s| format!(" {s}s")).unwrap_or_default();
                         let far = set
                             .millimetres

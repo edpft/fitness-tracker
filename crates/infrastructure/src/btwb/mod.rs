@@ -31,7 +31,7 @@ use domain::{
         SetKind,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
-    landing::{Cell, CellRef, LandedRecord, SheetName},
+    landing::{CellRef, LandedRecord, LandingRecordId, SheetCell, SheetName},
     measure::{Duration, Metres, RepCount},
     normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason},
     sequence::{AtLeastTwo, NonEmpty},
@@ -213,7 +213,6 @@ fn results(records: &[Vec<String>]) -> impl Iterator<Item = (Date, Entry<'_>)> {
 /// One export, ready to read: what a session it holds is dated by, and the
 /// name a cell of it is addressed under.
 struct Export {
-    record: LandedRecord,
     logged: Logged,
     sheet: SheetName,
 }
@@ -254,7 +253,6 @@ fn prepare(record: &LandedRecord, scribe: &mut Scribe) -> Option<Export> {
         return None;
     };
     Some(Export {
-        record: record.clone(),
         logged: Logged {
             landed_as: record.id(),
             source_record_id: record.source_record_id().clone(),
@@ -294,37 +292,35 @@ fn session(
                 continue;
             }
         };
-        let written_in = Cell {
-            landed_as: export.logged.landed_as,
-            source_record_id: export.logged.source_record_id.clone(),
-            file: export.logged.file.clone(),
+        let at = SheetCell {
             sheet: export.sheet.clone(),
             cell: CellRef::at(result.row, DESCRIPTION),
         };
         for group in groups {
-            if let Some(item) = item(group, &written_in, &export.record)? {
+            if let Some(item) = item(group, export, &at)? {
                 items.push(item);
             }
         }
     }
-    Ok(NonEmpty::new(items)
-        .ok()
-        .map(|items| ManualGymSession::new(on, export.logged.clone(), items)))
+    Ok(NonEmpty::new(items).ok().map(|items| {
+        let copies = NonEmpty::of(export.logged.clone(), Vec::new());
+        ManualGymSession::new(on, copies, items)
+    }))
 }
 
 /// One group of sets as an item: one exercise, or a superset of the
 /// exercises in the order they were first done.
 fn item(
     sets: Vec<Done>,
-    written_in: &Cell,
-    record: &LandedRecord,
+    export: &Export,
+    at: &SheetCell,
 ) -> Result<Option<ManualItem>, NormalisationError> {
     let mut exercises: Vec<(Exercise, Vec<Done>)> = Vec::new();
     for set in sets {
         let Some(exercise) = exercise_named(&set.name) else {
             return Err(NormalisationError::UnmappedExercise {
                 template_id: set.name,
-                source_record_id: record.source_record_id().to_string(),
+                source_record_id: export.logged.source_record_id.to_string(),
             });
         };
         match exercises.iter_mut().find(|(seen, _)| *seen == exercise) {
@@ -334,7 +330,7 @@ fn item(
     }
     let mut built: Vec<ManualExercise> = exercises
         .into_iter()
-        .filter_map(|(exercise, sets)| performed(exercise, &sets, written_in))
+        .filter_map(|(exercise, sets)| performed(exercise, &sets, export.logged.landed_as, at))
         .collect();
     Ok(match built.len() {
         0 => None,
@@ -344,7 +340,12 @@ fn item(
 }
 
 /// The sets of one exercise, counted in its own measure.
-fn performed(exercise: Exercise, sets: &[Done], written_in: &Cell) -> Option<ManualExercise> {
+fn performed(
+    exercise: Exercise,
+    sets: &[Done],
+    copy: LandingRecordId,
+    at: &SheetCell,
+) -> Option<ManualExercise> {
     let set = |done: &Done| -> ManualSet<()> {
         ManualSet {
             load: done.load.map(|mass| load_of(exercise, mass, None)),
@@ -352,7 +353,8 @@ fn performed(exercise: Exercise, sets: &[Done], written_in: &Cell) -> Option<Man
             intensity: None,
             kind: SetKind::Working,
             rest_after: done.rest_after.map(Duration::from_seconds),
-            written_in: written_in.clone(),
+            copy,
+            at: at.clone(),
         }
     };
     match exercise {
@@ -403,7 +405,8 @@ fn with<M>(set: ManualSet<()>, measure: Option<M>) -> ManualSet<M> {
         intensity: set.intensity,
         kind: set.kind,
         rest_after: set.rest_after,
-        written_in: set.written_in,
+        copy: set.copy,
+        at: set.at,
     }
 }
 

@@ -507,9 +507,9 @@ impl Row {
             rest_after_seconds: set
                 .rest_after
                 .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
-            landing_record_id: Some(set.written_in.landed_as.as_i64()),
-            sheet: Some(set.written_in.sheet.to_string()),
-            cell: Some(set.written_in.cell.to_string()),
+            landing_record_id: Some(set.copy.as_i64()),
+            sheet: Some(set.at.sheet.to_string()),
+            cell: Some(set.at.cell.to_string()),
         }
     }
 }

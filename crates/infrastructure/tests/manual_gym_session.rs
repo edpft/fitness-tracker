@@ -62,29 +62,24 @@ fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
         Performed::Completed(None) => "?".to_owned(),
         Performed::Failed => "failed".to_owned(),
     };
-    format!(
-        "{load} × {outcome}{intensity}{rest} [{}!{}]",
-        set.written_in.sheet, set.written_in.cell
-    )
+    format!("{load} × {outcome}{intensity}{rest} [{}]", set.at)
 }
 
-/// Which file each set was taken from, in order.
+/// Which file each set was taken from, in order. A set names its copy by the
+/// record it landed as, and the session names the copies.
 fn files(session: &ManualGymSession) -> Vec<String> {
     session
         .exercises()
-        .flat_map(|exercise| match exercise {
-            ManualExercise::ForReps { sets, .. } => sets
+        .flat_map(ManualExercise::copies)
+        .map(|copy| {
+            session
+                .copies()
                 .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect::<Vec<_>>(),
-            ManualExercise::ForDuration { sets, .. } => sets
-                .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect(),
-            ManualExercise::ForDistance { sets, .. } => sets
-                .iter()
-                .map(|set| set.written_in.file.to_string())
-                .collect(),
+                .find(|logged| logged.landed_as == copy)
+                .map_or_else(
+                    || format!("landing record {copy}"),
+                    |logged| logged.file.to_string(),
+                )
         })
         .collect()
 }

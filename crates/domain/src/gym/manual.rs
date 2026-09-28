@@ -16,6 +16,13 @@
 //! joins the two). So [`ManualSet::load`] is optional, and `None` means exactly
 //! that the sheet does not say.
 //!
+//! **A set names its copy by the record it landed as** (operator, 2026-09-28:
+//! *"if you only need an Id, just use the Id"*). The file and its digest belong
+//! to the copy, and the session names each copy once in [`ManualGymSession::copies`];
+//! repeating them on every set held one copy of the path and one of the
+//! 64-character digest per set, which is also what pushed [`ManualItem`] past
+//! clippy's size difference between variants.
+//!
 //! **One session however many copies of its workbook hold it** (operator,
 //! 2026-09-28). A workbook saved in several places is one record revised, not
 //! several recordings, so its copies are merged before a session derives: every
@@ -47,7 +54,7 @@ use std::fmt;
 use jiff::civil::Date;
 
 use crate::{
-    landing::{Cell, FilePath, LandingRecordId, SourceRecordId},
+    landing::{FilePath, LandingRecordId, SheetCell, SourceRecordId},
     measure::{Duration, Metres, RepCount},
     normalised::NormalisedEntity,
     sequence::{AtLeastTwo, NonEmpty},
@@ -73,12 +80,16 @@ pub struct ManualSet<M> {
     pub intensity: Option<Rir>,
     pub kind: SetKind,
     pub rest_after: Option<Duration>,
-    /// The file, sheet and cell holding the set's count. A set names its own
+    /// Which of the session's copies the set was taken from. The id is enough:
+    /// the file and its digest belong to the copy, which the session names
+    /// once, and a set that repeated them would hold one copy of each per set.
+    pub copy: LandingRecordId,
+    /// Where in that copy the set's count is written. A set names its own
     /// because a session need not sit on one sheet, or in one file: the 2018
     /// `1RM` sheets keep each lift on a sheet of its own, `CT 2017` keeps the
     /// trunk work apart from the lifts it was done with, and a session merged
     /// from copies of its workbook takes each set from the copy that says it.
-    pub written_in: Cell,
+    pub at: SheetCell,
 }
 
 /// One exercise and the sets performed of it, in order.
@@ -123,12 +134,12 @@ impl ManualExercise {
         }
     }
 
-    /// Where each set was written.
-    fn cells(&self) -> Vec<&Cell> {
+    /// The copies its sets were taken from, in the order written.
+    pub fn copies(&self) -> Vec<LandingRecordId> {
         match self {
-            Self::ForReps { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
-            Self::ForDuration { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
-            Self::ForDistance { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
+            Self::ForReps { sets, .. } => sets.iter().map(|set| set.copy).collect(),
+            Self::ForDuration { sets, .. } => sets.iter().map(|set| set.copy).collect(),
+            Self::ForDistance { sets, .. } => sets.iter().map(|set| set.copy).collect(),
         }
     }
 }
@@ -152,8 +163,8 @@ impl ManualItem {
     }
 }
 
-/// The copy of a workbook a session is dated by: the most recent one that
-/// holds it. Which file, sheet and cell each set came from, the set says.
+/// One copy of a log a session drew on: the file, and the record it landed as.
+/// Which copy each set came from, the set says, by this record's id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Logged {
     pub landed_as: LandingRecordId,
@@ -172,22 +183,29 @@ impl fmt::Display for Logged {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualGymSession {
     on: Date,
-    logged: Logged,
+    copies: NonEmpty<Logged>,
     items: NonEmpty<ManualItem>,
 }
 
 impl ManualGymSession {
-    pub const fn new(on: Date, logged: Logged, items: NonEmpty<ManualItem>) -> Self {
-        Self { on, logged, items }
+    /// `copies` are the copies it drew sets from, the one it is dated by first.
+    pub const fn new(on: Date, copies: NonEmpty<Logged>, items: NonEmpty<ManualItem>) -> Self {
+        Self { on, copies, items }
     }
 
     pub const fn on(&self) -> Date {
         self.on
     }
 
-    /// The most recent copy of its workbook that holds it.
+    /// The most recent copy of its log that holds it, which is the one it is
+    /// dated by.
     pub const fn logged(&self) -> &Logged {
-        &self.logged
+        self.copies.first()
+    }
+
+    /// Every copy it drew a set from, the one it is dated by first.
+    pub const fn copies(&self) -> &NonEmpty<Logged> {
+        &self.copies
     }
 
     /// The items, in the order performed.
@@ -208,17 +226,13 @@ impl ManualGymSession {
 }
 
 impl NormalisedEntity for ManualGymSession {
-    /// Every copy it drew a set from, as well as the one it is dated by.
+    /// Every copy it drew a set from, as well as the one it is dated by, which
+    /// is what [`Self::copies`] holds.
     fn composes(&self) -> Vec<&SourceRecordId> {
-        let mut records = vec![&self.logged.source_record_id];
-        for exercise in self.exercises() {
-            for cell in exercise.cells() {
-                if !records.contains(&&cell.source_record_id) {
-                    records.push(&cell.source_record_id);
-                }
-            }
-        }
-        records
+        self.copies
+            .iter()
+            .map(|copy| &copy.source_record_id)
+            .collect()
     }
 }
 
@@ -230,7 +244,7 @@ impl fmt::Display for ManualGymSession {
             self.on,
             self.exercises().count(),
             self.set_count(),
-            self.logged
+            self.logged()
         )
     }
 }

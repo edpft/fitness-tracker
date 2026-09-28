@@ -73,7 +73,7 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
         for entity in entities {
             match entity {
                 SpreadsheetEntity::WeighIn(weigh_in) => weigh_ins.push(weigh_in),
-                SpreadsheetEntity::GymSession(session) => sessions.push(session),
+                SpreadsheetEntity::GymSession(session) => sessions.push(*session),
             }
         }
 

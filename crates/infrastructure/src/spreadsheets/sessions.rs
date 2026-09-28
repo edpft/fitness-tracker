@@ -374,7 +374,21 @@ fn finish(
         unmodelled(scribe, format!("{what} ({on}) records no set"));
         return Ok(None);
     };
-    Ok(Some(ManualGymSession::new(on, dated_by.logged(), items)))
+    // The copy it is dated by first, then every other copy a set came from.
+    let mut drawn_from = vec![dated_by.logged()];
+    for item in &items {
+        for copy in item.exercises().flat_map(ManualExercise::copies) {
+            if !drawn_from.iter().any(|logged| logged.landed_as == copy)
+                && let Some(opened) = copies.iter().find(|opened| opened.record.id() == copy)
+            {
+                drawn_from.push(opened.logged());
+            }
+        }
+    }
+    let Ok(drawn_from) = NonEmpty::new(drawn_from) else {
+        return Ok(None);
+    };
+    Ok(Some(ManualGymSession::new(on, drawn_from, items)))
 }
 
 /// A warm-up of nothing on an exercise that is never done with nothing.
@@ -485,7 +499,7 @@ fn manual_set<M>(
     outcome: Performed<M>,
     copies: &[Opened<'_>],
 ) -> Option<ManualSet<M>> {
-    let written_in = copies.get(entry.copy)?.cell(entry.written_in);
+    let copy = copies.get(entry.copy)?.record.id();
     Some(ManualSet {
         load: entry
             .load
@@ -497,7 +511,8 @@ fn manual_set<M>(
         intensity: entry.intensity,
         kind: entry.kind,
         rest_after: entry.rest_after,
-        written_in,
+        copy,
+        at: entry.written_in,
     })
 }
 
