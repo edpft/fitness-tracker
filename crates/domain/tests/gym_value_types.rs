@@ -177,8 +177,9 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        150,
-        "the vocabulary this build has needed so far: 136, and 14 from the spreadsheets (#274)"
+        151,
+        "the vocabulary this build has needed so far: 136, 14 from the spreadsheets (#274) and \
+         the suitcase carry from `CT 2017`'s earlier copies (#280)"
     );
 }
 

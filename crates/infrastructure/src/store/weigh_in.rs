@@ -27,8 +27,10 @@ use domain::{
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::{SpreadsheetFileLandingStore, corrupt, count_from_storage, store_error};
+use crate::spreadsheets::Workbook;
 
-/// Raw, read-only, for the historical spreadsheets. One account per file.
+/// Raw, read-only, for the historical spreadsheets. One account per workbook,
+/// holding every copy of it that landed.
 #[derive(Debug, Clone)]
 pub struct SpreadsheetFileAccountReader {
     pool: SqlitePool,
@@ -49,15 +51,15 @@ impl SpreadsheetFileAccountReader {
 }
 
 impl AccountReader for SpreadsheetFileAccountReader {
-    /// A file on its own. Its identity is the digest of its bytes, so no two
-    /// landed files share one and nothing is superseded.
-    type Account = LandedRecord;
+    /// Every copy of one workbook. A file's identity is the digest of its
+    /// bytes, so no two landed files share one and nothing is superseded.
+    type Account = Workbook;
 
     fn stream(&self) -> &LandingStream {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<LandedRecord>, StoreError> {
+    async fn accounts(&self) -> Result<Vec<Workbook>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -74,7 +76,8 @@ impl AccountReader for SpreadsheetFileAccountReader {
         .await
         .map_err(|error| store_error(&error))?;
 
-        rows.into_iter()
+        let records = rows
+            .into_iter()
             .map(|row| {
                 let provenance = FileProvenance::new(
                     FilePath::try_from(row.path).map_err(|error| corrupt(&error))?,
@@ -95,7 +98,8 @@ impl AccountReader for SpreadsheetFileAccountReader {
                     record,
                 ))
             })
-            .collect()
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(Workbook::gather(records))
     }
 }
 

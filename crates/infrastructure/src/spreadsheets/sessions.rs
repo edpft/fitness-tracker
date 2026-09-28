@@ -25,17 +25,16 @@
 //! with no mapping stops the run, as an unmapped Hevy template does: a gap in
 //! the vocabulary is a defect here, not in the data.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        Load, Logged, ManualExercise, ManualGymSession, ManualSet, Performed, Rir, SetKind,
-        SignedKg,
-        exercise::{DurationExercise, Exercise, Implement, RepsExercise},
+        Load, ManualExercise, ManualGymSession, ManualSet, Performed, Rir, SetKind, SignedKg,
+        exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     },
-    landing::{CellRef, FileProvenance, LandedRecord, SheetCell, SheetName},
-    measure::{Duration, Kg, RepCount},
+    landing::{CellRef, SheetCell, SheetName},
+    measure::{Duration, Kg, Metres, RepCount},
     normalised::{OperatorZone, RefusalLocus, RefusalReason},
     sequence::NonEmpty,
 };
@@ -44,7 +43,10 @@ use jiff::{
     civil::{Date, Weekday},
 };
 
-use super::sheet::{Sheet, Value};
+use super::{
+    Opened, Workbook,
+    sheet::{Sheet, Value},
+};
 use crate::scribe::Scribe;
 
 /// Reads manual gym sessions out of a landed spreadsheet.
@@ -52,56 +54,194 @@ use crate::scribe::Scribe;
 pub struct SpreadsheetSessionTranslator;
 
 impl Translator for SpreadsheetSessionTranslator {
-    type Account = LandedRecord;
+    type Account = Workbook;
     type Entity = ManualGymSession;
 
     /// The zone is not consulted: a manual session is a day.
     fn translate(
         &self,
-        record: &LandedRecord,
+        workbook: &Workbook,
         _zone: &OperatorZone,
     ) -> Result<Translation<ManualGymSession>, NormalisationError> {
-        super::translate_with(record, "gym sessions", |file, sheets, scribe| {
-            read_sessions(record, file, sheets, scribe)
+        super::translate_with(workbook, "gym sessions", |copies, scribes| {
+            scribes
+                .last_mut()
+                .map_or_else(|| Ok(Vec::new()), |scribe| read_sessions(copies, scribe))
         })
     }
 }
 
-/// Every performed session in a workbook's sheets.
+/// Every performed session in a workbook, merged across its copies.
+///
+/// `copies` is oldest first. Each copy is read on its own, and then the copies
+/// are merged (operator, 2026-09-28): a session any copy shows performed
+/// derives once, every set any copy states is kept, and where two copies state
+/// different values for one set the most recent wins. A blank is not a
+/// statement, so it never beats a value.
 ///
 /// # Errors
 ///
 /// [`NormalisationError::UnmappedExercise`] for a name the vocabulary does not
 /// map.
 pub(super) fn read_sessions(
-    record: &LandedRecord,
-    file: &FileProvenance,
-    sheets: &[Sheet],
+    copies: &[Opened<'_>],
     scribe: &mut Scribe,
 ) -> Result<Vec<ManualGymSession>, NormalisationError> {
-    let mut drafts = Vec::new();
-    for sheet in sheets {
-        session_sheet(sheet, &mut drafts);
-        weights_2016(sheet, &mut drafts);
-        training_log(sheet, &mut drafts);
-        beginner_2020(sheet, &mut drafts);
-        estimates_2023(sheet, &mut drafts);
+    let mut read = Vec::new();
+    for (index, copy) in copies.iter().enumerate() {
+        let mut drafts = Vec::new();
+        for sheet in &copy.sheets {
+            session_sheet(sheet, &mut drafts);
+            weights_2016(sheet, &mut drafts);
+            training_log(sheet, &mut drafts);
+            beginner_2020(sheet, &mut drafts);
+            estimates_2023(sheet, &mut drafts);
+        }
+        lift_sheets_2018(&copy.sheets, &mut drafts);
+        for draft in &mut drafts {
+            from_copy(draft, index);
+        }
+        read.push(drafts);
     }
-    lift_sheets_2018(sheets, &mut drafts);
-    conditioning_2017(sheets, &mut drafts, scribe);
+    let mut drafts = merge_by_date(read);
+    drafts.extend(conditioning_2017(copies, scribe));
 
-    let logged = Logged {
-        landed_as: record.id(),
-        source_record_id: record.source_record_id().clone(),
-        file: file.path().clone(),
-    };
     let mut sessions = Vec::new();
     for draft in drafts {
-        if let Some(session) = finish(draft, &logged, record, scribe)? {
+        if let Some(session) = finish(draft, copies, scribe)? {
             sessions.push(session);
         }
     }
     Ok(sessions)
+}
+
+/// Mark a draft, and every set in it, as read from one copy.
+fn from_copy(draft: &mut Draft, copy: usize) {
+    draft.copy = copy;
+    for entry in &mut draft.entries {
+        entry.copy = copy;
+    }
+}
+
+/// The copies' sessions, one per sheet and day, however many copies hold it.
+///
+/// `read` is each copy's drafts, oldest copy first.
+fn merge_by_date(read: Vec<Vec<Draft>>) -> Vec<Draft> {
+    let mut merged: Vec<Draft> = Vec::new();
+    for drafts in read.into_iter().rev() {
+        for draft in drafts {
+            let same = merged
+                .iter_mut()
+                .find(|kept| kept.what == draft.what && kept.on == draft.on);
+            match same {
+                Some(kept) => absorb(kept, draft),
+                None => merged.push(draft),
+            }
+        }
+    }
+    merged
+}
+
+/// Fold an older copy's draft of a session into a newer copy's.
+///
+/// Only a copy that shows the session performed contributes sets: a copy
+/// holding it as a plan says nothing about what was done.
+fn absorb(newer: &mut Draft, older: Draft) {
+    if !older.performed {
+        return;
+    }
+    if !newer.performed {
+        newer.performed = true;
+        newer.copy = older.copy;
+        newer.entries = older.entries;
+        return;
+    }
+    let press = newer.press;
+    newer.entries = merge_sets(std::mem::take(&mut newer.entries), older.entries, press);
+}
+
+/// One exercise's set of one kind, at one place in the layout: the unit two
+/// copies are compared on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Slot {
+    exercise: String,
+    kind: SetKind,
+    position: u32,
+}
+
+fn slots(entries: &[Entry], press: Press) -> Vec<Slot> {
+    let mut seen: BTreeMap<(String, bool), u32> = BTreeMap::new();
+    entries
+        .iter()
+        .map(|entry| {
+            let exercise = exercise_named(&entry.name, press).map_or_else(
+                || entry.name.to_lowercase(),
+                |exercise| exercise.to_string(),
+            );
+            let ordinal = seen
+                .entry((exercise.clone(), entry.kind == SetKind::Warmup))
+                .or_insert(0);
+            let position = entry.position.unwrap_or(*ordinal);
+            *ordinal = ordinal.saturating_add(1);
+            Slot {
+                exercise,
+                kind: entry.kind,
+                position,
+            }
+        })
+        .collect()
+}
+
+/// Whether a set says anything. A count missing beside a load, and a warm-up
+/// of nothing on an exercise never done with nothing, are blanks.
+fn states(entry: &Entry, press: Press) -> bool {
+    if matches!(entry.count, Count::Missing) {
+        return false;
+    }
+    exercise_named(&entry.name, press).is_none_or(|exercise| !is_empty_bar(exercise, entry))
+}
+
+/// Two lists of one session's sets as one: where both have a set, the one
+/// from the more recent copy, unless it is a blank; where only `added` has
+/// one, it goes where `added` put it, after the set it followed there or
+/// before the one it preceded.
+fn merge_sets(kept: Vec<Entry>, added: Vec<Entry>, press: Press) -> Vec<Entry> {
+    let mut keys = slots(&kept, press);
+    let mut merged = kept;
+    let added_keys = slots(&added, press);
+    for (index, (key, entry)) in added_keys.iter().zip(added).enumerate() {
+        if let Some(at) = keys.iter().position(|kept| kept == key) {
+            if let Some(kept) = merged.get_mut(at) {
+                let replaces = match (states(kept, press), states(&entry, press)) {
+                    (false, true) => true,
+                    (true, true) => entry.copy > kept.copy,
+                    _ => false,
+                };
+                if replaces {
+                    *kept = entry;
+                }
+            }
+            continue;
+        }
+        let after = added_keys
+            .get(..index)
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .find_map(|before| keys.iter().position(|kept| kept == before))
+            .map(|at| at.saturating_add(1));
+        let before = || {
+            added_keys
+                .get(index.saturating_add(1)..)
+                .unwrap_or_default()
+                .iter()
+                .find_map(|next| keys.iter().position(|kept| kept == next))
+        };
+        let at = after.or_else(before).unwrap_or(merged.len());
+        keys.insert(at, key.clone());
+        merged.insert(at, entry);
+    }
+    merged
 }
 
 /// How many reps, or how long, a sheet says a set was.
@@ -131,6 +271,12 @@ struct Entry {
     kind: SetKind,
     rest_after: Option<Duration>,
     written_in: SheetCell,
+    /// Which copy of the workbook it was read from, oldest first.
+    copy: usize,
+    /// Where the layout puts it among its exercise's sets of its kind (`WU2`,
+    /// `SET3`), where the layout numbers them. Copies of a workbook are
+    /// merged set by set, and a blank in one copy must not shift the rest.
+    position: Option<u32>,
 }
 
 /// What a press is, in one layout.
@@ -151,13 +297,14 @@ struct Draft {
     performed: bool,
     press: Press,
     entries: Vec<Entry>,
+    /// The copy it is dated by: the most recent that holds it.
+    copy: usize,
 }
 
 /// A draft becomes a session, or says why not.
 fn finish(
     draft: Draft,
-    logged: &Logged,
-    record: &LandedRecord,
+    copies: &[Opened<'_>],
     scribe: &mut Scribe,
 ) -> Result<Option<ManualGymSession>, NormalisationError> {
     let Draft {
@@ -166,7 +313,11 @@ fn finish(
         performed,
         press,
         entries,
+        copy,
     } = draft;
+    let Some(dated_by) = copies.get(copy) else {
+        return Ok(None);
+    };
 
     if !performed {
         unmodelled(
@@ -192,9 +343,15 @@ fn finish(
     let mut exercises: Vec<(Exercise, Vec<Entry>)> = Vec::new();
     for entry in entries {
         let Some(exercise) = exercise_named(&entry.name, press) else {
+            let source_record_id = copies
+                .get(entry.copy)
+                .unwrap_or(dated_by)
+                .record
+                .source_record_id()
+                .to_string();
             return Err(NormalisationError::UnmappedExercise {
                 template_id: entry.name,
-                source_record_id: record.source_record_id().to_string(),
+                source_record_id,
             });
         };
         if matches!(entry.count, Count::Missing) || is_empty_bar(exercise, &entry) {
@@ -208,7 +365,7 @@ fn finish(
 
     let mut built = Vec::new();
     for (exercise, sets) in exercises {
-        if let Some(exercise) = performed_exercise(exercise, sets, &what, scribe) {
+        if let Some(exercise) = performed_exercise(exercise, sets, copies, &what, scribe) {
             built.push(exercise);
         }
     }
@@ -216,7 +373,11 @@ fn finish(
         unmodelled(scribe, format!("{what} ({on}) records no set"));
         return Ok(None);
     };
-    Ok(Some(ManualGymSession::new(on, logged.clone(), exercises)))
+    Ok(Some(ManualGymSession::new(
+        on,
+        dated_by.logged(),
+        exercises,
+    )))
 }
 
 /// A warm-up of nothing on an exercise that is never done with nothing.
@@ -234,6 +395,7 @@ fn is_empty_bar(exercise: Exercise, entry: &Entry) -> bool {
 fn performed_exercise(
     exercise: Exercise,
     entries: Vec<Entry>,
+    copies: &[Opened<'_>],
     what: &str,
     scribe: &mut Scribe,
 ) -> Option<ManualExercise> {
@@ -255,7 +417,9 @@ fn performed_exercise(
                         continue;
                     }
                 };
-                sets.push(manual_set(Exercise::Reps(exercise), entry, outcome));
+                if let Some(set) = manual_set(Exercise::Reps(exercise), entry, outcome, copies) {
+                    sets.push(set);
+                }
             }
             NonEmpty::new(sets)
                 .ok()
@@ -275,24 +439,57 @@ fn performed_exercise(
                         continue;
                     }
                 };
-                sets.push(manual_set(Exercise::Duration(exercise), entry, outcome));
+                if let Some(set) = manual_set(Exercise::Duration(exercise), entry, outcome, copies)
+                {
+                    sets.push(set);
+                }
             }
             NonEmpty::new(sets)
                 .ok()
                 .map(|sets| ManualExercise::ForDuration { exercise, sets })
         }
+        // Counted in carries of a known length: `CT 2017`'s carries.
         Exercise::Distance(exercise) => {
-            unmodelled(
-                scribe,
-                format!("{what}: no sheet records {exercise} as a distance"),
-            );
-            None
+            let mut sets = Vec::new();
+            for entry in entries {
+                let outcome = match entry.count {
+                    Count::Reps(carries) => Performed::Completed(Metres::from_millimetres(
+                        CARRY
+                            .as_millimetres()
+                            .saturating_mul(u64::from(carries.as_u32())),
+                    )),
+                    Count::Failed => Performed::Failed,
+                    Count::Held(_) | Count::Missing => {
+                        unmodelled(
+                            scribe,
+                            format!(
+                                "{what}: {} at {} is not a carry",
+                                exercise, entry.written_in
+                            ),
+                        );
+                        continue;
+                    }
+                };
+                if let Some(set) = manual_set(Exercise::Distance(exercise), entry, outcome, copies)
+                {
+                    sets.push(set);
+                }
+            }
+            NonEmpty::new(sets)
+                .ok()
+                .map(|sets| ManualExercise::ForDistance { exercise, sets })
         }
     }
 }
 
-fn manual_set<M>(exercise: Exercise, entry: Entry, outcome: Performed<M>) -> ManualSet<M> {
-    ManualSet {
+fn manual_set<M>(
+    exercise: Exercise,
+    entry: Entry,
+    outcome: Performed<M>,
+    copies: &[Opened<'_>],
+) -> Option<ManualSet<M>> {
+    let written_in = copies.get(entry.copy)?.cell(entry.written_in);
+    Some(ManualSet {
         load: entry
             .load
             .map(|mass| load_of(exercise, mass, entry.bodyweight)),
@@ -300,8 +497,8 @@ fn manual_set<M>(exercise: Exercise, entry: Entry, outcome: Performed<M>) -> Man
         intensity: entry.intensity,
         kind: entry.kind,
         rest_after: entry.rest_after,
-        written_in: entry.written_in,
-    }
+        written_in,
+    })
 }
 
 /// A load on the axis its exercise is loaded on.
@@ -376,6 +573,8 @@ fn exercise_named(name: &str, press: Press) -> Option<Exercise> {
         "landmines" => RepsExercise::LandmineRotation,
         "bat wings" => RepsExercise::BatWings,
         "suitcase hold" => return Some(Exercise::Duration(DurationExercise::SuitcaseHold)),
+        "suitcase carry" => return Some(Exercise::Distance(DistanceExercise::SuitcaseCarry)),
+        "farmers walk" => return Some(Exercise::Distance(DistanceExercise::FarmersWalk)),
         _ => return None,
     };
     Some(Exercise::Reps(reps))
@@ -430,6 +629,13 @@ fn count(value: &Value) -> Option<Count> {
             .and_then(|reps| RepCount::new(reps).ok())
             .map(Count::Reps),
         Value::Time(seconds) if *seconds > 0 => Some(Count::Held(Duration::from_seconds(*seconds))),
+        // The May copy of `CT 2017` times its later carries in words: `20secs`.
+        Value::Text(text) => text
+            .trim()
+            .strip_suffix("secs")
+            .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+            .filter(|&seconds| seconds > 0)
+            .map(|seconds| Count::Held(Duration::from_seconds(seconds))),
         _ => None,
     }
 }
@@ -488,6 +694,8 @@ fn entry(
         kind,
         rest_after,
         written_in: at(sheet, row, count_column)?,
+        copy: 0,
+        position: None,
     })
 }
 
@@ -526,6 +734,7 @@ impl<'drafts> ByDate<'drafts> {
                 performed: true,
                 press,
                 entries: Vec::new(),
+                copy: 0,
             });
             self.drafts.len().saturating_sub(1)
         });
@@ -565,6 +774,7 @@ fn session_sheet(sheet: &Sheet, drafts: &mut Vec<Draft>) {
         performed: false,
         press: Press::Barbell,
         entries: Vec::new(),
+        copy: 0,
     };
     for row in 1..sheet.height() {
         if notes
@@ -760,6 +970,7 @@ fn beginner_2020(sheet: &Sheet, drafts: &mut Vec<Draft>) {
                 performed: false,
                 press: Press::Dumbbell,
                 entries: Vec::new(),
+                copy: 0,
             });
             drafts.len().saturating_sub(1)
         });
@@ -895,7 +1106,7 @@ fn lift_sheets_2018(sheets: &[Sheet], drafts: &mut Vec<Draft>) {
     }
 }
 
-/// Which of the programme's days a `CT 2017` sheet is.
+/// Which of the programme's days a `CT 2017` workout is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Day {
     Push,
@@ -903,85 +1114,206 @@ enum Day {
     Pull,
 }
 
-/// One `CT 2017` workout: a row of `Push`, `Legs` or `Pull`.
+impl fmt::Display for Day {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Push => "Push",
+            Self::Legs => "Legs",
+            Self::Pull => "Pull",
+        })
+    }
+}
+
+/// One `CT 2017` workout: the Nth of its day.
 struct Workout {
     day: Day,
-    week: i8,
+    number: u32,
+    /// The calendar week, where a copy says it. The first layout's `Wk` is the
+    /// template's week, which the programme ran a week and more behind, so it
+    /// is not read as one.
+    week: Option<i8>,
+    /// The body weight written beside it: what ties the earlier copies' trunk
+    /// work to it.
+    bodyweight: Option<Kg>,
     draft: Draft,
 }
 
-/// `CT 2017`'s `Push`, `Legs`, `Pull` and `Trunk` sheets, January–April 2017.
+/// `CT 2017`, January–April 2017, merged across its copies.
 ///
-/// Each row of `Push`, `Legs` or `Pull` is a workout, in blocks across the
-/// sheet, one per exercise, each with warm-ups, a planned column and the
-/// performed `SET1`–`SET3`. A row with nothing performed is the plan.
+/// **Two layouts.** The final workbook and the May copy keep a sheet per day
+/// (`Push`, `Legs`, `Pull`), a workout per row and an exercise per block, each
+/// with warm-ups, a planned column and the performed `SET1`–`SET3`. The March
+/// and April copies keep a sheet per lift (`Squat`, `Bench`, …), whose row N is
+/// the Nth workout of that lift's day. A row with nothing performed is the plan.
+///
+/// **The copies are one workbook** (operator, 2026-09-28), so a workout is its
+/// day and number, whichever copy and layout it is read from, and the merge
+/// keeps every set any copy states, the most recent copy winning.
 ///
 /// **The day is the programme's** (operator, 2026-09-27): the sheets give the
-/// week, and the second pattern on `Weekly` puts push on Monday, legs on
-/// Wednesday and pull on Friday. A week with two pushes and no legs ran push,
-/// pull, push on the same days. `Trunk` is two rows per exercise per week, done
-/// on the days `Weekly` puts it: suitcase holds with push and pull, landmines
-/// with push and legs, loaded dead bugs with legs and pull.
-fn conditioning_2017(sheets: &[Sheet], drafts: &mut Vec<Draft>, scribe: &mut Scribe) {
+/// week, and the second pattern on the final `Weekly` puts push on Monday, legs
+/// on Wednesday and pull on Friday. A week with two pushes and no legs ran
+/// push, pull, push on the same days. The final `Trunk` is two rows per
+/// exercise per week, done on the days `Weekly` puts it; the earlier copies'
+/// trunk sheets are joined by [`trunk_before_week_14`].
+fn conditioning_2017(copies: &[Opened<'_>], scribe: &mut Scribe) -> Vec<Draft> {
+    let read: Vec<Vec<Workout>> = copies
+        .iter()
+        .enumerate()
+        .map(|(copy, opened)| workouts_2017(&opened.sheets, copy))
+        .collect();
+    let mut workouts = merge_workouts(read);
+    if workouts.is_empty() {
+        return Vec::new();
+    }
+
+    workouts.retain_mut(|workout| {
+        let Some(week) = workout.week else {
+            if workout.draft.performed {
+                unmodelled(
+                    scribe,
+                    format!("{}: no copy says which week it was", workout.draft.what),
+                );
+            }
+            return false;
+        };
+        match monday_of_2017(week) {
+            Some(monday) => {
+                workout.draft.on = monday;
+                true
+            }
+            None => false,
+        }
+    });
+
+    date_by_the_programme(&mut workouts, scribe);
+
+    if let Some((copy, opened)) = copies
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, opened)| opened.sheets.iter().any(|sheet| sheet.name == "Trunk"))
+    {
+        trunk_2017(&opened.sheets, copy, &mut workouts, scribe);
+    }
+    trunk_before_week_14(copies, &mut workouts, scribe);
+
+    workouts
+        .into_iter()
+        .filter(|workout| workout.draft.performed || !workout.draft.entries.is_empty())
+        .map(|workout| workout.draft)
+        .collect()
+}
+
+/// One copy's workouts, in either layout.
+fn workouts_2017(sheets: &[Sheet], copy: usize) -> Vec<Workout> {
     let mut workouts: Vec<Workout> = Vec::new();
     for sheet in sheets {
-        let day = match sheet.name.as_str() {
-            "Push" => Day::Push,
-            "Legs" => Day::Legs,
-            "Pull" => Day::Pull,
+        let (day, lift) = match sheet.name.as_str() {
+            "Push" => (Day::Push, None),
+            "Legs" => (Day::Legs, None),
+            "Pull" => (Day::Pull, None),
+            "Squat" => (Day::Legs, Some("Squat")),
+            "Deadlift" => (Day::Legs, Some("Deadlift")),
+            "Lunge" => (Day::Legs, Some("Lunge")),
+            "Bench" => (Day::Push, Some("Bench")),
+            "Press" => (Day::Push, Some("Press")),
+            "Dips" => (Day::Push, Some("Dips")),
+            "Pullup" => (Day::Pull, Some("Pull up")),
+            "Row" => (Day::Pull, Some("Row")),
+            "Curl" => (Day::Pull, Some("Curl")),
             _ => continue,
         };
+        let blocks = lift.map_or_else(
+            || blocks(sheet),
+            |name| lift_sheet(sheet, name).into_iter().collect(),
+        );
         for row in 1..sheet.height() {
-            let mut entries = Vec::new();
+            let mut number = None;
             let mut week = None;
+            let mut bodyweight = None;
             let mut performed = false;
-            for block in blocks(sheet) {
+            let mut entries = Vec::new();
+            for block in &blocks {
                 let Some(name) = block.name(sheet, row) else {
                     continue;
                 };
-                let Some(this_week) = week_of(sheet.get(row, block.week)) else {
+                let Some(this_number) = block.number(sheet, row) else {
                     continue;
                 };
-                week = week.or(Some(this_week));
+                number = number.or(Some(this_number));
+                week = week.or_else(|| block.week(sheet, row));
+                bodyweight = bodyweight.or_else(|| block.bodyweight(sheet, row));
                 performed |= block
                     .sets
                     .iter()
                     .any(|&(reps, _)| is_filled(sheet.get(row, reps)));
-                entries.extend(block.entries(sheet, row, &name));
+                entries.extend(block.entries(sheet, row, &name, copy));
             }
-            let Some(week) = week else {
+            let Some(number) = number else {
                 continue;
             };
-            let Some(monday) = monday_of_2017(week) else {
-                continue;
-            };
-            workouts.push(Workout {
-                day,
-                week,
-                draft: Draft {
-                    on: monday,
-                    what: format!("{}, week {week}", sheet.name),
-                    performed,
-                    press: Press::Barbell,
-                    entries,
-                },
-            });
+            match workouts
+                .iter_mut()
+                .find(|workout| workout.day == day && workout.number == number)
+            {
+                // A sheet per lift: the workout is already begun by an earlier
+                // lift's sheet.
+                Some(workout) => {
+                    workout.week = workout.week.or(week);
+                    workout.bodyweight = workout.bodyweight.or(bodyweight);
+                    if performed {
+                        workout.draft.performed = true;
+                        workout.draft.entries.extend(entries);
+                    }
+                }
+                None => workouts.push(Workout {
+                    day,
+                    number,
+                    week,
+                    bodyweight,
+                    draft: Draft {
+                        on: Date::MIN,
+                        what: format!("{day}, workout {number}"),
+                        performed,
+                        press: Press::Barbell,
+                        entries: if performed || lift.is_none() {
+                            entries
+                        } else {
+                            Vec::new()
+                        },
+                        copy,
+                    },
+                }),
+            }
         }
     }
-    if workouts.is_empty() {
-        return;
+    workouts
+}
+
+/// Every copy's workouts as one, the most recent copy first.
+fn merge_workouts(read: Vec<Vec<Workout>>) -> Vec<Workout> {
+    let mut merged: Vec<Workout> = Vec::new();
+    for workouts in read.into_iter().rev() {
+        for workout in workouts {
+            let Some(kept) = merged
+                .iter_mut()
+                .find(|kept| kept.day == workout.day && kept.number == workout.number)
+            else {
+                merged.push(workout);
+                continue;
+            };
+            if workout.draft.performed && !kept.draft.performed {
+                kept.week = workout.week.or(kept.week);
+                kept.bodyweight = workout.bodyweight.or(kept.bodyweight);
+            } else if workout.draft.performed {
+                kept.week = kept.week.or(workout.week);
+                kept.bodyweight = kept.bodyweight.or(workout.bodyweight);
+            }
+            absorb(&mut kept.draft, workout.draft);
+        }
     }
-
-    date_by_the_programme(&mut workouts, scribe);
-
-    trunk_2017(sheets, &mut workouts, scribe);
-
-    drafts.extend(
-        workouts
-            .into_iter()
-            .filter(|workout| workout.draft.performed || !workout.draft.entries.is_empty())
-            .map(|workout| workout.draft),
-    );
+    merged
 }
 
 /// Each performed workout onto its programme day: push Monday, legs
@@ -990,8 +1322,10 @@ fn conditioning_2017(sheets: &[Sheet], drafts: &mut Vec<Draft>, scribe: &mut Scr
 fn date_by_the_programme(workouts: &mut [Workout], scribe: &mut Scribe) {
     let mut weeks: BTreeMap<i8, Vec<usize>> = BTreeMap::new();
     for (index, workout) in workouts.iter().enumerate() {
-        if workout.draft.performed {
-            weeks.entry(workout.week).or_default().push(index);
+        if workout.draft.performed
+            && let Some(week) = workout.week
+        {
+            weeks.entry(week).or_default().push(index);
         }
     }
     for indices in weeks.values() {
@@ -1046,8 +1380,8 @@ fn date_by_the_programme(workouts: &mut [Workout], scribe: &mut Scribe) {
     }
 }
 
-/// The trunk work, onto the workouts `Weekly` puts it with.
-fn trunk_2017(sheets: &[Sheet], workouts: &mut [Workout], scribe: &mut Scribe) {
+/// The final workbook's trunk work, onto the workouts `Weekly` puts it with.
+fn trunk_2017(sheets: &[Sheet], copy: usize, workouts: &mut [Workout], scribe: &mut Scribe) {
     let Some(sheet) = sheets.iter().find(|sheet| sheet.name == "Trunk") else {
         return;
     };
@@ -1057,7 +1391,7 @@ fn trunk_2017(sheets: &[Sheet], workouts: &mut [Workout], scribe: &mut Scribe) {
             let Some(name) = block.name(sheet, row) else {
                 continue;
             };
-            let Some(week) = week_of(sheet.get(row, block.week)) else {
+            let Some(week) = block.week(sheet, row) else {
                 continue;
             };
             if !block
@@ -1077,7 +1411,7 @@ fn trunk_2017(sheets: &[Sheet], workouts: &mut [Workout], scribe: &mut Scribe) {
             *nth = nth.saturating_add(1);
             let workout = with.and_then(|day| {
                 workouts.iter_mut().find(|workout| {
-                    workout.day == day && workout.week == week && workout.draft.performed
+                    workout.day == day && workout.week == Some(week) && workout.draft.performed
                 })
             });
             let Some(workout) = workout else {
@@ -1090,14 +1424,320 @@ fn trunk_2017(sheets: &[Sheet], workouts: &mut [Workout], scribe: &mut Scribe) {
             workout
                 .draft
                 .entries
-                .extend(block.entries(sheet, row, &name));
+                .extend(block.entries(sheet, row, &name, copy));
         }
     }
 }
 
+/// What a row of the earlier copies' trunk sheets is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Trunk {
+    Carry,
+    Landmines,
+    Deadbugs,
+}
+
+impl Trunk {
+    /// The days of a programme week it was done on, in the order the earlier
+    /// copies' `Weekly` numbers them.
+    const fn days(self) -> &'static [Day] {
+        match self {
+            Self::Carry => &[Day::Legs, Day::Push, Day::Pull],
+            Self::Landmines => &[Day::Push, Day::Pull],
+            Self::Deadbugs => &[Day::Legs],
+        }
+    }
+}
+
+impl fmt::Display for Trunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Carry => "Carry",
+            Self::Landmines => "Landmines",
+            Self::Deadbugs => "Deadbugs",
+        })
+    }
+}
+
+/// Which workout a trunk row says it was done in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pointer {
+    /// The programme week and the slot in it: `2.1` is the first of week 2.
+    /// That week's workouts are the second of each day.
+    Programme { week: u32, day: Day },
+    /// A calendar week, as the May copy writes its later rows.
+    Calendar(i8),
+}
+
+/// One row of an earlier copy's trunk sheet: the Nth of its kind.
+struct TrunkRow {
+    trunk: Trunk,
+    number: u32,
+    pointer: Option<Pointer>,
+    bodyweight: Option<Kg>,
+    draft: Draft,
+}
+
+/// The March, April and May copies' trunk work, onto the workouts it was done
+/// in (operator, 2026-09-28).
+///
+/// The final `Trunk` starts at week 14, so the carries, landmines and dead bugs
+/// before it are only in the copies. A row joins the workout its copy points it
+/// at, and only where the body weight written on it is that workout's: the
+/// pointer says which workout, and the body weight confirms it. A row that does
+/// not match is refused, not guessed onto a day.
+fn trunk_before_week_14(copies: &[Opened<'_>], workouts: &mut [Workout], scribe: &mut Scribe) {
+    for row in merge_trunk(copies) {
+        if !row.draft.performed {
+            continue;
+        }
+        let what = format!(
+            "{}, workout {} in {}",
+            row.trunk,
+            row.number,
+            copies
+                .get(row.draft.copy)
+                .map_or_else(String::new, |copy| copy.file.path().to_string())
+        );
+        let Some(workout) = placed(&row, &what, workouts, scribe) else {
+            continue;
+        };
+        let press = workout.draft.press;
+        let entries = std::mem::take(&mut workout.draft.entries);
+        workout.draft.entries = merge_sets(entries, row.draft.entries, press);
+    }
+}
+
+/// Every copy's trunk rows as one, the most recent copy first.
+fn merge_trunk(copies: &[Opened<'_>]) -> Vec<TrunkRow> {
+    let mut merged: Vec<TrunkRow> = Vec::new();
+    for (copy, opened) in copies.iter().enumerate().rev() {
+        for row in opened
+            .sheets
+            .iter()
+            .flat_map(|sheet| trunk_rows(sheet, copy))
+        {
+            let Some(kept) = merged
+                .iter_mut()
+                .find(|kept| kept.trunk == row.trunk && kept.number == row.number)
+            else {
+                merged.push(row);
+                continue;
+            };
+            kept.pointer = kept.pointer.or(row.pointer);
+            kept.bodyweight = kept.bodyweight.or(row.bodyweight);
+            absorb(&mut kept.draft, row.draft);
+        }
+    }
+    merged
+}
+
+/// The workout a trunk row was done in: the one its copy points at, if the
+/// body weight on the row is that workout's. Otherwise it is refused.
+fn placed<'workouts>(
+    row: &TrunkRow,
+    what: &str,
+    workouts: &'workouts mut [Workout],
+    scribe: &mut Scribe,
+) -> Option<&'workouts mut Workout> {
+    let Some(bodyweight) = row.bodyweight else {
+        unmodelled(scribe, format!("{what}: no body weight to place it by"));
+        return None;
+    };
+    match row.pointer {
+        None => {
+            unmodelled(scribe, format!("{what}: no copy says which week it was"));
+            None
+        }
+        Some(Pointer::Programme { week, day }) => {
+            let found = workouts.iter_mut().find(|workout| {
+                workout.day == day && workout.number == week && workout.draft.performed
+            });
+            match found {
+                Some(workout) if workout.bodyweight == Some(bodyweight) => Some(workout),
+                Some(workout) => {
+                    let theirs = workout
+                        .bodyweight
+                        .map_or_else(|| "none".to_owned(), |kg| format!("{kg} kg"));
+                    unmodelled(
+                        scribe,
+                        format!(
+                            "{what}: body weight {bodyweight} kg is not {}'s ({theirs})",
+                            workout.draft.what
+                        ),
+                    );
+                    None
+                }
+                None => {
+                    unmodelled(
+                        scribe,
+                        format!("{what}: {day}, workout {week} was not performed"),
+                    );
+                    None
+                }
+            }
+        }
+        Some(Pointer::Calendar(week)) => {
+            let mut found = workouts.iter_mut().filter(|workout| {
+                workout.week == Some(week)
+                    && workout.draft.performed
+                    && workout.bodyweight == Some(bodyweight)
+            });
+            let (first, second) = (found.next(), found.next());
+            if let (Some(workout), None) = (first, second) {
+                return Some(workout);
+            }
+            unmodelled(
+                scribe,
+                format!("{what}: not one workout in week {week} has body weight {bodyweight} kg"),
+            );
+            None
+        }
+    }
+}
+
+/// How far one of the earlier copies' carries went. They count carries, and a
+/// carry was *"one walk over a set distance, no idea, probably 20 meters"*
+/// (operator, 2026-09-28).
+const CARRY: Metres = Metres::from_millimetres(20_000);
+
+/// The rows of one earlier-copy trunk sheet, in whichever of the three layouts
+/// it has.
+fn trunk_rows(sheet: &Sheet, copy: usize) -> Vec<TrunkRow> {
+    let width = sheet.width();
+    // (what it is, the slot a sheet of one slot is, how the row is numbered)
+    let (trunk, slot) = match sheet.name.as_str() {
+        "Carry, Left" => (Trunk::Carry, Some(1)),
+        "Carry, Right" => (Trunk::Carry, Some(2)),
+        "Carry, Both" => (Trunk::Carry, Some(3)),
+        "Landmines1" => (Trunk::Landmines, Some(1)),
+        "Landmines2" => (Trunk::Landmines, Some(2)),
+        "Carry" => (Trunk::Carry, None),
+        "Landmines" => (Trunk::Landmines, None),
+        "Deadbugs" => (Trunk::Deadbugs, Some(1)),
+        _ => return Vec::new(),
+    };
+    let Some(week) = column(sheet, 0, "Wk", 0, width) else {
+        return Vec::new();
+    };
+    let numbered = column(sheet, 0, "Work Out", 0, width);
+    let block = Block::found(
+        sheet,
+        None,
+        None,
+        BlockName::Header(String::new()),
+        0,
+        width,
+    );
+    let slots = trunk.days().len();
+
+    let mut rows = Vec::new();
+    for row in 1..sheet.height() {
+        let written = sheet.get(row, week);
+        let (number, pointer) = match (numbered, slot) {
+            // The May copy: numbered, and a calendar week where it says one.
+            (Some(numbered), _) => {
+                let Some(number) = whole(sheet.get(row, numbered)) else {
+                    continue;
+                };
+                (number, week_of(written).map(Pointer::Calendar))
+            }
+            // The March copy, and the April dead bugs: a sheet per slot, a
+            // row per programme week.
+            (None, Some(slot)) => {
+                let Some(programme) = whole(written) else {
+                    continue;
+                };
+                let number = u32::try_from(slots)
+                    .unwrap_or(1)
+                    .saturating_mul(programme.saturating_sub(1))
+                    .saturating_add(slot);
+                let day = trunk
+                    .days()
+                    .get(usize::try_from(slot).unwrap_or(0).saturating_sub(1));
+                (
+                    number,
+                    day.map(|&day| Pointer::Programme {
+                        week: programme,
+                        day,
+                    }),
+                )
+            }
+            // The April copy: a row per workout, `Wk` the programme week and
+            // slot (`2.1`), or blank.
+            (None, None) => (row, week_and_slot(written, trunk)),
+        };
+        let bodyweight = column(sheet, 0, "BW", 0, width)
+            .and_then(|bw| mass(sheet.get(row, bw)))
+            .filter(|kg| !kg.is_none());
+        // A carry in one hand is a suitcase carry, and in both a farmer's walk.
+        // The May copy times its later ones, which are suitcase holds.
+        let both = sheet.name == "Carry, Both"
+            || column(sheet, 0, "Side", 0, width)
+                .and_then(|side| sheet.get(row, side).text())
+                .is_some_and(|side| side.trim() == "Both");
+        let name = match trunk {
+            Trunk::Carry if both => "farmers walk",
+            Trunk::Carry => "suitcase carry",
+            Trunk::Landmines => "landmines",
+            Trunk::Deadbugs => "deadbugs",
+        };
+        let mut entries = block.entries(sheet, row, name, copy);
+        for entry in &mut entries {
+            if trunk == Trunk::Carry && matches!(entry.count, Count::Held(_)) {
+                "suitcase hold".clone_into(&mut entry.name);
+            }
+        }
+        let performed = block
+            .sets
+            .iter()
+            .any(|&(reps, _)| count(sheet.get(row, reps)).is_some());
+        rows.push(TrunkRow {
+            trunk,
+            number,
+            pointer,
+            bodyweight,
+            draft: Draft {
+                on: Date::MIN,
+                what: format!("{trunk}, workout {number}"),
+                performed,
+                press: Press::Barbell,
+                entries: if performed { entries } else { Vec::new() },
+                copy,
+            },
+        });
+    }
+    rows
+}
+
+/// A whole number in a cell.
+fn whole(value: &Value) -> Option<u32> {
+    match count(value)? {
+        Count::Reps(number) => Some(number.as_u32()),
+        _ => None,
+    }
+}
+
+/// `2.1`: the programme week, and which of its slots.
+fn week_and_slot(value: &Value, trunk: Trunk) -> Option<Pointer> {
+    let Value::Number(number) = value else {
+        return None;
+    };
+    let written = format!("{number}");
+    let (week, slot) = written.split_once('.')?;
+    let week = week.parse::<u32>().ok()?;
+    let slot = slot.parse::<usize>().ok()?;
+    let day = *trunk.days().get(slot.checked_sub(1)?)?;
+    Some(Pointer::Programme { week, day })
+}
+
 /// One exercise's columns on a `CT 2017` sheet.
 struct Block {
-    week: u32,
+    /// The calendar week, where the layout writes one.
+    week: Option<u32>,
+    /// The workout's number among its day's. `None` where the layout numbers
+    /// its workouts by row.
+    number: Option<u32>,
     /// Where the exercise is named: in a column per row, or once in the header.
     name: BlockName,
     bodyweight: Option<u32>,
@@ -1111,6 +1751,35 @@ enum BlockName {
 }
 
 impl Block {
+    /// The block whose columns lie between `from` and `to`.
+    fn found(
+        sheet: &Sheet,
+        week: Option<u32>,
+        number: Option<u32>,
+        name: BlockName,
+        from: u32,
+        to: u32,
+    ) -> Self {
+        let pair = |reps: &str, load: &str| {
+            Some((
+                column(sheet, 0, reps, from, to)?,
+                column(sheet, 0, load, from, to)?,
+            ))
+        };
+        Self {
+            week,
+            number,
+            name,
+            bodyweight: column(sheet, 0, "BW", from, to),
+            warmups: (1..=3)
+                .filter_map(|set| pair(&format!("WU{set}(reps)"), &format!("WU{set}(kg)")))
+                .collect(),
+            sets: (1..=3)
+                .filter_map(|set| pair(&format!("SET{set}(reps)"), &format!("SET{set}(kg)")))
+                .collect(),
+        }
+    }
+
     fn name(&self, sheet: &Sheet, row: u32) -> Option<String> {
         match &self.name {
             BlockName::Column(column) => sheet
@@ -1122,15 +1791,45 @@ impl Block {
         }
     }
 
-    fn entries(&self, sheet: &Sheet, row: u32, name: &str) -> Vec<Entry> {
+    /// Which of its day's workouts `row` is. A layout that numbers by row
+    /// only counts a row that has a week beside it.
+    fn number(&self, sheet: &Sheet, row: u32) -> Option<u32> {
+        self.number.map_or_else(
+            || {
+                self.week
+                    .map_or(Some(row), |week| week_of(sheet.get(row, week)).map(|_| row))
+            },
+            |column| whole(sheet.get(row, column)),
+        )
+    }
+
+    fn week(&self, sheet: &Sheet, row: u32) -> Option<i8> {
+        self.week.and_then(|week| week_of(sheet.get(row, week)))
+    }
+
+    fn bodyweight(&self, sheet: &Sheet, row: u32) -> Option<Kg> {
+        self.bodyweight
+            .and_then(|column| mass(sheet.get(row, column)))
+            .filter(|kg| !kg.is_none())
+    }
+
+    fn entries(&self, sheet: &Sheet, row: u32, name: &str, copy: usize) -> Vec<Entry> {
         let bodyweight = self
             .bodyweight
             .and_then(|column| mass(sheet.get(row, column)));
-        let warmups = self.warmups.iter().map(|&set| (SetKind::Warmup, set));
-        let sets = self.sets.iter().map(|&set| (SetKind::Working, set));
+        let warmups = self
+            .warmups
+            .iter()
+            .zip(1..)
+            .map(|(&set, position)| (SetKind::Warmup, set, position));
+        let sets = self
+            .sets
+            .iter()
+            .zip(1..)
+            .map(|(&set, position)| (SetKind::Working, set, position));
         warmups
             .chain(sets)
-            .filter_map(|(kind, (reps, load))| {
+            .filter_map(|(kind, (reps, load), position)| {
                 let mut entry = entry(
                     sheet,
                     name,
@@ -1142,13 +1841,16 @@ impl Block {
                     None,
                 )?;
                 entry.bodyweight = bodyweight;
+                entry.copy = copy;
+                entry.position = Some(position);
                 Some(entry)
             })
             .collect()
     }
 }
 
-/// Every exercise block on a `CT 2017` sheet, found by its `Wk` column.
+/// Every exercise block on a `Push`, `Legs`, `Pull` or `Trunk` sheet, found by
+/// its `Wk` column.
 ///
 /// The name is in the header above the workout number (`Squat\nWork Out`), or
 /// in a column of its own before it (`Horizontal Push` holding `Bench`), or,
@@ -1173,6 +1875,7 @@ fn blocks(sheet: &Sheet) -> Vec<Block> {
             .get(0, week.saturating_sub(1))
             .text()
             .unwrap_or_default();
+        let numbered = before.contains("Work Out").then(|| week.saturating_sub(1));
         let name = if before == "Work Out" {
             BlockName::Column(week.saturating_sub(2))
         } else if let Some((name, _)) = before.split_once('\n') {
@@ -1180,25 +1883,28 @@ fn blocks(sheet: &Sheet) -> Vec<Block> {
         } else {
             BlockName::Column(week.saturating_sub(1))
         };
-        let pair = |reps: &str, load: &str| {
-            Some((
-                column(sheet, 0, reps, week, end)?,
-                column(sheet, 0, load, week, end)?,
-            ))
-        };
-        blocks.push(Block {
-            week,
-            name,
-            bodyweight: column(sheet, 0, "BW", week, end),
-            warmups: (1..=3)
-                .filter_map(|set| pair(&format!("WU{set}(reps)"), &format!("WU{set}(kg)")))
-                .collect(),
-            sets: (1..=3)
-                .filter_map(|set| pair(&format!("SET{set}(reps)"), &format!("SET{set}(kg)")))
-                .collect(),
-        });
+        blocks.push(Block::found(sheet, Some(week), numbered, name, week, end));
     }
     blocks
+}
+
+/// The one block on an earlier copy's sheet per lift.
+///
+/// Its `Wk` is a calendar week only beside a `WorkOut` column (the April
+/// copy's `Bench` and `Press`). Without one, it is the template's week, and
+/// the row is the workout's number.
+fn lift_sheet(sheet: &Sheet, name: &str) -> Option<Block> {
+    let width = sheet.width();
+    let week = column(sheet, 0, "Wk", 0, width)?;
+    let numbered = column(sheet, 0, "WorkOut", 0, width);
+    Some(Block::found(
+        sheet,
+        numbered.map(|_| week),
+        numbered,
+        BlockName::Header(name.to_owned()),
+        0,
+        width,
+    ))
 }
 
 fn week_of(value: &Value) -> Option<i8> {

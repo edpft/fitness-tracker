@@ -461,6 +461,7 @@ vocabulary! {
     DistanceExercise {
         FarmersWalk => "farmers-walk", Dumbbell,
         Running => "running", Bodyweight,
+        SuitcaseCarry => "suitcase-carry", Dumbbell,
         WalkingLungeDumbbell => "walking-lunge-dumbbell", Dumbbell,
     }
 }

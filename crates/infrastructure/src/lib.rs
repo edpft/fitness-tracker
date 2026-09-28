@@ -30,7 +30,7 @@ pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use spreadsheets::{
     SpreadsheetEntity, SpreadsheetFiles, SpreadsheetSessionTranslator, SpreadsheetTranslator,
-    SpreadsheetWeighInTranslator,
+    SpreadsheetWeighInTranslator, Workbook,
 };
 pub use store::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
