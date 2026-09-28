@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COALESCE(revision_digest, payload_digest) AS \"payload_digest!: Vec<u8>\"\n            FROM btwb_export_landing\n            WHERE source_record_id = ?\n            ORDER BY id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "payload_digest!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7476156ae9cfd3d649250e75de9207c8889687215e56a00e5818ef8d6392978e"
+}
