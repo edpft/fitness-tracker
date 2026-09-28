@@ -124,3 +124,46 @@ impl fmt::Display for HeartRateVariability {
 }
 
 crate::newtype::from_str_via_string!(HeartRateVariability, InvalidQuantity);
+
+/// What a source says a session's heart rate came to: its average and its
+/// highest.
+///
+/// **Stated, never averaged here.** Both figures are the source's own summary
+/// of a recording it holds at a resolution this does not — § II.3 forbids us
+/// aggregating component observations, and says nothing against keeping what a
+/// source states, which is the call [`crate::cycling::RideRecord`]'s average
+/// power made for the same reason. Where the samples themselves are wanted,
+/// they come from the recording, not from here.
+///
+/// **Both or neither**, which is what every source has served so far: Garmin
+/// states `averageHR` and `maxHR` together on 547 of the operator's 548 gym
+/// activities and neither on the other. A summary with one of them is not a
+/// summary of anything, so there is no variant for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeartRateSummary {
+    average: BeatsPerMinute,
+    highest: BeatsPerMinute,
+}
+
+impl HeartRateSummary {
+    /// Both figures as the source stated them. Nothing compares them: a source
+    /// contradicting itself is data to look at rather than a type to refuse,
+    /// and no figure here is ours to correct.
+    pub const fn new(average: BeatsPerMinute, highest: BeatsPerMinute) -> Self {
+        Self { average, highest }
+    }
+
+    pub const fn average(self) -> BeatsPerMinute {
+        self.average
+    }
+
+    pub const fn highest(self) -> BeatsPerMinute {
+        self.highest
+    }
+}
+
+impl fmt::Display for HeartRateSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} average, {} highest", self.average, self.highest)
+    }
+}

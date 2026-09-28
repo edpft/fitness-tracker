@@ -651,7 +651,6 @@ impl From<WiringError> for Failure {
             | WiringError::NotAFolder { .. } => Self::message(error.to_string(), exit::STORE),
             // Not a mistake in this build: the stream really does land, and
             // asking it to derive is something the operator can stop doing.
-            WiringError::NothingDerives { .. } => Self::message(error.to_string(), exit::USAGE),
         }
     }
 }

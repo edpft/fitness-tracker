@@ -17,14 +17,17 @@ pub mod activities;
 pub mod auth;
 pub mod exercise_sets;
 pub mod files;
+pub mod gym;
 pub mod hrv;
+pub mod mapping;
 pub mod translate;
 
-pub use account::{NightAccount, nights};
+pub use account::{ActivityAccount, NightAccount, nights};
 pub use activities::{ActivityPage, GarminActivities};
 pub use auth::{GarminAuth, GarminCredentials};
 pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
 pub use files::{ActivityFilePage, GarminActivityFiles};
+pub use gym::GarminGymTranslator;
 pub use hrv::{GarminHrv, HrvWalk};
 pub use translate::GarminHrvTranslator;
 

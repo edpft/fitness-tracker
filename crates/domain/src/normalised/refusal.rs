@@ -37,6 +37,14 @@ pub enum RefusalLocus {
     Set { entry: u32, set: u32 },
     /// A grouping, named by what the source called it.
     Grouping { group: u32 },
+    /// One set of a flat sequence, where the source files sets under no
+    /// exercise at all.
+    ///
+    /// A watch sees a set start, counts reps and sees it end; the movement is
+    /// something it guesses afterwards, so there is no entry above the set to
+    /// index from. Using [`Self::Set`] with a zero entry would name an exercise
+    /// the record does not have.
+    Ungrouped { set: u32 },
 }
 
 impl fmt::Display for RefusalLocus {
@@ -46,6 +54,7 @@ impl fmt::Display for RefusalLocus {
             Self::Entry { entry } => write!(f, "exercise {entry}"),
             Self::Set { entry, set } => write!(f, "exercise {entry}, set {set}"),
             Self::Grouping { group } => write!(f, "superset {group}"),
+            Self::Ungrouped { set } => write!(f, "set {set}"),
         }
     }
 }
@@ -165,6 +174,33 @@ pub enum RefusalReason {
     /// the reading afterwards. Family members have done that by mistake, so
     /// the operator rejects them all (2026-09-17).
     Unattributed,
+    /// The movement a source proposed, where this vocabulary holds no such
+    /// movement.
+    ///
+    /// Distinct from the set refusing: what is dropped is the source's guess at
+    /// what was performed, and the set keeps its clock, its reps and its load.
+    /// Garmin's classifier proposes a movement for every set it records, in a
+    /// vocabulary of its own — `PLANK_WITH_OBLIQUE_CRUNCH`, `EZ_BAR_PULLOVER` —
+    /// and where ours has no member for one, keeping the word would make its
+    /// vocabulary ours.
+    ///
+    /// The detail is the source's own term, so the refusals are the list of
+    /// words the vocabulary would need in order to hold them.
+    UnguessableMovement { term: String },
+    /// A session whose only exercise data is the watch classifying on its own.
+    ///
+    /// The operator, 2026-09-28: *"it's possible that this is my watches
+    /// attempt to automatically classify the exercise. If it is that, you'll
+    /// usually see a single set with n reps and no load. If there's a
+    /// corresponding record in another source with exercises, sets, reps, etc,
+    /// we can safely ignore these."*
+    ///
+    /// It is one shape in his record and nothing else is: 124 of his gym
+    /// activities hold exactly one active set, every one of them unloaded, 122
+    /// of them since he started logging in Hevy, and 115 on days Hevy holds the
+    /// session. No session with one active set carries a load. The heart rate
+    /// still stands — the watch was on his wrist and the session happened.
+    OnlyTheWatchClassifying,
     /// Part of a weigh-in, taken without one.
     ///
     /// A nerve reading on its own, 26 Jun: the operator does not want one kept
@@ -193,10 +229,15 @@ impl RefusalReason {
             // recorded so the record is still accounted for. It sits with wrong
             // data because that is what an operator does about it.
             | Self::NothingTranslatable => RefusalKind::WrongData,
-            Self::Unmodelled { .. } => RefusalKind::Unmodelled,
+            // Both are a real case the model does not hold yet: one is a kind
+            // of session, the other a movement the vocabulary has no member
+            // for. The reasons stay apart because what an operator does about
+            // them differs — the second names the word to add.
+            Self::Unmodelled { .. } | Self::UnguessableMovement { .. } => RefusalKind::Unmodelled,
             Self::NotTheInstrument { .. }
             | Self::Unattributed
             | Self::WithoutBaseline
+            | Self::OnlyTheWatchClassifying
             | Self::WithoutWeighIn { .. } => RefusalKind::DeclaredLimitation,
         }
     }
@@ -222,6 +263,8 @@ impl RefusalReason {
             Self::Unattributed => "unattributed",
             Self::WithoutBaseline => "without-baseline",
             Self::WithoutWeighIn { .. } => "without-weigh-in",
+            Self::UnguessableMovement { .. } => "unguessable-movement",
+            Self::OnlyTheWatchClassifying => "only-the-watch-classifying",
         }
     }
 
@@ -236,6 +279,7 @@ impl RefusalReason {
             | Self::NotTheInstrument { detail } => Some(detail.clone()),
             Self::UnreadableValue { field, detail } => Some(format!("{field}: {detail}")),
             Self::CompanionNotLanded { stream } => Some(stream.clone()),
+            Self::UnguessableMovement { term } => Some(term.clone()),
             Self::NoReadingsInSeries { series }
             | Self::MissingSeries { series }
             | Self::MissingFigure { figure: series }
@@ -275,6 +319,12 @@ impl fmt::Display for RefusalReason {
                 f.write_str("a night with no baseline, which is not a night with HRV")
             }
             Self::WithoutWeighIn { part } => write!(f, "a {part} reading with no weigh-in"),
+            Self::UnguessableMovement { term } => {
+                write!(f, "{term} names no movement in the vocabulary")
+            }
+            Self::OnlyTheWatchClassifying => {
+                f.write_str("one unloaded set, which is the watch classifying on its own")
+            }
         }
     }
 }
