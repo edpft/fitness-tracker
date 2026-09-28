@@ -137,8 +137,15 @@ impl Translator for SpreadsheetWeighInTranslator {
         record: &LandedRecord,
         _zone: &OperatorZone,
     ) -> Result<Translation<ManualWeighIn>, NormalisationError> {
-        super::translate_with(record, "weigh-ins", |file, sheets, scribe| {
-            Ok(read_weigh_ins(record, file, sheets, scribe))
+        let workbook = super::Workbook::of(record.clone());
+        super::translate_with(&workbook, "weigh-ins", |copies, scribes| {
+            Ok(copies
+                .iter()
+                .zip(scribes.iter_mut())
+                .flat_map(|(copy, scribe)| {
+                    read_weigh_ins(copy.record, copy.file, &copy.sheets, scribe)
+                })
+                .collect())
         })
     }
 }

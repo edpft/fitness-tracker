@@ -112,8 +112,9 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
 /// and an item per exercise.
 ///
 /// **One workout per session.** A workout is a part of a session as one source
-/// recorded it, and a sheet records a session in one place, so there is only
-/// ever one part.
+/// recorded it, and a workbook records a session in one place, so there is only
+/// ever one part. It names the most recent copy of the workbook that holds the
+/// session; each set names the copy it was taken from.
 async fn write_session(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
@@ -221,6 +222,23 @@ async fn write_exercise(
                     })?;
                 write_set(tx, Row::manual(workout, position, ordinal, set))
                     .duration(seconds)
+                    .execute()
+                    .await?;
+            }
+        }
+        ManualExercise::ForDistance { sets, .. } => {
+            for (ordinal, set) in sets.iter().enumerate() {
+                let ordinal = count_for_storage(ordinal)?;
+                let millimetres = set
+                    .outcome
+                    .completed()
+                    .map(|metres| i64::try_from(metres.as_millimetres()))
+                    .transpose()
+                    .map_err(|_| StoreError::Corrupt {
+                        detail: "a distance larger than the store can hold".to_owned(),
+                    })?;
+                write_set(tx, Row::manual(workout, position, ordinal, set))
+                    .distance(millimetres)
                     .execute()
                     .await?;
             }

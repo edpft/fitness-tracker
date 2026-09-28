@@ -15,10 +15,12 @@
 //! joins the two). So [`ManualSet::load`] is optional, and `None` means exactly
 //! that the sheet does not say.
 //!
-//! **Each copy is its own session**, as each copy of a weigh-in is its own
-//! weigh-in. The same session sits in two workbooks, and one of them was saved
-//! halfway through it. Which copy is right is the canonical layer's question
-//! (#278), answered from Garmin.
+//! **One session however many copies of its workbook hold it** (operator,
+//! 2026-09-28). A workbook saved in several places is one record revised, not
+//! several recordings, so its copies are merged before a session derives: every
+//! detail any copy adds is kept, and where two copies state different values
+//! for one fact the most recent workbook wins. A session therefore draws on
+//! more than one file, and each set names the copy it was taken from.
 //!
 //! **Only what was performed.** A session derives here only where something
 //! shows it was done: a note, an RPE, reps in reserve, a performed column, or a
@@ -32,14 +34,14 @@ use std::fmt;
 use jiff::civil::Date;
 
 use crate::{
-    landing::{FilePath, LandingRecordId, SheetCell, SourceRecordId},
-    measure::{Duration, RepCount},
+    landing::{Cell, FilePath, LandingRecordId, SourceRecordId},
+    measure::{Duration, Metres, RepCount},
     normalised::NormalisedEntity,
     sequence::NonEmpty,
 };
 
 use super::{
-    exercise::{DurationExercise, RepsExercise},
+    exercise::{DistanceExercise, DurationExercise, RepsExercise},
     intensity::Rir,
     load::Load,
     outcome::Performed,
@@ -56,11 +58,12 @@ pub struct ManualSet<M> {
     pub intensity: Option<Rir>,
     pub kind: SetKind,
     pub rest_after: Option<Duration>,
-    /// The sheet and cell holding the set's count. A set names its own sheet
-    /// because a session need not sit on one: the 2018 `1RM` sheets keep each
-    /// lift on a sheet of its own, and `CT 2017` keeps the trunk work apart
-    /// from the lifts it was done with.
-    pub written_in: SheetCell,
+    /// The file, sheet and cell holding the set's count. A set names its own
+    /// because a session need not sit on one sheet, or in one file: the 2018
+    /// `1RM` sheets keep each lift on a sheet of its own, `CT 2017` keeps the
+    /// trunk work apart from the lifts it was done with, and a session merged
+    /// from copies of its workbook takes each set from the copy that says it.
+    pub written_in: Cell,
 }
 
 /// One exercise and the sets performed of it, in order.
@@ -76,6 +79,10 @@ pub enum ManualExercise {
         exercise: DurationExercise,
         sets: NonEmpty<ManualSet<Duration>>,
     },
+    ForDistance {
+        exercise: DistanceExercise,
+        sets: NonEmpty<ManualSet<Metres>>,
+    },
 }
 
 impl ManualExercise {
@@ -83,6 +90,7 @@ impl ManualExercise {
         match self {
             Self::ForReps { exercise, .. } => exercise.as_str(),
             Self::ForDuration { exercise, .. } => exercise.as_str(),
+            Self::ForDistance { exercise, .. } => exercise.as_str(),
         }
     }
 
@@ -90,6 +98,7 @@ impl ManualExercise {
         match self {
             Self::ForReps { .. } => "reps",
             Self::ForDuration { .. } => "duration",
+            Self::ForDistance { .. } => "distance",
         }
     }
 
@@ -97,12 +106,13 @@ impl ManualExercise {
         match self {
             Self::ForReps { sets, .. } => sets.count(),
             Self::ForDuration { sets, .. } => sets.count(),
+            Self::ForDistance { sets, .. } => sets.count(),
         }
     }
 }
 
-/// The file a session was logged in. Which sheet each set is on, the set
-/// says.
+/// The copy of a workbook a session is dated by: the most recent one that
+/// holds it. Which file, sheet and cell each set came from, the set says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Logged {
     pub landed_as: LandingRecordId,
@@ -138,7 +148,7 @@ impl ManualGymSession {
         self.on
     }
 
-    /// The file it was logged in.
+    /// The most recent copy of its workbook that holds it.
     pub const fn logged(&self) -> &Logged {
         &self.logged
     }
@@ -157,8 +167,28 @@ impl ManualGymSession {
 }
 
 impl NormalisedEntity for ManualGymSession {
+    /// Every copy it drew a set from, as well as the one it is dated by.
     fn composes(&self) -> Vec<&SourceRecordId> {
-        vec![&self.logged.source_record_id]
+        let mut records = vec![&self.logged.source_record_id];
+        for exercise in self.exercises.iter() {
+            let cells: Vec<&Cell> = match exercise {
+                ManualExercise::ForReps { sets, .. } => {
+                    sets.iter().map(|set| &set.written_in).collect()
+                }
+                ManualExercise::ForDuration { sets, .. } => {
+                    sets.iter().map(|set| &set.written_in).collect()
+                }
+                ManualExercise::ForDistance { sets, .. } => {
+                    sets.iter().map(|set| &set.written_in).collect()
+                }
+            };
+            for cell in cells {
+                if !records.contains(&&cell.source_record_id) {
+                    records.push(&cell.source_record_id);
+                }
+            }
+        }
+        records
     }
 }
 

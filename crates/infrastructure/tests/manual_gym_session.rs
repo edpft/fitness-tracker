@@ -10,15 +10,21 @@ use domain::{
     },
     normalised::{OperatorZone, Refusal, RefusalReason},
 };
-use infrastructure::SpreadsheetSessionTranslator;
+use infrastructure::{SpreadsheetSessionTranslator, Workbook};
 
 type Failure = Box<dyn std::error::Error>;
 
 const SESSIONS: &[u8] = include_bytes!("fixtures/spreadsheets/gym-sessions.xlsx");
 const CONDITIONING: &[u8] = include_bytes!("fixtures/spreadsheets/conditioning-2017.xlsx");
 const BEGINNER: &[u8] = include_bytes!("fixtures/spreadsheets/beginner-2020.xlsx");
+const FINAL_2017: &[u8] = include_bytes!("fixtures/spreadsheets/ct-2017-final.xlsx");
+const EARLY_2017: &[u8] = include_bytes!("fixtures/spreadsheets/ct-2017-early.xlsx");
 
 fn record(path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
+    landed(7, path, bytes)
+}
+
+fn landed(id: i64, path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
     let provenance = FileProvenance::new(
         FilePath::try_from(path)?,
         ModifiedAt::try_from("2019-03-14T07:59:28Z")?,
@@ -26,19 +32,17 @@ fn record(path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
     let landed = LandingRecord::land(
         LandingStream::try_from("spreadsheets.files")?,
         FetchedAt::try_from("2026-09-27T12:00:00Z")?,
-        SourceRecordId::try_from("digest-of-the-file")?,
+        SourceRecordId::try_from(format!("digest-of-file-{id}"))?,
         provenance.into(),
         RawPayload::try_from(bytes.to_vec())?,
     );
-    Ok(LandedRecord::new(LandingRecordId::try_from(7)?, landed))
+    Ok(LandedRecord::new(LandingRecordId::try_from(id)?, landed))
 }
 
 fn translate(bytes: &[u8]) -> Result<Translation<ManualGymSession>, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
-    Ok(
-        SpreadsheetSessionTranslator
-            .translate(&record("Dropbox/Random/1RM.xlsx", bytes)?, &zone)?,
-    )
+    let workbook = Workbook::of(record("Dropbox/Random/1RM.xlsx", bytes)?);
+    Ok(SpreadsheetSessionTranslator.translate(&workbook, &zone)?)
 }
 
 fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
@@ -54,9 +58,31 @@ fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
         .map(|rest| format!(" rest {}s", rest.as_seconds()))
         .unwrap_or_default();
     format!(
-        "{load} × {}{intensity}{rest} [{}]",
-        set.outcome, set.written_in
+        "{load} × {}{intensity}{rest} [{}!{}]",
+        set.outcome, set.written_in.sheet, set.written_in.cell
     )
+}
+
+/// Which file each set was taken from, in order.
+fn files(session: &ManualGymSession) -> Vec<String> {
+    session
+        .exercises()
+        .iter()
+        .flat_map(|exercise| match exercise {
+            ManualExercise::ForReps { sets, .. } => sets
+                .iter()
+                .map(|set| set.written_in.file.to_string())
+                .collect::<Vec<_>>(),
+            ManualExercise::ForDuration { sets, .. } => sets
+                .iter()
+                .map(|set| set.written_in.file.to_string())
+                .collect(),
+            ManualExercise::ForDistance { sets, .. } => sets
+                .iter()
+                .map(|set| set.written_in.file.to_string())
+                .collect(),
+        })
+        .collect()
 }
 
 /// Each session as `day: exercise: set; set | exercise: …`, which is what the
@@ -72,6 +98,7 @@ fn described(sessions: &[&ManualGymSession]) -> Vec<String> {
                     let sets: Vec<String> = match exercise {
                         ManualExercise::ForReps { sets, .. } => sets.iter().map(set).collect(),
                         ManualExercise::ForDuration { sets, .. } => sets.iter().map(set).collect(),
+                        ManualExercise::ForDistance { sets, .. } => sets.iter().map(set).collect(),
                     };
                     format!("{}: {}", exercise.exercise_key(), sets.join("; "))
                 })
@@ -142,7 +169,58 @@ fn a_ct_2017_week_is_dated_by_the_programme_and_two_pushes_run_push_pull_push() 
     );
     assert_eq!(
         details(&refusals),
-        ["Push, week 13 (2017-03-27) is a plan, with nothing to show it was performed"]
+        ["Push, workout 8 (2017-03-27) is a plan, with nothing to show it was performed"]
+    );
+}
+
+#[test]
+fn copies_of_ct_2017_merge_into_one_session_and_the_most_recent_wins() {
+    const FINAL: &str = "Dropbox/Random/CT 2017.xlsx";
+    const MARCH: &str = "Dropbox/Random/CT 2017 (Netbook's conflicted copy 2017-03-29).xlsx";
+    let zone = OperatorZone::try_from("Europe/London").expect("zone");
+    let workbooks = Workbook::gather(vec![
+        landed(1, FINAL, FINAL_2017).expect("final"),
+        landed(2, MARCH, EARLY_2017).expect("March copy"),
+    ]);
+    let [workbook] = workbooks.as_slice() else {
+        panic!("the copies are one workbook, got {}", workbooks.len());
+    };
+    let translation = SpreadsheetSessionTranslator
+        .translate(workbook, &zone)
+        .expect("translates");
+    let Translation::Entities { entities, refusals } = translation else {
+        panic!("expected sessions, got {translation:?}");
+    };
+
+    assert_eq!(
+        described(&entities.iter().collect::<Vec<_>>()),
+        [
+            "2017-01-11: squat-barbell: 20 kg × 6 [Legs!D2]; 40 kg × 10 [Legs!F2] \
+             | deadlift-barbell: 42.5 kg × 2 [Deadlift!C2]; 47.5 kg × 10 [Legs!O2] \
+             | suitcase-carry: 36 kg × 20m [Carry, Left!C2] \
+             | dead-bug: 1 kg × 10 [Deadbugs!C2]",
+            "2017-01-13: bicep-curl-barbell: 15 kg × 10 [Pull!E2]",
+        ],
+        "one session per workout; the March copy adds the deadlift warm-up the final left at \
+         0 kg, a carry of one 20 m walk and the dead bugs, and the final's 15 kg curl beats the \
+         March copy's 10 kg"
+    );
+    let legs = entities.first();
+    assert_eq!(
+        files(legs),
+        [FINAL, FINAL, MARCH, FINAL, MARCH, MARCH],
+        "each set names the copy it was taken from"
+    );
+    assert_eq!(
+        legs.logged().file.to_string(),
+        FINAL,
+        "dated by the most recent copy"
+    );
+    assert_eq!(
+        details(&refusals),
+        [format!(
+            "Landmines, workout 1 in {MARCH}: Push, workout 1 was not performed"
+        )]
     );
 }
 

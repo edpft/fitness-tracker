@@ -730,6 +730,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("AC1BB830"),
                 assisted: None,
             }, // Running
+            DistanceExercise::SuitcaseCarry => SPREADSHEETS_ONLY,
             DistanceExercise::WalkingLungeDumbbell => Writable {
                 added: Some("A733CC5B"),
                 assisted: None,
@@ -826,6 +827,7 @@ mod tests {
         Exercise::Reps(RepsExercise::SingleArmRowDumbbell),
         Exercise::Reps(RepsExercise::StandingCalfRaiseDumbbell),
         Exercise::Duration(DurationExercise::SuitcaseHold),
+        Exercise::Distance(DistanceExercise::SuitcaseCarry),
     ];
 
     /// Total: the vocabulary is ours, and an exercise with nowhere to be written

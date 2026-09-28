@@ -429,8 +429,9 @@ pub(super) struct Row {
     rir: Option<String>,
     set_kind: &'static str,
     rest_after_seconds: Option<i64>,
-    /// The sheet and cell a spreadsheet recorded the set in. `None` for a
-    /// feed.
+    /// The copy, sheet and cell a spreadsheet recorded the set in. `None` for
+    /// a feed.
+    landing_record_id: Option<i64>,
     sheet: Option<String>,
     cell: Option<String>,
 }
@@ -478,6 +479,7 @@ impl Row {
             rest_after_seconds: set
                 .rest_after
                 .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
+            landing_record_id: None,
             sheet: None,
             cell: None,
         }
@@ -507,6 +509,7 @@ impl Row {
             rest_after_seconds: set
                 .rest_after
                 .and_then(|rest| i64::try_from(rest.as_seconds()).ok()),
+            landing_record_id: Some(set.written_in.landed_as.as_i64()),
             sheet: Some(set.written_in.sheet.to_string()),
             cell: Some(set.written_in.cell.to_string()),
         }
@@ -546,7 +549,7 @@ impl SetWrite<'_, '_> {
         self
     }
 
-    const fn distance(mut self, distance: Option<i64>) -> Self {
+    pub(super) const fn distance(mut self, distance: Option<i64>) -> Self {
         self.distance = distance;
         self
     }
@@ -559,9 +562,9 @@ impl SetWrite<'_, '_> {
                 workout, item_position, exercise_position, position,
                 load_kind, load_grams, outcome,
                 reps, duration_seconds, distance_mm,
-                rir, set_kind, rest_after_seconds, sheet, cell
+                rir, set_kind, rest_after_seconds, landing_record_id, sheet, cell
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             row.workout,
             row.item_position,
@@ -576,6 +579,7 @@ impl SetWrite<'_, '_> {
             row.rir,
             row.set_kind,
             row.rest_after_seconds,
+            row.landing_record_id,
             row.sheet,
             row.cell
         )
