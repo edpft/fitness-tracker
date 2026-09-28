@@ -1,4 +1,5 @@
-//! A gym session the operator logged in a spreadsheet himself (#274).
+//! A gym session the operator logged himself: in a spreadsheet (#274), or in
+//! Beyond The White Board, the gym's own log (#285).
 //!
 //! **A day, not an instant.** No sheet records when in the day he trained, and
 //! some record only the week: `CT 2017` gives a week number and the day is the
@@ -22,6 +23,18 @@
 //! for one fact the most recent workbook wins. A session therefore draws on
 //! more than one file, and each set names the copy it was taken from.
 //!
+//! **Its own count, because the count may be missing too.** Beyond The White
+//! Board writes down the gym's workout, and a line of it may name a movement
+//! and no number: "Burpee" in four rounds is four sets of burpees, however
+//! many were in each (operator, 2026-09-28). So a completed set's measure is
+//! optional in the same way its load is, and `Completed(None)` means exactly
+//! that the log does not say. It is not `Option<Performed<M>>`, which would
+//! say it is unknown whether the set happened.
+//!
+//! **Supersets, because the gym's workouts are in rounds.** A round of
+//! thrusters and burpees is a superset, as the operator recorded such rounds in
+//! Hevy. No spreadsheet records one.
+//!
 //! **Only what was performed.** A session derives here only where something
 //! shows it was done: a note, an RPE, reps in reserve, a performed column, or a
 //! sheet that is a log rather than a plan. A dated plan is a plan (operator,
@@ -37,7 +50,7 @@ use crate::{
     landing::{Cell, FilePath, LandingRecordId, SourceRecordId},
     measure::{Duration, Metres, RepCount},
     normalised::NormalisedEntity,
-    sequence::NonEmpty,
+    sequence::{AtLeastTwo, NonEmpty},
 };
 
 use super::{
@@ -54,7 +67,9 @@ pub struct ManualSet<M> {
     /// `None` where the sheet does not record the load, which is not the same
     /// as no load: an unloaded set is `Some` of [`Load::UNLOADED`].
     pub load: Option<Load>,
-    pub outcome: Performed<M>,
+    /// `Completed(None)` where the log says the set was done and not how much
+    /// of it.
+    pub outcome: Performed<Option<M>>,
     pub intensity: Option<Rir>,
     pub kind: SetKind,
     pub rest_after: Option<Duration>,
@@ -67,8 +82,6 @@ pub struct ManualSet<M> {
 }
 
 /// One exercise and the sets performed of it, in order.
-///
-/// No supersets: no sheet records one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManualExercise {
     ForReps {
@@ -109,6 +122,34 @@ impl ManualExercise {
             Self::ForDistance { sets, .. } => sets.count(),
         }
     }
+
+    /// Where each set was written.
+    fn cells(&self) -> Vec<&Cell> {
+        match self {
+            Self::ForReps { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
+            Self::ForDuration { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
+            Self::ForDistance { sets, .. } => sets.iter().map(|set| &set.written_in).collect(),
+        }
+    }
+}
+
+/// One position in a session's order: an exercise, or exercises performed
+/// back to back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManualItem {
+    Exercise(ManualExercise),
+    Superset(AtLeastTwo<ManualExercise>),
+}
+
+impl ManualItem {
+    /// Every exercise in this item, in order: one, or a superset's members.
+    pub fn exercises(&self) -> impl Iterator<Item = &ManualExercise> {
+        let (one, members) = match self {
+            Self::Exercise(exercise) => (Some(exercise), None),
+            Self::Superset(members) => (None, Some(members.iter())),
+        };
+        one.into_iter().chain(members.into_iter().flatten())
+    }
 }
 
 /// The copy of a workbook a session is dated by: the most recent one that
@@ -132,16 +173,12 @@ impl fmt::Display for Logged {
 pub struct ManualGymSession {
     on: Date,
     logged: Logged,
-    exercises: NonEmpty<ManualExercise>,
+    items: NonEmpty<ManualItem>,
 }
 
 impl ManualGymSession {
-    pub const fn new(on: Date, logged: Logged, exercises: NonEmpty<ManualExercise>) -> Self {
-        Self {
-            on,
-            logged,
-            exercises,
-        }
+    pub const fn new(on: Date, logged: Logged, items: NonEmpty<ManualItem>) -> Self {
+        Self { on, logged, items }
     }
 
     pub const fn on(&self) -> Date {
@@ -153,14 +190,18 @@ impl ManualGymSession {
         &self.logged
     }
 
-    /// The exercises, in the order performed.
-    pub const fn exercises(&self) -> &NonEmpty<ManualExercise> {
-        &self.exercises
+    /// The items, in the order performed.
+    pub const fn items(&self) -> &NonEmpty<ManualItem> {
+        &self.items
+    }
+
+    /// Every exercise, in the order performed, supersets flattened.
+    pub fn exercises(&self) -> impl Iterator<Item = &ManualExercise> {
+        self.items.iter().flat_map(ManualItem::exercises)
     }
 
     pub fn set_count(&self) -> usize {
-        self.exercises
-            .iter()
+        self.exercises()
             .map(ManualExercise::set_count)
             .sum::<usize>()
     }
@@ -170,19 +211,8 @@ impl NormalisedEntity for ManualGymSession {
     /// Every copy it drew a set from, as well as the one it is dated by.
     fn composes(&self) -> Vec<&SourceRecordId> {
         let mut records = vec![&self.logged.source_record_id];
-        for exercise in self.exercises.iter() {
-            let cells: Vec<&Cell> = match exercise {
-                ManualExercise::ForReps { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-                ManualExercise::ForDuration { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-                ManualExercise::ForDistance { sets, .. } => {
-                    sets.iter().map(|set| &set.written_in).collect()
-                }
-            };
-            for cell in cells {
+        for exercise in self.exercises() {
+            for cell in exercise.cells() {
                 if !records.contains(&&cell.source_record_id) {
                     records.push(&cell.source_record_id);
                 }
@@ -198,7 +228,7 @@ impl fmt::Display for ManualGymSession {
             f,
             "{} — {} exercises, {} sets, {}",
             self.on,
-            self.exercises.count(),
+            self.exercises().count(),
             self.set_count(),
             self.logged
         )

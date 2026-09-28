@@ -216,6 +216,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         "2F8D3067" => reps(RepsExercise::TricepsExtensionBarbell, LoadReading::Absolute), // Triceps Extension (Barbell) (38)
         "F8A0FCCA" => reps(RepsExercise::KettlebellSwing, LoadReading::Absolute), // Kettlebell Swing (36)
         "43573BB8" => duration(DurationExercise::AirBike, LoadReading::Absolute), // Air Bike (32)
+        "5D99A2FA" => duration(DurationExercise::SkiErg, LoadReading::Absolute),  // Ski Erg (0)
         "BB792A36" => reps(RepsExercise::Burpee, LoadReading::Absolute),          // Burpee (31)
         "FB09C938" => reps(RepsExercise::Snatch, LoadReading::Absolute),          // Snatch (31)
         "10313AFD" => reps(RepsExercise::ThrusterKettlebell, LoadReading::Absolute), // Thruster (Kettlebell) (31)
@@ -401,7 +402,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         } // Kettlebell Clean and Press (3)
         "DF200976" => reps(RepsExercise::LateralRaiseBand, LoadReading::Absolute), // Lateral Raise (Band) (3)
         "C7973E0E" => reps(RepsExercise::LegPressMachine, LoadReading::Absolute), // Leg Press (Machine) (3)
-        "54E60954" => reps(RepsExercise::OverheadPlateRaise, LoadReading::Absolute), // Overhead Plate Raise (3)
+        "54E60954" => reps(RepsExercise::LuRaise, LoadReading::Absolute), // Overhead Plate Raise (3)
         "56808FD2" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated), // Pull Up (Band) (3)
         "8BAB2735" => reps(
             RepsExercise::SeatedInclineCurlDumbbell,

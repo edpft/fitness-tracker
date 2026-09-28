@@ -3,7 +3,7 @@
 
 use application::{Translation, ports::Translator};
 use domain::{
-    gym::{ManualExercise, ManualGymSession, ManualSet},
+    gym::{ManualExercise, ManualGymSession, ManualSet, Performed},
     landing::{
         FetchedAt, FilePath, FileProvenance, LandedRecord, LandingRecord, LandingRecordId,
         LandingStream, ModifiedAt, RawPayload, SourceRecordId,
@@ -57,9 +57,14 @@ fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
         .rest_after
         .map(|rest| format!(" rest {}s", rest.as_seconds()))
         .unwrap_or_default();
+    let outcome = match &set.outcome {
+        Performed::Completed(Some(measure)) => measure.to_string(),
+        Performed::Completed(None) => "?".to_owned(),
+        Performed::Failed => "failed".to_owned(),
+    };
     format!(
-        "{load} × {}{intensity}{rest} [{}!{}]",
-        set.outcome, set.written_in.sheet, set.written_in.cell
+        "{load} × {outcome}{intensity}{rest} [{}!{}]",
+        set.written_in.sheet, set.written_in.cell
     )
 }
 
@@ -67,7 +72,6 @@ fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
 fn files(session: &ManualGymSession) -> Vec<String> {
     session
         .exercises()
-        .iter()
         .flat_map(|exercise| match exercise {
             ManualExercise::ForReps { sets, .. } => sets
                 .iter()
@@ -93,7 +97,6 @@ fn described(sessions: &[&ManualGymSession]) -> Vec<String> {
         .map(|session| {
             let exercises: Vec<String> = session
                 .exercises()
-                .iter()
                 .map(|exercise| {
                     let sets: Vec<String> = match exercise {
                         ManualExercise::ForReps { sets, .. } => sets.iter().map(set).collect(),

@@ -7,6 +7,7 @@
 //! inside the nix sandbox, with no service to start and no network.
 
 pub mod btwb_export_landing;
+pub mod btwb_normalised;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
@@ -18,6 +19,7 @@ pub mod garmin_normalised;
 pub mod gym_mesocycle;
 pub mod history;
 pub mod landing;
+mod manual_session;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod parameters;
@@ -45,6 +47,7 @@ use domain::{
 };
 
 pub use btwb_export_landing::BtwbExportLandingStore;
+pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;

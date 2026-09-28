@@ -30,7 +30,8 @@ use std::{collections::BTreeMap, fmt};
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        Load, ManualExercise, ManualGymSession, ManualSet, Performed, Rir, SetKind, SignedKg,
+        Load, ManualExercise, ManualGymSession, ManualItem, ManualSet, Performed, Rir, SetKind,
+        SignedKg,
         exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     },
     landing::{CellRef, SheetCell, SheetName},
@@ -366,18 +367,14 @@ fn finish(
     let mut built = Vec::new();
     for (exercise, sets) in exercises {
         if let Some(exercise) = performed_exercise(exercise, sets, copies, &what, scribe) {
-            built.push(exercise);
+            built.push(ManualItem::Exercise(exercise));
         }
     }
-    let Ok(exercises) = NonEmpty::new(built) else {
+    let Ok(items) = NonEmpty::new(built) else {
         unmodelled(scribe, format!("{what} ({on}) records no set"));
         return Ok(None);
     };
-    Ok(Some(ManualGymSession::new(
-        on,
-        dated_by.logged(),
-        exercises,
-    )))
+    Ok(Some(ManualGymSession::new(on, dated_by.logged(), items)))
 }
 
 /// A warm-up of nothing on an exercise that is never done with nothing.
@@ -493,7 +490,10 @@ fn manual_set<M>(
         load: entry
             .load
             .map(|mass| load_of(exercise, mass, entry.bodyweight)),
-        outcome,
+        outcome: match outcome {
+            Performed::Completed(measure) => Performed::Completed(Some(measure)),
+            Performed::Failed => Performed::Failed,
+        },
         intensity: entry.intensity,
         kind: entry.kind,
         rest_after: entry.rest_after,
@@ -507,11 +507,12 @@ fn manual_set<M>(
 /// bodyweight, as the Hevy adapter reads them. A sheet writes the weight added,
 /// so 0 is plain bodyweight — except that `CT 2017` writes the body weight
 /// itself, which is plain bodyweight too.
-fn load_of(exercise: Exercise, mass: Kg, bodyweight: Option<Kg>) -> Load {
+pub fn load_of(exercise: Exercise, mass: Kg, bodyweight: Option<Kg>) -> Load {
     let relative = matches!(
         exercise,
         Exercise::Reps(
             RepsExercise::ChestDip
+                | RepsExercise::RingDip
                 | RepsExercise::PullUp
                 | RepsExercise::PullUpNegative
                 | RepsExercise::ChinUp

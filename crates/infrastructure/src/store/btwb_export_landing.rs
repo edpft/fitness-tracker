@@ -170,6 +170,14 @@ impl LandingStore for BtwbExportLandingStore {
     }
 }
 
+/// How much raw a derivation of the exports has to read, for reporting how
+/// far behind it is without being handed an `append`.
+impl application::RawExtent for BtwbExportLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BtwbExportLandingStore, LandingStream};

@@ -152,10 +152,11 @@ pub fn write_load(exercise: Exercise, load: Load) -> Result<WrittenLoad, Unwrita
     })
 }
 
-/// An exercise known only from the historical spreadsheets (#274), with no
-/// Hevy template anyone has looked up. Prescribing one is refused as
-/// unwritable rather than written to a guessed template.
-const SPREADSHEETS_ONLY: Writable = Writable {
+/// An exercise known only from the operator's own records, the historical
+/// spreadsheets (#274) and Beyond The White Board (#285), with no Hevy template
+/// anyone has looked up. Prescribing one is refused as unwritable rather than
+/// written to a guessed template.
+const NOT_IN_HEVY: Writable = Writable {
     added: None,
     assisted: None,
 };
@@ -440,7 +441,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("108D7A14"),
                 assisted: None,
             }, // Nordic Hamstrings Curls
-            RepsExercise::OverheadPlateRaise => Writable {
+            RepsExercise::LuRaise => Writable {
                 added: Some("54E60954"),
                 assisted: None,
             }, // Overhead Plate Raise
@@ -662,20 +663,44 @@ const fn writable(exercise: Exercise) -> Writable {
             }, // Seated Palms Up Wrist Curl
             RepsExercise::BatWings
             | RepsExercise::BicepCurlBarbell
+            | RepsExercise::BroadJump
             | RepsExercise::CableCrossover
             | RepsExercise::ClapPushUp
             | RepsExercise::CloseGripBenchPressBarbell
+            | RepsExercise::CloseGripPushUp
+            | RepsExercise::CrushGripCurlKettlebell
+            | RepsExercise::CyclistSquat
+            | RepsExercise::DevilPressDumbbell
             | RepsExercise::FacePullCable
+            | RepsExercise::FrontSquatDumbbell
+            | RepsExercise::HandstandShoulderTap
+            | RepsExercise::HangSnatchDumbbell
+            | RepsExercise::HangingLSitComplex
             | RepsExercise::HipThrustBarbell
             | RepsExercise::LandmineRotation
             | RepsExercise::PauseSquatBarbell
+            | RepsExercise::PikeCompression
             | RepsExercise::PullUpNegative
+            | RepsExercise::PushPressDumbbell
+            | RepsExercise::RearDeltRaiseDumbbell
+            | RepsExercise::ReverseLungeBarbell
+            | RepsExercise::RingDip
+            | RepsExercise::RowKettlebell
+            | RepsExercise::SandbagGoodMorning
+            | RepsExercise::SandbagSquat
+            | RepsExercise::SandbagToShoulder
             | RepsExercise::SeatedCalfRaiseMachine
+            | RepsExercise::SingleArmCleanAndJerkKettlebell
+            | RepsExercise::SingleArmDevilPressDumbbell
             | RepsExercise::SingleArmRowDumbbell
-            | RepsExercise::StandingCalfRaiseDumbbell => SPREADSHEETS_ONLY,
+            | RepsExercise::SkullcrusherKettlebell
+            | RepsExercise::StandingCalfRaiseDumbbell
+            | RepsExercise::StepUpDumbbell
+            | RepsExercise::ThrusterDumbbell
+            | RepsExercise::WallBall => NOT_IN_HEVY,
         },
         Exercise::Duration(exercise) => match exercise {
-            DurationExercise::SuitcaseHold => SPREADSHEETS_ONLY,
+            DurationExercise::SuitcaseHold => NOT_IN_HEVY,
             DurationExercise::AirBike => Writable {
                 added: Some("43573BB8"),
                 assisted: None,
@@ -696,6 +721,10 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("040BA2E3"),
                 assisted: None,
             }, // Jump Rope
+            DurationExercise::SkiErg => Writable {
+                added: Some("5D99A2FA"),
+                assisted: None,
+            }, // Ski Erg
             DurationExercise::NinetyNinety => Writable {
                 added: Some("5c98d763-9ceb-412c-8365-18110f9d5897"),
                 assisted: None,
@@ -730,7 +759,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("AC1BB830"),
                 assisted: None,
             }, // Running
-            DistanceExercise::SuitcaseCarry => SPREADSHEETS_ONLY,
+            DistanceExercise::SuitcaseCarry => NOT_IN_HEVY,
             DistanceExercise::WalkingLungeDumbbell => Writable {
                 added: Some("A733CC5B"),
                 assisted: None,
@@ -810,22 +839,47 @@ mod tests {
         }
     }
 
-    /// The exercises only the historical spreadsheets name (#274). Nothing has
-    /// prescribed them, and their Hevy templates have not been looked up.
-    const SPREADSHEETS_ONLY: &[Exercise] = &[
+    /// The exercises only the historical spreadsheets (#274) and Beyond The
+    /// White Board (#285) name. Nothing has prescribed them, and their Hevy
+    /// templates have not been looked up.
+    const NOT_IN_HEVY: &[Exercise] = &[
         Exercise::Reps(RepsExercise::BatWings),
         Exercise::Reps(RepsExercise::BicepCurlBarbell),
+        Exercise::Reps(RepsExercise::BroadJump),
         Exercise::Reps(RepsExercise::CableCrossover),
         Exercise::Reps(RepsExercise::ClapPushUp),
         Exercise::Reps(RepsExercise::CloseGripBenchPressBarbell),
+        Exercise::Reps(RepsExercise::CloseGripPushUp),
+        Exercise::Reps(RepsExercise::CrushGripCurlKettlebell),
+        Exercise::Reps(RepsExercise::CyclistSquat),
+        Exercise::Reps(RepsExercise::DevilPressDumbbell),
         Exercise::Reps(RepsExercise::FacePullCable),
+        Exercise::Reps(RepsExercise::FrontSquatDumbbell),
+        Exercise::Reps(RepsExercise::HandstandShoulderTap),
+        Exercise::Reps(RepsExercise::HangSnatchDumbbell),
+        Exercise::Reps(RepsExercise::HangingLSitComplex),
         Exercise::Reps(RepsExercise::HipThrustBarbell),
         Exercise::Reps(RepsExercise::LandmineRotation),
         Exercise::Reps(RepsExercise::PauseSquatBarbell),
+        Exercise::Reps(RepsExercise::PikeCompression),
         Exercise::Reps(RepsExercise::PullUpNegative),
+        Exercise::Reps(RepsExercise::PushPressDumbbell),
+        Exercise::Reps(RepsExercise::RearDeltRaiseDumbbell),
+        Exercise::Reps(RepsExercise::ReverseLungeBarbell),
+        Exercise::Reps(RepsExercise::RingDip),
+        Exercise::Reps(RepsExercise::RowKettlebell),
+        Exercise::Reps(RepsExercise::SandbagGoodMorning),
+        Exercise::Reps(RepsExercise::SandbagSquat),
+        Exercise::Reps(RepsExercise::SandbagToShoulder),
         Exercise::Reps(RepsExercise::SeatedCalfRaiseMachine),
+        Exercise::Reps(RepsExercise::SingleArmCleanAndJerkKettlebell),
+        Exercise::Reps(RepsExercise::SingleArmDevilPressDumbbell),
         Exercise::Reps(RepsExercise::SingleArmRowDumbbell),
+        Exercise::Reps(RepsExercise::SkullcrusherKettlebell),
         Exercise::Reps(RepsExercise::StandingCalfRaiseDumbbell),
+        Exercise::Reps(RepsExercise::StepUpDumbbell),
+        Exercise::Reps(RepsExercise::ThrusterDumbbell),
+        Exercise::Reps(RepsExercise::WallBall),
         Exercise::Duration(DurationExercise::SuitcaseHold),
         Exercise::Distance(DistanceExercise::SuitcaseCarry),
     ];
@@ -836,7 +890,7 @@ mod tests {
     #[test]
     fn every_exercise_can_be_written_somewhere() {
         for exercise in every_exercise() {
-            if SPREADSHEETS_ONLY.contains(&exercise) {
+            if NOT_IN_HEVY.contains(&exercise) {
                 continue;
             }
             let Writable { added, assisted } = writable(exercise);

@@ -22,6 +22,7 @@ mod sheet;
 mod weigh_ins;
 
 pub use sessions::SpreadsheetSessionTranslator;
+pub(crate) use sessions::load_of;
 pub use weigh_ins::SpreadsheetWeighInTranslator;
 
 /// Everything one spreadsheet derives, each thing an entity of its own.
