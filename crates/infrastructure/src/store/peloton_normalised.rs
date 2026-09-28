@@ -37,7 +37,7 @@ use domain::{
     measure::Duration,
     normalised::{NormalisationRunId, WorkoutCount},
 };
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -664,7 +664,7 @@ impl SqliteCyclingSessionLog {
 }
 
 impl PerformedSessionLog for SqliteCyclingSessionLog {
-    async fn dates_between(&self, from: Date, to: Date) -> Result<Vec<Date>, StoreError> {
+    async fn started_between(&self, from: Date, to: Date) -> Result<Vec<DateTime>, StoreError> {
         // **Widened in SQL and narrowed in Rust**, for the reason the gym's
         // reader gives: the day depends on the zone on each row, and a day
         // either side covers every zone there is.
@@ -697,14 +697,14 @@ impl PerformedSessionLog for SqliteCyclingSessionLog {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut dates = Vec::new();
+        let mut started = Vec::new();
         for row in rows {
-            let day = super::history::day_of(&row.started_at_utc, &row.zone)?;
-            if day >= from && day <= to {
-                dates.push(day);
+            let moment = super::history::moment_of(&row.started_at_utc, &row.zone)?;
+            if moment.date() >= from && moment.date() <= to {
+                started.push(moment);
             }
         }
-        Ok(dates)
+        Ok(started)
     }
 }
 
@@ -756,8 +756,8 @@ impl application::RiddenSessionLog for SqliteCyclingSessionLog {
         let mut sessions: Vec<application::RiddenSession> = Vec::new();
         let mut seen: Vec<i64> = Vec::new();
         for row in rows {
-            let day = super::history::day_of(&row.started_at_utc, &row.zone)?;
-            if day < from || day > to {
+            let moment = super::history::moment_of(&row.started_at_utc, &row.zone)?;
+            if moment.date() < from || moment.date() > to {
                 continue;
             }
             let at = if let Some(at) = seen.iter().position(|id| *id == row.session) {
@@ -765,7 +765,7 @@ impl application::RiddenSessionLog for SqliteCyclingSessionLog {
             } else {
                 seen.push(row.session);
                 sessions.push(application::RiddenSession {
-                    on: day,
+                    started: moment,
                     at: BTreeSet::new(),
                 });
                 seen.len().saturating_sub(1)
