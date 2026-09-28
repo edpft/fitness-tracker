@@ -56,6 +56,7 @@ const fn locus_columns(
         RefusalLocus::Entry { entry } => ("entry", Some(entry as i64), None, None),
         RefusalLocus::Set { entry, set } => ("set", Some(entry as i64), Some(set as i64), None),
         RefusalLocus::Grouping { group } => ("grouping", None, None, Some(group as i64)),
+        RefusalLocus::Ungrouped { set } => ("ungrouped", None, Some(set as i64), None),
     }
 }
 
@@ -80,6 +81,9 @@ fn locus_from_row(
         }),
         "set" => Ok(RefusalLocus::Set {
             entry: index(entry, "exercise index")?,
+            set: index(set, "set index")?,
+        }),
+        "ungrouped" => Ok(RefusalLocus::Ungrouped {
             set: index(set, "set index")?,
         }),
         "grouping" => Ok(RefusalLocus::Grouping {
@@ -138,6 +142,8 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
             figure: figure_named(&detail)?,
         }),
         "not-the-instrument" => Ok(RefusalReason::NotTheInstrument { detail }),
+        "unguessable-movement" => Ok(RefusalReason::UnguessableMovement { term: detail }),
+        "only-the-watch-classifying" => Ok(RefusalReason::OnlyTheWatchClassifying),
         "unattributed" => Ok(RefusalReason::Unattributed),
         "without-baseline" => Ok(RefusalReason::WithoutBaseline),
         "without-weigh-in" => Ok(RefusalReason::WithoutWeighIn {
@@ -160,12 +166,16 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
 
 /// A figure's name, back as the `&'static str` the reason carries.
 ///
-/// Closed for [`series_named`]'s reason. Both figures a night can be refused for
-/// are named here.
+/// Closed for [`series_named`]'s reason: every figure a night or a gym session
+/// can be refused for is named here.
 fn figure_named(detail: &str) -> Result<&'static str, StoreError> {
     match detail {
         "overnight reading of any kind" => Ok("overnight reading of any kind"),
         "overnight average" => Ok("overnight average"),
+        "a start" => Ok("a start"),
+        "a duration" => Ok("a duration"),
+        "a rep count" => Ok("a rep count"),
+        "a heart rate or a set" => Ok("a heart rate or a set"),
         other => Err(StoreError::Corrupt {
             detail: format!("{other:?} is not a figure this version knows"),
         }),

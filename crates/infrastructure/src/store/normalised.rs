@@ -202,6 +202,7 @@ pub(super) async fn clear_stream(
     tx: &mut Transaction<'_, Sqlite>,
     stream: &str,
 ) -> Result<(), StoreError> {
+    super::garmin_gym::clear_measured(tx, stream).await?;
     sqlx::query!(
         "DELETE FROM performed_set WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
         stream

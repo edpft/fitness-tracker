@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO gym_workout (\n            session, stream, landing_record_id, source_record_id, started_at_utc, zone,\n            endpoint, event_kind, event_time, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        RETURNING id AS \"id!: i64\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2661a6157529b5c1e365a510ad60d73c19a08cce4ffece92ab7b6df57314595d"
+}

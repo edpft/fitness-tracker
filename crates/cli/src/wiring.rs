@@ -28,15 +28,16 @@ use domain::{
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth, GarminCredentials,
-    GarminExerciseSetLandingStore, GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore,
-    GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
-    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
-    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
-    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    GarminExerciseSetLandingStore, GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
+    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
+    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
+    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore,
+    SqliteRefusalStore, SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore,
+    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
@@ -120,8 +121,6 @@ pub enum WiringError {
     },
     #[error(transparent)]
     Stream(#[from] domain::landing::InvalidStream),
-    #[error("{stream} lands, and nothing derives it yet")]
-    NothingDerives { stream: &'static str },
     #[error("{stream} is collected from its source, not a folder")]
     NotAFolder { stream: &'static str },
 }
@@ -460,14 +459,47 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
             )
             .await
         }
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
-            stream: GarminActivityLandingStore::STREAM,
-        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: GarminGymAccountReader::new(pool.clone())?,
+                    translator: GarminGymTranslator,
+                    workouts: SqliteMeasuredGymSessionStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        GarminActivityLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), GarminActivityLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
         Command::Status => {
+            let derivation = DerivationStanding::new(
+                GarminGymRawExtent::new(
+                    GarminActivityLandingStore::new(pool.clone())?,
+                    GarminExerciseSetLandingStore::new(pool.clone())?,
+                ),
+                SqliteMeasuredGymSessionStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), GarminActivityLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
             let reader = ExtractionStatus::new(landing, resumption, runs);
             Ok(Outcome::Reported {
                 extraction: Box::new(reader.status().await?),
-                derivation: None,
+                derivation: Some(Box::new(derivation)),
             })
         }
         Command::Reset => {
