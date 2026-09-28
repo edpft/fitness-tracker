@@ -131,6 +131,13 @@ pub struct MeasuredSet {
     pub reps: RepCount,
     /// What the operator entered against it. `None` where the source states
     /// none, which is not a set carrying nothing.
+    ///
+    /// **Whole kilogrammes, and that is the watch's limit rather than the
+    /// lift's.** The load is entered on a dial that takes integers, and a
+    /// barbell lift is almost always a multiple of 2.5 kg (operator,
+    /// 2026-09-28). So a watch's 48 and a log's 47.5 are one load recorded at
+    /// two precisions, not two accounts to choose between, and where any other
+    /// source recorded the same set its load is the one to read.
     pub load: Option<Load>,
     /// What the watch made of the movement.
     pub guess: GuessedExercise,

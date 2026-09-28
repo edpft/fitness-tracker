@@ -21,10 +21,13 @@ use jiff::{
 };
 
 use domain::analytical::Weighed;
+use domain::canonical::SessionCount;
 use domain::cycling::{
     CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
-use domain::gym::{Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise};
+use domain::gym::{
+    CanonicalGymSession, Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise,
+};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
@@ -539,6 +542,49 @@ pub trait NormalisedEntityStore {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn count(&self) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
+}
+
+/// The canonical layer for gym sessions: one entry per visit to a gym,
+/// whatever number of sources recorded it (§ II.4).
+///
+/// **No stream, where [`NormalisedEntityStore`] has one.** A normalised store
+/// holds what one source said and replaces only that source's rows; this one
+/// holds the sessions themselves, and a session that spans Hevy, Beyond The
+/// White Board and a watch belongs to no stream.
+///
+/// **No run either, yet.** Every derivation from raw carries a
+/// [`NormalisationRunId`] because § 38 wants a broken one visible rather than
+/// merely absent. Nothing builds these yet — #247 is the matching — so there
+/// is no run to log, and a run table with no writer would be a fifth place to
+/// look for state that is not there.
+pub trait CanonicalGymSessionStore {
+    /// Replace the canonical layer entirely.
+    ///
+    /// One transaction, and a replacement rather than an update, for the
+    /// reason [`NormalisedEntityStore::replace`] gives: § II says a derivation
+    /// is never mutated in place.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if a session names a
+    /// normalised session the store does not hold.
+    fn replace(
+        &self,
+        sessions: Vec<CanonicalGymSession>,
+    ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
+
+    /// Every canonical session, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<CanonicalGymSession>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn count(&self) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 }
 
 /// What the domain would not accept, for one stream.

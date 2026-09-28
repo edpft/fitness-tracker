@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.id           AS \"id!: i64\",\n                   s.started_at_utc AS \"started_at_utc: String\",\n                   s.zone         AS \"zone: String\",\n                   s.on_day       AS \"on_day: String\",\n                   p.part         AS \"part!: String\",\n                   p.normalised   AS \"normalised!: i64\"\n            FROM canonical_gym_session AS s\n            JOIN canonical_gym_session_part AS p ON p.session = s.id\n            ORDER BY COALESCE(date(datetime(s.started_at_utc)), s.on_day),\n                     s.started_at_utc, s.id, p.position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "part!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_part",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "name": "normalised!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_part",
+            "name": "normalised"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5b154c78a35b6b91be511fff183d90bd2c63755cb569de1550b44ae21d4717ef"
+}

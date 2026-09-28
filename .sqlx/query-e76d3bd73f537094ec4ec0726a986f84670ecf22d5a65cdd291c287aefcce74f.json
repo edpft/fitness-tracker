@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO canonical_gym_session_part (session, position, part, normalised)\n            VALUES (?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "e76d3bd73f537094ec4ec0726a986f84670ecf22d5a65cdd291c287aefcce74f"
+}
