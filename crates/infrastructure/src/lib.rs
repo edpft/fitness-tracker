@@ -8,6 +8,7 @@
 
 pub mod calendar;
 pub mod credentials;
+pub mod folder;
 pub mod garmin;
 pub mod hevy;
 pub mod lock;
@@ -21,6 +22,7 @@ pub mod withings;
 
 pub use calendar::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 pub use credentials::{Credential, CredentialError, Credentials};
+pub use folder::FolderFiles;
 pub use garmin::{GarminAuth, GarminCredentials, GarminHrv, GarminHrvTranslator};
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyWorkoutEvents, PageCount,
@@ -29,13 +31,13 @@ pub use hevy::{
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use spreadsheets::{
-    SpreadsheetEntity, SpreadsheetFiles, SpreadsheetSessionTranslator, SpreadsheetTranslator,
+    SpreadsheetEntity, SpreadsheetSessionTranslator, SpreadsheetTranslator,
     SpreadsheetWeighInTranslator, Workbook,
 };
 pub use store::{
-    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
-    GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
-    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
+    GarminExerciseSetLandingStore, GarminHrvAccountReader, GarminHrvLandingStore,
+    HevySessionAccountReader, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
     SpreadsheetFileLandingStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
     SqliteCyclingSessionLog, SqliteCyclingSessionStore, SqliteDiaryStore, SqliteExerciseHistory,

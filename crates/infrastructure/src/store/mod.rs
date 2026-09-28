@@ -6,6 +6,7 @@
 //! integration tests at the port boundaries run against a temporary file
 //! inside the nix sandbox, with no service to start and no network.
 
+pub mod btwb_export_landing;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
@@ -43,6 +44,7 @@ use domain::{
     normalised::NormalisationRunId,
 };
 
+pub use btwb_export_landing::BtwbExportLandingStore;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;

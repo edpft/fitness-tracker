@@ -26,14 +26,15 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    FileRunLock, GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth,
-    GarminCredentials, GarminExerciseSetLandingStore, GarminHrv, GarminHrvAccountReader,
-    GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
-    HevyWorkoutEvents, HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetFiles,
-    SpreadsheetTranslator, SqliteCyclingSessionStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
+    BtwbExportLandingStore, FileRunLock, FolderFiles, GarminActivityFileLandingStore,
+    GarminActivityLandingStore, GarminAuth, GarminCredentials, GarminExerciseSetLandingStore,
+    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
+    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
+    SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqliteRefusalStore,
     SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
     WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
@@ -149,6 +150,7 @@ pub async fn run(
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
         GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
         SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
+        BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -786,7 +788,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
     match command {
         Command::ExtractFolder(folder) => {
             let extraction = Extraction::new(ExtractionPorts {
-                source: SpreadsheetFiles::new(folder),
+                source: FolderFiles::new(folder),
                 landing,
                 resumption,
                 runs,
@@ -850,12 +852,57 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
     }
 }
 
+/// Beyond The White Board's export: the file it sent, landed whole (#265).
+/// Nothing derives it yet (#285).
+async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = BtwbExportLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::ExtractFolder(folder) => {
+            let extraction = Extraction::new(ExtractionPorts {
+                source: FolderFiles::new(folder),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+        }
+        Command::Extract(_) => Err(WiringError::WrongCredential {
+            stream: BtwbExportLandingStore::STREAM.to_owned(),
+            wanted: "a folder",
+            given: "a credential",
+        }),
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
+            stream: BtwbExportLandingStore::STREAM,
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(landing, resumption, runs)
+                .reset()
+                .await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
-        GarminHrvLandingStore, HevyWorkoutLandingStore, PelotonRideLandingStore,
-        PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
+        BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
+        GarminExerciseSetLandingStore, GarminHrvLandingStore, HevyWorkoutLandingStore,
+        PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
         WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
@@ -882,6 +929,7 @@ mod tests {
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
             SpreadsheetFileLandingStore::STREAM,
+            BtwbExportLandingStore::STREAM,
         ];
 
         for known in &KNOWN {

@@ -21,7 +21,7 @@ use application::{
 };
 use domain::landing::FetchedAt;
 use infrastructure::{
-    FileRunLock, SpreadsheetFileLandingStore, SpreadsheetFiles, SqliteExtractionRunLog, SqlitePool,
+    FileRunLock, FolderFiles, SpreadsheetFileLandingStore, SqliteExtractionRunLog, SqlitePool,
     SqliteResumptionPointStore, connect,
 };
 use sha2::{Digest as _, Sha256};
@@ -85,7 +85,7 @@ async fn land(folder: &Path, store: &Store) -> Result<RunSummary, ExtractionErro
             detail: error.to_string(),
         })?;
     Extraction::new(ExtractionPorts {
-        source: SpreadsheetFiles::new(folder),
+        source: FolderFiles::new(folder),
         landing,
         resumption: SqliteResumptionPointStore::new(pool.clone()),
         runs: SqliteExtractionRunLog::new(pool.clone()),
