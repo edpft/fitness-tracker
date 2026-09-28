@@ -10,8 +10,10 @@
 //! **A gym session, not every activity.** `garmin.activities` lands all 2,271 of
 //! the operator's activities because the type is a field on the record rather
 //! than a service of its own (#166), so choosing the gym ones is this layer's
-//! work. `strength_training` is Garmin's bucket for them; a ride is #90's
-//! business and refuses here as unmodelled rather than being dropped (§ 37).
+//! work. `strength_training` is Garmin's bucket for them; a ride, a run or a
+//! swim refuses here as unmodelled rather than being dropped (§ 37), so the
+//! 1,723 records this build reads and does nothing with are counted rather than
+//! invisible. Nothing derives them yet.
 //!
 //! **Seventy-two of the 548 strength activities were never on a gym floor.**
 //! They are Peloton stretch and mobility classes pushed into Garmin by a sync,
