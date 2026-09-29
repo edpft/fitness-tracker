@@ -223,11 +223,11 @@ fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
         "SIT_UP" => absolute(RepsExercise::SitUp),                  // 10
         "ROW" => described(row(weight)),                            // 90
         "CURL" => described(Description::of(Movement::Curl).loaded_with(Implement::Dumbbell)), // 80
-        "TRICEPS_EXTENSION" => described(
-            Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell),
-        ), // 61
+        "TRICEPS_EXTENSION" => {
+            described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
+        } // 61
         "CALF_RAISE" => described(Description::of(Movement::CalfRaise)), // 33
-        "LEG_RAISE" => described(leg_raise(weight)),                     // 13
+        "LEG_RAISE" => described(leg_raise(weight)),                // 13
         "LATERAL_RAISE" => {
             described(Description::of(Movement::LateralRaise).loaded_with(Implement::Dumbbell))
         } // 8

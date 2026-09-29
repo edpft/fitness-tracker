@@ -220,7 +220,10 @@ fn every_movement_is_distinct_reversible_and_performed() {
         .filter(|movement| !declared.contains(movement))
         .map(|movement| movement.as_str())
         .collect();
-    assert!(unperformed.is_empty(), "no exercise is one of: {unperformed:?}");
+    assert!(
+        unperformed.is_empty(),
+        "no exercise is one of: {unperformed:?}"
+    );
 }
 
 /// A held position worked one side at a time is held twice.

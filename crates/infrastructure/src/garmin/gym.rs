@@ -26,9 +26,7 @@
 
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
-    gym::{
-        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded, SignedKg,
-    },
+    gym::{Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded, SignedKg},
     landing::{EventKind, LandedRecord},
     measure::{BeatsPerMinute, Duration, HeartRateSummary, Kg, RepCount},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
