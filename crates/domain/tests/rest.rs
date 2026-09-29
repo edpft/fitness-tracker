@@ -117,7 +117,7 @@ fn arms() -> Built<WorkoutShape> {
                 member(SlotId::Biceps, RepsExercise::PreacherCurlBarbell)?,
                 member(
                     SlotId::Triceps,
-                    RepsExercise::SingleArmTricepsExtensionCable,
+                    RepsExercise::SingleArmOverheadTricepsExtensionCable,
                 )?,
             ])?,
         }),

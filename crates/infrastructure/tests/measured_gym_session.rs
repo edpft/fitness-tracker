@@ -472,7 +472,7 @@ fn a_movement_the_vocabulary_has_no_member_for_keeps_its_set_and_names_itself() 
             "2019-03-14T08:00:00.0",
             10,
             Some(20_000.0),
-            ("PLANK", Some("PLANK_WITH_OBLIQUE_CRUNCH")),
+            ("PLANK", Some("SIDE_PLANK_WITH_HIP_DIP")),
         )],
     );
 
@@ -490,7 +490,7 @@ fn a_movement_the_vocabulary_has_no_member_for_keeps_its_set_and_names_itself() 
         refused.iter().any(|reason| matches!(
             reason,
             RefusalReason::UnguessableMovement { term }
-                if term == "PLANK/PLANK_WITH_OBLIQUE_CRUNCH"
+                if term == "PLANK/SIDE_PLANK_WITH_HIP_DIP"
         )),
         "{refused:?}",
     );
@@ -504,7 +504,7 @@ fn unplaceable_sets(id: &str) -> Value {
             "2019-03-14T08:00:00.0",
             10,
             Some(20_000.0),
-            ("PLANK", Some("PLANK_WITH_OBLIQUE_CRUNCH")),
+            ("PLANK", Some("SIDE_PLANK_WITH_HIP_DIP")),
         )],
     )
 }

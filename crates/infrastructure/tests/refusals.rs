@@ -126,7 +126,7 @@ fn a_malformed_grouping_does_not_cost_its_members() {
         .map(PerformedExercise::exercise_key)
         .collect();
     assert!(
-        names.contains(&"single-arm-triceps-extension-cable"),
+        names.contains(&"single-arm-overhead-triceps-extension-cable"),
         "{names:?}"
     );
 }

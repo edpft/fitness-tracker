@@ -78,7 +78,7 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         ],
         SlotId::UpperPush => &["chest-dip", "bench-press-barbell", "overhead-press-barbell"],
         SlotId::Triceps => &[
-            "single-arm-triceps-extension-dumbbell",
+            "single-arm-overhead-triceps-extension-dumbbell",
             "overhead-triceps-extension-cable",
             "skullcrusher-barbell",
         ],

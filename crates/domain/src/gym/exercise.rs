@@ -75,25 +75,52 @@
 //! its template titles kebab-cased, which is why
 //! `single-arm-tricep-extension-dumbbell` carried Hevy's singular "Tricep"
 //! where every neighbour had "Triceps" — inherited rather than chosen, and the
-//! clearest evidence the target was not ours. Five were renamed to say what
+//! clearest evidence the target was not ours. Seven were renamed to say what
 //! they mean, and each is a migration over the six columns that hold a key:
 //!
 //! - `squat-barbell` and `front-squat` became `back-squat-barbell` and
 //!   `front-squat-barbell`, which is what the operator writes (#93).
-//! - `triceps-extension-cable` became `single-arm-triceps-extension-cable`. It
-//!   always meant the single-arm movement and never said so, which is #300's
-//!   third fault.
+//! - **Every triceps extension is overhead**, so all three now say so:
+//!   `triceps-extension-cable` and `single-arm-tricep-extension-dumbbell`
+//!   became `single-arm-overhead-triceps-extension-cable` and
+//!   `single-arm-overhead-triceps-extension-dumbbell`, and
+//!   `triceps-extension-barbell` became `overhead-triceps-extension-barbell`.
+//!   The first also never said it meant the single-arm movement, which was
+//!   #300's third fault. What separates the family's members is laterality and
+//!   implement, and the names now show only that.
+//! - `single-arm-lateral-raise-cable` became `lean-away-lateral-raise-cable`.
+//!   The operator: *"I've been doing Lean-Away Cable Lateral Raises"*, and the
+//!   lean is what performing them one at a time buys — the resistance profile
+//!   changes because you can lean away from the stack. The old name stated
+//!   laterality, which a lateral raise always has.
 //! - `lu-raise` became `overhead-lateral-raise`. The operator, 2026-09-29: *"Lu
 //!   Raises and overhead lateral raises are the same thing, but Lu Raises are
 //!   done with Plates because Lu does them with plates."* It was the only key in
 //!   the vocabulary named after a person, and the plate is incidental to the
 //!   movement, so it stays the implement and leaves the name.
 //!
-//! Two arrived that no source could name. A `triceps-pushdown-cable`, because a
-//! pushdown is performed with the elbows at the side and was being filed as an
-//! overhead extension; and a `triceps-dip`, performed upright, which the
-//! operator distinguishes from the angled `chest-dip` — *"a dip isn't a triceps
-//! extension, it's a dip"*.
+//! **A pushdown is not an extension**, and they are separate movements rather
+//! than two keys in one family. The operator, 2026-09-29: *"the important thing
+//! is whether the long head is lengthened or not in the stretch position."* One
+//! of the triceps heads crosses the shoulder, so an overhead extension
+//! lengthens it and a pushdown, performed with the elbows at the side, does
+//! not. Nothing could record a pushdown until `triceps-pushdown-cable` arrived,
+//! and six sets were filed as overhead extensions.
+//!
+//! Nine more arrived that no source could name. A `triceps-dip`, performed
+//! upright, which the operator distinguishes from the angled `chest-dip` —
+//! *"a dip isn't a triceps extension, it's a dip"*. And eight he named on
+//! 2026-09-29 so the watch's own terms had somewhere to land: a `warm-up`,
+//! which is an unspecified amount of warming up exactly as `stretching` is an
+//! unspecified amount of stretching; `plank-with-oblique-crunch` and
+//! `bridge-with-leg-extension`, compound bodyweight movements in their own
+//! right; a `handstand-push-up`; a `jump-lunge`, whose source term says
+//! "alternating" redundantly, because a lunge is performed by each leg
+//! independently and alternating is a prescription rather than a different
+//! movement; a `pullover-barbell`, which is the straight-arm pulldown performed
+//! lying on a bench and declares that movement — the bar is irrelevant, since
+//! dumbbells load it the same way; and `single-leg-deadlift-barbell` and
+//! `straight-leg-deadlift-barbell`.
 //!
 //! A source's own words never change: Hevy's `Overhead Plate Raise`, BTWB's
 //! `Lu Raise` and a spreadsheet's `pushdown` all still map, onto keys that now
@@ -325,6 +352,7 @@ keyed! {
         BenchPress => "bench-press",
         BirdDog => "bird-dog",
         BoxJump => "box-jump",
+        BridgeWithLegExtension => "bridge-with-leg-extension",
         BroadJump => "broad-jump",
         Burpee => "burpee",
         CalfRaise => "calf-raise",
@@ -347,11 +375,13 @@ keyed! {
         GroinStretch => "groin-stretch",
         HamstringStretch => "hamstring-stretch",
         HandstandHold => "handstand-hold",
+        HandstandPushUp => "handstand-push-up",
         HandstandShoulderTap => "handstand-shoulder-tap",
         HighPull => "high-pull",
         HipExternalRotatorStretch => "hip-external-rotator-stretch",
         HipFlexorStretch => "hip-flexor-stretch",
         HipThrust => "hip-thrust",
+        JumpLunge => "jump-lunge",
         JumpRope => "jump-rope",
         JumpSquat => "jump-squat",
         KettlebellSwing => "kettlebell-swing",
@@ -366,6 +396,7 @@ keyed! {
         OverheadPress => "overhead-press",
         PecFly => "pec-fly",
         PikeCompression => "pike-compression",
+        PlankWithObliqueCrunch => "plank-with-oblique-crunch",
         Pogo => "pogo",
         PullUp => "pull-up",
         PushPress => "push-press",
@@ -393,9 +424,11 @@ keyed! {
         Thruster => "thruster",
         ToesToBar => "toes-to-bar",
         TricepsExtension => "triceps-extension",
+        TricepsPushdown => "triceps-pushdown",
         TrunkRotation => "trunk-rotation",
         WallBall => "wall-ball",
         WallClimb => "wall-climb",
+        WarmUp => "warm-up",
         WristExtension => "wrist-extension",
         WristFlexion => "wrist-flexion",
     }
@@ -491,6 +524,7 @@ vocabulary! {
         BicepCurlDumbbell => "bicep-curl-dumbbell", Dumbbell, Curl,
         BirdDog => "bird-dog", Bodyweight, BirdDog,
         BoxJump => "box-jump", Bodyweight, BoxJump,
+        BridgeWithLegExtension => "bridge-with-leg-extension", Bodyweight, BridgeWithLegExtension,
         BroadJump => "broad-jump", Bodyweight, BroadJump,
         BulgarianSplitSquatBarbell => "bulgarian-split-squat-barbell", Barbell, Squat,
         BulgarianSplitSquatDumbbell => "bulgarian-split-squat-dumbbell", Dumbbell, Squat,
@@ -531,6 +565,7 @@ vocabulary! {
         HammerCurlCable => "hammer-curl-cable", Cable, Curl,
         HammerCurlDumbbell => "hammer-curl-dumbbell", Dumbbell, Curl,
         HammerTwists => "hammer-twists", Bodyweight, ForearmRotation,
+        HandstandPushUp => "handstand-push-up", Bodyweight, HandstandPushUp,
         HandstandShoulderTap => "handstand-shoulder-tap", Bodyweight, HandstandShoulderTap,
         HangHighPull => "hang-high-pull", Barbell, HighPull,
         HangSnatch => "hang-snatch", Barbell, Snatch,
@@ -542,6 +577,7 @@ vocabulary! {
         InclineBenchPressBarbell => "incline-bench-press-barbell", Barbell, BenchPress,
         InclineBenchPressDumbbell => "incline-bench-press-dumbbell", Dumbbell, BenchPress,
         InvertedRow => "inverted-row", Bodyweight, Row,
+        JumpLunge => "jump-lunge", Bodyweight, JumpLunge,
         KettlebellClean => "kettlebell-clean", Kettlebell, Clean,
         KettlebellCleanAndPress => "kettlebell-clean-and-press", Kettlebell, CleanAndPress,
         KettlebellSwing => "kettlebell-swing", Kettlebell, KettlebellSwing,
@@ -551,6 +587,7 @@ vocabulary! {
         LateralRaiseBand => "lateral-raise-band", Band, LateralRaise,
         LateralRaiseCable => "lateral-raise-cable", Cable, LateralRaise,
         LateralRaiseDumbbell => "lateral-raise-dumbbell", Dumbbell, LateralRaise,
+        LeanAwayLateralRaiseCable => "lean-away-lateral-raise-cable", Cable, LateralRaise,
         LegExtensionMachine => "leg-extension-machine", Machine, LegExtension,
         LegPressMachine => "leg-press-machine", Machine, LegPress,
         LowRowSuspension => "low-row-suspension", Bodyweight, Row,
@@ -563,12 +600,14 @@ vocabulary! {
         OverheadPressBarbell => "overhead-press-barbell", Barbell, OverheadPress,
         OverheadPressDumbbell => "overhead-press-dumbbell", Dumbbell, OverheadPress,
         OverheadSquat => "overhead-squat", Barbell, Squat,
+        OverheadTricepsExtensionBarbell => "overhead-triceps-extension-barbell", Barbell, TricepsExtension,
         OverheadTricepsExtensionCable => "overhead-triceps-extension-cable", Cable, TricepsExtension,
         PauseSquatBarbell => "pause-squat-barbell", Barbell, Squat,
         PendlayRowBarbell => "pendlay-row-barbell", Barbell, Row,
         PikeCompression => "pike-compression", Bodyweight, PikeCompression,
         PikePullThrough => "pike-pull-through", Bodyweight, PikeCompression,
         PlankPushup => "plank-pushup", Bodyweight, PushUp,
+        PlankWithObliqueCrunch => "plank-with-oblique-crunch", Bodyweight, PlankWithObliqueCrunch,
         Pogo => "pogo", Bodyweight, Pogo,
         PowerClean => "power-clean", Barbell, Clean,
         PowerMuscleSnatch => "power-muscle-snatch", Barbell, Snatch,
@@ -576,6 +615,7 @@ vocabulary! {
         PreacherCurlDumbbell => "preacher-curl-dumbbell", Dumbbell, Curl,
         PullUp => "pull-up", Bodyweight, PullUp,
         PullUpNegative => "pull-up-negative", Bodyweight, PullUp,
+        PulloverBarbell => "pullover-barbell", Barbell, StraightArmPulldown,
         PushPress => "push-press", Barbell, PushPress,
         PushPressDumbbell => "push-press-dumbbell", Dumbbell, PushPress,
         PushUp => "push-up", Bodyweight, PushUp,
@@ -602,10 +642,10 @@ vocabulary! {
         SingleArmCableRow => "single-arm-cable-row", Cable, Row,
         SingleArmCleanAndJerkKettlebell => "single-arm-clean-and-jerk-kettlebell", Kettlebell, CleanAndJerk,
         SingleArmDevilPressDumbbell => "single-arm-devil-press-dumbbell", Dumbbell, DevilPress,
-        SingleArmLateralRaiseCable => "single-arm-lateral-raise-cable", Cable, LateralRaise,
+        SingleArmOverheadTricepsExtensionCable => "single-arm-overhead-triceps-extension-cable", Cable, TricepsExtension,
+        SingleArmOverheadTricepsExtensionDumbbell => "single-arm-overhead-triceps-extension-dumbbell", Dumbbell, TricepsExtension,
         SingleArmRowDumbbell => "single-arm-row-dumbbell", Dumbbell, Row,
-        SingleArmTricepsExtensionCable => "single-arm-triceps-extension-cable", Cable, TricepsExtension,
-        SingleArmTricepsExtensionDumbbell => "single-arm-triceps-extension-dumbbell", Dumbbell, TricepsExtension,
+        SingleLegDeadliftBarbell => "single-leg-deadlift-barbell", Barbell, Deadlift,
         SingleLegExtensions => "single-leg-extensions", Machine, LegExtension,
         SingleLegRomanianDeadliftBarbell => "single-leg-romanian-deadlift-barbell", Barbell, RomanianDeadlift,
         SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell", Dumbbell, RomanianDeadlift,
@@ -621,14 +661,14 @@ vocabulary! {
         StandingCalfRaiseDumbbell => "standing-calf-raise-dumbbell", Dumbbell, CalfRaise,
         StepUpDumbbell => "step-up-dumbbell", Dumbbell, StepUp,
         StraightArmLatPulldownCable => "straight-arm-lat-pulldown-cable", Cable, StraightArmPulldown,
+        StraightLegDeadliftBarbell => "straight-leg-deadlift-barbell", Barbell, Deadlift,
         ThrusterBarbell => "thruster-barbell", Barbell, Thruster,
         ThrusterDumbbell => "thruster-dumbbell", Dumbbell, Thruster,
         ThrusterKettlebell => "thruster-kettlebell", Kettlebell, Thruster,
         ToeTouch => "toe-touch", Bodyweight, HamstringStretch,
         ToesToBar => "toes-to-bar", Bodyweight, ToesToBar,
         TricepsDip => "triceps-dip", Bodyweight, Dip,
-        TricepsExtensionBarbell => "triceps-extension-barbell", Barbell, TricepsExtension,
-        TricepsPushdownCable => "triceps-pushdown-cable", Cable, TricepsExtension,
+        TricepsPushdownCable => "triceps-pushdown-cable", Cable, TricepsPushdown,
         VUp => "v-up", Bodyweight, SitUp,
         WallBall => "wall-ball", MedicineBall, WallBall,
         WallClimbs => "wall-climbs", Bodyweight, WallClimb,
@@ -657,6 +697,7 @@ vocabulary! {
         SquattingGroinStretch => "squatting-groin-stretch", Bodyweight, GroinStretch,
         StandingStraddleFold => "standing-straddle-fold", Bodyweight, GroinStretch,
         Stretching => "stretching", Bodyweight, Stretching,
+        WarmUp => "warm-up", Bodyweight, WarmUp,
         SuitcaseHold => "suitcase-hold", Dumbbell, Carry,
     }
 }
@@ -729,7 +770,11 @@ impl DurationExercise {
             | Self::SledPush
             | Self::SquattingGroinStretch
             | Self::StandingStraddleFold
-            | Self::Stretching => Sides::Together,
+            | Self::Stretching
+            // An unspecified amount of warming up, which is what the operator
+            // says Garmin's `WARM_UP` is: a collection of warm-up exercises
+            // nothing will recover. Not a position held per side.
+            | Self::WarmUp => Sides::Together,
         }
     }
 }

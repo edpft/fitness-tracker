@@ -557,11 +557,11 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("D0C4A899"),
                 assisted: None,
             }, // Single Arm Cable Row
-            RepsExercise::SingleArmLateralRaiseCable => Writable {
+            RepsExercise::LeanAwayLateralRaiseCable => Writable {
                 added: Some("DE68C825"),
                 assisted: None,
             }, // Single Arm Lateral Raise (Cable)
-            RepsExercise::SingleArmTricepsExtensionDumbbell => Writable {
+            RepsExercise::SingleArmOverheadTricepsExtensionDumbbell => Writable {
                 added: Some("8347DFD1"),
                 assisted: None,
             }, // Single Arm Tricep Extension (Dumbbell)
@@ -633,18 +633,11 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("B94E35E1"),
                 assisted: None,
             }, // Toes to Bar
-            // A dip performed upright rather than angled forwards, which the
-            // operator distinguishes and Hevy does not: no template names one.
-            RepsExercise::TricepsDip => NOT_IN_HEVY,
-            // Hevy serves a "Triceps Pressdown" template and nobody has looked
-            // its id up, which is what NOT_IN_HEVY says. Filling it in is a
-            // lookup, not a decision.
-            RepsExercise::TricepsPushdownCable => NOT_IN_HEVY,
-            RepsExercise::TricepsExtensionBarbell => Writable {
+            RepsExercise::OverheadTricepsExtensionBarbell => Writable {
                 added: Some("2F8D3067"),
                 assisted: None,
             }, // Triceps Extension (Barbell)
-            RepsExercise::SingleArmTricepsExtensionCable => Writable {
+            RepsExercise::SingleArmOverheadTricepsExtensionCable => Writable {
                 added: Some("21310F5F"),
                 assisted: None,
             }, // Triceps Extension (Cable)
@@ -704,10 +697,27 @@ const fn writable(exercise: Exercise) -> Writable {
             | RepsExercise::StandingCalfRaiseDumbbell
             | RepsExercise::StepUpDumbbell
             | RepsExercise::ThrusterDumbbell
+            // A dip performed upright rather than angled forwards, and a
+            // pushdown: the operator distinguishes both and no template here
+            // names either. Hevy serves a "Triceps Pressdown" and nobody has
+            // looked its id up, which is a lookup rather than a decision.
+            | RepsExercise::TricepsDip
+            | RepsExercise::TricepsPushdownCable
+            // Movements only the watch has recorded, named by the operator on
+            // 2026-09-29 so its terms have somewhere to land.
+            | RepsExercise::BridgeWithLegExtension
+            | RepsExercise::HandstandPushUp
+            | RepsExercise::JumpLunge
+            | RepsExercise::PlankWithObliqueCrunch
+            | RepsExercise::PulloverBarbell
+            | RepsExercise::SingleLegDeadliftBarbell
+            | RepsExercise::StraightLegDeadliftBarbell
             | RepsExercise::WallBall => NOT_IN_HEVY,
         },
         Exercise::Duration(exercise) => match exercise {
-            DurationExercise::SuitcaseHold => NOT_IN_HEVY,
+            // An unspecified amount of warming up, which is Hevy's own
+            // `warm-up` and has no template of its own.
+            DurationExercise::SuitcaseHold | DurationExercise::WarmUp => NOT_IN_HEVY,
             DurationExercise::AirBike => Writable {
                 added: Some("43573BB8"),
                 assisted: None,
@@ -885,11 +895,19 @@ mod tests {
         Exercise::Reps(RepsExercise::SkullcrusherKettlebell),
         Exercise::Reps(RepsExercise::StandingCalfRaiseDumbbell),
         Exercise::Reps(RepsExercise::StepUpDumbbell),
+        Exercise::Reps(RepsExercise::BridgeWithLegExtension),
+        Exercise::Reps(RepsExercise::HandstandPushUp),
+        Exercise::Reps(RepsExercise::JumpLunge),
+        Exercise::Reps(RepsExercise::PlankWithObliqueCrunch),
+        Exercise::Reps(RepsExercise::PulloverBarbell),
+        Exercise::Reps(RepsExercise::SingleLegDeadliftBarbell),
+        Exercise::Reps(RepsExercise::StraightLegDeadliftBarbell),
         Exercise::Reps(RepsExercise::ThrusterDumbbell),
         Exercise::Reps(RepsExercise::TricepsDip),
         Exercise::Reps(RepsExercise::TricepsPushdownCable),
         Exercise::Reps(RepsExercise::WallBall),
         Exercise::Duration(DurationExercise::SuitcaseHold),
+        Exercise::Duration(DurationExercise::WarmUp),
         Exercise::Distance(DistanceExercise::SuitcaseCarry),
     ];
 

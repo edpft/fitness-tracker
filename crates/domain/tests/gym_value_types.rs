@@ -177,11 +177,12 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        178,
+        186,
         "the vocabulary this build has needed so far: 136, 14 from the spreadsheets (#274), \
          the suitcase carry from `CT 2017`'s earlier copies (#280), 25 from Beyond The \
-         White Board (#285), and the triceps pushdown and triceps dip the record needed \
-         and no source could name (#300)"
+         White Board (#285), the triceps pushdown and triceps dip the record needed \
+         and no source could name (#300), and eight more the operator named on 2026-09-29 so \
+         the watch's own terms had somewhere to land (#305)"
     );
 }
 
@@ -202,7 +203,7 @@ fn every_movement_is_distinct_reversible_and_performed() {
         assert!(keys.insert(key), "{key} names two movements");
         assert_eq!(Ok(movement), Movement::try_from(key));
     }
-    assert_eq!(keys.len(), 78, "the movements the operator settled on #305");
+    assert_eq!(keys.len(), 84, "the movements the operator settled on #305");
 
     let mut declared = std::collections::BTreeSet::new();
     macro_rules! collect {

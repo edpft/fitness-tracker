@@ -38,8 +38,13 @@
 //! answer. They are a [`domain::gym::exercise::Description`] instead: the
 //! movement, which the watch did state, and whatever facet the record itself
 //! separates. Until that existed all 285 of those sets were refused, and their
-//! loads, reps and clock went with them. `WARM_UP` still names no movement at
-//! all.
+//! loads, reps and clock went with them.
+//!
+//! `WARM_UP` is a description too, and the operator's account of it is why:
+//! it is a collection of warm-up exercises nothing will recover, which is the
+//! same thing `stretching` already is here. Arm circles are one such exercise
+//! and land on the same movement, because what they were part of is the only
+//! thing the record keeps.
 //!
 //! **A placed category is the movement, not the variant, and it will be wrong
 //! sometimes.** On 2019-03-07 `SQUAT` puts a back squat over three sets of ten
@@ -123,7 +128,18 @@ pub fn lookup(category: &str, name: Option<&str>, weight: Option<Kg>) -> Option<
     by_category(category, weight)
 }
 
+/// Which of our exercises, or which description, Garmin's named term reaches.
+///
+/// **Two answers in kind, so two tables.** A term that names one of ours is an
+/// exercise; a term this vocabulary has no exercise for, but whose own words
+/// say which movement it is, is a description. Keeping them apart is what stops
+/// a description being read as a near-miss for a key.
 fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
+    named_exercise(category, name).or_else(|| described_by_name(category, name, weight))
+}
+
+/// A term that names one of our exercises.
+fn named_exercise(category: &str, name: &str) -> Option<Mapped> {
     let mapped = match (category, name) {
         ("BANDED_EXERCISES", "LATERAL_RAISE") => absolute(RepsExercise::LateralRaiseBand), // 3
         ("BENCH_PRESS", "BARBELL_BENCH_PRESS") => absolute(RepsExercise::BenchPressBarbell), // 23
@@ -198,7 +214,39 @@ fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
         // the upright movement.
         ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::TricepsDip), // 15
 
-        // A name this vocabulary has no exercise for, but whose own words say
+        // Movements the operator named on 2026-09-29 so the watch's terms had
+        // somewhere to land. Each is his account of what the term is: a plank
+        // with an oblique crunch and a bridge with a leg extension are compound
+        // bodyweight movements in their own right; a jump lunge's "alternating"
+        // is redundant, because a lunge is performed by each leg independently
+        // and alternating is a prescription rather than a different movement;
+        // and a pullover is the straight-arm pulldown performed lying on a
+        // bench, where the bar is irrelevant because dumbbells load it the same
+        // way.
+        ("PLANK", "PLANK_WITH_OBLIQUE_CRUNCH") => {
+            absolute(RepsExercise::PlankWithObliqueCrunch) // 14
+        }
+        ("HIP_RAISE", "BRIDGE_WITH_LEG_EXTENSION") => {
+            absolute(RepsExercise::BridgeWithLegExtension) // 1
+        }
+        ("PUSH_UP", "HANDSTAND_PUSH_UP") => absolute(RepsExercise::HandstandPushUp), // 4
+        ("PLYO", "ALTERNATING_JUMP_LUNGE") => absolute(RepsExercise::JumpLunge),     // 4
+        ("PULL_UP", "EZ_BAR_PULLOVER") => absolute(RepsExercise::PulloverBarbell),   // 3
+        ("DEADLIFT", "SINGLE_LEG_DEADLIFT_WITH_BARBELL") => {
+            absolute(RepsExercise::SingleLegDeadliftBarbell) // 2
+        }
+        ("DEADLIFT", "BARBELL_STRAIGHT_LEG_DEADLIFT") => {
+            absolute(RepsExercise::StraightLegDeadliftBarbell) // 2
+        }
+        _ => return None,
+    };
+    Some(mapped)
+}
+
+/// A term this vocabulary has no exercise for, whose own words nonetheless say
+/// which movement it is.
+fn described_by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
+    let mapped = match (category, name) {
         // which movement it is. Each of these reads the term Garmin served and
         // states no more than it does: `SEATED_CABLE_ROW` is a row on a cable,
         // and which row is not in the record. A key would be an invention; a
@@ -243,6 +291,13 @@ fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
         }
         ("CORE", "RUSSIAN_TWIST") => described(unloaded(Movement::TrunkRotation, weight)), // 1
 
+        // A warm-up, which the operator says is a collection of warm-up
+        // exercises nothing will recover -- the same thing Hevy's `warm-up` is
+        // and `stretching` already is here. Arm circles are one such exercise
+        // and land on the same movement, because what they were part of is the
+        // only thing the record keeps.
+        ("WARM_UP", _) => described(Description::of(Movement::WarmUp)), // 4
+
         _ => return None,
     };
     Some(mapped)
@@ -283,6 +338,7 @@ fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
         "LATERAL_RAISE" => {
             described(Description::of(Movement::LateralRaise).loaded_with(Implement::Dumbbell))
         } // 8
+        "WARM_UP" => described(Description::of(Movement::WarmUp)),  // 49
         _ => return None,
     };
     Some(mapped)
