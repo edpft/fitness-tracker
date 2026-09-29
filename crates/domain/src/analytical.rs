@@ -26,8 +26,8 @@ use crate::{
 /// a different exercise from a barbell press, not the same one on another
 /// implement.
 pub const HEADLINE_LIFTS: [RepsExercise; 9] = [
-    RepsExercise::SquatBarbell,
-    RepsExercise::FrontSquat,
+    RepsExercise::BackSquatBarbell,
+    RepsExercise::FrontSquatBarbell,
     RepsExercise::DeadliftBarbell,
     RepsExercise::RomanianDeadliftBarbell,
     RepsExercise::BenchPressBarbell,

@@ -96,7 +96,7 @@ fn fills() -> Built<SlotFills> {
             sets: three,
             reps: five,
         }),
-        knee_dominant: lift(RepsExercise::FrontSquat),
+        knee_dominant: lift(RepsExercise::FrontSquatBarbell),
         upper_push: lift(RepsExercise::ChestDip),
         upper_pull: lift(RepsExercise::NeutralGripPullUp),
         hip_dominant: lift(RepsExercise::NordicHamstringsCurls),
@@ -135,7 +135,7 @@ fn gym() -> Built<GymMesocycle> {
         BlockPeriodisation::new(
             Primary::new(
                 PrimaryPattern::KneeDominant,
-                Exercise::Reps(RepsExercise::FrontSquat),
+                Exercise::Reps(RepsExercise::FrontSquatBarbell),
                 harder(),
             ),
             fills()?,

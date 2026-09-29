@@ -113,10 +113,10 @@ fn block(
     Ok(BlockPeriodisation::new(
         Primary::new(
             PrimaryPattern::KneeDominant,
-            Exercise::Reps(RepsExercise::FrontSquat),
+            Exercise::Reps(RepsExercise::FrontSquatBarbell),
             SessionRole::new(Relative::Higher, Relative::Lower),
         ),
-        fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)))?,
+        fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)))?,
         entry_test,
         calendar,
     ))
@@ -143,7 +143,7 @@ fn test(
     Ok(Test::new(
         Tested::new(
             PrimaryPattern::KneeDominant,
-            Exercise::Reps(RepsExercise::FrontSquat),
+            Exercise::Reps(RepsExercise::FrontSquatBarbell),
             reps(reps_at)?,
         ),
         fills(knee_dominant)?,
@@ -166,7 +166,7 @@ fn a_test_occupies_one_week() {
         panic!("the operator's week is a weekday map")
     };
     let Ok(Ok(test)) = test(
-        Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
+        Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)),
         1,
         weekdays,
     ) else {
@@ -200,8 +200,8 @@ fn the_light_session_may_run_the_predecessors_lift() {
         panic!("the operator's week is a weekday map")
     };
     let inherited = Fill::Alternating(ByIntensity {
-        lower: Exercise::Reps(RepsExercise::SquatBarbell),
-        higher: Exercise::Reps(RepsExercise::FrontSquat),
+        lower: Exercise::Reps(RepsExercise::BackSquatBarbell),
+        higher: Exercise::Reps(RepsExercise::FrontSquatBarbell),
     });
     let Ok(Ok(test)) = test(inherited, 1, weekdays) else {
         panic!("a week that back squats light and tests the front squat is a test")
@@ -211,7 +211,7 @@ fn the_light_session_may_run_the_predecessors_lift() {
             PrimaryPattern::KneeDominant,
             SessionRole::new(Relative::Lower, Relative::Higher)
         ),
-        &Exercise::Reps(RepsExercise::SquatBarbell)
+        &Exercise::Reps(RepsExercise::BackSquatBarbell)
     );
     assert!(test.is_tested(
         PrimaryPattern::KneeDominant.slot(),
@@ -244,7 +244,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
     let (Ok(start), Ok(count)) = (date(2026, 9, 14), reps(1)) else {
         panic!("the fixture builds")
     };
-    let Ok(filled) = fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquat))) else {
+    let Ok(filled) = fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell))) else {
         panic!("the fixture builds")
     };
     let Ok(parameters) = seed() else {
@@ -255,7 +255,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
         Authored {
             start,
             pattern: PrimaryPattern::KneeDominant,
-            primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+            primary_exercise: Exercise::Reps(RepsExercise::FrontSquatBarbell),
             week: mondays,
             shape: AuthoredShape::Test {
                 reps: count,
@@ -288,7 +288,7 @@ fn a_test_off_the_repetition_maximum_table_is_refused() {
         panic!("the operator's week is a weekday map")
     };
     let Ok(refused) = test(
-        Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
+        Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)),
         41,
         weekdays,
     ) else {
@@ -362,7 +362,7 @@ fn a_test_gates_nothing_and_a_block_gates_a_role() {
         panic!("the operator's week is a weekday map")
     };
     let Ok(Ok(test)) = test(
-        Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
+        Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)),
         1,
         weekdays,
     ) else {

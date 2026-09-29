@@ -20,7 +20,10 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    gym::{GuessedExercise, Load, MeasuredGymSession, MeasuredSet, RepsExercise},
+    gym::{
+        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet,
+        exercise::{Description, Implement, Movement, RepsExercise},
+    },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, Provenance, RawPayload, SourceRecordId,
@@ -356,7 +359,18 @@ async fn write_set(
         Some(Load::Relative(delta)) => (Some("relative"), Some(delta.as_grams())),
         None => (None, None),
     };
-    let guess = set.guess.movement().map(RepsExercise::as_str);
+    // An exercise and a description of one are different claims, so they are
+    // different columns rather than one key the reader has to guess the kind
+    // of. A row carries exactly one of them, or neither.
+    let (guess_exercise, guess_movement, guess_implement) = match set.guess.guess() {
+        Some(Guess::Exercise(exercise)) => (Some(exercise.as_str()), None, None),
+        Some(Guess::Description(description)) => (
+            None,
+            Some(description.movement().as_str()),
+            description.implement().map(Implement::as_str),
+        ),
+        None => (None, None, None),
+    };
     // What the watch proposed for this set, and what was carried to it from the
     // run it sits in, are different claims and the row says which.
     let guess_from = match set.guess {
@@ -369,9 +383,9 @@ async fn write_set(
         r#"
         INSERT INTO measured_set (
             workout, position, started_at_utc, zone, reps, load_kind, load_grams,
-            guess, guess_from
+            guess_exercise, guess_movement, guess_implement, guess_from
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         workout,
         position,
@@ -380,7 +394,9 @@ async fn write_set(
         reps,
         load_kind,
         load_grams,
-        guess,
+        guess_exercise,
+        guess_movement,
+        guess_implement,
         guess_from
     )
     .execute(&mut **tx)
@@ -425,24 +441,46 @@ pub(super) async fn clear_measured(
     Ok(())
 }
 
-/// The movement a stored row names, and how it was arrived at.
+/// What a stored row guessed, and how it was arrived at.
+///
+/// The two key columns are exclusive, which the table checks: a row names one
+/// of our exercises or describes a movement, never both.
 ///
 /// # Errors
 ///
-/// [`StoreError::Corrupt`] if the key is not one of ours, which is a row
-/// written by a version whose vocabulary has since moved, or if the row says a
-/// movement without saying where it came from.
+/// [`StoreError::Corrupt`] if a key is not one of ours, which is a row written
+/// by a version whose vocabulary has since moved; if the row says a movement
+/// without saying where it came from; or if it says both an exercise and a
+/// description.
 pub fn guessed_from_row(
-    key: Option<String>,
+    exercise: Option<String>,
+    movement: Option<String>,
+    implement: Option<String>,
     from: Option<&str>,
 ) -> Result<GuessedExercise, StoreError> {
-    let Some(key) = key else {
-        return Ok(GuessedExercise::Undetermined);
+    let guess = match (exercise, movement) {
+        (None, None) => return Ok(GuessedExercise::Undetermined),
+        (Some(key), None) => {
+            Guess::Exercise(RepsExercise::try_from(key).map_err(|error| corrupt(&error))?)
+        }
+        (None, Some(key)) => {
+            let movement = Movement::try_from(key).map_err(|error| corrupt(&error))?;
+            let description = Description::of(movement);
+            Guess::Description(match implement {
+                Some(key) => description
+                    .loaded_with(Implement::try_from(key).map_err(|error| corrupt(&error))?),
+                None => description,
+            })
+        }
+        (Some(_), Some(_)) => {
+            return Err(StoreError::Corrupt {
+                detail: "a guess names an exercise and describes a movement".to_owned(),
+            });
+        }
     };
-    let exercise = RepsExercise::try_from(key).map_err(|error| corrupt(&error))?;
     match from {
-        Some("proposed") => Ok(GuessedExercise::Proposed(exercise)),
-        Some("from-its-run") => Ok(GuessedExercise::FromItsRun(exercise)),
+        Some("proposed") => Ok(GuessedExercise::Proposed(guess)),
+        Some("from-its-run") => Ok(GuessedExercise::FromItsRun(guess)),
         other => Err(StoreError::Corrupt {
             detail: format!("{other:?} is not how a guess is arrived at"),
         }),

@@ -123,7 +123,7 @@ fn a_day_is_one_session_and_an_amrap_its_rounds() {
     assert_eq!(
         described(session),
         vec![
-            "squat-barbell: 95 kg × 3".to_owned(),
+            "back-squat-barbell: 95 kg × 3".to_owned(),
             "[jump-rope: ? × ?; ? × ?; ? × ?; ? × ? | \
              dumbbell-snatch: ? × 16; ? × 16; ? × 16 | \
              toes-to-bar: ? × 8; ? × 8; ? × 8]"

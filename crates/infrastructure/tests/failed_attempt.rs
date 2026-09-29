@@ -57,7 +57,7 @@ fn zero_reps_becomes_a_failed_attempt() {
     let Some((exercise, set)) = failures.first() else {
         panic!("the attempt was just counted")
     };
-    assert_eq!(exercise.as_str(), "front-squat");
+    assert_eq!(exercise.as_str(), "front-squat-barbell");
     assert_eq!(set.load, Load::Absolute(Kg::from_grams(95_000)));
     assert_eq!(set.kind, SetKind::Working);
     assert!(
@@ -165,7 +165,7 @@ fn a_failure_is_not_a_quantity() {
     // on the bar and did not go up, so the heaviest front squat is still 90kg.
     let heaviest = heaviest_completed(&all);
     assert_eq!(heaviest, heaviest_completed(&without));
-    let Ok(front_squat) = RepsExercise::try_from("front-squat".to_owned()) else {
+    let Ok(front_squat) = RepsExercise::try_from("front-squat-barbell".to_owned()) else {
         panic!("the front squat is in the vocabulary")
     };
     assert_eq!(

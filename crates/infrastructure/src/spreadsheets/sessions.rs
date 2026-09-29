@@ -552,10 +552,10 @@ fn exercise_named(name: &str, press: Press) -> Option<Exercise> {
         .trim()
         .to_lowercase();
     let reps = match name.as_str() {
-        "squat" | "back squat" => RepsExercise::SquatBarbell,
+        "squat" | "back squat" => RepsExercise::BackSquatBarbell,
         "bench" | "bench press" => RepsExercise::BenchPressBarbell,
         "deadlift" => RepsExercise::DeadliftBarbell,
-        "front squat" => RepsExercise::FrontSquat,
+        "front squat" => RepsExercise::FrontSquatBarbell,
         "rdl" => RepsExercise::RomanianDeadliftBarbell,
         // Row at 24 kg is ambiguous, and assumed a barbell.
         "bb row" | "bo row" | "row" => RepsExercise::BentOverRowBarbell,
@@ -573,7 +573,7 @@ fn exercise_named(name: &str, press: Press) -> Option<Exercise> {
         "lunge" => RepsExercise::LungeDumbbell,
         "bss" => RepsExercise::BulgarianSplitSquatDumbbell,
         "deadbug" | "deadbugs" | "loaded deadbug" => RepsExercise::DeadBug,
-        "pushdown" => RepsExercise::TricepsExtensionCable,
+        "pushdown" => RepsExercise::TricepsPushdownCable,
         "hip thrust" => RepsExercise::HipThrustBarbell,
         "face-pull" | "face pull" => RepsExercise::FacePullCable,
         "calf raise" | "standing calf raise" | "standing calf-raise" => {

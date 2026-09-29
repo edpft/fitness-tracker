@@ -9,7 +9,7 @@
 
 use application::{Translation, ports::SourceAccount, ports::Translator};
 use domain::{
-    gym::{GuessedExercise, Load, MeasuredGymSession, RepsExercise},
+    gym::{Guess, GuessedExercise, Load, MeasuredGymSession, RepsExercise},
     landing::{
         Endpoint, EventKind, EventProvenance, FetchedAt, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -232,8 +232,8 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
         "the classifier proposed this one itself",
     );
     assert_eq!(
-        named.guess.movement().map(RepsExercise::as_str),
-        Some("front-squat"),
+        named.guess.exercise().map(RepsExercise::as_str),
+        Some("front-squat-barbell"),
     );
 
     // The operator, 2026-09-28: an unknown between named sets at the same reps
@@ -241,7 +241,7 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
     let carried = sets.next().expect("the unclassified set");
     assert_eq!(
         carried.guess,
-        GuessedExercise::FromItsRun(RepsExercise::FrontSquat),
+        GuessedExercise::FromItsRun(Guess::Exercise(RepsExercise::FrontSquatBarbell)),
     );
     assert!(
         !carried.guess.from_the_source(),
@@ -472,7 +472,7 @@ fn a_movement_the_vocabulary_has_no_member_for_keeps_its_set_and_names_itself() 
             "2019-03-14T08:00:00.0",
             10,
             Some(20_000.0),
-            ("PLANK", Some("PLANK_WITH_OBLIQUE_CRUNCH")),
+            ("PLANK", Some("SIDE_PLANK_WITH_HIP_DIP")),
         )],
     );
 
@@ -490,7 +490,7 @@ fn a_movement_the_vocabulary_has_no_member_for_keeps_its_set_and_names_itself() 
         refused.iter().any(|reason| matches!(
             reason,
             RefusalReason::UnguessableMovement { term }
-                if term == "PLANK/PLANK_WITH_OBLIQUE_CRUNCH"
+                if term == "PLANK/SIDE_PLANK_WITH_HIP_DIP"
         )),
         "{refused:?}",
     );
@@ -504,7 +504,7 @@ fn unplaceable_sets(id: &str) -> Value {
             "2019-03-14T08:00:00.0",
             10,
             Some(20_000.0),
-            ("PLANK", Some("PLANK_WITH_OBLIQUE_CRUNCH")),
+            ("PLANK", Some("SIDE_PLANK_WITH_HIP_DIP")),
         )],
     )
 }
@@ -694,44 +694,77 @@ fn a_withdrawn_activity_withdraws_its_session() {
 }
 
 #[test]
-fn a_bare_category_is_used_where_the_vocabulary_names_that_movement() {
+fn a_bare_category_is_the_exercise_it_names_unqualified() {
     // The operator, 2026-09-28: "I said you could use category when there was
-    // only category." What it can reach is what our vocabulary holds
-    // unqualified — there is a squat and there is no row.
+    // only category." Where the movement has a conventional referent he has
+    // stated, the category is that exercise: an unqualified squat is a barbell
+    // back squat.
     let id = "3461073244";
     let activity = activity(id, "strength_training", "2019-03-14 07:43:22", &[]);
     let sets = exercise_sets(
         id,
+        &[set(
+            "2019-03-14T07:43:22.0",
+            5,
+            Some(60_000.0),
+            ("SQUAT", None),
+        )],
+    );
+
+    let session = session_for(&activity, Some(&sets)).expect("a session");
+    let measured = session.recorded().sets().expect("sets");
+
+    assert_eq!(
+        measured.first().guess.exercise().map(RepsExercise::as_str),
+        Some("back-squat-barbell"),
+    );
+    assert!(
+        refusals(&activity, Some(&sets))
+            .expect("refusals")
+            .is_empty(),
+    );
+}
+
+#[test]
+fn a_bare_category_with_no_conventional_exercise_describes_the_movement() {
+    // There is no `row` in the vocabulary and no default for a bare one, so
+    // what the watch stated is the movement and the weight says the rest: the
+    // operator's loaded bare rows are bimodal with one empty interval, 20 to
+    // 28 kg. Before this the whole set was refused and its load, reps and
+    // clock went with it.
+    let id = "3461073245";
+    let activity = activity(id, "strength_training", "2019-03-14 07:43:22", &[]);
+    let sets = exercise_sets(
+        id,
         &[
-            set("2019-03-14T07:43:22.0", 5, Some(60_000.0), ("SQUAT", None)),
-            set("2019-03-14T07:50:00.0", 10, Some(30_000.0), ("ROW", None)),
+            set("2019-03-14T07:43:22.0", 10, Some(32_500.0), ("ROW", None)),
+            set("2019-03-14T07:50:00.0", 10, Some(15_000.0), ("ROW", None)),
+            set("2019-03-14T07:57:00.0", 12, None, ("CALF_RAISE", None)),
+            set("2019-03-14T08:04:00.0", 15, None, ("LEG_RAISE", None)),
         ],
     );
 
     let session = session_for(&activity, Some(&sets)).expect("a session");
     let measured = session.recorded().sets().expect("sets");
-    let mut measured = measured.iter();
+    let described: Vec<String> = measured.iter().map(|set| set.guess.to_string()).collect();
 
     assert_eq!(
-        measured
-            .next()
-            .expect("the squat")
-            .guess
-            .movement()
-            .map(RepsExercise::as_str),
-        Some("squat-barbell"),
+        described,
+        vec![
+            "row (barbell)?".to_owned(),
+            "row (dumbbell)?".to_owned(),
+            // Seated and standing are 81 sets against 78 and their loads are
+            // indistinguishable, so no implement is recoverable and none is
+            // invented.
+            "calf-raise?".to_owned(),
+            // None of the operator's carries a weight at all, and a leg raise
+            // with nothing added is loaded by the lifter.
+            "leg-raise (bodyweight)?".to_owned(),
+        ],
     );
-    assert_eq!(
-        measured.next().expect("the row").guess,
-        GuessedExercise::Undetermined,
-        "every row here names an implement, so there is nothing to place it on",
-    );
-
-    let refused = refusals(&activity, Some(&sets)).expect("refusals");
     assert!(
-        refused.iter().any(
-            |reason| matches!(reason, RefusalReason::UnguessableMovement { term } if term == "ROW")
-        ),
-        "{refused:?}",
+        refusals(&activity, Some(&sets))
+            .expect("refusals")
+            .is_empty(),
     );
 }

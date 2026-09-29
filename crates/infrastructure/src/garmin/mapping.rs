@@ -27,15 +27,24 @@
 //! *"I said you could use category when there was only category."*
 //!
 //! **What "use the category" can reach is decided by our vocabulary.** A bare
-//! category is placed where this vocabulary holds the movement that category
-//! names unqualified: `SQUAT` is the squat, `DEADLIFT` the deadlift,
+//! category is the exercise where this vocabulary holds the movement that
+//! category names unqualified: `SQUAT` is the squat, `DEADLIFT` the deadlift,
 //! `BENCH_PRESS` the bench press, `SHOULDER_PRESS` the overhead press,
-//! `PULL_UP` the pull-up, and `PUSH_UP` and `SIT_UP` name themselves. `ROW`,
-//! `CURL`, `TRICEPS_EXTENSION`, `CALF_RAISE`, `LATERAL_RAISE` and `LEG_RAISE`
-//! are not placed, because there is no `row`, no `curl` and no `calf-raise`
-//! here to place them on — every member names an implement or a position, and
-//! picking one would be inventing an answer rather than using the category.
-//! `WARM_UP` names no movement at all.
+//! `PULL_UP` the pull-up, and `PUSH_UP` and `SIT_UP` name themselves.
+//!
+//! `ROW`, `CURL`, `TRICEPS_EXTENSION`, `CALF_RAISE`, `LEG_RAISE` and
+//! `LATERAL_RAISE` reach no exercise, because every member of those families
+//! names an implement or a posture and picking one would be inventing an
+//! answer. They are a [`domain::gym::exercise::Description`] instead: the
+//! movement, which the watch did state, and whatever facet the record itself
+//! separates. Until that existed all 285 of those sets were refused, and their
+//! loads, reps and clock went with them.
+//!
+//! `WARM_UP` is a description too, and the operator's account of it is why:
+//! it is a collection of warm-up exercises nothing will recover, which is the
+//! same thing `stretching` already is here. Arm circles are one such exercise
+//! and land on the same movement, because what they were part of is the only
+//! thing the record keeps.
 //!
 //! **A placed category is the movement, not the variant, and it will be wrong
 //! sometimes.** On 2019-03-07 `SQUAT` puts a back squat over three sets of ten
@@ -50,7 +59,13 @@
 //! own rule and the reason `WEIGHTED_SEATED_CALF_RAISE` and `SEATED_CALF_RAISE`
 //! are the same member here.
 
-use domain::gym::exercise::RepsExercise;
+use domain::{
+    gym::{
+        Guess,
+        exercise::{Description, Implement, Movement, RepsExercise},
+    },
+    measure::Kg,
+};
 
 /// How to read the number Garmin serves as a set's weight.
 ///
@@ -69,13 +84,13 @@ pub enum LoadReading {
 /// What one classifier term resolves to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mapped {
-    pub exercise: RepsExercise,
+    pub guess: Guess,
     pub load: LoadReading,
 }
 
 const fn absolute(exercise: RepsExercise) -> Mapped {
     Mapped {
-        exercise,
+        guess: Guess::Exercise(exercise),
         load: LoadReading::Absolute,
     }
 }
@@ -84,8 +99,16 @@ const fn absolute(exercise: RepsExercise) -> Mapped {
 /// Hevy's table: the movements a gym routinely makes easier as well as harder.
 const fn relative(exercise: RepsExercise) -> Mapped {
     Mapped {
-        exercise,
+        guess: Guess::Exercise(exercise),
         load: LoadReading::Relative,
+    }
+}
+
+/// A category that names a movement and narrows no further.
+const fn described(description: Description) -> Mapped {
+    Mapped {
+        guess: Guess::Description(description),
+        load: LoadReading::Absolute,
     }
 }
 
@@ -98,14 +121,25 @@ const fn relative(exercise: RepsExercise) -> Mapped {
 /// are there to be read, not matched — a term with no sets yet is as valid an
 /// entry as the busiest one.
 #[must_use]
-pub fn lookup(category: &str, name: Option<&str>) -> Option<Mapped> {
+pub fn lookup(category: &str, name: Option<&str>, weight: Option<Kg>) -> Option<Mapped> {
     if let Some(name) = name {
-        return by_name(category, name);
+        return by_name(category, name, weight);
     }
-    by_category(category)
+    by_category(category, weight)
 }
 
-fn by_name(category: &str, name: &str) -> Option<Mapped> {
+/// Which of our exercises, or which description, Garmin's named term reaches.
+///
+/// **Two answers in kind, so two tables.** A term that names one of ours is an
+/// exercise; a term this vocabulary has no exercise for, but whose own words
+/// say which movement it is, is a description. Keeping them apart is what stops
+/// a description being read as a near-miss for a key.
+fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
+    named_exercise(category, name).or_else(|| described_by_name(category, name, weight))
+}
+
+/// A term that names one of our exercises.
+fn named_exercise(category: &str, name: &str) -> Option<Mapped> {
     let mapped = match (category, name) {
         ("BANDED_EXERCISES", "LATERAL_RAISE") => absolute(RepsExercise::LateralRaiseBand), // 3
         ("BENCH_PRESS", "BARBELL_BENCH_PRESS") => absolute(RepsExercise::BenchPressBarbell), // 23
@@ -168,11 +202,102 @@ fn by_name(category: &str, name: &str) -> Option<Mapped> {
         // Four of Garmin's names for one lift, and the operator's record holds
         // no squat of any other kind in the years these were recorded.
         ("SQUAT", "BACK_SQUATS" | "BARBELL_BACK_SQUAT" | "SQUAT" | "WEIGHTED_SQUAT") => {
-            absolute(RepsExercise::SquatBarbell) // 6 + 38 + 21 + 236
+            absolute(RepsExercise::BackSquatBarbell) // 6 + 38 + 21 + 236
         }
-        ("SQUAT", "BARBELL_FRONT_SQUAT") => absolute(RepsExercise::FrontSquat), // 15
-        ("SQUAT", "LEG_PRESS") => absolute(RepsExercise::LegPressMachine),      // 4
-        ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::ChestDip), // 15
+        ("SQUAT", "BARBELL_FRONT_SQUAT") => absolute(RepsExercise::FrontSquatBarbell), // 15
+        ("SQUAT", "LEG_PRESS") => absolute(RepsExercise::LegPressMachine),             // 4
+        // All 15 are from 2018 and 2019, which is squarely the period the
+        // operator describes as his upright one -- he used to perform mostly
+        // upright dips and now performs mostly angled ones, using dips as a
+        // chest exercise. So this corpus needs no judgement call. It read as a
+        // chest dip until 2026-09-29 only because the vocabulary had no key for
+        // the upright movement.
+        ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::TricepsDip), // 15
+
+        // Movements the operator named on 2026-09-29 so the watch's terms had
+        // somewhere to land. Each is his account of what the term is: a plank
+        // with an oblique crunch and a bridge with a leg extension are compound
+        // bodyweight movements in their own right; a jump lunge's "alternating"
+        // is redundant, because a lunge is performed by each leg independently
+        // and alternating is a prescription rather than a different movement;
+        // and a pullover is the straight-arm pulldown performed lying on a
+        // bench, where the bar is irrelevant because dumbbells load it the same
+        // way.
+        ("PLANK", "PLANK_WITH_OBLIQUE_CRUNCH") => {
+            absolute(RepsExercise::PlankWithObliqueCrunch) // 14
+        }
+        ("HIP_RAISE", "BRIDGE_WITH_LEG_EXTENSION") => {
+            absolute(RepsExercise::BridgeWithLegExtension) // 1
+        }
+        ("PUSH_UP", "HANDSTAND_PUSH_UP") => absolute(RepsExercise::HandstandPushUp), // 4
+        ("PLYO", "ALTERNATING_JUMP_LUNGE") => absolute(RepsExercise::JumpLunge),     // 4
+        ("PULL_UP", "EZ_BAR_PULLOVER") => absolute(RepsExercise::PulloverBarbell),   // 3
+        ("DEADLIFT", "SINGLE_LEG_DEADLIFT_WITH_BARBELL") => {
+            absolute(RepsExercise::SingleLegDeadliftBarbell) // 2
+        }
+        ("DEADLIFT", "BARBELL_STRAIGHT_LEG_DEADLIFT") => {
+            absolute(RepsExercise::StraightLegDeadliftBarbell) // 2
+        }
+        _ => return None,
+    };
+    Some(mapped)
+}
+
+/// A term this vocabulary has no exercise for, whose own words nonetheless say
+/// which movement it is.
+fn described_by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
+    let mapped = match (category, name) {
+        // which movement it is. Each of these reads the term Garmin served and
+        // states no more than it does: `SEATED_CABLE_ROW` is a row on a cable,
+        // and which row is not in the record. A key would be an invention; a
+        // description is the term, translated.
+        ("ROW", "SEATED_CABLE_ROW" | "CABLE_ROW_STANDING") => {
+            described(Description::of(Movement::Row).loaded_with(Implement::Cable)) // 13 + 2
+        }
+        ("CHOP", "CABLE_WOODCHOP") => {
+            described(Description::of(Movement::TrunkRotation).loaded_with(Implement::Cable)) // 3
+        }
+        ("TRICEPS_EXTENSION", "DUMBBELL_LYING_TRICEPS_EXTENSION") => {
+            described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
+            // 3
+        }
+        (
+            "SHOULDER_PRESS",
+            "SINGLE_ARM_DUMBBELL_SHOULDER_PRESS" | "SEATED_DUMBBELL_SHOULDER_PRESS",
+        ) => {
+            described(Description::of(Movement::OverheadPress).loaded_with(Implement::Dumbbell))
+            // 2 + 1
+        }
+        ("LEG_CURL", "WEIGHTED_LEG_CURL") => {
+            described(Description::of(Movement::LegCurl).loaded_with(Implement::Machine)) // 2
+        }
+        ("FLYE", "DUMBBELL_FLYE") => {
+            described(Description::of(Movement::PecFly).loaded_with(Implement::Dumbbell)) // 1
+        }
+        // A carry, and the term says nothing about what was carried.
+        ("CARRY", "FARMERS_CARRY") => described(Description::of(Movement::Carry)), // 6
+
+        // Bodyweight movements Garmin counts in repetitions. `farmers-walk` and
+        // `jump-rope` exist as exercises, and neither can be reached from here:
+        // one is measured in ground covered and the other in elapsed time,
+        // while a watch's set is always a rep count. The movement is the part
+        // that carries across measures, which is why a description reaches what
+        // a key cannot.
+        ("CARDIO", "JUMP_ROPE") => described(unloaded(Movement::JumpRope, weight)), // 2
+        ("LUNGE", "LUNGE") => described(unloaded(Movement::Lunge, weight)),         // 6
+        ("SQUAT", "ONE_LEGGED_SQUAT") => described(unloaded(Movement::Squat, weight)), // 4
+        ("LEG_RAISE", "LYING_STRAIGHT_LEG_RAISE") => {
+            described(unloaded(Movement::LegRaise, weight)) // 1
+        }
+        ("CORE", "RUSSIAN_TWIST") => described(unloaded(Movement::TrunkRotation, weight)), // 1
+
+        // A warm-up, which the operator says is a collection of warm-up
+        // exercises nothing will recover -- the same thing Hevy's `warm-up` is
+        // and `stretching` already is here. Arm circles are one such exercise
+        // and land on the same movement, because what they were part of is the
+        // only thing the record keeps.
+        ("WARM_UP", _) => described(Description::of(Movement::WarmUp)), // 4
+
         _ => return None,
     };
     Some(mapped)
@@ -180,18 +305,130 @@ fn by_name(category: &str, name: &str) -> Option<Mapped> {
 
 /// A category Garmin reached and went no further with.
 ///
-/// Placed where this vocabulary holds the movement the category names
-/// unqualified. Everything else is deliberately absent: see the module note.
-fn by_category(category: &str) -> Option<Mapped> {
+/// **Two answers, and which one depends on our vocabulary rather than on
+/// Garmin.** Where a movement has a conventional referent the operator has
+/// stated, the category is that exercise: a bare `SQUAT` is a barbell back
+/// squat because that is what an unqualified squat means, not because most of
+/// his squats were. Where it has none, the category is a [`Description`] —
+/// the movement, and whatever facet the record itself separates.
+///
+/// **Facets compose in one order**, settled with the operator on 2026-09-29:
+/// recorded values first, because *"a row at 15.875 kg is not a barbell row
+/// whatever the default says"*; convention second, where the movement has one;
+/// and unstated otherwise, with the facet absent rather than guessed. Reading
+/// the implement off the weight is § 9 deterministic translation — source
+/// identity plus recorded values, no further input — so it is code here rather
+/// than an overlay.
+fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
     let mapped = match category {
         "BENCH_PRESS" => absolute(RepsExercise::BenchPressBarbell), // 432
-        "SQUAT" => absolute(RepsExercise::SquatBarbell),            // 183
+        "SQUAT" => absolute(RepsExercise::BackSquatBarbell),        // 183
         "DEADLIFT" => absolute(RepsExercise::DeadliftBarbell),      // 70
         "PULL_UP" => relative(RepsExercise::PullUp),                // 57
         "PUSH_UP" => absolute(RepsExercise::PushUp),                // 54
         "SHOULDER_PRESS" => absolute(RepsExercise::OverheadPressBarbell), // 14
         "SIT_UP" => absolute(RepsExercise::SitUp),                  // 10
+        "ROW" => described(row(weight)),                            // 90
+        "CURL" => described(Description::of(Movement::Curl).loaded_with(Implement::Dumbbell)), // 80
+        "TRICEPS_EXTENSION" => {
+            described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
+        } // 61
+        "CALF_RAISE" => described(Description::of(Movement::CalfRaise)), // 33
+        "LEG_RAISE" => described(unloaded(Movement::LegRaise, weight)), // 13
+        "LATERAL_RAISE" => {
+            described(Description::of(Movement::LateralRaise).loaded_with(Implement::Dumbbell))
+        } // 8
+        "WARM_UP" => described(Description::of(Movement::WarmUp)),  // 49
         _ => return None,
     };
     Some(mapped)
+}
+
+/// The weight above which a bare `ROW` is a barbell.
+///
+/// **The record draws this line, not a convention.** The operator has said
+/// there is no default for a bare row — *"I don't think there is a way of
+/// identifying a bare curl or a bare row because there isn't a default"* — so
+/// the only evidence is the number he typed. His 87 loaded bare rows are
+/// cleanly bimodal with exactly one empty interval in the whole distribution,
+/// 20 kg to 28 kg: 60 sets sit above it and 27 below, against a named
+/// `BARBELL_ROW` range of 28–33 kg and a heaviest-ever named dumbbell row of
+/// 40 kg. Any threshold in that interval partitions his corpus identically;
+/// the midpoint is the one that assumes least about where the gap really ends.
+const ROW_BARBELL_FLOOR: Kg = Kg::from_grams(24_000);
+
+/// A bare `ROW`, with the implement its weight separates.
+fn row(weight: Option<Kg>) -> Description {
+    let description = Description::of(Movement::Row);
+    match weight {
+        Some(weight) if weight >= ROW_BARBELL_FLOOR => description.loaded_with(Implement::Barbell),
+        Some(_) => description.loaded_with(Implement::Dumbbell),
+        None => description,
+    }
+}
+
+/// A movement loaded by the lifter, where nothing was added to it.
+///
+/// Not a convention but a recorded value: Garmin names the loaded form of each
+/// of these separately — `WEIGHTED_LUNGE` beside `LUNGE` — so a set the
+/// operator typed no weight against is the unloaded one. A set that *did*
+/// carry a weight is something this says nothing about, and the implement
+/// stays absent rather than being guessed at.
+const fn unloaded(movement: Movement, weight: Option<Kg>) -> Description {
+    let description = Description::of(movement);
+    match weight {
+        None => description.loaded_with(Implement::Bodyweight),
+        Some(_) => description,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Guess, Kg, RepsExercise, lookup};
+
+    fn described(category: &str, grams: Option<u64>) -> String {
+        let Some(mapped) = lookup(category, None, grams.map(Kg::from_grams)) else {
+            panic!("{category} reaches nothing");
+        };
+        match mapped.guess {
+            Guess::Description(description) => description.to_string(),
+            Guess::Exercise(exercise) => panic!("{category} named {exercise}"),
+        }
+    }
+
+    /// The composed default, pinned at the boundary rather than at a
+    /// comfortable distance from it. The operator's loaded bare rows leave one
+    /// empty interval, 20 kg to 28 kg, and this says where in it the line
+    /// falls — which a test at 15 kg and 32.5 kg would not.
+    #[test]
+    fn a_bare_row_takes_its_implement_from_the_weight() {
+        assert_eq!(described("ROW", Some(24_000)), "row (barbell)");
+        assert_eq!(described("ROW", Some(23_999)), "row (dumbbell)");
+        assert_eq!(described("ROW", None), "row");
+    }
+
+    /// A weight would make it something else, and nothing here says what.
+    #[test]
+    fn a_bare_leg_raise_is_bodyweight_only_where_nothing_was_added() {
+        assert_eq!(described("LEG_RAISE", None), "leg-raise (bodyweight)");
+        assert_eq!(described("LEG_RAISE", Some(10_000)), "leg-raise");
+    }
+
+    /// Seated against standing is 81 sets to 78 with indistinguishable loads,
+    /// so no implement is recoverable and none is invented.
+    #[test]
+    fn a_bare_calf_raise_states_no_implement() {
+        assert_eq!(described("CALF_RAISE", Some(20_000)), "calf-raise");
+    }
+
+    /// A category whose movement has a conventional referent is that exercise,
+    /// not a description of one.
+    #[test]
+    fn a_bare_squat_is_the_barbell_back_squat() {
+        let mapped = lookup("SQUAT", None, Some(Kg::from_grams(60_000))).expect("a squat");
+        assert_eq!(
+            mapped.guess.exercise().map(RepsExercise::as_str),
+            Some("back-squat-barbell"),
+        );
+    }
 }

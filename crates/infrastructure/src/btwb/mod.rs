@@ -429,7 +429,7 @@ fn with<M>(set: ManualSet<()>, measure: Option<M>) -> ManualSet<M> {
 fn exercise_named(name: &str) -> Option<Exercise> {
     let reps = match name {
         "Back Rack Reverse Lunges" => RepsExercise::ReverseLungeBarbell,
-        "Back Squats" => RepsExercise::SquatBarbell,
+        "Back Squats" => RepsExercise::BackSquatBarbell,
         "Bar Facing Burpees" => RepsExercise::BurpeeOverTheBar,
         "Barbell Curls" => RepsExercise::BicepCurlBarbell,
         "Barbell Thrusters" | "Thrusters" | "Thruster" => RepsExercise::ThrusterBarbell,
@@ -456,7 +456,7 @@ fn exercise_named(name: &str) -> Option<Exercise> {
         "Dumbbell Push Press" => RepsExercise::PushPressDumbbell,
         "Dumbbell Snatches" => RepsExercise::DumbbellSnatch,
         "Dumbbell Thruster" | "Dumbbell Thrusters" => RepsExercise::ThrusterDumbbell,
-        "Front Squats" => RepsExercise::FrontSquat,
+        "Front Squats" => RepsExercise::FrontSquatBarbell,
         "Hammer Curls" => RepsExercise::HammerCurlDumbbell,
         "Handstand Shoulder Taps" => RepsExercise::HandstandShoulderTap,
         "Hanging Knee Raises" | "Weighted Knee Raises" => RepsExercise::HangingKneeRaise,
@@ -467,7 +467,7 @@ fn exercise_named(name: &str) -> Option<Exercise> {
         "Kettlebell Swings" | "Russian Kettlebell Swings" | "American Kettlebell Swings" => {
             RepsExercise::KettlebellSwing
         }
-        "Lu Raise" => RepsExercise::LuRaise,
+        "Lu Raise" => RepsExercise::OverheadLateralRaise,
         "Overhead Tricep Extensions" => RepsExercise::OverheadTricepsExtensionCable,
         "Pendlay Rows" => RepsExercise::PendlayRowBarbell,
         "Pike Compressions" | "Pike Compression Lift Overs" => RepsExercise::PikeCompression,
@@ -497,7 +497,7 @@ fn exercise_named(name: &str) -> Option<Exercise> {
         | "Lat Pullovers" => RepsExercise::StraightArmLatPulldownCable,
         "Toe Touches" => RepsExercise::ToeTouch,
         "Toes-to-bars" => RepsExercise::ToesToBar,
-        "Tricep Push Downs" => RepsExercise::TricepsExtensionCable,
+        "Tricep Push Downs" => RepsExercise::TricepsPushdownCable,
         "Wall Ball" | "Wall Balls" => RepsExercise::WallBall,
         "Wall Climbs" => RepsExercise::WallClimbs,
         "Weighted Step-ups" => RepsExercise::StepUpDumbbell,

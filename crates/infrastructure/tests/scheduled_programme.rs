@@ -446,7 +446,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
 
         let history = SqliteExerciseHistory::new(pool.clone());
         let performances = history
-            .performances(domain::gym::exercise::RepsExercise::FrontSquat)
+            .performances(domain::gym::exercise::RepsExercise::FrontSquatBarbell)
             .await?;
         let lost = diary
             .diary()

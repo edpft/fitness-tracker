@@ -35,8 +35,8 @@ use crate::prescription::{PrimaryPattern, SlotId};
 pub const fn for_primary(pattern: PrimaryPattern) -> &'static [&'static str] {
     match pattern {
         PrimaryPattern::KneeDominant => &[
-            "squat-barbell",
-            "front-squat",
+            "back-squat-barbell",
+            "front-squat-barbell",
             "bulgarian-split-squat-barbell",
         ],
         PrimaryPattern::HipDominant => &["deadlift-barbell", "romanian-deadlift-barbell"],
@@ -54,8 +54,8 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         // the programme makes the pattern its primary — the wizard knows which
         // and asks with the right one.
         SlotId::KneeDominant => &[
-            "squat-barbell",
-            "front-squat",
+            "back-squat-barbell",
+            "front-squat-barbell",
             "bulgarian-split-squat-barbell",
             "leg-extension-machine",
             "bulgarian-split-squat-dumbbell",
@@ -78,7 +78,7 @@ pub const fn for_slot(slot: SlotId) -> &'static [&'static str] {
         ],
         SlotId::UpperPush => &["chest-dip", "bench-press-barbell", "overhead-press-barbell"],
         SlotId::Triceps => &[
-            "single-arm-tricep-extension-dumbbell",
+            "single-arm-overhead-triceps-extension-dumbbell",
             "overhead-triceps-extension-cable",
             "skullcrusher-barbell",
         ],
