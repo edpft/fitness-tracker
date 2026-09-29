@@ -27,7 +27,7 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded, RepsExercise, SignedKg,
+        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded, SignedKg,
     },
     landing::{EventKind, LandedRecord},
     measure::{BeatsPerMinute, Duration, HeartRateSummary, Kg, RepCount},
@@ -393,12 +393,12 @@ fn carry_along_runs(sets: &mut [Working]) {
     for run in sets.chunk_by_mut(|earlier, later| {
         earlier.set.reps == later.set.reps && earlier.set.load == later.set.load
     }) {
-        let Some(movement) = proposed_by(run) else {
+        let Some(guess) = proposed_by(run) else {
             continue;
         };
         for working in run.iter_mut() {
             if working.unclassified && working.set.guess == GuessedExercise::Undetermined {
-                working.set.guess = GuessedExercise::FromItsRun(movement);
+                working.set.guess = GuessedExercise::FromItsRun(guess);
             }
         }
     }
@@ -408,13 +408,13 @@ fn carry_along_runs(sets: &mut [Working]) {
 ///
 /// `None` for a run nobody placed and for a run placed two ways, which are
 /// different states and the same answer: there is nothing to carry.
-fn proposed_by(run: &[Working]) -> Option<RepsExercise> {
-    let mut agreed: Option<RepsExercise> = None;
+fn proposed_by(run: &[Working]) -> Option<Guess> {
+    let mut agreed: Option<Guess> = None;
     for working in run {
-        if let GuessedExercise::Proposed(exercise) = working.set.guess {
+        if let GuessedExercise::Proposed(guess) = working.set.guess {
             match agreed {
-                Some(held) if held != exercise => return None,
-                _ => agreed = Some(exercise),
+                Some(held) if held != guess => return None,
+                _ => agreed = Some(guess),
             }
         }
     }
@@ -463,8 +463,12 @@ fn measured_set(
         }
     };
 
-    let (guess, reading, unclassified) = guessed(set, locus, scribe);
-    let load = weight(set).map(|grams| load(grams, reading));
+    // The weight is read before the movement, not after: a bare category is
+    // placed by what the operator typed against it — a 32.5 kg row is a barbell
+    // row and a 15 kg row is not — so the lookup needs the number.
+    let grams = weight(set);
+    let (guess, reading, unclassified) = guessed(set, grams, locus, scribe);
+    let load = grams.map(|grams| load(grams, reading));
 
     Some(Working {
         set: MeasuredSet {
@@ -485,6 +489,7 @@ fn measured_set(
 /// relative axis belongs to the pull-up family, and the watch names those.
 fn guessed(
     set: &ServedSet,
+    grams: Option<i64>,
     locus: RefusalLocus,
     scribe: &mut Scribe,
 ) -> (GuessedExercise, LoadReading, bool) {
@@ -498,7 +503,8 @@ fn guessed(
         return unclassified;
     }
 
-    let Some(Mapped { exercise, load }) = lookup(category, candidate.name.as_deref()) else {
+    let weight = grams.map(|grams| Kg::from_grams(grams.unsigned_abs()));
+    let Some(Mapped { guess, load }) = lookup(category, candidate.name.as_deref(), weight) else {
         scribe.note(
             locus,
             RefusalReason::UnguessableMovement {
@@ -507,7 +513,7 @@ fn guessed(
         );
         return (GuessedExercise::Undetermined, LoadReading::Absolute, false);
     };
-    (GuessedExercise::Proposed(exercise), load, false)
+    (GuessedExercise::Proposed(guess), load, false)
 }
 
 /// Garmin's term for a movement, as it serves it.

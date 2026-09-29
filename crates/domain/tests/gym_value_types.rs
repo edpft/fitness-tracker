@@ -184,6 +184,45 @@ fn every_exercise_key_is_distinct_and_reversible() {
     );
 }
 
+/// Every movement's key is distinct and reversible, and every one of them is a
+/// movement some exercise is.
+///
+/// The second half is what keeps the grouping honest. A movement with no member
+/// is a word nothing in the record answers to, and the only way to add one is to
+/// declare it beside a key — so this fails the moment a name is invented for its
+/// own sake rather than for an exercise that needed it.
+#[test]
+fn every_movement_is_distinct_reversible_and_performed() {
+    use domain::gym::exercise::{DistanceExercise, DurationExercise, Movement, RepsExercise};
+
+    let mut keys = std::collections::BTreeSet::new();
+    for &movement in Movement::ALL {
+        let key = movement.as_str();
+        assert!(keys.insert(key), "{key} names two movements");
+        assert_eq!(Ok(movement), Movement::try_from(key));
+    }
+    assert_eq!(keys.len(), 78, "the movements the operator settled on #305");
+
+    let mut declared = std::collections::BTreeSet::new();
+    macro_rules! collect {
+        ($vocabulary:ty) => {
+            for &exercise in <$vocabulary>::ALL {
+                declared.insert(exercise.movement());
+            }
+        };
+    }
+    collect!(RepsExercise);
+    collect!(DurationExercise);
+    collect!(DistanceExercise);
+
+    let unperformed: Vec<&str> = Movement::ALL
+        .iter()
+        .filter(|movement| !declared.contains(movement))
+        .map(|movement| movement.as_str())
+        .collect();
+    assert!(unperformed.is_empty(), "no exercise is one of: {unperformed:?}");
+}
+
 /// A held position worked one side at a time is held twice.
 ///
 /// The couch stretch and the 90/90 are the two the operator named, and the

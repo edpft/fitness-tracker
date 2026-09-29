@@ -47,13 +47,64 @@ use crate::{
     sequence::NonEmpty,
 };
 
-use super::{exercise::RepsExercise, load::Load};
+use super::{
+    exercise::{Description, Movement, RepsExercise},
+    load::Load,
+};
+
+/// What a classifier reached: one of our exercises, or a description of one.
+///
+/// **Both arms are the source's claim about the movement**, and the difference
+/// between them is how far it narrowed. Garmin's `BARBELL_DEADLIFT` names an
+/// exercise this vocabulary holds; its bare `ROW` names a movement and stops,
+/// and a [`Description`] is what stopping there looks like. Before this arm
+/// existed the second case was refused outright, which cost 285 of the
+/// operator's sets their load, their reps and their clock over six terms the
+/// watch had in fact identified.
+///
+/// **The movement is total across both**, which is the whole point: a reader
+/// after "what movement was this set of" never has to know which arm answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guess {
+    /// One of ours, named.
+    Exercise(RepsExercise),
+    /// A movement, described as far as the source stated it.
+    Description(Description),
+}
+
+impl Guess {
+    /// Which movement the set was of, however far the source narrowed it.
+    pub const fn movement(self) -> Movement {
+        match self {
+            Self::Exercise(exercise) => exercise.movement(),
+            Self::Description(description) => description.movement(),
+        }
+    }
+
+    /// The exercise, where the source named one. `None` where it described a
+    /// movement and no more, which is not the same as having said nothing.
+    pub const fn exercise(self) -> Option<RepsExercise> {
+        match self {
+            Self::Exercise(exercise) => Some(exercise),
+            Self::Description(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for Guess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exercise(exercise) => write!(f, "{exercise}"),
+            Self::Description(description) => write!(f, "{description}"),
+        }
+    }
+}
 
 /// The movement a set was of, as a watch's classifier proposed it.
 ///
 /// Never an observation, whichever variant it is. The name is here so that a
 /// reader of a set cannot mistake the proposal for a record of what was done,
-/// which an `Option<RepsExercise>` on the set would invite.
+/// which an `Option<Guess>` on the set would invite.
 ///
 /// **What the source proposed and what was worked out from it are different
 /// variants**, because only the first is something the source said. The
@@ -64,23 +115,22 @@ use super::{exercise::RepsExercise, load::Load};
 /// translator's inference for a source's claim.
 ///
 /// **A grouping the classifier could not narrow is not a third kind of
-/// answer.** Garmin states a movement, or a category of movements —
-/// `BENCH_PRESS` with nothing under it — or `UNKNOWN`. This vocabulary has one
-/// level and no families (#93), so the adapter resolves a category to the
-/// movement it means in this record, or to nothing.
+/// answer**, and it is not nothing either. Garmin states an exercise, or a
+/// category of movements — `ROW` with nothing under it — or `UNKNOWN`. The
+/// first two are both [`Guess`]; only `UNKNOWN`, and a term naming a movement
+/// this vocabulary does not hold, are [`Self::Undetermined`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuessedExercise {
-    /// The classifier proposed this movement for this set.
-    Proposed(RepsExercise),
+    /// The classifier proposed this for this set.
+    Proposed(Guess),
     /// The classifier proposed nothing for this set, and the run of sets it
     /// belongs to — one identical load for one identical rep count, performed
-    /// back to back — is this movement, on the say-so of a set the classifier
-    /// did place.
+    /// back to back — is this, on the say-so of a set the classifier did place.
     ///
     /// Still a guess, and one further from the source than [`Self::Proposed`]:
-    /// the movement carried here was the classifier's guess about its own set
+    /// what is carried here was the classifier's guess about its own set
     /// before it was carried to this one.
-    FromItsRun(RepsExercise),
+    FromItsRun(Guess),
     /// Neither the classifier nor the run it sits in says what the movement
     /// was. Garmin's `UNKNOWN`, and every term of its own that names no
     /// movement of ours.
@@ -88,16 +138,34 @@ pub enum GuessedExercise {
 }
 
 impl GuessedExercise {
-    /// The movement guessed, however it was arrived at.
-    pub const fn movement(self) -> Option<RepsExercise> {
+    /// What was guessed, however it was arrived at.
+    pub const fn guess(self) -> Option<Guess> {
         match self {
-            Self::Proposed(exercise) | Self::FromItsRun(exercise) => Some(exercise),
+            Self::Proposed(guess) | Self::FromItsRun(guess) => Some(guess),
             Self::Undetermined => None,
         }
     }
 
-    /// Whether the source proposed this movement for this set, or it was
-    /// carried from the run.
+    /// Which movement was guessed, however it was arrived at and however far
+    /// the source narrowed it.
+    pub const fn movement(self) -> Option<Movement> {
+        match self.guess() {
+            Some(guess) => Some(guess.movement()),
+            None => None,
+        }
+    }
+
+    /// The exercise guessed, where one was named. A set described only as a
+    /// movement answers `None` here and still answers [`Self::movement`].
+    pub const fn exercise(self) -> Option<RepsExercise> {
+        match self.guess() {
+            Some(guess) => guess.exercise(),
+            None => None,
+        }
+    }
+
+    /// Whether the source proposed this for this set, or it was carried from
+    /// the run.
     pub const fn from_the_source(self) -> bool {
         matches!(self, Self::Proposed(_))
     }
@@ -106,8 +174,8 @@ impl GuessedExercise {
 impl fmt::Display for GuessedExercise {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Proposed(exercise) => write!(f, "{exercise}?"),
-            Self::FromItsRun(exercise) => write!(f, "{exercise}? (from its run)"),
+            Self::Proposed(guess) => write!(f, "{guess}?"),
+            Self::FromItsRun(guess) => write!(f, "{guess}? (from its run)"),
             Self::Undetermined => f.write_str("unidentified"),
         }
     }

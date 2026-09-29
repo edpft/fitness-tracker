@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO measured_set (\n            workout, position, started_at_utc, zone, reps, load_kind, load_grams,\n            guess_exercise, guess_movement, guess_implement, guess_from\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "ffc5aacf2bad129d5ad0924e0185390337c66c0ae8e5f9d708a54f9acd6ef4c1"
+}
