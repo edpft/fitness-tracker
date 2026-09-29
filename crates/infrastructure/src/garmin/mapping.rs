@@ -118,12 +118,12 @@ const fn described(description: Description) -> Mapped {
 #[must_use]
 pub fn lookup(category: &str, name: Option<&str>, weight: Option<Kg>) -> Option<Mapped> {
     if let Some(name) = name {
-        return by_name(category, name);
+        return by_name(category, name, weight);
     }
     by_category(category, weight)
 }
 
-fn by_name(category: &str, name: &str) -> Option<Mapped> {
+fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
     let mapped = match (category, name) {
         ("BANDED_EXERCISES", "LATERAL_RAISE") => absolute(RepsExercise::LateralRaiseBand), // 3
         ("BENCH_PRESS", "BARBELL_BENCH_PRESS") => absolute(RepsExercise::BenchPressBarbell), // 23
@@ -191,6 +191,49 @@ fn by_name(category: &str, name: &str) -> Option<Mapped> {
         ("SQUAT", "BARBELL_FRONT_SQUAT") => absolute(RepsExercise::FrontSquat), // 15
         ("SQUAT", "LEG_PRESS") => absolute(RepsExercise::LegPressMachine),      // 4
         ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::ChestDip), // 15
+
+        // A name this vocabulary has no exercise for, but whose own words say
+        // which movement it is. Each of these reads the term Garmin served and
+        // states no more than it does: `SEATED_CABLE_ROW` is a row on a cable,
+        // and which row is not in the record. A key would be an invention; a
+        // description is the term, translated.
+        ("ROW", "SEATED_CABLE_ROW" | "CABLE_ROW_STANDING") => {
+            described(Description::of(Movement::Row).loaded_with(Implement::Cable)) // 13 + 2
+        }
+        ("CHOP", "CABLE_WOODCHOP") => {
+            described(Description::of(Movement::TrunkRotation).loaded_with(Implement::Cable)) // 3
+        }
+        ("TRICEPS_EXTENSION", "DUMBBELL_LYING_TRICEPS_EXTENSION") => {
+            described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
+            // 3
+        }
+        ("SHOULDER_PRESS", "SINGLE_ARM_DUMBBELL_SHOULDER_PRESS" | "SEATED_DUMBBELL_SHOULDER_PRESS") => {
+            described(Description::of(Movement::OverheadPress).loaded_with(Implement::Dumbbell))
+            // 2 + 1
+        }
+        ("LEG_CURL", "WEIGHTED_LEG_CURL") => {
+            described(Description::of(Movement::LegCurl).loaded_with(Implement::Machine)) // 2
+        }
+        ("FLYE", "DUMBBELL_FLYE") => {
+            described(Description::of(Movement::PecFly).loaded_with(Implement::Dumbbell)) // 1
+        }
+        // A carry, and the term says nothing about what was carried.
+        ("CARRY", "FARMERS_CARRY") => described(Description::of(Movement::Carry)), // 6
+
+        // Bodyweight movements Garmin counts in repetitions. `farmers-walk` and
+        // `jump-rope` exist as exercises, and neither can be reached from here:
+        // one is measured in ground covered and the other in elapsed time,
+        // while a watch's set is always a rep count. The movement is the part
+        // that carries across measures, which is why a description reaches what
+        // a key cannot.
+        ("CARDIO", "JUMP_ROPE") => described(unloaded(Movement::JumpRope, weight)), // 2
+        ("LUNGE", "LUNGE") => described(unloaded(Movement::Lunge, weight)),         // 6
+        ("SQUAT", "ONE_LEGGED_SQUAT") => described(unloaded(Movement::Squat, weight)), // 4
+        ("LEG_RAISE", "LYING_STRAIGHT_LEG_RAISE") => {
+            described(unloaded(Movement::LegRaise, weight)) // 1
+        }
+        ("CORE", "RUSSIAN_TWIST") => described(unloaded(Movement::TrunkRotation, weight)), // 1
+
         _ => return None,
     };
     Some(mapped)
@@ -227,7 +270,7 @@ fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
             described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
         } // 61
         "CALF_RAISE" => described(Description::of(Movement::CalfRaise)), // 33
-        "LEG_RAISE" => described(leg_raise(weight)),                // 13
+        "LEG_RAISE" => described(unloaded(Movement::LegRaise, weight)),                // 13
         "LATERAL_RAISE" => {
             described(Description::of(Movement::LateralRaise).loaded_with(Implement::Dumbbell))
         } // 8
@@ -259,13 +302,15 @@ fn row(weight: Option<Kg>) -> Description {
     }
 }
 
-/// A bare `LEG_RAISE`, which is bodyweight where nothing was added to it.
+/// A movement loaded by the lifter, where nothing was added to it.
 ///
-/// Not a convention: none of the operator's 13 carries a weight at all, and a
-/// leg raise with nothing added is loaded by the lifter. One that did carry a
-/// weight would be something else, and this says nothing about it.
-const fn leg_raise(weight: Option<Kg>) -> Description {
-    let description = Description::of(Movement::LegRaise);
+/// Not a convention but a recorded value: Garmin names the loaded form of each
+/// of these separately — `WEIGHTED_LUNGE` beside `LUNGE` — so a set the
+/// operator typed no weight against is the unloaded one. A set that *did*
+/// carry a weight is something this says nothing about, and the implement
+/// stays absent rather than being guessed at.
+const fn unloaded(movement: Movement, weight: Option<Kg>) -> Description {
+    let description = Description::of(movement);
     match weight {
         None => description.loaded_with(Implement::Bodyweight),
         Some(_) => description,
