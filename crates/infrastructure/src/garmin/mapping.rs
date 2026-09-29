@@ -264,7 +264,7 @@ fn row(weight: Option<Kg>) -> Description {
 /// Not a convention: none of the operator's 13 carries a weight at all, and a
 /// leg raise with nothing added is loaded by the lifter. One that did carry a
 /// weight would be something else, and this says nothing about it.
-fn leg_raise(weight: Option<Kg>) -> Description {
+const fn leg_raise(weight: Option<Kg>) -> Description {
     let description = Description::of(Movement::LegRaise);
     match weight {
         None => description.loaded_with(Implement::Bodyweight),
@@ -274,7 +274,7 @@ fn leg_raise(weight: Option<Kg>) -> Description {
 
 #[cfg(test)]
 mod tests {
-    use super::{Guess, Kg, lookup};
+    use super::{Guess, Kg, RepsExercise, lookup};
 
     fn described(category: &str, grams: Option<u64>) -> String {
         let Some(mapped) = lookup(category, None, grams.map(Kg::from_grams)) else {
@@ -317,7 +317,7 @@ mod tests {
     fn a_bare_squat_is_the_barbell_back_squat() {
         let mapped = lookup("SQUAT", None, Some(Kg::from_grams(60_000))).expect("a squat");
         assert_eq!(
-            mapped.guess.exercise().map(|exercise| exercise.as_str()),
+            mapped.guess.exercise().map(RepsExercise::as_str),
             Some("squat-barbell"),
         );
     }
