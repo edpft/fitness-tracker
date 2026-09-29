@@ -111,7 +111,7 @@ macro_rules! run {
 #[test]
 fn the_primarys_series_is_ordered_and_complete() {
     let (history, _directory) = history!();
-    let front_squat = RepsExercise::FrontSquat;
+    let front_squat = RepsExercise::FrontSquatBarbell;
 
     let performances = run!(history.performances(front_squat));
 
@@ -155,7 +155,7 @@ fn the_primarys_series_is_ordered_and_complete() {
 fn the_record_includes_its_warm_ups() {
     let (history, _directory) = history!();
 
-    let performances = run!(history.performances(RepsExercise::SquatBarbell));
+    let performances = run!(history.performances(RepsExercise::BackSquatBarbell));
     let Some(july) = performances
         .iter()
         .find(|performance| performance.on.to_string() == "2025-07-04")
@@ -198,7 +198,7 @@ fn the_record_includes_its_warm_ups() {
 #[test]
 fn the_july_test_session_reads_back() {
     let (history, _directory) = history!();
-    let front_squat = RepsExercise::FrontSquat;
+    let front_squat = RepsExercise::FrontSquatBarbell;
 
     let performances = run!(history.performances(front_squat));
     let Some(july) = performances
@@ -274,7 +274,7 @@ fn an_alternating_fill_reaches_past_the_last_session() {
 fn a_never_performed_exercise_is_named_not_absent() {
     let (history, _directory) = empty_history!();
 
-    let asked = [RepsExercise::FrontSquat, RepsExercise::SissySquat];
+    let asked = [RepsExercise::FrontSquatBarbell, RepsExercise::SissySquat];
     let answers = run!(history.last_performances(&asked));
 
     assert_eq!(
@@ -291,7 +291,7 @@ fn a_never_performed_exercise_is_named_not_absent() {
     }
 
     // And the series read agrees: empty, not an error.
-    let series = run!(history.performances(RepsExercise::FrontSquat));
+    let series = run!(history.performances(RepsExercise::FrontSquatBarbell));
     assert!(series.is_empty());
     assert_eq!(run!(history.newest_performance()), None);
 }
@@ -309,7 +309,7 @@ fn the_corpus_covers_what_it_taught_and_no_more() {
     let (history, _directory) = history!();
 
     let taught = [
-        RepsExercise::FrontSquat,
+        RepsExercise::FrontSquatBarbell,
         RepsExercise::SissySquat,
         RepsExercise::CableTwistUpToDown,
     ];
@@ -365,7 +365,7 @@ fn the_newest_performance_is_the_corpuss_last_session() {
 #[test]
 fn warm_ups_are_history() {
     let (history, _directory) = history!();
-    let front_squat = RepsExercise::FrontSquat;
+    let front_squat = RepsExercise::FrontSquatBarbell;
 
     let performances = run!(history.performances(front_squat));
     let Some(recent) = performances.last() else {
@@ -393,7 +393,7 @@ fn warm_ups_are_history() {
 #[test]
 fn a_completed_set_carries_its_count() {
     let (history, _directory) = history!();
-    let front_squat = RepsExercise::FrontSquat;
+    let front_squat = RepsExercise::FrontSquatBarbell;
 
     let performances = run!(history.performances(front_squat));
     let mut counted = 0_usize;

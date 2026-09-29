@@ -179,17 +179,20 @@ const fn distance(exercise: DistanceExercise, load: LoadReading) -> Mapped {
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
 pub fn lookup(template_id: &str) -> Option<Mapped> {
     let mapped = match template_id {
-        "D04AC939" => reps(RepsExercise::SquatBarbell, LoadReading::Absolute), // Squat (Barbell) (377)
+        "D04AC939" => reps(RepsExercise::BackSquatBarbell, LoadReading::Absolute), // Squat (Barbell) (377)
         "E9E4089F" => reps(RepsExercise::ChestDip, LoadReading::RelativeNegated), // Chest Dip (Assisted) (277)
         "C6272009" => reps(RepsExercise::DeadliftBarbell, LoadReading::Absolute), // Deadlift (Barbell) (196)
         "2C37EC5E" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated), // Pull Up (Assisted) (159)
-        "5046D0A9" => reps(RepsExercise::FrontSquat, LoadReading::Absolute),    // Front Squat (147)
+        "5046D0A9" => reps(RepsExercise::FrontSquatBarbell, LoadReading::Absolute), // Front Squat (147)
         "4F942934" => reps(RepsExercise::PreacherCurlBarbell, LoadReading::Absolute), // Preacher Curl (Barbell) (121)
         "9202CC23" => reps(
             RepsExercise::SeatedWristExtensionBarbell,
             LoadReading::Absolute,
         ), // Seated Wrist Extension (Barbell) (119)
-        "21310F5F" => reps(RepsExercise::TricepsExtensionCable, LoadReading::Absolute), // Triceps Extension (Cable) (117)
+        "21310F5F" => reps(
+            RepsExercise::SingleArmTricepsExtensionCable,
+            LoadReading::Absolute,
+        ), // Triceps Extension (Cable) (117)
         "B5EFBF9C" => reps(
             RepsExercise::OverheadTricepsExtensionCable,
             LoadReading::Absolute,
@@ -272,7 +275,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         "527DA061" => duration(DurationExercise::Stretching, LoadReading::Absolute), // Stretching (16)
         "50C613D0" => distance(DistanceExercise::FarmersWalk, LoadReading::Absolute), // Farmers Walk (15)
         "8347DFD1" => reps(
-            RepsExercise::SingleArmTricepExtensionDumbbell,
+            RepsExercise::SingleArmTricepsExtensionDumbbell,
             LoadReading::Absolute,
         ), // Single Arm Tricep Extension (Dumbbell) (15)
         "D928C232" => reps(RepsExercise::Crunch, LoadReading::Absolute), // Crunch (Weighted) (11)
@@ -402,7 +405,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         } // Kettlebell Clean and Press (3)
         "DF200976" => reps(RepsExercise::LateralRaiseBand, LoadReading::Absolute), // Lateral Raise (Band) (3)
         "C7973E0E" => reps(RepsExercise::LegPressMachine, LoadReading::Absolute), // Leg Press (Machine) (3)
-        "54E60954" => reps(RepsExercise::LuRaise, LoadReading::Absolute), // Overhead Plate Raise (3)
+        "54E60954" => reps(RepsExercise::OverheadLateralRaise, LoadReading::Absolute), // Overhead Plate Raise (3)
         "56808FD2" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated), // Pull Up (Band) (3)
         "8BAB2735" => reps(
             RepsExercise::SeatedInclineCurlDumbbell,

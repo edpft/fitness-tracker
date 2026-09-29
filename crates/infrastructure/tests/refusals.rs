@@ -125,7 +125,10 @@ fn a_malformed_grouping_does_not_cost_its_members() {
         .exercises()
         .map(PerformedExercise::exercise_key)
         .collect();
-    assert!(names.contains(&"triceps-extension-cable"), "{names:?}");
+    assert!(
+        names.contains(&"single-arm-triceps-extension-cable"),
+        "{names:?}"
+    );
 }
 
 // **The one genuine gap is no longer a gap.** 95 kg for zero repetitions is a

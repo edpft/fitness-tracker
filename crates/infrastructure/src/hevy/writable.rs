@@ -325,7 +325,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("47B036EF"),
                 assisted: None,
             }, // Front Raise (Band)
-            RepsExercise::FrontSquat => Writable {
+            RepsExercise::FrontSquatBarbell => Writable {
                 added: Some("5046D0A9"),
                 assisted: None,
             }, // Front Squat
@@ -441,7 +441,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("108D7A14"),
                 assisted: None,
             }, // Nordic Hamstrings Curls
-            RepsExercise::LuRaise => Writable {
+            RepsExercise::OverheadLateralRaise => Writable {
                 added: Some("54E60954"),
                 assisted: None,
             }, // Overhead Plate Raise
@@ -561,7 +561,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("DE68C825"),
                 assisted: None,
             }, // Single Arm Lateral Raise (Cable)
-            RepsExercise::SingleArmTricepExtensionDumbbell => Writable {
+            RepsExercise::SingleArmTricepsExtensionDumbbell => Writable {
                 added: Some("8347DFD1"),
                 assisted: None,
             }, // Single Arm Tricep Extension (Dumbbell)
@@ -609,7 +609,7 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("20C1A3CB"),
                 assisted: None,
             }, // Split Squat (Dumbbell)
-            RepsExercise::SquatBarbell => Writable {
+            RepsExercise::BackSquatBarbell => Writable {
                 added: Some("D04AC939"),
                 assisted: None,
             }, // Squat (Barbell)
@@ -633,11 +633,18 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("B94E35E1"),
                 assisted: None,
             }, // Toes to Bar
+            // A dip performed upright rather than angled forwards, which the
+            // operator distinguishes and Hevy does not: no template names one.
+            RepsExercise::TricepsDip => NOT_IN_HEVY,
+            // Hevy serves a "Triceps Pressdown" template and nobody has looked
+            // its id up, which is what NOT_IN_HEVY says. Filling it in is a
+            // lookup, not a decision.
+            RepsExercise::TricepsPushdownCable => NOT_IN_HEVY,
             RepsExercise::TricepsExtensionBarbell => Writable {
                 added: Some("2F8D3067"),
                 assisted: None,
             }, // Triceps Extension (Barbell)
-            RepsExercise::TricepsExtensionCable => Writable {
+            RepsExercise::SingleArmTricepsExtensionCable => Writable {
                 added: Some("21310F5F"),
                 assisted: None,
             }, // Triceps Extension (Cable)
@@ -879,6 +886,8 @@ mod tests {
         Exercise::Reps(RepsExercise::StandingCalfRaiseDumbbell),
         Exercise::Reps(RepsExercise::StepUpDumbbell),
         Exercise::Reps(RepsExercise::ThrusterDumbbell),
+        Exercise::Reps(RepsExercise::TricepsDip),
+        Exercise::Reps(RepsExercise::TricepsPushdownCable),
         Exercise::Reps(RepsExercise::WallBall),
         Exercise::Duration(DurationExercise::SuitcaseHold),
         Exercise::Distance(DistanceExercise::SuitcaseCarry),

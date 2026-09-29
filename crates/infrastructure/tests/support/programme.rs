@@ -154,7 +154,7 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
             sets: three,
             reps: five,
         }),
-        knee_dominant: Fill::Same(Exercise::Reps(RepsExercise::FrontSquat)),
+        knee_dominant: Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)),
         upper_push: Fill::Same(Exercise::Reps(RepsExercise::ChestDip)),
         upper_pull: Fill::Same(Exercise::Reps(RepsExercise::NeutralGripPullUp)),
         // Alternating: the reason the history projection is unbounded.
@@ -401,7 +401,7 @@ pub fn entry_test() -> Result<GymMesocycle, ProgrammeFixtureError> {
         domain::prescription::Test::new(
             domain::prescription::Tested::new(
                 PrimaryPattern::KneeDominant,
-                Exercise::Reps(RepsExercise::FrontSquat),
+                Exercise::Reps(RepsExercise::FrontSquatBarbell),
                 domain::measure::RepCount::new(1).map_err(invalid)?,
             ),
             fills()?,
@@ -425,7 +425,7 @@ pub fn entry_test_from(start: Date) -> Result<GymMesocycle, ProgrammeFixtureErro
         domain::prescription::Test::new(
             domain::prescription::Tested::new(
                 PrimaryPattern::KneeDominant,
-                Exercise::Reps(RepsExercise::FrontSquat),
+                Exercise::Reps(RepsExercise::FrontSquatBarbell),
                 domain::measure::RepCount::new(1).map_err(invalid)?,
             ),
             fills()?,
@@ -454,7 +454,7 @@ pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureE
     Ok(Authored {
         start,
         pattern: PrimaryPattern::KneeDominant,
-        primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+        primary_exercise: Exercise::Reps(RepsExercise::FrontSquatBarbell),
         week: weekdays()?,
         shape,
     })
@@ -504,7 +504,7 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
     Linear::new(
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
-            Exercise::Reps(RepsExercise::FrontSquat),
+            Exercise::Reps(RepsExercise::FrontSquatBarbell),
             SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
@@ -525,7 +525,7 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
     Linear::new(
         Primary::new(
             domain::prescription::PrimaryPattern::KneeDominant,
-            Exercise::Reps(RepsExercise::FrontSquat),
+            Exercise::Reps(RepsExercise::FrontSquatBarbell),
             SessionRole::new(Relative::Higher, Relative::Lower),
         ),
         fills()?,
@@ -564,7 +564,7 @@ pub fn gating_on_a_role_it_never_runs()
         Authored {
             start: Date::new(2026, 7, 6).map_err(invalid)?,
             pattern: PrimaryPattern::KneeDominant,
-            primary_exercise: Exercise::Reps(RepsExercise::FrontSquat),
+            primary_exercise: Exercise::Reps(RepsExercise::FrontSquatBarbell),
             week: monday_only,
             shape: Shape::Linear {
                 gating: SessionRole::new(Relative::Higher, Relative::Lower),

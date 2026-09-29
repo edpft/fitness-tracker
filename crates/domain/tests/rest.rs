@@ -83,7 +83,7 @@ fn first(shape: &WorkoutShape) -> Rests {
 /// The primary's ramp and its working sets.
 fn ramp() -> Built<WorkoutShape> {
     let squat = PrescribedExercise::ForReps {
-        exercise: RepsExercise::FrontSquat,
+        exercise: RepsExercise::FrontSquatBarbell,
         sets: NonEmpty::new(vec![
             warmup(30_000, 4)?,
             warmup(60_000, 2)?,
@@ -115,7 +115,10 @@ fn arms() -> Built<WorkoutShape> {
         PrescribedItem::Superset(PrescribedSuperset {
             members: AtLeastTwo::new(vec![
                 member(SlotId::Biceps, RepsExercise::PreacherCurlBarbell)?,
-                member(SlotId::Triceps, RepsExercise::TricepsExtensionCable)?,
+                member(
+                    SlotId::Triceps,
+                    RepsExercise::SingleArmTricepsExtensionCable,
+                )?,
             ])?,
         }),
     ])?))

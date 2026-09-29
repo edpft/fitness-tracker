@@ -31,7 +31,7 @@
 //! **The implement is a field, and it was not always.** It carried no weight
 //! while nothing consumed it, and the argument then was that naming absorbs it
 //! too. That argument was false and the vocabulary shows it: seventy of the
-//! keys below name no implement at all, so `front-squat` being a barbell and
+//! keys below name no implement at all, so `goblet-squat` being a dumbbell and
 //! `chest-dip` being bodyweight was nowhere written down. What made it matter
 //! is that the loading increment is a property of the implement — a dumbbell
 //! rack does not move in 2.5kg steps — so a prescription that progresses a
@@ -48,18 +48,18 @@
 //! assistance a property of a pull-up because assisted and unassisted share a
 //! load axis, and a 30kg barbell curl and a 30kg dumbbell curl do not.
 //!
-//! **What is here is what has been needed so far, not what exists.** 128
-//! exercises cover the 134 templates one source has served; a second source, or
-//! programming that introduces a movement nobody has recorded yet, adds
-//! members. Nothing about the vocabulary is closed, and an exercise is added
-//! here before anything can map onto it.
+//! **What is here is what has been needed so far, not what exists.** 178 are
+//! declared, and they began as the 128 covering the 134 templates one source
+//! had served. A new source, or programming that introduces a movement nobody
+//! has recorded yet, adds members. Nothing about the vocabulary is closed, and
+//! an exercise is added here before anything can map onto it.
 //!
-//! 135 are declared, so seven have served nothing yet. That is the sentence
-//! above doing what it says rather than a gap: four movements the operator had
-//! been logging under a stand-in, and three the autumn block's slots name — a
-//! barbell bench press, a barbell skullcrusher and a barbell Bulgarian split
-//! squat. An exercise exists here before it can be prescribed, and it is
-//! prescribed before it can have been performed.
+//! Some have served nothing yet, which is that sentence doing what it says
+//! rather than a gap: four movements the operator had been logging under a
+//! stand-in, and three the autumn block's slots name — a barbell bench press, a
+//! barbell skullcrusher and a barbell Bulgarian split squat. An exercise exists
+//! here before it can be prescribed, and it is prescribed before it can have
+//! been performed.
 //!
 //! Fourteen more arrived with the operator's historical spreadsheets (#274),
 //! which is the second source the sentence above expected: a hip thrust, a face
@@ -69,9 +69,35 @@
 //! Twenty-five more arrived with Beyond The White Board (#285), the gym's own
 //! log, whose names are the more accurate record of what the class did
 //! (operator, 2026-09-28). Two implements arrived with them: a sandbag and a
-//! medicine ball. `overhead-plate-raise` became `lu-raise` the same day, which
-//! is what the movement is called; Hevy's `Overhead Plate Raise` still maps to
-//! it.
+//! medicine ball.
+//!
+//! **The keys stopped being Hevy's on 2026-09-29 (#305).** Until then they were
+//! its template titles kebab-cased, which is why
+//! `single-arm-tricep-extension-dumbbell` carried Hevy's singular "Tricep"
+//! where every neighbour had "Triceps" — inherited rather than chosen, and the
+//! clearest evidence the target was not ours. Five were renamed to say what
+//! they mean, and each is a migration over the six columns that hold a key:
+//!
+//! - `squat-barbell` and `front-squat` became `back-squat-barbell` and
+//!   `front-squat-barbell`, which is what the operator writes (#93).
+//! - `triceps-extension-cable` became `single-arm-triceps-extension-cable`. It
+//!   always meant the single-arm movement and never said so, which is #300's
+//!   third fault.
+//! - `lu-raise` became `overhead-lateral-raise`. The operator, 2026-09-29: *"Lu
+//!   Raises and overhead lateral raises are the same thing, but Lu Raises are
+//!   done with Plates because Lu does them with plates."* It was the only key in
+//!   the vocabulary named after a person, and the plate is incidental to the
+//!   movement, so it stays the implement and leaves the name.
+//!
+//! Two arrived that no source could name. A `triceps-pushdown-cable`, because a
+//! pushdown is performed with the elbows at the side and was being filed as an
+//! overhead extension; and a `triceps-dip`, performed upright, which the
+//! operator distinguishes from the angled `chest-dip` — *"a dip isn't a triceps
+//! extension, it's a dip"*.
+//!
+//! A source's own words never change: Hevy's `Overhead Plate Raise`, BTWB's
+//! `Lu Raise` and a spreadsheet's `pushdown` all still map, onto keys that now
+//! say what they are.
 //!
 //! The six fewer than 134 are collapses, and they are all the same collapse: a
 //! variant that differs only in how the movement is loaded is not a different
@@ -451,6 +477,7 @@ vocabulary! {
         AboveAndBelowTheKneePauseSnatch => "above-and-below-the-knee-pause-snatch", Barbell, Snatch,
         BackExtensionHyperextension => "back-extension-hyperextension", Bodyweight, BackExtension,
         BackExtensionMachine => "back-extension-machine", Machine, BackExtension,
+        BackSquatBarbell => "back-squat-barbell", Barbell, Squat,
         BackSquatWithSnatchPushPress => "back-squat-with-snatch-push-press", Barbell, SnatchComplex,
         BandPullaparts => "band-pullaparts", Band, ScapularControl,
         BandedScapulaProtraction => "banded-scapula-protraction", Band, ScapularControl,
@@ -497,7 +524,7 @@ vocabulary! {
         FloorPressDumbbell => "floor-press-dumbbell", Dumbbell, BenchPress,
         FrontLeverRaise => "front-lever-raise", Bodyweight, FrontLeverRaise,
         FrontRaiseBand => "front-raise-band", Band, FrontRaise,
-        FrontSquat => "front-squat", Barbell, Squat,
+        FrontSquatBarbell => "front-squat-barbell", Barbell, Squat,
         FrontSquatDumbbell => "front-squat-dumbbell", Dumbbell, Squat,
         GobletSquat => "goblet-squat", Dumbbell, Squat,
         GoodMorningBarbell => "good-morning-barbell", Barbell, GoodMorning,
@@ -527,12 +554,12 @@ vocabulary! {
         LegExtensionMachine => "leg-extension-machine", Machine, LegExtension,
         LegPressMachine => "leg-press-machine", Machine, LegPress,
         LowRowSuspension => "low-row-suspension", Bodyweight, Row,
-        LuRaise => "lu-raise", Plate, LateralRaise,
         LungeDumbbell => "lunge-dumbbell", Dumbbell, Lunge,
         LyingLegCurlMachine => "lying-leg-curl-machine", Machine, LegCurl,
         MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat", Barbell, SnatchComplex,
         NeutralGripPullUp => "neutral-grip-pull-up", Bodyweight, PullUp,
         NordicHamstringsCurls => "nordic-hamstrings-curls", Bodyweight, LegCurl,
+        OverheadLateralRaise => "overhead-lateral-raise", Plate, LateralRaise,
         OverheadPressBarbell => "overhead-press-barbell", Barbell, OverheadPress,
         OverheadPressDumbbell => "overhead-press-dumbbell", Dumbbell, OverheadPress,
         OverheadSquat => "overhead-squat", Barbell, Squat,
@@ -577,7 +604,8 @@ vocabulary! {
         SingleArmDevilPressDumbbell => "single-arm-devil-press-dumbbell", Dumbbell, DevilPress,
         SingleArmLateralRaiseCable => "single-arm-lateral-raise-cable", Cable, LateralRaise,
         SingleArmRowDumbbell => "single-arm-row-dumbbell", Dumbbell, Row,
-        SingleArmTricepExtensionDumbbell => "single-arm-tricep-extension-dumbbell", Dumbbell, TricepsExtension,
+        SingleArmTricepsExtensionCable => "single-arm-triceps-extension-cable", Cable, TricepsExtension,
+        SingleArmTricepsExtensionDumbbell => "single-arm-triceps-extension-dumbbell", Dumbbell, TricepsExtension,
         SingleLegExtensions => "single-leg-extensions", Machine, LegExtension,
         SingleLegRomanianDeadliftBarbell => "single-leg-romanian-deadlift-barbell", Barbell, RomanianDeadlift,
         SingleLegRomanianDeadliftDumbbell => "single-leg-romanian-deadlift-dumbbell", Dumbbell, RomanianDeadlift,
@@ -590,7 +618,6 @@ vocabulary! {
         SnatchBalance => "snatch-balance", Barbell, Snatch,
         SnatchGripBehindTheNeckPress => "snatch-grip-behind-the-neck-press", Barbell, OverheadPress,
         SplitSquatDumbbell => "split-squat-dumbbell", Dumbbell, Squat,
-        SquatBarbell => "squat-barbell", Barbell, Squat,
         StandingCalfRaiseDumbbell => "standing-calf-raise-dumbbell", Dumbbell, CalfRaise,
         StepUpDumbbell => "step-up-dumbbell", Dumbbell, StepUp,
         StraightArmLatPulldownCable => "straight-arm-lat-pulldown-cable", Cable, StraightArmPulldown,
@@ -599,8 +626,9 @@ vocabulary! {
         ThrusterKettlebell => "thruster-kettlebell", Kettlebell, Thruster,
         ToeTouch => "toe-touch", Bodyweight, HamstringStretch,
         ToesToBar => "toes-to-bar", Bodyweight, ToesToBar,
+        TricepsDip => "triceps-dip", Bodyweight, Dip,
         TricepsExtensionBarbell => "triceps-extension-barbell", Barbell, TricepsExtension,
-        TricepsExtensionCable => "triceps-extension-cable", Cable, TricepsExtension,
+        TricepsPushdownCable => "triceps-pushdown-cable", Cable, TricepsExtension,
         VUp => "v-up", Bodyweight, SitUp,
         WallBall => "wall-ball", MedicineBall, WallBall,
         WallClimbs => "wall-climbs", Bodyweight, WallClimb,

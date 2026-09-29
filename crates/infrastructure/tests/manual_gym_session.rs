@@ -126,13 +126,13 @@ fn a_dated_session_sheet_is_its_sets_in_order_and_a_plan_is_refused_as_one() {
     assert_eq!(
         described(&entities.iter().collect::<Vec<_>>()),
         [
-            "2019-02-12: squat-barbell: 50 kg × 5 [Squat day (19-02-12)!C2]; \
+            "2019-02-12: back-squat-barbell: 50 kg × 5 [Squat day (19-02-12)!C2]; \
              80 kg × 1 @ 1-2 rest 180s [Squat day (19-02-12)!C3]; \
              87.5 kg × failed rest 180s [Squat day (19-02-12)!C4] \
              | chest-dip: bodyweight × 5 rest 90s [Squat day (19-02-12)!C5] \
              | hip-thrust-barbell: 65 kg × 10 [Squat day (19-02-12)!C6]",
             "2016-04-04: deadlift-barbell: 37.5 kg × 6 [Weights!C3]; 72.5 kg × 5 [Weights!E3] \
-             | squat-barbell: 20 kg × 6 [Weights!C8]; 40 kg × 3 [Weights!E8]",
+             | back-squat-barbell: 20 kg × 6 [Weights!C8]; 40 kg × 3 [Weights!E8]",
         ],
         "the undated `Squat day` is the template, and 1 June 2016 is not recorded as done"
     );
@@ -161,7 +161,7 @@ fn a_ct_2017_week_is_dated_by_the_programme_and_two_pushes_run_push_pull_push() 
             "2017-02-24: bench-press-barbell: 45 kg × 5 [Push!G3]; 45 kg × 4 [Push!I3] \
              | chest-dip: bodyweight × 4 [Push!Q3]",
             "2017-02-22: pull-up: bodyweight × 3 [Pull!E2]",
-            "2017-01-11: squat-barbell: 20 kg × 6 [Legs!D2]; 40 kg × 10 [Legs!F2]",
+            "2017-01-11: back-squat-barbell: 20 kg × 6 [Legs!D2]; 40 kg × 10 [Legs!F2]",
         ],
         "week 8 is push Monday, pull Wednesday, push Friday; an empty-bar warm-up is a blank"
     );
@@ -193,7 +193,7 @@ fn copies_of_ct_2017_merge_into_one_session_and_the_most_recent_wins() {
     assert_eq!(
         described(&entities.iter().collect::<Vec<_>>()),
         [
-            "2017-01-11: squat-barbell: 20 kg × 6 [Legs!D2]; 40 kg × 10 [Legs!F2] \
+            "2017-01-11: back-squat-barbell: 20 kg × 6 [Legs!D2]; 40 kg × 10 [Legs!F2] \
              | deadlift-barbell: 42.5 kg × 2 [Deadlift!C2]; 47.5 kg × 10 [Legs!O2] \
              | suitcase-carry: 36 kg × 20m [Carry, Left!C2] \
              | dead-bug: 1 kg × 10 [Deadbugs!C2]",
@@ -232,7 +232,7 @@ fn the_2020_log_has_no_loads_and_its_reps_in_reserve_are_the_evidence() {
     assert_eq!(
         described(&entities.iter().collect::<Vec<_>>()),
         [
-            "2020-10-12: squat-barbell: ? × 4 [Sheet1!F2]; ? × 4 @ 4+ [Sheet1!F3] \
+            "2020-10-12: back-squat-barbell: ? × 4 [Sheet1!F2]; ? × 4 @ 4+ [Sheet1!F3] \
              | overhead-press-dumbbell: ? × 4 @ 2-3 [Sheet1!F4]",
         ],
         "day 1 of the week ending 18 October is Monday the 12th; its press is dumbbells"

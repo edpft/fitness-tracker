@@ -186,11 +186,17 @@ fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
         // Four of Garmin's names for one lift, and the operator's record holds
         // no squat of any other kind in the years these were recorded.
         ("SQUAT", "BACK_SQUATS" | "BARBELL_BACK_SQUAT" | "SQUAT" | "WEIGHTED_SQUAT") => {
-            absolute(RepsExercise::SquatBarbell) // 6 + 38 + 21 + 236
+            absolute(RepsExercise::BackSquatBarbell) // 6 + 38 + 21 + 236
         }
-        ("SQUAT", "BARBELL_FRONT_SQUAT") => absolute(RepsExercise::FrontSquat), // 15
-        ("SQUAT", "LEG_PRESS") => absolute(RepsExercise::LegPressMachine),      // 4
-        ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::ChestDip), // 15
+        ("SQUAT", "BARBELL_FRONT_SQUAT") => absolute(RepsExercise::FrontSquatBarbell), // 15
+        ("SQUAT", "LEG_PRESS") => absolute(RepsExercise::LegPressMachine),             // 4
+        // All 15 are from 2018 and 2019, which is squarely the period the
+        // operator describes as his upright one -- he used to perform mostly
+        // upright dips and now performs mostly angled ones, using dips as a
+        // chest exercise. So this corpus needs no judgement call. It read as a
+        // chest dip until 2026-09-29 only because the vocabulary had no key for
+        // the upright movement.
+        ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP") => relative(RepsExercise::TricepsDip), // 15
 
         // A name this vocabulary has no exercise for, but whose own words say
         // which movement it is. Each of these reads the term Garmin served and
@@ -207,7 +213,10 @@ fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
             described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
             // 3
         }
-        ("SHOULDER_PRESS", "SINGLE_ARM_DUMBBELL_SHOULDER_PRESS" | "SEATED_DUMBBELL_SHOULDER_PRESS") => {
+        (
+            "SHOULDER_PRESS",
+            "SINGLE_ARM_DUMBBELL_SHOULDER_PRESS" | "SEATED_DUMBBELL_SHOULDER_PRESS",
+        ) => {
             described(Description::of(Movement::OverheadPress).loaded_with(Implement::Dumbbell))
             // 2 + 1
         }
@@ -258,7 +267,7 @@ fn by_name(category: &str, name: &str, weight: Option<Kg>) -> Option<Mapped> {
 fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
     let mapped = match category {
         "BENCH_PRESS" => absolute(RepsExercise::BenchPressBarbell), // 432
-        "SQUAT" => absolute(RepsExercise::SquatBarbell),            // 183
+        "SQUAT" => absolute(RepsExercise::BackSquatBarbell),        // 183
         "DEADLIFT" => absolute(RepsExercise::DeadliftBarbell),      // 70
         "PULL_UP" => relative(RepsExercise::PullUp),                // 57
         "PUSH_UP" => absolute(RepsExercise::PushUp),                // 54
@@ -270,7 +279,7 @@ fn by_category(category: &str, weight: Option<Kg>) -> Option<Mapped> {
             described(Description::of(Movement::TricepsExtension).loaded_with(Implement::Dumbbell))
         } // 61
         "CALF_RAISE" => described(Description::of(Movement::CalfRaise)), // 33
-        "LEG_RAISE" => described(unloaded(Movement::LegRaise, weight)),                // 13
+        "LEG_RAISE" => described(unloaded(Movement::LegRaise, weight)), // 13
         "LATERAL_RAISE" => {
             described(Description::of(Movement::LateralRaise).loaded_with(Implement::Dumbbell))
         } // 8
@@ -363,7 +372,7 @@ mod tests {
         let mapped = lookup("SQUAT", None, Some(Kg::from_grams(60_000))).expect("a squat");
         assert_eq!(
             mapped.guess.exercise().map(RepsExercise::as_str),
-            Some("squat-barbell"),
+            Some("back-squat-barbell"),
         );
     }
 }

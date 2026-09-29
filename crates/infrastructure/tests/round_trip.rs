@@ -178,7 +178,9 @@ fn shape_of(measure: Target<RepCount>) -> Fallible<WorkoutShape> {
         PrescribedItem::Exercise {
             slot: SlotId::KneeDominant,
             exercise: PrescribedExercise::ForReps {
-                exercise: domain::gym::exercise::RepsExercise::try_from("front-squat".to_owned())?,
+                exercise: domain::gym::exercise::RepsExercise::try_from(
+                    "front-squat-barbell".to_owned(),
+                )?,
                 sets: NonEmpty::of(set, Vec::new()),
             },
         },

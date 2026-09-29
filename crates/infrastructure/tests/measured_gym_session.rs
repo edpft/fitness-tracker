@@ -233,7 +233,7 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
     );
     assert_eq!(
         named.guess.exercise().map(RepsExercise::as_str),
-        Some("front-squat"),
+        Some("front-squat-barbell"),
     );
 
     // The operator, 2026-09-28: an unknown between named sets at the same reps
@@ -241,7 +241,7 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
     let carried = sets.next().expect("the unclassified set");
     assert_eq!(
         carried.guess,
-        GuessedExercise::FromItsRun(Guess::Exercise(RepsExercise::FrontSquat)),
+        GuessedExercise::FromItsRun(Guess::Exercise(RepsExercise::FrontSquatBarbell)),
     );
     assert!(
         !carried.guess.from_the_source(),
@@ -716,7 +716,7 @@ fn a_bare_category_is_the_exercise_it_names_unqualified() {
 
     assert_eq!(
         measured.first().guess.exercise().map(RepsExercise::as_str),
-        Some("squat-barbell"),
+        Some("back-squat-barbell"),
     );
     assert!(
         refusals(&activity, Some(&sets))
@@ -766,38 +766,5 @@ fn a_bare_category_with_no_conventional_exercise_describes_the_movement() {
         refusals(&activity, Some(&sets))
             .expect("refusals")
             .is_empty(),
-    );
-}
-
-#[test]
-fn a_term_that_names_no_movement_of_ours_is_still_refused() {
-    // A description places a category the watch did narrow to a movement. A
-    // name this vocabulary has no member for is a different failure — our
-    // vocabulary came up short — and it keeps saying so.
-    let id = "3461073246";
-    let activity = activity(id, "strength_training", "2019-03-14 07:43:22", &[]);
-    let sets = exercise_sets(
-        id,
-        &[set(
-            "2019-03-14T07:43:22.0",
-            10,
-            Some(30_000.0),
-            ("SQUAT", Some("ONE_LEGGED_SQUAT")),
-        )],
-    );
-
-    let session = session_for(&activity, Some(&sets)).expect("a session");
-    assert_eq!(
-        session.recorded().sets().expect("sets").first().guess,
-        GuessedExercise::Undetermined,
-    );
-
-    let refused = refusals(&activity, Some(&sets)).expect("refusals");
-    assert!(
-        refused.iter().any(|reason| matches!(
-            reason,
-            RefusalReason::UnguessableMovement { term } if term == "SQUAT/ONE_LEGGED_SQUAT"
-        )),
-        "{refused:?}",
     );
 }

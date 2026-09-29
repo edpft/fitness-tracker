@@ -88,7 +88,7 @@ fn prescribed_set() -> impl Strategy<Value = PrescribedSet<RepCount>> {
 fn reps_exercise() -> impl Strategy<Value = PrescribedExercise> {
     (
         prop_oneof![
-            Just(RepsExercise::FrontSquat),
+            Just(RepsExercise::FrontSquatBarbell),
             Just(RepsExercise::PullUp),
             Just(RepsExercise::ChestDip),
         ],

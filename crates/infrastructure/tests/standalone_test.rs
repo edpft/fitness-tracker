@@ -771,7 +771,7 @@ fn a_holding_week_opens_the_linear_template_from_the_test_just_done() {
     let steps = parameters
         .scales
         .for_exercise(domain::gym::Exercise::Reps(
-            domain::gym::RepsExercise::FrontSquat,
+            domain::gym::RepsExercise::FrontSquatBarbell,
         ))
         .expect("the front squat has a scale");
     let opening = steps.quantise_loaded(parameters.entry_drop.applied_to(failed));

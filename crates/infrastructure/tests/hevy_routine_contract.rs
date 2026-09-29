@@ -636,7 +636,7 @@ fn ramped_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
     };
 
     let squat = PrescribedExercise::ForReps {
-        exercise: RepsExercise::FrontSquat,
+        exercise: RepsExercise::FrontSquatBarbell,
         sets: NonEmpty::new(vec![
             rested(
                 PrescribedSet::warmup(
