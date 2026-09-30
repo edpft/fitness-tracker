@@ -86,6 +86,7 @@ where
             .await?
             .ok_or(DeliveryError::NoMesocycle { date })?;
         let microcycle = found.mesocycle.calendar().microcycle(workout.week());
+        let rerun = self.ports.programmes.rerun_on(date).await?;
 
         // **And the number comes from the record, not from the calendar**
         // (#312). A calendar is rebuilt from a start, a duration and its
@@ -110,6 +111,7 @@ where
             plan: found.plan,
             mesocycle: found.ordinal,
             microcycle,
+            rerun,
             ordinal,
         };
 

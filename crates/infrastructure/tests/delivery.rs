@@ -89,8 +89,11 @@ fn address(session: &Deliverable) -> String {
         || "holding".to_owned(),
         |index| format!("microcycle {}", index.as_u32()),
     );
+    let rerun = session
+        .rerun
+        .map_or_else(String::new, |rerun| format!(" (rerun {rerun})"));
     format!(
-        "{} · mesocycle {} · {microcycle}",
+        "{} · mesocycle {} · {microcycle}{rerun}",
         session.plan, session.mesocycle
     )
 }

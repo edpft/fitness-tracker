@@ -22,9 +22,9 @@
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
-    planner::{self, Rerun},
+    planner::{self, Rerun, RerunOrdinal},
     prescription::GymMesocycle,
-    schedule::Diary,
+    schedule::{Diary, Discipline},
 };
 use jiff::civil::Date;
 
@@ -182,6 +182,16 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
 
     async fn following(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         self.gym(Pick::Following(date)).await
+    }
+
+    /// **Answered from the reruns rather than from a moved calendar**, because
+    /// only they say a week was attempted and not completed. See the port.
+    async fn rerun_on(&self, date: Date) -> Result<Option<RerunOrdinal>, StoreError> {
+        Ok(planner::rerun_of(
+            self.reschedule.reruns(),
+            Discipline::Gym,
+            date,
+        ))
     }
 }
 

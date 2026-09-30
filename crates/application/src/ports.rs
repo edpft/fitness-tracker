@@ -36,6 +36,7 @@ use domain::normalised::{
     RefusalCount, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
+use domain::planner::RerunOrdinal;
 use domain::prescription::{
     Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId, WeekIndex,
@@ -1134,6 +1135,25 @@ pub trait MesocycleStore {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<MesocycleInForce>, StoreError>> + Send;
+
+    /// Which re-run of its microcycle the week containing a date is (#313).
+    ///
+    /// **A question about the plan as it now stands, which is why it is here and
+    /// not on the calendar.** A re-run is a microcycle that was attempted and not
+    /// completed, so it is a fact about the record; the calendar it produces
+    /// cannot tell a lost week from a week the operator was away, because both
+    /// arrive in it as a seven-day interruption.
+    ///
+    /// `None` is a week running for the first time — which is what the plan as
+    /// *authored* says of every week, since nothing has been attempted yet.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn rerun_on(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<RerunOrdinal>, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.
@@ -1696,6 +1716,9 @@ pub struct Deliverable {
     /// Which microcycle of that mesocycle, and `None` for a holding week, which
     /// is a microcycle of neither this mesocycle nor the next (#190).
     pub microcycle: Option<WeekIndex>,
+    /// Which re-run of that microcycle, and `None` the first time it runs
+    /// (#313).
+    pub rerun: Option<RerunOrdinal>,
     /// Which session of the macrocycle this is. What an ordered list of them is
     /// ordered by; how it is rendered is the destination's business.
     pub ordinal: SessionOrdinal,

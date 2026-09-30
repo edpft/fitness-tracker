@@ -34,6 +34,7 @@ use domain::{
     measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{MesocycleOrdinal, Occupies, PlanName},
+    planner::RerunOrdinal,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, GymMesocycle, Linear,
         MesocycleId, Progression, Sbs, Skip, SlotId, Test, Tested,
@@ -625,6 +626,16 @@ impl MesocycleStore for SqliteGymMesocycleStore {
             .into_iter()
             .map(|(_, found)| found)
             .find(|found| found.mesocycle.span().start() > date))
+    }
+
+    /// **Nothing has been attempted, as far as an authored plan knows** (#313).
+    /// A re-run is a microcycle the record shows was not completed, and this
+    /// store reads the plan rather than the record — so it answers for the plan
+    /// as authored and [`application::reschedule::Rescheduled`] answers for the
+    /// plan as it now stands, which is the division every other method here
+    /// already follows.
+    async fn rerun_on(&self, _date: Date) -> Result<Option<RerunOrdinal>, StoreError> {
+        Ok(None)
     }
 }
 

@@ -738,7 +738,7 @@ fn a_ride_the_record_cannot_name_answers_for_whose_turn_it_was() {
 /// cycling mesocycle starts on the 28th rather than the 21st.
 #[test]
 fn a_week_that_lost_both_essential_sessions_runs_again() {
-    let (standing, gym, wednesday, next_mesocycle) = corpus::block_on(async {
+    let (standing, (gym, attempt), wednesday, next_mesocycle) = corpus::block_on(async {
         let (pool, _directory) = autumn_together().await?;
         away_over_the_monday(&pool).await?;
         gym_delivered_for_the_friday(&pool).await?;
@@ -789,6 +789,7 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
             .map(|found| found.mesocycle)
             .ok_or("the block answers for the Monday")?;
         let gym_week = block.calendar().place(monday)?.0;
+        let gym_attempt = MesocycleStore::rerun_on(&gym, monday).await?;
 
         let wednesday = Date::constant(2026, 9, 23);
         let (_, _, riding) = CyclingMesocycleStore::on(&bike, wednesday)
@@ -804,7 +805,12 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
             .await?
             .ok_or("a second cycling mesocycle follows")?;
 
-        Ok::<_, Box<dyn std::error::Error>>((standing, gym_week, ridden, following.start()))
+        Ok::<_, Box<dyn std::error::Error>>((
+            standing,
+            (gym_week, gym_attempt),
+            ridden,
+            following.start(),
+        ))
     })
     .expect("a runtime is available")
     .expect("the store authors and answers");
@@ -824,6 +830,11 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         gym,
         WeekKind::Climbing(WeekIndex::FIRST),
         "the gym's first week runs again"
+    );
+    assert_eq!(
+        attempt.map(domain::planner::RerunOrdinal::as_u32),
+        Some(1),
+        "and says so: it is that microcycle's first re-run (#313)"
     );
     assert_eq!(
         wednesday.as_deref(),

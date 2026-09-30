@@ -16,6 +16,7 @@ use domain::{
     gym::{Load, SignedKg, exercise::RepsExercise},
     measure::{Duration, Kg, RepCount},
     plan::MesocycleOrdinal,
+    planner::RerunOrdinal,
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SlotId, SupersetMember, Target,
@@ -83,8 +84,29 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         plan: support::programme::name("summer-2026-front-squat")?,
         mesocycle: MesocycleOrdinal::new(2)?,
         microcycle: Some(WeekIndex::new(4)?),
+        rerun: None,
         ordinal: SessionOrdinal::new(7)?,
     })
+}
+
+/// The note on the routine a stub was posted, for a test about what it says.
+///
+/// A free function, so it returns rather than expecting where it can — the test
+/// exemptions reach a `#[test]` body and not the helpers beside it. What is left
+/// is the stub's own bookkeeping, which failing means the mock never ran.
+async fn note_of(server: &MockServer) -> String {
+    let requests = server.received_requests().await.unwrap_or_default();
+    requests
+        .iter()
+        .find(|request| request.url.path() == "/v1/routines")
+        .and_then(|posted| serde_json::from_slice::<Value>(&posted.body).ok())
+        .and_then(|body| {
+            body.get("routine")
+                .and_then(|routine| routine.get("notes"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
 }
 
 /// The defect this whole feature has to not have.
@@ -224,23 +246,60 @@ fn a_holding_week_says_so_where_a_microcycle_number_would_go() {
             .outcome
             .expect("the session is delivered");
 
-        let requests = server
-            .received_requests()
-            .await
-            .expect("the mock recorded its requests");
-        let posted = requests
-            .iter()
-            .find(|request| request.url.path() == "/v1/routines")
-            .expect("a routine was posted");
-        let body: Value = serde_json::from_slice(&posted.body).expect("the request body is json");
-        body["routine"]["notes"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned()
+        note_of(&server).await
     })
     .expect("the runtime runs");
 
     assert_eq!(note, "summer-2026-front-squat · mesocycle 2 · holding");
+}
+
+/// **A re-run says which attempt it is** (#313).
+///
+/// The operator, 2026-09-30: *"Say mesocycle 2 - microcycle 3 isn't completed,
+/// then the rerun would be mesocycle 2 - microcycle 3 (rerun 1)."* Without it a
+/// second attempt at one microcycle is the same routine twice, a week apart,
+/// with nothing in it to say why.
+#[test]
+fn a_re_run_microcycle_says_which_attempt_it_is() {
+    let note = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
+            })))
+            .mount(&server)
+            .await;
+
+        let again = Deliverable {
+            rerun: RerunOrdinal::new(1),
+            ..session().expect("the fixture session builds")
+        };
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        hevy.deliver(&again)
+            .await
+            .outcome
+            .expect("the session is delivered");
+
+        note_of(&server).await
+    })
+    .expect("the runtime runs");
+
+    assert_eq!(
+        note,
+        "summer-2026-front-squat · mesocycle 2 · microcycle 4 (rerun 1)"
+    );
 }
 
 /// **A replacement is a `PUT` to the routine's own path, carrying the same body.**

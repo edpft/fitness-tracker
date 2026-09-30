@@ -628,6 +628,73 @@ pub fn rerun(monday: Date, state: MicrocycleState, sessions: &[Placed]) -> Optio
     }
 }
 
+/// Which re-run of its microcycle a week is: the first re-run is 1.
+///
+/// **A count, and the absence of one is [`None`] rather than a zero.** A week
+/// running for the first time is not a re-run of anything, and a `0` in a
+/// routine's note would say it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RerunOrdinal(u32);
+
+impl RerunOrdinal {
+    /// `None` for a zero, which is a week running for the first time.
+    #[must_use]
+    pub const fn new(value: u32) -> Option<Self> {
+        if value < 1 {
+            return None;
+        }
+        Some(Self(value))
+    }
+
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for RerunOrdinal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+/// Which re-run of its microcycle the week containing a date is, for one
+/// discipline.
+///
+/// **Counted back through the weeks this discipline lost, not through its
+/// calendar's skips** (#313). Both look the same in a rescheduled calendar — a
+/// lost week becomes a seven-day interruption — and they are not the same thing:
+/// a week nobody trained because the operator was away prescribed nothing, so
+/// the week that follows it is the microcycle's first run rather than its second.
+/// A re-run is a microcycle that was *attempted* and not completed.
+///
+/// The operator, 2026-09-30: *"Say mesocycle 2 - microcycle 3 isn't completed,
+/// then the rerun would be mesocycle 2 - microcycle 3 (rerun 1)."* So the count
+/// belongs to the microcycle being re-run, whichever mesocycle holds it, and a
+/// mesocycle of one microcycle is not a special case.
+///
+/// **A week this discipline held is not a week it re-ran** (#190), and it stops
+/// the count rather than being skipped over: the microcycle that follows a hold
+/// is not another attempt at the one before it.
+#[must_use]
+pub fn rerun_of(reruns: &[Rerun], discipline: Discipline, date: Date) -> Option<RerunOrdinal> {
+    let Weeks { lost, .. } = Weeks::of(reruns, discipline);
+    let week = commencing(date);
+
+    // A week lost is re-run by the week after it, so this week is a re-run when
+    // the one before it was lost — and the nth re-run when the n before it were.
+    let mut counted = 0_u32;
+    let mut cursor = week;
+    while let Ok(previous) = cursor.checked_sub(jiff::Span::new().weeks(1)) {
+        if !lost.contains(&previous) {
+            break;
+        }
+        counted = counted.saturating_add(1);
+        cursor = previous;
+    }
+
+    RerunOrdinal::new(counted)
+}
+
 /// One discipline's share of the weeks run again.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Weeks {
