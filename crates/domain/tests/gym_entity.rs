@@ -146,6 +146,9 @@ fn workout() -> impl Strategy<Value = GymWorkout> {
             Some(GymWorkout::new(
                 items,
                 StartedAt::new(instant, zone),
+                // A workout the source stated no clock for, which is every
+                // sheet-logged and Beyond The White Board one.
+                None,
                 provenance,
                 SourceRecordId::try_from("synthetic").ok()?,
                 LandingRecordId::FIRST,

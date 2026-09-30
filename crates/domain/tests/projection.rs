@@ -21,7 +21,7 @@ use domain::{
         exercise::{DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
-    measure::{Duration, Kg, RepCount},
+    measure::{Duration, Kg, PositiveDuration, RepCount},
     normalised::{OperatorZone, StartedAt},
     prescription::{Position, PrimaryPattern, ProjectionGap, SlotId, project},
     sequence::{AtLeastTwo, NonEmpty},
@@ -153,6 +153,10 @@ fn performed(primary: PrimaryPattern) -> impl Strategy<Value = PerformedGymSessi
                 workouts.push(GymWorkout::new(
                     NonEmpty::new(chunk.to_vec()).ok()?,
                     StartedAt::new(instant, zone.clone()),
+                    // Each part runs for five of the ten minutes before the next
+                    // starts, so a multi-part session's span covers the gaps
+                    // between its parts as well as the parts themselves.
+                    Some(PositiveDuration::from_seconds(300).ok()?),
                     provenance.clone(),
                     SourceRecordId::try_from(format!("synthetic-{index}").as_str()).ok()?,
                     LandingRecordId::FIRST,

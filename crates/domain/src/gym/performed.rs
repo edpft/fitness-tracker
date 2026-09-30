@@ -35,6 +35,7 @@
 use std::fmt;
 
 use crate::landing::{LandingRecordId, SourceRecordId};
+use crate::measure::PositiveDuration;
 use crate::normalised::{NormalisedEntity, StartedAt};
 use crate::sequence::NonEmpty;
 
@@ -122,6 +123,37 @@ impl PerformedGymSession {
     /// How many Hevy records this session was split across.
     pub const fn part_count(&self) -> usize {
         self.workouts.count()
+    }
+
+    /// How long the session ran, from its first workout's start to its last
+    /// one's end.
+    ///
+    /// **Derived from the parts, never stored.** A session is ours rather than
+    /// the source's, so no source states its length; what each part states is
+    /// its own, and the session's is arithmetic over those (§ II.3 keeps a
+    /// source's statements and derives nothing it could have kept).
+    ///
+    /// **The gaps between the parts are inside it**, because they were inside
+    /// the session: a session split across four Hevy routines was one visit, and
+    /// the minutes spent starting the next routine were spent in the gym. This
+    /// is how long the visit took, not the sum of the parts.
+    ///
+    /// [`None`] where **any** part states no duration, which is not the same as
+    /// a short session. A session of three workouts where the middle one states
+    /// nothing has an unknown end, and answering with the parts that did state
+    /// one would be reporting a shorter session as a fact.
+    pub fn duration(&self) -> Option<PositiveDuration> {
+        let mut latest = self.workouts.first().ended_at()?;
+        for workout in self.workouts.iter() {
+            let ended = workout.ended_at()?;
+            if ended > latest {
+                latest = ended;
+            }
+        }
+        let seconds = latest
+            .as_second()
+            .checked_sub(self.started_at().instant().as_second())?;
+        PositiveDuration::from_seconds(u64::try_from(seconds).ok()?).ok()
     }
 }
 

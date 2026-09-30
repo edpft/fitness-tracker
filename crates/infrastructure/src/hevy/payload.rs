@@ -50,10 +50,12 @@ pub struct Workout<'a> {
     pub start_time: String,
     /// When it finished, in the same form.
     ///
-    /// **Read only by [`super::sessions`]**, to measure the break between one
-    /// workout and the next. Optional because a deleted event has no workout
-    /// body at all, and because a payload that omits it should leave a workout
-    /// ungrouped rather than stop a derivation.
+    /// **Two readers.** [`super::sessions`] measures the break between one
+    /// workout and the next from it, and [`super::translate`] takes the
+    /// workout's own duration from it — the only account of a session's length
+    /// any source but Garmin gives (#323). Optional because a deleted event has
+    /// no workout body at all, and because a payload that omits it should leave
+    /// a workout ungrouped rather than stop a derivation.
     #[serde(default)]
     pub end_time: Option<String>,
     /// The routine this workout was logged against, where there was one.

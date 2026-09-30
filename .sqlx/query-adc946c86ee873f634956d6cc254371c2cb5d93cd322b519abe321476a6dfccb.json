@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.id AS \"session!: i64\",\n                   w.id AS \"workout!: i64\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\",\n                   first.started_at_utc AS \"session_started_at!: String\",\n                   first.zone AS \"session_zone!: String\"\n            FROM gym_session AS s\n            JOIN gym_workout AS first\n              ON first.landing_record_id = s.landing_record_id AND first.stream = s.stream\n            JOIN gym_workout AS w ON w.session = s.id\n            WHERE s.stream = 'hevy.workouts'\n              AND first.started_at_utc >= ? AND first.started_at_utc < ?\n            ORDER BY first.started_at_utc ASC, s.landing_record_id ASC,\n                     w.started_at_utc ASC, w.landing_record_id ASC\n            ",
+  "query": "\n            SELECT s.id AS \"session!: i64\",\n                   w.id AS \"workout!: i64\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\",\n                   w.duration_seconds AS \"duration_seconds: i64\",\n                   first.started_at_utc AS \"session_started_at!: String\",\n                   first.zone AS \"session_zone!: String\"\n            FROM gym_session AS s\n            JOIN gym_workout AS first\n              ON first.landing_record_id = s.landing_record_id AND first.stream = s.stream\n            JOIN gym_workout AS w ON w.session = s.id\n            WHERE s.stream = 'hevy.workouts'\n              AND first.started_at_utc >= ? AND first.started_at_utc < ?\n            ORDER BY first.started_at_utc ASC, s.landing_record_id ASC,\n                     w.started_at_utc ASC, w.landing_record_id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -114,8 +114,19 @@
         }
       },
       {
-        "name": "session_started_at!: String",
+        "name": "duration_seconds: i64",
         "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "session_started_at!: String",
+        "ordinal": 11,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -126,7 +137,7 @@
       },
       {
         "name": "session_zone!: String",
-        "ordinal": 11,
+        "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -151,8 +162,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "001c991520ad086f0f908ebe5c8e5c4184bcdde8cf67acdf8baf9eee17775be2"
+  "hash": "adc946c86ee873f634956d6cc254371c2cb5d93cd322b519abe321476a6dfccb"
 }

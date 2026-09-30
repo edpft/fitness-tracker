@@ -32,7 +32,7 @@ use domain::{
         SignedKg, Superset, WorkoutItem, exercise::Exercise,
     },
     landing::{EventKind, LandedRecord},
-    measure::{Distance, Duration, Kg, Metres, RepCount},
+    measure::{Distance, Duration, Kg, Metres, PositiveDuration, RepCount},
     normalised::{EditOverlay, OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
@@ -46,7 +46,7 @@ use jiff::Timestamp;
 use super::{
     account::SessionAccount,
     mapping::{LoadReading, Mapped, lookup},
-    payload::{ExerciseEntry, PerformedSet, WorkoutEnvelope, number},
+    payload::{ExerciseEntry, PerformedSet, Workout, WorkoutEnvelope, number},
 };
 
 /// The Hevy adapter's translator.
@@ -222,14 +222,68 @@ impl HevySessionTranslator {
             .as_ref()
             .and_then(|id| DeliveryReference::try_from(id.clone()).ok());
 
+        // **A duration the source states badly is noted, not fatal.** The sets
+        // are the point of the record and refusing the whole workout over its
+        // clock would lose every one of them; carrying `None` silently would
+        // hide a field that stopped parsing. So the note lands on the scribe and
+        // the workout stands without a duration — the state a sheet-logged
+        // workout is in anyway.
+        let duration = Self::duration(&workout, instant, scribe);
+
         Ok(Some(GymWorkout::new(
             items,
             StartedAt::new(instant, zone.clone()),
+            duration,
             record.provenance().clone(),
             record.source_record_id().clone(),
             record.id(),
             performed_against,
         )))
+    }
+
+    /// How long the workout ran, from the two instants the source states.
+    ///
+    /// Hevy serves `end_time` on all 170 of the operator's workouts and every
+    /// span is between 307 and 6,230 seconds, so each `None` below is a case the
+    /// record has not shown rather than one it routinely holds.
+    fn duration(
+        workout: &Workout<'_>,
+        started_at: Timestamp,
+        scribe: &mut Scribe,
+    ) -> Option<PositiveDuration> {
+        let stated = workout.end_time.as_ref()?;
+        let Ok(end) = stated.parse::<Timestamp>() else {
+            scribe.note(
+                RefusalLocus::Record,
+                RefusalReason::UnreadableValue {
+                    field: "end_time",
+                    detail: stated.clone(),
+                },
+            );
+            return None;
+        };
+        let seconds = end.as_second().checked_sub(started_at.as_second())?;
+        let Ok(seconds) = u64::try_from(seconds) else {
+            scribe.note(
+                RefusalLocus::Record,
+                RefusalReason::UnreadableValue {
+                    field: "end_time",
+                    detail: format!("{stated}, which precedes the start"),
+                },
+            );
+            return None;
+        };
+        let Ok(duration) = PositiveDuration::from_seconds(seconds) else {
+            scribe.note(
+                RefusalLocus::Record,
+                RefusalReason::UnreadableValue {
+                    field: "end_time",
+                    detail: format!("{stated}, the same second it started"),
+                },
+            );
+            return None;
+        };
+        Some(duration)
     }
 
     /// The workout's ordered items, with groupings resolved.

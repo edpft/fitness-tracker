@@ -24,7 +24,7 @@ use std::fmt;
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::prescription::DeliveryReference;
 
-use crate::measure::{Distance, Duration, RepCount};
+use crate::measure::{Distance, Duration, PositiveDuration, RepCount};
 use crate::normalised::StartedAt;
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
@@ -150,6 +150,23 @@ impl WorkoutItem {
 pub struct GymWorkout {
     items: NonEmpty<WorkoutItem>,
     started_at: StartedAt,
+    /// How long the workout ran, where the source states it.
+    ///
+    /// **`None` is the source saying nothing, not a workout of no length**
+    /// (§ 37). Hevy serves `end_time` on all 163 workouts in the corpus, so the
+    /// absent case is a payload that omits it rather than a routine occurrence —
+    /// but it is the state the other sources are in, and they are the reason a
+    /// duration is not simply required. Beyond The White Board serves a `Date`
+    /// and the historical spreadsheets a day, neither with a clock; both reach
+    /// the same store table through [`super::ManualGymSession`], which states no
+    /// duration at all. A session logged on a sheet still took an hour. What is
+    /// missing is the record of it.
+    ///
+    /// **Positive, so a workout of no length cannot be written down** (§ 24).
+    /// Every one of the corpus' 163 spans is between 307 and 6,177 seconds, and
+    /// a workout that began and ended in the same second is not something a
+    /// source has said.
+    duration: Option<PositiveDuration>,
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: LandingRecordId,
@@ -174,6 +191,7 @@ impl GymWorkout {
     pub const fn new(
         items: NonEmpty<WorkoutItem>,
         started_at: StartedAt,
+        duration: Option<PositiveDuration>,
         provenance: Provenance,
         source_record_id: SourceRecordId,
         landed_as: LandingRecordId,
@@ -182,6 +200,7 @@ impl GymWorkout {
         Self {
             items,
             started_at,
+            duration,
             provenance,
             source_record_id,
             landed_as,
@@ -200,6 +219,24 @@ impl GymWorkout {
 
     pub const fn started_at(&self) -> &StartedAt {
         &self.started_at
+    }
+
+    /// How long the workout ran, where the source states it.
+    pub const fn duration(&self) -> Option<PositiveDuration> {
+        self.duration
+    }
+
+    /// The instant the workout ended, where the source stated how long it ran.
+    ///
+    /// Derived rather than stored: the source states a start and a length, and
+    /// keeping the end as well would be two places for one fact that could
+    /// disagree.
+    pub fn ended_at(&self) -> Option<jiff::Timestamp> {
+        let seconds = i64::try_from(self.duration?.as_seconds()).ok()?;
+        self.started_at
+            .instant()
+            .checked_add(jiff::SignedDuration::from_secs(seconds))
+            .ok()
     }
 
     pub const fn provenance(&self) -> &Provenance {
