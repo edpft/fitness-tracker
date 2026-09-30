@@ -562,3 +562,86 @@ fn every_record_is_accounted_for() {
     );
     assert!(summary.reconciles(), "the numbers add up: {summary:?}");
 }
+
+/// Every workout in the corpus carries the duration Hevy stated for it.
+///
+/// **Hevy states one on all 163**, so there is no arm of this the corpus
+/// exercises through absence — which is why the sheets are tested for the
+/// absence separately (`manual_gym_session`). What this pins is that the field
+/// is read at all: it was in the payload from the first landing and went
+/// unread until #323, and the figures below are what the landed records say.
+#[test]
+fn every_workout_carries_the_duration_the_source_stated() {
+    let produced = derived!();
+
+    let stated: Vec<_> = produced
+        .workouts
+        .iter()
+        .filter_map(domain::gym::GymWorkout::duration)
+        .collect();
+    assert_eq!(
+        stated.len(),
+        produced.workouts.len(),
+        "Hevy states an end_time on every workout it serves"
+    );
+
+    let total: u64 = stated.iter().map(|ran| ran.as_seconds()).sum();
+    assert_eq!(total, 476_129, "the corpus' workouts ran this long in all");
+
+    let shortest = stated.iter().map(|ran| ran.as_seconds()).min();
+    let longest = stated.iter().map(|ran| ran.as_seconds()).max();
+    assert_eq!(shortest, Some(307), "the shortest workout landed");
+    assert_eq!(longest, Some(6_177), "the longest");
+}
+
+/// A session's duration covers the gaps between its parts, because they were
+/// spent in the gym.
+///
+/// **Not the sum of the parts**, and the corpus makes the difference visible on
+/// all 21 of its multi-part days. 2025-10-10 is the extreme: four Hevy records
+/// spanning 3,703 seconds of which only 2,909 are inside a record, so 794
+/// seconds were spent between routines. A session reported as 2,909 seconds
+/// would be one nobody trained.
+#[test]
+fn a_sessions_duration_spans_its_parts_and_the_gaps_between_them() {
+    let produced = derived!();
+
+    let mut multi = 0;
+    for session in &produced.sessions {
+        let Some(duration) = session.duration() else {
+            panic!("every corpus session states a duration");
+        };
+        let parts: u64 = session
+            .workouts()
+            .iter()
+            .filter_map(domain::gym::GymWorkout::duration)
+            .map(domain::measure::PositiveDuration::as_seconds)
+            .sum();
+        assert!(
+            duration.as_seconds() >= parts,
+            "a session is at least as long as its parts: {duration} against {parts}s"
+        );
+        if session.part_count() > 1 {
+            multi += 1;
+            assert!(
+                duration.as_seconds() > parts,
+                "a split session spent time between its routines: {duration} against {parts}s"
+            );
+        }
+    }
+    assert_eq!(
+        multi, 21,
+        "days the operator logged against several routines"
+    );
+
+    // The four-part session, by its figures rather than by its date: the only
+    // one of the 136 that spans this long with this little inside a record.
+    let four = produced
+        .sessions
+        .iter()
+        .filter(|session| session.part_count() == 4)
+        .filter_map(domain::gym::PerformedGymSession::duration)
+        .map(domain::measure::PositiveDuration::as_seconds)
+        .max();
+    assert_eq!(four, Some(3_703), "2025-10-10, four routines in one visit");
+}

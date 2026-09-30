@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT w.id AS \"workout!: i64\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\"\n            FROM gym_workout AS w\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            ",
+  "query": "\n            SELECT w.id AS \"workout!: i64\",\n                   w.landing_record_id AS \"landed_as!: i64\",\n                   w.source_record_id AS \"source_record_id!: String\",\n                   w.started_at_utc AS \"on_utc!: String\", w.zone AS \"zone!: String\",\n                   w.endpoint AS \"endpoint!: String\", w.event_kind AS \"event_kind!: String\",\n                   w.event_time AS \"event_time: String\",\n                   w.performed_against AS \"performed_against: String\",\n                   w.duration_seconds AS \"duration_seconds: i64\"\n            FROM gym_workout AS w\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,17 @@
             "name": "performed_against"
           }
         }
+      },
+      {
+        "name": "duration_seconds: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "duration_seconds"
+          }
+        }
       }
     ],
     "parameters": {
@@ -115,8 +126,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "e2466ae8cce41960c32b1ad41c0df773b5bed05df9e6819a8a9f9532d13b8954"
+  "hash": "4dda8fc8567db66f087a83c3440171bfcb56ebd8f93beeea9dbf8ac38e881a4f"
 }

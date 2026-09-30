@@ -288,13 +288,25 @@ async fn write_workout(
         .performed_against()
         .map(application::DeliveryReference::as_str);
 
+    // How long the source said it ran. `None` for a source that states no
+    // clock, which is every sheet-logged and Beyond The White Board workout.
+    let duration = workout
+        .duration()
+        .map(|duration| {
+            i64::try_from(duration.as_seconds()).map_err(|_| StoreError::Corrupt {
+                detail: "a duration larger than the store can hold".to_owned(),
+            })
+        })
+        .transpose()?;
+
     let row = sqlx::query!(
         r#"
         INSERT INTO gym_workout (
             stream, landing_record_id, source_record_id, started_at_utc, zone,
-            endpoint, event_kind, event_time, run_id, performed_against, session
+            endpoint, event_kind, event_time, run_id, performed_against, session,
+            duration_seconds
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id AS "id!: i64"
         "#,
         stream,
@@ -307,7 +319,8 @@ async fn write_workout(
         event_time,
         run_id,
         performed_against,
-        session
+        session,
+        duration
     )
     .fetch_one(&mut **tx)
     .await

@@ -44,7 +44,7 @@ use domain::{
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     landing::{Endpoint, EventKind, EventProvenance, EventTime, LandingRecordId, Provenance},
-    measure::{Distance, Duration, Metres, RepCount},
+    measure::{Distance, Duration, Metres, PositiveDuration, RepCount},
     normalised::{OperatorZone, StartedAt},
     plan::PlanName,
     schedule::{Relative, SessionRole},
@@ -592,6 +592,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                    w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
                    w.event_time AS "event_time: String",
                    w.performed_against AS "performed_against: String",
+                   w.duration_seconds AS "duration_seconds: i64",
                    first.started_at_utc AS "session_started_at!: String",
                    first.zone AS "session_zone!: String"
             FROM gym_session AS s
@@ -637,6 +638,7 @@ impl PerformedWorkoutReader for SqlitePerformedWorkoutReader {
                     event_kind: row.event_kind,
                     event_time: row.event_time,
                     performed_against: row.performed_against,
+                    duration_seconds: row.duration_seconds,
                 })
                 .await?,
             );
@@ -729,7 +731,8 @@ impl SqlitePerformedWorkoutReader {
                    w.started_at_utc AS "on_utc!: String", w.zone AS "zone!: String",
                    w.endpoint AS "endpoint!: String", w.event_kind AS "event_kind!: String",
                    w.event_time AS "event_time: String",
-                   w.performed_against AS "performed_against: String"
+                   w.performed_against AS "performed_against: String",
+                   w.duration_seconds AS "duration_seconds: i64"
             FROM gym_workout AS w
             WHERE w.session = ?
             ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
@@ -753,6 +756,7 @@ impl SqlitePerformedWorkoutReader {
                     event_kind: row.event_kind,
                     event_time: row.event_time,
                     performed_against: row.performed_against,
+                    duration_seconds: row.duration_seconds,
                 })
                 .await?,
             );
@@ -793,9 +797,26 @@ impl SqlitePerformedWorkoutReader {
                 detail: error.to_string(),
             })?;
 
+        // A row the store cannot read back as a positive duration is corrupt
+        // rather than absent: the `CHECK` on the column forbids anything else,
+        // so a value here that will not convert means the row was not written by
+        // this code.
+        let duration = row
+            .duration_seconds
+            .map(|seconds| {
+                u64::try_from(seconds)
+                    .ok()
+                    .and_then(|seconds| PositiveDuration::from_seconds(seconds).ok())
+                    .ok_or_else(|| StoreError::Corrupt {
+                        detail: format!("{seconds} is not a duration a workout can have"),
+                    })
+            })
+            .transpose()?;
+
         Ok(GymWorkout::new(
             items,
             started_at,
+            duration,
             provenance,
             source_record_id,
             landed_as,
@@ -816,6 +837,9 @@ struct WorkoutRow {
     event_kind: String,
     event_time: Option<String>,
     performed_against: Option<String>,
+    /// How long the source said the workout ran. `NULL` for a source that
+    /// states no clock at all, which is the sheets and Beyond The White Board.
+    duration_seconds: Option<i64>,
 }
 
 impl SqlitePerformedWorkoutReader {
