@@ -466,10 +466,36 @@ impl Derivation {
     /// # Errors
     ///
     /// [`NormalisationError`] if the derivation failed.
+    /// Derive with the operator's corrections in force.
+    ///
+    /// What the edit overlay needs: the same raw, derived twice, differing only
+    /// in what the operator has asserted. § II.2's rebuild property is exactly
+    /// that comparison.
+    ///
+    /// # Errors
+    ///
+    /// [`NormalisationError`] if the derivation failed.
+    pub async fn run_correcting(
+        &self,
+        overlay: domain::normalised::EditOverlay,
+    ) -> Result<Produced, NormalisationError> {
+        self.derive(self.zone.clone(), false, overlay).await
+    }
+
     pub async fn run_in(
         &self,
         zone: OperatorZone,
         reversed: bool,
+    ) -> Result<Produced, NormalisationError> {
+        self.derive(zone, reversed, domain::normalised::EditOverlay::default())
+            .await
+    }
+
+    async fn derive(
+        &self,
+        zone: OperatorZone,
+        reversed: bool,
+        overlay: domain::normalised::EditOverlay,
     ) -> Result<Produced, NormalisationError> {
         let raw = {
             let raw = InMemoryRaw::new(self.stream.clone(), self.records.clone());
@@ -481,7 +507,7 @@ impl Derivation {
         let normalisation = application::normalise::Normalisation::new(
             application::normalise::NormalisationPorts {
                 raw,
-                translator: infrastructure::hevy::HevySessionTranslator,
+                translator: infrastructure::hevy::HevySessionTranslator::correcting(overlay),
                 workouts: sessions.clone(),
                 refusals: refusals.clone(),
                 runs: InMemoryRunLog::default(),

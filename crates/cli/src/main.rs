@@ -8,6 +8,7 @@
 mod catalogue;
 mod committing;
 mod config;
+mod corrections;
 mod cycling;
 mod gym;
 mod holidays;
@@ -252,8 +253,68 @@ fn discipline_command() -> ClapCommand {
             )
             .arg(timezone_argument()),
     );
+    command = command.subcommand(corrections_command());
 
     command
+}
+
+/// `fitness gym corrections` — the edit overlay (§ II.2).
+///
+/// Under the discipline rather than at the top level, because a discipline names
+/// the one source its record comes from and a correction is a correction to that
+/// source. A second discipline is an arm, not a second command.
+fn corrections_command() -> ClapCommand {
+    ClapCommand::new("corrections")
+        .about("What the operator says a source recorded under the wrong exercise")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(
+            ClapCommand::new("add")
+                .about("Assert that what a source named was another exercise")
+                .arg(timezone_argument())
+                .arg(
+                    Arg::new("was")
+                        .long("was")
+                        .value_name("exercise")
+                        .required(true)
+                        .help("The exercise those records read as now, as a vocabulary key"),
+                )
+                .arg(
+                    Arg::new("actually")
+                        .long("actually")
+                        .value_name("exercise")
+                        .required(true)
+                        .help("The exercise they were, as a vocabulary key"),
+                )
+                .arg(
+                    Arg::new("because")
+                        .long("because")
+                        .value_name("reason")
+                        .required(true)
+                        .help("Why, so the correction is readable in six months"),
+                )
+                .arg(
+                    Arg::new("from").long("from").value_name("date").help(
+                        "The first day it reaches, as YYYY-MM-DD. Defaults to the first record",
+                    ),
+                )
+                .arg(
+                    Arg::new("until").long("until").value_name("date").help(
+                        "The last day it reaches, as YYYY-MM-DD. Defaults to the last record",
+                    ),
+                ),
+        )
+        .subcommand(ClapCommand::new("show").about("Every correction in force, with its reason"))
+        .subcommand(
+            ClapCommand::new("remove")
+                .about("Retract one assertion, so the source's own word stands again")
+                .arg(
+                    Arg::new("correction")
+                        .value_name("number")
+                        .required(true)
+                        .help("The number `show` prints"),
+                ),
+        )
 }
 
 /// `fitness cycling next`.
@@ -649,6 +710,10 @@ impl From<WiringError> for Failure {
             | WiringError::Stream(_)
             | WiringError::WrongCredential { .. }
             | WiringError::NotAFolder { .. } => Self::message(error.to_string(), exit::STORE),
+            // A correction naming a key the vocabulary no longer holds is the
+            // same kind of thing: a rename that missed a column, not something
+            // the operator typed.
+            WiringError::Overlay(error) => Self::message(error.to_string(), exit::STORE),
             // Not a mistake in this build: the stream really does land, and
             // asking it to derive is something the operator can stop doing.
         }
@@ -964,6 +1029,9 @@ async fn discipline_command_run(
         )?;
         return gym::strength(discipline, database, &zone, credentials).await;
     }
+    if let Some(("corrections", corrections)) = sub.subcommand() {
+        return corrections_run(corrections, stated_timezone, database).await;
+    }
     let Some(("next", next)) = sub.subcommand() else {
         return Err(Failure::message(
             format!("no {name} command given"),
@@ -990,6 +1058,51 @@ async fn discipline_command_run(
         credentials,
     )
     .await
+}
+
+/// `gym corrections`, once its arguments are in hand.
+async fn corrections_run(
+    sub: &ArgMatches,
+    stated_timezone: Option<&str>,
+    database: &Path,
+) -> Result<(), Failure> {
+    match sub.subcommand() {
+        Some(("add", add)) => {
+            let zone = config::timezone(
+                add.get_one::<String>("timezone").map(String::as_str),
+                stated_timezone,
+            )?;
+            let text = |name: &str| -> Result<&str, Failure> {
+                add.get_one::<String>(name)
+                    .map(String::as_str)
+                    .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))
+            };
+            corrections::add(
+                database,
+                &zone,
+                &corrections::Assertion {
+                    was: text("was")?,
+                    actually: text("actually")?,
+                    because: text("because")?,
+                    from: add.get_one::<String>("from").map(String::as_str),
+                    until: add.get_one::<String>("until").map(String::as_str),
+                },
+            )
+            .await
+        }
+        Some(("show", _)) => corrections::show(database).await,
+        Some(("remove", remove)) => {
+            let id = remove
+                .get_one::<String>("correction")
+                .map(String::as_str)
+                .ok_or_else(|| Failure::message("no correction number given", exit::USAGE))?;
+            corrections::remove(database, id).await
+        }
+        _ => Err(Failure::message(
+            "no corrections command given",
+            exit::USAGE,
+        )),
+    }
 }
 
 /// `plan`, once its arguments are in hand.

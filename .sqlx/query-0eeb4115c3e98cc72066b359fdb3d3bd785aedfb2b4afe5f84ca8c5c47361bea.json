@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO exercise_correction (stream, exercise, asserted_at, reason)\n            VALUES (?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0eeb4115c3e98cc72066b359fdb3d3bd785aedfb2b4afe5f84ca8c5c47361bea"
+}

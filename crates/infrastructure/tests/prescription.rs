@@ -53,7 +53,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     let normalisation = Normalisation::new(
         NormalisationPorts {
             raw: HevySessionAccountReader::new(pool.clone())?,
-            translator: HevySessionTranslator,
+            translator: HevySessionTranslator::default(),
             workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),

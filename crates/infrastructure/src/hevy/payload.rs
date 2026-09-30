@@ -73,9 +73,9 @@ pub struct Workout<'a> {
 #[derive(Debug, Deserialize)]
 pub struct ExerciseEntry<'a> {
     /// Positional, and the only identity below the workout that Hevy publishes.
-    /// It moves under insertion or reordering, which is why an overlay anchored
-    /// here is an open question — but for naming the place a refusal happened
-    /// it is exactly what an operator sees in the app.
+    /// It moves under insertion or reordering, which is why the edit overlay
+    /// anchors on `exercise_template_id` and not on this — but for naming the
+    /// place a refusal happened it is exactly what an operator sees in the app.
     pub index: u32,
     pub exercise_template_id: String,
     /// Not stable, and never used to key anything. `Overhead Squat` has two

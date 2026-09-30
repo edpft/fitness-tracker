@@ -84,7 +84,7 @@
 //! offered instead. Both now exist and both stay distinct — `Pull Up
 //! (Assisted)` is an assisted pull-up however many neutral-grip pull-ups were
 //! recorded under it. Correcting those workouts is the edit overlay's job, not
-//! this table's.
+//! this table's, and `fitness gym corrections add` is where it is done.
 //!
 //! Three are builtin templates he has simply never used, mapped because the
 //! autumn block's slots name the movements: a barbell bench press, a barbell
@@ -100,7 +100,8 @@
 //! `Stretching` because those are the templates he picked as the nearest thing
 //! Hevy offered. Reading them as the movement he meant would be this table
 //! asserting something the source never said; the substitution is a correction
-//! to those workouts, and belongs in the edit overlay rather than here.
+//! to those workouts, and belongs in the edit overlay rather than here —
+//! `fitness gym corrections add --was pull-up --actually neutral-grip-pull-up`.
 //!
 //! **Where our category and the source's differ, ours wins.** One entry:
 //! `Sled Push`, which Hevy calls distance-and-duration and which records thirty

@@ -29,8 +29,8 @@ pub use garmin::{
     GarminAuth, GarminCredentials, GarminGymTranslator, GarminHrv, GarminHrvTranslator,
 };
 pub use hevy::{
-    HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyWorkoutEvents, PageCount,
-    PageNumber, RetryPolicy,
+    HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyStandIns, HevyWorkoutEvents,
+    PageCount, PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
@@ -42,17 +42,18 @@ pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
-    HevyWorkoutLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    HevyWorkoutLandingStore, OverlayError, PelotonRawExtent, PelotonRideLandingStore,
     PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
     SpreadsheetFileLandingStore, SqliteBtwbStore, SqliteCyclingDeliveryStore,
     SqliteCyclingMesocycleStore, SqliteCyclingSessionLog, SqliteCyclingSessionStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
-    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqliteOperatorSettingsStore,
-    SqliteOvernightHrvStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
-    SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory,
-    SqliteWeighInStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog,
+    SqliteOperatorSettingsStore, SqliteOvernightHrvStore, SqlitePerformedWorkoutReader,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteRefusalStore, SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore,
+    SqliteWeighInHistory, SqliteWeighInStore, WithingsMeasurementLandingStore,
+    WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

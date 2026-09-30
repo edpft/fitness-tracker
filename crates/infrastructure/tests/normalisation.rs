@@ -122,7 +122,8 @@ fn every_landed_template_resolves() {
 /// pull-up and not a neutral-grip one, however many neutral-grip pull-ups were
 /// recorded under it. Reading a template as the movement he *meant* would make
 /// the adapter assert something the source never said, and would silently
-/// rewrite the record; correcting those workouts is the edit overlay's job.
+/// rewrite the record; correcting those workouts is the edit overlay's job, and
+/// `tests/edit_overlay.rs` is where that is demonstrated.
 ///
 /// Asserted rather than reviewed, because the table is long and the mistake it
 /// catches is a one-line edit that looks like a rename.

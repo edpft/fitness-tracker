@@ -11,6 +11,7 @@ pub mod btwb_normalised;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
+pub mod edit_overlay;
 pub mod garmin_activity_file_landing;
 pub mod garmin_activity_landing;
 pub mod garmin_exercise_set_landing;
@@ -52,6 +53,7 @@ pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
+pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;
 pub use garmin_activity_landing::GarminActivityLandingStore;
 pub use garmin_exercise_set_landing::GarminExerciseSetLandingStore;
@@ -88,7 +90,7 @@ pub use withings_normalised::{SqliteWeighInStore, WithingsWeighInAccountReader};
 ///
 /// This is the boundary: no `sqlx::Error` and no SQLite result code exists
 /// above this function.
-fn store_error(error: &sqlx::Error) -> StoreError {
+pub(crate) fn store_error(error: &sqlx::Error) -> StoreError {
     match error {
         // A row that will not decode is not a transient fault — something is in
         // the file that this program did not put there, or could not have.

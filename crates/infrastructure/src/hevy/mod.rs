@@ -15,7 +15,8 @@ pub mod payload;
 pub mod retry;
 pub mod routine;
 pub mod sessions;
-pub mod translate;
+pub mod standins;
+mod translate;
 pub mod writable;
 
 pub use account::{SessionAccount, supersede};
@@ -26,5 +27,6 @@ pub use page::parse_page;
 pub use paging::{PageCount, PageNumber};
 pub use retry::RetryPolicy;
 pub use sessions::group;
+pub use standins::{HevyStandIns, StandIn};
 pub use translate::HevySessionTranslator;
 pub use writable::{Unwritable, Writable, WrittenLoad, write_load};
