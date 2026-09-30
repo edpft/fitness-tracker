@@ -34,11 +34,12 @@ use infrastructure::{
     PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
     PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
-    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore,
-    SqliteRefusalStore, SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore,
-    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
-    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
+    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog,
+    SqliteOvernightHrvStore, SqliteRefusalStore, SqliteResumptionPointStore,
+    SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
+    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
+    WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -123,6 +124,8 @@ pub enum WiringError {
     Stream(#[from] domain::landing::InvalidStream),
     #[error("{stream} is collected from its source, not a folder")]
     NotAFolder { stream: &'static str },
+    #[error(transparent)]
+    Overlay(#[from] infrastructure::OverlayError),
 }
 
 /// Carry out `command` against `known`, with whatever adapters that stream
@@ -753,10 +756,20 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             // No lock. A derivation reads raw and writes only its own tables,
             // so it neither takes the extraction lock nor advances the
             // resumption point — the two commands can run at once.
+            // The overlay is read here, as the zone is, and handed to the
+            // translator already resolved: § II.2 applies a correction while
+            // the layer is rebuilt, and this is that moment. A store that
+            // holds none yields an empty overlay and the derivation is the
+            // one it always was.
+            let overlay =
+                SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
+                    .overlay()
+                    .await?;
+
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: HevySessionAccountReader::new(pool.clone())?,
-                    translator: HevySessionTranslator,
+                    translator: HevySessionTranslator::correcting(overlay),
                     workouts: SqliteGymSessionStore::new(pool.clone())?,
                     refusals: SqliteRefusalStore::new(
                         pool.clone(),

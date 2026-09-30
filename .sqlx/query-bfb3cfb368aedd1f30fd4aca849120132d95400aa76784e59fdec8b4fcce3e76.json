@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT c.id          AS \"id!: i64\",\n                   c.exercise    AS \"exercise!: String\",\n                   c.asserted_at AS \"asserted_at!: String\",\n                   c.reason      AS \"reason!: String\",\n                   t.source_record_id AS \"source_record_id!: String\",\n                   t.term             AS \"term!: String\"\n            FROM exercise_correction c\n            JOIN exercise_correction_term t ON t.correction = c.id\n            WHERE c.stream = ?\n            ORDER BY c.asserted_at, c.id, t.source_record_id, t.term\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "asserted_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction",
+            "name": "asserted_at"
+          }
+        }
+      },
+      {
+        "name": "reason!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction_term",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "term!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exercise_correction_term",
+            "name": "term"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bfb3cfb368aedd1f30fd4aca849120132d95400aa76784e59fdec8b4fcce3e76"
+}

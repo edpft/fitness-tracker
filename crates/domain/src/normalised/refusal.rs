@@ -63,7 +63,7 @@ impl fmt::Display for RefusalLocus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RefusalKind {
     /// The event is genuine and the recording is wrong. Fix it at source, or in
-    /// the edit overlay when there is one.
+    /// the edit overlay.
     WrongData,
     /// The domain has declined to model this, knowingly. Nothing to fix.
     DeclaredLimitation,

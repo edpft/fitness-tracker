@@ -13,11 +13,15 @@
 //! belong to; this is the vocabulary they are derived with.
 
 pub mod entity;
+pub mod overlay;
 pub mod refusal;
 pub mod run;
 pub mod time;
 
 pub use entity::NormalisedEntity;
+pub use overlay::{
+    CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, SourceTerm,
+};
 pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
 pub use run::{
     NormalisationFailure, NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount,

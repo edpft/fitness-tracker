@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id               AS \"id!: i64\",\n                   source_record_id AS \"source_record_id!: String\",\n                   event_kind       AS \"event_kind!: String\",\n                   payload          AS \"payload!: Vec<u8>\"\n            FROM hevy_workout_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "event_kind!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "event_kind"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "187d34a8fa9f41f874395e9086adaf7c2eea11e69d3dc524c4f43ee3df9de882"
+}

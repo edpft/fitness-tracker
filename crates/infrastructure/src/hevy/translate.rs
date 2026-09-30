@@ -7,9 +7,14 @@
 //! entity from the answer.
 //!
 //! Deterministic and total: the record's values plus the mapping plus the
-//! declared zone resolve the entity with no further input. There is no clock,
-//! no request and no overlay in reach, which is what § 9 means and is why this
-//! takes `&self` and returns without awaiting anything.
+//! declared zone plus the edit overlay resolve the entity with no further
+//! input. There is no clock and no request in reach, which is what § 9 means
+//! and is why this takes `&self` and returns without awaiting anything.
+//!
+//! **The overlay arrives at construction, already read.** It is data, not a
+//! lookup this performs, so translation stays the pure function § 9 requires
+//! while § II.3 gets its third input. A translator built without one corrects
+//! nothing, which is the ordinary case.
 //!
 //! **What cannot be expressed is rejected, never coerced.** The grammatical
 //! part of a record translates, the ungrammatical part does not, and
@@ -28,7 +33,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord},
     measure::{Distance, Duration, Kg, Metres, RepCount},
-    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{EditOverlay, OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
 };
@@ -46,12 +51,26 @@ use super::{
 
 /// The Hevy adapter's translator.
 ///
-/// Stateless. It holds no connection, no cache and no configuration — the zone
-/// arrives per call, so the same translator answers for any declared
-/// configuration and a test can pin both sides of a switchover without building
-/// two of them.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct HevySessionTranslator;
+/// It holds no connection and no cache — the zone still arrives per call, so
+/// the same translator answers for any declared configuration and a test can
+/// pin both sides of a switchover without building two of them.
+///
+/// What it does hold is the edit overlay, because a correction is per
+/// observation and cannot be resolved without the operator's assertions in
+/// hand. [`Default`] is the empty overlay: a stream nobody has corrected reads
+/// exactly as it did before there was one.
+#[derive(Debug, Clone, Default)]
+pub struct HevySessionTranslator {
+    overlay: EditOverlay,
+}
+
+impl HevySessionTranslator {
+    /// Translation with the operator's corrections in hand.
+    #[must_use]
+    pub const fn correcting(overlay: EditOverlay) -> Self {
+        Self { overlay }
+    }
+}
 
 impl Translator for HevySessionTranslator {
     type Account = SessionAccount;
@@ -112,7 +131,7 @@ impl Translator for HevySessionTranslator {
 
         for record in account.workouts().iter() {
             let mut scribe = Scribe::new(record);
-            match Self::workout(record, zone, &mut scribe)? {
+            match Self::workout(record, zone, &self.overlay, &mut scribe)? {
                 Some(workout) => workouts.push(workout),
                 None => refused = true,
             }
@@ -148,6 +167,7 @@ impl HevySessionTranslator {
     fn workout(
         record: &LandedRecord,
         zone: &OperatorZone,
+        overlay: &EditOverlay,
         scribe: &mut Scribe,
     ) -> Result<Option<GymWorkout>, NormalisationError> {
         let envelope = match WorkoutEnvelope::read(record.payload().as_bytes()) {
@@ -183,7 +203,7 @@ impl HevySessionTranslator {
             return Ok(None);
         };
 
-        let items = Self::items(&workout.exercises, scribe, record)?;
+        let items = Self::items(&workout.exercises, overlay, scribe, record)?;
         let Ok(items) = NonEmpty::new(items) else {
             // A workout whose every entry refused. The entry-level reasons are
             // already on the scribe; this only covers a record with no entries
@@ -215,6 +235,7 @@ impl HevySessionTranslator {
     /// The workout's ordered items, with groupings resolved.
     fn items(
         entries: &[ExerciseEntry<'_>],
+        overlay: &EditOverlay,
         scribe: &mut Scribe,
         record: &LandedRecord,
     ) -> Result<Vec<WorkoutItem>, NormalisationError> {
@@ -225,7 +246,7 @@ impl HevySessionTranslator {
         let mut pending_group: Option<u32> = None;
 
         for entry in entries {
-            let Some(exercise) = Self::entry(entry, scribe, record)? else {
+            let Some(exercise) = Self::entry(entry, overlay, scribe, record)? else {
                 // A refused entry ends any run it was part of, because the
                 // members either side of it are no longer back to back.
                 flush(&mut items, &mut pending, &mut pending_group);
@@ -253,6 +274,7 @@ impl HevySessionTranslator {
     /// One exercise entry with its sets, or nothing if none of them survived.
     fn entry(
         entry: &ExerciseEntry<'_>,
+        overlay: &EditOverlay,
         scribe: &mut Scribe,
         record: &LandedRecord,
     ) -> Result<Option<PerformedExercise>, NormalisationError> {
@@ -265,6 +287,21 @@ impl HevySessionTranslator {
                 source_record_id: record.source_record_id().as_str().to_owned(),
             });
         };
+
+        // **The correction replaces the movement and nothing else.** The load
+        // reading stays the template's, because the number was typed into the
+        // template: 139 of the corrected pull-up sets are under Hevy's assisted
+        // template, which records weight taken off, and carrying the corrected
+        // exercise's own convention across would read 42kg of assistance as
+        // 42kg of added weight. § 8 says the same thing from the other end —
+        // assistance is a load axis of a pull-up, not a different exercise — so
+        // correcting the grip leaves the axis alone.
+        let mapped = overlay
+            .exercise_for(record.source_record_id(), &entry.exercise_template_id)
+            .map_or(mapped, |exercise| Mapped {
+                exercise,
+                load: mapped.load,
+            });
 
         if entry.sets.is_empty() {
             scribe.note_for(
