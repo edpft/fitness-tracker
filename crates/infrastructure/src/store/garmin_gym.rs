@@ -1,12 +1,14 @@
 //! The normalised layer for the gym sessions `garmin.activities` derives
-//! (#172), and the reader that hands the translator each activity with its
-//! sets.
+//! (#172), and the reader that hands the translator each activity with its sets
+//! and the recording the watch wrote.
 //!
 //! The sessions go in the source-independent gym tables beside Hevy's, the
 //! spreadsheets' and Beyond The White Board's, told apart by `stream`, and only
-//! this stream's rows are replaced. What a watch adds to them is two tables of
-//! its own: `measured_gym_session` for the session's duration, its heart-rate
-//! summary and the record its sets came from, and `measured_set` for the sets.
+//! this stream's rows are replaced. What a watch adds to them is three tables of
+//! its own: `measured_gym_session` for the session's duration, the heart-rate
+//! summary the list states and the records its companions came from,
+//! `measured_gym_session_heart_rate` for the readings its recording holds, and
+//! `measured_set` for the sets.
 //!
 //! **Its own set table rather than the shared one.** A `performed_set` hangs
 //! off a `performed_exercise`, and a watch files sets under no exercise at all —
@@ -14,20 +16,21 @@
 //! the shared table's exercise nullable would put a hole in every source's rows
 //! to hold one source's shape.
 //!
-//! **Reading two landing tables is not one stream reaching into another**, for
+//! **Reading three landing tables is not one stream reaching into another**, for
 //! the reason [`super::peloton_normalised`] gives: the extraction adapters stay
-//! apart, and a derivation reads raw, of which both of these are Garmin's.
+//! apart, and a derivation reads raw, of which all three of these are Garmin's.
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
     gym::{
-        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet,
+        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
         exercise::{Description, Implement, Movement, RepsExercise},
     },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, Provenance, RawPayload, SourceRecordId,
     },
+    measure::HeartRateSeries,
     normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -35,12 +38,13 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use crate::garmin::{ActivityAccount, account::activities};
 
 use super::{
-    GarminActivityLandingStore, GarminExerciseSetLandingStore, corrupt, count_for_storage,
-    count_from_storage, normalisation_run_for_storage, normalised::clear_stream, store_error,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
+    corrupt, count_for_storage, count_from_storage, normalisation_run_for_storage,
+    normalised::clear_stream, store_error,
 };
 
-/// Raw, read-only, for Garmin's gym sessions: every activity, each with the
-/// sets that landed for it.
+/// Raw, read-only, for Garmin's gym sessions: every activity, each with the sets
+/// and the recording that landed for it.
 #[derive(Debug, Clone)]
 pub struct GarminGymAccountReader {
     pool: SqlitePool,
@@ -103,7 +107,7 @@ impl Row {
 }
 
 impl AccountReader for GarminGymAccountReader {
-    /// One activity and its sets.
+    /// One activity, its sets and its recording.
     type Account = ActivityAccount;
 
     fn stream(&self) -> &LandingStream {
@@ -147,6 +151,9 @@ impl AccountReader for GarminGymAccountReader {
             );
         }
 
+        let file_stream = LandingStream::try_from(GarminActivityFileLandingStore::STREAM)
+            .map_err(|error| corrupt(&error))?;
+
         let set_rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -180,7 +187,40 @@ impl AccountReader for GarminGymAccountReader {
             );
         }
 
-        Ok(activities(landed, sets))
+        let file_rows = sqlx::query!(
+            r#"
+            SELECT id AS "id!: i64",
+                   endpoint AS "endpoint!: String",
+                   fetched_at AS "fetched_at!: String",
+                   source_record_id AS "source_record_id!: String",
+                   event_kind AS "event_kind!: String",
+                   event_time AS "event_time: String",
+                   payload AS "payload!: Vec<u8>"
+            FROM garmin_activity_file_landing
+            ORDER BY id ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut recordings = Vec::with_capacity(file_rows.len());
+        for row in file_rows {
+            recordings.push(
+                Row {
+                    id: row.id,
+                    endpoint: row.endpoint,
+                    fetched_at: row.fetched_at,
+                    source_record_id: row.source_record_id,
+                    event_kind: row.event_kind,
+                    event_time: row.event_time,
+                    payload: row.payload,
+                }
+                .into_record(&file_stream)?,
+            );
+        }
+
+        Ok(activities(landed, sets, recordings))
     }
 }
 
@@ -257,7 +297,8 @@ async fn write_session(
     stream: &str,
     session: &MeasuredGymSession,
 ) -> Result<(), StoreError> {
-    let landed_as = session.landed_as().as_i64();
+    let composed = session.landed_as();
+    let landed_as = composed.activity.as_i64();
 
     let row = sqlx::query!(
         r#"
@@ -308,26 +349,34 @@ async fn write_session(
             detail: "a duration larger than the store can hold".to_owned(),
         })?;
     let heart_rate = session.recorded().heart_rate();
-    let average = heart_rate.map(|summary| i64::from(summary.average().as_u32()));
-    let highest = heart_rate.map(|summary| i64::from(summary.highest().as_u32()));
-    let sets_landed_as = session.sets_landed_as().map(LandingRecordId::as_i64);
+    let stated = heart_rate.map(MeasuredHeartRate::stated);
+    let average = stated.map(|summary| i64::from(summary.average().as_u32()));
+    let highest = stated.map(|summary| i64::from(summary.highest().as_u32()));
+    let sets_landed_as = composed.sets.map(LandingRecordId::as_i64);
+    let recording_landed_as = composed.recording.map(LandingRecordId::as_i64);
 
     sqlx::query!(
         r#"
         INSERT INTO measured_gym_session (
-            workout, duration_seconds, average_bpm, highest_bpm, sets_landing_record_id
+            workout, duration_seconds, average_bpm, highest_bpm, sets_landing_record_id,
+            recording_landing_record_id
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         "#,
         workout,
         duration,
         average,
         highest,
-        sets_landed_as
+        sets_landed_as,
+        recording_landed_as
     )
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
+
+    if let Some(series) = heart_rate.and_then(MeasuredHeartRate::series) {
+        write_readings(tx, workout, series).await?;
+    }
 
     if let Some(sets) = session.recorded().sets() {
         for (position, set) in sets.iter().enumerate() {
@@ -335,6 +384,40 @@ async fn write_session(
         }
     }
 
+    Ok(())
+}
+
+/// The readings the watch wrote, one row each.
+///
+/// **A row per reading the watch wrote, and none for a second it did not.** The
+/// watch writes on its own judgement rather than on a clock — 2,785 readings
+/// across the 5,935 seconds of the operator's 2026-09-25 session — so the
+/// offsets are carried and the gaps stay gaps. Filling them would invent
+/// readings; numbering the rows instead of stating the offset would read a gap
+/// as continuous recording.
+async fn write_readings(
+    tx: &mut Transaction<'_, Sqlite>,
+    workout: i64,
+    series: &HeartRateSeries,
+) -> Result<(), StoreError> {
+    for reading in series.samples().iter() {
+        let at = i64::try_from(reading.at.as_seconds()).map_err(|_| StoreError::Corrupt {
+            detail: "a reading further into a session than the store can hold".to_owned(),
+        })?;
+        let beats = i64::from(reading.beats_per_minute.as_u32());
+        sqlx::query!(
+            r#"
+            INSERT INTO measured_gym_session_heart_rate (workout, at_seconds, beats_per_minute)
+            VALUES (?, ?, ?)
+            "#,
+            workout,
+            at,
+            beats
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
     Ok(())
 }
 
@@ -432,6 +515,14 @@ pub(super) async fn clear_measured(
     .await
     .map_err(|error| store_error(&error))?;
     sqlx::query!(
+        "DELETE FROM measured_gym_session_heart_rate \
+         WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
         "DELETE FROM measured_gym_session WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",
         stream
     )
@@ -487,24 +578,31 @@ pub fn guessed_from_row(
     }
 }
 
-/// How much raw the gym derivation reads: the activities and their sets.
+/// How much raw the gym derivation reads: the activities, their sets and their
+/// recordings.
 ///
-/// Both, for the reason [`super::peloton_normalised::PelotonRawExtent`] counts
-/// two tables: § 3.1 lets an entity compose the responses one source serves
-/// about one thing, and a standing that counted only the activities would
-/// report the layer up to date while a set walk was half done.
+/// All three, for the reason [`super::peloton_normalised::PelotonRawExtent`]
+/// counts two tables: § 3.1 lets an entity compose the responses one source
+/// serves about one thing, and a standing that counted only the activities would
+/// report the layer up to date while a companion walk was half done.
 #[derive(Debug, Clone)]
 pub struct GarminGymRawExtent {
     activities: GarminActivityLandingStore,
     sets: GarminExerciseSetLandingStore,
+    recordings: GarminActivityFileLandingStore,
 }
 
 impl GarminGymRawExtent {
     pub const fn new(
         activities: GarminActivityLandingStore,
         sets: GarminExerciseSetLandingStore,
+        recordings: GarminActivityFileLandingStore,
     ) -> Self {
-        Self { activities, sets }
+        Self {
+            activities,
+            sets,
+            recordings,
+        }
     }
 }
 
@@ -512,8 +610,12 @@ impl application::RawExtent for GarminGymRawExtent {
     async fn records(&self) -> Result<domain::landing::RecordCount, StoreError> {
         let activities = application::LandingStore::count(&self.activities).await?;
         let sets = application::LandingStore::count(&self.sets).await?;
+        let recordings = application::LandingStore::count(&self.recordings).await?;
         Ok(domain::landing::RecordCount::from(
-            activities.as_usize().saturating_add(sets.as_usize()),
+            activities
+                .as_usize()
+                .saturating_add(sets.as_usize())
+                .saturating_add(recordings.as_usize()),
         ))
     }
 }

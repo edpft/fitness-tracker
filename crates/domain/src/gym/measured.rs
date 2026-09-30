@@ -42,7 +42,7 @@ use std::fmt;
 
 use crate::{
     landing::{LandingRecordId, Provenance, SourceRecordId},
-    measure::{Duration, HeartRateSummary, RepCount},
+    measure::{Duration, HeartRateSeries, HeartRateSummary, RepCount},
     normalised::{NormalisedEntity, StartedAt},
     sequence::NonEmpty,
 };
@@ -213,6 +213,57 @@ impl fmt::Display for MeasuredSet {
     }
 }
 
+/// A session's heart rate as a watch has it: what it states, and the recording
+/// itself.
+///
+/// **Two accounts of one measurement, from two of the source's responses.** The
+/// activity list states an average and a highest; the samples they summarise are
+/// in the FIT file the third walk lands, at whatever resolution the watch chose
+/// to write them. The operator, 2026-09-18: *"heart rate for the canonical
+/// session needs per-second samples, not `averageHR`/`maxHR`"*.
+///
+/// **The summary is kept rather than recomputed from the series.** § II.3 forbids
+/// aggregating component observations and says nothing against keeping what a
+/// source states — the same call [`HeartRateSummary`] records for a ride's
+/// average power. A mean of these samples would be our arithmetic standing in
+/// for the watch's, and on an irregular series it is not even the same number.
+///
+/// **Stated is required and the series is not**, because that is the only
+/// combination the record holds: on the operator's corpus the 531 strength
+/// activities that state a summary are exactly the 531 whose file holds samples,
+/// and the 20 that state none hold no reading anywhere. [`None`] is then a
+/// recording that has not landed, or one the watch wrote without a strap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasuredHeartRate {
+    stated: HeartRateSummary,
+    series: Option<HeartRateSeries>,
+}
+
+impl MeasuredHeartRate {
+    pub const fn new(stated: HeartRateSummary, series: Option<HeartRateSeries>) -> Self {
+        Self { stated, series }
+    }
+
+    /// What the source says the session came to.
+    pub const fn stated(&self) -> HeartRateSummary {
+        self.stated
+    }
+
+    /// The readings themselves, where the recording landed and held any.
+    pub const fn series(&self) -> Option<&HeartRateSeries> {
+        self.series.as_ref()
+    }
+}
+
+impl fmt::Display for MeasuredHeartRate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.stated)?;
+        self.series
+            .as_ref()
+            .map_or(Ok(()), |series| write!(f, ", {series}"))
+    }
+}
+
 /// What a watch recorded of a session: its heart rate, its sets, or both.
 ///
 /// **A session with neither is not a session**, so there is no fourth variant
@@ -221,10 +272,10 @@ impl fmt::Display for MeasuredSet {
 /// asserts nothing, and refusing it is § 37 rather than a gap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recorded {
-    HeartRate(HeartRateSummary),
+    HeartRate(MeasuredHeartRate),
     Sets(NonEmpty<MeasuredSet>),
     Both {
-        heart_rate: HeartRateSummary,
+        heart_rate: MeasuredHeartRate,
         sets: NonEmpty<MeasuredSet>,
     },
 }
@@ -234,7 +285,7 @@ impl Recorded {
     /// recorded it and present where it did. The split is the point of the
     /// type: a caller after heart rate never has to know whether there were
     /// sets.
-    pub const fn heart_rate(&self) -> Option<&HeartRateSummary> {
+    pub const fn heart_rate(&self) -> Option<&MeasuredHeartRate> {
         match self {
             Self::HeartRate(heart_rate) | Self::Both { heart_rate, .. } => Some(heart_rate),
             Self::Sets(_) => None,
@@ -249,9 +300,31 @@ impl Recorded {
     }
 
     /// The two parts, where a caller wants both and neither is required.
-    pub const fn parts(&self) -> (Option<&HeartRateSummary>, Option<&NonEmpty<MeasuredSet>>) {
+    pub const fn parts(&self) -> (Option<&MeasuredHeartRate>, Option<&NonEmpty<MeasuredSet>>) {
         (self.heart_rate(), self.sets())
     }
+}
+
+/// The landing records one measured session is composed from.
+///
+/// **Three responses about one thing** (§ 3.1), and Garmin names all three by
+/// the same `activityId`: the activity list states the session's start, duration
+/// and heart-rate summary, a second endpoint serves its sets, and a third serves
+/// the file the watch wrote. None of the three is the other's, so a refusal or a
+/// rebuild can say which of them it is about.
+///
+/// **Two of them are optional and their absence is not a refusal.** 179 of the
+/// operator's gym activities carry no sets, and a recording that has not landed
+/// is a session whose samples are not here yet rather than a session with a hole
+/// in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComposedFrom {
+    /// The record the activity's own account came from.
+    pub activity: LandingRecordId,
+    /// The record its sets came from, where they came from one.
+    pub sets: Option<LandingRecordId>,
+    /// The record the watch's own recording came from, where it landed.
+    pub recording: Option<LandingRecordId>,
 }
 
 /// A gym session a watch recorded.
@@ -267,14 +340,7 @@ pub struct MeasuredGymSession {
     recorded: Recorded,
     provenance: Provenance,
     source_record_id: SourceRecordId,
-    landed_as: LandingRecordId,
-    /// The record the sets came from, where they came from one.
-    ///
-    /// **A second response about one thing** (§ 3.1): the activity list states
-    /// a session's start, duration and heart rate, and its sets are a second
-    /// endpoint fetched per activity. Neither response is the other's, so a
-    /// refusal or a rebuild can say which of the two it is about.
-    sets_landed_as: Option<LandingRecordId>,
+    landed_as: ComposedFrom,
 }
 
 impl MeasuredGymSession {
@@ -284,8 +350,7 @@ impl MeasuredGymSession {
         recorded: Recorded,
         provenance: Provenance,
         source_record_id: SourceRecordId,
-        landed_as: LandingRecordId,
-        sets_landed_as: Option<LandingRecordId>,
+        landed_as: ComposedFrom,
     ) -> Self {
         Self {
             started_at,
@@ -294,7 +359,6 @@ impl MeasuredGymSession {
             provenance,
             source_record_id,
             landed_as,
-            sets_landed_as,
         }
     }
 
@@ -319,12 +383,9 @@ impl MeasuredGymSession {
         &self.source_record_id
     }
 
-    pub const fn landed_as(&self) -> LandingRecordId {
+    /// The records this session was composed from.
+    pub const fn landed_as(&self) -> ComposedFrom {
         self.landed_as
-    }
-
-    pub const fn sets_landed_as(&self) -> Option<LandingRecordId> {
-        self.sets_landed_as
     }
 
     /// How many sets the watch recorded. Zero for a session it recorded only a
@@ -332,17 +393,25 @@ impl MeasuredGymSession {
     pub fn set_count(&self) -> usize {
         self.recorded.sets().map_or(0, NonEmpty::count)
     }
+
+    /// How many readings its recording holds. Zero where none landed.
+    pub fn reading_count(&self) -> usize {
+        self.recorded
+            .heart_rate()
+            .and_then(MeasuredHeartRate::series)
+            .map_or(0, |series| series.samples().count())
+    }
 }
 
 impl NormalisedEntity for MeasuredGymSession {
     /// The activity, once.
     ///
-    /// **Once although it composes two responses**, because Garmin names both
-    /// by the same identifier: an activity's sets are served under the
-    /// activity's own id, so the two landing records share a
-    /// [`SourceRecordId`] and returning it twice would say the entity stands on
-    /// two things the source could withdraw separately. It cannot: withdrawing
-    /// the activity withdraws its sets.
+    /// **Once although it composes three responses**, because Garmin names all
+    /// of them by the same identifier: an activity's sets and its file are both
+    /// served under the activity's own id, so the landing records share a
+    /// [`SourceRecordId`] and returning it three times would say the entity
+    /// stands on things the source could withdraw separately. It cannot:
+    /// withdrawing the activity withdraws its sets and its recording.
     fn composes(&self) -> Vec<&SourceRecordId> {
         vec![&self.source_record_id]
     }

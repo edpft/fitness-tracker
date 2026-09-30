@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO measured_gym_session_heart_rate (workout, at_seconds, beats_per_minute)\n            VALUES (?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "24b3ea495329b3368c66ee873eb349dab63c85a6618820ec687ce87f58bc557a"
+}

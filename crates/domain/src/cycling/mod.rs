@@ -37,10 +37,7 @@ pub use mesocycle::{
     SessionPosition,
 };
 pub use performed::PerformedSession;
-pub use ride::{
-    BikePlusRide, Cadence, ComposedFrom, HeartRateSample, HeartRateSeries, Resistance, RideRecord,
-    RideSample, Speed,
-};
+pub use ride::{BikePlusRide, Cadence, ComposedFrom, Resistance, RideRecord, RideSample, Speed};
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{
     Answer, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,

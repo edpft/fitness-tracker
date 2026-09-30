@@ -12,7 +12,9 @@
 mod heart;
 pub(crate) mod mass;
 
-pub use heart::{BeatsPerMinute, HeartRateSummary, HeartRateVariability};
+pub use heart::{
+    BeatsPerMinute, HeartRateSample, HeartRateSeries, HeartRateSummary, HeartRateVariability,
+};
 pub use mass::{InvalidMass, Kg};
 
 use std::{

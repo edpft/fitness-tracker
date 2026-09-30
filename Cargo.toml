@@ -88,6 +88,11 @@ rpassword = "7.5.4"
 # The historical spreadsheets (#273). Pure Rust, and lenient where openpyxl is
 # not: two of the operator's workbooks have stylesheets it refuses to parse.
 calamine = "0.36.1"
+# Garmin serves each activity's recording inside a zip, and § II.1 lands the
+# bytes as served — so reading one is normalisation's work and needs inflate.
+# Already in the tree under `calamine`, with the same feature: `deflate` is
+# read-side flate2 plus write-side zopfli, and nothing here writes an archive.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 # Test-only.
 proptest = "1.11.0"
