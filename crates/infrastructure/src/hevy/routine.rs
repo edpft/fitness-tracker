@@ -39,9 +39,7 @@ use application::{Deliverable, Unexpressed};
 use domain::{
     gym::{Exercise, Load, Rir},
     measure::{Kg, Spans},
-    prescription::{
-        Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, Target, WeekKind,
-    },
+    prescription::{Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, Target},
     schedule::Relative,
 };
 use serde::Serialize;
@@ -113,9 +111,13 @@ pub struct Rendered {
 
 /// **Zero-padded, and the role after it.** The number orders the folder and the
 /// role says what the session is; nothing else fits a phone's routine list at a
-/// glance. Two digits because a block is a dozen sessions, and a wider one still
-/// sorts correctly — it is the padding that makes 9 come before 10, not the
-/// width.
+/// glance. Two digits because a macrocycle is a few dozen sessions, and a wider
+/// one still sorts correctly — it is the padding that makes 9 come before 10,
+/// not the width.
+///
+/// **The folder is the macrocycle, so the number is the macrocycle's** (#312).
+/// It was the session's position in its *mesocycle* until 2026-09-30, which
+/// restarted partway down a folder and put two `01`s in the autumn's.
 ///
 /// **"Light" and "Heavy" are Hevy's words now, not the domain's.** A role is an
 /// intensity and a volume since 2026-09-20 (issue #63) and prints as both; a
@@ -132,21 +134,34 @@ fn title(session: &Deliverable) -> String {
 
 /// What the routine says about itself, for an operator looking at it later.
 ///
-/// The date it was issued for and where in the block it sits. Not the anchor and
-/// not the parameters: those are recorded on the prescription, which is the
-/// record, and repeating them here would put a second copy somewhere nothing
-/// keeps current.
+/// **The session's address in the hierarchy, and nothing else** (#312): which
+/// macrocycle, which mesocycle of it, which microcycle of that. The operator,
+/// 2026-09-30, on what it should read: *"no date, just macrocycle, mesocycle,
+/// microcycle"*. The date it was issued for went with the same change — Hevy
+/// stamps a routine with the day it was created and the folder is one
+/// macrocycle, so the note was spending a third of itself on the one fact the
+/// phone already had.
+///
+/// Not the anchor and not the parameters: those are recorded on the
+/// prescription, which is the record, and repeating them here would put a second
+/// copy somewhere nothing keeps current.
 fn notes(session: &Deliverable) -> String {
-    let week = match session.workout.week() {
-        WeekKind::Climbing(index) => format!("week {}", index.as_u32()),
-        WeekKind::Test => "test".to_owned(),
-        WeekKind::Holding => "holding".to_owned(),
-    };
+    // A holding week is no microcycle of this mesocycle, so it is named rather
+    // than numbered (#190). Read from the resolved address and not from the
+    // week's kind, so that what "no microcycle" means is decided in one place.
+    let microcycle = session.microcycle.map_or_else(
+        || "holding".to_owned(),
+        |index| format!("microcycle {}", index.as_u32()),
+    );
+    // **A re-run says so, and only when it is one** (#313). The operator asked
+    // for it because a second attempt at one microcycle otherwise reads as the
+    // same routine twice, a week apart, with nothing to say why.
+    let rerun = session
+        .rerun
+        .map_or_else(String::new, |rerun| format!(" (rerun {rerun})"));
     format!(
-        "{} · {} · {}",
-        session.workout.issued_for(),
-        week,
-        session.plan
+        "{} · mesocycle {} · {microcycle}{rerun}",
+        session.plan, session.mesocycle
     )
 }
 

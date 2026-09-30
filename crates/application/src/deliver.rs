@@ -74,21 +74,31 @@ where
             .await?
             .ok_or(DeliveryError::NothingIssued { date })?;
 
-        // The programme supplies what the prescription does not carry: its name,
-        // and which session of it this is. Both are facts about the calendar
-        // rather than about what was issued, which is why they are derived here
-        // and not stored on the prescription.
-        let (_, plan, programme) = self
+        // The plan supplies the session's address, which the prescription does
+        // not carry: the macrocycle's name, which mesocycle of it this is, and
+        // which microcycle of that. All three are facts about the plan rather
+        // than about what was issued, which is why they are derived here and not
+        // stored on the prescription.
+        let found = self
             .ports
             .programmes
             .on(date)
             .await?
             .ok_or(DeliveryError::NoMesocycle { date })?;
+        let microcycle = found.mesocycle.calendar().microcycle(workout.week());
+        let rerun = self.ports.programmes.rerun_on(date).await?;
 
-        let ordinal = programme
-            .calendar()
-            .ordinal(date)
-            .ok_or(DeliveryError::NoMesocycle { date })?;
+        // **And the number comes from the record, not from the calendar**
+        // (#312). A calendar is rebuilt from a start, a duration and its
+        // interruptions, so authoring an illness a week late renumbers sessions
+        // already on the operator's phone; the days the macrocycle has issued a
+        // prescription for only ever grow.
+        let ordinal = self
+            .ports
+            .prescriptions
+            .ordinal_in(&found.plan, date)
+            .await?
+            .ok_or(DeliveryError::NothingIssued { date })?;
 
         // **Asked before sent, and asked about the date rather than about this
         // prescription** (decision 0022). Without this, a second invocation
@@ -98,7 +108,10 @@ where
 
         let session = Deliverable {
             workout,
-            plan,
+            plan: found.plan,
+            mesocycle: found.ordinal,
+            microcycle,
+            rerun,
             ordinal,
         };
 

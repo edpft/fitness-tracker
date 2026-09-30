@@ -200,6 +200,46 @@ impl TryFrom<String> for PlanName {
 
 string_name!(PlanName, InvalidPlanName);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a plan numbers its mesocycles from one")]
+pub struct InvalidMesocycleOrdinal;
+
+/// Which mesocycle of its plan this is, counting from the first.
+///
+/// **The plan's number, not the store's identity.** [`PlanId`] and
+/// `MesocycleId` are surrogate keys and say nothing an operator reads; this is
+/// the number he means by "mesocycle 2" — the entry test is the first mesocycle
+/// of the autumn whatever row it landed in. The two are told apart by the type
+/// because they read identically in a store holding one plan, which is how
+/// `programme show` came to print a row id for two weeks (#314).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MesocycleOrdinal(u32);
+
+impl MesocycleOrdinal {
+    /// # Errors
+    ///
+    /// [`InvalidMesocycleOrdinal`] for a zero, which names no mesocycle.
+    pub const fn new(value: u32) -> Result<Self, InvalidMesocycleOrdinal> {
+        if value < 1 {
+            return Err(InvalidMesocycleOrdinal);
+        }
+        Ok(Self(value))
+    }
+
+    /// The first mesocycle of a plan. What every plan has.
+    pub const FIRST: Self = Self(1);
+
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for MesocycleOrdinal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// The identity the store gives a plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlanId(i64);

@@ -12,13 +12,14 @@
 //! it either. FR-010's
 //! idempotence is therefore the schema's rather than a caller's to remember.
 
-use application::{PrescribedWorkoutId, PrescribedWorkoutStore, StoreError};
+use application::{PrescribedWorkoutId, PrescribedWorkoutStore, SessionOrdinal, StoreError};
 use domain::{
     gym::{
         Load, Rir, SignedKg,
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     measure::{Distance, Duration, Kg, Metres, RepCount, Spans},
+    plan::PlanName,
     prescription::{
         Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
         PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
@@ -592,6 +593,38 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                 .map_err(|_| corrupt(&"an issue time that is not an instant"))?,
         );
         Ok(Some((PrescribedWorkoutId::new(row.id), workout)))
+    }
+
+    async fn ordinal_in(
+        &self,
+        plan: &PlanName,
+        date: Date,
+    ) -> Result<Option<SessionOrdinal>, StoreError> {
+        let name = plan.as_str();
+        let key = date.to_string();
+        let counted = sqlx::query!(
+            r#"
+            SELECT COUNT(DISTINCT w.issued_for) AS "counted!: i64"
+            FROM prescribed_workout AS w
+            JOIN gym_mesocycle AS m ON m.id = w.mesocycle
+            JOIN plan AS p ON p.id = m.plan
+            -- **Every authoring of the name, not the one in force.** A plan
+            -- re-authored keeps its old rows (§ 12) and a prescription goes on
+            -- naming the mesocycle it was issued against, so filtering to the
+            -- latest authoring would drop days the macrocycle really did
+            -- prescribe for and renumber everything after them.
+            WHERE p.name = ? AND w.issued_for <= ?
+            "#,
+            name,
+            key
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?
+        .counted;
+
+        let counted = u32::try_from(counted).map_err(|_| corrupt(&"more sessions than a u32"))?;
+        Ok(SessionOrdinal::new(counted).ok())
     }
 }
 

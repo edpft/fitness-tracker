@@ -62,15 +62,29 @@ impl TryFrom<String> for DeliveryReference {
 
 string_name!(DeliveryReference, InvalidDelivery);
 
-/// Which session of its programme this is, counting every programmed session
-/// from the first.
+/// Which session of its macrocycle this is, counting every session the
+/// macrocycle has prescribed for from the first.
 ///
-/// **A property of the calendar, not of any destination.** What a renderer does
-/// with it — pads it, prefixes a title with it, ignores it — is the renderer's
-/// business; that there is a first, second and third session of a block is the
-/// programme's. Counting sessions rather than weeks is what makes it a total
-/// order over a folder: two sessions in one week are two numbers, and an
-/// interrupted week contributes none.
+/// **A count over the record of prescriptions, not over a calendar** (#312).
+/// Until 2026-09-30 it was the session's position in its *mesocycle's*
+/// calendar, and both halves of that were wrong. The folder it orders is the
+/// macrocycle's, so the number restarted inside it; and a calendar is rebuilt
+/// from a start, a duration and its interruptions, so re-authoring any of them
+/// renumbers sessions already sitting on the operator's phone. The autumn's
+/// first two deliveries were both `01` for exactly that reason — same
+/// mesocycle, moved calendar.
+///
+/// So what it counts is days the macrocycle issued a prescription for. The
+/// operator, 2026-09-30: *"it doesn't matter if a session was missed because of
+/// illness, all that matters is was it prescribed ... so it's the prescription
+/// number, relative to the macrocycle, at the time of prescription."* A day
+/// nobody prescribed for takes no number; a day prescribed and then missed
+/// keeps its own; a reissue for a day already numbered keeps that day's number,
+/// because what it replaces is that day's routine.
+///
+/// **A property of the macrocycle, not of any destination.** What a renderer
+/// does with it — pads it, prefixes a title with it, ignores it — is the
+/// renderer's business.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SessionOrdinal(u32);
 

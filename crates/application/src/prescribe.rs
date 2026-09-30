@@ -41,9 +41,9 @@ use crate::{
     error::{PrescriptionError, StoreError},
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
-        LastPerformance, MesocycleStore, Performance, PerformedSetSummary, PlanAuthor, PlanStore,
-        PrescribedWorkoutStore, Prescription, PrescriptionLifecycle, UnderivableReason,
-        UnderivableSlot, WorkoutPrescriber,
+        LastPerformance, MesocycleInForce, MesocycleStore, Performance, PerformedSetSummary,
+        PlanAuthor, PlanStore, PrescribedWorkoutStore, Prescription, PrescriptionLifecycle,
+        UnderivableReason, UnderivableSlot, WorkoutPrescriber,
     },
 };
 
@@ -104,14 +104,15 @@ pub async fn next_session(
     // is which mesocycle to ask. The one in force answers first, and only one
     // with nothing left defers to those after it.
     let covering = programmes.on(from).await?;
-    if let Some((_, _, mesocycle)) = &covering
-        && let Some(date) = mesocycle.calendar().next_programmed(from)
+    if let Some(found) = &covering
+        && let Some(date) = found.mesocycle.calendar().next_programmed(from)
     {
         return Ok(NextSession::On(date));
     }
 
     let mut after = from;
-    while let Some((_, _, mesocycle)) = programmes.following(after).await? {
+    while let Some(found) = programmes.following(after).await? {
+        let mesocycle = found.mesocycle;
         let start = mesocycle.span().start();
         if let Some(date) = mesocycle.calendar().next_programmed(start) {
             return Ok(NextSession::On(date));
@@ -127,9 +128,9 @@ pub async fn next_session(
         None => programmes.preceding(from).await?,
     };
     Ok(NextSession::NothingPlanned {
-        last: last.map(|(_, plan, mesocycle)| {
-            let end = mesocycle.span().end();
-            (plan, end.yesterday().unwrap_or(end))
+        last: last.map(|found| {
+            let end = found.mesocycle.span().end();
+            (found.plan, end.yesterday().unwrap_or(end))
         }),
     })
 }
@@ -196,9 +197,10 @@ where
     L: PrescriptionLifecycle + Sync,
 {
     async fn standing(&self, on: Date) -> Result<LadderStanding, PrescriptionError> {
-        let Some((programme_id, plan, programme)) = self.ports.programmes.on(on).await? else {
+        let Some(found) = self.ports.programmes.on(on).await? else {
             return Err(PrescriptionError::NoPlan { date: on });
         };
+        let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
@@ -340,9 +342,10 @@ where
         &self,
         date: Date,
     ) -> Result<(PrescribedWorkout, Vec<UnderivableSlot>), PrescriptionError> {
-        let Some((programme_id, plan, programme)) = self.ports.programmes.on(date).await? else {
+        let Some(found) = self.ports.programmes.on(date).await? else {
             return Err(PrescriptionError::NoPlan { date });
         };
+        let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
@@ -557,7 +560,13 @@ where
     ) -> Result<Option<Anchor>, PrescriptionError> {
         let mut candidates = Vec::new();
 
-        if let Some((_, _, current)) = self.ports.programmes.on(on).await? {
+        if let Some(current) = self
+            .ports
+            .programmes
+            .on(on)
+            .await?
+            .map(|found| found.mesocycle)
+        {
             // A week at the front of a sequence states what it ramps toward,
             // whether it stands alone or is the first week of a block.
             if let Some(asserted) = asserted_by(&current) {
@@ -568,7 +577,13 @@ where
             }
         }
 
-        if let Some((_, before_plan, before)) = self.ports.programmes.preceding(on).await? {
+        if let Some((before_plan, before)) = self
+            .ports
+            .programmes
+            .preceding(on)
+            .await?
+            .map(|found| (found.plan, found.mesocycle))
+        {
             if let Some(asserted) = asserted_by(&before) {
                 candidates.push(asserted);
             }
@@ -829,8 +844,11 @@ where
             .programmes
             .preceding(test.calendar().start())
             .await?;
-        let Some((_, before_plan, GymMesocycle::Progression(Progression::Linear(before)))) =
-            predecessor
+        let Some(MesocycleInForce {
+            plan: before_plan,
+            mesocycle: GymMesocycle::Progression(Progression::Linear(before)),
+            ..
+        }) = predecessor
         else {
             // Nothing before it, or a predecessor with no ladder to read a
             // position off. A block's exit test anchors what follows through its

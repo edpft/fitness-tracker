@@ -15,6 +15,8 @@ use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{
     gym::{Load, SignedKg, exercise::RepsExercise},
     measure::{Duration, Kg, RepCount},
+    plan::MesocycleOrdinal,
+    planner::RerunOrdinal,
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SlotId, SupersetMember, Target,
@@ -80,8 +82,31 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
     Ok(Deliverable {
         workout,
         plan: support::programme::name("summer-2026-front-squat")?,
+        mesocycle: MesocycleOrdinal::new(2)?,
+        microcycle: Some(WeekIndex::new(4)?),
+        rerun: None,
         ordinal: SessionOrdinal::new(7)?,
     })
+}
+
+/// The note on the routine a stub was posted, for a test about what it says.
+///
+/// A free function, so it returns rather than expecting where it can — the test
+/// exemptions reach a `#[test]` body and not the helpers beside it. What is left
+/// is the stub's own bookkeeping, which failing means the mock never ran.
+async fn note_of(server: &MockServer) -> String {
+    let requests = server.received_requests().await.unwrap_or_default();
+    requests
+        .iter()
+        .find(|request| request.url.path() == "/v1/routines")
+        .and_then(|posted| serde_json::from_slice::<Value>(&posted.body).ok())
+        .and_then(|body| {
+            body.get("routine")
+                .and_then(|routine| routine.get("notes"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
 }
 
 /// The defect this whole feature has to not have.
@@ -171,10 +196,110 @@ fn assistance_is_sent_as_the_assisted_template() {
         "zero-padded and ordered, short enough to read on a phone"
     );
     assert_eq!(
+        body["routine"]["notes"], "summer-2026-front-squat · mesocycle 2 · microcycle 4",
+        "and the note is the session's address in the hierarchy, with no date in it (#312)"
+    );
+    assert_eq!(
         body["routine"]["folder_id"], 42,
         "the programme's existing folder is found rather than duplicated"
     );
     assert_eq!(reference, "b459cba5-cd6d-463c-abd6-54f8eafcadcb");
+}
+
+/// **A holding week is named, not numbered** (#190, #312).
+///
+/// It is a microcycle of neither the mesocycle that holds it nor the one that
+/// follows: it sits between them so that the other discipline can re-run a test,
+/// and climbs nothing. So the note says what it is where it would otherwise say
+/// which microcycle — the operator reading his phone on that Monday is being told
+/// the week does not advance the block.
+#[test]
+fn a_holding_week_says_so_where_a_microcycle_number_would_go() {
+    let note = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
+            })))
+            .mount(&server)
+            .await;
+
+        let holding = Deliverable {
+            microcycle: None,
+            ..session().expect("the fixture session builds")
+        };
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        hevy.deliver(&holding)
+            .await
+            .outcome
+            .expect("the session is delivered");
+
+        note_of(&server).await
+    })
+    .expect("the runtime runs");
+
+    assert_eq!(note, "summer-2026-front-squat · mesocycle 2 · holding");
+}
+
+/// **A re-run says which attempt it is** (#313).
+///
+/// The operator, 2026-09-30: *"Say mesocycle 2 - microcycle 3 isn't completed,
+/// then the rerun would be mesocycle 2 - microcycle 3 (rerun 1)."* Without it a
+/// second attempt at one microcycle is the same routine twice, a week apart,
+/// with nothing in it to say why.
+#[test]
+fn a_re_run_microcycle_says_which_attempt_it_is() {
+    let note = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
+            })))
+            .mount(&server)
+            .await;
+
+        let again = Deliverable {
+            rerun: RerunOrdinal::new(1),
+            ..session().expect("the fixture session builds")
+        };
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        hevy.deliver(&again)
+            .await
+            .outcome
+            .expect("the session is delivered");
+
+        note_of(&server).await
+    })
+    .expect("the runtime runs");
+
+    assert_eq!(
+        note,
+        "summer-2026-front-squat · mesocycle 2 · microcycle 4 (rerun 1)"
+    );
 }
 
 /// **A replacement is a `PUT` to the routine's own path, carrying the same body.**

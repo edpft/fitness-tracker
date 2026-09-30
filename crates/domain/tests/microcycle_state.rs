@@ -8,8 +8,8 @@
 
 use domain::{
     planner::{
-        ESSENTIAL, MicrocycleState, Owed, Placed, Rerun, SessionState, microcycle_state, owed_by,
-        rerun,
+        ESSENTIAL, MicrocycleState, Owed, Placed, Rerun, RerunOrdinal, SessionState,
+        microcycle_state, owed_by, rerun, rerun_of,
     },
     schedule::{AbsenceKind, Discipline, Relative, SessionRole},
 };
@@ -282,4 +282,70 @@ fn a_completed_or_running_week_runs_nothing_again() {
 
     assert_eq!(rerun(MONDAY, microcycle_state(&done), &done), None);
     assert_eq!(rerun(MONDAY, microcycle_state(&running), &running), None);
+}
+
+/// **Which attempt a week is, counted back through the weeks lost** (#313).
+///
+/// The operator, 2026-09-30, on where the count belongs: *"Say mesocycle 2 -
+/// microcycle 3 isn't completed, then the rerun would be mesocycle 2 -
+/// microcycle 3 (rerun 1)."* A week lost is re-run by the week after it, so the
+/// count is how many consecutive weeks before this one were lost — which makes
+/// the nth attempt readable without anything storing that it is the nth.
+#[test]
+fn a_week_is_the_nth_re_run_when_the_n_before_it_were_lost() {
+    let lost = |monday| Rerun {
+        monday,
+        holding: None,
+    };
+    let reruns = [lost(date(2026, 9, 14)), lost(date(2026, 9, 21))];
+
+    let attempt = |day| rerun_of(&reruns, Discipline::Gym, day).map(RerunOrdinal::as_u32);
+
+    assert_eq!(
+        attempt(date(2026, 9, 14)),
+        None,
+        "the first attempt is not a re-run"
+    );
+    assert_eq!(
+        attempt(date(2026, 9, 21)),
+        Some(1),
+        "the week after the one lost is the first re-run"
+    );
+    assert_eq!(
+        attempt(date(2026, 9, 25)),
+        Some(1),
+        "and so is every day of it, not only its Monday"
+    );
+    assert_eq!(
+        attempt(date(2026, 9, 28)),
+        Some(2),
+        "two weeks lost in a row make the third attempt the second re-run"
+    );
+    assert_eq!(
+        attempt(date(2026, 10, 5)),
+        None,
+        "and the week after a week that completed is a first attempt again"
+    );
+}
+
+/// **A week a discipline held is not a week it re-ran** (#190), so it stops the
+/// count rather than being counted or skipped over: what follows a hold is the
+/// next microcycle, not another attempt at the one before it.
+#[test]
+fn a_week_held_is_not_an_attempt_at_the_microcycle_before_it() {
+    let reruns = [Rerun {
+        monday: date(2026, 9, 14),
+        holding: Some(Discipline::Gym),
+    }];
+
+    assert_eq!(
+        rerun_of(&reruns, Discipline::Gym, date(2026, 9, 21)),
+        None,
+        "the gym held that week rather than losing it"
+    );
+    assert_eq!(
+        rerun_of(&reruns, Discipline::Cycling, date(2026, 9, 21)).map(RerunOrdinal::as_u32),
+        Some(1),
+        "while the bike re-ran the test it missed"
+    );
 }

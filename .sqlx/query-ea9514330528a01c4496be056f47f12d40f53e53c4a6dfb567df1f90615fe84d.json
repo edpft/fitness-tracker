@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COUNT(DISTINCT w.issued_for) AS \"counted!: i64\"\n            FROM prescribed_workout AS w\n            JOIN gym_mesocycle AS m ON m.id = w.mesocycle\n            JOIN plan AS p ON p.id = m.plan\n            -- **Every authoring of the name, not the one in force.** A plan\n            -- re-authored keeps its old rows (§ 12) and a prescription goes on\n            -- naming the mesocycle it was issued against, so filtering to the\n            -- latest authoring would drop days the macrocycle really did\n            -- prescribe for and renumber everything after them.\n            WHERE p.name = ? AND w.issued_for <= ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "counted!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ea9514330528a01c4496be056f47f12d40f53e53c4a6dfb567df1f90615fe84d"
+}

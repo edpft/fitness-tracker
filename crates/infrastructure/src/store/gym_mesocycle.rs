@@ -28,12 +28,13 @@
 
 use std::num::NonZeroU8;
 
-use application::{MesocycleStore, StoreError};
+use application::{MesocycleInForce, MesocycleStore, StoreError};
 use domain::{
     gym::exercise::Exercise,
     measure::{Kg, RepCount},
     normalised::OperatorZone,
-    plan::{Occupies, PlanName},
+    plan::{MesocycleOrdinal, Occupies, PlanName},
+    planner::RerunOrdinal,
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, GymMesocycle, Linear,
         MesocycleId, Progression, Sbs, Skip, SlotId, Test, Tested,
@@ -181,10 +182,11 @@ impl SqliteGymMesocycleStore {
 pub(super) async fn in_force(
     pool: &SqlitePool,
     zone: &OperatorZone,
-) -> Result<Vec<(i64, PlanName, MesocycleId, GymMesocycle)>, StoreError> {
+) -> Result<Vec<(i64, MesocycleInForce)>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT m.id AS "id!: i64", m.plan AS "plan!: i64",
+               m.ordinal AS "ordinal!: i64",
                pl.name AS "plan_name!: String",
                m.template AS "template!: String",
                m.provider AS "provider: String",
@@ -223,23 +225,7 @@ pub(super) async fn in_force(
             .start_date
             .parse::<Date>()
             .map_err(|_| corrupt(&"a start date that is not a date"))?;
-        // **Read from the schedule, not from the mesocycle.** `gym_weekday`
-        // held a copy of this per row until 2026-09-20 (issue #63); the week
-        // belongs to the operator, and a block is rebuilt against the one in
-        // force when it started.
-        let week = super::schedule::training_week(pool, start, Discipline::Gym)
-            .await?
-            .ok_or_else(|| {
-                corrupt(&format!(
-                    "the schedule gives the gym no day of the week as of {start}, \
-                     so a block starting then has nothing to run on"
-                ))
-            })?;
-
-        let duration = u32::try_from(row.duration_weeks)
-            .map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
-        let calendar = Calendar::new(start, duration, &interruptions, week, zone.as_time_zone())
-            .map_err(|error| corrupt(&error))?;
+        let calendar = calendar_of(pool, zone, start, row.duration_weeks, &interruptions).await?;
 
         let plan = PlanName::try_from(row.plan_name).map_err(|error| corrupt(&error))?;
         let pattern =
@@ -287,9 +273,56 @@ pub(super) async fn in_force(
             }
         };
 
-        mesocycles.push((row.plan, plan, MesocycleId::new(row.id), mesocycle));
+        mesocycles.push((
+            row.plan,
+            MesocycleInForce {
+                id: MesocycleId::new(row.id),
+                ordinal: ordinal_in_plan(row.ordinal)?,
+                plan,
+                mesocycle,
+            },
+        ));
     }
     Ok(mesocycles)
+}
+
+/// The calendar a stored mesocycle runs against.
+///
+/// **The week is read from the schedule, not from the mesocycle.** `gym_weekday`
+/// held a copy of it per row until 2026-09-20 (issue #63); the week belongs to
+/// the operator, and a block is rebuilt against the one in force when it
+/// started.
+async fn calendar_of(
+    pool: &SqlitePool,
+    zone: &OperatorZone,
+    start: Date,
+    duration_weeks: i64,
+    interruptions: &[Skip],
+) -> Result<Calendar, StoreError> {
+    let week = super::schedule::training_week(pool, start, Discipline::Gym)
+        .await?
+        .ok_or_else(|| {
+            corrupt(&format!(
+                "the schedule gives the gym no day of the week as of {start}, \
+                 so a block starting then has nothing to run on"
+            ))
+        })?;
+    let duration =
+        u32::try_from(duration_weeks).map_err(|_| corrupt(&"a duration the domain cannot hold"))?;
+    Calendar::new(start, duration, interruptions, week, zone.as_time_zone())
+        .map_err(|error| corrupt(&error))
+}
+
+/// Which mesocycle of its plan a row is, from the column that numbers them.
+///
+/// A `CHECK` keeps it above zero and `UNIQUE (plan, ordinal)` keeps it unique,
+/// so a row failing this was edited by hand — which is corrupt rather than
+/// merely unexpected, the verdict every other reading in this module gives.
+fn ordinal_in_plan(ordinal: i64) -> Result<MesocycleOrdinal, StoreError> {
+    u32::try_from(ordinal)
+        .ok()
+        .and_then(|ordinal| MesocycleOrdinal::new(ordinal).ok())
+        .ok_or_else(|| corrupt(&"a mesocycle numbered from something other than one"))
 }
 
 /// Which microcycles of which published programme a mesocycle is.
@@ -566,42 +599,43 @@ fn read_anchor(
 }
 
 impl MesocycleStore for SqliteGymMesocycleStore {
-    async fn on(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn on(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         Ok(in_force(&self.pool, &self.zone)
             .await?
             .into_iter()
-            .find(|(_, _, _, mesocycle)| mesocycle.span().covers(date))
-            .map(|(_, plan, id, mesocycle)| (id, plan, mesocycle)))
+            .map(|(_, found)| found)
+            .find(|found| found.mesocycle.span().covers(date)))
     }
 
-    async fn preceding(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn preceding(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         // The latest mesocycle that has finished by this date. `in_force` is
         // ordered by start, so the last one whose span ends at or before the
         // date is the one immediately before it.
         Ok(in_force(&self.pool, &self.zone)
             .await?
             .into_iter()
-            .rfind(|(_, _, _, mesocycle)| mesocycle.span().end() <= date)
-            .map(|(_, plan, id, mesocycle)| (id, plan, mesocycle)))
+            .map(|(_, found)| found)
+            .rfind(|found| found.mesocycle.span().end() <= date))
     }
 
-    async fn following(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn following(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         // Ordered by start, so the first one beginning after the date is the
         // next in the sequence.
         Ok(in_force(&self.pool, &self.zone)
             .await?
             .into_iter()
-            .find(|(_, _, _, mesocycle)| mesocycle.span().start() > date)
-            .map(|(_, plan, id, mesocycle)| (id, plan, mesocycle)))
+            .map(|(_, found)| found)
+            .find(|found| found.mesocycle.span().start() > date))
+    }
+
+    /// **Nothing has been attempted, as far as an authored plan knows** (#313).
+    /// A re-run is a microcycle the record shows was not completed, and this
+    /// store reads the plan rather than the record — so it answers for the plan
+    /// as authored and [`application::reschedule::Rescheduled`] answers for the
+    /// plan as it now stands, which is the division every other method here
+    /// already follows.
+    async fn rerun_on(&self, _date: Date) -> Result<Option<RerunOrdinal>, StoreError> {
+        Ok(None)
     }
 }
 

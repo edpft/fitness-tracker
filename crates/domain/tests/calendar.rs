@@ -13,7 +13,7 @@
 use std::num::NonZeroU8;
 
 use domain::{
-    prescription::{Calendar, InvalidCalendar, NotScheduled, Skip, WeekKind},
+    prescription::{Calendar, InvalidCalendar, NotScheduled, Skip, WeekIndex, WeekKind},
     schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{
@@ -415,72 +415,66 @@ proptest! {
     }
 }
 
-/// The ordinal counts sessions, so a week running two contributes two and the
-/// numbers are a total order over everything the block prescribes.
+/// **Every week answers with a microcycle number, including the test.** A
+/// routine's note names the session's place in the hierarchy, so "test" is not
+/// an answer: the number has to come from somewhere for a test week too (#312).
 ///
-/// Monday light is the first session, Friday heavy the second, and the Monday
-/// after is the third — which is what an ordered list of routines needs and what
-/// a week index, repeating itself twice a week, cannot give.
+/// A test is the last microcycle of the mesocycle that owns it, which is the
+/// eleventh here and the only one of a standalone test.
 #[test]
-fn the_ordinal_counts_every_session_from_the_first() {
-    let calendar = autumn(&[]).expect("an uninterrupted autumn block");
-
-    let ordinal = |y, m, d| {
-        calendar
-            .ordinal(date(y, m, d).expect("a real date"))
-            .map(domain::prescription::SessionOrdinal::as_u32)
-    };
-
-    assert_eq!(ordinal(2026, 9, 14), Some(1), "the first Monday");
-    assert_eq!(ordinal(2026, 9, 18), Some(2), "the Friday of week one");
-    assert_eq!(ordinal(2026, 9, 21), Some(3), "the Monday of week two");
-    assert_eq!(ordinal(2026, 9, 25), Some(4), "the Friday of week two");
-}
-
-/// A date the block does not run has no ordinal — the same answer `place` gives,
-/// and for the same reason: nothing was prescribed, so there is nothing to
-/// number.
-#[test]
-fn an_unprogrammed_day_has_no_ordinal() {
-    let calendar = autumn(&[]).expect("an uninterrupted autumn block");
+fn a_test_week_is_the_last_microcycle_of_its_mesocycle() {
+    let block = autumn(&[]).expect("an uninterrupted autumn block");
 
     assert_eq!(
-        calendar.ordinal(date(2026, 9, 16).expect("a real Wednesday")),
-        None,
-        "Wednesday is not a programmed day"
+        block.microcycle(WeekKind::Test).map(WeekIndex::as_u32),
+        Some(11),
+        "an eleven-week block's test is its eleventh microcycle"
     );
+
+    let standalone = Calendar::new(
+        date(2026, 9, 14).expect("a real Monday"),
+        1,
+        &[],
+        monday_light_friday_heavy().expect("a week with two sessions"),
+        TimeZone::UTC,
+    )
+    .expect("a one-week test block");
     assert_eq!(
-        calendar.ordinal(date(2026, 9, 7).expect("a real date")),
-        None,
-        "the week before the block started"
+        standalone.microcycle(WeekKind::Test).map(WeekIndex::as_u32),
+        Some(1),
+        "a standalone test's only week is its first microcycle"
     );
 }
 
-/// **An interruption takes its sessions out of the count entirely.** A week the
-/// operator was away prescribes nothing, so the session after it is the next
-/// number rather than one two higher — which is what keeps the ordinal counting
-/// sessions rather than dates.
+/// A climbing week answers with its own index, whatever the block skipped on the
+/// way there — the index is already the training week, and re-deriving it from
+/// the calendar would be the same fact worked out twice.
 #[test]
-fn an_interrupted_week_contributes_no_ordinals() {
+fn a_climbing_week_is_the_microcycle_its_index_names() {
     let week_two = Skip::new(
         date(2026, 9, 21).expect("a real Monday"),
         NonZeroU8::new(7).expect("seven is not zero"),
     );
-    let calendar = autumn(&[week_two]).expect("an autumn block missing its second week");
+    let block = autumn(&[week_two]).expect("an autumn block missing its second week");
+    let third = WeekIndex::new(3).expect("weeks are numbered from one");
 
-    let ordinal = |y, m, d| {
-        calendar
-            .ordinal(date(y, m, d).expect("a real date"))
-            .map(domain::prescription::SessionOrdinal::as_u32)
-    };
-
-    assert_eq!(ordinal(2026, 9, 18), Some(2), "the Friday before the skip");
-    assert_eq!(ordinal(2026, 9, 21), None, "inside the skip");
     assert_eq!(
-        ordinal(2026, 9, 28),
+        block
+            .microcycle(WeekKind::Climbing(third))
+            .map(WeekIndex::as_u32),
         Some(3),
-        "the session after the skip is the third, not the fifth"
     );
+}
+
+/// **A holding week is a microcycle of nothing** (#190). It sits after the last
+/// microcycle of the mesocycle that holds it and before the first of what
+/// follows, climbs no rung, and exists so that the other discipline can catch
+/// up — so it is named rather than numbered wherever it is printed.
+#[test]
+fn a_holding_week_is_no_microcycle_of_the_block() {
+    let block = autumn(&[]).expect("an uninterrupted autumn block");
+
+    assert_eq!(block.microcycle(WeekKind::Holding), None);
 }
 
 // --- Dates in, weeks out ----------------------------------------------------

@@ -8,6 +8,7 @@
 mod support;
 
 use application::{GenerationParameterStore as _, MesocycleStore as _, PlanStore as _};
+use domain::plan::MesocycleOrdinal;
 use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
@@ -213,10 +214,16 @@ fn a_programme_round_trips_with_every_fill_shape() {
 
     run!(plans.author(&plan_of!("fixture", authored.clone())));
 
-    let Some((read_id, _, read_back)) = run!(store.on(inside_the_block())) else {
+    let Some(found) = run!(store.on(inside_the_block())) else {
         panic!("what was authored is in force")
     };
-    assert!(read_id.as_i64() > 0, "the store gave it an identity");
+    let read_back = found.mesocycle;
+    assert!(found.id.as_i64() > 0, "the store gave it an identity");
+    assert_eq!(
+        found.ordinal,
+        MesocycleOrdinal::FIRST,
+        "and numbered it the first mesocycle of its plan"
+    );
 
     // The single, the alternating single, the same-both-ways superset and the
     // alternating superset, all in one comparison.
@@ -264,7 +271,7 @@ fn the_interrupted_weeks_round_trip() {
     };
 
     run!(plans.author(&plan_of!("fixture", authored.clone())));
-    let Some((_, _, read_back)) = run!(store.on(inside_the_block())) else {
+    let Some(read_back) = run!(store.on(inside_the_block())).map(|found| found.mesocycle) else {
         panic!("what was authored is in force")
     };
 
@@ -297,7 +304,7 @@ fn the_weekday_mapping_round_trips() {
     };
     run!(plans.author(&plan_of!("fixture", authored.clone())));
 
-    let Some((_, _, read_back)) = run!(store.on(inside_the_block())) else {
+    let Some(read_back) = run!(store.on(inside_the_block())).map(|found| found.mesocycle) else {
         panic!("what was authored is in force")
     };
 
@@ -492,7 +499,10 @@ fn two_plans_succeed_one_another_and_the_date_chooses() {
 
     let in_summer = run!(store.on(jiff::civil::Date::constant(2026, 7, 20)));
     let in_autumn = run!(store.on(jiff::civil::Date::constant(2026, 9, 14)));
-    let (Some((_, first, _)), Some((_, second, _))) = (in_summer, in_autumn) else {
+    let (Some(first), Some(second)) = (
+        in_summer.map(|found| found.plan),
+        in_autumn.map(|found| found.plan),
+    ) else {
         panic!("both plans answer for their own weeks")
     };
 
