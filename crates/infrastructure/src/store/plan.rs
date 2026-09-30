@@ -82,8 +82,8 @@ impl SqlitePlanStore {
             // do not overlap, so filtering preserves the order they are run in.
             let gym_side: Vec<_> = gym
                 .iter()
-                .filter(|(plan, ..)| *plan == row.id)
-                .map(|(.., mesocycle)| mesocycle.clone())
+                .filter(|(plan, _)| *plan == row.id)
+                .map(|(_, found)| found.mesocycle.clone())
                 .collect();
             let cycling_side: Vec<_> = cycling
                 .iter()

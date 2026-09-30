@@ -784,8 +784,9 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         );
 
         let monday = Date::constant(2026, 9, 21);
-        let (_, _, block) = MesocycleStore::on(&gym, monday)
+        let block = MesocycleStore::on(&gym, monday)
             .await?
+            .map(|found| found.mesocycle)
             .ok_or("the block answers for the Monday")?;
         let gym_week = block.calendar().place(monday)?.0;
 
@@ -937,8 +938,9 @@ async fn after(
 
     let mut weeks = Vec::new();
     for monday in [Date::constant(2026, 9, 21), Date::constant(2026, 9, 28)] {
-        let (_, _, block) = MesocycleStore::on(&gym, monday)
+        let block = MesocycleStore::on(&gym, monday)
             .await?
+            .map(|found| found.mesocycle)
             .ok_or("the block answers for the Monday")?;
         weeks.push((block.template(), block.calendar().place(monday)?.0));
     }

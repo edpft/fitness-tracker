@@ -35,10 +35,10 @@ use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
     RefusalCount, WorkoutCount,
 };
-use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
+use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::prescription::{
     Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
-    Progress, SlotId,
+    Progress, SlotId, WeekIndex,
 };
 use domain::schedule::{Alteration, Diary, Holidays, SessionRole, TrainingPattern};
 use domain::sequence::NonEmpty;
@@ -1052,6 +1052,23 @@ pub trait GenerationParameterStore {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
+/// A gym mesocycle as the store answered for it: what it is, and where it sits.
+///
+/// **A struct because the fourth field broke the tuple** (#312). Three of these
+/// travelled together from the beginning; the ordinal joined them when a
+/// routine's note came to name the session's place in the hierarchy, and
+/// `(MesocycleId, MesocycleOrdinal, PlanName, GymMesocycle)` is a shape whose
+/// two numbers are told apart by their position.
+#[derive(Debug, Clone)]
+pub struct MesocycleInForce {
+    /// The identity the store gave it. A surrogate key: never printed.
+    pub id: MesocycleId,
+    /// Which mesocycle of the plan this is, as the plan numbers them.
+    pub ordinal: MesocycleOrdinal,
+    pub plan: PlanName,
+    pub mesocycle: GymMesocycle,
+}
+
 /// A gym mesocycle, read out of the plan that holds it.
 ///
 /// **The plan's name travels with it.** A mesocycle has no name of its own since
@@ -1076,7 +1093,7 @@ pub trait MesocycleStore {
     fn on(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<MesocycleInForce>, StoreError>> + Send;
 
     /// The mesocycle immediately before a date, if there is one.
     ///
@@ -1100,7 +1117,7 @@ pub trait MesocycleStore {
     fn preceding(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<MesocycleInForce>, StoreError>> + Send;
 
     /// The first mesocycle to begin after a date, if there is one.
     ///
@@ -1116,7 +1133,7 @@ pub trait MesocycleStore {
     fn following(
         &self,
         date: Date,
-    ) -> impl Future<Output = Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<MesocycleInForce>, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.
@@ -1401,6 +1418,32 @@ pub trait PrescribedWorkoutStore {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<(PrescribedWorkoutId, PrescribedWorkout)>, StoreError>> + Send;
+
+    /// Which session of its macrocycle a date's prescription is (#312): how many
+    /// days of the plan have had one issued for them, up to and including this
+    /// one.
+    ///
+    /// **Days, not rows.** A reissue supersedes rather than replaces (§ 12), so
+    /// a day may hold several prescriptions and they are one session of the
+    /// macrocycle — the second replaces the first at the destination and takes
+    /// its number with it.
+    ///
+    /// **By the plan's name, across every authoring of it.** The macrocycle is
+    /// the name; re-authoring it supersedes the mesocycles a prescription points
+    /// at but not the fact that the day was prescribed for, and counting only
+    /// the current authoring would renumber the sessions that came before it.
+    ///
+    /// `None` where the plan has prescribed for no day at or before the date,
+    /// which is a plan that has not started rather than a fault.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn ordinal_in(
+        &self,
+        plan: &PlanName,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<SessionOrdinal>, StoreError>> + Send;
 }
 
 /// The identity the store gives an issued prescription.
@@ -1633,15 +1676,27 @@ pub use domain::prescription::{
 
 /// Everything a rendering needs that the prescription does not itself carry.
 ///
-/// The prescription knows its date, role and week; it does not know its
-/// programme's *name* or which session of that programme it is, because both are
-/// facts about the calendar rather than about what was issued. Deriving them
-/// here and handing them over keeps the destination from reading a store.
+/// The prescription knows its date, role and week; it does not know where in the
+/// macrocycle it sits, because that is a fact about the plan and the record
+/// rather than about what was issued. Deriving it here and handing it over keeps
+/// the destination from reading a store.
+///
+/// **Together, the last three fields are the session's address** — macrocycle,
+/// mesocycle, microcycle — which is what the operator asked a delivered routine
+/// to say about itself (#312). How that address is written is the destination's
+/// business; that it is the address is the plan's.
 #[derive(Debug, Clone)]
 pub struct Deliverable {
     pub workout: PrescribedWorkout,
+    /// The macrocycle. Named rather than numbered: a macrocycle is a term, and
+    /// `2026-autumn` is what it is called.
     pub plan: PlanName,
-    /// Which session of the programme this is. What an ordered list of them is
+    /// Which mesocycle of the macrocycle.
+    pub mesocycle: MesocycleOrdinal,
+    /// Which microcycle of that mesocycle, and `None` for a holding week, which
+    /// is a microcycle of neither this mesocycle nor the next (#190).
+    pub microcycle: Option<WeekIndex>,
+    /// Which session of the macrocycle this is. What an ordered list of them is
     /// ordered by; how it is rendered is the destination's business.
     pub ordinal: SessionOrdinal,
 }

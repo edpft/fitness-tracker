@@ -15,6 +15,7 @@ use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{
     gym::{Load, SignedKg, exercise::RepsExercise},
     measure::{Duration, Kg, RepCount},
+    plan::MesocycleOrdinal,
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SlotId, SupersetMember, Target,
@@ -80,6 +81,8 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
     Ok(Deliverable {
         workout,
         plan: support::programme::name("summer-2026-front-squat")?,
+        mesocycle: MesocycleOrdinal::new(2)?,
+        microcycle: Some(WeekIndex::new(4)?),
         ordinal: SessionOrdinal::new(7)?,
     })
 }
@@ -171,10 +174,73 @@ fn assistance_is_sent_as_the_assisted_template() {
         "zero-padded and ordered, short enough to read on a phone"
     );
     assert_eq!(
+        body["routine"]["notes"], "summer-2026-front-squat · mesocycle 2 · microcycle 4",
+        "and the note is the session's address in the hierarchy, with no date in it (#312)"
+    );
+    assert_eq!(
         body["routine"]["folder_id"], 42,
         "the programme's existing folder is found rather than duplicated"
     );
     assert_eq!(reference, "b459cba5-cd6d-463c-abd6-54f8eafcadcb");
+}
+
+/// **A holding week is named, not numbered** (#190, #312).
+///
+/// It is a microcycle of neither the mesocycle that holds it nor the one that
+/// follows: it sits between them so that the other discipline can re-run a test,
+/// and climbs nothing. So the note says what it is where it would otherwise say
+/// which microcycle — the operator reading his phone on that Monday is being told
+/// the week does not advance the block.
+#[test]
+fn a_holding_week_says_so_where_a_microcycle_number_would_go() {
+    let note = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
+            })))
+            .mount(&server)
+            .await;
+
+        let holding = Deliverable {
+            microcycle: None,
+            ..session().expect("the fixture session builds")
+        };
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        hevy.deliver(&holding)
+            .await
+            .outcome
+            .expect("the session is delivered");
+
+        let requests = server
+            .received_requests()
+            .await
+            .expect("the mock recorded its requests");
+        let posted = requests
+            .iter()
+            .find(|request| request.url.path() == "/v1/routines")
+            .expect("a routine was posted");
+        let body: Value = serde_json::from_slice(&posted.body).expect("the request body is json");
+        body["routine"]["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    })
+    .expect("the runtime runs");
+
+    assert_eq!(note, "summer-2026-front-squat · mesocycle 2 · holding");
 }
 
 /// **A replacement is a `PUT` to the routine's own path, carrying the same body.**

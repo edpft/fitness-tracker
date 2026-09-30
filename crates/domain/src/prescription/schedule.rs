@@ -23,8 +23,6 @@ use jiff::{Zoned, civil::Date, tz::TimeZone};
 
 use crate::schedule::{Relative, SessionRole, TrainingWeek};
 
-use super::delivery::SessionOrdinal;
-
 /// One value per intensity, both mandatory.
 ///
 /// A struct rather than a map, so a programme missing a side is a compile error
@@ -680,34 +678,29 @@ impl Calendar {
         })
     }
 
-    /// Which session of the block this date is, counting from the first.
+    /// Which microcycle of this mesocycle a week is, or `None` for a week that
+    /// is none of its own.
     ///
-    /// **Counts sessions, not days and not weeks.** A week the block skipped
-    /// contributes nothing, and a week running two sessions contributes two — so
-    /// the number is a total order over everything the block prescribes, which
-    /// is what an ordered list of them needs and what a week index cannot give.
+    /// **Every kind of week answers, because the operator numbers them all.** A
+    /// routine's note names the session's place in the hierarchy — macrocycle,
+    /// mesocycle, microcycle — and "test" is not a place, so the number has to
+    /// come from somewhere for a test week too (#312).
     ///
-    /// `None` for a date the block does not run, which is the same answer
-    /// [`Self::place`] gives and for the same reason.
-    pub fn ordinal(&self, date: Date) -> Option<SessionOrdinal> {
-        if self.place(date).is_err() {
-            return None;
+    /// **A test is the last microcycle of the mesocycle that owns it**: the only
+    /// week of a standalone test, and the fourth of a periodised block. That is
+    /// what makes the answer total without a second number to keep in step —
+    /// [`WeekKind::Test`] has no index precisely because the ladder has no rung
+    /// for it (decision 0013).
+    #[must_use]
+    pub fn microcycle(&self, week: WeekKind) -> Option<WeekIndex> {
+        match week {
+            WeekKind::Climbing(index) => Some(index),
+            WeekKind::Test => WeekIndex::new(self.duration_weeks).ok(),
+            // A hold is not a microcycle of this mesocycle at all (#190). It
+            // sits after its last one, climbs nothing, and exists so the other
+            // discipline can catch up.
+            WeekKind::Holding => None,
         }
-
-        // Walk the programmed days from the start rather than deriving from the
-        // week index: interruptions are runs of days rather than whole weeks
-        // (decision 0010), so a week can lose one of its two sessions and
-        // arithmetic over weeks would count it anyway.
-        let mut counted: u32 = 0;
-        let mut cursor = self.start;
-        while cursor <= date {
-            if self.place(cursor).is_ok() {
-                counted = counted.saturating_add(1);
-            }
-            cursor = cursor.tomorrow().ok()?;
-        }
-
-        SessionOrdinal::new(counted).ok()
     }
 
     /// How many calendar weeks before this one had no session at all.

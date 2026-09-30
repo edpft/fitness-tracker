@@ -23,12 +23,12 @@ use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
     planner::{self, Rerun},
-    prescription::{GymMesocycle, MesocycleId},
+    prescription::GymMesocycle,
     schedule::Diary,
 };
 use jiff::civil::Date;
 
-use crate::{CyclingMesocycleStore, MesocycleStore, PlanStore, StoreError};
+use crate::{CyclingMesocycleStore, MesocycleInForce, MesocycleStore, PlanStore, StoreError};
 
 /// Which weeks run again, and the diary a moved mesocycle is read against.
 ///
@@ -143,10 +143,7 @@ fn unfound(plan: &PlanName, start: Date) -> StoreError {
 }
 
 impl<S: MesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
-    async fn gym(
-        &self,
-        pick: Pick,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn gym(&self, pick: Pick) -> Result<Option<MesocycleInForce>, StoreError> {
         for (authored, now) in self.both().await? {
             let (Some(authored_gym), Some(now_gym)) = (authored.gym(), now.gym()) else {
                 continue;
@@ -154,29 +151,26 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
             let Some((start, moved)) = located(authored_gym, now_gym, pick) else {
                 continue;
             };
-            let (id, name, _) = self
+            let found = self
                 .store
                 .on(start)
                 .await?
                 .ok_or_else(|| unfound(authored.name(), start))?;
-            return Ok(Some((id, name, moved)));
+            return Ok(Some(MesocycleInForce {
+                mesocycle: moved,
+                ..found
+            }));
         }
         Ok(None)
     }
 }
 
 impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Rescheduled<S, P> {
-    async fn on(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn on(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         self.gym(Pick::On(date)).await
     }
 
-    async fn preceding(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn preceding(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         // **A plan with nothing before the date still has a predecessor
         // somewhere**: the mesocycle at the very front of a plan inherits from
         // the plan before it, which rescheduling does not touch.
@@ -186,10 +180,7 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
         }
     }
 
-    async fn following(
-        &self,
-        date: Date,
-    ) -> Result<Option<(MesocycleId, PlanName, GymMesocycle)>, StoreError> {
+    async fn following(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         self.gym(Pick::Following(date)).await
     }
 }

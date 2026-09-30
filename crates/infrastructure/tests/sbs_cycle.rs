@@ -114,7 +114,7 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
 
             let store = infrastructure::SqliteGymMesocycleStore::new(pool, zone);
             let read = store.on(Date::new(2026, 9, 21)?).await?;
-            let Some((_, _, read)) = read else {
+            let Some(read) = read.map(|found| found.mesocycle) else {
                 panic!("the cycle authored above answers for a day inside it")
             };
             assert!(

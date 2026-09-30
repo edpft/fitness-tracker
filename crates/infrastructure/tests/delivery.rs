@@ -42,6 +42,9 @@ struct Counting {
     /// the question decision 0022 turns on and the store cannot answer it.
     replacements: AtomicUsize,
     titles: Mutex<Vec<String>>,
+    /// Where each session said it sat: which mesocycle of the plan, and which
+    /// microcycle of that (#312).
+    addresses: Mutex<Vec<String>>,
 }
 
 impl Counting {
@@ -51,6 +54,7 @@ impl Counting {
             calls: AtomicUsize::new(0),
             replacements: AtomicUsize::new(0),
             titles: Mutex::new(Vec::new()),
+            addresses: Mutex::new(Vec::new()),
         })
     }
 
@@ -61,6 +65,34 @@ impl Counting {
     fn replacements(&self) -> usize {
         self.replacements.load(Ordering::SeqCst)
     }
+
+    /// What the destination would have called each routine, in the order it was
+    /// given them.
+    fn titles(&self) -> Vec<String> {
+        self.titles
+            .lock()
+            .map(|seen| seen.clone())
+            .unwrap_or_default()
+    }
+
+    fn addresses(&self) -> Vec<String> {
+        self.addresses
+            .lock()
+            .map(|seen| seen.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// The session's place in its macrocycle, as a routine's note states it (#312).
+fn address(session: &Deliverable) -> String {
+    let microcycle = session.microcycle.map_or_else(
+        || "holding".to_owned(),
+        |index| format!("microcycle {}", index.as_u32()),
+    );
+    format!(
+        "{} · mesocycle {} · {microcycle}",
+        session.plan, session.mesocycle
+    )
 }
 
 impl PrescriptionDestination for Counting {
@@ -76,6 +108,9 @@ impl PrescriptionDestination for Counting {
                 session.ordinal.as_u32(),
                 session.workout.session_role()
             ));
+        }
+        if let Ok(mut addresses) = self.addresses.lock() {
+            addresses.push(address(session));
         }
 
         let outcome = DeliveryReference::try_from(format!("routine-{seen}"))
@@ -166,6 +201,15 @@ struct Ready {
 
 /// The corpus, landed and derived, with the fixture programme authored.
 async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
+    ready_with(programme::as_plan(programme::programme()?)?).await
+}
+
+/// The same, holding a plan the caller shaped.
+///
+/// **What a test about the macrocycle needs** (#312): a number that runs on
+/// across a mesocycle boundary cannot be asserted against a plan whose
+/// boundaries are all in the past.
+async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
@@ -203,10 +247,7 @@ async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(
-        &programme::as_plan(programme::programme()?)?,
-        &programme::parameters()?,
-    )
+    .author(&plan, &programme::parameters()?)
     .await?;
 
     Ok(Ready {
@@ -258,6 +299,136 @@ macro_rules! run {
             Err(error) => panic!("a runtime is available: {error}"),
         }
     };
+}
+
+/// A plan with a mesocycle boundary inside it: the entry test the record is
+/// anchored against, the eight-week block the record was trained under, and the
+/// test week that closes it on 31 August.
+///
+/// **A test rather than a third block**, because a block opening from another
+/// block needs that one's maximum recorded and a test is what records it — which
+/// is also the shape the autumn actually ran (decision 0013).
+fn to_a_test() -> Result<domain::plan::Plan, Box<dyn std::error::Error>> {
+    let closing_test = programme::authoring(
+        programme::authored(
+            Date::constant(2026, 8, 31),
+            domain::prescription::authored::Shape::Test {
+                reps: domain::measure::RepCount::new(1)?,
+                provided: None,
+                // Read off the record, which is what a test after a block does.
+                asserted: None,
+            },
+        )?,
+        &[],
+    )??;
+
+    Ok(programme::plan(vec![
+        programme::entry_test()?,
+        programme::as_programme(programme::programme()?),
+        closing_test,
+    ])?)
+}
+
+/// **The number runs on across a mesocycle boundary** (#312).
+///
+/// The folder a routine lands in is the macrocycle's, so the number that orders
+/// it has to be the macrocycle's too. It was the session's position in its own
+/// mesocycle until 2026-09-30, which restarted at `01` partway down the folder —
+/// the autumn's held two of them, one from the entry test and one from the block
+/// that followed.
+///
+/// So the closing test week's Monday is the *third* session the macrocycle has
+/// prescribed for, and is numbered so. Its address resets around it, which is
+/// the point: the mesocycle advances, the microcycle goes back to its first, and
+/// the number does neither.
+#[test]
+fn the_number_runs_on_across_a_mesocycle_boundary() {
+    let ready = run!(ready_with(match to_a_test() {
+        Ok(plan) => plan,
+        Err(error) => panic!("the three-mesocycle fixture builds: {error}"),
+    }));
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    run!(async {
+        for date in [
+            // The last week of the first block, both its sessions.
+            Date::constant(2026, 8, 24),
+            Date::constant(2026, 8, 28),
+            // The first session of the test week that follows it.
+            Date::constant(2026, 8, 31),
+        ] {
+            ready.prescriber.prescribe(date).await?;
+            delivering(&ready, &destination).deliver(date).await?;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    });
+
+    assert_eq!(
+        destination.titles(),
+        vec![
+            "01 lower intensity, higher volume".to_owned(),
+            "02 higher intensity, lower volume".to_owned(),
+            "03 lower intensity, higher volume".to_owned(),
+        ],
+        "the test week's first session is the macrocycle's third, not its own first"
+    );
+
+    assert_eq!(
+        destination.addresses(),
+        vec![
+            "fixture · mesocycle 2 · microcycle 8".to_owned(),
+            "fixture · mesocycle 2 · microcycle 8".to_owned(),
+            "fixture · mesocycle 3 · microcycle 1".to_owned(),
+        ],
+        "and each says where it sits: a test week is the one microcycle of its \
+         mesocycle, and what resets is the address rather than the number"
+    );
+}
+
+/// **A day prescribed and then missed keeps its number.** The operator,
+/// 2026-09-30: *"it doesn't matter if a session was missed because of illness,
+/// all that matters is was it prescribed"*. So what is counted is the days the
+/// macrocycle issued a prescription for, and a day nobody derived anything for
+/// never had a number to keep.
+///
+/// Here the test week's Monday is prescribed and never delivered — the
+/// session lost to illness — and the Friday after it is the macrocycle's fourth
+/// rather than its third.
+#[test]
+fn a_prescribed_session_that_was_never_delivered_still_takes_its_number() {
+    let ready = run!(ready_with(match to_a_test() {
+        Ok(plan) => plan,
+        Err(error) => panic!("the three-mesocycle fixture builds: {error}"),
+    }));
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    run!(async {
+        for date in [
+            Date::constant(2026, 8, 24),
+            Date::constant(2026, 8, 28),
+            // Prescribed, and then nothing: the session lost to illness.
+            Date::constant(2026, 8, 31),
+        ] {
+            ready.prescriber.prescribe(date).await?;
+        }
+
+        let friday = Date::constant(2026, 9, 4);
+        ready.prescriber.prescribe(friday).await?;
+        delivering(&ready, &destination).deliver(friday).await?;
+        Ok::<_, Box<dyn std::error::Error>>(())
+    });
+
+    assert_eq!(
+        destination.titles(),
+        vec!["04 higher intensity, lower volume".to_owned()],
+        "three days were prescribed for before it, delivered or not"
+    );
 }
 
 /// **Asked twice is one session.** The destination cannot delete what it has
