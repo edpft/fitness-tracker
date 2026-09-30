@@ -491,6 +491,7 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
                 GarminGymRawExtent::new(
                     GarminActivityLandingStore::new(pool.clone())?,
                     GarminExerciseSetLandingStore::new(pool.clone())?,
+                    GarminActivityFileLandingStore::new(pool.clone())?,
                 ),
                 SqliteMeasuredGymSessionStore::new(pool.clone())?,
                 SqliteRefusalStore::new(pool.clone(), GarminActivityLandingStore::STREAM)?,

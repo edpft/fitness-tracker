@@ -1,11 +1,17 @@
 //! Turning Garmin's account of one gym session into a [`MeasuredGymSession`].
 //!
-//! **Two responses about one thing** (§ 3.1). The activity list states a
+//! **Three responses about one thing** (§ 3.1). The activity list states a
 //! session's start, duration, device and heart-rate summary; its sets come from
-//! a second endpoint fetched per activity, and Garmin names both by the same
-//! `activityId`. Neither response is an entity on its own — an activity with no
-//! sets is a session that was recorded without them, and a set list with no
-//! activity is a set list with no clock, no device and no session.
+//! a second endpoint fetched per activity, the file the watch wrote comes from a
+//! third, and Garmin names all of them by the same `activityId`. None of them is
+//! an entity on its own — an activity with no sets is a session that was
+//! recorded without them, and a set list or a recording with no activity has no
+//! clock, no device and no session.
+//!
+//! **What the file adds is the heart rate at the resolution the watch wrote it**
+//! (#295). The list states an average and a highest, and those stay: they are
+//! what the source said, and § II.3 forbids deriving a summary of our own from
+//! the readings they summarise.
 //!
 //! **A gym session, not every activity.** `garmin.activities` lands all 2,271 of
 //! the operator's activities because the type is a field on the record rather
@@ -26,9 +32,12 @@
 
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
-    gym::{Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded, SignedKg},
+    gym::{
+        ComposedFrom, Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate,
+        MeasuredSet, Recorded, SignedKg,
+    },
     landing::{EventKind, LandedRecord},
-    measure::{BeatsPerMinute, Duration, HeartRateSummary, Kg, RepCount},
+    measure::{BeatsPerMinute, Duration, HeartRateSeries, HeartRateSummary, Kg, RepCount},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
 };
@@ -40,6 +49,7 @@ use crate::scribe::Scribe;
 
 use super::{
     account::ActivityAccount,
+    fit,
     mapping::{LoadReading, Mapped, lookup},
 };
 
@@ -211,26 +221,8 @@ impl Translator for GarminGymTranslator {
             ));
         };
 
-        let heart_rate = heart_rate(&activity);
-        let sets = account
-            .sets()
-            .and_then(|landed| measured_sets(landed, zone, &mut scribe));
-
-        let recorded = match (heart_rate, sets) {
-            (Some(heart_rate), Some(sets)) => Recorded::Both { heart_rate, sets },
-            (Some(heart_rate), None) => Recorded::HeartRate(heart_rate),
-            (None, Some(sets)) => Recorded::Sets(sets),
-            // Neither part, so the activity asserts nothing about the session
-            // beyond its having happened, which is not an entity here.
-            (None, None) => {
-                scribe.note(
-                    RefusalLocus::Record,
-                    RefusalReason::MissingFigure {
-                        figure: "a heart rate or a set",
-                    },
-                );
-                return Ok(scribe.nothing_translatable());
-            }
+        let Some(recorded) = recorded(&activity, account, zone, &mut scribe) else {
+            return Ok(scribe.nothing_translatable());
         };
 
         let entity = MeasuredGymSession::new(
@@ -239,8 +231,11 @@ impl Translator for GarminGymTranslator {
             recorded,
             record.provenance().clone(),
             record.source_record_id().clone(),
-            record.id(),
-            account.sets().map(LandedRecord::id),
+            ComposedFrom {
+                activity: record.id(),
+                sets: account.sets().map(LandedRecord::id),
+                recording: account.recording().map(LandedRecord::id),
+            },
         );
 
         Ok(Translation::Entity {
@@ -280,6 +275,61 @@ fn heart_rate(activity: &Activity) -> Option<HeartRateSummary> {
         beats(activity.average_heart_rate.as_deref())?,
         beats(activity.highest_heart_rate.as_deref())?,
     ))
+}
+
+/// What the watch recorded of this session, in the parts it recorded it in.
+///
+/// [`None`] where it recorded neither a heart rate nor a set: the activity then
+/// asserts nothing about the session beyond its having happened, which is not an
+/// entity here, and the refusal saying so is noted before returning.
+fn recorded(
+    activity: &Activity,
+    account: &ActivityAccount,
+    zone: &OperatorZone,
+    scribe: &mut Scribe,
+) -> Option<Recorded> {
+    let heart_rate = heart_rate(activity)
+        .map(|stated| MeasuredHeartRate::new(stated, recorded_series(account, scribe)));
+    let sets = account
+        .sets()
+        .and_then(|landed| measured_sets(landed, zone, scribe));
+
+    match (heart_rate, sets) {
+        (Some(heart_rate), Some(sets)) => Some(Recorded::Both { heart_rate, sets }),
+        (Some(heart_rate), None) => Some(Recorded::HeartRate(heart_rate)),
+        (None, Some(sets)) => Some(Recorded::Sets(sets)),
+        (None, None) => {
+            scribe.note(
+                RefusalLocus::Record,
+                RefusalReason::MissingFigure {
+                    figure: "a heart rate or a set",
+                },
+            );
+            None
+        }
+    }
+}
+
+/// The readings the watch wrote, where its recording landed and holds any.
+///
+/// **A recording that will not read costs the series and not the session.** What
+/// the activity list states about the heart rate is a claim of its own, and it
+/// stands whether or not the file behind it opens — so a bad archive is noted
+/// against the record and the summary is kept (§ 37).
+fn recorded_series(account: &ActivityAccount, scribe: &mut Scribe) -> Option<HeartRateSeries> {
+    let landed = account.recording()?;
+    match fit::heart_rate(landed.payload().as_bytes()) {
+        Ok(samples) => samples.map(HeartRateSeries::new),
+        Err(error) => {
+            scribe.note(
+                RefusalLocus::Record,
+                RefusalReason::UnreadablePayload {
+                    detail: format!("its recording: {error}"),
+                },
+            );
+            None
+        }
+    }
 }
 
 /// The whole part of a number Garmin wrote, as the characters it wrote.

@@ -922,6 +922,7 @@ fn ridden(
         average_power: Watts::from_u32(average),
         samples: NonEmpty::of(sample, vec![]),
         heart_rate: None,
+        heart_rate_declared_missing: None,
         provenance: EventProvenance::new(
             Endpoint::try_from("/api/user/u/workouts")?,
             EventKind::Updated,

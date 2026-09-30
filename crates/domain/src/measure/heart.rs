@@ -167,3 +167,55 @@ impl fmt::Display for HeartRateSummary {
         write!(f, "{} average, {} highest", self.average, self.highest)
     }
 }
+
+/// One reading, and where in the recording it sits.
+///
+/// **Here rather than in `cycling`**, for [`BeatsPerMinute`]'s reason: a watch
+/// on a gym floor writes the same series a bike relays, and the thing that
+/// differs between them is the source, not the measurement.
+///
+/// `at` is seconds from the start of the recording, and it is carried rather
+/// than implied by position. Neither source is regular: Peloton's index starts
+/// at 4 or skips 38 seconds in the middle on 143 of the operator's 285 rides,
+/// and Garmin's watch writes on its own judgement — 2,785 readings across the
+/// 5,935 seconds of 2026-09-25, spaced one to ten seconds apart. Row order
+/// would silently restate a gap as continuous recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeartRateSample {
+    pub at: super::Duration,
+    pub beats_per_minute: BeatsPerMinute,
+}
+
+/// The heart-rate series, where one was recorded.
+///
+/// **A series rather than a nullable column on whatever else was measured.** A
+/// heart rate comes from a strap or a watch, which is a different method from
+/// the bike's power or the watch's rep counting, and § 6 makes that a different
+/// series even inside one entity. As a separate series, "nothing was worn" is
+/// [`None`] and "the sensor dropped out for every second" is a series with no
+/// samples, which cannot be built; as a nullable column the two would be the
+/// same rows of nulls.
+///
+/// **What a source says it missed is not here**, because it is a total rather
+/// than a position: it sits on the entity beside the series, which is also
+/// where the store keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeartRateSeries {
+    samples: crate::sequence::NonEmpty<HeartRateSample>,
+}
+
+impl HeartRateSeries {
+    pub const fn new(samples: crate::sequence::NonEmpty<HeartRateSample>) -> Self {
+        Self { samples }
+    }
+
+    pub const fn samples(&self) -> &crate::sequence::NonEmpty<HeartRateSample> {
+        &self.samples
+    }
+}
+
+impl fmt::Display for HeartRateSeries {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} readings", self.samples.count())
+    }
+}

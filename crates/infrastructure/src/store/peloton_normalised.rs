@@ -27,9 +27,7 @@
 
 use application::{AccountReader, NormalisedEntityStore, PerformedSessionLog, StoreError};
 use domain::{
-    cycling::{
-        BikePlusRide, Ftp, FtpProvenance, HeartRateSeries, PerformedSession, RideVenue, Watts,
-    },
+    cycling::{BikePlusRide, Ftp, FtpProvenance, PerformedSession, RideVenue, Watts},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -464,8 +462,7 @@ async fn write_ride(
         })?;
     let average_power = i64::from(ride.average_power().as_u32());
     let declared_missing = ride
-        .heart_rate()
-        .and_then(HeartRateSeries::declared_missing)
+        .heart_rate_declared_missing()
         .map(seconds_for_storage)
         .transpose()?;
 

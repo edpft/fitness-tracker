@@ -25,7 +25,10 @@ pub use exercise::{
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{Load, SignedKg};
 pub use manual::{Logged, ManualExercise, ManualGymSession, ManualItem, ManualSet};
-pub use measured::{Guess, GuessedExercise, MeasuredGymSession, MeasuredSet, Recorded};
+pub use measured::{
+    ComposedFrom, Guess, GuessedExercise, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
+    Recorded,
+};
 pub use outcome::Performed;
 pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};

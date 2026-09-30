@@ -17,6 +17,7 @@ pub mod activities;
 pub mod auth;
 pub mod exercise_sets;
 pub mod files;
+pub mod fit;
 pub mod gym;
 pub mod hrv;
 pub mod mapping;

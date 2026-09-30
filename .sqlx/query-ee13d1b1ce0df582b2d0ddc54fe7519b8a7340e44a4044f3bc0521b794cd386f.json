@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT average_bpm AS \"average!: i64\", highest_bpm AS \"highest!: i64\",\n                      recording_landing_record_id AS \"recording!: i64\",\n                      (SELECT id FROM garmin_activity_file_landing) AS \"landed!: i64\"\n               FROM measured_gym_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "average!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "measured_gym_session",
+            "name": "average_bpm"
+          }
+        }
+      },
+      {
+        "name": "highest!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "measured_gym_session",
+            "name": "highest_bpm"
+          }
+        }
+      },
+      {
+        "name": "recording!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "measured_gym_session",
+            "name": "recording_landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "landed!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "garmin_activity_file_landing",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ee13d1b1ce0df582b2d0ddc54fe7519b8a7340e44a4044f3bc0521b794cd386f"
+}

@@ -33,11 +33,10 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     cycling::{
-        BikePlusRide, ComposedFrom, HeartRateSample, HeartRateSeries, PerformedSession, RideRecord,
-        RideSample, RideVenue, Watts,
+        BikePlusRide, ComposedFrom, PerformedSession, RideRecord, RideSample, RideVenue, Watts,
     },
     landing::EventKind,
-    measure::{BeatsPerMinute, Duration, Metres},
+    measure::{BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
 };
@@ -286,7 +285,7 @@ fn ride_from(
     // nothing, or wore something that failed, and the four series the bike
     // produced are unaffected either way. A problem with it is carried back
     // rather than raised, so it costs the declaration and not the ride.
-    let (heart_rate, noted) = heart_rate_of(&graph);
+    let (heart_rate, heart_rate_declared_missing, noted) = heart_rate_of(&graph);
 
     Ok((
         BikePlusRide::new(RideRecord {
@@ -297,6 +296,7 @@ fn ride_from(
             average_power,
             samples,
             heart_rate,
+            heart_rate_declared_missing,
             provenance: record.provenance().clone(),
             source_record_id: record.source_record_id().clone(),
             landed_as: ComposedFrom {
@@ -601,10 +601,16 @@ where
 /// Peloton held a value forward for as well as the ones it zeroed — so it is
 /// recorded rather than recomputed, and a value that is not a duration is
 /// refused without costing the series.
-fn heart_rate_of(graph: &PerformanceGraph<'_>) -> (Option<HeartRateSeries>, Vec<RefusalReason>) {
+fn heart_rate_of(
+    graph: &PerformanceGraph<'_>,
+) -> (
+    Option<HeartRateSeries>,
+    Option<Duration>,
+    Vec<RefusalReason>,
+) {
     let mut noted = Vec::new();
     let Some(metric) = graph.metric(HEART_RATE) else {
-        return (None, noted);
+        return (None, None, noted);
     };
     let offsets = &graph.seconds_since_pedaling_start;
 
@@ -617,7 +623,7 @@ fn heart_rate_of(graph: &PerformanceGraph<'_>) -> (Option<HeartRateSeries>, Vec<
                 offsets.len()
             ),
         });
-        return (None, noted);
+        return (None, None, noted);
     }
 
     let mut samples = Vec::new();
@@ -641,7 +647,7 @@ fn heart_rate_of(graph: &PerformanceGraph<'_>) -> (Option<HeartRateSeries>, Vec<
         noted.push(RefusalReason::NoReadingsInSeries {
             series: "heart rate",
         });
-        return (None, noted);
+        return (None, None, noted);
     };
 
     let declared_missing = number(metric.missing_data_duration).and_then(|stated| {
@@ -657,5 +663,5 @@ fn heart_rate_of(graph: &PerformanceGraph<'_>) -> (Option<HeartRateSeries>, Vec<
         }
     });
 
-    (Some(HeartRateSeries::new(samples, declared_missing)), noted)
+    (Some(HeartRateSeries::new(samples)), declared_missing, noted)
 }

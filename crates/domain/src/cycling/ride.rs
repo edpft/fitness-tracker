@@ -55,7 +55,7 @@ use std::fmt;
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::measure::{Duration, InvalidQuantity, Metres};
 use crate::sequence::NonEmpty;
-use crate::{measure::BeatsPerMinute, normalised::StartedAt};
+use crate::{measure::HeartRateSeries, normalised::StartedAt};
 
 use super::venue::RideVenue;
 use super::zone::Watts;
@@ -271,60 +271,6 @@ pub struct RideSample {
     pub speed: Speed,
 }
 
-/// One second of what the watch broadcast.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HeartRateSample {
-    pub at: Duration,
-    pub beats_per_minute: BeatsPerMinute,
-}
-
-/// The heart-rate series, where one was recorded.
-///
-/// **Its own series rather than a fifth column on [`RideSample`]**, because it
-/// is the one measurement here that is not the bike's. It comes from a watch on
-/// broadcast, occasionally a strap, relayed through Peloton — a different
-/// method from the other four, which § 6 says makes it a different series even
-/// inside one entity. As a separate series, "nothing was worn" is
-/// [`None`] and "the strap dropped out for every second" is a series with no
-/// samples, which cannot be built; as a nullable column the two would be the
-/// same rows of nulls.
-///
-/// **Which device supplied it is not recoverable.** Peloton records no sensor
-/// identity anywhere, and the operator has parked that: it would have to come
-/// from Garmin directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeartRateSeries {
-    samples: NonEmpty<HeartRateSample>,
-    declared_missing: Option<Duration>,
-}
-
-impl HeartRateSeries {
-    /// `declared_missing` is what the *source* says was not measured, and is
-    /// not derived from the samples: it counts seconds Peloton knows it held a
-    /// value forward for as well as the ones it served a zero for, so it is
-    /// larger than the gaps here and cannot be recomputed from them. [`None`]
-    /// where the source stated nothing, or stated something unreadable.
-    pub const fn new(
-        samples: NonEmpty<HeartRateSample>,
-        declared_missing: Option<Duration>,
-    ) -> Self {
-        Self {
-            samples,
-            declared_missing,
-        }
-    }
-
-    pub const fn samples(&self) -> &NonEmpty<HeartRateSample> {
-        &self.samples
-    }
-
-    /// How many seconds the source says it did not measure. Never a count of
-    /// the gaps in [`Self::samples`], which is a different number.
-    pub const fn declared_missing(&self) -> Option<Duration> {
-        self.declared_missing
-    }
-}
-
 /// The landing records one ride is composed from.
 ///
 /// **Two, and that is what needed constitution 3.1.0.** Peloton serves a ride's
@@ -379,6 +325,7 @@ pub struct BikePlusRide {
     average_power: Watts,
     samples: NonEmpty<RideSample>,
     heart_rate: Option<HeartRateSeries>,
+    heart_rate_declared_missing: Option<Duration>,
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: ComposedFrom,
@@ -418,7 +365,25 @@ pub struct RideRecord {
     /// worked out.
     pub average_power: Watts,
     pub samples: NonEmpty<RideSample>,
+    /// The heart rate relayed through the bike, where something was worn.
+    ///
+    /// **Which device supplied it is not recoverable.** Peloton records no
+    /// sensor identity anywhere, and the operator has parked that: it would
+    /// have to come from Garmin directly.
     pub heart_rate: Option<HeartRateSeries>,
+    /// How many seconds the source says it did not measure.
+    ///
+    /// **The source's own total, not a count of the gaps in
+    /// [`Self::heart_rate`]**, which is a different number: it counts seconds
+    /// Peloton knows it held a value forward for as well as the ones it served
+    /// a zero for, so it is larger than the gaps in the series and cannot be
+    /// recomputed from them. [`None`] where the source stated nothing, or
+    /// stated something unreadable.
+    ///
+    /// **Beside the series rather than inside it**, because it is a total
+    /// rather than a position — which is also why the store keeps it on the
+    /// ride's own row.
+    pub heart_rate_declared_missing: Option<Duration>,
     pub provenance: Provenance,
     pub source_record_id: SourceRecordId,
     pub landed_as: ComposedFrom,
@@ -436,6 +401,7 @@ impl BikePlusRide {
             average_power: record.average_power,
             samples: record.samples,
             heart_rate: record.heart_rate,
+            heart_rate_declared_missing: record.heart_rate_declared_missing,
             provenance: record.provenance,
             source_record_id: record.source_record_id,
             landed_as: record.landed_as,
@@ -470,6 +436,12 @@ impl BikePlusRide {
 
     pub const fn heart_rate(&self) -> Option<&HeartRateSeries> {
         self.heart_rate.as_ref()
+    }
+
+    /// How many seconds the source says it did not measure — see
+    /// [`RideRecord::heart_rate_declared_missing`].
+    pub const fn heart_rate_declared_missing(&self) -> Option<Duration> {
+        self.heart_rate_declared_missing
     }
 
     pub const fn provenance(&self) -> &Provenance {
