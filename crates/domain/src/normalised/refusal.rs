@@ -153,6 +153,19 @@ pub enum RefusalReason {
     /// The name is the figure alone, undetermined: [`fmt::Display`] puts it in
     /// "no {figure} was stated".
     MissingFigure { figure: &'static str },
+    /// An activity the source states no length for, which is not a short
+    /// activity.
+    ///
+    /// The operator, 2026-09-30: *"A 0 duration activity isn't an activity, by
+    /// definition, nothing happened."* So this is a
+    /// [`RefusalKind::DeclaredLimitation`] rather than wrong data: the source is
+    /// telling the truth and there is nothing to fix at either end. Garmin
+    /// states it once, on a yoga activity whose `duration` and
+    /// `elapsedDuration` are both `0.0`.
+    ///
+    /// Distinct from [`Self::MissingFigure`], which is the source not stating a
+    /// duration at all. A stated zero is a statement.
+    NothingHappened,
     /// A reading from something other than the instrument the entity is for.
     ///
     /// The operator, 2026-09-17, of two weights typed into the Withings app:
@@ -238,6 +251,7 @@ impl RefusalReason {
             | Self::Unattributed
             | Self::WithoutBaseline
             | Self::OnlyTheWatchClassifying
+            | Self::NothingHappened
             | Self::WithoutWeighIn { .. } => RefusalKind::DeclaredLimitation,
         }
     }
@@ -259,6 +273,7 @@ impl RefusalReason {
             Self::NoReadingsInSeries { .. } => "no-readings-in-series",
             Self::MissingSeries { .. } => "missing-series",
             Self::MissingFigure { .. } => "missing-figure",
+            Self::NothingHappened => "nothing-happened",
             Self::NotTheInstrument { .. } => "not-the-instrument",
             Self::Unattributed => "unattributed",
             Self::WithoutBaseline => "without-baseline",
@@ -311,6 +326,7 @@ impl fmt::Display for RefusalReason {
             }
             Self::MissingSeries { series } => write!(f, "no {series} series was served"),
             Self::MissingFigure { figure } => write!(f, "no {figure} was stated"),
+            Self::NothingHappened => f.write_str("an activity of no length, so nothing happened"),
             Self::NotTheInstrument { detail } => {
                 write!(f, "{detail} is not a reading from the instrument")
             }

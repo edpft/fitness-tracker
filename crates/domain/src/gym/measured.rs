@@ -42,7 +42,7 @@ use std::fmt;
 
 use crate::{
     landing::{LandingRecordId, Provenance, SourceRecordId},
-    measure::{Duration, HeartRateSeries, HeartRateSummary, RepCount},
+    measure::{HeartRateSeries, HeartRateSummary, PositiveDuration, RepCount},
     normalised::{NormalisedEntity, StartedAt},
     sequence::NonEmpty,
 };
@@ -336,7 +336,18 @@ pub struct ComposedFrom {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasuredGymSession {
     started_at: StartedAt,
-    duration: Duration,
+    /// How long the watch recorded for.
+    ///
+    /// **Positive, because a session of no length is not a session.** The
+    /// operator, 2026-09-30: *"A 0 duration activity isn't an activity, by
+    /// definition, nothing happened."* Garmin states one of these — a yoga
+    /// activity on 2026-08-19 whose `duration` and `elapsedDuration` are both
+    /// `0.0` — so this is a value the source serves rather than one it cannot,
+    /// and § 24 makes it unrepresentable here instead of unlikely. No
+    /// `strength_training` activity states it, so nothing in the record is
+    /// affected; the type is what stops the next one landing as a session
+    /// nobody trained.
+    duration: PositiveDuration,
     recorded: Recorded,
     provenance: Provenance,
     source_record_id: SourceRecordId,
@@ -346,7 +357,7 @@ pub struct MeasuredGymSession {
 impl MeasuredGymSession {
     pub const fn new(
         started_at: StartedAt,
-        duration: Duration,
+        duration: PositiveDuration,
         recorded: Recorded,
         provenance: Provenance,
         source_record_id: SourceRecordId,
@@ -366,7 +377,7 @@ impl MeasuredGymSession {
         &self.started_at
     }
 
-    pub const fn duration(&self) -> Duration {
+    pub const fn duration(&self) -> PositiveDuration {
         self.duration
     }
 

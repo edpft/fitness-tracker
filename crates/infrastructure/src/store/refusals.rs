@@ -144,6 +144,7 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
         "not-the-instrument" => Ok(RefusalReason::NotTheInstrument { detail }),
         "unguessable-movement" => Ok(RefusalReason::UnguessableMovement { term: detail }),
         "only-the-watch-classifying" => Ok(RefusalReason::OnlyTheWatchClassifying),
+        "nothing-happened" => Ok(RefusalReason::NothingHappened),
         "unattributed" => Ok(RefusalReason::Unattributed),
         "without-baseline" => Ok(RefusalReason::WithoutBaseline),
         "without-weigh-in" => Ok(RefusalReason::WithoutWeighIn {
