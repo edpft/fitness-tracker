@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_gym_session (\n            started_at_utc, zone, on_day, duration_seconds, duration_normalised_session,\n            average_bpm, highest_bpm, heart_rate_normalised_session\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        RETURNING id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9640af1bbbc412427ba4b0131e624f7b98c6cdc96430bd417e313255d0fc0635"
+}

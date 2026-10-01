@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT at_seconds AS \"at_seconds!\", beats_per_minute AS \"beats_per_minute!\"\n        FROM canonical_gym_session_heart_rate\n        WHERE session = ?\n        ORDER BY at_seconds\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "at_seconds!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_heart_rate",
+            "name": "at_seconds"
+          }
+        }
+      },
+      {
+        "name": "beats_per_minute!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_heart_rate",
+            "name": "beats_per_minute"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fe2ccce412c58e4b6074d3909481823da39cc8229b7c45ea36b3878bde753f50"
+}

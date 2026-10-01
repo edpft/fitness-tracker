@@ -10,6 +10,7 @@
 
 pub mod analytical;
 pub mod body;
+pub mod canonical;
 pub mod cycling;
 pub mod gym;
 pub mod landing;

@@ -1,0 +1,218 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT outcome AS \"outcome!\", reps, duration_seconds, distance_mm,\n               outcome_normalised_session AS \"outcome_normalised_session!\",\n               load_kind, load_grams, load_normalised_session,\n               began_at_utc, began_zone, began_normalised_session,\n               rir, rir_normalised_session, set_kind, set_kind_normalised_session,\n               rest_after_seconds, rest_after_normalised_session\n        FROM canonical_gym_set\n        WHERE session = ? AND item_position = ? AND exercise_position = ?\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "outcome!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "outcome_normalised_session!",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "outcome_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "load_kind",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "load_normalised_session",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "began_at_utc",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "began_at_utc"
+          }
+        }
+      },
+      {
+        "name": "began_zone",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "began_zone"
+          }
+        }
+      },
+      {
+        "name": "began_normalised_session",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "began_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "rir",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "rir"
+          }
+        }
+      },
+      {
+        "name": "rir_normalised_session",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "rir_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "set_kind",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "set_kind"
+          }
+        }
+      },
+      {
+        "name": "set_kind_normalised_session",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "set_kind_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "rest_after_seconds",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "rest_after_seconds"
+          }
+        }
+      },
+      {
+        "name": "rest_after_normalised_session",
+        "ordinal": 16,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "rest_after_normalised_session"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f8c5ab8ecf6c4ac7d3db5ea3b3613564951acb5ceac544ecab491eba65f01b28"
+}

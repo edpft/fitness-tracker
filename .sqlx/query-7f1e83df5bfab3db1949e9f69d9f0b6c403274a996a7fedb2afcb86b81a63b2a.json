@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT position AS \"position!\", is_superset AS \"is_superset!\"\n        FROM canonical_gym_item WHERE session = ? ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_item",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "is_superset!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_item",
+            "name": "is_superset"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7f1e83df5bfab3db1949e9f69d9f0b6c403274a996a7fedb2afcb86b81a63b2a"
+}

@@ -9,6 +9,7 @@
 //! which is the model of record. What is restated here is only what a reader of
 //! the code needs in order not to undo it.
 
+pub mod canonical;
 pub mod exercise;
 pub mod intensity;
 pub mod load;
@@ -19,6 +20,9 @@ pub mod performed;
 pub mod set;
 pub mod workout;
 
+pub use canonical::{
+    CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
+};
 pub use exercise::{
     DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
 };
