@@ -37,7 +37,7 @@ use domain::{
         MeasuredSet, Recorded, SignedKg,
     },
     landing::{EventKind, LandedRecord},
-    measure::{BeatsPerMinute, Duration, HeartRateSeries, HeartRateSummary, Kg, RepCount},
+    measure::{BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
 };
@@ -212,13 +212,23 @@ impl Translator for GarminGymTranslator {
             }
         };
 
-        let Some(duration) = seconds(activity.duration.as_deref()) else {
-            return Ok(scribe.only(
-                RefusalLocus::Record,
-                RefusalReason::MissingFigure {
-                    figure: "a duration",
-                },
-            ));
+        // **A stated zero and an absent duration are different refusals.** The
+        // source saying nothing is wrong data to fix; the source saying the
+        // activity had no length is the truth about a non-event, and the
+        // operator has declared that not to be an activity at all.
+        let duration = match seconds(activity.duration.as_deref()) {
+            Stated::Length(duration) => duration,
+            Stated::NoLength => {
+                return Ok(scribe.only(RefusalLocus::Record, RefusalReason::NothingHappened));
+            }
+            Stated::Nothing => {
+                return Ok(scribe.only(
+                    RefusalLocus::Record,
+                    RefusalReason::MissingFigure {
+                        figure: "a duration",
+                    },
+                ));
+            }
         };
 
         let Some(recorded) = recorded(&activity, account, zone, &mut scribe) else {
@@ -590,11 +600,27 @@ const fn load(grams: i64, reading: LoadReading) -> Load {
     }
 }
 
+/// What the activity says about how long it lasted.
+///
+/// Three answers rather than two, because a stated zero is a statement and the
+/// caller refuses it differently from silence.
+enum Stated {
+    Length(PositiveDuration),
+    /// The source stated a duration of zero.
+    NoLength,
+    /// The source stated no duration, or one that will not read as seconds.
+    Nothing,
+}
+
 /// A duration in whole seconds, from the fractional seconds Garmin serves.
-fn seconds(stated: Option<&RawValue>) -> Option<Duration> {
-    whole(stated)
+fn seconds(stated: Option<&RawValue>) -> Stated {
+    let Some(seconds) = whole(stated)
         .map(ToOwned::to_owned)
-        .and_then(|seconds| Duration::try_from(seconds).ok())
+        .and_then(|seconds| seconds.parse::<u64>().ok())
+    else {
+        return Stated::Nothing;
+    };
+    PositiveDuration::from_seconds(seconds).map_or(Stated::NoLength, Stated::Length)
 }
 
 /// A naive GMT stamp, placed.

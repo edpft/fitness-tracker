@@ -1216,3 +1216,51 @@ fn a_bare_category_with_no_conventional_exercise_describes_the_movement() {
             .is_empty(),
     );
 }
+
+/// A stated duration of zero is refused, and not as a missing figure.
+///
+/// The operator, 2026-09-30: *"A 0 duration activity isn't an activity, by
+/// definition, nothing happened."* Garmin serves one — a yoga activity on
+/// 2026-08-19 whose `duration` and `elapsedDuration` are both `0.0` — so the
+/// case is the source's rather than hypothetical, and it reaches the gym path the
+/// moment a strength activity is stopped the same way.
+///
+/// **The two refusals are kept apart** because what an operator does about them
+/// differs. Silence is wrong data to fix at source; a stated zero is the truth
+/// about a non-event and there is nothing to fix, which is why it is a declared
+/// limitation.
+#[test]
+fn a_stated_zero_duration_is_nothing_happening_and_an_absent_one_is_not() {
+    let zero = activity(
+        "24041473622",
+        "strength_training",
+        "2026-08-19 20:34:44",
+        &[("duration", json!(0.0)), ("elapsedDuration", json!(0.0))],
+    );
+    let refused = refusals(&zero, None).expect("refusals");
+    assert_eq!(
+        refused.as_slice(),
+        [RefusalReason::NothingHappened],
+        "a stated zero says nothing happened"
+    );
+    assert_eq!(
+        RefusalReason::NothingHappened.kind(),
+        domain::normalised::RefusalKind::DeclaredLimitation,
+        "there is nothing to fix at either end"
+    );
+
+    let absent = activity(
+        "24041473623",
+        "strength_training",
+        "2026-08-19 20:34:44",
+        &[("duration", Value::Null)],
+    );
+    let refused = refusals(&absent, None).expect("refusals");
+    assert_eq!(
+        refused.as_slice(),
+        [RefusalReason::MissingFigure {
+            figure: "a duration"
+        }],
+        "silence is a missing figure, not a non-event"
+    );
+}
