@@ -8,6 +8,7 @@
 
 pub mod btwb_export_landing;
 pub mod btwb_normalised;
+pub mod canonical_gym;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
@@ -50,6 +51,7 @@ use domain::{
 
 pub use btwb_export_landing::BtwbExportLandingStore;
 pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
+pub use canonical_gym::SqliteCanonicalGymSessionStore;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;

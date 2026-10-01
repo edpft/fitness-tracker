@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"count!\" FROM canonical_gym_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "145a929cb384573a7d3b8c54409559ba3f5cd5ad96a0872090ff3064b7d9689b"
+}

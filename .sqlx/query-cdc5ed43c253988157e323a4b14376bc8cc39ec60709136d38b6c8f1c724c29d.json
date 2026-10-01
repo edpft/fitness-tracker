@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT position AS \"position!\", measure AS \"measure!\", identified AS \"identified!\",\n               exercise, movement, implement, identified_normalised_session AS \"identified_normalised_session!\"\n        FROM canonical_gym_exercise\n        WHERE session = ? AND item_position = ?\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "measure!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "measure"
+          }
+        }
+      },
+      {
+        "name": "identified!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "identified"
+          }
+        }
+      },
+      {
+        "name": "exercise",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "movement",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "movement"
+          }
+        }
+      },
+      {
+        "name": "implement",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "implement"
+          }
+        }
+      },
+      {
+        "name": "identified_normalised_session!",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "identified_normalised_session"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "cdc5ed43c253988157e323a4b14376bc8cc39ec60709136d38b6c8f1c724c29d"
+}

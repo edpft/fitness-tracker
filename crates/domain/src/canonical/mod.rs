@@ -14,7 +14,7 @@
 //!
 //! **What this layer does is merge** (§ 10, amended 2026-10-01). One entry per
 //! event is one account of it, assembled field by field from whichever
-//! normalised accounts recorded each field, and every field names the account
+//! normalised sessions recorded each field, and every field names the normalised session
 //! it was taken from — which is what [`Attributed`] is.
 
 pub mod attribution;

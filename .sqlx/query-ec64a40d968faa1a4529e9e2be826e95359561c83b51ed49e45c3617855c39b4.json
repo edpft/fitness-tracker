@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_gym_exercise (\n            session, item_position, position, measure,\n            identified, exercise, movement, implement, identified_normalised_session\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "ec64a40d968faa1a4529e9e2be826e95359561c83b51ed49e45c3617855c39b4"
+}

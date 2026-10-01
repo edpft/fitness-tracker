@@ -5,9 +5,10 @@ Sync Impact Report
 - 5.0.0 — § 10's second bullet redefined. It said choosing between two sources' accounts was
   an analytical-layer decision, "never resolved by discarding one"; it now says the normalised
   layer discards nothing and the canonical layer merges, field by field, each field naming the
-  account it came from. MAJOR: a rule redefined incompatibly. The operator, 2026-10-01: *"This
-  is right at the normalisation layer, but wrong at canonicalisation, so, yes amend."* The old
-  reading produced #297, a canonical gym session that named its parts rather than merging them,
+  normalised entity it came from. MAJOR: a rule redefined incompatibly. The operator,
+  2026-10-01: *"This is right at the normalisation layer, but wrong at canonicalisation, so,
+  yes amend."* The old reading produced #297, a canonical gym session that named its parts
+  rather than merging them,
   which he rejected: *"This isn't what I wanted at all… I was looking for consolidation and
   merging, taking the best of each source to produce the fullest picture possible."* On the one
   difference in the record — 47.5 kg in a sheet against 48 kg on the watch for one bench set on
@@ -222,9 +223,9 @@ Both are re-runnable at any time. Neither consults an overlay.
 - Two records sharing a source identity are the same source contradicting itself. The later supersedes; the earlier remains in raw and normalised but is not current. Retraction is not supersession and does not reach here: it names no replacement, so there are not two accounts to prefer between, and § II.3 has already settled it.
 - Records from different sources are co-observations. Neither supersedes the other and both stand. At the normalised layer nothing is preferred, reconciled or discarded: each account is kept exactly as its source gave it, and a difference between two of them is evidence rather than error.
 
-  **The canonical layer merges them, which is what it is for.** One entry per real-world event (§ II.4) is one account of that event, assembled field by field from whichever normalised accounts recorded each field, and every field names the account it was taken from. A field no account recorded is not held; a field one account recorded is held as that account gave it; a field several accounts recorded and agree on is held once. Where they differ because one source's input could not express the value the other gave — a load entered on a dial that takes whole kilogrammes against the same load written down as 47.5 — the canonical entity holds the one that could express it and names it. The account not taken is not discarded: it stands unchanged in the normalised layer, which the merge never rewrites.
+  **The canonical layer merges them, which is what it is for.** One entry per real-world event (§ II.4) is one account of that event, assembled field by field from whichever normalised entities recorded each field, and every field names the normalised entity it was taken from. A field none of them recorded is not held; a field one of them recorded is held as that one gave it; a field several recorded and agree on is held once. Where they differ because one source's input could not express the value another gave — a load entered on a dial that takes whole kilogrammes against the same load written down as 47.5 — the canonical entity holds the one that could express it and names it. The one not taken is not discarded: it stands unchanged in the normalised layer, which the merge never rewrites.
 
-  Two accounts that could each express a value and still differ are a genuine disagreement, and merging is not how it is settled: the merge surfaces it rather than picking. Method-dependent quantities (§ 6) are never merged into one value at all, because there is no single value for them to be. Choosing which series to read remains an analytical-layer decision (§ 5).
+  Two normalised entities that could each express a value and still differ are a genuine disagreement, and merging is not how it is settled: the merge surfaces it rather than picking. Method-dependent quantities (§ 6) are never merged into one value at all, because there is no single value for them to be. Choosing which series to read remains an analytical-layer decision (§ 5).
 
 Consequences:
 

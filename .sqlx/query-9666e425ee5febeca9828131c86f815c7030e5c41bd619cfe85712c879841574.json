@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO canonical_gym_item (session, position, is_superset) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9666e425ee5febeca9828131c86f815c7030e5c41bd619cfe85712c879841574"
+}

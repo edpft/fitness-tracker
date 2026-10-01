@@ -32,12 +32,12 @@ pub use error::{
     RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    AccountReader, Authored, Clock, CyclingDeliveryStore, CyclingMesocycleStore, Deliverable,
-    Delivered, Delivery, DeliveryAttempt, DeliveryReference, DerivationStatus,
-    DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor, DiaryStore,
-    EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FtpHistory,
-    FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance,
-    LadderStanding, LandingStore, LastPerformance, MesocycleInForce, MesocycleStore,
+    AccountReader, Authored, CanonicalGymSessionStore, Clock, CyclingDeliveryStore,
+    CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
+    DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
+    DiaryStore, EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter,
+    FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar,
+    Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce, MesocycleStore,
     NormalisationRunLog, NormalisationSummary, NormalisedEntityStore, Performance,
     PerformedSessionLog, PerformedSetSummary, PerformedWorkoutReader, PlanAuthor, PlanStore,
     PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
