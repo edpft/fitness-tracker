@@ -1,7 +1,20 @@
 <!--
 Sync Impact Report
-- Version: 4.3.0, amended 2026-09-27. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 5.0.0, amended 2026-10-01. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 5.0.0 — § 10's second bullet redefined. It said choosing between two sources' accounts was
+  an analytical-layer decision, "never resolved by discarding one"; it now says the normalised
+  layer discards nothing and the canonical layer merges, field by field, each field naming the
+  account it came from. MAJOR: a rule redefined incompatibly. The operator, 2026-10-01: *"This
+  is right at the normalisation layer, but wrong at canonicalisation, so, yes amend."* The old
+  reading produced #297, a canonical gym session that named its parts rather than merging them,
+  which he rejected: *"This isn't what I wanted at all… I was looking for consolidation and
+  merging, taking the best of each source to produce the fullest picture possible."* On the one
+  difference in the record — 47.5 kg in a sheet against 48 kg on the watch for one bench set on
+  2019-03-14 — he had already settled what it is: *"Garmin didn't let you record decimal
+  weights! You enter the load via a dial on the watch face, integer only."* A forced divergence
+  is not a disagreement about a fact. No decision record: there was one position and the
+  previous text was wrong.
 - 4.3.0 — § 3.1 gains a rule: a normalised table follows the kind of observation, not the
   device, and every row names its method; § 6's class decides only whether rows of different
   methods form one series. An observation meaningless without another from the same
@@ -207,7 +220,11 @@ Both are re-runnable at any time. Neither consults an overlay.
 **10.** **Correspondence is ordered within a source and unordered across sources.**
 
 - Two records sharing a source identity are the same source contradicting itself. The later supersedes; the earlier remains in raw and normalised but is not current. Retraction is not supersession and does not reach here: it names no replacement, so there are not two accounts to prefer between, and § II.3 has already settled it.
-- Records from different sources are co-observations. Neither supersedes the other, both stand, and disagreement between them is evidence rather than error. Choosing which to read is an analytical-layer decision (§ 5), never resolved by discarding one.
+- Records from different sources are co-observations. Neither supersedes the other and both stand. At the normalised layer nothing is preferred, reconciled or discarded: each account is kept exactly as its source gave it, and a difference between two of them is evidence rather than error.
+
+  **The canonical layer merges them, which is what it is for.** One entry per real-world event (§ II.4) is one account of that event, assembled field by field from whichever normalised accounts recorded each field, and every field names the account it was taken from. A field no account recorded is not held; a field one account recorded is held as that account gave it; a field several accounts recorded and agree on is held once. Where they differ because one source's input could not express the value the other gave — a load entered on a dial that takes whole kilogrammes against the same load written down as 47.5 — the canonical entity holds the one that could express it and names it. The account not taken is not discarded: it stands unchanged in the normalised layer, which the merge never rewrites.
+
+  Two accounts that could each express a value and still differ are a genuine disagreement, and merging is not how it is settled: the merge surfaces it rather than picking. Method-dependent quantities (§ 6) are never merged into one value at all, because there is no single value for them to be. Choosing which series to read remains an analytical-layer decision (§ 5).
 
 Consequences:
 
@@ -321,4 +338,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 4.3.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-09-27
+**Version**: 5.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-01
