@@ -312,49 +312,29 @@ impl CanonicalItem {
     }
 }
 
-/// What the sources between them hold of a session: what was done, what the
-/// heart did, or both.
-///
-/// **A session with neither is not a session**, so there is no fourth variant
-/// and nothing validates. It is also what the record is: of 550 gym days, 289
-/// are a Garmin activity alone — a heart rate and nothing else — and 48 are a
-/// log with no watch beside it.
-///
-/// **The heart rate is one account's whole.** Only a watch records one, it is
-/// method-dependent (§ 6), and § 10 keeps method-dependent quantities out of
-/// the merge: there is no second account of it to merge with and never will be
-/// one that could be merged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Parts {
-    Exercises(NonEmpty<CanonicalItem>),
-    HeartRate(Attributed<MeasuredHeartRate>),
-    Both {
-        exercises: NonEmpty<CanonicalItem>,
-        heart_rate: Attributed<MeasuredHeartRate>,
-    },
-}
-
-impl Parts {
-    pub const fn exercises(&self) -> Option<&NonEmpty<CanonicalItem>> {
-        match self {
-            Self::Exercises(exercises) | Self::Both { exercises, .. } => Some(exercises),
-            Self::HeartRate(_) => None,
-        }
-    }
-
-    pub const fn heart_rate(&self) -> Option<&Attributed<MeasuredHeartRate>> {
-        match self {
-            Self::HeartRate(heart_rate) | Self::Both { heart_rate, .. } => Some(heart_rate),
-            Self::Exercises(_) => None,
-        }
-    }
-}
-
 /// One gym session that happened, however many sources recorded it.
+///
+/// **Exercises are required and the heart rate is not.** The operator,
+/// 2026-10-01: *"A canonical gym session must have exercises and may have heart
+/// rate data. Heart rate only isn't a meaningful gym session."* So an activity
+/// that holds a heart rate and nothing else — 307 of the operator's 477 Garmin
+/// strength activities — is a normalised session and no canonical one, and
+/// there is no variant for it to be the degenerate case of.
+///
+/// A watch that recorded sets does give exercises, as [`Identified::Guessed`],
+/// which is why the rule costs the record only the activities where the watch
+/// classified nothing at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalGymSession {
     occurred: Occurred,
-    parts: Parts,
+    exercises: NonEmpty<CanonicalItem>,
+    /// What the heart did while they were performed, where a watch recorded it.
+    ///
+    /// **One account's whole, never merged.** Only a watch records a heart
+    /// rate, it is method-dependent (§ 6), and § 10 keeps method-dependent
+    /// quantities out of the merge: there is no single value two accounts of it
+    /// could reduce to.
+    heart_rate: Option<Attributed<MeasuredHeartRate>>,
     /// How long the visit took, as whichever account stated it. Hevy and a
     /// watch both do; a sheet and the gym's log do not.
     duration: Option<Attributed<PositiveDuration>>,
@@ -363,12 +343,14 @@ pub struct CanonicalGymSession {
 impl CanonicalGymSession {
     pub const fn new(
         occurred: Occurred,
-        parts: Parts,
+        exercises: NonEmpty<CanonicalItem>,
+        heart_rate: Option<Attributed<MeasuredHeartRate>>,
         duration: Option<Attributed<PositiveDuration>>,
     ) -> Self {
         Self {
             occurred,
-            parts,
+            exercises,
+            heart_rate,
             duration,
         }
     }
@@ -378,26 +360,25 @@ impl CanonicalGymSession {
         &self.occurred
     }
 
-    pub const fn parts(&self) -> &Parts {
-        &self.parts
+    pub const fn heart_rate(&self) -> Option<&Attributed<MeasuredHeartRate>> {
+        self.heart_rate.as_ref()
     }
 
     pub const fn duration(&self) -> Option<&Attributed<PositiveDuration>> {
         self.duration.as_ref()
     }
 
-    /// The items performed, in order. Empty where nothing but a watch's heart
-    /// rate records the session, which is 289 of the operator's gym days.
-    pub fn items(&self) -> impl Iterator<Item = &CanonicalItem> {
-        self.parts.exercises().into_iter().flat_map(NonEmpty::iter)
+    /// The items performed, in order. Never empty.
+    pub const fn items(&self) -> &NonEmpty<CanonicalItem> {
+        &self.exercises
     }
 
     /// Every exercise, supersets flattened, in the order performed.
     pub fn exercises(&self) -> impl Iterator<Item = &CanonicalExercise> {
-        self.items().flat_map(CanonicalItem::exercises)
+        self.exercises.iter().flat_map(CanonicalItem::exercises)
     }
 
-    /// How many sets the session holds.
+    /// How many sets the session holds. Never zero.
     pub fn set_count(&self) -> usize {
         self.exercises().map(CanonicalExercise::set_count).sum()
     }
@@ -411,8 +392,7 @@ impl CanonicalGymSession {
     /// list beside them would be a second source of truth for the same fact —
     /// one that could disagree with the fields it summarises.
     ///
-    /// Never empty: a session is its exercises or its heart rate or both, each
-    /// of which names an account.
+    /// Never empty: the exercises are non-empty and each names an account.
     pub fn stands_on(&self) -> Vec<NormalisedSessionId> {
         let mut accounts = Vec::new();
         let mut push = |account: NormalisedSessionId| {
@@ -420,13 +400,13 @@ impl CanonicalGymSession {
                 accounts.push(account);
             }
         };
-        if let Some(heart_rate) = self.parts.heart_rate() {
+        if let Some(heart_rate) = &self.heart_rate {
             push(heart_rate.account());
         }
         if let Some(duration) = &self.duration {
             push(duration.account());
         }
-        for exercise in self.exercises() {
+        for exercise in self.exercises.iter().flat_map(CanonicalItem::exercises) {
             for account in exercise.accounts() {
                 push(account);
             }
@@ -438,7 +418,7 @@ impl CanonicalGymSession {
 impl fmt::Display for CanonicalGymSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.occurred)?;
-        match self.parts.heart_rate() {
+        match &self.heart_rate {
             Some(heart_rate) => write!(f, " — {}", heart_rate.value())?,
             None => f.write_str(" — no heart rate")?,
         }
@@ -455,6 +435,7 @@ impl fmt::Display for CanonicalGymSession {
 mod tests {
     use super::*;
     use crate::canonical::NegativeNormalisedSessionId;
+    use super::super::measured::Guess;
     use crate::measure::{HeartRateSummary, Kg};
     use crate::normalised::{OperatorZone, UnknownTimeZone};
     use jiff::Timestamp;
@@ -522,7 +503,8 @@ mod tests {
         };
         let session = CanonicalGymSession::new(
             Occurred::On("2020-10-09".parse().expect("a day")),
-            Parts::Exercises(NonEmpty::of(CanonicalItem::Exercise(exercise), vec![])),
+            NonEmpty::of(CanonicalItem::Exercise(exercise), vec![]),
+            None,
             None,
         );
 
@@ -530,15 +512,25 @@ mod tests {
         assert_eq!(session.stands_on(), vec![sheet, watch]);
     }
 
-    /// 289 of the operator's gym days are a Garmin activity alone: a heart rate
-    /// and nothing else. That is a session, not a session with a hole in it.
+    /// A session only a watch recorded is still a session: its exercises are
+    /// the watch's guesses, and its heart rate sits beside them.
     #[test]
-    fn a_session_may_be_a_heart_rate_and_nothing_else() {
+    fn a_watch_only_session_has_the_watch_s_guesses_as_its_exercises() {
         let watch = account(7).expect("an account");
         let instant: Timestamp = "2015-02-09T18:03:00Z".parse().expect("an instant");
+        let exercise = CanonicalExercise::ForReps {
+            identified: Attributed::new(
+                Identified::Guessed(GuessedExercise::Proposed(Guess::Exercise(
+                    RepsExercise::BenchPressBarbell,
+                ))),
+                watch,
+            ),
+            sets: NonEmpty::of(set(8, watch, Some((40_000, watch))).expect("a set"), vec![]),
+        };
         let session = CanonicalGymSession::new(
             Occurred::At(StartedAt::new(instant, zone().expect("a zone"))),
-            Parts::HeartRate(Attributed::new(
+            NonEmpty::of(CanonicalItem::Exercise(exercise), vec![]),
+            Some(Attributed::new(
                 MeasuredHeartRate::new(
                     HeartRateSummary::new(
                         "77".parse().expect("a rate"),
@@ -551,8 +543,10 @@ mod tests {
             None,
         );
 
-        assert_eq!(session.set_count(), 0);
-        assert_eq!(session.items().count(), 0);
+        assert_eq!(session.set_count(), 1);
+        assert!(!session.exercises().any(|exercise| exercise
+            .exercise_key()
+            .is_none()));
         assert_eq!(session.stands_on(), vec![watch]);
     }
 

@@ -21,7 +21,7 @@ pub mod set;
 pub mod workout;
 
 pub use canonical::{
-    CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified, Parts,
+    CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
 };
 pub use exercise::{
     DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
