@@ -392,6 +392,93 @@ fn a_replacement_puts_the_same_body_to_the_routines_own_path() {
     );
 }
 
+/// **The digest a delivery records is the digest the next run compares it
+/// against** (#343).
+///
+/// The invariant the whole mechanism rests on. `deliver` hands back a
+/// fingerprint of what it sent and the store keeps it; the next run asks
+/// `rendering` what this build would send now and replaces the routine when the
+/// two differ. Were they different functions of the same session, every run
+/// would find a difference and rewrite the operator's routine daily.
+///
+/// **And the folder is outside it.** The two servers list the programme's
+/// folder under different ids, so the bodies posted differ in `folder_id` and
+/// in nothing else. The digests are equal, which is what lets `rendering` be
+/// asked on every run without resolving a folder — and resolving one creates it
+/// when it is missing.
+#[test]
+fn the_fingerprint_a_delivery_records_is_the_one_rendering_answers() {
+    let digests = support::corpus::block_on(async {
+        let mut sent = Vec::new();
+        let mut answered = Vec::new();
+        let mut filed = Vec::new();
+
+        for folder in [42, 7] {
+            let server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/v1/routine_folders"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "routine_folders": [{ "id": folder, "title": "summer-2026-front-squat" }]
+                })))
+                .mount(&server)
+                .await;
+
+            Mock::given(method("POST"))
+                .and(path("/v1/routines"))
+                .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                    "routine": { "id": "b459cba5-cd6d-463c-abd6-54f8eafcadcb" }
+                })))
+                .mount(&server)
+                .await;
+
+            let hevy =
+                HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+            let session = session().expect("the fixture session builds");
+
+            answered.push(hevy.rendering(&session).expect("the session renders"));
+            sent.push(
+                hevy.deliver(&session)
+                    .await
+                    .outcome
+                    .expect("the session is delivered")
+                    .rendering,
+            );
+
+            let requests = server
+                .received_requests()
+                .await
+                .expect("the mock recorded its requests");
+            let posted = requests
+                .iter()
+                .find(|request| request.url.path() == "/v1/routines")
+                .expect("a routine was posted");
+            let body: Value =
+                serde_json::from_slice(&posted.body).expect("the request body is json");
+            filed.push(body["routine"]["folder_id"].clone());
+        }
+
+        (sent, answered, filed)
+    })
+    .expect("the runtime runs");
+
+    let (sent, answered, filed) = digests;
+    assert_eq!(
+        filed,
+        vec![Value::from(42), Value::from(7)],
+        "the two bodies really were filed differently"
+    );
+    assert_eq!(
+        sent[0], answered[0],
+        "what was recorded is what the next run will compare against"
+    );
+    assert_eq!(
+        sent[0], sent[1],
+        "and the folder the routine is filed in is no part of it"
+    );
+    assert_eq!(answered[0], answered[1]);
+}
+
 /// **A set without a range carries no `rep_range` key at all.**
 ///
 /// `PUT` refuses a null where `POST` takes one, though the published schema

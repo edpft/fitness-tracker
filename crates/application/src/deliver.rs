@@ -18,13 +18,20 @@
 //! twice is the same one. That the destination in use also cannot delete what it
 //! has been given is a happy agreement, not the reason.
 //!
-//! **What makes "a session asked about twice" true is decision 0021**, and it is
-//! worth naming because the guard below is keyed on the prescription's identity
-//! rather than on what it says. `prescribe` derives on every run; a derivation
-//! that produces the same `WorkoutShape` is not issued, so it does not get an
-//! identity, so it cannot reach this as a second delivery. Were that not so,
-//! every run of the daily loop would put another routine on the operator's
-//! phone.
+//! **What makes "a session asked about twice" true is decision 0021.** `prescribe`
+//! derives on every run; a derivation that produces the same `WorkoutShape` is
+//! not issued, so it does not get an identity, so it cannot reach this as a
+//! second delivery. Were that not so, every run of the daily loop would put
+//! another routine on the operator's phone.
+//!
+//! **A prescription's identity is not enough on its own, though** (#343). The
+//! guard below used to stop at it: the place is held by the session being
+//! delivered, so the destination hears nothing. That reads the *prescription*
+//! being unchanged as the *routine* being current, and the two part company the
+//! moment a rendering is corrected — `prescribe` re-derives the identical
+//! session and issues nothing, so a broken routine stays on the phone with
+//! nothing able to replace it. So the question is asked of both: who holds the
+//! place, and whether what is in it is what this build renders.
 
 use domain::prescription::{DeliveryReference, SessionOrdinal};
 use jiff::{Timestamp, civil::Date};
@@ -32,7 +39,7 @@ use jiff::{Timestamp, civil::Date};
 use crate::{
     error::DeliveryError,
     ports::{
-        Deliverable, Delivered, Delivery, DeliveryAttempt, DestinationName, MesocycleStore,
+        Deliverable, Delivered, Delivery, DeliveryAttempt, DestinationName, MesocycleStore, Placed,
         PrescribedWorkoutId, PrescribedWorkoutStore, PrescriptionDeliverer,
         PrescriptionDeliveryStore, PrescriptionDestination,
     },
@@ -57,6 +64,66 @@ impl<S, P, D, T> Delivering<S, P, D, T> {
     }
 }
 
+/// The session this date has issued, with the address a rendering needs.
+///
+/// **Separate from `deliver` because they are two jobs**, which is what clippy's
+/// line count was evidence of once a third arm arrived: working out *what* is
+/// being delivered reads the prescription and the plan and touches no
+/// destination, and deciding what to do about the destination's place for the
+/// date touches nothing else.
+///
+/// A free function taking its two ports rather than a method, for the reason
+/// [`keep`] is one: borrowing `Delivering` would hand this future a `&Self`
+/// that is not `Sync`, and the port declares `deliver` `Send`.
+async fn deliverable<S, P>(
+    prescriptions: &S,
+    programmes: &P,
+    date: Date,
+) -> Result<(PrescribedWorkoutId, Deliverable), DeliveryError>
+where
+    S: PrescribedWorkoutStore + Sync,
+    P: MesocycleStore + Sync,
+{
+    let (id, workout) = prescriptions
+        .issued_for(date)
+        .await?
+        .ok_or(DeliveryError::NothingIssued { date })?;
+
+    // The plan supplies the session's address, which the prescription does not
+    // carry: the macrocycle's name, which mesocycle of it this is, and which
+    // microcycle of that. All three are facts about the plan rather than about
+    // what was issued, which is why they are derived here and not stored on the
+    // prescription.
+    let found = programmes
+        .on(date)
+        .await?
+        .ok_or(DeliveryError::NoMesocycle { date })?;
+    let microcycle = found.mesocycle.calendar().microcycle(workout.week());
+    let rerun = programmes.rerun_on(date).await?;
+
+    // **And the number comes from the record, not from the calendar** (#312). A
+    // calendar is rebuilt from a start, a duration and its interruptions, so
+    // authoring an illness a week late renumbers sessions already on the
+    // operator's phone; the days the macrocycle has issued a prescription for
+    // only ever grow.
+    let ordinal = prescriptions
+        .ordinal_in(&found.plan, date)
+        .await?
+        .ok_or(DeliveryError::NothingIssued { date })?;
+
+    Ok((
+        id,
+        Deliverable {
+            workout,
+            plan: found.plan,
+            mesocycle: found.ordinal,
+            microcycle,
+            rerun,
+            ordinal,
+        },
+    ))
+}
+
 impl<S, P, D, T> PrescriptionDeliverer for Delivering<S, P, D, T>
 where
     S: PrescribedWorkoutStore + Sync,
@@ -66,39 +133,9 @@ where
 {
     async fn deliver(&self, date: Date) -> Result<Delivery, DeliveryError> {
         let destination = self.ports.destination.name();
-
-        let (id, workout) = self
-            .ports
-            .prescriptions
-            .issued_for(date)
-            .await?
-            .ok_or(DeliveryError::NothingIssued { date })?;
-
-        // The plan supplies the session's address, which the prescription does
-        // not carry: the macrocycle's name, which mesocycle of it this is, and
-        // which microcycle of that. All three are facts about the plan rather
-        // than about what was issued, which is why they are derived here and not
-        // stored on the prescription.
-        let found = self
-            .ports
-            .programmes
-            .on(date)
-            .await?
-            .ok_or(DeliveryError::NoMesocycle { date })?;
-        let microcycle = found.mesocycle.calendar().microcycle(workout.week());
-        let rerun = self.ports.programmes.rerun_on(date).await?;
-
-        // **And the number comes from the record, not from the calendar**
-        // (#312). A calendar is rebuilt from a start, a duration and its
-        // interruptions, so authoring an illness a week late renumbers sessions
-        // already on the operator's phone; the days the macrocycle has issued a
-        // prescription for only ever grow.
-        let ordinal = self
-            .ports
-            .prescriptions
-            .ordinal_in(&found.plan, date)
-            .await?
-            .ok_or(DeliveryError::NothingIssued { date })?;
+        let (id, session) =
+            deliverable(&self.ports.prescriptions, &self.ports.programmes, date).await?;
+        let ordinal = session.ordinal;
 
         // **Asked before sent, and asked about the date rather than about this
         // prescription** (decision 0022). Without this, a second invocation
@@ -106,37 +143,47 @@ where
         // which is in force.
         let occupant = self.ports.deliveries.occupying(date, destination).await?;
 
-        let session = Deliverable {
-            workout,
-            plan: found.plan,
-            mesocycle: found.ordinal,
-            microcycle,
-            rerun,
-            ordinal,
-        };
-
         match occupant {
-            // Already there, under this very prescription. Asking twice is a
-            // question, and the destination hears nothing.
-            Some((holder, reference)) if holder == id => {
-                Ok(already_delivered(reference, destination.clone(), ordinal))
-            }
+            // Already there, under this very prescription — so the question is
+            // no longer who holds the place but what is in it.
+            Some(occupant) if occupant.prescription == id => {
+                let rendering = self.ports.destination.rendering(&session)?;
 
-            // A predecessor holds the date's place. The correction replaces what
-            // is there rather than landing beside it, and the place changes
-            // hands. Sent before recorded: a `PUT` that failed must not leave
-            // the store claiming the new session is the one on the operator's
-            // phone.
-            Some((holder, reference)) => {
-                let attempt = self.ports.destination.replace(&session, &reference).await;
+                // **The destination hears nothing when it is already holding
+                // this**, which is the whole of the idempotence the daily loop
+                // relies on: `gym next` runs every day and must not rewrite a
+                // routine it has nothing new to say about.
+                //
+                // **And nothing when the session has been performed**, whatever
+                // the rendering says. Decision 0022 had this case unreachable
+                // and § 12 is why it stays closed: a routine the operator
+                // trained against is not rewritten under them to satisfy a
+                // rendering fix that arrived afterwards.
+                if occupant.rendering == Some(rendering) || occupant.performed {
+                    return Ok(already_delivered(
+                        occupant.reference,
+                        destination.clone(),
+                        ordinal,
+                    ));
+                }
+
+                // The place keeps its occupant and what is in it is replaced.
+                // Sent before recorded, for the reason the hand-over below is:
+                // a `PUT` that failed must not leave the store claiming the
+                // phone holds this rendering.
+                let attempt = self
+                    .ports
+                    .destination
+                    .replace(&session, &occupant.reference)
+                    .await;
                 let delivered = keep(&self.ports.deliveries, id, destination, attempt).await?;
                 self.ports
                     .deliveries
-                    .hand_over(
-                        holder,
+                    .record_rendering(
                         id,
                         destination,
                         &delivered.reference,
+                        &delivered.rendering,
                         Timestamp::now(),
                     )
                     .await?;
@@ -144,8 +191,41 @@ where
                     reference: delivered.reference,
                     destination: destination.clone(),
                     ordinal,
-                    freshly_delivered: true,
-                    replaced: Some(holder),
+                    placed: Placed::Replaced { superseding: None },
+                    unexpressed: delivered.unexpressed,
+                })
+            }
+
+            // A predecessor holds the date's place. The correction replaces what
+            // is there rather than landing beside it, and the place changes
+            // hands. Sent before recorded: a `PUT` that failed must not leave
+            // the store claiming the new session is the one on the operator's
+            // phone.
+            Some(occupant) => {
+                let attempt = self
+                    .ports
+                    .destination
+                    .replace(&session, &occupant.reference)
+                    .await;
+                let delivered = keep(&self.ports.deliveries, id, destination, attempt).await?;
+                self.ports
+                    .deliveries
+                    .hand_over(
+                        occupant.prescription,
+                        id,
+                        destination,
+                        &delivered.reference,
+                        &delivered.rendering,
+                        Timestamp::now(),
+                    )
+                    .await?;
+                Ok(Delivery {
+                    reference: delivered.reference,
+                    destination: destination.clone(),
+                    ordinal,
+                    placed: Placed::Replaced {
+                        superseding: Some(occupant.prescription),
+                    },
                     unexpressed: delivered.unexpressed,
                 })
             }
@@ -156,14 +236,19 @@ where
                 let delivered = keep(&self.ports.deliveries, id, destination, attempt).await?;
                 self.ports
                     .deliveries
-                    .record(id, destination, &delivered.reference, Timestamp::now())
+                    .record(
+                        id,
+                        destination,
+                        &delivered.reference,
+                        &delivered.rendering,
+                        Timestamp::now(),
+                    )
                     .await?;
                 Ok(Delivery {
                     reference: delivered.reference,
                     destination: destination.clone(),
                     ordinal,
-                    freshly_delivered: true,
-                    replaced: None,
+                    placed: Placed::Created,
                     unexpressed: delivered.unexpressed,
                 })
             }
@@ -231,8 +316,7 @@ const fn already_delivered(
         reference,
         destination,
         ordinal,
-        freshly_delivered: false,
-        replaced: None,
+        placed: Placed::Unchanged,
         unexpressed: Vec::new(),
     }
 }

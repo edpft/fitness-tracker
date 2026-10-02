@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE prescription_delivery\n            SET reference = ?, rendering = ?, delivered_at = ?\n            WHERE prescription = ? AND destination = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "befe468406662820796761d77a628e5baedfe8ce930de5e6f753a29a1e79d05c"
+}

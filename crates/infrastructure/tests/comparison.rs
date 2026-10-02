@@ -103,6 +103,9 @@ fn publish(prescriber: &Prescriber, pool: &SqlitePool, date: Date, reference: &s
                 issued.id,
                 &DestinationName::try_from("hevy".to_owned())?,
                 &DeliveryReference::try_from(reference.to_owned())?,
+                // What the routine said is not what this suite compares:
+                // any digest does, as long as the delivery has one.
+                &application::RenderingDigest::of(reference.as_bytes()),
                 jiff::Timestamp::UNIX_EPOCH,
             )
             .await

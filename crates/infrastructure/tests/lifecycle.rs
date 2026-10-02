@@ -15,7 +15,9 @@ use application::{
     WorkoutPrescriber as _,
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
-use domain::prescription::{DeliveryReference, DestinationName, PrescriptionState};
+use domain::prescription::{
+    DeliveryReference, DestinationName, PrescriptionState, RenderingDigest,
+};
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
     SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
@@ -56,6 +58,13 @@ macro_rules! reference {
             Err(error) => panic!("{} is a reference: {error}", $id),
         }
     };
+}
+
+/// What the destination was told, fingerprinted. These tests are about the
+/// three states and not about rendering, so any digest will do — what matters
+/// is that a delivery has one.
+fn rendering() -> RenderingDigest {
+    RenderingDigest::of(b"a rendered routine")
 }
 
 /// A store with one issued prescription in it, and its id.
@@ -112,6 +121,7 @@ fn a_delivered_prescription_nobody_has_performed_is_published() {
         prescription,
         &hevy!(),
         &reference!("routine-1"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
 
@@ -144,6 +154,7 @@ fn a_prescription_a_workout_names_is_performed() {
         prescription,
         &hevy!(),
         &reference!("routine-2"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
 
@@ -193,6 +204,7 @@ fn a_performed_prescription_is_not_derived_again() {
         prescription,
         &hevy!(),
         &reference!("routine-4"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
     run!(async {
@@ -274,6 +286,7 @@ fn a_superseded_session_that_was_trained_is_the_one_in_force() {
         performed,
         &hevy!(),
         &reference!("routine-5"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
 
@@ -348,6 +361,7 @@ fn a_performed_sessions_place_is_not_handed_over() {
         performed,
         &hevy!(),
         &reference!("routine-6"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
     run!(async {
@@ -365,6 +379,7 @@ fn a_performed_sessions_place_is_not_handed_over() {
         successor,
         &hevy!(),
         &reference!("routine-6"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     )) {
         Ok(outcome) => outcome,
@@ -414,6 +429,7 @@ fn the_store_refuses_to_delete_a_performed_prescription() {
         prescription,
         &hevy!(),
         &reference!("routine-3"),
+        &rendering(),
         Timestamp::UNIX_EPOCH,
     ));
     run!(async {

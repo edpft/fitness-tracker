@@ -54,9 +54,13 @@ Everything follows from that sentence:
    | what occupies the place | what happens |
    |---|---|
    | nothing | `POST`, and record the reference |
-   | the prescription in force | already delivered; the destination hears nothing |
+   | the prescription in force, rendered as it is now | already delivered; the destination hears nothing |
+   | the prescription in force, rendered otherwise | `PUT` into that reference; the place keeps its occupant |
    | a superseded prescription | `PUT` into that reference; the place changes hands |
-   | a performed prescription | unreachable — see below |
+   | a performed prescription | already delivered; the destination hears nothing |
+
+   The second and third rows were one row until 2026-10-02 — see the amendment
+   below.
 
 2. **The destination gains a second act.** `PrescriptionDestination::replace`
    beside `deliver`. `PutRoutinesRequestBody` and `PostRoutinesRequestBody` are
@@ -99,7 +103,8 @@ question anyone asks.
 **The performed case is closed twice over.** Decision 0021 made a performed
 prescription the one in force for its date, so `deliver` finds the place already
 held by the session it is delivering and sends nothing. The trigger is the floor
-under that rather than the mechanism.
+under that rather than the mechanism. (Amended: the first of those is no longer
+true on its own — see below.)
 
 **`prescribe`'s warning changes from a chore to an instruction.** The superseded
 session is stale rather than stranded, and the line now reads "deliver to
@@ -119,3 +124,64 @@ its current occupant, with `prescription_delivery` kept append-only as history.
 The conceptually cleanest of the three and the largest. Worth revisiting only if
 a second destination turns out to need a place model of its own; today it would
 be two tables expressing what one row already says.
+
+## Amended 2026-10-02
+
+**The place's occupant being unchanged does not mean what is in it is current.**
+That is what the row "the prescription in force | already delivered; the
+destination hears nothing" assumed, and it reads the *prescription* being
+unchanged as the *routine* being up to date. The two part company the moment a
+rendering is corrected.
+
+`05 Heavy` for 2026-10-02 is the case (#343). Five of the front squat's eight
+sets reached the phone showing no repetitions, which is the lift the session
+exists for; #342 fixed the rendering the next day and could not reach the
+routine. `prescribe` re-derived the identical session and issued nothing, so
+`deliver` found the place held by the prescription in force and sent nothing.
+Hevy publishes no `DELETE`, so the operator's only remedy was to type the
+corrected session in by hand. The operator: *"To me, it is a bug, the delivered
+routine isn't useable in it's current state."*
+
+**So a delivery records what was rendered, and the comparison is on that.** A
+`RenderingDigest` — SHA-256 over the body the destination would send — sits
+beside the reference in `prescription_delivery`, and `deliver` asks the
+destination for the digest of what it renders now. Equal, and nothing is sent;
+different, and the session is `PUT` into the place it already holds. The
+occupant does not change, so this is neither a first delivery nor a hand-over:
+`Placed::Replaced { superseding: None }`, and the store restates the row rather
+than moving it.
+
+The alternative was `deliver --replace`, a flag the operator types when they
+notice a routine is wrong. Rejected because `fitness gym next` is the command
+actually run, so its flag-free behaviour has to be the right one — a fix that
+depends on spotting a bad routine does not close "a broken rendering stays on
+the phone". The operator chose the digest and said what it is for: *"we only
+want to replace the previously delivered routine because there was an issue with
+rendering, if nothing has changed in content or form, then this should be a no
+op, already delivered."*
+
+**What the decision itself still says is untouched.** A reference names a place
+rather than a delivered prescription; a date has at most one occupant per
+destination; the hand-over is a delete and an insert so the trigger sees it.
+Only the question asked before sending has grown a second half.
+
+**Three details follow from it.**
+
+A **null rendering is stale, not current.** Every routine delivered before this
+column existed holds one — including the broken `05 Heavy` the issue was filed
+for, which reading null as "current" would leave permanently unreachable. The
+cost of the other reading is one `PUT` of a session that may already have been
+right.
+
+A **performed prescription is reachable now**, where the table above called it
+unreachable, because the digest no longer stops at the occupant's identity. The
+answer does not change: § 12 pins what has been performed, and a rendering fix
+arriving after the work was done has nothing to correct. `deliver` declines to
+send rather than leaving the trigger to abort, so the reason can be stated
+rather than raised as a store error — and `occupying` answers whether a workout
+names the place in the same query that answers who holds it.
+
+**The folder is outside the digest.** Resolving one creates it when it is
+missing, so including it would mean a request on every run that had nothing to
+send. The digest answers what a routine says; where it is filed is the
+reference's business.

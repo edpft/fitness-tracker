@@ -377,6 +377,9 @@ async fn gym_delivered_for_the_friday(pool: &SqlitePool) -> Fallible<()> {
             id,
             &destination,
             &reference,
+            // This suite asks whether a slot was delivered at all, not what
+            // the routine said, so any digest does.
+            &application::RenderingDigest::of(b"a rendered routine"),
             jiff::Timestamp::constant(1_758_000_000, 0),
         )
         .await?;

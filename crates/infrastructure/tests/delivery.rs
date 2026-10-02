@@ -15,8 +15,9 @@ use std::sync::{
 
 use application::{
     Deliverable, Delivered, DeliveryAttempt, DeliveryError, DeliveryReference, DestinationName,
-    DestinationReply, Issuance, PlanAuthor as _, PrescribedWorkoutId, PrescriptionDeliverer as _,
-    PrescriptionDestination, ReplyStatus, WorkoutPrescriber as _,
+    DestinationReply, Issuance, Placed, PlanAuthor as _, PrescribedWorkoutId,
+    PrescriptionDeliverer as _, PrescriptionDestination, RenderingDigest, ReplyStatus,
+    WorkoutPrescriber as _,
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
@@ -45,6 +46,11 @@ struct Counting {
     /// Where each session said it sat: which mesocycle of the plan, and which
     /// microcycle of that (#312).
     addresses: Mutex<Vec<String>>,
+    /// Which rendering this destination currently has, so a test can correct
+    /// one between two deliveries of the same prescription (#343). That is the
+    /// case the digest exists for and the only way to stage it: the session
+    /// does not change, the way it is written down does.
+    revision: AtomicUsize,
 }
 
 impl Counting {
@@ -55,7 +61,29 @@ impl Counting {
             replacements: AtomicUsize::new(0),
             titles: Mutex::new(Vec::new()),
             addresses: Mutex::new(Vec::new()),
+            revision: AtomicUsize::new(0),
         })
+    }
+
+    /// What this destination would send, fingerprinted — the revision and what
+    /// the session says, so correcting the first changes the digest without
+    /// changing the session.
+    fn fingerprint(&self, session: &Deliverable) -> RenderingDigest {
+        RenderingDigest::of(
+            format!(
+                "{}:{:02} {}:{}",
+                self.revision.load(Ordering::SeqCst),
+                session.ordinal.as_u32(),
+                session.workout.session_role(),
+                address(session)
+            )
+            .as_bytes(),
+        )
+    }
+
+    /// A rendering fix lands. Nothing about the session changes.
+    fn rendering_corrected(&self) {
+        self.revision.fetch_add(1, Ordering::SeqCst);
     }
 
     fn calls(&self) -> usize {
@@ -103,6 +131,10 @@ impl PrescriptionDestination for Counting {
         &self.name
     }
 
+    fn rendering(&self, session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+        Ok(self.fingerprint(session))
+    }
+
     async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
         let seen = self.calls.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut titles) = self.titles.lock() {
@@ -119,6 +151,7 @@ impl PrescriptionDestination for Counting {
         let outcome = DeliveryReference::try_from(format!("routine-{seen}"))
             .map(|reference| Delivered {
                 reference,
+                rendering: self.fingerprint(session),
                 unexpressed: Vec::new(),
             })
             .map_err(|error| DeliveryError::Unidentifiable {
@@ -151,6 +184,7 @@ impl PrescriptionDestination for Counting {
 
         let outcome = Ok(Delivered {
             reference: occupying.clone(),
+            rendering: self.fingerprint(session),
             unexpressed: Vec::new(),
         });
 
@@ -454,8 +488,8 @@ fn delivering_twice_sends_once() {
 
     let second = run!(delivering(&ready, &destination).deliver(monday()));
 
-    assert!(first.freshly_delivered, "the first delivery is fresh");
-    assert!(!second.freshly_delivered, "the second is not");
+    assert_eq!(first.placed, Placed::Created, "the first delivery is fresh");
+    assert_eq!(second.placed, Placed::Unchanged, "the second is not");
     assert_eq!(
         first.reference, second.reference,
         "and it reports the reference already recorded"
@@ -500,7 +534,7 @@ fn deriving_the_same_session_again_delivers_nothing() {
         Issuance::Unchanged,
         "the record has not moved, so neither has the session"
     );
-    assert!(!delivered.freshly_delivered);
+    assert_eq!(delivered.placed, Placed::Unchanged);
     assert_eq!(
         first.reference, delivered.reference,
         "the session already sent is the session in force"
@@ -565,11 +599,13 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
         "and names the delivered session it has left standing"
     );
 
-    assert!(second.freshly_delivered, "the correction is sent");
     assert_eq!(
-        second.replaced,
-        Some(first_issued.id),
-        "as a replacement of the prescription that held the place"
+        second.placed,
+        Placed::Replaced {
+            superseding: Some(first_issued.id)
+        },
+        "the correction is sent, as a replacement of the prescription that \
+         held the place"
     );
     assert_eq!(
         first_delivery.reference, second.reference,
@@ -577,6 +613,130 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
     );
     assert_eq!(destination.calls(), 1, "one create");
     assert_eq!(destination.replacements(), 1, "and one update");
+}
+
+/// **A rendering corrected after the session was sent reaches the phone** —
+/// #343, and the defect it was filed for.
+///
+/// `05 Heavy` for 2026-10-02 went out with five of the front squat's eight sets
+/// showing no repetitions. #342 fixed the rendering the next day, and could not
+/// reach the routine: the prescription had not changed, so `prescribe` issued
+/// nothing and `deliver` saw the place held by the session in force and sent
+/// nothing. The routine stayed broken and had to be typed into Hevy by hand.
+///
+/// So the question is asked of the contents and not only of the holder. Nothing
+/// about the session changes here — the destination's rendering does, which is
+/// exactly the shape of a rendering fix landing after a delivery.
+#[test]
+fn a_rendering_corrected_after_delivery_replaces_the_routine_in_place() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let first = run!(async {
+        ready.prescriber.prescribe(monday()).await?;
+        Ok::<_, Box<dyn std::error::Error>>(
+            delivering(&ready, &destination).deliver(monday()).await?,
+        )
+    });
+
+    destination.rendering_corrected();
+    let second = run!(delivering(&ready, &destination).deliver(monday()));
+
+    assert_eq!(
+        second.placed,
+        Placed::Replaced { superseding: None },
+        "the same session, replaced because what was there said it differently"
+    );
+    assert_eq!(
+        first.reference, second.reference,
+        "into the same routine, so the folder still holds one session for the date"
+    );
+    assert_eq!(destination.calls(), 1, "one create");
+    assert_eq!(destination.replacements(), 1, "and one update");
+
+    // And the third run has nothing to say: the place now holds what this
+    // build renders, which is the idempotence `gym next` runs on daily.
+    let third = run!(delivering(&ready, &destination).deliver(monday()));
+    assert_eq!(third.placed, Placed::Unchanged);
+    assert_eq!(destination.replacements(), 1, "no second update");
+}
+
+/// **A delivery recorded before the digest existed is stale, not current.**
+///
+/// The store's `rendering` is null for every routine delivered by a build that
+/// did not keep one — including the broken `05 Heavy` the issue was filed for.
+/// Reading null as "current" would leave exactly that routine unreachable,
+/// which is the thing being fixed; reading it as "stale" costs one `PUT` of a
+/// session that may already have been right.
+#[test]
+fn a_delivery_recorded_without_a_rendering_is_replaced() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let first = run!(async {
+        ready.prescriber.prescribe(monday()).await?;
+        let delivered = delivering(&ready, &destination).deliver(monday()).await?;
+        // What an upgraded store holds: the routine is there and what it says
+        // is not on record.
+        sqlx::query!("UPDATE prescription_delivery SET rendering = NULL")
+            .execute(&ready.pool)
+            .await?;
+        Ok::<_, Box<dyn std::error::Error>>(delivered)
+    });
+
+    let second = run!(delivering(&ready, &destination).deliver(monday()));
+
+    assert_eq!(second.placed, Placed::Replaced { superseding: None });
+    assert_eq!(first.reference, second.reference);
+    assert_eq!(destination.replacements(), 1);
+}
+
+/// **A session the operator has done is not rewritten under them**, whatever
+/// the rendering says.
+///
+/// Decision 0022 listed a performed prescription as unreachable here, because
+/// the place being held by the session in force meant the destination heard
+/// nothing. Comparing renderings makes it reachable, and § 12 is why the answer
+/// does not change: a rendering fix that arrives after the work was done has
+/// nothing to correct.
+#[test]
+fn a_performed_session_is_not_rewritten_for_a_rendering_fix() {
+    let ready = run!(ready());
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let first = run!(async {
+        ready.prescriber.prescribe(monday()).await?;
+        let delivered = delivering(&ready, &destination).deliver(monday()).await?;
+        // A workout names the routine, so the session happened. Which workout
+        // and on what day is deliberately not asked: the join is the reference.
+        sqlx::query!(
+            "UPDATE gym_workout SET performed_against = 'routine-0' \
+             WHERE landing_record_id = (SELECT MIN(landing_record_id) FROM gym_workout)"
+        )
+        .execute(&ready.pool)
+        .await?;
+        Ok::<_, Box<dyn std::error::Error>>(delivered)
+    });
+
+    destination.rendering_corrected();
+    let second = run!(delivering(&ready, &destination).deliver(monday()));
+
+    assert_eq!(
+        second.placed,
+        Placed::Unchanged,
+        "the destination hears nothing about a session already trained"
+    );
+    assert_eq!(first.reference, second.reference);
+    assert_eq!(destination.replacements(), 0, "and nothing was updated");
 }
 
 /// **The place changes hands, rather than being shared.**
@@ -882,6 +1042,12 @@ impl Refusing {
 impl PrescriptionDestination for Refusing {
     fn name(&self) -> &DestinationName {
         &self.name
+    }
+
+    /// Rendering is not the act that fails here: a destination that will refuse
+    /// the session can still say what it would have sent.
+    fn rendering(&self, _session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+        Ok(RenderingDigest::of(b"refusing"))
     }
 
     async fn deliver(&self, _session: &Deliverable) -> DeliveryAttempt {

@@ -1736,7 +1736,8 @@ pub trait PlanAuthor {
 // Re-exported so that every ring above reaches them through the port surface,
 // as it does the rest of the vocabulary a port speaks.
 pub use domain::prescription::{
-    DeliveryReference, DestinationName, DestinationReply, ReplyStatus, SessionOrdinal,
+    DeliveryReference, DestinationName, DestinationReply, RenderingDigest, ReplyStatus,
+    SessionOrdinal,
 };
 
 /// Everything a rendering needs that the prescription does not itself carry.
@@ -1788,6 +1789,10 @@ pub struct Delivered {
     /// What the destination called it. Opaque: see
     /// [`domain::prescription::delivery`].
     pub reference: DeliveryReference,
+    /// What it was sent, fingerprinted — the same digest
+    /// [`PrescriptionDestination::rendering`] would give for this session, so
+    /// the next run can tell a current routine from a stale one (#343).
+    pub rendering: RenderingDigest,
     pub unexpressed: Vec<Unexpressed>,
 }
 
@@ -1856,6 +1861,27 @@ pub trait PrescriptionDestination {
     /// comes back in [`Delivered::unexpressed`].
     fn deliver(&self, session: &Deliverable) -> impl Future<Output = DeliveryAttempt> + Send;
 
+    /// What this destination would make of the session, fingerprinted.
+    ///
+    /// **The question that tells a current routine from a stale one** (#343).
+    /// Delivery used to treat the prescription in force holding the date's place
+    /// as proof the destination was up to date, which holds only while the
+    /// rendering never changes — and a rendering fix that lands after the
+    /// session was sent left a broken routine on the operator's phone with
+    /// nothing able to replace it.
+    ///
+    /// **Contacts nothing, so it can be asked on every run.** A destination
+    /// that cannot render without resolving something remote leaves that part
+    /// out of the digest rather than making a request: the digest answers what
+    /// the routine *says*, and where it is filed is [`Delivered::reference`]'s
+    /// business.
+    ///
+    /// # Errors
+    ///
+    /// [`DeliveryError`] if the session cannot be rendered at all, which is a
+    /// defect in the rendering rather than anything the operator did.
+    fn rendering(&self, session: &Deliverable) -> Result<RenderingDigest, DeliveryError>;
+
     /// Put a session in the place another one occupies, replacing it.
     ///
     /// **The second act, because a destination holds places and not just
@@ -1895,6 +1921,10 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
         (*self).deliver(session)
     }
 
+    fn rendering(&self, session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+        (*self).rendering(session)
+    }
+
     fn replace(
         &self,
         session: &Deliverable,
@@ -1902,6 +1932,42 @@ impl<T: PrescriptionDestination + Sync> PrescriptionDestination for &T {
     ) -> impl Future<Output = DeliveryAttempt> + Send {
         (*self).replace(session, occupying)
     }
+}
+
+/// Who holds a date's place at a destination, and what is in it.
+///
+/// **A struct rather than a tuple, because the third fact is not like the other
+/// two** (#343). Where the place is and who holds it are both identities; what
+/// is in it is a fingerprint of contents, and a positional third element would
+/// read as another name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Occupant {
+    /// Which prescription holds the place.
+    pub prescription: PrescribedWorkoutId,
+    /// What the destination calls the place.
+    pub reference: DeliveryReference,
+    /// What the destination was last told, where that is known.
+    ///
+    /// `None` for a delivery recorded before this build kept the digest, which
+    /// is not the same as "nothing is there": the routine exists and what it
+    /// says is simply not on record. Delivery treats it as stale, which is the
+    /// safe reading — one `PUT` of a session that may already have been
+    /// current, against a broken routine that would otherwise stay broken.
+    pub rendering: Option<RenderingDigest>,
+    /// Whether a workout names this place, which decides whether what is in it
+    /// may be replaced (§ 12, decision 0021).
+    ///
+    /// **Answered here rather than by a second question to
+    /// [`PrescriptionLifecycle::state_of`]**, for the reason `state_of` itself
+    /// gives for asking both of its questions at once: two queries would let
+    /// the answer change between them. The occupant and whether it has been
+    /// performed are one fact about the place.
+    ///
+    /// Decision 0022 called this case unreachable, because the prescription in
+    /// force holding the place meant the destination heard nothing. Comparing
+    /// renderings makes it reachable, and the answer is the one 0022 assumed:
+    /// a session the operator has done is not rewritten under them.
+    pub performed: bool,
 }
 
 /// What has already been delivered, and where.
@@ -1944,7 +2010,7 @@ pub trait PrescriptionDeliveryStore {
         &self,
         date: Date,
         destination: &DestinationName,
-    ) -> impl Future<Output = Result<Option<(PrescribedWorkoutId, DeliveryReference)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<Occupant>, StoreError>> + Send;
 
     /// Record a delivery into a place nothing occupied.
     ///
@@ -1956,6 +2022,31 @@ pub trait PrescriptionDeliveryStore {
         prescription: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
+        rendering: &RenderingDigest,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Note that the place's occupant has been sent a different rendering.
+    ///
+    /// **The write the stale case needs, and not [`Self::record`]** (#343).
+    /// `record` refuses to reconcile a second delivery of one prescription,
+    /// because a silent overwrite there would leave an orphaned routine behind
+    /// it. Nothing is orphaned here: the occupant does not change and the place
+    /// is the one it already held, so what is restated is the rendering and
+    /// when it was sent.
+    ///
+    /// The reference is taken rather than assumed, for the reason
+    /// [`PrescriptionDestination::replace`] hands one back.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_rendering(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reference: &DeliveryReference,
+        rendering: &RenderingDigest,
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
@@ -1984,6 +2075,7 @@ pub trait PrescriptionDeliveryStore {
         to: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
+        rendering: &RenderingDigest,
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
@@ -2011,24 +2103,44 @@ pub trait PrescriptionDeliveryStore {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
+/// What a delivery did to the destination's place for the date.
+///
+/// **Three acts rather than two flags** (#343). `freshly_delivered` and
+/// `replaced` said this between them until a replacement that keeps the place's
+/// occupant became possible, and that case is indistinguishable from a first
+/// delivery in both of them — "sent, superseding nothing" — while being the
+/// opposite thing to tell the operator. One created a routine; the other
+/// rewrote the one already on their phone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placed {
+    /// Nothing held the place. A routine was created.
+    Created,
+    /// The place was held and what is in it has been replaced.
+    ///
+    /// `superseding` names the prescription that lost the place, and is `None`
+    /// when the occupant did not change and only its rendering did — the same
+    /// session, as this build renders it.
+    ///
+    /// Reported either way because the operator's phone changed under them:
+    /// the routine they may already have opened now says something else, and
+    /// that is worth a line whatever else the command prints.
+    Replaced {
+        superseding: Option<PrescribedWorkoutId>,
+    },
+    /// The place already held this session, rendered exactly this way, so the
+    /// destination heard nothing. The output side of the same idempotence
+    /// [`PrescribedWorkoutStore::issued_for`] gives issuing.
+    Unchanged,
+}
+
 /// What a delivery amounted to.
 #[derive(Debug, Clone)]
 pub struct Delivery {
     pub reference: DeliveryReference,
     pub destination: DestinationName,
     pub ordinal: SessionOrdinal,
-    /// The prescription whose place at the destination this took over, where it
-    /// took one over. `None` for a first delivery and for a session that was
-    /// already there.
-    ///
-    /// Reported because the operator's phone changed under them: the routine
-    /// they may already have opened now says something else, and that is worth
-    /// a line whatever else the command prints.
-    pub replaced: Option<PrescribedWorkoutId>,
-    /// False when the prescription had already been delivered and this is that
-    /// delivery. The output side of the same idempotence
-    /// [`PrescribedWorkoutStore::issued_for`] gives issuing.
-    pub freshly_delivered: bool,
+    /// Which of the three acts this was.
+    pub placed: Placed,
     /// Empty on a session the destination could state in full.
     pub unexpressed: Vec<Unexpressed>,
 }

@@ -22,6 +22,8 @@
 
 use std::fmt;
 
+use sha2::{Digest, Sha256};
+
 use crate::newtype::string_name;
 
 /// Why a delivery could not be recorded.
@@ -140,6 +142,75 @@ impl TryFrom<String> for DestinationName {
 }
 
 string_name!(DestinationName, InvalidDelivery);
+
+/// A stored rendering digest that is not 32 bytes wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a rendering digest is 32 bytes, found {width}")]
+pub struct WrongRenderingWidth {
+    pub width: usize,
+}
+
+/// A SHA-256 over what a destination made of a session.
+///
+/// **The fingerprint of a routine's contents, so a stale one can be told from a
+/// current one.** A [`DeliveryReference`] says where a session is; this says
+/// what is there. Without it a delivery can only ask "has this prescription
+/// been delivered?", and answers yes to a routine rendered by a build whose
+/// rendering has since been corrected — which is a broken session on the
+/// operator's phone and nothing that will replace it (#343).
+///
+/// **Opaque, and compared only for equality.** Nothing orders two of these,
+/// reads a byte of one or infers what changed from the difference: the only
+/// question it answers is whether the destination is holding what this build
+/// renders. What goes into it is the destination's to decide, and the digest is
+/// meaningless across destinations.
+///
+/// Deliberately not `Hash`, for the reason [`crate::landing::RawPayload`]'s
+/// digest is not: this is written to the store and compared against rows
+/// written by earlier versions of this program, and `Hash` guarantees neither
+/// the algorithm nor stability across builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderingDigest([u8; 32]);
+
+impl RenderingDigest {
+    /// Digest the bytes a destination would send.
+    pub fn of(rendered: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(rendered);
+        Self(hasher.finalize().into())
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Rehydrate a digest an adapter previously persisted, exactly as
+/// [`crate::landing::PayloadDigest`] is rehydrated: the bytes that produced it
+/// are not read back merely to re-derive it.
+impl From<[u8; 32]> for RenderingDigest {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+/// A row holding anything other than 32 bytes means the file holds something
+/// this program did not write.
+impl TryFrom<&[u8]> for RenderingDigest {
+    type Error = WrongRenderingWidth;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        <[u8; 32]>::try_from(bytes)
+            .map(Self)
+            .map_err(|_| WrongRenderingWidth { width: bytes.len() })
+    }
+}
+
+impl AsRef<[u8]> for RenderingDigest {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// Where a prescription has got to.
 ///

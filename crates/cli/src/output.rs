@@ -1339,10 +1339,12 @@ fn weight(load: domain::gym::Load) -> String {
 /// feature reads, and because an operator who cannot find the routine needs
 /// something to search for.
 pub fn delivery(delivered: &application::Delivery) {
-    let lead = match (delivered.freshly_delivered, delivered.replaced) {
-        (true, Some(_)) => "replaced at",
-        (true, None) => "delivered to",
-        (false, _) => "already delivered to",
+    use application::Placed;
+
+    let lead = match delivered.placed {
+        Placed::Created => "delivered to",
+        Placed::Replaced { .. } => "replaced at",
+        Placed::Unchanged => "already delivered to",
     };
     println!(
         "{lead} {} as session {} ({})",
@@ -1352,8 +1354,18 @@ pub fn delivery(delivered: &application::Delivery) {
     // reference is unchanged, so the routine they may already have open now
     // instructs something else — and a line that reports only the identity
     // would read as though nothing had happened.
-    if let Some(previous) = delivered.replaced {
-        println!("  in place of prescription {previous}, which it supersedes");
+    match delivered.placed {
+        Placed::Replaced {
+            superseding: Some(previous),
+        } => println!("  in place of prescription {previous}, which it supersedes"),
+        // The same session, and so nothing superseded. It does not claim what
+        // was there said instead: a delivery recorded before the digest
+        // existed has no rendering on record, so "it differed" is more than
+        // this knows. What it is sure of is what is there now.
+        Placed::Replaced { superseding: None } => {
+            println!("  the same session, as this build renders it");
+        }
+        Placed::Created | Placed::Unchanged => {}
     }
     unexpressed(&delivered.unexpressed);
 }

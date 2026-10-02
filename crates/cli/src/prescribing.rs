@@ -336,13 +336,7 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
         &self,
         _date: jiff::civil::Date,
         _destination: &application::DestinationName,
-    ) -> Result<
-        Option<(
-            application::PrescribedWorkoutId,
-            application::DeliveryReference,
-        )>,
-        application::StoreError,
-    > {
+    ) -> Result<Option<application::Occupant>, application::StoreError> {
         Ok(None)
     }
 
@@ -351,6 +345,18 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
         _prescription: application::PrescribedWorkoutId,
         _destination: &application::DestinationName,
         _reference: &application::DeliveryReference,
+        _rendering: &application::RenderingDigest,
+        _at: jiff::Timestamp,
+    ) -> Result<(), application::StoreError> {
+        Ok(())
+    }
+
+    async fn record_rendering(
+        &self,
+        _prescription: application::PrescribedWorkoutId,
+        _destination: &application::DestinationName,
+        _reference: &application::DeliveryReference,
+        _rendering: &application::RenderingDigest,
         _at: jiff::Timestamp,
     ) -> Result<(), application::StoreError> {
         Ok(())
@@ -362,6 +368,7 @@ impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
         _to: application::PrescribedWorkoutId,
         _destination: &application::DestinationName,
         _reference: &application::DeliveryReference,
+        _rendering: &application::RenderingDigest,
         _at: jiff::Timestamp,
     ) -> Result<(), application::StoreError> {
         Ok(())
