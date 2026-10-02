@@ -865,3 +865,135 @@ fn an_exercise_carries_the_longest_rest_it_instructs() {
         squat["notes"]
     );
 }
+
+/// A rep-max day's primary, which is the one shape that mixes the two schemas:
+/// the ramp and the top set state a count, the back-offs state a range.
+///
+/// The real `05 Heavy` of 2026-10-02, trimmed to the sets that matter — `8, 8`
+/// of the ramp, the `1×8 @ 8RM` top set, and one of the three `5-6` back-offs.
+fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
+    let squat = PrescribedExercise::ForReps {
+        exercise: RepsExercise::FrontSquatBarbell,
+        sets: NonEmpty::new(vec![
+            PrescribedSet::warmup(
+                Load::Absolute(Kg::from_grams(30_000)),
+                Target::Exactly(RepCount::new(8)?),
+            ),
+            PrescribedSet::warmup(
+                Load::Absolute(Kg::from_grams(65_000)),
+                Target::Exactly(RepCount::new(5)?),
+            ),
+            PrescribedSet::fixed(
+                Load::Absolute(Kg::from_grams(72_500)),
+                Target::Exactly(RepCount::new(8)?),
+            ),
+            PrescribedSet::fixed(
+                Load::Absolute(Kg::from_grams(72_500)),
+                Target::spanning(RepCount::new(5)?, RepCount::new(1)?),
+            ),
+        ])?,
+    };
+
+    let mut session = session()?;
+    session.workout = PrescribedWorkout::new(
+        WorkoutShape::new(NonEmpty::new(vec![PrescribedItem::Exercise {
+            slot: SlotId::KneeDominant,
+            exercise: squat,
+        }])?),
+        session.workout.issued_for(),
+        session.workout.session_role(),
+        session.workout.week(),
+        session.workout.derived_from(),
+        session.workout.parameters().clone(),
+        session.workout.parameters_authored_at(),
+        session.workout.programme(),
+        session.workout.issued_at(),
+    );
+    session.ordinal = SessionOrdinal::new(5)?;
+    Ok(session)
+}
+
+/// **A count and a range in one entry means every set crosses as a range** (#341).
+///
+/// Hevy's app holds the schema on the exercise rather than the set, so an entry
+/// carrying one `rep_range` is read as ranged throughout and every fixed count
+/// in it renders blank. `05 Heavy` reached the phone on 2026-10-02 with nothing
+/// against the front squat's ramp or its `1×8 @ 8RM` top set, the API having
+/// stored all five counts faithfully.
+///
+/// A degenerate range is the same instruction in the other notation, and the
+/// operator confirmed the app takes `8` to `8` and shows it as `8-8`. So the
+/// assertion is that no set of a mixed entry is left stating a count.
+#[test]
+fn a_mixed_entry_states_every_count_as_a_range() {
+    let rendered = support::corpus::block_on(async {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/routine_folders"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "routine_folders": [{ "id": 42, "title": "summer-2026-front-squat" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/routines"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "routine": { "id": "promoted" }
+            })))
+            .mount(&server)
+            .await;
+
+        let hevy =
+            HevyRoutines::new(server.uri(), "key").expect("the destination is constructible");
+        hevy.deliver(&rep_max_primary().expect("the rep-max fixture builds"))
+            .await
+            .outcome
+            .expect("the session is delivered");
+
+        let requests = server
+            .received_requests()
+            .await
+            .expect("the mock recorded its requests");
+        let posted = requests
+            .iter()
+            .find(|request| request.url.path() == "/v1/routines")
+            .expect("a routine was posted");
+        serde_json::from_slice::<Value>(&posted.body).expect("the request body is json")
+    })
+    .expect("the runtime runs");
+
+    let exercises = rendered["routine"]["exercises"]
+        .as_array()
+        .expect("the routine carries exercises");
+    assert_eq!(
+        exercises.len(),
+        1,
+        "one entry, because the schema is not a reason to split one: {rendered}"
+    );
+
+    let sets = exercises[0]["sets"]
+        .as_array()
+        .expect("the squat carries sets");
+    let schema: Vec<String> = sets
+        .iter()
+        .map(|set| {
+            set.get("rep_range").map_or_else(
+                || format!("reps {}", set["reps"]),
+                |range| format!("{}-{}", range["start"], range["end"]),
+            )
+        })
+        .collect();
+    assert_eq!(
+        schema,
+        vec!["8-8", "5-5", "8-8", "5-6"],
+        "every count is widened and the range is untouched"
+    );
+    for set in sets {
+        assert!(
+            set["reps"].is_null(),
+            "a ranged set states no count beside its range: {set}"
+        );
+    }
+}
