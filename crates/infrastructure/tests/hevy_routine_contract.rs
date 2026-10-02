@@ -978,9 +978,11 @@ fn a_mixed_entry_states_every_count_as_a_range() {
         .expect("the squat carries sets");
     let schema: Vec<String> = sets
         .iter()
-        .map(|set| match set.get("rep_range") {
-            Some(range) => format!("{}-{}", range["start"], range["end"]),
-            None => format!("reps {}", set["reps"]),
+        .map(|set| {
+            set.get("rep_range").map_or_else(
+                || format!("reps {}", set["reps"]),
+                |range| format!("{}-{}", range["start"], range["end"]),
+            )
         })
         .collect();
     assert_eq!(
