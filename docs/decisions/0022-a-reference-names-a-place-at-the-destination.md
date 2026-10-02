@@ -135,21 +135,28 @@ rendering is corrected.
 
 `05 Heavy` for 2026-10-02 is the case (#343). Five of the front squat's eight
 sets reached the phone showing no repetitions in the app's routine view, which
-is the lift the session exists for; #342 fixed the rendering the next day and
+is the lift the session exists for; #342 changed the rendering the next day and
 could not reach the routine. `prescribe` re-derived the identical session and
 issued nothing, so `deliver` found the place held by the prescription in force
-and sent nothing. Hevy publishes no `DELETE`, so the operator's only remedy was
-to type the corrected session in by hand. The operator: *"To me, it is a bug,
-the delivered routine isn't useable in it's current state."*
+and sent nothing. Hevy publishes no `DELETE`, so nothing could replace it. The
+operator: *"To me, it is a bug, the delivered routine isn't useable in it's
+current state."*
 
-**How bad that instance was is narrower than #341 and #343 say**, and the
-operator established it on 2026-10-02, after this record was first amended: the
-blanks are in the *routine* view, whose column is headed "rep range", and the
-*workout* view fills every fixed count in. So the session was trainable all
-along and what was lost was reading it beforehand. It changes nothing here. The
-mechanism is not about one broken routine: a corrected rendering could not reach
-*any* delivered session, whatever the correction was for, and that is what the
-digest fixes.
+**The instance it was filed for then evaporated, and the decision survived it**
+— which is the part worth recording, because it is the argument. Over the same
+two days the operator established two things this record was first amended
+without. The blanks are in the *routine* view alone, whose column is headed "rep
+range"; the *workout* view fills every fixed count in, so `05 Heavy` was
+trainable all along and nothing was ever typed into Hevy by hand. And #342's own
+answer — widening each count to a degenerate range — reads `8-8` in the workout
+view where a count read `8`, so #346 took it back out.
+
+So there were *two* rendering changes in two days, in opposite directions, and
+neither could reach a session already delivered. That is the fact the digest is
+about. It was never about one broken routine, which is just as well, because
+that routine was not broken. The operator, on being shown the mechanism outliving
+its instance: *"it's the promoting to a range that I don't want, the replacing an
+outdated render is a good idea."*
 
 **So a delivery records what was rendered, and the comparison is on that.** A
 `RenderingDigest` — SHA-256 over the body the destination would send — sits
@@ -177,10 +184,10 @@ Only the question asked before sending has grown a second half.
 **Three details follow from it.**
 
 A **null rendering is stale, not current.** Every routine delivered before this
-column existed holds one — including the broken `05 Heavy` the issue was filed
-for, which reading null as "current" would leave permanently unreachable. The
-cost of the other reading is one `PUT` of a session that may already have been
-right.
+column existed holds one, so reading null as "current" would leave every one of
+them permanently beyond any correction. The cost of the other reading is one
+`PUT` of a session that may already have been right — which is exactly what
+`05 Heavy` will get, since #346 renders it as it already stands.
 
 A **performed prescription is reachable now**, where the table above called it
 unreachable, because the digest no longer stops at the occupant's identity. The
