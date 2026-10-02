@@ -11,7 +11,9 @@
 //! Verified against the published schema rather than remembered:
 //!
 //! - A rep **range** is native (`rep_range`), so `4-6` crosses as `4-6` rather
-//!   than as a lie about four.
+//!   than as a lie about four. **The choice between a count and a range is the
+//!   entry's, though, not the set's**, so where the two meet every count is
+//!   widened to a degenerate range — see [`agree_on_one_schema`].
 //! - A **warm-up** is a set type, so the ramp arrives marked as a ramp and does
 //!   not inflate a volume count on the phone.
 //! - **Supersets** are an id shared between exercises, and take as many members
@@ -271,7 +273,8 @@ fn render_exercise(
     }
 
     let notes = annotations.join("; ");
-    for (template_id, sets) in groups {
+    for (template_id, mut sets) in groups {
+        agree_on_one_schema(&mut sets);
         into.push(RoutineExercise {
             exercise_template_id: template_id,
             superset_id,
@@ -279,6 +282,42 @@ fn render_exercise(
             notes: notes.clone(),
             sets,
         });
+    }
+}
+
+/// **One entry, one repetition schema** (#341).
+///
+/// Hevy's app holds the choice between a fixed count and a rep range on the
+/// *exercise*, not on the set, and reads an entry as ranged the moment any one
+/// of its sets carries a `rep_range`. Every fixed count in that entry then
+/// renders blank. `05 Heavy`'s front squat reached the phone that way on
+/// 2026-10-02: eight sets of `8, 8, 6, 5, 8` fixed and then `5-6` three times,
+/// with nothing shown against the first five.
+///
+/// **Nothing was lost in transit** — the reply to the create had every one of
+/// those counts back, so the loss is in a rendering we cannot change. A count
+/// therefore shares an entry with a range by becoming one: `8` as `8-8`, which
+/// the app accepts and shows as `8-8` (the operator, 2026-10-02). That is the
+/// same instruction in the other notation rather than a degradation, which is
+/// why it is not an [`Unexpressed`].
+///
+/// **A set that pins no measure is left alone.** There is no count to widen,
+/// and a blank is the right rendering for a set that asks for none.
+fn agree_on_one_schema(sets: &mut [RoutineSet]) {
+    if !sets.iter().any(|set| set.rep_range.is_some()) {
+        return;
+    }
+
+    for set in sets {
+        if set.rep_range.is_some() {
+            continue;
+        }
+        if let Some(reps) = set.reps.take() {
+            set.rep_range = Some(RepRange {
+                start: reps,
+                end: reps,
+            });
+        }
     }
 }
 
