@@ -134,13 +134,22 @@ unchanged as the *routine* being up to date. The two part company the moment a
 rendering is corrected.
 
 `05 Heavy` for 2026-10-02 is the case (#343). Five of the front squat's eight
-sets reached the phone showing no repetitions, which is the lift the session
-exists for; #342 fixed the rendering the next day and could not reach the
-routine. `prescribe` re-derived the identical session and issued nothing, so
-`deliver` found the place held by the prescription in force and sent nothing.
-Hevy publishes no `DELETE`, so the operator's only remedy was to type the
-corrected session in by hand. The operator: *"To me, it is a bug, the delivered
-routine isn't useable in it's current state."*
+sets reached the phone showing no repetitions in the app's routine view, which
+is the lift the session exists for; #342 fixed the rendering the next day and
+could not reach the routine. `prescribe` re-derived the identical session and
+issued nothing, so `deliver` found the place held by the prescription in force
+and sent nothing. Hevy publishes no `DELETE`, so the operator's only remedy was
+to type the corrected session in by hand. The operator: *"To me, it is a bug,
+the delivered routine isn't useable in it's current state."*
+
+**How bad that instance was is narrower than #341 and #343 say**, and the
+operator established it on 2026-10-02, after this record was first amended: the
+blanks are in the *routine* view, whose column is headed "rep range", and the
+*workout* view fills every fixed count in. So the session was trainable all
+along and what was lost was reading it beforehand. It changes nothing here. The
+mechanism is not about one broken routine: a corrected rendering could not reach
+*any* delivered session, whatever the correction was for, and that is what the
+digest fixes.
 
 **So a delivery records what was rendered, and the comparison is on that.** A
 `RenderingDigest` — SHA-256 over the body the destination would send — sits

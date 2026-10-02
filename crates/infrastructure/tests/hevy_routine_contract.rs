@@ -1008,6 +1008,13 @@ fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
 /// against the front squat's ramp or its `1×8 @ 8RM` top set, the API having
 /// stored all five counts faithfully.
 ///
+/// **In the routine view, and only there.** The operator checked both on
+/// 2026-10-02: the routine view's column is headed *rep range*, so a fixed
+/// count has nothing to put in it and shows a dash, while the workout view's is
+/// headed *reps* and fills all five in. So what this fixes is the view the
+/// session is read in beforehand, not the one it is trained from — worth
+/// knowing before trading it for something that reads worse while training.
+///
 /// A degenerate range is the same instruction in the other notation, and the
 /// operator confirmed the app takes `8` to `8` and shows it as `8-8`. So the
 /// assertion is that no set of a mixed entry is left stating a count.

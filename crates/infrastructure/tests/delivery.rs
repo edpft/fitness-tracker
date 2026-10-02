@@ -619,10 +619,11 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
 /// #343, and the defect it was filed for.
 ///
 /// `05 Heavy` for 2026-10-02 went out with five of the front squat's eight sets
-/// showing no repetitions. #342 fixed the rendering the next day, and could not
-/// reach the routine: the prescription had not changed, so `prescribe` issued
-/// nothing and `deliver` saw the place held by the session in force and sent
-/// nothing. The routine stayed broken and had to be typed into Hevy by hand.
+/// showing no repetitions in the app's routine view. #342 fixed the rendering
+/// the next day, and could not reach the routine: the prescription had not
+/// changed, so `prescribe` issued nothing and `deliver` saw the place held by
+/// the session in force and sent nothing. The corrected rendering had nowhere
+/// to go.
 ///
 /// So the question is asked of the contents and not only of the holder. Nothing
 /// about the session changes here — the destination's rendering does, which is
