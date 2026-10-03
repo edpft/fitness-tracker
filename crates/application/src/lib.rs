@@ -19,6 +19,7 @@ pub mod deliver;
 pub mod error;
 pub mod extract;
 pub mod holding;
+pub mod matching;
 pub mod microcycle;
 pub mod normalise;
 pub mod ports;

@@ -8,6 +8,7 @@ use application::{
     DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
 };
 use domain::{
+    canonical::SessionCount,
     landing::{LandingStream, RunOutcome, Watermark},
     normalised::{Refusal, RefusalKind},
     prescription::{
@@ -223,6 +224,24 @@ pub fn reset(stream: &LandingStream, previous: Option<Watermark>) {
 
 pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
+}
+
+pub fn matching_started() {
+    println!("matching gym sessions …");
+}
+
+/// What the matching read and what it wrote.
+///
+/// **The two numbers are deliberately different things, and the gap is not a
+/// loss.** Several accounts of one visit merge into one session, and a visit
+/// no account holds an exercise for is no canonical session at all — the
+/// operator, 2026-10-01: *"Heart rate only isn't a meaningful gym session."*
+/// So `written` is below `read` twice over, and a reader who expects them to
+/// reconcile would read a working run as a broken one.
+pub fn matched(read: SessionCount, written: SessionCount) {
+    println!("matching succeeded");
+    println!("  normalised sessions read {read:>5}");
+    println!("  canonical sessions       {written:>5}");
 }
 
 /// The numbers that must add up.

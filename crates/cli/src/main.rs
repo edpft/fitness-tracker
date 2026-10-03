@@ -12,6 +12,7 @@ mod corrections;
 mod cycling;
 mod gym;
 mod holidays;
+mod matching;
 mod next;
 mod output;
 mod paths;
@@ -171,6 +172,7 @@ fn command() -> ClapCommand {
         .subcommand(programme_command())
         .subcommand(parameters_command())
         .subcommand(schedule_command())
+        .subcommand(match_command())
         .subcommand(
             ClapCommand::new("holidays")
                 .about("List the school and public holidays still to come, as their sources publish them"),
@@ -183,6 +185,32 @@ fn command() -> ClapCommand {
                 )
                 .arg(stream_argument()),
         )
+}
+
+/// `fitness match`, once its subcommand is in hand.
+async fn match_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+    match sub.subcommand() {
+        Some(("gym", _)) => matching::gym(database).await,
+        _ => Err(Failure::message("no match command given", exit::USAGE)),
+    }
+}
+
+/// `fitness match` — the canonical layer, built from the normalised one.
+///
+/// **It takes what it derives, not a stream.** `extract` and `normalise` both
+/// name a stream because each runs against one source; the canonical layer is
+/// one entry per visit whatever number of sources recorded it, so there is no
+/// stream to name. What it takes is the entity, and a second discipline is a
+/// second subcommand rather than an argument — body measurements have a source
+/// and no sessions to match.
+fn match_command() -> ClapCommand {
+    ClapCommand::new("match")
+        .about("Build the canonical layer: one entry per real session, from every record of it")
+        .subcommand_required(true)
+        .subcommand(ClapCommand::new("gym").about(
+            "One canonical session per gym visit, merged from Hevy, the watch, \
+             Beyond The White Board and the historical spreadsheets",
+        ))
 }
 
 /// `fitness next` — whichever discipline the schedule says is next.
@@ -936,6 +964,7 @@ async fn authored_command(
         name if catalogue::discipline(name).is_some() => {
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
         }
+        "match" => Some(match_command_run(sub, database).await),
         "holidays" => Some(holidays::list().await),
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,
