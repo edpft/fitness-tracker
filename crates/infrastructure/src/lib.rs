@@ -49,11 +49,11 @@ pub use store::{
     SqliteCyclingSessionStore, SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
-    SqliteNormalisationRunLog, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
-    SqlitePerformedWorkoutReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory, SqliteWeighInStore,
-    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    SqliteNormalisationRunLog, SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore,
+    SqliteOvernightHrvStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory,
+    SqliteWeighInStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

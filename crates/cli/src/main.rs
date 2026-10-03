@@ -5,6 +5,7 @@
 //! picks the adapters — and turns whatever comes back into output and an exit
 //! code.
 
+mod canonicalise;
 mod catalogue;
 mod committing;
 mod config;
@@ -171,6 +172,7 @@ fn command() -> ClapCommand {
         .subcommand(programme_command())
         .subcommand(parameters_command())
         .subcommand(schedule_command())
+        .subcommand(canonicalise_command())
         .subcommand(
             ClapCommand::new("holidays")
                 .about("List the school and public holidays still to come, as their sources publish them"),
@@ -183,6 +185,35 @@ fn command() -> ClapCommand {
                 )
                 .arg(stream_argument()),
         )
+}
+
+/// `fitness canonicalise`, once its subcommand is in hand.
+async fn canonicalise_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+    match sub.subcommand() {
+        Some(("gym", _)) => canonicalise::gym(database).await,
+        _ => Err(Failure::message(
+            "no canonicalise command given",
+            exit::USAGE,
+        )),
+    }
+}
+
+/// `fitness canonicalise` — the canonical layer, built from the normalised one.
+///
+/// **It takes what it derives, not a stream.** `extract` and `normalise` both
+/// name a stream because each runs against one source; the canonical layer is
+/// one entry per visit whatever number of sources recorded it, so there is no
+/// stream to name. What it takes is the entity, and a second discipline is a
+/// second subcommand rather than an argument — body measurements have a source
+/// and no sessions to match.
+fn canonicalise_command() -> ClapCommand {
+    ClapCommand::new("canonicalise")
+        .about("Build the canonical layer: one entry per real session, from every record of it")
+        .subcommand_required(true)
+        .subcommand(ClapCommand::new("gym").about(
+            "One canonical session per gym visit, merged from Hevy, the watch, \
+             Beyond The White Board and the historical spreadsheets",
+        ))
 }
 
 /// `fitness next` — whichever discipline the schedule says is next.
@@ -936,6 +967,7 @@ async fn authored_command(
         name if catalogue::discipline(name).is_some() => {
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
         }
+        "canonicalise" => Some(canonicalise_command_run(sub, database).await),
         "holidays" => Some(holidays::list().await),
         "schedule" => Some(match sub.subcommand() {
             Some(("add", _)) => scheduling::add(database).await,

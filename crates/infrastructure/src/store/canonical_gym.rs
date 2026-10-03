@@ -556,15 +556,15 @@ impl SetRow<'_, '_> {
     }
 }
 
-fn normalised_session_from_storage(id: i64) -> Result<NormalisedSessionId, StoreError> {
+pub(super) fn normalised_session_from_storage(id: i64) -> Result<NormalisedSessionId, StoreError> {
     NormalisedSessionId::try_from(id).map_err(|e| corrupt(&e))
 }
 
-fn beats(value: i64) -> Result<BeatsPerMinute, StoreError> {
+pub(super) fn beats(value: i64) -> Result<BeatsPerMinute, StoreError> {
     BeatsPerMinute::new(u32::try_from(value).map_err(|e| corrupt(&e))?).map_err(|e| corrupt(&e))
 }
 
-fn occurred(
+pub(super) fn occurred(
     started_at_utc: Option<&str>,
     zone: Option<&str>,
     on_day: Option<&str>,
@@ -716,7 +716,7 @@ fn named(exercise: Option<&str>) -> Result<&str, StoreError> {
     })
 }
 
-fn identified_from_storage(
+pub(super) fn identified_from_storage(
     how: &str,
     exercise: Option<&str>,
     movement: Option<&str>,
@@ -762,24 +762,29 @@ fn identified_from_storage(
 }
 
 /// A set row, before its measure is read into the type its exercise fixes.
-struct StoredSet {
-    outcome: String,
-    reps: Option<i64>,
-    duration_seconds: Option<i64>,
-    distance_mm: Option<i64>,
-    outcome_normalised_session: i64,
-    load_kind: Option<String>,
-    load_grams: Option<i64>,
-    load_normalised_session: Option<i64>,
-    began_at_utc: Option<String>,
-    began_zone: Option<String>,
-    began_normalised_session: Option<i64>,
-    rir: Option<String>,
-    rir_normalised_session: Option<i64>,
-    set_kind: Option<String>,
-    set_kind_normalised_session: Option<i64>,
-    rest_after_seconds: Option<i64>,
-    rest_after_normalised_session: Option<i64>,
+///
+/// **Shared with the normalised reader**, which fills every attribution slot
+/// with the one session it is reading. A canonical set is assembled by one
+/// piece of code whether it comes from these tables or from a projection of
+/// the layer below, so the two cannot drift.
+pub(super) struct StoredSet {
+    pub(super) outcome: String,
+    pub(super) reps: Option<i64>,
+    pub(super) duration_seconds: Option<i64>,
+    pub(super) distance_mm: Option<i64>,
+    pub(super) outcome_normalised_session: i64,
+    pub(super) load_kind: Option<String>,
+    pub(super) load_grams: Option<i64>,
+    pub(super) load_normalised_session: Option<i64>,
+    pub(super) began_at_utc: Option<String>,
+    pub(super) began_zone: Option<String>,
+    pub(super) began_normalised_session: Option<i64>,
+    pub(super) rir: Option<String>,
+    pub(super) rir_normalised_session: Option<i64>,
+    pub(super) set_kind: Option<String>,
+    pub(super) set_kind_normalised_session: Option<i64>,
+    pub(super) rest_after_seconds: Option<i64>,
+    pub(super) rest_after_normalised_session: Option<i64>,
 }
 
 async fn read_sets(
@@ -922,7 +927,7 @@ fn outcome_of<M>(stored: &str, measure: Option<M>) -> Result<Performed<Option<M>
     }
 }
 
-fn reps_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<RepCount>>, StoreError> {
+pub(super) fn reps_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<RepCount>>, StoreError> {
     let mut sets = Vec::with_capacity(rows.len());
     for row in rows {
         let reps = match row.reps {
@@ -938,7 +943,9 @@ fn reps_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<RepCount>>, StoreE
     Ok(sets)
 }
 
-fn duration_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<Duration>>, StoreError> {
+pub(super) fn duration_sets(
+    rows: Vec<StoredSet>,
+) -> Result<Vec<CanonicalSet<Duration>>, StoreError> {
     let mut sets = Vec::with_capacity(rows.len());
     for row in rows {
         let seconds = match row.duration_seconds {
@@ -953,7 +960,9 @@ fn duration_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<Duration>>, St
     Ok(sets)
 }
 
-fn distance_sets(rows: Vec<StoredSet>) -> Result<Vec<CanonicalSet<Distance>>, StoreError> {
+pub(super) fn distance_sets(
+    rows: Vec<StoredSet>,
+) -> Result<Vec<CanonicalSet<Distance>>, StoreError> {
     let mut sets = Vec::with_capacity(rows.len());
     for row in rows {
         let distance = match row.distance_mm {

@@ -13,6 +13,7 @@
 //! a driven adapter from quietly calling the application it is supposed to be
 //! driven by.
 
+pub mod canonicalise;
 pub mod compare;
 pub mod cycling;
 pub mod deliver;
@@ -38,13 +39,14 @@ pub use ports::{
     DiaryStore, EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter,
     FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar,
     Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce, MesocycleStore,
-    NormalisationRunLog, NormalisationSummary, NormalisedEntityStore, Occupant, Performance,
-    PerformedSessionLog, PerformedSetSummary, PerformedWorkoutReader, Placed, PlanAuthor,
-    PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
-    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionLifecycle, RawExtent,
-    RefusalReport, RefusalReporter, RefusalStore, RenderingDigest, ReplyStatus,
-    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
-    RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation,
-    Translator, UnderivableReason, UnderivableSlot, Unexpressed, WeighInHistory,
-    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
+    NormalisationRunLog, NormalisationSummary, NormalisedEntityStore, NormalisedGymSessionReader,
+    Occupant, Performance, PerformedSessionLog, PerformedSetSummary, PerformedWorkoutReader,
+    Placed, PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
+    PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
+    PrescriptionLifecycle, RawExtent, RefusalReport, RefusalReporter, RefusalStore,
+    RenderingDigest, ReplyStatus, ResumptionPointResetter, ResumptionPointStore, RiddenSession,
+    RiddenSessionLog, RiddenVenues, RunLock, RunSummary, SessionOrdinal, SourceAccount,
+    SourceEvent, StreamStatus, Translation, Translator, UnderivableReason, UnderivableSlot,
+    Unexpressed, WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
+    WorkoutPrescriber,
 };

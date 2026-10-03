@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT outcome AS \"outcome!: String\", reps, duration_seconds, distance_mm,\n                   load_kind, load_grams, rir, set_kind AS \"set_kind!: String\",\n                   rest_after_seconds\n            FROM performed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "outcome!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "load_kind",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "rir",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "rir"
+          }
+        }
+      },
+      {
+        "name": "set_kind!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "set_kind"
+          }
+        }
+      },
+      {
+        "name": "rest_after_seconds",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "rest_after_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "fe0c0b370001697b6a78bbaa7b8eed1aac8b4a93fe15d3e36fe854442f16980e"
+}
