@@ -1,4 +1,4 @@
-//! A workout performed against the template projects back into a prescription.
+//! A session performed against the template projects back into a prescription.
 //!
 //! The forward invariant of § 11, as a property rather than as a comparison
 //! against history. A session performed on this platform is performed against a
@@ -9,24 +9,39 @@
 //! and the claim is that each one derives a prescription with no slot left
 //! unassigned.
 //!
+//! **The session is a canonical one** (#350), which is what projection now
+//! reads. Where this used to generate a session split across one to four Hevy
+//! records, to show that projection cannot see the seams, the seams are now the
+//! merge's business and `canonicalise.rs` is where they are tested: a canonical
+//! session holds its items and nothing says which account each came from.
+//!
+//! **Every field a shape needs is stated here, and that is the point of the
+//! separate cases below.** A canonical set may hold no load and no kind, and a
+//! canonical exercise may be nothing but a watch's guess; a session shaped by the
+//! template was logged in full, so the property generates full sets and the
+//! unit tests cover what happens when the record holds less.
+//!
 //! **Nothing here reads the corpus.** The record predates the template and was
 //! run by hand; comparing it against a regenerated prescription measures how the
 //! operator's habits differed from the model, which is a fact about history
 //! rather than a property of the model.
 
 use domain::{
+    canonical::{Attributed, NormalisedSessionId, Occurred},
     gym::{
-        GymWorkout, Load, Performed, PerformedExercise, PerformedGymSession, Set, SetKind,
-        SignedKg, Superset, WorkoutItem,
+        CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
+        GuessedExercise, Identified, Load, Performed, SetKind, SignedKg,
         exercise::{DurationExercise, RepsExercise},
     },
-    landing::{Endpoint, EventKind, EventProvenance, LandingRecordId, Provenance, SourceRecordId},
-    measure::{Duration, Kg, PositiveDuration, RepCount},
+    measure::{Duration, Kg, RepCount},
     normalised::{OperatorZone, StartedAt},
     prescription::{Position, PrimaryPattern, ProjectionGap, SlotId, project},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use proptest::prelude::*;
+
+/// The one account every generated field is attributed to.
+const ACCOUNT: NormalisedSessionId = NormalisedSessionId::FIRST;
 
 // Strategy helpers are free functions, where the test exemptions in `clippy.toml`
 // do not reach. Each is fallible and the caller filters.
@@ -38,25 +53,33 @@ fn load() -> impl Strategy<Value = Load> {
     ]
 }
 
+/// One fully recorded set: a load, a kind, and an outcome.
 fn set_of<M: std::fmt::Debug + Clone + 'static>(
     measure: impl Strategy<Value = M>,
-) -> impl Strategy<Value = Set<M>> {
+) -> impl Strategy<Value = CanonicalSet<M>> {
     // Completed and failed both: a session that missed a set is still a session
     // performed against the template, and it must still project.
     (load(), measure, any::<bool>(), any::<bool>()).prop_map(
-        |(load, measure, completed, warmup)| Set {
-            load,
-            outcome: if completed {
-                Performed::Completed(measure)
-            } else {
-                Performed::Failed
-            },
+        |(load, measure, completed, warmup)| CanonicalSet {
+            outcome: Attributed::new(
+                if completed {
+                    Performed::Completed(Some(measure))
+                } else {
+                    Performed::Failed
+                },
+                ACCOUNT,
+            ),
+            load: Some(Attributed::new(load, ACCOUNT)),
+            began: None,
             intensity: None,
-            kind: if warmup {
-                SetKind::Warmup
-            } else {
-                SetKind::Working
-            },
+            kind: Some(Attributed::new(
+                if warmup {
+                    SetKind::Warmup
+                } else {
+                    SetKind::Working
+                },
+                ACCOUNT,
+            )),
             rest_after: None,
         },
     )
@@ -76,7 +99,7 @@ fn non_empty<T: std::fmt::Debug + 'static>(
 /// other slot is counted in repetitions. That is the template's own partition,
 /// and a session that ignored it would not be one performed against the
 /// template.
-fn exercise_for(slot: SlotId) -> BoxedStrategy<PerformedExercise> {
+fn exercise_for(slot: SlotId) -> BoxedStrategy<CanonicalExercise> {
     if slot.block() == domain::prescription::Block::Mobility {
         let seconds = (1_u64..3_600).prop_map(Duration::from_seconds);
         (
@@ -86,7 +109,10 @@ fn exercise_for(slot: SlotId) -> BoxedStrategy<PerformedExercise> {
             .prop_filter_map("the vocabulary is not empty", |(at, sets)| {
                 DurationExercise::ALL
                     .get(at)
-                    .map(|&exercise| PerformedExercise::ForDuration { exercise, sets })
+                    .map(|&exercise| CanonicalExercise::ForDuration {
+                        exercise: Attributed::new(exercise, ACCOUNT),
+                        sets,
+                    })
             })
             .boxed()
     } else {
@@ -96,77 +122,45 @@ fn exercise_for(slot: SlotId) -> BoxedStrategy<PerformedExercise> {
             .prop_filter_map("the vocabulary is not empty", |(at, sets)| {
                 RepsExercise::ALL
                     .get(at)
-                    .map(|&exercise| PerformedExercise::ForReps { exercise, sets })
+                    .map(|&exercise| CanonicalExercise::ForReps {
+                        identified: Attributed::new(Identified::Recorded(exercise), ACCOUNT),
+                        sets,
+                    })
             })
             .boxed()
     }
 }
 
 /// One item, shaped as the position it fills.
-fn item_for(position: Position) -> BoxedStrategy<WorkoutItem> {
+fn item_for(position: Position) -> BoxedStrategy<CanonicalItem> {
     if let Position::Single(slot) = position {
-        return exercise_for(slot).prop_map(WorkoutItem::Exercise).boxed();
+        return exercise_for(slot).prop_map(CanonicalItem::Exercise).boxed();
     }
-    let members: Vec<BoxedStrategy<PerformedExercise>> =
+    let members: Vec<BoxedStrategy<CanonicalExercise>> =
         position.slots().map(exercise_for).collect();
     members
         .prop_filter_map("a group has at least two members", |members| {
             AtLeastTwo::new(members)
                 .ok()
-                .map(|members| WorkoutItem::Superset(Superset { members }))
+                .map(|members| CanonicalItem::Superset(Box::new(members)))
         })
         .boxed()
 }
 
-/// A session performed against one variant of the template, split across one to
-/// four records.
-///
-/// **The split is part of the property.** The operator logged single sessions
-/// against several Hevy routines — 21 of his 140 days, three of them four
-/// records — and § 3.1 makes those one entity. Projection reads the session's
-/// items in the order performed and cannot see where the seams were, so a
-/// session that landed as four records must project exactly as the same session
-/// landed as one. Generating the split is what tests that rather than assuming
-/// it.
-fn performed(primary: PrimaryPattern) -> impl Strategy<Value = PerformedGymSession> {
-    let items: Vec<BoxedStrategy<WorkoutItem>> =
+/// A canonical session performed against one variant of the template.
+fn performed(primary: PrimaryPattern) -> impl Strategy<Value = CanonicalGymSession> {
+    let items: Vec<BoxedStrategy<CanonicalItem>> =
         primary.sequence().into_iter().map(item_for).collect();
-    (items, 0_i64..1_000_000_000, 1_usize..=4).prop_filter_map(
-        "a session is buildable",
-        |(items, seconds, parts)| {
-            let zone = OperatorZone::try_from("Europe/London").ok()?;
-            let provenance = Provenance::Event(EventProvenance::new(
-                Endpoint::try_from("/v1/workouts/events").ok()?,
-                EventKind::Updated,
-                None,
-            ));
-
-            // Ceiling division, so every chunk holds at least one item and the
-            // last is never empty — a workout's items are `NonEmpty`.
-            let per_part = items.len().div_ceil(parts).max(1);
-            let mut workouts = Vec::new();
-            for (index, chunk) in items.chunks(per_part).enumerate() {
-                let index = i64::try_from(index).ok()?;
-                // Each part starts after the one before it, which is the order
-                // grouping would have put them in.
-                let instant = jiff::Timestamp::from_second(seconds + index * 600).ok()?;
-                workouts.push(GymWorkout::new(
-                    NonEmpty::new(chunk.to_vec()).ok()?,
-                    StartedAt::new(instant, zone.clone()),
-                    // Each part runs for five of the ten minutes before the next
-                    // starts, so a multi-part session's span covers the gaps
-                    // between its parts as well as the parts themselves.
-                    Some(PositiveDuration::from_seconds(300).ok()?),
-                    provenance.clone(),
-                    SourceRecordId::try_from(format!("synthetic-{index}").as_str()).ok()?,
-                    LandingRecordId::FIRST,
-                    // Performed freehand: no session was delivered for it.
-                    None,
-                ));
-            }
-            Some(PerformedGymSession::new(NonEmpty::new(workouts).ok()?))
-        },
-    )
+    (items, 0_i64..1_000_000_000).prop_filter_map("a session is buildable", |(items, seconds)| {
+        let zone = OperatorZone::try_from("Europe/London").ok()?;
+        let instant = jiff::Timestamp::from_second(seconds).ok()?;
+        Some(CanonicalGymSession::new(
+            Occurred::At(StartedAt::new(instant, zone)),
+            NonEmpty::new(items).ok()?,
+            None,
+            None,
+        ))
+    })
 }
 
 proptest! {
@@ -188,20 +182,21 @@ proptest! {
             .filter(|gap| matches!(gap, ProjectionGap::SlotUnassignable { .. }))
             .count();
         prop_assert_eq!(unassignable, 0, "every item took a position");
+        let shape = projection.shape.expect("a session logged in full has a shape");
         prop_assert_eq!(
-            projection.shape.items().count(),
+            shape.items().count(),
             session.items().count(),
             "every item survives into the shape"
         );
 
         for slot in SlotId::ALL {
             prop_assert!(
-                projection.shape.item_for(*slot).is_some(),
+                shape.item_for(*slot).is_some(),
                 "the {} slot is filled",
                 slot
             );
         }
-        prop_assert!(projection.shape.set_count() > 0);
+        prop_assert!(shape.set_count() > 0);
     }
 }
 
@@ -215,9 +210,129 @@ proptest! {
         session in performed(PrimaryPattern::HipDominant)
     ) {
         let projection = project(&session);
-        prop_assert_eq!(
-            projection.shape.items().count(),
-            session.items().count()
-        );
+        let shape = projection.shape.expect("a session logged in full has a shape");
+        prop_assert_eq!(shape.items().count(), session.items().count());
     }
+}
+
+/// A canonical session of one exercise, built from parts the caller states.
+fn one_exercise(exercise: CanonicalExercise) -> Option<CanonicalGymSession> {
+    let zone = OperatorZone::try_from("Europe/London").ok()?;
+    Some(CanonicalGymSession::new(
+        Occurred::At(StartedAt::new(jiff::Timestamp::from_second(0).ok()?, zone)),
+        NonEmpty::of(CanonicalItem::Exercise(exercise), Vec::new()),
+        None,
+        None,
+    ))
+}
+
+/// One set of repetitions, with whichever of its three fields the caller states.
+fn bare_set(
+    load: Option<Load>,
+    kind: Option<SetKind>,
+    reps: Option<RepCount>,
+) -> CanonicalSet<RepCount> {
+    CanonicalSet {
+        outcome: Attributed::new(Performed::Completed(reps), ACCOUNT),
+        load: load.map(|load| Attributed::new(load, ACCOUNT)),
+        began: None,
+        intensity: None,
+        kind: kind.map(|kind| Attributed::new(kind, ACCOUNT)),
+        rest_after: None,
+    }
+}
+
+/// A set the record states no load for cannot be an instruction, and a session
+/// of nothing but such sets has no shape at all.
+#[test]
+fn a_set_with_no_load_is_not_read_as_a_prescription() {
+    let reps = RepCount::new(5).expect("a real count");
+    let exercise = CanonicalExercise::ForReps {
+        identified: Attributed::new(
+            Identified::Recorded(RepsExercise::BackSquatBarbell),
+            ACCOUNT,
+        ),
+        sets: NonEmpty::of(
+            bare_set(None, Some(SetKind::Working), Some(reps)),
+            Vec::new(),
+        ),
+    };
+    let session = one_exercise(exercise).expect("a session builds");
+    let projection = project(&session);
+    assert!(projection.shape.is_none(), "nothing was readable");
+    assert!(
+        projection
+            .gaps
+            .iter()
+            .any(|gap| matches!(gap, ProjectionGap::SetUnreadable { .. })),
+        "the gap says which set went: {:?}",
+        projection.gaps
+    );
+}
+
+/// The same for a set nothing says was a warm-up or a working set: reading it as
+/// working would compare a ramp against a prescribed working set.
+#[test]
+fn a_set_with_no_kind_is_not_read_as_a_prescription() {
+    let reps = RepCount::new(5).expect("a real count");
+    let load = Load::absolute(Kg::from_grams(60_000));
+    let exercise = CanonicalExercise::ForReps {
+        identified: Attributed::new(
+            Identified::Recorded(RepsExercise::BackSquatBarbell),
+            ACCOUNT,
+        ),
+        sets: NonEmpty::of(bare_set(Some(load), None, Some(reps)), Vec::new()),
+    };
+    let session = one_exercise(exercise).expect("a session builds");
+    assert!(project(&session).shape.is_none());
+}
+
+/// A set the gym's log recorded without a count — "Burpee", and not how many —
+/// pins no measure, so it is not an instruction either.
+#[test]
+fn a_completed_set_with_no_count_is_not_read_as_a_prescription() {
+    let load = Load::absolute(Kg::from_grams(60_000));
+    let exercise = CanonicalExercise::ForReps {
+        identified: Attributed::new(
+            Identified::Recorded(RepsExercise::BackSquatBarbell),
+            ACCOUNT,
+        ),
+        sets: NonEmpty::of(
+            bare_set(Some(load), Some(SetKind::Working), None),
+            Vec::new(),
+        ),
+    };
+    let session = one_exercise(exercise).expect("a session builds");
+    assert!(project(&session).shape.is_none());
+}
+
+/// A watch's guess is not an account of what was performed, so nothing is
+/// compared against it however completely its sets are stated.
+#[test]
+fn a_guessed_exercise_is_not_compared_against_a_prescription() {
+    let reps = RepCount::new(5).expect("a real count");
+    let load = Load::absolute(Kg::from_grams(60_000));
+    let exercise = CanonicalExercise::ForReps {
+        identified: Attributed::new(
+            Identified::Guessed(GuessedExercise::Proposed(Guess::Exercise(
+                RepsExercise::BackSquatBarbell,
+            ))),
+            ACCOUNT,
+        ),
+        sets: NonEmpty::of(
+            bare_set(Some(load), Some(SetKind::Working), Some(reps)),
+            Vec::new(),
+        ),
+    };
+    let session = one_exercise(exercise).expect("a session builds");
+    let projection = project(&session);
+    assert!(projection.shape.is_none());
+    assert!(
+        projection
+            .gaps
+            .iter()
+            .any(|gap| matches!(gap, ProjectionGap::ExerciseGuessed { .. })),
+        "the gap names the guess: {:?}",
+        projection.gaps
+    );
 }

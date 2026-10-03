@@ -268,3 +268,58 @@ fn the_layer_is_replaced_not_appended() {
         );
     });
 }
+
+/// Re-deriving a normalised gym stream leaves the canonical layer rebuildable.
+///
+/// **The defect this pins.** Every field of a canonical session names the
+/// `gym_session` row it came from, and re-deriving a stream deletes those rows
+/// and writes new ones under new ids — so a canonical layer left standing is a
+/// layer holding foreign keys to rows that no longer exist. SQLite said so,
+/// `FOREIGN KEY constraint failed`, the second time a store that had been
+/// canonicalised was normalised; and `fitness next` canonicalises every run, so
+/// the second run would have been every run (#350).
+///
+/// So re-deriving clears the whole layer, and canonicalising builds it again.
+#[test]
+fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = derived().await.expect("a derived store");
+        let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
+        let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
+
+        let first = canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a first run");
+        assert!(first.written.as_usize() > 0, "the layer was built");
+
+        // The same derivation again, over the same raw: the normalised rows are
+        // replaced, so the layer standing on them cannot survive.
+        Normalisation::new(
+            NormalisationPorts {
+                raw: HevySessionAccountReader::new(pool.clone()).expect("a reader"),
+                translator: HevySessionTranslator::default(),
+                workouts: SqliteGymSessionStore::new(pool.clone()).expect("a store"),
+                refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)
+                    .expect("a refusal store"),
+                runs: SqliteNormalisationRunLog::new(pool.clone()),
+                clock: corpus::FixedClock,
+            },
+            zone().expect("a zone"),
+        )
+        .normalise()
+        .await
+        .expect("re-deriving succeeds with a canonical layer in the store");
+
+        assert_eq!(
+            canonical.count().await.expect("a count").as_usize(),
+            0,
+            "the stale layer is gone rather than left pointing at deleted rows"
+        );
+
+        let again = canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a second canonicalising");
+        assert_eq!(again, first, "and it rebuilds to the same layer");
+    });
+}

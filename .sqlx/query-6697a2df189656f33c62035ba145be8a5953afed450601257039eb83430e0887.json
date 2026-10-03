@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT started_at_utc, zone, on_day\n            FROM canonical_gym_session\n            WHERE COALESCE(started_at_utc, on_day) >= ?\n              AND COALESCE(started_at_utc, on_day) < ?\n            ORDER BY COALESCE(started_at_utc, on_day), id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6697a2df189656f33c62035ba145be8a5953afed450601257039eb83430e0887"
+}

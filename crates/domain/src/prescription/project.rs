@@ -15,6 +15,11 @@
 //! prescription reverse-engineered from the very performance it exists to be
 //! compared against, and expectation against reality would be unrecoverable.
 //!
+//! **A canonical session, so the visit is the unit** (§ 5). A visit merged from
+//! four sources is one sequence of items, and which source each field came from
+//! is provenance rather than shape — so nothing here can see the seams, exactly
+//! as it could not see the seams between a session's Hevy routines.
+//!
 //! **Every loss is a [`ProjectionGap`] rather than an invented value** (FR-035):
 //!
 //! - **A failed attempt carries no intended count.** The load was on the bar and
@@ -30,6 +35,22 @@
 //! - **Observed effort is dropped.** A recorded RIR is what happened; a
 //!   prescribed effort is guidance. A completed set projects with no effort at
 //!   all rather than presenting an observation as an instruction.
+//! - **A set the record states too little of is left out.** An instruction needs
+//!   a load, a count where the set completed, and whether it was a warm-up; a
+//!   canonical set may hold none of the three, and not one of them has a
+//!   defensible default — a missing load is not zero, and a missing kind read as
+//!   working is a warm-up compared against a working set. Those are the same
+//!   three fields `ExerciseHistory` needs, and the rule is the same rule.
+//! - **A guessed exercise is left out.** Where nothing but a watch's classifier
+//!   named the exercise, there is no claim about what was performed to compare
+//!   against one.
+//!
+//! **So the shape is optional.** An exercise whose every set went, or an item
+//! whose every exercise went, goes with them, and a session can be left with
+//! nothing to read — which is a thing to say rather than an empty shape to
+//! compare. No session in the operator's record reaches that state through
+//! [`crate::prescription::project`]'s one caller, because a prescription exists
+//! only for the years every set is logged in full; the type says so anyway.
 //!
 //! **Comparison is asymmetric, and that is a property of the domain rather than a
 //! weakness of the test.** A performed six repetitions projects to `Exactly(6)`,
@@ -43,17 +64,17 @@
 //! generation has:
 //!
 //! ```compile_fail
-//! use domain::{gym::PerformedGymSession, prescription::{PrescribedWorkout, project}};
+//! use domain::{gym::CanonicalGymSession, prescription::{PrescribedWorkout, project}};
 //!
 //! // Standing in for `PrescribedWorkoutStore::issue`, which takes the same thing.
 //! fn issue(_: &PrescribedWorkout) {}
 //!
-//! fn reverse_engineer_a_prescription(performed: &PerformedGymSession) {
+//! fn reverse_engineer_a_prescription(performed: &CanonicalGymSession) {
 //!     let projection = project(performed);
 //!     // The shape is instructional content and nothing more, so this does not
 //!     // compile — which is FR-034 held by construction rather than by a rule
 //!     // somebody has to follow.
-//!     issue(&projection.shape);
+//!     issue(projection.shape.as_ref().unwrap());
 //! }
 //! ```
 //!
@@ -66,18 +87,20 @@
 //!
 //! ```
 //! use domain::{
-//!     gym::PerformedGymSession,
+//!     gym::CanonicalGymSession,
 //!     prescription::{PrescribedWorkout, WorkoutShape, project},
 //! };
 //!
 //! fn issue(_: &PrescribedWorkout) {}
 //! fn compare_against(_: &WorkoutShape) {}
 //!
-//! fn read_a_performance(performed: &PerformedGymSession) {
+//! fn read_a_performance(performed: &CanonicalGymSession) {
 //!     let projection = project(performed);
 //!     // A shape is welcome wherever a shape is wanted. It is only `issue` that
 //!     // refuses it, and refusing it is the whole point.
-//!     compare_against(&projection.shape);
+//!     if let Some(shape) = &projection.shape {
+//!         compare_against(shape);
+//!     }
 //! }
 //! ```
 //!
@@ -90,8 +113,10 @@
 use std::collections::VecDeque;
 use std::fmt;
 
+use crate::canonical::Attributed;
 use crate::gym::{
-    Load, Performed, PerformedExercise, PerformedGymSession, Rir, Set, SetKind, WorkoutItem,
+    CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified, Load,
+    Performed, Rir, SetKind,
 };
 use crate::measure::Spans;
 use crate::sequence::{AtLeastTwo, NonEmpty};
@@ -137,6 +162,14 @@ pub enum ProjectionGap {
     /// The template's issue order had no slot left for this item, so none was
     /// assigned and the item is not in the shape.
     SlotUnassignable { at: ItemPosition },
+    /// A set the record does not state fully enough to read as an instruction:
+    /// no load, no count where it completed, or nothing saying whether it was a
+    /// warm-up. Left out of the shape, and its exercise with it where it was the
+    /// only one.
+    SetUnreadable { at: ItemPosition },
+    /// Nothing but a watch's classifier named the exercise, so there is no
+    /// account of what was performed to compare against a prescription.
+    ExerciseGuessed { at: ItemPosition },
 }
 
 impl fmt::Display for ProjectionGap {
@@ -149,14 +182,25 @@ impl fmt::Display for ProjectionGap {
             Self::SlotUnassignable { at } => {
                 write!(f, "{at}: no slot in the template's issue order")
             }
+            Self::SetUnreadable { at } => write!(
+                f,
+                "{at}: the record does not state a set's load, count or kind"
+            ),
+            Self::ExerciseGuessed { at } => {
+                write!(f, "{at}: only a watch's classifier named this exercise")
+            }
         }
     }
 }
 
 /// A performance read as a prescription shape, and what was lost on the way.
+///
+/// **`None` where nothing survived the reading.** Every item's exercises were
+/// guesses, or stated too little of their sets to be instructions, so there is
+/// no shape to compare — which the gaps say in full.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Projection {
-    pub shape: WorkoutShape,
+    pub shape: Option<WorkoutShape>,
     pub gaps: Vec<ProjectionGap>,
 }
 
@@ -177,40 +221,31 @@ pub const ISSUE_ORDER: [Position; 10] = PrimaryPattern::KneeDominant.sequence();
 
 /// Read a performed session as a prescription shape.
 ///
-/// **Total.** Reads no store, makes no request and consults no overlay, which is
-/// why it is a function and not a port. The first item always takes the first
-/// group, so the shape is never empty and nothing here can fail.
+/// **Pure.** Reads no store, makes no request and consults no overlay, which is
+/// why it is a function and not a port. It cannot fail either; what it can do is
+/// come back with no shape, where nothing in the session was readable as an
+/// instruction.
 ///
-/// **The session entire, seams included** (§ 3.1). A session the operator split
-/// across four Hevy routines was one sequence of items as it was performed, and
-/// reading only the first routine would compare a quarter of a session against
-/// the whole of what was issued. Where the parts of that sequence came from is
-/// provenance, not shape, so nothing here can see the joins.
+/// **The visit entire, seams included** (§ 3.1, § II.4). A visit the operator
+/// logged across four Hevy routines, or recorded in a sheet and on a watch, is one
+/// sequence of items by the time it reaches here. Where each field of it came from
+/// is provenance, not shape, so nothing here can see the joins.
 #[must_use]
-pub fn project(session: &PerformedGymSession) -> Projection {
+pub fn project(session: &CanonicalGymSession) -> Projection {
     let mut positions: VecDeque<Position> = ISSUE_ORDER.into_iter().collect();
     let mut gaps = Vec::new();
+    let mut projected = Vec::new();
 
-    // The head, separately: the first position is a single slot and a first item
-    // always exists, so this cannot fail — which is what lets the shape be
-    // `NonEmpty` with no fallback anywhere in the walk.
-    let head_slot = positions
-        .pop_front()
-        .and_then(|position| position.slots().next())
-        .unwrap_or(SlotId::Plyometric);
-    let head = one_slot(session.first_item(), head_slot, ItemPosition(0), &mut gaps);
-
-    let mut tail = Vec::new();
-    for (offset, item) in session.items().enumerate().skip(1) {
+    for (offset, item) in session.items().iter().enumerate() {
         let at = ItemPosition(offset);
         match assign(item, &mut positions, at, &mut gaps) {
-            Some(projected) => tail.push(projected),
+            Some(item) => projected.push(item),
             None => gaps.push(ProjectionGap::SlotUnassignable { at }),
         }
     }
 
     Projection {
-        shape: WorkoutShape::new(NonEmpty::of(head, tail)),
+        shape: NonEmpty::new(projected).ok().map(WorkoutShape::new),
         gaps,
     }
 }
@@ -221,188 +256,215 @@ pub fn project(session: &PerformedGymSession) -> Projection {
 /// and hands the second back as a position of its own, which is what lets a pair
 /// be read off when the operator performed it unsupersetted.
 fn assign(
-    item: &WorkoutItem,
+    item: &CanonicalItem,
     positions: &mut VecDeque<Position>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
 ) -> Option<PrescribedItem> {
     let position = positions.pop_front()?;
     match (item, position) {
-        (WorkoutItem::Exercise(_) | WorkoutItem::Superset(_), Position::Single(slot)) => {
-            Some(one_slot(item, slot, at, gaps))
+        (CanonicalItem::Exercise(_) | CanonicalItem::Superset(_), Position::Single(slot)) => {
+            one_slot(item, slot, at, gaps)
         }
-        (WorkoutItem::Exercise(_), Position::Superset(first, second)) => {
+        (CanonicalItem::Exercise(_), Position::Superset(first, second)) => {
             positions.push_front(Position::Single(second));
-            Some(one_slot(item, first, at, gaps))
+            one_slot(item, first, at, gaps)
         }
-        (WorkoutItem::Exercise(_), Position::Circuit(slots)) => {
+        (CanonicalItem::Exercise(_), Position::Circuit(slots)) => {
             // The circuit was performed one exercise at a time. Its remaining
             // slots go back as positions of their own, in order.
             let (first, rest) = slots.split_first()?;
             for slot in rest.iter().rev() {
                 positions.push_front(Position::Single(*slot));
             }
-            Some(one_slot(item, *first, at, gaps))
+            one_slot(item, *first, at, gaps)
         }
-        (WorkoutItem::Superset(superset), Position::Circuit(slots)) => {
-            let members: Vec<_> = superset.members.iter().collect();
-            if members.len() != slots.len() {
+        (CanonicalItem::Superset(members), Position::Circuit(slots)) => {
+            if members.count() != slots.len() {
                 // Putting the position back keeps the walk aligned for whatever
                 // follows.
                 positions.push_front(position);
                 return None;
             }
-            let mut tagged =
-                members
-                    .into_iter()
-                    .zip(slots)
-                    .map(|(performed, slot)| SupersetMember {
+            let tagged: Vec<SupersetMember> = members
+                .iter()
+                .zip(slots)
+                .filter_map(|(performed, slot)| {
+                    Some(SupersetMember {
                         slot,
-                        exercise: exercise(performed, at, gaps),
-                    });
-            let (Some(one), Some(two)) = (tagged.next(), tagged.next()) else {
-                positions.push_front(position);
-                return None;
-            };
-            Some(PrescribedItem::Superset(PrescribedSuperset {
-                members: AtLeastTwo::of(one, two, tagged.collect()),
-            }))
+                        exercise: exercise(performed, at, gaps)?,
+                    })
+                })
+                .collect();
+            grouped(tagged)
         }
-        (WorkoutItem::Superset(superset), Position::Superset(first, second)) => {
-            let mut members = superset.members.iter();
-            let (Some(one), Some(two), None) = (members.next(), members.next(), members.next())
-            else {
+        (CanonicalItem::Superset(members), Position::Superset(first, second)) => {
+            let mut held = members.iter();
+            let (Some(one), Some(two), None) = (held.next(), held.next(), held.next()) else {
                 // More members than the pair has slots. Putting the position
                 // back keeps the walk aligned for whatever follows.
                 positions.push_front(position);
                 return None;
             };
-            Some(PrescribedItem::Superset(PrescribedSuperset {
-                members: AtLeastTwo::of(
-                    SupersetMember {
-                        slot: first,
-                        exercise: exercise(one, at, gaps),
-                    },
-                    SupersetMember {
-                        slot: second,
-                        exercise: exercise(two, at, gaps),
-                    },
-                    Vec::new(),
-                ),
-            }))
+            let tagged: Vec<SupersetMember> = [(first, one), (second, two)]
+                .into_iter()
+                .filter_map(|(slot, performed)| {
+                    Some(SupersetMember {
+                        slot,
+                        exercise: exercise(performed, at, gaps)?,
+                    })
+                })
+                .collect();
+            grouped(tagged)
         }
     }
 }
 
+/// The members that survived the reading, as the item they now make.
+///
+/// **One survivor is no longer a superset.** A pair of which only one exercise
+/// could be read was performed back to back with something the record states too
+/// little of, and calling what is left a superset would report a grouping the
+/// shape does not hold. The gap already says what went.
+fn grouped(members: Vec<SupersetMember>) -> Option<PrescribedItem> {
+    AtLeastTwo::new(members)
+        .ok()
+        .map(|members| PrescribedItem::Superset(PrescribedSuperset { members }))
+}
+
 /// One item, every part of it tagged with the same slot.
 ///
-/// Total, which is what the head of the shape relies on. A performed superset
-/// reaching a single position is work the template does not pair — every member
-/// takes that one slot, and [`satisfies`] is left to report the divergence.
+/// A performed superset reaching a single position is work the template does not
+/// pair — every member takes that one slot, and [`satisfies`] is left to report
+/// the divergence.
 fn one_slot(
-    item: &WorkoutItem,
+    item: &CanonicalItem,
     slot: SlotId,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
-) -> PrescribedItem {
+) -> Option<PrescribedItem> {
     match item {
-        WorkoutItem::Exercise(performed) => PrescribedItem::Exercise {
+        CanonicalItem::Exercise(performed) => Some(PrescribedItem::Exercise {
             slot,
-            exercise: exercise(performed, at, gaps),
-        },
-        WorkoutItem::Superset(superset) => {
-            let first = SupersetMember {
-                slot,
-                exercise: exercise(superset.members.first(), at, gaps),
+            exercise: exercise(performed, at, gaps)?,
+        }),
+        CanonicalItem::Superset(members) => {
+            let tagged: Vec<SupersetMember> = members
+                .iter()
+                .filter_map(|performed| {
+                    Some(SupersetMember {
+                        slot,
+                        exercise: exercise(performed, at, gaps)?,
+                    })
+                })
+                .collect();
+            grouped(tagged)
+        }
+    }
+}
+
+/// One canonical exercise as a prescribed one, measure partition intact.
+///
+/// `None` where only a watch's classifier named it, or where no set of it states
+/// enough to be an instruction.
+fn exercise(
+    performed: &CanonicalExercise,
+    at: ItemPosition,
+    gaps: &mut Vec<ProjectionGap>,
+) -> Option<PrescribedExercise> {
+    match performed {
+        CanonicalExercise::ForReps { identified, sets } => {
+            let Identified::Recorded(exercise) = identified.copied() else {
+                gaps.push(ProjectionGap::ExerciseGuessed { at });
+                return None;
             };
-            let second = SupersetMember {
-                slot,
-                exercise: exercise(superset.members.second(), at, gaps),
-            };
-            let mut rest = Vec::new();
-            for performed in superset.members.iter().skip(2) {
-                rest.push(SupersetMember {
-                    slot,
-                    exercise: exercise(performed, at, gaps),
-                });
-            }
-            PrescribedItem::Superset(PrescribedSuperset {
-                members: AtLeastTwo::of(first, second, rest),
+            Some(PrescribedExercise::ForReps {
+                exercise,
+                sets: sets_of(sets, at, gaps)?,
+            })
+        }
+        CanonicalExercise::ForDuration { exercise, sets } => {
+            Some(PrescribedExercise::ForDuration {
+                exercise: exercise.copied(),
+                sets: sets_of(sets, at, gaps)?,
+            })
+        }
+        CanonicalExercise::ForDistance { exercise, sets } => {
+            Some(PrescribedExercise::ForDistance {
+                exercise: exercise.copied(),
+                sets: sets_of(sets, at, gaps)?,
             })
         }
     }
 }
 
-/// One performed exercise as a prescribed one, measure partition intact.
-fn exercise(
-    performed: &PerformedExercise,
-    at: ItemPosition,
-    gaps: &mut Vec<ProjectionGap>,
-) -> PrescribedExercise {
-    match performed {
-        PerformedExercise::ForReps { exercise, sets } => PrescribedExercise::ForReps {
-            exercise: *exercise,
-            sets: sets_of(sets, at, gaps),
-        },
-        PerformedExercise::ForDuration { exercise, sets } => PrescribedExercise::ForDuration {
-            exercise: *exercise,
-            sets: sets_of(sets, at, gaps),
-        },
-        PerformedExercise::ForDistance { exercise, sets } => PrescribedExercise::ForDistance {
-            exercise: *exercise,
-            sets: sets_of(sets, at, gaps),
-        },
-    }
-}
-
-/// Every set of one exercise, order kept.
+/// Every readable set of one exercise, order kept.
 ///
-/// Head and tail separately because [`NonEmpty`] guarantees the head, so this
-/// needs no fallible reassembly.
+/// `None` where not one of them could be read, since an exercise with no sets is
+/// not a prescription of anything.
 fn sets_of<M: Copy + Spans>(
-    sets: &NonEmpty<Set<M>>,
+    sets: &NonEmpty<CanonicalSet<M>>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
-) -> NonEmpty<PrescribedSet<M>> {
-    let head = set_of(sets.first(), at, gaps);
-    let mut tail = Vec::with_capacity(sets.count().saturating_sub(1));
-    for set in sets.iter().skip(1) {
-        tail.push(set_of(set, at, gaps));
-    }
-    NonEmpty::of(head, tail)
+) -> Option<NonEmpty<PrescribedSet<M>>> {
+    let read: Vec<PrescribedSet<M>> = sets
+        .iter()
+        .filter_map(|set| set_of(set, at, gaps))
+        .collect();
+    NonEmpty::new(read).ok()
 }
 
-/// One performed set as a prescribed one.
+/// One canonical set as a prescribed one.
 ///
 /// A completed set pins both axes and carries no effort — the recorded RIR is an
 /// observation and stays one. A failed attempt pins the load, leaves the measure
 /// open and reports the gap, because what was being attempted is recorded
 /// nowhere.
+///
+/// `None` where the record states no load, no count behind a completion, or
+/// nothing about whether the set was a warm-up. Each of the three is a field a
+/// canonical set may simply not hold, and an instruction cannot be read without
+/// it.
 fn set_of<M: Copy + Spans>(
-    set: &Set<M>,
+    set: &CanonicalSet<M>,
     at: ItemPosition,
     gaps: &mut Vec<ProjectionGap>,
-) -> PrescribedSet<M> {
-    let prescription = match set.outcome {
-        Performed::Completed(measure) => Prescribed::Fixed {
-            load: set.load,
-            measure: Target::Exactly(measure),
+) -> Option<PrescribedSet<M>> {
+    let unreadable = |gaps: &mut Vec<ProjectionGap>| {
+        gaps.push(ProjectionGap::SetUnreadable { at });
+        None
+    };
+    let (Some(load), Some(kind)) = (
+        set.load.as_ref().map(Attributed::copied),
+        set.kind.as_ref().map(Attributed::copied),
+    ) else {
+        return unreadable(gaps);
+    };
+    let prescription = match set.outcome.value() {
+        Performed::Completed(Some(measure)) => Prescribed::Fixed {
+            load,
+            measure: Target::Exactly(*measure),
             effort: None,
         },
+        Performed::Completed(None) => return unreadable(gaps),
         Performed::Failed => {
-            gaps.push(ProjectionGap::IntendedMeasureUnknown { at, load: set.load });
+            gaps.push(ProjectionGap::IntendedMeasureUnknown { at, load });
             Prescribed::ToEffort {
-                load: set.load,
+                load,
                 effort: Rir::Zero,
                 predicted: None,
             }
         }
     };
-    PrescribedSet {
+    Some(PrescribedSet {
         prescription,
-        rest_after: set.rest_after.map(Target::Exactly),
-        warmup: set.kind == SetKind::Warmup,
-    }
+        rest_after: set
+            .rest_after
+            .as_ref()
+            .map(Attributed::copied)
+            .map(Target::Exactly),
+        warmup: kind == SetKind::Warmup,
+    })
 }
 
 /// One way a performance and a prescription part company.

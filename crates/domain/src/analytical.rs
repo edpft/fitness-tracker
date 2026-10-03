@@ -1,8 +1,19 @@
-//! Functions over the record (§ 5). Nothing here is stored.
+//! Functions over the canonical layer (§ 5). Nothing here is stored.
 //!
 //! **Estimated one-rep maximum over body weight**, per session, for the
 //! headline lifts (#153). The first function that reads two sources: the gym's
 //! sets and the scale's weigh-ins.
+//!
+//! **A canonical session, so a visit is one row however many sources recorded
+//! it.** That is what makes the report reach the whole record rather than the
+//! stretch one source covers.
+//!
+//! **An estimate is only ever read off a set whose exercise a record named.**
+//! A canonical exercise is [`Identified::Guessed`] where nothing but a watch's
+//! classifier placed it, and a number derived from a guess would be an e1RM
+//! filed under a lift nobody confirmed. The visit still appears — the watch
+//! thinking he squatted is what the record holds (§ 37) — with no figure
+//! against it.
 //!
 //! **The estimator is a parameter, and its name is part of the series.** A
 //! figure from [`Rts`] and a figure from another formula are different series
@@ -14,7 +25,8 @@ use jiff::civil::Date;
 
 use crate::{
     body::BodyScanWeighIn,
-    gym::{Load, PerformedExercise, PerformedGymSession, Rir, exercise::RepsExercise},
+    canonical::Attributed,
+    gym::{CanonicalExercise, CanonicalGymSession, Identified, Load, Rir, exercise::RepsExercise},
     measure::{Kg, RepCount},
     normalised::StartedAt,
     sequence::NonEmpty,
@@ -124,26 +136,33 @@ impl fmt::Display for Estimate {
 ///
 /// **Whatever the set's load, and whether it was tagged warm-up or working**
 /// (the operator: *"Highest e1RM is highest e1RM."*). A set with no RIR, a
-/// failed set and a set with a relative load give no estimate; a session with
-/// no set that does gives none.
+/// failed set, a set the record states no count or no load for, and a set with
+/// a relative load give no estimate; a session with no set that does gives none.
+///
+/// **Only the exercises a record named.** A watch's guess is not a claim that
+/// this was the lift, so no figure is read off one.
 pub fn session_estimate<E: OneRepMaxEstimator>(
     estimator: &E,
-    session: &PerformedGymSession,
+    session: &CanonicalGymSession,
     lift: RepsExercise,
 ) -> Option<Estimate> {
     session
         .exercises()
         .filter_map(|performed| match performed {
-            PerformedExercise::ForReps { exercise, sets } if *exercise == lift => Some(sets),
+            CanonicalExercise::ForReps { identified, sets }
+                if identified.copied() == Identified::Recorded(lift) =>
+            {
+                Some(sets)
+            }
             _ => None,
         })
         .flat_map(NonEmpty::iter)
         .filter_map(|set| {
-            let Load::Absolute(load) = set.load else {
+            let Some(Load::Absolute(load)) = set.load.as_ref().map(Attributed::copied) else {
                 return None;
             };
-            let reps = *set.outcome.completed()?;
-            let rir = set.intensity?;
+            let reps = (*set.outcome.value().completed()?)?;
+            let rir = set.intensity.as_ref().map(Attributed::copied)?;
             let one_rep_max = estimator.estimate(load, reps, rir)?;
             Some(Estimate {
                 one_rep_max,
@@ -224,23 +243,47 @@ fn day_of(at: &StartedAt) -> Date {
 
 /// The weigh-in a session is read against: the same local day, and of several
 /// that day the one closest to the session's start. The earlier wins a tie.
+///
+/// **Where the session states no clock, the earliest of that day.** 61 of the
+/// operator's visits are dated to a day and no finer, so there is no moment for
+/// a weigh-in to be near; the earliest is a choice a rebuild repeats rather than
+/// an account of which reading was closest.
 fn weigh_in_for<'a>(
-    session: &PerformedGymSession,
+    session: &CanonicalGymSession,
     weigh_ins: &'a [Weighed],
 ) -> Option<&'a Weighed> {
-    let started = session.started_at();
-    let day = day_of(started);
-    weigh_ins
+    let occurred = session.occurred();
+    let day = occurred.day();
+    let on_the_day = weigh_ins
         .iter()
-        .filter(|weigh_in| day_of(&weigh_in.at) == day)
-        .min_by_key(|weigh_in| {
+        .filter(|weigh_in| day_of(&weigh_in.at) == day);
+    match occurred.instant() {
+        Some(started) => on_the_day.min_by_key(|weigh_in| {
             let gap = weigh_in
                 .at
                 .instant()
                 .as_second()
                 .abs_diff(started.instant().as_second());
             (gap, weigh_in.at.instant())
-        })
+        }),
+        None => on_the_day.min_by_key(|weigh_in| weigh_in.at.instant()),
+    }
+}
+
+/// Whether any account of the session names `lift`, a watch's guess included.
+///
+/// **A guess earns a row and never a figure.** The row says the record holds an
+/// account of that lift that day, which is true of a watch's classification;
+/// [`session_estimate`] is where the distinction bites, and it reads recorded
+/// exercises only.
+fn named(session: &CanonicalGymSession, lift: RepsExercise) -> bool {
+    session.exercises().any(|performed| {
+        matches!(
+            performed,
+            CanonicalExercise::ForReps { identified, .. }
+                if identified.copied().exercise() == Some(lift)
+        )
+    })
 }
 
 /// Relative strength for every session in which a headline lift was performed.
@@ -250,17 +293,14 @@ fn weigh_in_for<'a>(
 /// day, is a row with no figure rather than no row: the gap is the finding.
 pub fn relative_strength<E: OneRepMaxEstimator>(
     estimator: &E,
-    sessions: &[PerformedGymSession],
+    sessions: &[CanonicalGymSession],
     weigh_ins: &[Weighed],
 ) -> Vec<SessionStrength> {
     let mut rows = Vec::new();
     for session in sessions {
         let body_mass = weigh_in_for(session, weigh_ins).map(|weigh_in| weigh_in.mass);
         for lift in HEADLINE_LIFTS {
-            let performed = session.exercises().any(|performed| {
-                matches!(performed, PerformedExercise::ForReps { exercise, .. } if *exercise == lift)
-            });
-            if !performed {
+            if !named(session, lift) {
                 continue;
             }
             let estimate = session_estimate(estimator, session, lift);
@@ -268,7 +308,7 @@ pub fn relative_strength<E: OneRepMaxEstimator>(
                 .zip(body_mass)
                 .and_then(|(estimate, body)| RelativeStrength::of(estimate.one_rep_max, body));
             rows.push(SessionStrength {
-                on: day_of(session.started_at()),
+                on: session.occurred().day(),
                 lift,
                 estimate,
                 body_mass,

@@ -13,8 +13,8 @@ use application::{
 };
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionLog,
-    SqliteDiaryStore, SqliteGymMesocycleStore, SqlitePerformedWorkoutReader, SqlitePlanStore,
+    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteCyclingSessionLog, SqliteDiaryStore, SqliteGymMesocycleStore, SqlitePlanStore,
     SqlitePool, SqlitePrescriptionDeliveryStore,
 };
 
@@ -43,7 +43,7 @@ pub async fn standing(
             plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
             gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
             cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-            gym_performed: SqlitePerformedWorkoutReader::new(pool.clone()),
+            gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
             cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
         },
         next::destination(domain::schedule::Discipline::Gym)?,

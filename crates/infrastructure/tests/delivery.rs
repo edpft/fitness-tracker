@@ -29,7 +29,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme};
+use support::{corpus, programme, store};
 
 /// A destination that keeps count and invents a reference per call.
 ///
@@ -279,6 +279,10 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
         corpus::zone()?,
     );
     application::WorkoutNormaliser::normalise(&normalisation).await?;
+
+    // The performed record is read through the canonical layer, which is a
+    // derivation of what the step above has just written (#350).
+    store::canonicalise(&pool).await?;
 
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),

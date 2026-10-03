@@ -12,8 +12,9 @@ use application::{
 };
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
-    SqliteExtractionRunLog, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteGymSessionStore, SqliteNormalisationRunLog, SqlitePlanStore, SqliteRefusalStore, connect,
+    SqliteCanonicalGymSessionStore, SqliteExtractionRunLog, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog,
+    SqliteNormalisedGymSessionReader, SqlitePlanStore, SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
 
@@ -27,6 +28,21 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 /// the pool is talking to.
 pub async fn derived_and_authored() -> Fallible<(tempfile::TempDir, SqlitePool)> {
     with_programme(programme::programme()?).await
+}
+
+/// Rebuild the canonical gym layer from whatever the normalised one now holds.
+///
+/// **Every suite that derives has to do this** (#350). The performed record is
+/// read through the canonical layer, which is a derivation: a suite that lands
+/// and normalises and then asks for history would be asking a layer that has not
+/// been built from what it just wrote.
+pub async fn canonicalise(pool: &SqlitePool) -> Fallible<()> {
+    application::canonicalise::gym_sessions(
+        &SqliteNormalisedGymSessionReader::new(pool.clone()),
+        &SqliteCanonicalGymSessionStore::new(pool.clone()),
+    )
+    .await?;
+    Ok(())
 }
 
 /// The same, with a programme the caller chose.
@@ -63,6 +79,7 @@ pub async fn with_programme(
         corpus::zone()?,
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
+    canonicalise(&pool).await?;
 
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),

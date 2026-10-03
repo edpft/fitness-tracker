@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT c.id AS \"session!: i64\",\n                   c.started_at_utc, c.zone, c.on_day,\n                   prescriber.name AS \"plan: String\",\n                   issued.session_intensity AS \"session_intensity: String\",\n                   issued.session_volume AS \"session_volume: String\",\n                   st.load_kind AS \"load_kind!: String\",\n                   st.load_grams AS \"load_grams!: i64\",\n                   st.outcome AS \"outcome!: String\",\n                   st.reps AS \"reps: i64\",\n                   st.set_kind AS \"set_kind!: String\"\n            FROM canonical_gym_session AS c\n            JOIN canonical_gym_exercise AS e ON e.session = c.id\n            JOIN canonical_gym_set AS st\n              ON st.session = e.session\n             AND st.item_position = e.item_position\n             AND st.exercise_position = e.position\n            -- Which prescription the visit answered, where any account of it\n            -- names one.\n            --\n            -- **The link is one normalised session's and the answer is the\n            -- visit's.** Only the source a prescription is delivered to records\n            -- what a workout was performed against, so the reference is found on\n            -- its rows and carried up through whichever field of the canonical\n            -- session names that normalised session. The two attribution columns\n            -- joined here are the layer's only `NOT NULL` ones, which is what\n            -- makes them enough: an account that contributed anything to the\n            -- visit named an exercise or a set's outcome.\n            --\n            -- `MIN(d.prescription)` keeps the pick deterministic where a\n            -- reference somehow resolved twice; a join that fanned out would\n            -- duplicate every set of the visit, which the gate would read as\n            -- sets performed twice.\n            LEFT JOIN (\n                SELECT stands_on.canonical AS session, MIN(d.prescription) AS prescription\n                FROM (\n                    SELECT session AS canonical,\n                           identified_normalised_session AS normalised\n                    FROM canonical_gym_exercise\n                    UNION\n                    SELECT session AS canonical,\n                           outcome_normalised_session AS normalised\n                    FROM canonical_gym_set\n                ) AS stands_on\n                JOIN gym_workout AS w ON w.session = stands_on.normalised\n                JOIN prescription_delivery AS d ON d.reference = w.performed_against\n                GROUP BY stands_on.canonical\n            ) AS link ON link.session = c.id\n            LEFT JOIN prescribed_workout AS issued ON issued.id = link.prescription\n            LEFT JOIN gym_mesocycle AS m ON m.id = issued.mesocycle\n            LEFT JOIN plan AS prescriber ON prescriber.id = m.plan\n            -- Counted in repetitions, because the port is (`ExerciseHistory`'s\n            -- own doc): a key the duration vocabulary happened to share would\n            -- otherwise hand back a hold's sets as a lift's.\n            WHERE e.measure = 'reps'\n              AND e.identified = 'recorded'\n              AND e.exercise = ?\n              AND st.load_kind IS NOT NULL\n              AND st.set_kind IS NOT NULL\n              AND (st.outcome = 'failed' OR st.reps IS NOT NULL)\n            ORDER BY COALESCE(c.started_at_utc, c.on_day) ASC, c.id ASC,\n                     e.item_position ASC, e.position ASC, st.position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "plan: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "session_intensity: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "session_intensity"
+          }
+        }
+      },
+      {
+        "name": "session_volume: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_workout",
+            "name": "session_volume"
+          }
+        }
+      },
+      {
+        "name": "load_kind!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "outcome!: String",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps: i64",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "set_kind!: String",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "set_kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "7e411eea7af7bc84b7934279ad71e82a2e419b62f10eaaf489c02f680da58fc3"
+}

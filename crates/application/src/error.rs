@@ -276,11 +276,26 @@ pub enum ComparisonError {
     /// Refused rather than resolved by picking the first: a comparison run
     /// against the wrong workout reports divergences that are really a mismatch,
     /// which is worse than declining to answer.
+    ///
+    /// **Unreachable while the day is the match** (#350). The canonical layer
+    /// merges every account of a day into one visit, so no span of one day holds
+    /// two sessions; the match overlay (#349) is what will make two visits on a
+    /// day representable, and this is what should be reported when it does.
     #[error(
         "{count} sessions were trained on {date} and none names the prescription, \
          so which one answered it is not recorded"
     )]
     AmbiguousDay { date: Date, count: usize },
+
+    /// The session was found and the record states too little of it to read as a
+    /// prescription shape: every exercise was a watch's guess, or no set of any
+    /// of them states its load, its count and whether it was a warm-up.
+    ///
+    /// Refused rather than compared against what little survived: a shape built
+    /// from a third of a session reports divergences that are really the gaps,
+    /// and the gaps are the finding.
+    #[error("the session performed on {date} is not stated fully enough to compare: {gaps}")]
+    Unreadable { date: Date, gaps: String },
 }
 
 /// Why a prescription could not be put where the operator trains from.
