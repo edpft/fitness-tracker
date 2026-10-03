@@ -165,21 +165,33 @@ fn heart_rate(accounts: &[NormalisedGymSession]) -> Option<Attributed<MeasuredHe
         .cloned()
 }
 
-/// How long the visit took: the longest account of it.
+/// How long the visit took: the operator's own record of it, else the watch's.
 ///
-/// **Not a disagreement to settle.** A watch states how long it recorded for
-/// and Hevy how long the logging ran; each is a floor on the visit, and the
-/// visit is at least as long as the longest of them. Ties go to the lowest id.
+/// **Not the longest, and this is provisional.** #321 is the issue that owns
+/// it: on six of the operator's 2025 sessions the watch runs 21 to 62 minutes
+/// past Hevy's last set because he left it running on the drive home, so the
+/// longest account is not a floor on the visit but an inflated one. Nor is
+/// Hevy's end the boundary — on four of those six there are 16 to 36 minutes
+/// of *elevated* heart rate after the last logged set, so cutting there throws
+/// real training away. The two accounts bracket it and neither is it, and what
+/// resolves that needs the quiet-stretch analysis #321 is for.
+///
+/// Until then: a log is what the operator himself recorded of the visit, and a
+/// watch is a device that may have been left running, so the log is the better
+/// of two provisional answers and the watch's stands where nothing else does —
+/// which is 345 of his 389 sessions. Ties go to the lowest id.
 fn duration(accounts: &[NormalisedGymSession]) -> Option<Attributed<PositiveDuration>> {
-    accounts
+    let stated: Vec<&NormalisedGymSession> = accounts
         .iter()
-        .filter_map(NormalisedGymSession::duration)
-        .max_by_key(|stated| {
-            (
-                stated.copied().as_seconds(),
-                -stated.normalised_session().as_i64(),
-            )
-        })
+        .filter(|account| account.duration().is_some())
+        .collect();
+    let logged = stated
+        .iter()
+        .filter(|account| account.recorder() == Recorder::Operator)
+        .min_by_key(|account| account.id());
+    logged
+        .or_else(|| stated.iter().min_by_key(|account| account.id()))
+        .and_then(|account| account.duration())
         .copied()
 }
 

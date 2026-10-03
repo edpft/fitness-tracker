@@ -445,3 +445,65 @@ fn two_accounts_of_the_same_length_align_by_order() {
     let session = sessions.first().expect("one session");
     assert_eq!(session.set_count(), 3, "three sets, not four");
 }
+
+/// A session's length, where two accounts state one.
+///
+/// #321: on six 2025 sessions the watch runs 21 to 62 minutes past Hevy's last
+/// set because it was left running on the drive home, so the longer account is
+/// not a floor on the visit. The log stands until #321 settles the boundary
+/// properly, and the watch's stands where nothing else states one.
+#[test]
+fn a_log_states_the_length_where_both_do() {
+    let length = |minutes: u64, who: NormalisedSessionId| {
+        PositiveDuration::from_seconds(minutes * 60)
+            .ok()
+            .map(|stated| Attributed::new(stated, who))
+    };
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-03-17T17:00:00Z").unwrap(),
+        length(58, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let recording = NormalisedGymSession::new(
+        id(2).unwrap(),
+        Recorder::Watch,
+        at("2025-03-17T16:58:00Z").unwrap(),
+        length(104, id(2).unwrap()),
+        None,
+        vec![guessed("back-squat-barbell", &[(5, 60_000)], id(2).unwrap()).unwrap()],
+    );
+
+    let sessions = canonical_sessions(vec![logged, recording]);
+    let session = sessions.first().expect("one session");
+    let stated = session.duration().expect("a length");
+    assert_eq!(
+        stated.copied().as_seconds(),
+        58 * 60,
+        "the operator's own record, not the watch left running"
+    );
+    assert_eq!(
+        stated.normalised_session(),
+        id(1).unwrap(),
+        "and it says so"
+    );
+
+    // Alone, the watch is the only account there is.
+    let alone = NormalisedGymSession::new(
+        id(3).unwrap(),
+        Recorder::Watch,
+        at("2025-03-19T17:00:00Z").unwrap(),
+        length(47, id(3).unwrap()),
+        None,
+        vec![guessed("bench-press-barbell", &[(5, 60_000)], id(3).unwrap()).unwrap()],
+    );
+    let sessions = canonical_sessions(vec![alone]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(47 * 60),
+        "the watch's length where nothing else states one"
+    );
+}

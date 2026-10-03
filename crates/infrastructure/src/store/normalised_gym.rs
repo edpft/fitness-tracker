@@ -72,6 +72,13 @@ struct SpineRow {
     /// The workout a watch's recording hangs off, where this is a watch's
     /// session.
     measured_workout: Option<i64>,
+    /// How long the watch recorded for.
+    ///
+    /// **A watch states this on its own row, not on the workout**, and it is
+    /// required there where `gym_workout.duration_seconds` is nullable. Read
+    /// from the workout alone, every one of the operator's 478 watch sessions
+    /// came back with no length at all.
+    measured_duration: Option<i64>,
     average_bpm: Option<i64>,
     highest_bpm: Option<i64>,
 }
@@ -97,6 +104,7 @@ impl SqliteNormalisedGymSessionReader {
                              - MIN(unixepoch(w.started_at_utc))
                    END AS "duration_seconds?: i64",
                    MAX(m.workout) AS "measured_workout?: i64",
+                   MAX(m.duration_seconds) AS "measured_duration?: i64",
                    MAX(m.average_bpm) AS "average_bpm?: i64",
                    MAX(m.highest_bpm) AS "highest_bpm?: i64"
             FROM gym_session AS s
@@ -119,6 +127,7 @@ impl SqliteNormalisedGymSessionReader {
                 on_day: row.on_day,
                 duration_seconds: row.duration_seconds,
                 measured_workout: row.measured_workout,
+                measured_duration: row.measured_duration,
                 average_bpm: row.average_bpm,
                 highest_bpm: row.highest_bpm,
             })
@@ -132,7 +141,10 @@ impl SqliteNormalisedGymSessionReader {
             row.zone.as_deref(),
             row.on_day.as_deref(),
         )?;
-        let duration = match row.duration_seconds {
+        // The watch's own row where it has one, since a watch states its
+        // length there and a log states it on the workout.
+        let stated = row.measured_duration.or(row.duration_seconds);
+        let duration = match stated {
             Some(seconds) => Some(Attributed::new(
                 PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
                     .map_err(|e| corrupt(&e))?,
