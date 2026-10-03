@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO prescription_delivery\n                (prescription, destination, reference, rendering, delivered_at)\n            VALUES (?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "4619d6a8094bbe6e1d6fad5870ad5c783a683db13818cdc92d17158f4580cbfb"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE prescription_delivery SET rendering = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "929d0e0b3e1a260f00592ecb4def3923553aea40b3deb0283dc52df916fb54c6"
+}

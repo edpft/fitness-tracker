@@ -120,6 +120,9 @@ async fn deliver(
             issued.id,
             &DestinationName::try_from("hevy".to_owned())?,
             &DeliveryReference::try_from(reference.to_owned())?,
+            // These tests are about the ladder, not about rendering: what
+            // matters is that a delivery has a digest, not what it is.
+            &domain::prescription::RenderingDigest::of(reference.as_bytes()),
             jiff::Timestamp::UNIX_EPOCH,
         )
         .await?;

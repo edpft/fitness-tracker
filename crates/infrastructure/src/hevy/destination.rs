@@ -47,12 +47,18 @@
 //! created if it does not. That is the only concession to the app's own shape in
 //! this module, and it is a rendering decision — where a reader looks for the
 //! session — rather than anything the domain knows about.
+//!
+//! **And it is outside the fingerprint.** [`fingerprint`] answers what a routine
+//! *says*, so that a stale rendering can be told from a current one (#343); the
+//! folder is where it is filed, and resolving one to find out would create it on
+//! every run that had nothing to send. A programme renamed therefore moves the
+//! folder on the next real delivery rather than prompting one.
 
 use std::{sync::OnceLock, time::Duration};
 
 use application::{
     Deliverable, Delivered, DeliveryAttempt, DeliveryError, DeliveryReference, DestinationName,
-    DestinationReply, PrescriptionDestination, ReplyStatus,
+    DestinationReply, PrescriptionDestination, RenderingDigest, ReplyStatus,
 };
 use reqwest::{Client, StatusCode, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -344,12 +350,42 @@ impl HevyRoutines {
     }
 }
 
+/// What this destination would send for a session, fingerprinted.
+///
+/// **One definition for all three uses**, which is what makes the comparison
+/// mean anything: the digest recorded when a session is sent and the digest the
+/// next run compares it against have to be the same function of the same
+/// session, or every run would find a difference. Rendered with no folder, for
+/// the reason the module doc gives.
+fn fingerprint(session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+    let rendered = render(session, None);
+    serde_json::to_vec(&CreateRoutine {
+        routine: rendered.body,
+    })
+    .map(|bytes| RenderingDigest::of(&bytes))
+    .map_err(|error| DeliveryError::Unidentifiable {
+        destination: NAME.to_owned(),
+        message: error.to_string(),
+    })
+}
+
 impl PrescriptionDestination for HevyRoutines {
     fn name(&self) -> &DestinationName {
         &self.name
     }
 
+    fn rendering(&self, session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+        fingerprint(session)
+    }
+
     async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
+        // Taken before the folder is resolved, so a session that cannot be
+        // rendered at all fails without creating one.
+        let rendering = match fingerprint(session) {
+            Ok(rendering) => rendering,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
+
         let folder = match self.folder_for(session.plan.as_str()).await {
             Ok(folder) => folder,
             // Nothing has been sent to `/v1/routines` yet, so there is no reply
@@ -402,6 +438,7 @@ impl PrescriptionDestination for HevyRoutines {
             })
             .map(|reference| Delivered {
                 reference,
+                rendering,
                 unexpressed: rendered.unexpressed,
             });
 
@@ -413,6 +450,11 @@ impl PrescriptionDestination for HevyRoutines {
         session: &Deliverable,
         occupying: &DeliveryReference,
     ) -> DeliveryAttempt {
+        let rendering = match fingerprint(session) {
+            Ok(rendering) => rendering,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
+
         let folder = match self.folder_for(session.plan.as_str()).await {
             Ok(folder) => folder,
             Err(error) => return DeliveryAttempt::unanswered(error),
@@ -471,6 +513,7 @@ impl PrescriptionDestination for HevyRoutines {
             // is not a reason to discard it.
             Self::accepted(status).map(|()| Delivered {
                 reference: occupying.clone(),
+                rendering,
                 unexpressed: rendered.unexpressed,
             })
         };
@@ -520,10 +563,21 @@ impl PrescriptionDestination for HevyRoutinePreview {
         &self.name
     }
 
+    /// The same fingerprint the real destination gives, because it is the same
+    /// rendering.
+    fn rendering(&self, session: &Deliverable) -> Result<RenderingDigest, DeliveryError> {
+        fingerprint(session)
+    }
+
     /// **Answers nothing, because it asked nothing.** A preview contacts no
     /// destination, so there is no reply to keep — and inventing one would put a
     /// row in the store claiming Hevy said something it was never asked.
     async fn deliver(&self, session: &Deliverable) -> DeliveryAttempt {
+        let rendering = match fingerprint(session) {
+            Ok(rendering) => rendering,
+            Err(error) => return DeliveryAttempt::unanswered(error),
+        };
+
         let rendered = render(session, None);
         let body = match serde_json::to_string_pretty(&CreateRoutine {
             routine: rendered.body,
@@ -551,6 +605,7 @@ impl PrescriptionDestination for HevyRoutinePreview {
             })
             .map(|reference| Delivered {
                 reference,
+                rendering,
                 unexpressed: rendered.unexpressed,
             });
 
@@ -575,6 +630,7 @@ impl PrescriptionDestination for HevyRoutinePreview {
             reply: attempt.reply,
             outcome: attempt.outcome.map(|delivered| Delivered {
                 reference: occupying.clone(),
+                rendering: delivered.rendering,
                 unexpressed: delivered.unexpressed,
             }),
         }

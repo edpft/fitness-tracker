@@ -10,8 +10,8 @@
 //! the destination said each time it was asked.
 
 use application::{
-    DeliveryReference, DestinationName, DestinationReply, PrescribedWorkoutId,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, StoreError,
+    DeliveryReference, DestinationName, DestinationReply, Occupant, PrescribedWorkoutId,
+    PrescriptionDeliveryStore, PrescriptionLifecycle, RenderingDigest, StoreError,
 };
 use domain::prescription::PrescriptionState;
 use jiff::{Timestamp, civil::Date};
@@ -64,7 +64,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         &self,
         date: Date,
         destination: &DestinationName,
-    ) -> Result<Option<(PrescribedWorkoutId, DeliveryReference)>, StoreError> {
+    ) -> Result<Option<Occupant>, StoreError> {
         let issued_for = date.to_string();
         let destination = destination.to_string();
 
@@ -74,10 +74,20 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // because a replacement hands the place over rather than adding a row —
         // and `LIMIT 1` with the newest first is a belt for a state the writes
         // do not create rather than a choice between candidates.
+        //
+        // **Four facts, one query.** Whether a workout names the place decides
+        // whether what is in it may be replaced, and asking that separately
+        // would let it change between the two reads — the same reason
+        // `state_of` below answers both of its questions at once.
         let row = sqlx::query!(
             r#"
             SELECT d.prescription AS "prescription!: i64",
-                   d.reference    AS "reference!: String"
+                   d.reference    AS "reference!: String",
+                   d.rendering    AS "rendering: Vec<u8>",
+                   EXISTS (
+                       SELECT 1 FROM gym_workout AS w
+                       WHERE w.performed_against = d.reference
+                   ) AS "performed!: i64"
             FROM prescription_delivery AS d
             JOIN prescribed_workout AS p ON p.id = d.prescription
             WHERE p.issued_for = ? AND d.destination = ?
@@ -99,10 +109,25 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             DeliveryReference::try_from(row.reference).map_err(|error| StoreError::Corrupt {
                 detail: error.to_string(),
             })?;
-        Ok(Some((
-            PrescribedWorkoutId::new(row.prescription),
+
+        // A row written before this build kept the digest holds null, which is
+        // a real state: the routine exists and what it says is not on record.
+        // Anything else of the wrong width is a file this program did not write.
+        let rendering = row
+            .rendering
+            .as_deref()
+            .map(RenderingDigest::try_from)
+            .transpose()
+            .map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?;
+
+        Ok(Some(Occupant {
+            prescription: PrescribedWorkoutId::new(row.prescription),
             reference,
-        )))
+            rendering,
+            performed: row.performed != 0,
+        }))
     }
 
     async fn hand_over(
@@ -111,12 +136,14 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         to: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
+        rendering: &RenderingDigest,
         at: Timestamp,
     ) -> Result<(), StoreError> {
         let from = from.as_i64();
         let to = to.as_i64();
         let destination = destination.to_string();
         let reference = reference.to_string();
+        let rendering = rendering.as_bytes().as_slice();
         let delivered_at = at.to_string();
 
         // **Delete then insert, in one transaction, rather than an update.**
@@ -142,12 +169,13 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         sqlx::query!(
             r#"
             INSERT INTO prescription_delivery
-                (prescription, destination, reference, delivered_at)
-            VALUES (?, ?, ?, ?)
+                (prescription, destination, reference, rendering, delivered_at)
+            VALUES (?, ?, ?, ?, ?)
             "#,
             to,
             destination,
             reference,
+            rendering,
             delivered_at
         )
         .execute(&mut *tx)
@@ -163,27 +191,73 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         prescription: PrescribedWorkoutId,
         destination: &DestinationName,
         reference: &DeliveryReference,
+        rendering: &RenderingDigest,
         at: Timestamp,
     ) -> Result<(), StoreError> {
         let id = prescription.as_i64();
         let destination = destination.to_string();
         let reference = reference.to_string();
+        let rendering = rendering.as_bytes().as_slice();
         let delivered_at = at.to_string();
 
         // A plain insert, with no upsert clause. A second delivery of one
         // prescription to one destination is a defect rather than a state to
         // reconcile, and the primary key saying so out loud is better than a
-        // silent overwrite that leaves an orphaned routine behind it.
+        // silent overwrite that leaves an orphaned routine behind it. The one
+        // legitimate restatement goes through `record_rendering`, which keeps
+        // the place and changes what is in it.
         sqlx::query!(
             r#"
             INSERT INTO prescription_delivery
-                (prescription, destination, reference, delivered_at)
-            VALUES (?, ?, ?, ?)
+                (prescription, destination, reference, rendering, delivered_at)
+            VALUES (?, ?, ?, ?, ?)
             "#,
             id,
             destination,
             reference,
+            rendering,
             delivered_at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        Ok(())
+    }
+
+    async fn record_rendering(
+        &self,
+        prescription: PrescribedWorkoutId,
+        destination: &DestinationName,
+        reference: &DeliveryReference,
+        rendering: &RenderingDigest,
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        let id = prescription.as_i64();
+        let destination = destination.to_string();
+        let reference = reference.to_string();
+        let rendering = rendering.as_bytes().as_slice();
+        let delivered_at = at.to_string();
+
+        // **An update, and the one write here that is.** The hand-over above
+        // goes through a delete so the trigger pinning a performed session
+        // sees it; nothing is withdrawn here, because the place keeps its
+        // occupant and the receipt a performance joins through is the
+        // reference — which this restates rather than retires. What stops a
+        // performed session being rewritten is the use case declining to send
+        // one, which is where § 12 can be stated as a reason rather than as an
+        // abort.
+        sqlx::query!(
+            r#"
+            UPDATE prescription_delivery
+            SET reference = ?, rendering = ?, delivered_at = ?
+            WHERE prescription = ? AND destination = ?
+            "#,
+            reference,
+            rendering,
+            delivered_at,
+            id,
+            destination
         )
         .execute(&self.pool)
         .await

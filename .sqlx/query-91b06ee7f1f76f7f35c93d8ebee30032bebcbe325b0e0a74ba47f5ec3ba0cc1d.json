@@ -1,0 +1,57 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT d.prescription AS \"prescription!: i64\",\n                   d.reference    AS \"reference!: String\",\n                   d.rendering    AS \"rendering: Vec<u8>\",\n                   EXISTS (\n                       SELECT 1 FROM gym_workout AS w\n                       WHERE w.performed_against = d.reference\n                   ) AS \"performed!: i64\"\n            FROM prescription_delivery AS d\n            JOIN prescribed_workout AS p ON p.id = d.prescription\n            WHERE p.issued_for = ? AND d.destination = ?\n            ORDER BY d.delivered_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "prescription!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "prescription"
+          }
+        }
+      },
+      {
+        "name": "reference!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "rendering: Vec<u8>",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "prescription_delivery",
+            "name": "rendering"
+          }
+        }
+      },
+      {
+        "name": "performed!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "91b06ee7f1f76f7f35c93d8ebee30032bebcbe325b0e0a74ba47f5ec3ba0cc1d"
+}

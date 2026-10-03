@@ -58,7 +58,7 @@ pub use authored::{Authored, AuthoringError};
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
 pub use delivery::{
     DeliveryReference, DestinationName, DestinationReply, InvalidDelivery, PrescriptionState,
-    ReplyStatus, SessionOrdinal,
+    RenderingDigest, ReplyStatus, SessionOrdinal, WrongRenderingWidth,
 };
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
