@@ -13,13 +13,13 @@
 //! a driven adapter from quietly calling the application it is supposed to be
 //! driven by.
 
+pub mod canonicalise;
 pub mod compare;
 pub mod cycling;
 pub mod deliver;
 pub mod error;
 pub mod extract;
 pub mod holding;
-pub mod matching;
 pub mod microcycle;
 pub mod normalise;
 pub mod ports;

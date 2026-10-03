@@ -226,11 +226,11 @@ pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
 }
 
-pub fn matching_started() {
-    println!("matching gym sessions …");
+pub fn canonicalising_started() {
+    println!("canonicalising gym sessions …");
 }
 
-/// What the matching read and what it wrote.
+/// What the canonicalising read and what it wrote.
 ///
 /// **The two numbers are deliberately different things, and the gap is not a
 /// loss.** Several accounts of one visit merge into one session, and a visit
@@ -238,8 +238,8 @@ pub fn matching_started() {
 /// operator, 2026-10-01: *"Heart rate only isn't a meaningful gym session."*
 /// So `written` is below `read` twice over, and a reader who expects them to
 /// reconcile would read a working run as a broken one.
-pub fn matched(read: SessionCount, written: SessionCount) {
-    println!("matching succeeded");
+pub fn canonicalised(read: SessionCount, written: SessionCount) {
+    println!("canonicalising succeeded");
     println!("  normalised sessions read {read:>5}");
     println!("  canonical sessions       {written:>5}");
 }

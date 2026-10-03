@@ -20,7 +20,7 @@ mod support;
 
 use application::{
     CanonicalGymSessionStore as _, ExtractionRunLog as _, LandingStore as _,
-    NormalisedGymSessionReader as _, WorkoutNormaliser as _, matching,
+    NormalisedGymSessionReader as _, WorkoutNormaliser as _, canonicalise,
     normalise::{Normalisation, NormalisationPorts},
 };
 use domain::{
@@ -200,19 +200,19 @@ fn a_visit_two_sources_recorded_is_one_canonical_session() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let matched = matching::gym_sessions(&reader, &canonical)
+        let done = canonicalise::gym_sessions(&reader, &canonical)
             .await
-            .expect("a matching run");
+            .expect("a canonicalising run");
         assert!(
-            matched.written.as_usize() < matched.read.as_usize(),
+            done.written.as_usize() < done.read.as_usize(),
             "accounts merged and the sessionless recording wrote nothing: \
              read {}, wrote {}",
-            matched.read,
-            matched.written
+            done.read,
+            done.written
         );
         assert_eq!(
             canonical.count().await.expect("a count"),
-            matched.written,
+            done.written,
             "what it reported is what it holds"
         );
 
@@ -254,10 +254,10 @@ fn the_layer_is_replaced_not_appended() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let first = matching::gym_sessions(&reader, &canonical)
+        let first = canonicalise::gym_sessions(&reader, &canonical)
             .await
             .expect("a first run");
-        let again = matching::gym_sessions(&reader, &canonical)
+        let again = canonicalise::gym_sessions(&reader, &canonical)
             .await
             .expect("a second run");
         assert_eq!(first, again, "the same inputs give the same layer");

@@ -1,5 +1,11 @@
-//! Building the canonical gym session from whichever normalised records hold
-//! it (#247).
+//! Canonicalising gym sessions: building each from whichever normalised
+//! records hold it (#247).
+//!
+//! **`canonicalise` is the derivation and matching is one step of it**, which is
+//! why the module is named for the first. § 9's *"deterministic matching"*
+//! decides which accounts are accounts of one visit; the merge then assembles
+//! one session from them. Naming the whole after its first half would leave the
+//! second without a word.
 //!
 //! § II.4's two halves: deterministic matching decides which normalised
 //! accounts are accounts of one visit, and the merge assembles one session

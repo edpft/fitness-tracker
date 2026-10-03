@@ -10,11 +10,11 @@
 //! the code needs in order not to undo it.
 
 pub mod canonical;
+pub mod canonicalise;
 pub mod exercise;
 pub mod intensity;
 pub mod load;
 pub mod manual;
-pub mod matching;
 pub mod measured;
 pub mod normalised;
 pub mod outcome;
@@ -25,13 +25,13 @@ pub mod workout;
 pub use canonical::{
     CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
 };
+pub use canonicalise::canonical_sessions;
 pub use exercise::{
     DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
 };
 pub use intensity::{Rir, UnrecognisedIntensity};
 pub use load::{Load, SignedKg};
 pub use manual::{Logged, ManualExercise, ManualGymSession, ManualItem, ManualSet};
-pub use matching::canonical_sessions;
 pub use measured::{
     ComposedFrom, Guess, GuessedExercise, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
     Recorded,

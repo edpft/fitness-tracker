@@ -397,7 +397,7 @@
           # checked. The mistake was invisible only because `web` was a stub that
           # called nothing; the first real line of it would have failed the gate.
           use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
-            if grep -rn 'application::\(cycling\|extract\|matching\|normalise\|prescribe\|status\|strength\)' \
+            if grep -rn 'application::\(cycling\|extract\|canonicalise\|normalise\|prescribe\|status\|strength\)' \
                  ${repoSrc}/crates/infrastructure/src; then
               echo
               echo "Constitution § 16: a driven adapter implements ports, it"

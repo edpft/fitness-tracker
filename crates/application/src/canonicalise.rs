@@ -21,9 +21,9 @@ use crate::{
     ports::{CanonicalGymSessionStore, NormalisedGymSessionReader},
 };
 
-/// What one run of the matching did.
+/// What one run of the canonicalising did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Matched {
+pub struct Canonicalised {
     /// How many normalised sessions were read.
     pub read: SessionCount,
     /// How many canonical sessions they made.
@@ -47,10 +47,10 @@ pub async fn gym_sessions<
 >(
     normalised: &R,
     canonical: &C,
-) -> Result<Matched, StoreError> {
+) -> Result<Canonicalised, StoreError> {
     let accounts = normalised.all().await?;
     let read = SessionCount::from(accounts.len());
     let sessions = canonical_sessions(accounts);
     let written = canonical.replace(sessions).await?;
-    Ok(Matched { read, written })
+    Ok(Canonicalised { read, written })
 }
