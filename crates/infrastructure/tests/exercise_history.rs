@@ -2,8 +2,13 @@
 //!
 //! Part of user story 1: the primary draws from programme state, and every other
 //! slot draws from observed history. This suite asserts the second half — that
-//! the history is what the record actually says, that it reaches back as far as
-//! it needs to, and that § 10's supersession rule is applied on the way out.
+//! the history is what the record actually says and that it reaches back as far
+//! as it needs to.
+//!
+//! **Read through the canonical layer** (#350), so the corpus is landed,
+//! normalised and canonicalised before anything is asked of it. § 10's
+//! supersession is applied before that, where the normalised layer is built: a
+//! re-served Hevy workout produces no normalised session of its own.
 //!
 //! Driven through the real store against a real SQLite file, because what is
 //! being asserted is a query.
@@ -23,7 +28,7 @@ use infrastructure::{
     SqliteNormalisationRunLog, SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
-use support::corpus;
+use support::{corpus, store};
 
 /// A store holding the corpus, landed and derived.
 ///
@@ -56,6 +61,10 @@ async fn derived_corpus() -> Result<(SqlitePool, tempfile::TempDir), Box<dyn std
         corpus::zone()?,
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
+
+    // The history is read through the canonical layer, which is a derivation of
+    // what the step above has just written (#350).
+    store::canonicalise(&pool).await?;
 
     Ok((pool, directory))
 }

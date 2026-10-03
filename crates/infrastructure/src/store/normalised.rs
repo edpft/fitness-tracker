@@ -198,10 +198,24 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
 ///
 /// Shared with the spreadsheets' store, because the tables are every source's
 /// (constitution § 3.1) and a derivation replaces only its own stream.
+///
+/// **And the canonical layer goes first, all of it** (#350). Every field of a
+/// canonical gym session names the `gym_session` row it came from, and this
+/// deletes those rows and the re-derivation writes new ones under new ids — so
+/// keeping the layer is not an option the database would allow, never mind one
+/// § II would. Nor is keeping the part of it that stood on other streams: a visit
+/// merged from four accounts is one row, and one of its four inputs changing
+/// makes the whole row stale.
+///
+/// So re-deriving a gym stream leaves no canonical layer until
+/// `fitness canonicalise gym` builds it again. `fitness next` and
+/// `fitness gym strength` run both steps; the plumbing commands are the
+/// operator's to sequence, as they are for every other derivation.
 pub(super) async fn clear_stream(
     tx: &mut Transaction<'_, Sqlite>,
     stream: &str,
 ) -> Result<(), StoreError> {
+    super::canonical_gym::clear(tx).await?;
     super::garmin_gym::clear_measured(tx, stream).await?;
     sqlx::query!(
         "DELETE FROM performed_set WHERE workout IN (SELECT id FROM gym_workout WHERE stream = ?)",

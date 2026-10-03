@@ -14,8 +14,8 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    HevyRoutinePreview, HevyRoutines, SqliteExerciseHistory, SqliteGenerationParameterStore,
-    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    HevyRoutinePreview, HevyRoutines, SqliteCanonicalGymSessionStore, SqliteExerciseHistory,
+    SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
     connect,
 };
 use jiff::civil::Date;
@@ -406,7 +406,7 @@ pub async fn compare(
     let programmes = rescheduling::gym(&pool, zone).await?;
     let comparing = Comparing::new(ComparisonPorts {
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-        workouts: SqlitePerformedWorkoutReader::new(pool),
+        workouts: SqliteCanonicalGymSessionStore::new(pool),
     });
 
     let Some(date) = resolve(&programmes, zone, date).await? else {

@@ -1,6 +1,11 @@
 //! The adapter half of the round trip: a stored performance read back and
 //! projected.
 //!
+//! **Read from the canonical layer** (#350), which is where the performed record
+//! is read from everywhere now. For this corpus that is one source merged with
+//! nothing, so what the projection sees is what it saw before — which is the
+//! point of asserting it here.
+//!
 //! The projection itself is a `domain` function and its property is asserted
 //! there, over sessions generated against the template
 //! (`domain/tests/projection.rs`). What needs an adapter suite is reading a
@@ -22,11 +27,11 @@
 mod support;
 
 use application::{
-    PerformedWorkoutReader as _,
+    PerformedGymSessions as _,
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use domain::{
-    gym::{Load, PerformedGymSession},
+    gym::{CanonicalGymSession, Load},
     measure::{Kg, RepCount},
     prescription::{
         PrescribedExercise, PrescribedItem, PrescribedSet, ProjectionGap, SlotId, Target,
@@ -35,8 +40,8 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteCanonicalGymSessionStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -53,9 +58,13 @@ type Prescriber = Prescribing<
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// The store, a reader over it and a prescriber against it.
-async fn ready() -> Fallible<(SqlitePerformedWorkoutReader, Prescriber, tempfile::TempDir)> {
+async fn ready() -> Fallible<(
+    SqliteCanonicalGymSessionStore,
+    Prescriber,
+    tempfile::TempDir,
+)> {
     let (directory, pool): (tempfile::TempDir, SqlitePool) = store::derived_and_authored().await?;
-    let reader = SqlitePerformedWorkoutReader::new(pool.clone());
+    let reader = SqliteCanonicalGymSessionStore::new(pool.clone());
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
         programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
@@ -86,17 +95,17 @@ macro_rules! run {
     };
 }
 
-/// The one workout performed on a date.
+/// The one visit performed on a date.
 ///
 /// A macro rather than a function for the reason `run!` is one: `panic` is
 /// `forbid` and clippy's test exemption covers a `#[test]` body, not a helper
-/// defined alongside it. Fragmentation would show up here as more than one
-/// workout, and does not on these dates.
+/// defined alongside it. Two visits on one day would show up here as two
+/// sessions, and do not on these dates.
 macro_rules! performance {
     ($reader:expr, $date:expr) => {{
-        let workouts: Vec<PerformedGymSession> = run!($reader.between($date, $date));
-        match workouts.into_iter().next() {
-            Some(workout) => workout,
+        let visits: Vec<CanonicalGymSession> = run!($reader.between($date, $date));
+        match visits.into_iter().next() {
+            Some(visit) => visit,
             None => panic!("{} has a performed session", $date),
         }
     }};
@@ -113,7 +122,7 @@ macro_rules! performance {
 #[test]
 fn a_failed_attempt_projects_a_gap() {
     let (reader, _prescriber, _directory) = ready!();
-    let performed: PerformedGymSession = performance!(&reader, Date::constant(2026, 7, 3));
+    let performed: CanonicalGymSession = performance!(&reader, Date::constant(2026, 7, 3));
     let projection = project(&performed);
 
     let unknown: Vec<&ProjectionGap> = projection

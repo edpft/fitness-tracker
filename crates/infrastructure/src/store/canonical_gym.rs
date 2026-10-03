@@ -17,8 +17,18 @@
 //! **Replacement rather than update**, as every derivation is: § II says a
 //! derivation is never mutated in place, and the whole layer goes in one
 //! transaction.
+//!
+//! **And this is where everything downstream reads the gym record** (#350).
+//! Three ports are served from these tables rather than from one source's:
+//! whole sessions in a span, the session that answered a prescription, and when
+//! each session happened. The fourth, [`application::ExerciseHistory`],
+//! projects the same tables and lives in `history.rs` because what it returns is
+//! a projection rather than the entity.
 
-use application::{CanonicalGymSessionStore, StoreError};
+use application::{
+    CanonicalGymSessionStore, DeliveryReference, PerformedGymSessions, PerformedSessionLog,
+    PrescribedWorkoutId, StoreError,
+};
 use domain::{
     canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount},
     gym::{
@@ -72,7 +82,8 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
     }
 
     async fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query_as!(
+            SessionRow,
             r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
                    duration_seconds, duration_normalised_session,
@@ -87,40 +98,7 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
 
         let mut sessions = Vec::with_capacity(rows.len());
         for row in rows {
-            let occurred = occurred(
-                row.started_at_utc.as_deref(),
-                row.zone.as_deref(),
-                row.on_day.as_deref(),
-            )?;
-            let duration = match (row.duration_seconds, row.duration_normalised_session) {
-                (Some(seconds), Some(session)) => Some(Attributed::new(
-                    PositiveDuration::from_seconds(
-                        u64::try_from(seconds).map_err(|e| corrupt(&e))?,
-                    )
-                    .map_err(|e| corrupt(&e))?,
-                    normalised_session_from_storage(session)?,
-                )),
-                _ => None,
-            };
-            let heart_rate = match (
-                row.average_bpm,
-                row.highest_bpm,
-                row.heart_rate_normalised_session,
-            ) {
-                (Some(average), Some(highest), Some(session)) => {
-                    let summary = HeartRateSummary::new(beats(average)?, beats(highest)?);
-                    let series = read_series(&self.pool, row.id).await?;
-                    Some(Attributed::new(
-                        MeasuredHeartRate::new(summary, series),
-                        normalised_session_from_storage(session)?,
-                    ))
-                }
-                _ => None,
-            };
-            let items = read_items(&self.pool, row.id).await?;
-            sessions.push(CanonicalGymSession::new(
-                occurred, items, heart_rate, duration,
-            ));
+            sessions.push(self.session_of(&row).await?);
         }
         Ok(sessions)
     }
@@ -135,8 +113,271 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
     }
 }
 
+/// One row of the layer's spine, as both the whole read and the span reads
+/// select it.
+struct SessionRow {
+    id: i64,
+    started_at_utc: Option<String>,
+    zone: Option<String>,
+    on_day: Option<String>,
+    duration_seconds: Option<i64>,
+    duration_normalised_session: Option<i64>,
+    average_bpm: Option<i64>,
+    highest_bpm: Option<i64>,
+    heart_rate_normalised_session: Option<i64>,
+}
+
+impl SqliteCanonicalGymSessionStore {
+    /// One whole session, its items and its heart rate.
+    async fn session_of(&self, row: &SessionRow) -> Result<CanonicalGymSession, StoreError> {
+        let occurred = occurred(
+            row.started_at_utc.as_deref(),
+            row.zone.as_deref(),
+            row.on_day.as_deref(),
+        )?;
+        let duration = match (row.duration_seconds, row.duration_normalised_session) {
+            (Some(seconds), Some(session)) => Some(Attributed::new(
+                PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
+                    .map_err(|e| corrupt(&e))?,
+                normalised_session_from_storage(session)?,
+            )),
+            _ => None,
+        };
+        let heart_rate = match (
+            row.average_bpm,
+            row.highest_bpm,
+            row.heart_rate_normalised_session,
+        ) {
+            (Some(average), Some(highest), Some(session)) => {
+                let summary = HeartRateSummary::new(beats(average)?, beats(highest)?);
+                let series = read_series(&self.pool, row.id).await?;
+                Some(Attributed::new(
+                    MeasuredHeartRate::new(summary, series),
+                    normalised_session_from_storage(session)?,
+                ))
+            }
+            _ => None,
+        };
+        let items = read_items(&self.pool, row.id).await?;
+        Ok(CanonicalGymSession::new(
+            occurred, items, heart_rate, duration,
+        ))
+    }
+
+    /// Every spine row that could fall in the window, widest reading.
+    ///
+    /// **Widened in SQL and narrowed in Rust.** Which day a session happened on
+    /// depends on the zone on its own row, so the exact comparison cannot be a
+    /// `WHERE` clause without assuming every session shares one offset. A day
+    /// either side covers every zone there is, and the precise filter runs
+    /// through [`Occurred::day`] — the same reading everything else uses.
+    async fn spine_between(&self, from: Date, to: Date) -> Result<Vec<SessionRow>, StoreError> {
+        let (lower, upper) = widened(from, to)?;
+        sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id AS "id!", started_at_utc, zone, on_day,
+                   duration_seconds, duration_normalised_session,
+                   average_bpm, highest_bpm, heart_rate_normalised_session
+            FROM canonical_gym_session
+            WHERE COALESCE(started_at_utc, on_day) >= ?
+              AND COALESCE(started_at_utc, on_day) < ?
+            ORDER BY COALESCE(started_at_utc, on_day), id
+            "#,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))
+    }
+}
+
+/// A day either side of the window, as the strings the columns hold.
+///
+/// A day column is `YYYY-MM-DD` and an instant column `YYYY-MM-DDTHH:MM:SSZ`, so
+/// one lexicographic comparison covers both: every instant on a day sorts after
+/// that day's own string and before the next day's.
+fn widened(from: Date, to: Date) -> Result<(String, String), StoreError> {
+    let lower = from
+        .checked_sub(jiff::Span::new().days(1))
+        .map_err(|_| StoreError::Corrupt {
+            detail: "a date before the calendar".to_owned(),
+        })?
+        .to_string();
+    let upper = to
+        .checked_add(jiff::Span::new().days(2))
+        .map_err(|_| StoreError::Corrupt {
+            detail: "a date beyond the calendar".to_owned(),
+        })?
+        .to_string();
+    Ok((lower, upper))
+}
+
+/// Whole canonical sessions, and the one that answered a prescription.
+impl PerformedGymSessions for SqliteCanonicalGymSessionStore {
+    async fn between(&self, from: Date, to: Date) -> Result<Vec<CanonicalGymSession>, StoreError> {
+        let mut sessions = Vec::new();
+        for row in self.spine_between(from, to).await? {
+            let session = self.session_of(&row).await?;
+            let day = session.occurred().day();
+            if day >= from && day <= to {
+                sessions.push(session);
+            }
+        }
+        Ok(sessions)
+    }
+
+    async fn fulfilling(
+        &self,
+        prescription: PrescribedWorkoutId,
+    ) -> Result<Option<(DeliveryReference, CanonicalGymSession)>, StoreError> {
+        let id = prescription.as_i64();
+
+        // **The normalised session names the prescription; the canonical one is
+        // the visit.** Only the source a prescription is delivered to records
+        // what a workout was performed against, so the reference is found on its
+        // own rows exactly as it was before the canonical layer existed — and the
+        // visit is then whichever canonical session stands on that normalised
+        // session.
+        //
+        // Any delivery of this prescription will do: a reference a performance
+        // names is a reference that was delivered, so which destination it went
+        // to is not a question this has to answer.
+        let named = sqlx::query!(
+            r#"
+            SELECT w.session AS "normalised_session!: i64",
+                   w.performed_against AS "performed_against!: String"
+            FROM gym_workout AS w
+            JOIN prescription_delivery AS d ON d.reference = w.performed_against
+            WHERE d.prescription = ? AND w.stream = 'hevy.workouts'
+            ORDER BY w.started_at_utc ASC, w.landing_record_id ASC
+            LIMIT 1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+
+        let Some(named) = named else {
+            return Ok(None);
+        };
+        let reference =
+            DeliveryReference::try_from(named.performed_against).map_err(|e| corrupt(&e))?;
+
+        let Some(row) = self.standing_on(named.normalised_session).await? else {
+            // A normalised session with no canonical one: the visit held no
+            // exercise at all, or the layer has not been rebuilt since the
+            // session landed. Neither is a fault here (§ 37), and reporting it
+            // as "not performed" is what the caller already handles.
+            return Ok(None);
+        };
+        Ok(Some((reference, self.session_of(&row).await?)))
+    }
+}
+
+impl SqliteCanonicalGymSessionStore {
+    /// The canonical session standing on one normalised session, where the layer
+    /// holds one.
+    ///
+    /// **Every column that can attribute a field**, because any one of them may
+    /// be the only place a given normalised session is named: a sheet that
+    /// contributed nothing but one set's reps is named by that set's outcome and
+    /// nowhere else. The lowest id where two somehow matched — a normalised
+    /// session belongs to one visit, so that is a corrupt layer rather than a
+    /// choice, and settling it the same way every rebuild does beats picking
+    /// whichever row SQLite offered first.
+    async fn standing_on(&self, normalised: i64) -> Result<Option<SessionRow>, StoreError> {
+        sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id AS "id!", started_at_utc, zone, on_day,
+                   duration_seconds, duration_normalised_session,
+                   average_bpm, highest_bpm, heart_rate_normalised_session
+            FROM canonical_gym_session
+            WHERE id IN (
+                SELECT session FROM canonical_gym_exercise
+                 WHERE identified_normalised_session = ?
+                UNION
+                SELECT session FROM canonical_gym_set
+                 WHERE outcome_normalised_session = ?
+                    OR load_normalised_session = ?
+                    OR began_normalised_session = ?
+                    OR rir_normalised_session = ?
+                    OR set_kind_normalised_session = ?
+                    OR rest_after_normalised_session = ?
+                UNION
+                SELECT id FROM canonical_gym_session
+                 WHERE duration_normalised_session = ?
+                    OR heart_rate_normalised_session = ?
+            )
+            ORDER BY id
+            LIMIT 1
+            "#,
+            normalised,
+            normalised,
+            normalised,
+            normalised,
+            normalised,
+            normalised,
+            normalised,
+            normalised,
+            normalised
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))
+    }
+}
+
+/// When the gym's sessions happened, at the grain the record knows.
+///
+/// **The spine alone**, because that is the whole question: a slot asks whether
+/// the record holds a session to account for it, and reading every item and
+/// every heart-rate sample of eleven years to answer it would be work with no
+/// reader.
+impl PerformedSessionLog for SqliteCanonicalGymSessionStore {
+    async fn performed_between(&self, from: Date, to: Date) -> Result<Vec<Occurred>, StoreError> {
+        let (lower, upper) = widened(from, to)?;
+        let rows = sqlx::query!(
+            r#"
+            SELECT started_at_utc, zone, on_day
+            FROM canonical_gym_session
+            WHERE COALESCE(started_at_utc, on_day) >= ?
+              AND COALESCE(started_at_utc, on_day) < ?
+            ORDER BY COALESCE(started_at_utc, on_day), id
+            "#,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+
+        let mut happened = Vec::with_capacity(rows.len());
+        for row in rows {
+            let occurred = occurred(
+                row.started_at_utc.as_deref(),
+                row.zone.as_deref(),
+                row.on_day.as_deref(),
+            )?;
+            let day = occurred.day();
+            if day >= from && day <= to {
+                happened.push(occurred);
+            }
+        }
+        Ok(happened)
+    }
+}
+
 /// Everything the layer holds, in foreign-key order.
-async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreError> {
+///
+/// **Called from two places**, and the second is the reason it is `pub(super)`:
+/// re-deriving any normalised gym stream invalidates this whole layer, because
+/// every field of it names a `gym_session` row that the re-derivation deletes and
+/// rewrites under a new id. See [`super::normalised::clear_stream`].
+pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreError> {
     for statement in [
         "DELETE FROM canonical_gym_set",
         "DELETE FROM canonical_gym_exercise",

@@ -21,7 +21,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme};
+use support::{corpus, programme, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
@@ -62,6 +62,10 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
         corpus::zone()?,
     );
     let _summary: NormalisationSummary = normalisation.normalise().await?;
+
+    // The performed record is read through the canonical layer, which is a
+    // derivation of what the step above has just written (#350).
+    store::canonicalise(&pool).await?;
 
     let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
     let parameters = SqliteGenerationParameterStore::new(pool.clone());

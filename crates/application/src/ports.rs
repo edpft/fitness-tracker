@@ -21,18 +21,17 @@ use jiff::{
 };
 
 use domain::analytical::Weighed;
-use domain::canonical::SessionCount;
+use domain::canonical::{Occurred, SessionCount};
 use domain::cycling::{
     CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
 use domain::gym::{
-    CanonicalGymSession, Load, NormalisedGymSession, Performed, PerformedGymSession, SetKind,
-    exercise::RepsExercise,
+    CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
 };
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
-    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
-    SourceRecordId, Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream,
+    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
+    Watermark,
 };
 use domain::measure::RepCount;
 use domain::normalised::{
@@ -786,13 +785,18 @@ pub trait RefusalReporter {
 // port below returns both kinds of value.
 // ---------------------------------------------------------------------------
 
-/// One performance of one exercise, on one date, as the record holds it.
+/// One performance of one exercise, on one date, as the canonical layer holds
+/// it.
+///
+/// **No landing record.** A canonical session is merged from however many
+/// normalised sessions recorded it, each of them derived from however many
+/// landing records, so there is no one record for this to name — and nothing
+/// ever read the one it used to carry. Provenance lives on the canonical
+/// session's own fields (§ II.4), which is where a reader asking "whose figure
+/// is this?" should go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Performance {
     pub on: Date,
-    /// Which landing record it came from. Kept so a prescription can be traced
-    /// back to the observation it was derived from.
-    pub landed_as: LandingRecordId,
     /// The prescribed session this performance was against, where the record
     /// names one.
     ///
@@ -852,9 +856,18 @@ pub struct PerformedSetSummary {
 /// before, never performed, and performed but unusable. An `Option` collapses
 /// the first two at the call site, and that is exactly the shape that invites a
 /// `None` to become a default load.
+///
+/// **And a fourth, since the canonical layer.** A set whose exercise only a
+/// watch's classifier placed is `Identified::Guessed`, and a guess is not the
+/// operator's word on what was performed — so it may not set a load. Collapsing
+/// that into [`Self::NeverPerformed`] would tell him his history had been lost
+/// when what happened is that the only account of it is a guess (§ 37).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LastPerformance {
     Performed(Performance),
+    /// Performed, as far as the record goes, but only a watch's classifier ever
+    /// said it was this exercise.
+    OnlyGuessed,
     NeverPerformed,
 }
 
@@ -874,6 +887,13 @@ pub struct UnderivableSlot {
 pub enum UnderivableReason {
     #[error("never performed, and the programme sets no starting load")]
     NeverPerformed,
+    /// Performed only where a watch's classifier named it.
+    ///
+    /// Reported rather than progressed from: a guess is what a device made of
+    /// what was done, and a load derived from one would be a prescription built
+    /// on a classification nobody confirmed.
+    #[error("only a watch's classifier has named it, which cannot set a load")]
+    OnlyGuessed,
     #[error("its last performance recorded no working set to progress from")]
     NoWorkingSet,
     /// A mobility slot filled with something that is not counted in time.
@@ -930,6 +950,25 @@ pub enum UnderivableReason {
 /// duration or distance exercise has no business reaching it. Narrowing the
 /// signature is what makes that structural: asking for a hold's history is a
 /// compile error rather than a row the adapter cannot decode.
+///
+/// **Over the canonical layer** (§ 5), so the whole record answers rather than
+/// one source of four. Two consequences follow from what a merged session
+/// holds, and both are rules about what may set a load.
+///
+/// **A guess never names the exercise.** A canonical exercise is
+/// `Identified::Recorded` where a source that records what was done named it
+/// and `Identified::Guessed` where only a watch's classifier placed it. Only
+/// the first answers here, and an exercise the record holds no recorded account
+/// of is [`LastPerformance::OnlyGuessed`] rather than performed or never
+/// performed.
+///
+/// **A set with nothing to say about itself is not returned.** A set is here
+/// only where the record states its load, its count and whether it was a warm-up
+/// or a working set: each is a field a canonical set may simply not hold, and
+/// none of the three has a defensible default — a missing load is not zero, and
+/// a missing kind filed as working is a warm-up counted as volume. A performance
+/// left with no such set reads as [`UnderivableReason::NoWorkingSet`], which is
+/// what it is.
 pub trait ExerciseHistory {
     /// The most recent performance of each exercise asked about.
     ///
@@ -977,18 +1016,28 @@ pub trait ExerciseHistory {
     fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
-/// Whole performed sessions, for projecting into a prescription shape.
+/// Whole gym sessions the record holds, as the canonical layer holds them.
 ///
 /// Separate from [`ExerciseHistory`] because it answers a different question at
 /// a different grain, and merging them would give one port two reasons to
-/// change. It returns the domain entity untouched, because projection operates
-/// on the session entire — its items, its groupings, its ordering.
+/// change. It returns the domain entity untouched, because both its readers
+/// operate on the session entire — its items, its groupings, its ordering.
 ///
-/// **Sessions, not workouts, since § 3.1.** A session the operator split across
-/// four Hevy routines is one prescription performed, and reading it as four
-/// would compare a quarter of it against the whole of what was issued.
-pub trait PerformedWorkoutReader {
-    /// Oldest first, § 10 applied.
+/// **Canonical, not one source's** (§ 5). A visit is one session here however
+/// many sources recorded it, which is what makes the relative-strength report
+/// reach back past the first source still in use.
+///
+/// **Named for what it holds rather than for Hevy's word.** This was
+/// `PerformedWorkoutReader` and returned one source's workouts; § 3.1 made the
+/// entity a session in 2026-09 and the canonical layer makes it a visit, so
+/// "workout" named nothing it still returns.
+pub trait PerformedGymSessions {
+    /// Every canonical session that happened between the two days, both
+    /// included, oldest first.
+    ///
+    /// **By the day it happened on**, which for a session no clocked source
+    /// recorded is the day its sources dated it to and for every other is the
+    /// day its instant falls on in the zone it was performed in (§ II.3).
     ///
     /// # Errors
     ///
@@ -997,14 +1046,17 @@ pub trait PerformedWorkoutReader {
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<PerformedGymSession>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<CanonicalGymSession>, StoreError>> + Send;
 
     /// The session performed against a prescription, and the reference it named.
     ///
-    /// **The reference is one part's and the session is the whole.** A session
-    /// split across several routines carries a routine id on each part, and the
-    /// one that matters is the one naming the prescription — so this finds the
-    /// workout and returns the session it belongs to.
+    /// **The reference is one normalised session's and the session is the
+    /// visit.** Only the source the prescription was delivered to records what a
+    /// workout was performed against, and a visit may hold several of its
+    /// records — so this finds the record naming the prescription and returns
+    /// the canonical session standing on it. That the link survives
+    /// canonicalisation is § II.4's provenance clause earning its keep: every
+    /// field of a canonical session names the normalised session it came from.
     ///
     /// **Keyed on the prescription rather than on a date**, which is the whole
     /// point: a session prescribed for Friday and performed on Saturday morning
@@ -1023,17 +1075,22 @@ pub trait PerformedWorkoutReader {
     fn fulfilling(
         &self,
         prescription: PrescribedWorkoutId,
-    ) -> impl Future<Output = Result<Option<(DeliveryReference, PerformedGymSession)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(DeliveryReference, CanonicalGymSession)>, StoreError>> + Send;
 }
 
 /// When a discipline's sessions were performed, and nothing else about them.
 ///
-/// **What `fitness next` asks of the record** (#137): whether the slot the
+/// **What `fitness next` asks of the gym's record** (#137): whether the slot the
 /// schedule says came last has a session to account for it. When a session
-/// started is all that question needs, and it is the one thing every
-/// discipline's record has whatever its sessions are made of — so this is one
-/// port with an adapter per discipline rather than a question put to each
-/// discipline's own reader.
+/// happened is all that question needs, and the gym's record cannot answer more
+/// than that — which session of the microcycle it *was* is only knowable where it
+/// was performed against a prescription.
+///
+/// **The gym's alone.** It was written as one port with an adapter per
+/// discipline, and cycling then needed [`RiddenSessionLog`] instead, because a
+/// ride names the classes it was ridden to and that is what places it in the
+/// week. The cycling adapter's implementation of this went unused from that day
+/// and is gone (#350).
 ///
 /// **A moment, not a day** (#281). A microcycle ends when its final session is
 /// performed or that session's window closes, and the window closes at a part
@@ -1042,18 +1099,29 @@ pub trait PerformedWorkoutReader {
 ///
 /// A session's moment is the wall-clock time it started, in the zone it was
 /// performed in.
+///
+/// **And some sessions have no moment**, which is why this answers in
+/// [`Occurred`] rather than in instants. The canonical layer dates a visit to
+/// the finest grain any of its sources knew, and the operator's spreadsheets
+/// know a day: 61 of his 389 gym visits are dated to a day and no finer. A
+/// midday substituted for the missing clock would be a reading nothing observed,
+/// so the grain travels with the answer and the caller decides what a day can
+/// settle.
 pub trait PerformedSessionLog {
-    /// When each session performed between the two days started, both days
+    /// When each session performed between the two days happened, both days
     /// included, oldest first.
+    ///
+    /// Ordered by day, and within a day by instant, a session with no instant
+    /// first.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn started_between(
+    fn performed_between(
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<DateTime>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Occurred>, StoreError>> + Send;
 }
 
 /// One cycling session the record holds, and the classes it was ridden to.

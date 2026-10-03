@@ -3,13 +3,16 @@
 //! **The arithmetic is `domain`'s** ([`relative_strength`]); this finds the two
 //! records it reads and hands them over. Nothing is written: the figure
 //! re-derives from them exactly (§ 5).
+//!
+//! **The sessions are canonical ones**, so the report covers every gym visit the
+//! record holds rather than the stretch one source covers.
 
 use domain::analytical::{OneRepMaxEstimator, SessionStrength, relative_strength};
 use jiff::civil::{Date, date};
 
 use crate::{
     error::StoreError,
-    ports::{PerformedWorkoutReader, WeighInHistory},
+    ports::{PerformedGymSessions, WeighInHistory},
 };
 
 /// Before anything the record holds. The session reader takes a window, and
@@ -34,7 +37,7 @@ pub struct RelativeStrength<E, S, W> {
 impl<E, S, W> RelativeStrength<E, S, W>
 where
     E: OneRepMaxEstimator + Sync,
-    S: PerformedWorkoutReader + Sync,
+    S: PerformedGymSessions + Sync,
     W: WeighInHistory + Sync,
 {
     pub const fn new(estimator: E, sessions: S, weigh_ins: W) -> Self {

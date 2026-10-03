@@ -37,7 +37,7 @@ use domain::{
     analytical::Rts,
     normalised::{OperatorZone, StartedAt},
 };
-use infrastructure::{SqlitePerformedWorkoutReader, SqliteWeighInHistory, connect};
+use infrastructure::{SqliteCanonicalGymSessionStore, SqliteWeighInHistory, connect};
 
 /// Run the discipline's daily loop: collect, derive, prescribe, deliver.
 ///
@@ -67,9 +67,15 @@ pub async fn next(
     output::derivation_started(&stream);
     let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
     report(&stream, derived);
+
+    // 3. What happened, however many sources recorded it. Everything below reads
+    //    the canonical layer (#350), and a derivation whose inputs have just
+    //    changed is stale until it is rebuilt — so the session collected a moment
+    //    ago would otherwise be invisible to the prescription derived from it.
+    crate::canonicalise::gym(database).await?;
     println!();
 
-    // 3. What to do next, derived against the record the two steps above have
+    // 4. What to do next, derived against the record the steps above have
     //    just brought up to date. This is the step the loop exists for, and the
     //    one that was quietly reading stale history before decision 0021.
     //
@@ -84,7 +90,7 @@ pub async fn next(
     prescribing::prescribe(database, zone, Some(&date)).await?;
     println!();
 
-    // 4. Where to do it from. Reads what step 3 issued rather than deriving
+    // 5. Where to do it from. Reads what step 4 issued rather than deriving
     //    again, so a destination being unreachable costs a retry rather than a
     //    ladder position (§ 36).
     prescribing::deliver(
@@ -108,6 +114,10 @@ const WEIGH_INS: &str = "withings.measurements";
 /// reads what is landed, so an unreachable scale costs the newest weigh-ins
 /// rather than the whole report (§ 36); the note says so. Deriving is not
 /// stepped past: it contacts nothing, so a failure there is a real one.
+///
+/// **Over every gym visit the record holds**, not one source's: the sessions come
+/// from the canonical layer, so the figures run from 2016 rather than from the
+/// first session in the source still in use.
 pub async fn strength(
     discipline: &KnownDiscipline,
     database: &Path,
@@ -142,12 +152,16 @@ pub async fn strength(
         let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
         report(&stream, derived);
     }
+
+    // The report reads the canonical layer, which is a derivation of what the
+    // loop above has just re-derived (#350).
+    crate::canonicalise::gym(database).await?;
     println!();
 
     let pool = connect(database).await?;
     let figures = RelativeStrength::new(
         Rts,
-        SqlitePerformedWorkoutReader::new(pool.clone()),
+        SqliteCanonicalGymSessionStore::new(pool.clone()),
         SqliteWeighInHistory::new(pool),
     )
     .report(
