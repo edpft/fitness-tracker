@@ -21,7 +21,7 @@ use jiff::{
 };
 
 use domain::analytical::Weighed;
-use domain::canonical::{NormalisedSessionId, SessionCount};
+use domain::canonical::SessionCount;
 use domain::cycling::{
     CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
@@ -556,6 +556,14 @@ pub trait NormalisedEntityStore {
 /// recorded it"). A fifth source adds an arm to the adapter's query and nothing
 /// to the use case.
 ///
+/// **It stops at what the canonical layer records.** What comes back is a
+/// projection — each session already in the canonical shape, every field of it
+/// attributed to itself — and not the normalised entity. Rebuilding a watch
+/// session's three landing records, a sheet session's file paths and per-set
+/// cells or a Hevy session's event provenance in order to drop them again
+/// would be work with no reader, which is the call [`WeighInHistory`] already
+/// made.
+///
 /// **It reads the whole layer.** Matching cannot be done a day at a time: a
 /// session a sheet dated 6 March is matched to a watch's activity on the 7th,
 /// so the candidates for any one visit are not confined to its own day. The
@@ -563,8 +571,7 @@ pub trait NormalisedEntityStore {
 /// megabytes, and the canonical layer is replaced entire for the reason
 /// [`NormalisedEntityStore::replace`] gives.
 pub trait NormalisedGymSessionReader {
-    /// Every normalised gym session, each with the id the canonical layer
-    /// names it by, oldest first.
+    /// Every normalised gym session, oldest first.
     ///
     /// **Ordered, because matching must be deterministic** (§ 9). Where two
     /// accounts of one field are equally corroborated the merge has to settle
@@ -575,9 +582,7 @@ pub trait NormalisedGymSessionReader {
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn all(
-        &self,
-    ) -> impl Future<Output = Result<Vec<(NormalisedSessionId, NormalisedGymSession)>, StoreError>> + Send;
+    fn all(&self) -> impl Future<Output = Result<Vec<NormalisedGymSession>, StoreError>> + Send;
 }
 
 /// The canonical layer for gym sessions: one entry per visit to a gym, whatever

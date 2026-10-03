@@ -34,7 +34,7 @@ pub use measured::{
     ComposedFrom, Guess, GuessedExercise, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
     Recorded,
 };
-pub use normalised::NormalisedGymSession;
+pub use normalised::{NormalisedGymSession, Recorder};
 pub use outcome::Performed;
 pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};
