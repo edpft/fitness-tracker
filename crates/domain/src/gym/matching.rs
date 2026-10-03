@@ -699,11 +699,17 @@ fn name(mine: Attributed<Identified>, theirs: &Attributed<Identified>) -> Attrib
 
 /// Another account's sets, aligned onto the sets so far and merged into them.
 ///
-/// **Aligned on what was done, not on position.** A sheet records the top set
-/// of an exercise the watch recorded whole — 2018-04-28's bench press is 4 ×
-/// 36 in the sheet and 10 × 40, 6 × 40, 4 × 36 on the watch — so the sheet's
-/// one set is the watch's third and not its first. A set that aligns with
-/// nothing is a set only this account saw, and it is kept.
+/// **Two accounts of the same number of sets are aligned by order.** Order is
+/// the one thing both of them preserve, and it settles the case values cannot:
+/// 2019-03-20's front squat is 47.5 × 3 in the sheet and 50 × 3 on the watch,
+/// with the counts differing on the last set too, so nothing pairs by value and
+/// aligning that way gave four sets for a three-set exercise.
+///
+/// **Otherwise, on what was done rather than on position.** A sheet records the
+/// top set of an exercise the watch recorded whole — 2018-04-28's bench press
+/// is 4 × 36 in the sheet and 10 × 40, 6 × 40, 4 × 36 on the watch — so the
+/// sheet's one set is the watch's third and not its first. A set that aligns
+/// with nothing is a set only this account saw, and it is kept.
 fn align<M: Copy + PartialEq>(
     sets: NonEmpty<CanonicalSet<M>>,
     other: &NonEmpty<CanonicalSet<M>>,
@@ -714,6 +720,15 @@ fn align<M: Copy + PartialEq>(
     struct Built<M> {
         set: CanonicalSet<M>,
         taken: bool,
+    }
+
+    if sets.count() == other.count() {
+        let paired: Vec<CanonicalSet<M>> = sets
+            .iter()
+            .zip(other.iter())
+            .map(|(mine, theirs)| combine(mine, theirs, meta))
+            .collect();
+        return NonEmpty::new(paired).unwrap_or(sets);
     }
 
     let mut built: Vec<Built<M>> = sets

@@ -408,3 +408,40 @@ fn one_account_is_one_session() {
         "both sets, unchanged"
     );
 }
+
+/// 2019-03-20's front squat: 47.5 × 3 in the sheet and 50 × 3 on the watch,
+/// whose last counts differ too. Nothing pairs by value, and aligning that way
+/// gave four sets for a three-set exercise.
+#[test]
+fn two_accounts_of_the_same_length_align_by_order() {
+    let sheet = log(
+        1,
+        on("2019-03-20").unwrap(),
+        vec![
+            recorded(
+                "front-squat-barbell",
+                &[(10, 47_500), (10, 47_500), (12, 47_500)],
+                id(1).unwrap(),
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    let recording = watch(
+        2,
+        at("2019-03-20T07:50:00Z").unwrap(),
+        vec![
+            guessed(
+                "front-squat-barbell",
+                &[(10, 50_000), (10, 50_000), (8, 50_000)],
+                id(2).unwrap(),
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+
+    let sessions = canonical_sessions(vec![sheet, recording]);
+    let session = sessions.first().expect("one session");
+    assert_eq!(session.set_count(), 3, "three sets, not four");
+}
