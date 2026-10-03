@@ -1000,26 +1000,31 @@ fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
     Ok(session)
 }
 
-/// **A count and a range in one entry means every set crosses as a range** (#341).
+/// **A count crosses as a count, and a range as a range** (#346), even where one
+/// entry holds both.
 ///
 /// Hevy's app holds the schema on the exercise rather than the set, so an entry
 /// carrying one `rep_range` is read as ranged throughout and every fixed count
-/// in it renders blank. `05 Heavy` reached the phone on 2026-10-02 with nothing
-/// against the front squat's ramp or its `1×8 @ 8RM` top set, the API having
-/// stored all five counts faithfully.
+/// in it renders blank. #342 answered that by widening each count to a
+/// degenerate range, and #346 took it back out, because the app has *two* views
+/// and only one of them was measured:
 ///
-/// **In the routine view, and only there.** The operator checked both on
-/// 2026-10-02: the routine view's column is headed *rep range*, so a fixed
-/// count has nothing to put in it and shows a dash, while the workout view's is
-/// headed *reps* and fills all five in. So what this fixes is the view the
-/// session is read in beforehand, not the one it is trained from — worth
-/// knowing before trading it for something that reads worse while training.
+/// | | routine view | workout view |
+/// |---|---|---|
+/// | column heading | rep range | reps |
+/// | a fixed `8` | `-` | `8` |
+/// | a degenerate range `8-8` | `8-8` | `8-8` |
 ///
-/// A degenerate range is the same instruction in the other notation, and the
-/// operator confirmed the app takes `8` to `8` and shows it as `8-8`. So the
-/// assertion is that no set of a mixed entry is left stating a count.
+/// So widening bought a number in the view the session is read in beforehand
+/// and paid for it in the view it is trained from. The operator, 2026-10-02:
+/// *"the missing value in the routine is annoying but missing the value in the
+/// workout makes the workout hard"*.
+///
+/// **The dash in the routine view is therefore the chosen behaviour**, not a
+/// defect, and #341's "every set shows a count in the app" is withdrawn. This
+/// pins the choice so it is not made again from the routine view alone.
 #[test]
-fn a_mixed_entry_states_every_count_as_a_range() {
+fn a_mixed_entry_keeps_each_set_in_the_schema_it_was_prescribed() {
     let rendered = support::corpus::block_on(async {
         let server = MockServer::start().await;
 
@@ -1034,7 +1039,7 @@ fn a_mixed_entry_states_every_count_as_a_range() {
         Mock::given(method("POST"))
             .and(path("/v1/routines"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "routine": { "id": "promoted" }
+                "routine": { "id": "mixed-schema" }
             })))
             .mount(&server)
             .await;
@@ -1081,13 +1086,17 @@ fn a_mixed_entry_states_every_count_as_a_range() {
         .collect();
     assert_eq!(
         schema,
-        vec!["8-8", "5-5", "8-8", "5-6"],
-        "every count is widened and the range is untouched"
+        vec!["reps 8", "reps 5", "reps 8", "5-6"],
+        "each set states what it was prescribed, and nothing is widened"
     );
+
+    // The two are exclusive on the wire whichever way round they fall: a set
+    // states a count or a range, never both and never neither.
     for set in sets {
-        assert!(
+        assert_ne!(
             set["reps"].is_null(),
-            "a ranged set states no count beside its range: {set}"
+            set.get("rep_range").is_none(),
+            "exactly one of the two schemas is stated: {set}"
         );
     }
 }
