@@ -21,12 +21,13 @@ use jiff::{
 };
 
 use domain::analytical::Weighed;
-use domain::canonical::SessionCount;
+use domain::canonical::{NormalisedSessionId, SessionCount};
 use domain::cycling::{
     CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
 use domain::gym::{
-    CanonicalGymSession, Load, Performed, PerformedGymSession, SetKind, exercise::RepsExercise,
+    CanonicalGymSession, Load, NormalisedGymSession, Performed, PerformedGymSession, SetKind,
+    exercise::RepsExercise,
 };
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -543,6 +544,40 @@ pub trait NormalisedEntityStore {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn count(&self) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
+}
+
+/// Every normalised gym session the store holds, whatever source recorded it.
+///
+/// **One port over four streams, where [`NormalisedEntityStore`] is one per
+/// stream.** A store that writes is bound to a table because a table holds one
+/// shape; matching reads *across* the sources by definition, and a reader per
+/// stream would make the use case enumerate its sources — which is the thing
+/// `cli::catalogue` exists to stop (§ II.4: "whatever number of sources
+/// recorded it"). A fifth source adds an arm to the adapter's query and nothing
+/// to the use case.
+///
+/// **It reads the whole layer.** Matching cannot be done a day at a time: a
+/// session a sheet dated 6 March is matched to a watch's activity on the 7th,
+/// so the candidates for any one visit are not confined to its own day. The
+/// layer is 772 sessions across eleven years, which is one pass over a few
+/// megabytes, and the canonical layer is replaced entire for the reason
+/// [`NormalisedEntityStore::replace`] gives.
+pub trait NormalisedGymSessionReader {
+    /// Every normalised gym session, each with the id the canonical layer
+    /// names it by, oldest first.
+    ///
+    /// **Ordered, because matching must be deterministic** (§ 9). Where two
+    /// accounts of one field are equally corroborated the merge has to settle
+    /// it somehow, and settling it on the order the store returned rows in is
+    /// a rule that holds only until SQLite changes its mind. Oldest first, ties
+    /// broken by id.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn all(
+        &self,
+    ) -> impl Future<Output = Result<Vec<(NormalisedSessionId, NormalisedGymSession)>, StoreError>> + Send;
 }
 
 /// The canonical layer for gym sessions: one entry per visit to a gym, whatever

@@ -15,6 +15,7 @@ pub mod intensity;
 pub mod load;
 pub mod manual;
 pub mod measured;
+pub mod normalised;
 pub mod outcome;
 pub mod performed;
 pub mod set;
@@ -33,6 +34,7 @@ pub use measured::{
     ComposedFrom, Guess, GuessedExercise, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
     Recorded,
 };
+pub use normalised::NormalisedGymSession;
 pub use outcome::Performed;
 pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};
