@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.id AS \"workout!: i64\", i.position AS \"item_position!: i64\",\n                   i.is_superset AS \"is_superset!: i64\",\n                   e.position AS \"exercise_position!: i64\",\n                   e.exercise AS \"exercise!: String\", e.measure AS \"measure!: String\"\n            FROM gym_workout AS w\n            JOIN workout_item AS i ON i.workout = w.id\n            JOIN performed_exercise AS e\n              ON e.workout = i.workout AND e.item_position = i.position\n            WHERE w.session = ?\n            ORDER BY w.started_at_utc ASC, w.on_day ASC, w.id ASC,\n                     i.position ASC, e.position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "workout!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "item_position!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_item",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "is_superset!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_item",
+            "name": "is_superset"
+          }
+        }
+      },
+      {
+        "name": "exercise_position!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "measure!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_exercise",
+            "name": "measure"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fdeb0008b3bfb01839683cfdd3901b612db2efded174b3e6463eeb0db1f23e7e"
+}

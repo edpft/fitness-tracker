@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT started_at_utc AS \"started_at_utc!: String\", zone AS \"zone!: String\",\n                   reps AS \"reps!: i64\",\n                   load_kind AS \"load_kind: String\", load_grams AS \"load_grams: i64\",\n                   guess_exercise AS \"guess_exercise: String\",\n                   guess_movement AS \"guess_movement: String\",\n                   guess_implement AS \"guess_implement: String\",\n                   guess_from AS \"guess_from: String\"\n            FROM measured_set\n            WHERE workout = ?\n            ORDER BY position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "reps!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "load_kind: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "guess_exercise: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "guess_exercise"
+          }
+        }
+      },
+      {
+        "name": "guess_movement: String",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "guess_movement"
+          }
+        }
+      },
+      {
+        "name": "guess_implement: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "guess_implement"
+          }
+        }
+      },
+      {
+        "name": "guess_from: String",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "measured_set",
+            "name": "guess_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a12e440261614f9d7b20a6607f8eaf68ca4eefa536d9b9df7e63f238b9ab0ba2"
+}

@@ -1,0 +1,75 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.id AS \"id!: i64\",\n                   MIN(w.started_at_utc) AS \"started_at_utc?: String\",\n                   MIN(w.zone) AS \"zone?: String\",\n                   MIN(w.on_day) AS \"on_day?: String\",\n                   CASE WHEN COUNT(*) = COUNT(w.duration_seconds)\n                        THEN MAX(unixepoch(w.started_at_utc) + w.duration_seconds)\n                             - MIN(unixepoch(w.started_at_utc))\n                   END AS \"duration_seconds?: i64\",\n                   MAX(m.workout) AS \"measured_workout?: i64\",\n                   MAX(m.average_bpm) AS \"average_bpm?: i64\",\n                   MAX(m.highest_bpm) AS \"highest_bpm?: i64\"\n            FROM gym_session AS s\n            JOIN gym_workout AS w ON w.session = s.id\n            LEFT JOIN measured_gym_session AS m ON m.workout = w.id\n            GROUP BY s.id\n            ORDER BY COALESCE(MIN(w.started_at_utc), MIN(w.on_day)) ASC, s.id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_session",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc?: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "zone?: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "on_day?: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "duration_seconds?: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "measured_workout?: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "average_bpm?: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "highest_bpm?: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "169216a84e0d3252bbeb929f121ee69f152f849f99e0aa441531679a755677a3"
+}
