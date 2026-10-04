@@ -157,11 +157,23 @@ pub fn destination(discipline: Discipline) -> Result<application::DestinationNam
         .map_err(|error| Failure::usage(&error))
 }
 
-/// Collect and derive one discipline's record.
+/// Collect and derive one discipline's record, into the shape the rest of this
+/// command reads it in.
 ///
 /// **An unreachable source is reported and stepped past**, as `gym strength`
 /// does: what is already landed still answers, just less recently. Deriving
 /// is not stepped past, because it contacts nothing.
+///
+/// **The gym's canonical layer is rebuilt here, and that is the whole of
+/// #361.** Deriving a gym stream deletes the layer — every canonical field
+/// names the `gym_session` row it came from, and the derivation rewrites those
+/// rows under new ids — so between step 1 and `gym next`'s own rebuild there
+/// was a window in which the operator's entire gym history read as nothing.
+/// Step 3 below reads the standing inside that window, and on 4 October 2026 it
+/// told him the gym had lost its essential session in every week of the plan,
+/// including two he had trained. Rebuilding it as part of collecting is what
+/// makes "each discipline's record is collected and derived before anything is
+/// judged" true rather than nearly true.
 async fn collect(
     discipline: Discipline,
     database: &Path,
@@ -188,6 +200,10 @@ async fn collect(
     output::derivation_started(&stream);
     let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
     gym::report(&stream, derived);
+
+    if discipline == Discipline::Gym {
+        crate::canonicalise::gym(database).await?;
+    }
     Ok(())
 }
 

@@ -323,3 +323,79 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
         assert_eq!(again, first, "and it rebuilds to the same layer");
     });
 }
+
+/// What the window between the two steps costs a reader, which is #361.
+///
+/// The layer being rebuildable is not the same as its absence being harmless.
+/// `PerformedSessionLog` reads the canonical layer, and `fitness next` read
+/// where the plan stood *between* deriving and rebuilding — so on 4 October
+/// 2026 the operator's whole gym history answered as nothing, and two weeks he
+/// had trained were reported as weeks the gym had lost its essential session
+/// in. Anything that collects a gym stream has to rebuild before it judges.
+#[test]
+fn a_cleared_layer_answers_the_performed_log_with_nothing() {
+    use application::PerformedSessionLog as _;
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = derived().await.expect("a derived store");
+        let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
+        let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
+        let (from, to) = (
+            jiff::civil::Date::constant(2000, 1, 1),
+            jiff::civil::Date::constant(2030, 1, 1),
+        );
+
+        canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a first run");
+        let performed = canonical
+            .performed_between(from, to)
+            .await
+            .expect("a read of the performed log");
+        assert!(
+            !performed.is_empty(),
+            "the corpus holds sessions, and a built layer reports them",
+        );
+
+        Normalisation::new(
+            NormalisationPorts {
+                raw: HevySessionAccountReader::new(pool.clone()).expect("a reader"),
+                translator: HevySessionTranslator::default(),
+                workouts: SqliteGymSessionStore::new(pool.clone()).expect("a store"),
+                refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)
+                    .expect("a refusal store"),
+                runs: SqliteNormalisationRunLog::new(pool.clone()),
+                clock: corpus::FixedClock,
+            },
+            zone().expect("a zone"),
+        )
+        .normalise()
+        .await
+        .expect("re-deriving succeeds");
+
+        assert_eq!(
+            canonical
+                .performed_between(from, to)
+                .await
+                .expect("a read of the performed log")
+                .len(),
+            0,
+            "and between the two steps every session the operator trained is \
+             invisible — not reported as stale, but as never having happened",
+        );
+
+        canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a rebuild");
+        assert_eq!(
+            canonical
+                .performed_between(from, to)
+                .await
+                .expect("a read of the performed log")
+                .len(),
+            performed.len(),
+            "the rebuild puts them back",
+        );
+    });
+}
