@@ -25,7 +25,8 @@ use domain::{
     },
     landing::SourceRecordId,
     normalised::{
-        CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, SourceTerm,
+        Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay,
+        SourceTerm,
     },
     sequence::NonEmpty,
 };
@@ -47,10 +48,12 @@ fn correcting(exercise: Exercise, terms: Vec<CorrectedTerm>) -> Fallible<EditOve
     let reason = CorrectionReason::try_from("Hevy had no neutral grip pull up")?;
     let correction = Correction::new(
         CorrectionId::from(1),
-        exercise,
         "2026-09-30T09:00:00Z".parse()?,
         reason,
-        NonEmpty::new(terms)?,
+        Corrected::Exercise {
+            exercise,
+            entries: NonEmpty::new(terms)?,
+        },
     );
     Ok(EditOverlay::of(&[correction]))
 }
@@ -294,16 +297,16 @@ fn the_store_holds_an_assertion_and_gives_it_all_back() {
         panic!("there is a correction")
     };
     assert_eq!(correction.id(), id);
-    assert_eq!(
-        correction.exercise(),
-        Exercise::Reps(RepsExercise::NeutralGripPullUp)
-    );
+    let Corrected::Exercise { exercise, entries } = correction.corrected() else {
+        panic!("the assertion that went in was about an exercise")
+    };
+    assert_eq!(*exercise, Exercise::Reps(RepsExercise::NeutralGripPullUp));
     assert_eq!(
         correction.reason().as_str(),
         "Hevy had no neutral grip pull up",
         "§ II.2 requires the reason to survive, or it is unreadable in six months"
     );
-    assert_eq!(correction.terms().count(), 1);
+    assert_eq!(entries.count(), 1);
 
     let Ok(record) = SourceRecordId::try_from("a-workout") else {
         panic!("the identifier is valid")
@@ -317,4 +320,104 @@ fn the_store_holds_an_assertion_and_gives_it_all_back() {
     assert!(retracted, "retracting an assertion that exists says so");
     assert!(after.is_empty(), "and takes its terms with it");
     assert!(!nothing, "retracting it twice is not a second retraction");
+}
+
+/// The store round-trips a figures correction, and reads back what it replaces
+/// as well as what it replaces it with (#351).
+///
+/// **One numbering across both kinds**, which is why they share a table: the
+/// number `show` prints has to be the number `remove` takes, and two tables
+/// each counting from one would hand the operator two corrections called 1.
+#[test]
+fn the_store_round_trips_a_figures_correction_and_retracts_it() {
+    use domain::{
+        measure::{Kg, RepCount},
+        normalised::SetFigures,
+    };
+
+    // A fixture builder, not a test function, so it returns `Result` and the
+    // call site unwraps: the test exemptions do not reach a closure.
+    let figures = |reps: u32, grams: u64| -> Fallible<SetFigures> {
+        Ok(SetFigures::new(
+            RepCount::new(reps)?,
+            Some(Kg::from_grams(grams)),
+        ))
+    };
+
+    let outcome = corpus::block_on(async {
+        let directory = tempfile::tempdir()?;
+        let pool = connect(&directory.path().join("test.db")).await?;
+        let store = SqliteEditOverlayStore::new(pool, "garmin.exercise_sets")?;
+
+        let record = SourceRecordId::try_from("2768338072")?;
+        let term = CorrectedTerm::new(
+            record.clone(),
+            SourceTerm::try_from("2018-06-11T06:25:22.0")?,
+        );
+        let reason = CorrectionReason::try_from("a transposition in the watch".to_owned())?;
+
+        let id = store
+            .assert_figures(
+                figures(58, 6_000)?,
+                figures(6, 57_500)?,
+                "2026-10-04T09:00:00Z".parse()?,
+                &reason,
+                &NonEmpty::new(vec![term])?,
+            )
+            .await?;
+
+        let held = store.all().await?;
+        let overlay = store.overlay().await?;
+        let retracted = store.retract(id).await?;
+        let after = store.all().await?;
+
+        Ok::<_, Box<dyn std::error::Error>>((held, overlay, retracted, after, id, record))
+    });
+
+    let Ok(Ok((held, overlay, retracted, after, id, record))) = outcome else {
+        panic!("the store round-trips")
+    };
+
+    assert_eq!(held.len(), 1, "one assertion, read back as one");
+    let Some(correction) = held.first() else {
+        panic!("there is a correction")
+    };
+    assert_eq!(correction.id(), id);
+    let Corrected::Figures {
+        recorded,
+        figures: reads,
+        sets,
+    } = correction.corrected()
+    else {
+        panic!("the assertion that went in was about a set's figures")
+    };
+    assert_eq!(recorded.reps().as_u32(), 58);
+    assert_eq!(recorded.load().map(Kg::as_grams), Some(6_000));
+    assert_eq!(reads.reps().as_u32(), 6);
+    assert_eq!(reads.load().map(Kg::as_grams), Some(57_500));
+    assert_eq!(sets.count(), 1);
+    assert_eq!(
+        correction.reason().as_str(),
+        "a transposition in the watch",
+        "§ II.2 requires the reason to survive"
+    );
+
+    let Ok(wrong) = RepCount::new(58) else {
+        panic!("58 is a count")
+    };
+    assert_eq!(
+        overlay.figures_for(
+            &record,
+            "2018-06-11T06:25:22.0",
+            SetFigures::new(wrong, Some(Kg::from_grams(6_000)))
+        ),
+        Some(SetFigures::new(
+            RepCount::new(6).expect("6 is a count"),
+            Some(Kg::from_grams(57_500))
+        )),
+        "the overlay a derivation consults is built from what the store holds"
+    );
+
+    assert!(retracted, "retracting an assertion that exists says so");
+    assert!(after.is_empty(), "and takes the sets it named with it");
 }

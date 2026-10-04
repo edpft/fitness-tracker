@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM correction WHERE id = ? AND stream = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ba77cc7b5f49d2245a04c12fd4e52002c8334107bd82ca66958ec4c9d05c4b94"
+}

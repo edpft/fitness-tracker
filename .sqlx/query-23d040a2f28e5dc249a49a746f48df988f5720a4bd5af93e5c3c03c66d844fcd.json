@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT c.id          AS \"id!: i64\",\n                   c.exercise    AS \"exercise!: String\",\n                   c.asserted_at AS \"asserted_at!: String\",\n                   c.reason      AS \"reason!: String\",\n                   t.source_record_id AS \"source_record_id!: String\",\n                   t.term             AS \"term!: String\"\n            FROM exercise_correction c\n            JOIN exercise_correction_term t ON t.correction = c.id\n            WHERE c.stream = ?\n            ORDER BY c.asserted_at, c.id, t.source_record_id, t.term\n            ",
+  "query": "\n            SELECT c.id          AS \"id!: i64\",\n                   c.exercise    AS \"exercise!: String\",\n                   c.asserted_at AS \"asserted_at!: String\",\n                   c.reason      AS \"reason!: String\",\n                   t.source_record_id AS \"source_record_id!: String\",\n                   t.term             AS \"term!: String\"\n            FROM correction c\n            JOIN correction_term t ON t.correction = c.id\n            WHERE c.stream = ? AND c.exercise IS NOT NULL\n            ORDER BY c.asserted_at, c.id, t.source_record_id, t.term\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "exercise_correction",
+            "table": "correction",
             "name": "id"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "exercise_correction",
+            "table": "correction",
             "name": "exercise"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "exercise_correction",
+            "table": "correction",
             "name": "asserted_at"
           }
         }
@@ -42,7 +42,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "exercise_correction",
+            "table": "correction",
             "name": "reason"
           }
         }
@@ -53,7 +53,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "exercise_correction_term",
+            "table": "correction_term",
             "name": "source_record_id"
           }
         }
@@ -64,7 +64,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "exercise_correction_term",
+            "table": "correction_term",
             "name": "term"
           }
         }
@@ -75,12 +75,12 @@
     },
     "nullable": [
       false,
-      false,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "bfb3cfb368aedd1f30fd4aca849120132d95400aa76784e59fdec8b4fcce3e76"
+  "hash": "23d040a2f28e5dc249a49a746f48df988f5720a4bd5af93e5c3c03c66d844fcd"
 }

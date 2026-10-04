@@ -141,7 +141,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
     Normalisation::new(
         NormalisationPorts {
             raw: GarminGymAccountReader::new(pool.clone())?,
-            translator: GarminGymTranslator,
+            translator: GarminGymTranslator::default(),
             workouts: SqliteMeasuredGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), GarminActivityLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),

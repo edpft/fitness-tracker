@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO correction_term (correction, source_record_id, term)\n                VALUES (?, ?, ?)\n                ON CONFLICT DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "660c634dc060807242fad8642b8c01abfdf7283dfa366285f7126f6fe0b6bb1d"
+}

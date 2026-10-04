@@ -27,6 +27,7 @@ pub use credentials::{Credential, CredentialError, Credentials};
 pub use folder::FolderFiles;
 pub use garmin::{
     GarminAuth, GarminCredentials, GarminGymTranslator, GarminHrv, GarminHrvTranslator,
+    GarminRecordedSets,
 };
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyStandIns, HevyWorkoutEvents,

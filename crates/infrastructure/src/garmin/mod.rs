@@ -15,6 +15,7 @@
 pub mod account;
 pub mod activities;
 pub mod auth;
+pub mod corrections;
 pub mod exercise_sets;
 pub mod files;
 pub mod fit;
@@ -26,6 +27,7 @@ pub mod translate;
 pub use account::{ActivityAccount, NightAccount, nights};
 pub use activities::{ActivityPage, GarminActivities};
 pub use auth::{GarminAuth, GarminCredentials};
+pub use corrections::{FoundSet, GarminRecordedSets};
 pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
 pub use files::{ActivityFilePage, GarminActivityFiles};
 pub use gym::GarminGymTranslator;

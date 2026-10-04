@@ -18,7 +18,12 @@ use domain::{
         Endpoint, EventKind, EventProvenance, FetchedAt, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
-    normalised::{OperatorZone, RefusalLocus, RefusalReason},
+    measure::{Kg, RepCount},
+    normalised::{
+        Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay,
+        OperatorZone, RefusalLocus, RefusalReason, SetFigures, SourceTerm,
+    },
+    sequence::NonEmpty,
 };
 use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
@@ -112,7 +117,16 @@ fn translate(
     activity: &Value,
     sets: Option<&Value>,
 ) -> Result<Translation<MeasuredGymSession>, Failure> {
-    translate_with(activity, sets, None)
+    translate_with(activity, sets, None, &EditOverlay::default())
+}
+
+/// As [`translate`], with the operator's corrections in hand.
+fn translate_correcting(
+    activity: &Value,
+    sets: Option<&Value>,
+    overlay: &EditOverlay,
+) -> Result<Translation<MeasuredGymSession>, Failure> {
+    translate_with(activity, sets, None, overlay)
 }
 
 /// As [`translate`], with the file the watch wrote where one landed.
@@ -120,6 +134,7 @@ fn translate_with(
     activity: &Value,
     sets: Option<&Value>,
     recording: Option<&[u8]>,
+    overlay: &EditOverlay,
 ) -> Result<Translation<MeasuredGymSession>, Failure> {
     let id = activity
         .get("activityId")
@@ -153,7 +168,8 @@ fn translate_with(
     let [account] = accounts.as_slice() else {
         return Err(format!("{} accounts, not one", accounts.len()).into());
     };
-    Ok(GarminGymTranslator.translate(account, &OperatorZone::try_from("Europe/London")?)?)
+    Ok(GarminGymTranslator::correcting(overlay.clone())
+        .translate(account, &OperatorZone::try_from("Europe/London")?)?)
 }
 
 fn session_for(activity: &Value, sets: Option<&Value>) -> Result<MeasuredGymSession, Failure> {
@@ -332,7 +348,7 @@ async fn derive(pool: &SqlitePool) -> Result<application::NormalisationSummary, 
     let normalisation = Normalisation::new(
         NormalisationPorts {
             raw: GarminGymAccountReader::new(pool.clone())?,
-            translator: GarminGymTranslator,
+            translator: GarminGymTranslator::default(),
             workouts: SqliteMeasuredGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), "garmin.activities")?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
@@ -878,7 +894,8 @@ fn a_session_holds_the_readings_the_watch_wrote() {
     .expect("an archive");
 
     let Translation::Entity { entity, refusals } =
-        translate_with(&activity, None, Some(&file)).expect("a translation")
+        translate_with(&activity, None, Some(&file), &EditOverlay::default())
+            .expect("a translation")
     else {
         panic!("no session");
     };
@@ -919,7 +936,9 @@ fn a_recording_whose_clock_is_wrong_still_places_its_readings() {
     ))
     .expect("an archive");
 
-    let session = match translate_with(&activity, None, Some(&file)).expect("a translation") {
+    let session = match translate_with(&activity, None, Some(&file), &EditOverlay::default())
+        .expect("a translation")
+    {
         Translation::Entity { entity, .. } => *entity,
         other => panic!("no session: {other:?}"),
     };
@@ -949,10 +968,13 @@ fn a_recording_that_will_not_read_costs_the_series_and_not_the_summary() {
     let id = "3461073244";
     let activity = activity(id, "strength_training", "2019-03-14 07:43:22", &[]);
 
-    let Translation::Entity { entity, refusals } =
-        translate_with(&activity, None, Some(b"PK\x03\x04 and then nonsense"))
-            .expect("a translation")
-    else {
+    let Translation::Entity { entity, refusals } = translate_with(
+        &activity,
+        None,
+        Some(b"PK\x03\x04 and then nonsense"),
+        &EditOverlay::default(),
+    )
+    .expect("a translation") else {
         panic!("no session");
     };
 
@@ -1004,7 +1026,8 @@ fn a_recording_holding_no_reading_is_a_session_with_none() {
     );
     let file = archive(&recording(920_000_000, &[(920_000_000, None)])).expect("an archive");
 
-    let session = match translate_with(&activity, Some(&sets), Some(&file)).expect("a translation")
+    let session = match translate_with(&activity, Some(&sets), Some(&file), &EditOverlay::default())
+        .expect("a translation")
     {
         Translation::Entity { entity, .. } => *entity,
         other => panic!("no session: {other:?}"),
@@ -1132,7 +1155,7 @@ fn a_withdrawn_activity_withdraws_its_session() {
     };
 
     let zone = OperatorZone::try_from("Europe/London").expect("a zone");
-    match GarminGymTranslator
+    match GarminGymTranslator::default()
         .translate(account, &zone)
         .expect("a translation")
     {
@@ -1262,5 +1285,219 @@ fn a_stated_zero_duration_is_nothing_happening_and_an_absent_one_is_not() {
             figure: "a duration"
         }],
         "silence is a missing figure, not a non-event"
+    );
+}
+
+/// A figures correction over one set of one record, as the store hands it back.
+fn correcting(
+    activity: &str,
+    began: &str,
+    recorded: SetFigures,
+    reads: SetFigures,
+) -> Result<EditOverlay, Failure> {
+    let term = CorrectedTerm::new(
+        SourceRecordId::try_from(activity)?,
+        SourceTerm::try_from(began)?,
+    );
+    Ok(EditOverlay::of(&[Correction::new(
+        CorrectionId::from(1),
+        "2026-10-04T09:00:00Z".parse()?,
+        CorrectionReason::try_from("transposed when I typed it into the watch".to_owned())?,
+        Corrected::Figures {
+            recorded,
+            figures: reads,
+            sets: NonEmpty::new(vec![term])?,
+        },
+    )]))
+}
+
+/// A fixture builder, so it returns `Result`: the test exemptions for
+/// `expect` do not reach a free function, and the call site is a `#[test]`.
+fn figures(reps: u32, grams: Option<u64>) -> Result<SetFigures, Failure> {
+    Ok(SetFigures::new(
+        RepCount::new(reps)?,
+        grams.map(Kg::from_grams),
+    ))
+}
+
+/// 2018-06-11's deadlift, which is the case the field exists for (#351).
+///
+/// The watch holds 58 repetitions at 6 kg where the operator performed six at
+/// 57.5 — the two figures typed into each other's boxes — and his own sheet for
+/// that day carries `6 × 57.5` in the cell beside it. Nothing about the record
+/// says which of the two numbers is wrong, so he says.
+#[test]
+fn a_figures_correction_replaces_what_the_watch_recorded_for_one_set() {
+    let activity = activity(
+        "2768338072",
+        "strength_training",
+        "2018-06-11 06:10:36",
+        &[],
+    );
+    let sets = exercise_sets(
+        "2768338072",
+        &[
+            set(
+                "2018-06-11T06:25:22.0",
+                58,
+                Some(6_000.0),
+                ("DEADLIFT", None),
+            ),
+            set(
+                "2018-06-11T06:31:04.0",
+                10,
+                Some(50_000.0),
+                ("DEADLIFT", None),
+            ),
+        ],
+    );
+
+    let overlay = correcting(
+        "2768338072",
+        "2018-06-11T06:25:22.0",
+        figures(58, Some(6_000)).expect("figures"),
+        figures(6, Some(57_500)).expect("figures"),
+    )
+    .expect("an overlay");
+
+    let session =
+        match translate_correcting(&activity, Some(&sets), &overlay).expect("a translation") {
+            Translation::Entity { entity, .. } => *entity,
+            other => panic!("no session: {other:?}"),
+        };
+
+    let sets = session
+        .recorded()
+        .sets()
+        .expect("the session recorded sets");
+    let corrected = sets.first();
+    assert_eq!(
+        corrected.reps.as_u32(),
+        6,
+        "the count he actually performed"
+    );
+    assert_eq!(
+        corrected.load,
+        Some(Load::Absolute(Kg::from_grams(57_500))),
+        "and the load, on the axis the watch's own term still decides"
+    );
+
+    let untouched = sets.iter().nth(1).expect("the second set");
+    assert_eq!(untouched.reps.as_u32(), 10);
+    assert_eq!(
+        untouched.load,
+        Some(Load::Absolute(Kg::from_grams(50_000))),
+        "a correction reaches the set it names and no other"
+    );
+}
+
+/// The anchor is the set's own figures as well as its instant, so a set edited
+/// at source is a correction that lapses rather than one that overwrites a
+/// number nobody has ruled on (§ II.2's "overrides do not propagate").
+#[test]
+fn a_figures_correction_lapses_when_the_watch_no_longer_records_what_it_replaced() {
+    let activity = activity(
+        "2768338072",
+        "strength_training",
+        "2018-06-11 06:10:36",
+        &[],
+    );
+    // The source now says six at 50 kg: not the 58 × 6 the operator corrected.
+    let sets = exercise_sets(
+        "2768338072",
+        &[set(
+            "2018-06-11T06:25:22.0",
+            6,
+            Some(50_000.0),
+            ("DEADLIFT", None),
+        )],
+    );
+
+    let overlay = correcting(
+        "2768338072",
+        "2018-06-11T06:25:22.0",
+        figures(58, Some(6_000)).expect("figures"),
+        figures(6, Some(57_500)).expect("figures"),
+    )
+    .expect("an overlay");
+
+    let session =
+        match translate_correcting(&activity, Some(&sets), &overlay).expect("a translation") {
+            Translation::Entity { entity, .. } => *entity,
+            other => panic!("no session: {other:?}"),
+        };
+
+    let sets = session
+        .recorded()
+        .sets()
+        .expect("the session recorded sets");
+    assert_eq!(
+        sets.first().load,
+        Some(Load::Absolute(Kg::from_grams(50_000))),
+        "what the source says now stands, because the set he ruled on is gone"
+    );
+}
+
+/// A corrected load reaches the classifier lookup and not only the stored set.
+///
+/// Garmin's bare `ROW` names no implement, so the mapping places it by the
+/// weight typed against it — a 32.5 kg row is a barbell row and a 15 kg row is
+/// not. Correcting the number after the lookup would leave the exercise placed
+/// by the figure the operator has just said was wrong.
+#[test]
+fn a_corrected_load_places_the_movement_the_mapping_reads_off_it() {
+    let activity = activity(
+        "2768338073",
+        "strength_training",
+        "2018-06-11 06:10:36",
+        &[],
+    );
+    let sets = exercise_sets(
+        "2768338073",
+        &[set(
+            "2018-06-11T06:44:52.0",
+            10,
+            Some(15_000.0),
+            ("ROW", None),
+        )],
+    );
+
+    let uncorrected = match translate(&activity, Some(&sets)).expect("a translation") {
+        Translation::Entity { entity, .. } => *entity,
+        other => panic!("no session: {other:?}"),
+    };
+    let dumbbell = uncorrected
+        .recorded()
+        .sets()
+        .expect("sets")
+        .first()
+        .guess
+        .guess()
+        .expect("a proposal");
+
+    let overlay = correcting(
+        "2768338073",
+        "2018-06-11T06:44:52.0",
+        figures(10, Some(15_000)).expect("figures"),
+        figures(10, Some(32_500)).expect("figures"),
+    )
+    .expect("an overlay");
+    let corrected =
+        match translate_correcting(&activity, Some(&sets), &overlay).expect("a translation") {
+            Translation::Entity { entity, .. } => *entity,
+            other => panic!("no session: {other:?}"),
+        };
+    let barbell = corrected
+        .recorded()
+        .sets()
+        .expect("sets")
+        .first()
+        .guess
+        .guess()
+        .expect("a proposal");
+
+    assert_ne!(
+        dumbbell, barbell,
+        "the lookup sees the corrected load, so the implement it reads off it changes"
     );
 }
