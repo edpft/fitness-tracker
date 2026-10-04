@@ -463,10 +463,20 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
             .await
         }
         Command::Normalise(zone) => {
+            // The overlay is read here, as it is for Hevy and for the same
+            // reason: § II.2 applies a correction while the layer is rebuilt,
+            // and this is that moment. It is keyed on `garmin.exercise_sets`
+            // because a set is what the corrected figures belong to, and that
+            // is the record whose content is wrong.
+            let overlay =
+                SqliteEditOverlayStore::new(pool.clone(), GarminExerciseSetLandingStore::STREAM)?
+                    .overlay()
+                    .await?;
+
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminGymAccountReader::new(pool.clone())?,
-                    translator: GarminGymTranslator,
+                    translator: GarminGymTranslator::correcting(overlay),
                     workouts: SqliteMeasuredGymSessionStore::new(pool.clone())?,
                     refusals: SqliteRefusalStore::new(
                         pool.clone(),

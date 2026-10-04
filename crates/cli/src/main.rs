@@ -30,7 +30,7 @@ use std::{
 };
 
 use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
-use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
@@ -296,26 +296,40 @@ fn discipline_command() -> ClapCommand {
 /// source. A second discipline is an arm, not a second command.
 fn corrections_command() -> ClapCommand {
     ClapCommand::new("corrections")
-        .about("What the operator says a source recorded under the wrong exercise")
+        .about("What the operator says a source recorded wrongly: an exercise, or a set's figures")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
             ClapCommand::new("add")
-                .about("Assert that what a source named was another exercise")
+                .about(
+                    "Assert that what a source named was another exercise, \
+                     or that what it recorded for a set was other figures",
+                )
                 .arg(timezone_argument())
                 .arg(
                     Arg::new("was")
                         .long("was")
                         .value_name("exercise")
-                        .required(true)
+                        .conflicts_with_all(["recorded", "on"])
                         .help("The exercise those records read as now, as a vocabulary key"),
+                )
+                .arg(
+                    Arg::new("recorded")
+                        .long("recorded")
+                        .value_name("reps>x<kg")
+                        .requires("on")
+                        .conflicts_with_all(["was", "from", "until"])
+                        .help("The figures the source recorded for the set, as 58x6"),
                 )
                 .arg(
                     Arg::new("actually")
                         .long("actually")
-                        .value_name("exercise")
+                        .value_name("exercise-or-figures")
                         .required(true)
-                        .help("The exercise they were, as a vocabulary key"),
+                        .help(
+                            "What it was: a vocabulary key beside --was, \
+                             figures as 6x57.5 beside --recorded",
+                        ),
                 )
                 .arg(
                     Arg::new("because")
@@ -323,6 +337,12 @@ fn corrections_command() -> ClapCommand {
                         .value_name("reason")
                         .required(true)
                         .help("Why, so the correction is readable in six months"),
+                )
+                .arg(
+                    Arg::new("on")
+                        .long("on")
+                        .value_name("date")
+                        .help("The day the set was performed, as YYYY-MM-DD"),
                 )
                 .arg(
                     Arg::new("from").long("from").value_name("date").help(
@@ -333,6 +353,11 @@ fn corrections_command() -> ClapCommand {
                     Arg::new("until").long("until").value_name("date").help(
                         "The last day it reaches, as YYYY-MM-DD. Defaults to the last record",
                     ),
+                )
+                .group(
+                    ArgGroup::new("field")
+                        .args(["was", "recorded"])
+                        .required(true),
                 ),
         )
         .subcommand(ClapCommand::new("show").about("Every correction in force, with its reason"))
@@ -1109,6 +1134,22 @@ async fn corrections_run(
                     .map(String::as_str)
                     .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))
             };
+            // Which field is being corrected is named by the flag, and the
+            // group above makes it exactly one of them. `--actually` then means
+            // an exercise or a set's figures, which is what it says either way.
+            if add.get_one::<String>("recorded").is_some() {
+                return corrections::add_figures(
+                    database,
+                    &zone,
+                    &corrections::FigureAssertion {
+                        on: text("on")?,
+                        recorded: text("recorded")?,
+                        actually: text("actually")?,
+                        because: text("because")?,
+                    },
+                )
+                .await;
+            }
             corrections::add(
                 database,
                 &zone,

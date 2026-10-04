@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            INSERT INTO exercise_correction (stream, exercise, asserted_at, reason)\n            VALUES (?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "query": "\n            INSERT INTO correction (stream, asserted_at, reason, exercise)\n            VALUES (?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "exercise_correction",
+            "table": "correction",
             "name": "id"
           }
         }
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "0eeb4115c3e98cc72066b359fdb3d3bd785aedfb2b4afe5f84ca8c5c47361bea"
+  "hash": "f20f20166f73b97d7f069078d3f5487af26573c5add2adb0a5c18f52fc20ae06"
 }

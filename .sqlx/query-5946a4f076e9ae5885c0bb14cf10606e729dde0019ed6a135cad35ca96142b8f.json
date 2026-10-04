@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT source_record_id AS \"source_record_id!: String\",\n                   event_kind       AS \"event_kind!: String\",\n                   payload          AS \"payload!: Vec<u8>\"\n            FROM garmin_exercise_set_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "garmin_exercise_set_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "event_kind!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "garmin_exercise_set_landing",
+            "name": "event_kind"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "garmin_exercise_set_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5946a4f076e9ae5885c0bb14cf10606e729dde0019ed6a135cad35ca96142b8f"
+}

@@ -36,9 +36,9 @@ use domain::{
         ComposedFrom, Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate,
         MeasuredSet, Recorded, SignedKg,
     },
-    landing::{EventKind, LandedRecord},
+    landing::{EventKind, LandedRecord, SourceRecordId},
     measure::{BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
-    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{EditOverlay, OperatorZone, RefusalLocus, RefusalReason, SetFigures, StartedAt},
     sequence::NonEmpty,
 };
 use jiff::civil::DateTime;
@@ -61,7 +61,7 @@ use super::{
 const GYM: &str = "strength_training";
 
 /// The set type Garmin gives a set that was worked rather than rested.
-const ACTIVE: &str = "ACTIVE";
+pub(super) const ACTIVE: &str = "ACTIVE";
 
 /// What Garmin's classifier says when it could not tell.
 const UNKNOWN: &str = "UNKNOWN";
@@ -95,23 +95,28 @@ struct ActivityType {
 }
 
 /// One activity's sets, as the second endpoint serves them.
+///
+/// Visible to the rest of the adapter, so [`super::corrections`] reads a set's
+/// figures through the same shape the translator does: two readings of one
+/// payload that disagreed would offer the operator a correction the derivation
+/// will never apply.
 #[derive(Debug, Deserialize)]
-struct ExerciseSets {
+pub(super) struct ExerciseSets {
     #[serde(default, rename = "exerciseSets")]
-    sets: Vec<ServedSet>,
+    pub(super) sets: Vec<ServedSet>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ServedSet {
+pub(super) struct ServedSet {
     #[serde(default)]
-    exercises: Vec<Candidate>,
+    pub(super) exercises: Vec<Candidate>,
     #[serde(rename = "repetitionCount")]
-    reps: Option<u32>,
-    weight: Option<Box<RawValue>>,
+    pub(super) reps: Option<u32>,
+    pub(super) weight: Option<Box<RawValue>>,
     #[serde(rename = "setType")]
-    set_type: Option<String>,
+    pub(super) set_type: Option<String>,
     #[serde(rename = "startTime")]
-    started_at: Option<String>,
+    pub(super) started_at: Option<String>,
 }
 
 /// One movement the classifier proposed, with how sure it was.
@@ -123,16 +128,30 @@ struct ServedSet {
 /// exchange for nothing. What the entity says is that the movement is a guess,
 /// which is true at every probability Garmin serves.
 #[derive(Debug, Deserialize)]
-struct Candidate {
-    category: Option<String>,
-    name: Option<String>,
+pub(super) struct Candidate {
+    pub(super) category: Option<String>,
+    pub(super) name: Option<String>,
 }
 
 /// Garmin's adapter for gym sessions.
 ///
-/// Stateless, as every translator here is: the zone arrives per call.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GarminGymTranslator;
+/// The zone arrives per call, as it does for every translator here. What this
+/// does hold is the edit overlay, because a correction is per observation and
+/// cannot be resolved without the operator's assertions in hand. [`Default`] is
+/// the empty overlay: a stream nobody has corrected reads exactly as it did
+/// before there was one.
+#[derive(Debug, Clone, Default)]
+pub struct GarminGymTranslator {
+    overlay: EditOverlay,
+}
+
+impl GarminGymTranslator {
+    /// Translation with the operator's corrections in hand.
+    #[must_use]
+    pub const fn correcting(overlay: EditOverlay) -> Self {
+        Self { overlay }
+    }
+}
 
 impl Translator for GarminGymTranslator {
     type Account = ActivityAccount;
@@ -231,7 +250,7 @@ impl Translator for GarminGymTranslator {
             }
         };
 
-        let Some(recorded) = recorded(&activity, account, zone, &mut scribe) else {
+        let Some(recorded) = recorded(&activity, account, zone, &self.overlay, &mut scribe) else {
             return Ok(scribe.nothing_translatable());
         };
 
@@ -296,13 +315,14 @@ fn recorded(
     activity: &Activity,
     account: &ActivityAccount,
     zone: &OperatorZone,
+    overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<Recorded> {
     let heart_rate = heart_rate(activity)
         .map(|stated| MeasuredHeartRate::new(stated, recorded_series(account, scribe)));
     let sets = account
         .sets()
-        .and_then(|landed| measured_sets(landed, zone, scribe));
+        .and_then(|landed| measured_sets(landed, zone, overlay, scribe));
 
     match (heart_rate, sets) {
         (Some(heart_rate), Some(sets)) => Some(Recorded::Both { heart_rate, sets }),
@@ -367,6 +387,7 @@ fn whole(stated: Option<&RawValue>) -> Option<&str> {
 fn measured_sets(
     landed: &LandedRecord,
     zone: &OperatorZone,
+    overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<NonEmpty<MeasuredSet>> {
     let served: ExerciseSets = match serde_json::from_slice(landed.payload().as_bytes()) {
@@ -400,11 +421,21 @@ fn measured_sets(
         return None;
     }
 
+    let corrections = Corrections {
+        overlay,
+        record: landed.source_record_id(),
+    };
+
     let mut sets = Vec::with_capacity(active.len());
     for (ordinal, set) in active.iter().enumerate() {
         let at = u32::try_from(ordinal).unwrap_or(u32::MAX);
-        if let Some(measured) = measured_set(set, zone, RefusalLocus::Ungrouped { set: at }, scribe)
-        {
+        if let Some(measured) = measured_set(
+            set,
+            zone,
+            &corrections,
+            RefusalLocus::Ungrouped { set: at },
+            scribe,
+        ) {
             sets.push(measured);
         }
     }
@@ -479,10 +510,37 @@ fn proposed_by(run: &[Working]) -> Option<Guess> {
     agreed
 }
 
+/// The operator's corrections, bound to the record whose sets are being read.
+///
+/// **Anchored on the instant Garmin states the set began**, which is the one
+/// thing it publishes about a set that is neither derived nor positional: a
+/// `messageIndex` is null on every set the operator's 2018 watch wrote, and an
+/// ordinal moves the moment a set is inserted. The figures the source recorded
+/// go with it, so a set that has changed at source is a correction that lapses
+/// rather than one that overwrites a number nobody ruled on.
+struct Corrections<'a> {
+    overlay: &'a EditOverlay,
+    record: &'a SourceRecordId,
+}
+
+impl Corrections<'_> {
+    /// What this set's figures read: the source's own, unless the operator has
+    /// said otherwise about exactly these.
+    fn figures(&self, set: &ServedSet, recorded: SetFigures) -> SetFigures {
+        let Some(term) = set.started_at.as_deref() else {
+            return recorded;
+        };
+        self.overlay
+            .figures_for(self.record, term, recorded)
+            .unwrap_or(recorded)
+    }
+}
+
 /// One set, or the reason it is not one.
 fn measured_set(
     set: &ServedSet,
     zone: &OperatorZone,
+    corrections: &Corrections<'_>,
     locus: RefusalLocus,
     scribe: &mut Scribe,
 ) -> Option<Working> {
@@ -521,10 +579,23 @@ fn measured_set(
         }
     };
 
-    // The weight is read before the movement, not after: a bare category is
-    // placed by what the operator typed against it — a 32.5 kg row is a barbell
-    // row and a 15 kg row is not — so the lookup needs the number.
-    let grams = weight(set);
+    // **Corrected before anything reads them**, which is the whole point of an
+    // overlay being an input: a bare category is placed by what the operator
+    // typed against it — a 32.5 kg row is a barbell row and a 15 kg row is not
+    // — so a corrected load has to reach the lookup, not just the stored set.
+    let figures = corrections.figures(
+        set,
+        SetFigures::new(
+            reps,
+            weight(set).map(|grams| Kg::from_grams(grams.unsigned_abs())),
+        ),
+    );
+    let reps = figures.reps();
+    let grams = figures
+        .load()
+        .map(|load| i64::try_from(load.as_grams()).unwrap_or(i64::MAX));
+
+    // The weight is read before the movement, not after, for the same reason.
     let (guess, reading, unclassified) = guessed(set, grams, locus, scribe);
     let load = grams.map(|grams| load(grams, reading));
 
@@ -575,7 +646,7 @@ fn guessed(
 }
 
 /// Garmin's term for a movement, as it serves it.
-fn term(category: &str, name: Option<&str>) -> String {
+pub(super) fn term(category: &str, name: Option<&str>) -> String {
     name.map_or_else(|| category.to_owned(), |name| format!("{category}/{name}"))
 }
 
@@ -586,7 +657,7 @@ fn term(category: &str, name: Option<&str>) -> String {
 /// nothing was typed against — every one of the 124 single-set sessions the
 /// watch classified on its own carries an absent weight or a zero, and none
 /// carries a number.
-fn weight(set: &ServedSet) -> Option<i64> {
+pub(super) fn weight(set: &ServedSet) -> Option<i64> {
     // A negative is Garmin's `-1` sentinel and never a mass, so `whole` reading
     // no digits off it is the right answer rather than a near miss.
     let grams: i64 = whole(set.weight.as_deref())?.parse().ok()?;
@@ -623,12 +694,23 @@ fn seconds(stated: Option<&RawValue>) -> Stated {
     PositiveDuration::from_seconds(seconds).map_or(Stated::NoLength, Stated::Length)
 }
 
+/// The figures a served set records, where it records a set at all.
+///
+/// [`None`] for the two things the translator refuses a set over — an absent
+/// count, and the zero Garmin writes for a set taken to no repetitions — so a
+/// correction cannot be asserted over a set no derivation will produce.
+pub(super) fn recorded_figures(set: &ServedSet) -> Option<SetFigures> {
+    let reps = RepCount::new(set.reps?).ok()?;
+    let load = weight(set).map(|grams| Kg::from_grams(grams.unsigned_abs()));
+    Some(SetFigures::new(reps, load))
+}
+
 /// A naive GMT stamp, placed.
 ///
 /// Garmin serves no offset on either the activity's start or a set's, and both
 /// are UTC — `startTimeLocal` beside it is the watch's wall clock and is not
 /// carried (§ II.3). The zone is the operator's declared one.
-fn started(stamp: &str, zone: &OperatorZone) -> Result<StartedAt, RefusalReason> {
+pub(super) fn started(stamp: &str, zone: &OperatorZone) -> Result<StartedAt, RefusalReason> {
     let unreadable = |detail: String| RefusalReason::UnreadableValue {
         field: "start",
         detail,
