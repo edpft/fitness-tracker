@@ -90,6 +90,36 @@ impl SbsDay {
     }
 }
 
+/// A set the record holds, as a repetition-maximum day is read from it.
+///
+/// **Completed only, because a failed attempt is not a maximum.** A failure
+/// bounds one from above, which is what [`Anchor::failed`] carries for a test;
+/// this chart has no use for that bound, because what it needs is a load that
+/// went up for a stated count. So a failure is not representable here rather
+/// than filtered out inside — and a day whose heaviest attempt failed no longer
+/// loses the attempt below it that went up.
+///
+/// [`Anchor::failed`]: super::super::anchor::Anchor::failed
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletedSet {
+    load: Kg,
+    reps: RepCount,
+}
+
+impl CompletedSet {
+    pub const fn new(load: Kg, reps: RepCount) -> Self {
+        Self { load, reps }
+    }
+
+    pub const fn load(self) -> Kg {
+        self.load
+    }
+
+    pub const fn reps(self) -> RepCount {
+        self.reps
+    }
+}
+
 /// A day's position in the week. The chart runs two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SbsSession {
@@ -268,35 +298,75 @@ pub fn working_load(maximum: Kg, share: Percentage, increment: Kg) -> Option<Kg>
     u64::try_from(floored).ok().map(Kg::from_grams)
 }
 
+/// What a week's repetition-maximum day achieved: the heaviest completed set
+/// taken for at least the repetitions the chart asked for.
+///
+/// **The count is what makes it a maximum, and reading the heaviest set alone
+/// got this wrong** (#360). The operator's 8RM day of 2 October 2026 recorded
+/// `8 @ 75kg` and then `5 @ 77.5kg`, having gone up and not got the eight. His
+/// 8RM was 75kg; taking the 77.5 put the training maximum at 97.5kg instead of
+/// 95kg, and every week after it is a share of that.
+///
+/// **At least, rather than exactly.** Nine repetitions at 75kg proves the 8RM is
+/// 75kg or more, so the set is evidence and the floor it gives is honest.
+/// Demanding the exact count would discard it and reach further down the
+/// record for a lighter set — which is the same error in the other direction.
+///
+/// **`None` where no set reached the count**, and the caller leaves the maximum
+/// where it was. Seven repetitions at 75kg does say the 8RM is under 75kg, and
+/// nothing in SBS's table says by how much: inventing a discount here would be
+/// this crate's arithmetic wearing the chart's authority.
+///
+/// Also `None` for a week the chart does not name, and for one whose second
+/// session measures nothing.
+#[must_use]
+pub fn achieved(week: u32, sets: &[CompletedSet]) -> Option<Kg> {
+    let wanted = day(week, SbsSession::Second).ok()?.sets_the_maximum()?;
+    sets.iter()
+        .filter(|set| set.reps.as_u32() >= wanted.as_u32())
+        .map(|set| set.load)
+        .max()
+}
+
 /// The maximum a cycle is programming from, after the repetition-maximum days it
 /// has already run.
 ///
-/// **Where the chart's mechanism actually lives.** Each entry is a week and what
-/// was lifted on that week's second session; the chart says what repetition
-/// count that session was taken at, and [`training_max_share`] turns the result
-/// into what the next week programmes from. Applying them in order is the whole
-/// of the progression.
+/// **Where the chart's mechanism actually lives.** Each entry is a week and the
+/// sets that week's second session recorded; [`achieved`] says which of them was
+/// the repetition maximum and [`training_max_share`] turns it into what the next
+/// week programmes from. Applying them in order is the whole of the progression.
+///
+/// **The sets go in, not a load**, and that is the fix for #360 rather than a
+/// shape preference: handing this a number means the caller has already decided
+/// which set was the maximum, and deciding that needs the chart's own repetition
+/// count. What the record says is the caller's business; what it means is this
+/// module's, and a signature that splits them differently invites the split to be
+/// made in the wrong place again.
 ///
 /// Entries are applied in the order given, because each advance is a share of
-/// the one before it. A week the chart does not name, or one whose session sets
-/// no maximum, is skipped — a week nobody trained leaves the maximum where it
-/// was, which is right rather than merely convenient.
+/// the one before it. A week the chart does not name, one whose session sets no
+/// maximum, and one that did not reach the count are all skipped — a week nobody
+/// trained leaves the maximum where it was, which is right rather than merely
+/// convenient.
 ///
 /// **This is the reason SBS reads the record at all**, and it is the ordinary
 /// case rather than a special one: a linear ladder reads it too. What differs is
 /// what each asks. A ladder asks whether the top set was completed; this asks
-/// what it weighed.
+/// which set was the maximum and what it weighed.
 #[must_use]
-pub fn maximum_after(opening: Kg, performed: &[(u32, Kg)], increment: Kg) -> Kg {
+pub fn maximum_after(opening: Kg, performed: &[(u32, Vec<CompletedSet>)], increment: Kg) -> Kg {
     let mut maximum = opening;
-    for (week, achieved) in performed {
+    for (week, sets) in performed {
         let Ok(day) = day(*week, SbsSession::Second) else {
             continue;
         };
         let Some(reps) = day.sets_the_maximum() else {
             continue;
         };
-        if let Some(next) = advance(*achieved, reps, increment) {
+        let Some(achieved) = achieved(*week, sets) else {
+            continue;
+        };
+        if let Some(next) = advance(achieved, reps, increment) {
             maximum = next;
         }
     }
