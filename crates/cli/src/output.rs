@@ -678,12 +678,17 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_standing(block, standing.anchor, parameters);
         }
-        GymMesocycle::Progression(Progression::Provided { .. }) => sbs_standing(standing.anchor),
+        GymMesocycle::Progression(Progression::Provided { .. }) => {
+            sbs_standing(standing.anchor, standing.maximum);
+        }
     }
 }
 
 /// An SBS cycle: where the chart stands, and the one caveat that matters.
-fn sbs_standing(anchor: Option<domain::prescription::Anchor>) {
+fn sbs_standing(
+    anchor: Option<domain::prescription::Anchor>,
+    maximum: Option<domain::measure::Kg>,
+) {
     match anchor {
         Some(anchor) => println!(
             "the chart opens from {} ({})",
@@ -704,6 +709,15 @@ fn sbs_standing(anchor: Option<domain::prescription::Anchor>) {
         "  read from the record: each performed rep-max day advances it, so a \
          week nobody trained leaves it where it was"
     );
+    // **And where it has got to** (#362). Saying that a number moves without
+    // saying where it has moved to leaves the reader to work out the session's
+    // loads for themselves, which is the question this report exists to answer.
+    match maximum {
+        Some(maximum) if Some(maximum) != anchor.map(domain::prescription::Anchor::load) => {
+            println!("  and it stands at {maximum}kg");
+        }
+        Some(_) | None => {}
+    }
 }
 
 /// A standalone test: what it is an attempt at, and which session takes it.
@@ -897,6 +911,35 @@ fn block_standing(
         .is_some_and(|test| test.light().is_none())
     {
         println!("  its entry-test week runs the test only");
+    }
+}
+
+/// What the session's loads are shares of, in words.
+///
+/// **The anchor is not always it, and saying so was #362.** An SBS cycle's
+/// percentages are shares of a maximum the chart advances on every
+/// repetition-maximum day; the header printed the cycle's opening anchor and
+/// the session below it was derived from something else. The operator, reading
+/// 92.5kg over a set of 82.5kg top sets: *"is the anchor now calculated from
+/// Friday night 8RM?"*
+///
+/// So the maximum leads where it has moved, and the anchor stays beside it
+/// because where the number came from is the rest of the answer. Where nothing
+/// has moved it, the anchor is the whole answer and is printed alone.
+fn shares_of(
+    derived_from: domain::prescription::DerivedFrom,
+    week: domain::prescription::WeekKind,
+    maximum: Option<domain::measure::Kg>,
+) -> String {
+    let derived = derived_phrase(derived_from, week);
+    let anchored = derived_from
+        .anchor()
+        .map(domain::prescription::Anchor::load);
+    match maximum {
+        Some(maximum) if Some(maximum) != anchored => {
+            format!("maximum {maximum}kg, advanced from {derived}")
+        }
+        Some(_) | None => derived,
     }
 }
 
@@ -1168,7 +1211,11 @@ pub fn prescription(issued: &application::Prescription) {
     );
     println!(
         "{}, {}{}",
-        derived_phrase(workout.derived_from(), workout.week()),
+        shares_of(
+            workout.derived_from(),
+            workout.week(),
+            issued.training_maximum
+        ),
         workout.week(),
         issued
             .history_through
@@ -1758,7 +1805,7 @@ pub fn holidays(all: &domain::schedule::Holidays, from: jiff::civil::Date) {
 
 #[cfg(test)]
 mod tests {
-    use super::derived_phrase;
+    use super::{derived_phrase, shares_of};
     use domain::{
         measure::Kg,
         prescription::{Anchor, AnchorProvenance, DerivedFrom, WeekIndex, WeekKind},
@@ -1787,14 +1834,54 @@ mod tests {
     fn a_test_week_is_against_its_anchor_and_a_climbing_week_is_on_it() {
         assert_eq!(
             derived_phrase(DerivedFrom::Anchor(ninety()), WeekKind::Test),
-            "against 90kg (asserted, from 2026-07-03)"
+            "against 90kg (asserted, in force from 2026-07-03)"
         );
         assert_eq!(
             derived_phrase(
                 DerivedFrom::Anchor(ninety()),
                 WeekKind::Climbing(WeekIndex::FIRST)
             ),
-            "anchor 90kg (asserted, from 2026-07-03)"
+            "anchor 90kg (asserted, in force from 2026-07-03)"
+        );
+    }
+
+    /// **An SBS week says what it is a share of, not what the cycle opened
+    /// from** (#362). The operator was handed 82.5kg top sets under a header
+    /// reading 92.5kg, and asked where the number had come from.
+    #[test]
+    fn a_moved_maximum_leads_and_the_anchor_stays_beside_it() {
+        assert_eq!(
+            shares_of(
+                DerivedFrom::Anchor(ninety()),
+                WeekKind::Climbing(WeekIndex::FIRST),
+                Some(Kg::from_grams(95_000)),
+            ),
+            "maximum 95kg, advanced from anchor 90kg (asserted, in force from 2026-07-03)",
+        );
+    }
+
+    /// And where nothing has moved it, the anchor is the whole answer.
+    ///
+    /// A second number equal to the first would be noise, and a reader would
+    /// have to compare them to find that out.
+    #[test]
+    fn a_maximum_still_at_the_anchor_is_not_said_twice() {
+        assert_eq!(
+            shares_of(
+                DerivedFrom::Anchor(ninety()),
+                WeekKind::Climbing(WeekIndex::FIRST),
+                Some(Kg::from_grams(90_000)),
+            ),
+            "anchor 90kg (asserted, in force from 2026-07-03)",
+        );
+        assert_eq!(
+            shares_of(
+                DerivedFrom::Anchor(ninety()),
+                WeekKind::Climbing(WeekIndex::FIRST),
+                None,
+            ),
+            "anchor 90kg (asserted, in force from 2026-07-03)",
+            "and a template whose maximum does not move says nothing about one",
         );
     }
 

@@ -30,9 +30,7 @@ use domain::{
     normalised::{OperatorZone, StartedAt},
     prescription::{
         Anchor, AnchorProvenance, Block, GymMesocycle, PrescribedExercise, PrimaryPattern, Skip,
-        Test, Tested,
-        authored::Shape,
-        target::Prescribed,
+        Test, Tested, authored::Shape, target::Prescribed,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     sequence::NonEmpty,
@@ -176,14 +174,17 @@ async fn ready(
 
     // A second plan, beside the fixture's own. Its weeks are September's and
     // the fixture block's are July's, so neither overlaps the other.
+    //
+    // **Built before the await, not inside it.** A `?` in an argument holds its
+    // `Result` across the await, and a boxed error is not `Send` — which
+    // `clippy::future_not_send` refuses rather than this reading better.
+    let plan = programme::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?;
+    let parameters = programme::parameters()?;
     Authoring::new(
         SqlitePlanStore::new(pool.clone(), zone.clone()),
         SqliteGenerationParameterStore::new(pool.clone()),
     )
-    .author(
-        &programme::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?,
-        &programme::parameters()?,
-    )
+    .author(&plan, &parameters)
     .await?;
 
     let stands_on = sqlx::query_scalar::<_, i64>("SELECT MIN(id) FROM gym_session")
@@ -215,8 +216,11 @@ async fn ready(
 }
 
 /// The primary exercise of the strength block.
-fn primary_of(prescription: &application::Prescription) -> &PrescribedExercise {
-    let item = prescription
+///
+/// Fallible and unwrapped at the call site: the `clippy.toml` exemptions cover
+/// a `#[test]` body and not a function beside one.
+fn primary_of(prescription: &application::Prescription) -> Option<&PrescribedExercise> {
+    prescription
         .workout
         .shape()
         .items()
@@ -226,29 +230,30 @@ fn primary_of(prescription: &application::Prescription) -> &PrescribedExercise {
                 .next()
                 .is_some_and(|slot| slot.block() == Block::Strength)
         })
-        .expect("a strength block");
-    item.exercises().next().expect("a primary exercise")
+        .and_then(|item| item.exercises().next())
 }
 
 /// Its working sets, as `(load in grams, repetitions prescribed)`.
 ///
 /// Warm-ups are left out: the ramp is derived from the top set and says nothing
 /// about what the chart decided.
-fn working_sets(exercise: &PrescribedExercise) -> Vec<(u64, String)> {
+/// `None` for an exercise counted in anything but repetitions, a set with no
+/// absolute load, or a set the chart left open — none of which a percentage day
+/// of this cycle produces.
+fn working_sets(exercise: &PrescribedExercise) -> Option<Vec<(u64, String)>> {
     let PrescribedExercise::ForReps { sets, .. } = exercise else {
-        panic!("the front squat is counted in repetitions")
+        return None;
     };
     sets.iter()
         .filter(|set| !set.warmup)
         .map(|set| {
             let Some(Load::Absolute(load)) = set.prescription.load() else {
-                panic!("a barbell lift is prescribed an absolute load")
+                return None;
             };
-            let measure = match &set.prescription {
-                Prescribed::Fixed { measure, .. } => measure.to_string(),
-                other => panic!("the chart pins its percentage days: {other:?}"),
+            let Prescribed::Fixed { measure, .. } = &set.prescription else {
+                return None;
             };
-            (load.as_grams(), measure)
+            Some((load.as_grams(), measure.to_string()))
         })
         .collect()
 }
@@ -277,7 +282,8 @@ fn the_monday_is_a_share_of_the_eight_rep_maximum() {
             .await
             .expect("week 2 derives");
 
-        let sets = working_sets(primary_of(&prescription));
+        let primary = primary_of(&prescription).expect("a primary exercise");
+        let sets = working_sets(primary).expect("fixed sets at an absolute load");
         assert_eq!(
             sets,
             vec![
@@ -297,7 +303,7 @@ fn the_monday_is_a_share_of_the_eight_rep_maximum() {
 #[test]
 fn the_primary_slot_is_the_front_squat() {
     corpus::block_on(async {
-        let (prescriber, _directory, _pool) = ready(&[(rep_max_day(), &[(75_000, 8)])])
+        let (prescriber, _directory, pool) = ready(&[(rep_max_day(), &[(75_000, 8)])])
             .await
             .expect("a store holding the cycle and the session");
 
@@ -306,7 +312,7 @@ fn the_primary_slot_is_the_front_squat() {
             .await
             .expect("week 2 derives");
 
-        let store = SqliteGymMesocycleStore::new(_pool.clone(), corpus::zone().expect("a zone"));
+        let store = SqliteGymMesocycleStore::new(pool.clone(), corpus::zone().expect("a zone"));
         let found = store
             .on(week_two())
             .await
@@ -315,7 +321,9 @@ fn the_primary_slot_is_the_front_squat() {
         assert_eq!(found.mesocycle.template(), "sbs");
 
         assert_eq!(
-            primary_of(&prescription).exercise_key(),
+            primary_of(&prescription)
+                .expect("a primary exercise")
+                .exercise_key(),
             "front-squat-barbell",
             "the cycle's primary fills the strength block's first slot",
         );
