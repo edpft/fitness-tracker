@@ -13,7 +13,7 @@
 use domain::{
     measure::{Kg, RepCount},
     prescription::{
-        SbsDay, SbsSession, advance, day, maximum_after,
+        CompletedSet, SbsDay, SbsSession, achieved, advance, day, maximum_after,
         parameters::Percentage,
         sbs::{InvalidSbs, WEEKS, training_max_share, working_load},
         target::Target,
@@ -27,6 +27,17 @@ const fn increment() -> Kg {
 
 fn reps(count: u32) -> Option<RepCount> {
     RepCount::new(count).ok()
+}
+
+/// What a repetition-maximum day recorded, as `(grams, repetitions)`.
+///
+/// Fallible and unwrapped at the call site, because the test exemptions for
+/// `expect` do not reach a free function.
+fn sets(recorded: &[(u64, u32)]) -> Option<Vec<CompletedSet>> {
+    recorded
+        .iter()
+        .map(|&(grams, count)| Some(CompletedSet::new(Kg::from_grams(grams), reps(count)?)))
+        .collect()
 }
 
 /// The whole chart, as the workbook states it.
@@ -338,19 +349,16 @@ fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
     );
 
     // Week 1's eight-rep day made 82.5. 82.5 / 0.80 is 103.125 → 105.0.
+    let week_one = sets(&[(82_500, 8)]).expect("the sets build");
     assert_eq!(
-        maximum_after(opening, &[(1, Kg::from_grams(82_500))], step).as_grams(),
+        maximum_after(opening, &[(1, week_one.clone())], step).as_grams(),
         105_000,
     );
 
     // And week 2's five-rep day made 90. Applied in order, on top of the first.
+    let week_two = sets(&[(90_000, 5)]).expect("the sets build");
     assert_eq!(
-        maximum_after(
-            opening,
-            &[(1, Kg::from_grams(82_500)), (2, Kg::from_grams(90_000))],
-            step,
-        )
-        .as_grams(),
+        maximum_after(opening, &[(1, week_one), (2, week_two)], step).as_grams(),
         107_500,
         "90 / 0.85 is 105.88 → 107.5, from the maximum week 1 left behind",
     );
@@ -363,7 +371,8 @@ fn a_week_nobody_trained_leaves_the_maximum_where_it_was() {
 
     // Week 1 skipped, week 2 trained. The week 2 result still advances, off the
     // opening rather than off a week that never happened.
-    let skipped = maximum_after(opening, &[(2, Kg::from_grams(90_000))], step);
+    let week_two = sets(&[(90_000, 5)]).expect("the sets build");
+    let skipped = maximum_after(opening, &[(2, week_two)], step);
     assert_eq!(skipped.as_grams(), 107_500);
 }
 
@@ -371,8 +380,9 @@ fn a_week_nobody_trained_leaves_the_maximum_where_it_was() {
 fn a_week_the_chart_does_not_name_advances_nothing() {
     let step = increment();
     let opening = Kg::from_grams(100_000);
+    let anything = sets(&[(90_000, 8)]).expect("the sets build");
     assert_eq!(
-        maximum_after(opening, &[(9, Kg::from_grams(90_000))], step).as_grams(),
+        maximum_after(opening, &[(9, anything)], step).as_grams(),
         100_000,
         "the chart runs four weeks, and a fifth is not one of them",
     );
@@ -387,7 +397,7 @@ fn week_two_is_a_share_of_what_week_one_produced() {
     let step = increment();
     let maximum = maximum_after(
         Kg::from_grams(100_000),
-        &[(1, Kg::from_grams(82_500))],
+        &[(1, sets(&[(82_500, 8)]).expect("the sets build"))],
         step,
     );
 
@@ -400,5 +410,99 @@ fn week_two_is_a_share_of_what_week_one_produced() {
         load.as_grams(),
         87_500,
         "85% of 105 is 89.25, floored to the grid at 87.5",
+    );
+}
+
+/// The operator's own 8RM day, 2 October 2026 (#360).
+///
+/// He worked up, got eight at 75, went to 77.5 and got five, then took the
+/// back-offs at 75. Reading the heaviest set alone called 77.5 his 8RM and put
+/// the training maximum at 97.5 — so the Monday after was prescribed 82.5
+/// instead of 80, and every week of the cycle after that would have been a
+/// share of a number he had not lifted.
+#[test]
+fn the_rep_max_is_the_heaviest_set_that_reached_the_count() {
+    let performed = sets(&[
+        (72_500, 8),
+        (75_000, 8),
+        (77_500, 5),
+        (75_000, 6),
+        (75_000, 5),
+        (75_000, 5),
+    ])
+    .expect("the sets build");
+
+    assert_eq!(
+        achieved(1, &performed).map(Kg::as_grams),
+        Some(75_000),
+        "the 8RM is the heaviest set taken for eight, not the heaviest set",
+    );
+
+    assert_eq!(
+        maximum_after(Kg::from_grams(92_500), &[(1, performed)], increment()).as_grams(),
+        95_000,
+        "75 / 0.80 is 93.75, raised to the grid at 95",
+    );
+}
+
+/// Beating the count is evidence, and the floor it gives is honest.
+#[test]
+fn a_set_past_the_count_still_measures_the_maximum() {
+    let performed = sets(&[(75_000, 9), (77_500, 5)]).expect("the sets build");
+    assert_eq!(
+        achieved(1, &performed).map(Kg::as_grams),
+        Some(75_000),
+        "nine at 75 proves the 8RM is at least 75",
+    );
+}
+
+/// A day that never reached the count leaves the maximum alone.
+///
+/// Seven at 75 does say the 8RM is under 75, and no row of SBS's table says by
+/// how much — so the chart declines rather than inventing a discount.
+#[test]
+fn a_day_short_of_the_count_advances_nothing() {
+    let performed = sets(&[(72_500, 7), (75_000, 7)]).expect("the sets build");
+    assert_eq!(achieved(1, &performed), None);
+    assert_eq!(
+        maximum_after(Kg::from_grams(92_500), &[(1, performed)], increment()).as_grams(),
+        92_500,
+    );
+}
+
+/// A failed attempt no longer silences the set below it.
+///
+/// Week 4 is the test. Completing 95 and failing 97.5 is a test that found the
+/// ceiling, and the maximum it leaves is 95 — the old reading took the heaviest
+/// set of any outcome and then skipped the whole day because it had failed.
+#[test]
+fn a_failure_above_a_completed_set_does_not_lose_the_day() {
+    // A failure is not representable: only what went up is handed over.
+    let performed = sets(&[(90_000, 1), (95_000, 1)]).expect("the sets build");
+    assert_eq!(achieved(4, &performed).map(Kg::as_grams), Some(95_000));
+    assert_eq!(
+        maximum_after(Kg::from_grams(92_500), &[(4, performed)], increment()).as_grams(),
+        95_000,
+        "a one-rep maximum is its own training maximum",
+    );
+}
+
+/// Back-off sets are at the maximum's load and under its count, so they neither
+/// raise nor lower it.
+#[test]
+fn back_offs_do_not_set_the_maximum() {
+    // Week 2 is a 5RM with back-offs of three to four.
+    let performed = sets(&[(85_000, 5), (85_000, 4), (85_000, 3)]).expect("the sets build");
+    assert_eq!(achieved(2, &performed).map(Kg::as_grams), Some(85_000));
+}
+
+/// A week whose second session measures nothing has no maximum to give.
+#[test]
+fn only_a_rep_max_day_is_read() {
+    let performed = sets(&[(80_000, 5)]).expect("the sets build");
+    assert_eq!(
+        achieved(9, &performed),
+        None,
+        "the chart runs four weeks, and a ninth is not one of them",
     );
 }

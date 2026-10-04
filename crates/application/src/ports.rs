@@ -1686,6 +1686,18 @@ pub struct Prescription {
     pub issuance: Issuance,
     /// § 38. The newest performance the derivation read.
     pub history_through: Option<Date>,
+    /// What the session's loads are shares of, where that is not the anchor.
+    ///
+    /// **Reported rather than stored, because it moves week to week** — the
+    /// same reason [`LadderStanding::anchor`] is. An SBS cycle's percentages
+    /// are shares of a maximum the chart advances on every repetition-maximum
+    /// day in the record, so the number is true of the moment it was asked for
+    /// and of nothing else.
+    ///
+    /// `None` for every template whose loads are shares of the anchor itself,
+    /// which already says the number, and for a session that stands because it
+    /// was performed and so was never derived (#362).
+    pub training_maximum: Option<domain::measure::Kg>,
     /// Slots that could not be derived (FR-011). Not an error.
     pub underivable: Vec<UnderivableSlot>,
 }
@@ -1723,6 +1735,15 @@ pub struct LadderStanding {
     /// behind and the week after it programmes from that. `None` for a lift
     /// nothing has measured and no test has asserted.
     pub anchor: Option<Anchor>,
+    /// What the programme's loads are shares of right now, where that is not
+    /// the anchor.
+    ///
+    /// **Only an SBS cycle has one** (#362): its chart advances the maximum on
+    /// every repetition-maximum day the record holds, so a report that named
+    /// the anchor and stopped was describing the week the cycle opened rather
+    /// than the week being asked about. `None` for every template whose loads
+    /// are shares of the anchor itself.
+    pub maximum: Option<domain::measure::Kg>,
     /// The newest performance the derivation could see. `None` for an empty
     /// record — which is not the same as a stale one.
     pub history_through: Option<Date>,

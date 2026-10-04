@@ -11,7 +11,7 @@ pub mod chart;
 pub mod programme;
 
 pub use chart::{
-    InvalidSbs, SbsDay, SbsSession, WEEKS, advance, day, maximum_after, training_max_share,
-    working_load,
+    CompletedSet, InvalidSbs, SbsDay, SbsSession, WEEKS, achieved, advance, day, maximum_after,
+    training_max_share, working_load,
 };
 pub use programme::{GATING, Sbs};

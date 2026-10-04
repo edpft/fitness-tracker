@@ -142,7 +142,13 @@ impl Anchor {
         self.provenance
     }
 
-    /// The day it took effect: the day it was measured or stated for.
+    /// The day it took effect.
+    ///
+    /// **Not always the day it was measured**, which is why it prints as "in
+    /// force from" (#362). An anchor a test left behind takes effect when the
+    /// programme after it opens, so the operator's test of Friday 25 September
+    /// 2026 carries 28 September — and reading that as a measurement date sent
+    /// him looking for a session on a day he had not trained.
     pub const fn from(self) -> Date {
         self.from
     }
@@ -161,12 +167,12 @@ impl fmt::Display for Anchor {
         match self.failed {
             Some(failed) => write!(
                 f,
-                "{}kg ({}, from {}, failed {}kg)",
+                "{}kg ({}, in force from {}, failed {}kg)",
                 self.load, self.provenance, self.from, failed
             ),
             None => write!(
                 f,
-                "{}kg ({}, from {})",
+                "{}kg ({}, in force from {})",
                 self.load, self.provenance, self.from
             ),
         }

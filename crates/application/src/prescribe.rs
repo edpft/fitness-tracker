@@ -28,7 +28,8 @@ use domain::{
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
-            day as sbs_day, maximum_after as sbs_maximum_after, training_max_share, working_load,
+            CompletedSet, day as sbs_day, maximum_after as sbs_maximum_after, training_max_share,
+            working_load,
         },
         warmup_ramp,
     },
@@ -161,6 +162,22 @@ impl<H, P, G, S, L> Prescribing<H, P, G, S, L> {
     }
 }
 
+/// What deriving a session produced.
+///
+/// **Three things rather than two, and the third is reported only** (#362). The
+/// maximum is what the week's loads are shares of, which for an SBS cycle is
+/// neither the anchor nor anything stored: the chart advances it on every
+/// repetition-maximum day the record holds. A prescription that printed the
+/// anchor and programmed from this left the operator reading 92.5kg over a
+/// session of 82.5kg top sets and asking where the number came from.
+struct Derivation {
+    workout: PrescribedWorkout,
+    underivable: Vec<UnderivableSlot>,
+    /// `None` for every template whose loads are shares of a number that does
+    /// not move inside the mesocycle, where the anchor already says it.
+    maximum: Option<Kg>,
+}
+
 /// What one slot's derivation produced: an item, or a reason there is none.
 ///
 /// The item is boxed because it is an order of magnitude larger than the reason,
@@ -215,6 +232,7 @@ where
             Exercise::Reps(primary) => self.anchor_in_force(primary, on, &consulted).await?,
             Exercise::Duration(_) | Exercise::Distance(_) => None,
         };
+        let maximum = self.maximum_of(&plan, &programme, &consulted, on).await?;
         Ok(LadderStanding {
             target,
             plan,
@@ -222,6 +240,7 @@ where
             programme,
             parameters,
             anchor,
+            maximum,
             progress,
             history_through: self.ports.history.newest_performance().await?,
         })
@@ -257,11 +276,20 @@ where
                     reference: reference.clone(),
                 },
                 history_through: self.ports.history.newest_performance().await?,
+                // **Nothing was derived**, so there is no maximum this call
+                // worked from. Reporting the one a fresh derivation would reach
+                // would be reporting a number the standing session was not a
+                // share of.
+                training_maximum: None,
                 underivable: Vec::new(),
             });
         }
 
-        let (workout, underivable) = self.derive(date).await?;
+        let Derivation {
+            workout,
+            underivable,
+            maximum,
+        } = self.derive(date).await?;
 
         // **The shape decides whether this is the same workout.** Not the whole
         // of `PrescribedWorkout`, which also carries when it was issued, which
@@ -282,6 +310,7 @@ where
                     workout: standing,
                     issuance: Issuance::Unchanged,
                     history_through: self.ports.history.newest_performance().await?,
+                    training_maximum: maximum,
                     underivable,
                 });
             }
@@ -306,6 +335,7 @@ where
                     },
                 },
                 history_through,
+                training_maximum: maximum,
                 underivable,
             });
         }
@@ -318,6 +348,7 @@ where
             workout,
             issuance: Issuance::Issued,
             history_through,
+            training_maximum: maximum,
             underivable,
         })
     }
@@ -338,10 +369,7 @@ where
     /// the result are different questions.** This one is a pure function of the
     /// store's contents; the caller decides whether what comes out is worth
     /// writing down.
-    async fn derive(
-        &self,
-        date: Date,
-    ) -> Result<(PrescribedWorkout, Vec<UnderivableSlot>), PrescriptionError> {
+    async fn derive(&self, date: Date) -> Result<Derivation, PrescriptionError> {
         let Some(found) = self.ports.programmes.on(date).await? else {
             return Err(PrescriptionError::NoPlan { date });
         };
@@ -411,10 +439,11 @@ where
 
         let mut items = Vec::new();
         let mut underivable = Vec::new();
+        let maximum = self.maximum_of(&plan, &programme, &consulted, date).await?;
         let standing = Standing {
             progress,
             inheritance,
-            maximum: self.maximum_of(&plan, &programme, &consulted, date).await?,
+            maximum,
             opening,
         };
         for derived in issue_slots(&programme, &consulted, role, week, standing, &history) {
@@ -445,7 +474,11 @@ where
             Timestamp::now(),
         );
 
-        Ok((workout, underivable))
+        Ok(Derivation {
+            workout,
+            underivable,
+            maximum,
+        })
     }
 
     /// Where the primary's progression stands, walked out of the record.
@@ -763,7 +796,13 @@ where
 
         // Gathered first and applied by the chart, because *what* the record
         // says is this layer's business and what it *means* is the chart's.
-        let mut performed: Vec<(u32, Kg)> = Vec::new();
+        //
+        // **Every completed set goes over, not the heaviest one** (#360).
+        // Which set was the repetition maximum depends on the count the chart
+        // asked for, so picking one here was this layer answering the chart's
+        // question — and answering it wrongly: an 8RM day that recorded
+        // `8 @ 75kg` and then `5 @ 77.5kg` was read as a 77.5kg 8RM.
+        let mut performed: Vec<(u32, Vec<CompletedSet>)> = Vec::new();
         for performance in &performances {
             if performance.on >= before {
                 continue;
@@ -788,15 +827,7 @@ where
             let WeekKind::Climbing(index) = week else {
                 continue;
             };
-            let Some(top) = top_set_of(performance) else {
-                continue;
-            };
-            // A failed attempt says what the operator could not do, which is not
-            // a repetition maximum and advances nothing.
-            if !top.completed {
-                continue;
-            }
-            performed.push((index.as_u32(), top.load));
+            performed.push((index.as_u32(), completed_sets_of(performance)));
         }
 
         maximum = sbs_maximum_after(maximum, &performed, increment);
@@ -1085,6 +1116,37 @@ fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
         },
         completed: set.outcome.completed().is_some(),
     })
+}
+
+/// Every set of a performance that went up, for the chart to read a repetition
+/// maximum out of.
+///
+/// **No judgement here, which is the point** (#360). This says what the record
+/// holds; [`sbs::chart::achieved`] says which of it was the maximum, because
+/// that answer needs the repetition count the chart asked for and the chart is
+/// the only thing that knows it.
+///
+/// **Absolute loads only**, for the reason [`top_set_of`] gives: the primary is
+/// a barbell lift, and a relative load is not comparable on this axis.
+///
+/// **Warm-ups included.** Whether the source called a set a warm-up does not
+/// change what went up, which is #127's ruling — and a warm-up heavy enough to
+/// be the day's maximum at the day's count *is* the day's maximum.
+///
+/// [`sbs::chart::achieved`]: domain::prescription::sbs::chart::achieved
+fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
+    performance
+        .sets
+        .iter()
+        .filter_map(|set| {
+            let Load::Absolute(load) = set.load else {
+                return None;
+            };
+            set.outcome
+                .completed()
+                .map(|reps| CompletedSet::new(load, *reps))
+        })
+        .collect()
 }
 
 /// What a derivation consults, and it is two kinds of thing.

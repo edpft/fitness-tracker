@@ -75,8 +75,8 @@ pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, 
 pub use repmax::rep_max;
 pub use rest::{BlockRest, RestScheme, rested};
 pub use sbs::{
-    InvalidSbs, Sbs, SbsDay, SbsSession, advance, day, maximum_after, training_max_share,
-    working_load,
+    CompletedSet, InvalidSbs, Sbs, SbsDay, SbsSession, achieved, advance, day, maximum_after,
+    training_max_share, working_load,
 };
 // `SessionRole` is deliberately not re-exported here. It moved to
 // `domain::schedule` on 2026-09-20 (issue #63), because a training slot carries
