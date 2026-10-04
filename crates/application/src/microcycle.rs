@@ -76,6 +76,22 @@ struct Week {
     ended: Option<Boundary>,
 }
 
+/// One session the record holds, in the grain the record holds it.
+///
+/// **A day and a clock that may not be there.** The gym's record is the canonical
+/// layer, which dates a visit to the finest grain any of its sources knew: 61 of
+/// the operator's 389 are a day and no finer (#350). Everything this reading does
+/// with a session either needs only the day — which slot it answers — or needs
+/// the moment and has somewhere to go without it, which is what makes the clock
+/// optional rather than the record incomplete.
+#[derive(Debug, Clone, Copy)]
+struct Account {
+    on: Date,
+    /// The wall-clock time it started, where a source recorded one.
+    at: Option<DateTime>,
+    session: RecordedSession,
+}
+
 /// Where one microcycle's record ends and the next one's begins.
 ///
 /// **Two kinds, because a session stops being completable two ways** (#281).
@@ -90,11 +106,22 @@ enum Boundary {
 }
 
 impl Boundary {
-    /// Whether a session started at `started` is on the later side.
-    fn admits(self, started: DateTime) -> bool {
-        match self {
-            Self::After(performed) => started > performed,
-            Self::From(part) => DayPart::containing(started) >= part,
+    /// Whether a session that happened at `occurred` is on the later side.
+    ///
+    /// **A session dated to a day and no finer is admitted only where the whole
+    /// day is.** Both kinds of boundary fall inside a day — one at a performance
+    /// and one at a part of it — so a day that contains the boundary contains
+    /// moments on each side of it, and nothing in the record says which side this
+    /// session was. Counting it would spend a microcycle on a session that may
+    /// have belonged to the one before; leaving it out leaves a session owed that
+    /// the operator can see he performed. The second error is the one he can
+    /// correct.
+    fn admits(self, on: Date, at: Option<DateTime>) -> bool {
+        match (self, at) {
+            (Self::After(performed), Some(at)) => at > performed,
+            (Self::From(part), Some(at)) => DayPart::containing(at) >= part,
+            (Self::After(performed), None) => on > performed.date(),
+            (Self::From(part), None) => on > part.date,
         }
     }
 
@@ -293,19 +320,22 @@ where
             recorded
                 .iter()
                 .take(upto)
-                .map(|(_, session)| *session)
+                .map(|account| account.session)
                 .collect()
         };
         let answered = accounted(&slots, &sessions_of(recorded.len()));
 
         // When each slot was first answered: the moment of the session that,
-        // read in order, first made it performed.
+        // read in order, first made it performed. `None` where that session was
+        // dated to a day and no finer, and the boundary below then falls back to
+        // the slot's own start — which is where it already fell for a slot
+        // nothing performed.
         let mut performed_at: Vec<Option<DateTime>> = vec![None; slots.len()];
-        for (upto, (started, _)) in recorded.iter().enumerate() {
+        for (upto, account) in recorded.iter().enumerate() {
             let so_far = accounted(&slots, &sessions_of(upto.saturating_add(1)));
             for (at, done) in performed_at.iter_mut().zip(so_far) {
                 if done && at.is_none() {
-                    *at = Some(*started);
+                    *at = account.at;
                 }
             }
         }
@@ -435,7 +465,7 @@ where
         opens: Option<Boundary>,
         closes: Option<DayPart>,
         today: Date,
-    ) -> Result<Vec<(DateTime, RecordedSession)>, StoreError> {
+    ) -> Result<Vec<Account>, StoreError> {
         let Some(first) = week.iter().map(|planned| planned.slot.date).min() else {
             return Ok(Vec::new());
         };
@@ -444,23 +474,32 @@ where
         if from > to {
             return Ok(Vec::new());
         }
-        let within = |started: DateTime| {
-            opens.is_none_or(|opens| opens.admits(started))
-                && closes.is_none_or(|closes| DayPart::containing(started) < closes)
+        // A day-dated session is inside the closing boundary only where the whole
+        // day is, for the reason [`Boundary::admits`] gives.
+        let within = |on: Date, at: Option<DateTime>| {
+            let before = |closes: DayPart| {
+                at.map_or_else(|| on < closes.date, |at| DayPart::containing(at) < closes)
+            };
+            opens.is_none_or(|opens| opens.admits(on, at)) && closes.is_none_or(before)
         };
 
-        let mut recorded: Vec<(DateTime, RecordedSession)> = self
+        let mut recorded: Vec<Account> = self
             .ports
             .gym_performed
-            .started_between(from, to)
+            .performed_between(from, to)
             .await?
             .into_iter()
-            .filter(|started| within(*started))
-            .map(|started| {
+            .map(|occurred| {
                 (
-                    started,
-                    RecordedSession::unnamed(started.date(), Discipline::Gym),
+                    occurred.day(),
+                    occurred.instant().map(|at| at.wall_clock().datetime()),
                 )
+            })
+            .filter(|(on, at)| within(*on, *at))
+            .map(|(on, at)| Account {
+                on,
+                at,
+                session: RecordedSession::unnamed(on, Discipline::Gym),
             })
             .collect();
 
@@ -470,20 +509,24 @@ where
             .ridden_between(from, to)
             .await?
         {
-            if !within(ridden.started) {
+            let on = ridden.started.date();
+            if !within(on, Some(ridden.started)) {
                 continue;
             }
-            let on = ridden.started.date();
-            recorded.push((
-                ridden.started,
-                ridden_as(week, &ridden).map_or_else(
+            recorded.push(Account {
+                on,
+                at: Some(ridden.started),
+                session: ridden_as(week, &ridden).map_or_else(
                     || RecordedSession::unnamed(on, Discipline::Cycling),
                     |role| RecordedSession::named(on, Discipline::Cycling, role),
                 ),
-            ));
+            });
         }
 
-        recorded.sort_by_key(|(started, _)| *started);
+        // Day first, then by the clock, a session with no clock first. One order
+        // over two grains, and it is this reading's order rather than a fact
+        // about either.
+        recorded.sort_by_key(|account| (account.on, account.at));
         Ok(recorded)
     }
 }

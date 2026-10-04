@@ -22,23 +22,32 @@
 //! show which it got. The two are not interchangeable and nothing here pretends
 //! they are.
 //!
+//! **The performance is the canonical session.** A visit the operator recorded
+//! in two places is one session to compare, and the id that pairs it with a
+//! prescription is carried by whichever normalised session the destination
+//! named — so the link reaches the merged visit rather than one account of it.
+//!
 //! **Nothing is written.** A comparison reads two records and returns a
 //! judgement about them; it does not record the judgement, because the judgement
 //! re-derives from the two records exactly and § 12 asks us to keep what cannot
 //! be regenerated rather than what can.
 
 use domain::{
-    gym::PerformedGymSession,
+    gym::CanonicalGymSession,
     prescription::{DeliveryReference, Divergence, ProjectionGap, project, satisfies},
 };
 use jiff::civil::Date;
 
 use crate::{
     error::ComparisonError,
-    ports::{PerformedWorkoutReader, PrescribedWorkoutStore},
+    ports::{PerformedGymSessions, PrescribedWorkoutStore},
 };
 
 /// How a performance was paired with the prescription it is compared against.
+///
+/// [`Pairing::Dated`]'s assumption got stronger with the canonical layer: a day
+/// holds one visit by construction, so taking the day's training is no longer a
+/// guess between several records of it.
 ///
 /// **Two states, and they carry different weight.** One is a fact the record
 /// holds; the other is an assumption this use case made because the record held
@@ -106,15 +115,17 @@ impl<S, W> Comparing<S, W> {
 impl<S, W> Comparing<S, W>
 where
     S: PrescribedWorkoutStore + Sync,
-    W: PerformedWorkoutReader + Sync,
+    W: PerformedGymSessions + Sync,
 {
     /// Compare what was performed against what was prescribed for a date.
     ///
     /// # Errors
     ///
     /// [`ComparisonError::NothingIssued`] where no session was prescribed for
-    /// the date, and [`ComparisonError::NotPerformed`] where one was and no
-    /// performance answers it.
+    /// the date, [`ComparisonError::NotPerformed`] where one was and no
+    /// performance answers it, and [`ComparisonError::Unreadable`] where the
+    /// session is found and the record states too little of it to read as a
+    /// shape.
     pub async fn compare(&self, date: Date) -> Result<Comparison, ComparisonError> {
         let (id, prescribed) = self
             .ports
@@ -131,11 +142,23 @@ where
         };
 
         let projection = project(&performed);
-        let divergences = satisfies(&projection.shape, prescribed.shape());
+        let performed_on = performed.occurred().day();
+        let Some(shape) = &projection.shape else {
+            return Err(ComparisonError::Unreadable {
+                date: performed_on,
+                gaps: projection
+                    .gaps
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            });
+        };
+        let divergences = satisfies(shape, prescribed.shape());
 
         Ok(Comparison {
             prescribed_for: date,
-            performed_on: performed.started_at().wall_clock().date(),
+            performed_on,
             pairing,
             gaps: projection.gaps,
             divergences,
@@ -150,10 +173,15 @@ where
     /// comes to be run against the wrong session. Publishing the session
     /// resolves it, which is the remedy the error names.
     ///
-    /// **Two sessions, not two records.** Every one of the operator's 21
-    /// multi-record days used to land here and be refused; they are one session
-    /// each, and this now fires only where he genuinely trained twice.
-    async fn trained_on(&self, date: Date) -> Result<PerformedGymSession, ComparisonError> {
+    /// **And nothing can reach it yet.** The canonical layer matches on the day
+    /// — #247: *"a day names a visit"* — so two accounts of one day are merged
+    /// before this sees them and a span of one day holds at most one session. The
+    /// guard stays because the match overlay (§ II.2, #349) is what will let the
+    /// operator assert that two accounts of a day are two events, and the day it
+    /// does this is what should happen. Until then a day he genuinely trained
+    /// twice on is compared as one visit, which is the matching rule's limit
+    /// rather than this use case's.
+    async fn trained_on(&self, date: Date) -> Result<CanonicalGymSession, ComparisonError> {
         let mut trained = self.ports.workouts.between(date, date).await?;
         if trained.len() > 1 {
             return Err(ComparisonError::AmbiguousDay {

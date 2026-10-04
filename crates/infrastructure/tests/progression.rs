@@ -330,6 +330,9 @@ fn trained_the_next_morning(pool: &SqlitePool) {
         1,
         "the Friday session is the one that moved"
     );
+    // And the canonical layer has to be rebuilt from the row that moved: the
+    // ladder reads that layer, which is a derivation (#350).
+    run!(store::canonicalise(pool));
 }
 
 /// A session the gate does not watch does not move the progression (US3-10).

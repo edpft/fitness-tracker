@@ -2214,7 +2214,6 @@ mod progression_tests {
 
     use domain::{
         gym::{Load, Performed, SetKind, SignedKg, exercise::Exercise},
-        landing::LandingRecordId,
         measure::{Kg, RepCount},
         prescription::seed::seed,
     };
@@ -2233,15 +2232,14 @@ mod progression_tests {
         })
     }
 
-    fn performance(
-        sets: Vec<PerformedSetSummary>,
-    ) -> Result<Performance, Box<dyn std::error::Error>> {
-        Ok(Performance {
+    /// One performance on a fixed date. Infallible since the landing record id
+    /// went: nothing left in it can fail.
+    fn performance(sets: Vec<PerformedSetSummary>) -> Performance {
+        Performance {
             on: Date::constant(2026, 8, 3),
-            landed_as: LandingRecordId::try_from(1)?,
             fulfilled: None,
             sets,
-        })
+        }
     }
 
     /// The shape the primary template issues: a top set, then lighter back-offs.
@@ -2260,8 +2258,7 @@ mod progression_tests {
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
-        ])
-        .expect("a performance");
+        ]);
 
         let progressed = progressed_load(
             &consulted,
@@ -2299,8 +2296,7 @@ mod progression_tests {
             set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-14_000)), 5).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-21_000)), 6).expect("a set"),
-        ])
-        .expect("a performance");
+        ]);
 
         let progressed = progressed_load(
             &consulted,
@@ -2329,8 +2325,7 @@ mod progression_tests {
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 4).expect("a set"),
-        ])
-        .expect("a performance");
+        ]);
 
         let progressed = progressed_load(
             &consulted,
@@ -2358,7 +2353,6 @@ mod measurement_tests {
 
     use domain::{
         gym::{Load, Performed, SetKind},
-        landing::LandingRecordId,
         measure::{Kg, RepCount},
         plan::Span,
     };
@@ -2383,17 +2377,13 @@ mod measurement_tests {
         })
     }
 
-    fn performance(
-        on: Date,
-        id: i64,
-        sets: Vec<PerformedSetSummary>,
-    ) -> Result<Performance, Box<dyn std::error::Error>> {
-        Ok(Performance {
+    /// One performance on a given date. Infallible, as above.
+    fn performance(on: Date, sets: Vec<PerformedSetSummary>) -> Performance {
+        Performance {
             on,
-            landed_as: LandingRecordId::try_from(id)?,
             fulfilled: None,
             sets,
-        })
+        }
     }
 
     /// The week the test is in: Monday 29 June 2026 to Sunday 5 July.
@@ -2405,15 +2395,13 @@ mod measurement_tests {
     fn a_failed_attempt_is_not_what_was_lifted() {
         let day = performance(
             Date::constant(2026, 7, 3),
-            1,
             vec![
                 set(72_500, Some(1), SetKind::Warmup).expect("a ramp step"),
                 set(80_000, Some(1), SetKind::Working).expect("a single"),
                 set(90_000, Some(1), SetKind::Working).expect("a single"),
                 set(95_000, None, SetKind::Working).expect("a failed attempt"),
             ],
-        )
-        .expect("a performance");
+        );
 
         assert_eq!(
             heaviest_completed(&[day], week()),
@@ -2427,22 +2415,18 @@ mod measurement_tests {
     fn the_lighter_session_does_not_answer_for_the_test() {
         let taper = performance(
             Date::constant(2026, 6, 30),
-            1,
             vec![
                 set(70_000, Some(3), SetKind::Working).expect("a triple"),
                 set(70_000, Some(3), SetKind::Working).expect("a triple"),
             ],
-        )
-        .expect("a performance");
+        );
         let test = performance(
             Date::constant(2026, 7, 3),
-            2,
             vec![
                 set(90_000, Some(1), SetKind::Working).expect("a single"),
                 set(95_000, None, SetKind::Working).expect("a failed attempt"),
             ],
-        )
-        .expect("a performance");
+        );
 
         assert_eq!(
             heaviest_completed(&[taper, test], week()),
@@ -2457,14 +2441,12 @@ mod measurement_tests {
         // working sets below it are volume.
         let day = performance(
             Date::constant(2026, 7, 3),
-            1,
             vec![
                 set(82_500, Some(1), SetKind::Warmup).expect("a bridging single"),
                 set(92_500, Some(1), SetKind::Warmup).expect("a bridging single"),
                 set(70_000, Some(10), SetKind::Working).expect("a set of ten"),
             ],
-        )
-        .expect("a performance");
+        );
 
         assert_eq!(
             heaviest_completed(&[day], week()),
@@ -2477,10 +2459,8 @@ mod measurement_tests {
     fn a_session_outside_the_span_is_not_evidence_about_it() {
         let after = performance(
             Date::constant(2026, 7, 6),
-            1,
             vec![set(100_000, Some(1), SetKind::Working).expect("a single")],
-        )
-        .expect("a performance");
+        );
 
         assert_eq!(heaviest_completed(&[after], week()), None);
     }

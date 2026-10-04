@@ -25,7 +25,7 @@
 //! both being current, which is why a ride with no graph is a refusal rather
 //! than an error.
 
-use application::{AccountReader, NormalisedEntityStore, PerformedSessionLog, StoreError};
+use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
     cycling::{BikePlusRide, Ftp, FtpProvenance, PerformedSession, RideVenue, Watts},
     landing::{
@@ -35,7 +35,7 @@ use domain::{
     measure::Duration,
     normalised::{NormalisationRunId, WorkoutCount},
 };
-use jiff::civil::{Date, DateTime};
+use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -660,51 +660,6 @@ impl SqliteCyclingSessionLog {
     }
 }
 
-impl PerformedSessionLog for SqliteCyclingSessionLog {
-    async fn started_between(&self, from: Date, to: Date) -> Result<Vec<DateTime>, StoreError> {
-        // **Widened in SQL and narrowed in Rust**, for the reason the gym's
-        // reader gives: the day depends on the zone on each row, and a day
-        // either side covers every zone there is.
-        let lower = from
-            .checked_sub(jiff::Span::new().days(1))
-            .map_err(|_| StoreError::Corrupt {
-                detail: "a date before the calendar".to_owned(),
-            })?
-            .to_string();
-        let upper = to
-            .checked_add(jiff::Span::new().days(2))
-            .map_err(|_| StoreError::Corrupt {
-                detail: "a date beyond the calendar".to_owned(),
-            })?
-            .to_string();
-
-        let rows = sqlx::query!(
-            r#"
-            SELECT first.started_at_utc AS "started_at_utc!: String",
-                   first.zone           AS "zone!: String"
-              FROM cycling_session AS s
-              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id
-             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
-             ORDER BY first.started_at_utc ASC
-            "#,
-            lower,
-            upper,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        let mut started = Vec::new();
-        for row in rows {
-            let moment = super::history::moment_of(&row.started_at_utc, &row.zone)?;
-            if moment.date() >= from && moment.date() <= to {
-                started.push(moment);
-            }
-        }
-        Ok(started)
-    }
-}
-
 impl application::RiddenSessionLog for SqliteCyclingSessionLog {
     async fn ridden_between(
         &self,
@@ -753,7 +708,7 @@ impl application::RiddenSessionLog for SqliteCyclingSessionLog {
         let mut sessions: Vec<application::RiddenSession> = Vec::new();
         let mut seen: Vec<i64> = Vec::new();
         for row in rows {
-            let moment = super::history::moment_of(&row.started_at_utc, &row.zone)?;
+            let moment = super::moment_of(&row.started_at_utc, &row.zone)?;
             if moment.date() < from || moment.date() > to {
                 continue;
             }

@@ -28,11 +28,13 @@ use application::{
     reschedule::{Reschedule, Rescheduled},
 };
 use domain::{
+    canonical::Occurred,
     cycling::{
         CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, CyclingSession, DeliveredRide,
         Interval, PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
+    normalised::{OperatorZone, StartedAt},
     plan::{Plan, PlanName, Programme},
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
@@ -53,35 +55,80 @@ use support::{corpus, programme};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// Whatever moments it was built with, whatever it is asked.
+/// The zone every moment in this suite is read in.
+const TEST_ZONE: &str = "Europe/London";
+
+/// Whatever sessions it was built with, whatever it is asked.
 ///
 /// A test adapter for [`PerformedSessionLog`]: the question the standing puts
-/// to the record is only when each session started, and a real reader would
-/// need a landed and derived corpus per discipline to answer it.
+/// to the record is only when each session happened, and a real reader would
+/// need a landed and derived corpus to answer it.
+///
+/// **Two grains, because the canonical layer has two** (#350). A visit no clocked
+/// source recorded is dated to a day and no finer, and [`Self::on`] is how a test
+/// says so — 61 of the operator's 389 gym visits are in that state.
 struct Trained {
     started: Vec<DateTime>,
+    dated: Vec<Date>,
 }
 
 impl Trained {
     const fn nothing() -> Self {
         Self {
             started: Vec::new(),
+            dated: Vec::new(),
         }
     }
 
     const fn at(started: Vec<DateTime>) -> Self {
-        Self { started }
+        Self {
+            started,
+            dated: Vec::new(),
+        }
+    }
+
+    /// Sessions the record dates to a day and states no clock for.
+    const fn on(dated: Vec<Date>) -> Self {
+        Self {
+            started: Vec::new(),
+            dated,
+        }
     }
 }
 
 impl PerformedSessionLog for Trained {
-    async fn started_between(&self, from: Date, to: Date) -> Result<Vec<DateTime>, StoreError> {
-        Ok(self
-            .started
-            .iter()
-            .copied()
-            .filter(|started| started.date() >= from && started.date() <= to)
-            .collect())
+    async fn performed_between(&self, from: Date, to: Date) -> Result<Vec<Occurred>, StoreError> {
+        let zone =
+            OperatorZone::try_from(TEST_ZONE.to_owned()).map_err(|error| StoreError::Corrupt {
+                detail: error.to_string(),
+            })?;
+        let mut happened: Vec<Occurred> = Vec::new();
+        for started in self.started.iter().copied() {
+            if started.date() < from || started.date() > to {
+                continue;
+            }
+            let instant = started
+                .to_zoned(zone.as_time_zone())
+                .map_err(|error| StoreError::Corrupt {
+                    detail: error.to_string(),
+                })?
+                .timestamp();
+            happened.push(Occurred::At(StartedAt::new(instant, zone.clone())));
+        }
+        for day in self.dated.iter().copied() {
+            if day >= from && day <= to {
+                happened.push(Occurred::On(day));
+            }
+        }
+        happened.sort_by_key(|occurred| {
+            (
+                occurred.day(),
+                occurred
+                    .instant()
+                    .map(domain::normalised::StartedAt::instant),
+            )
+        });
+        Ok(happened)
     }
 }
 
@@ -1256,5 +1303,76 @@ fn the_session_that_closes_the_window_belongs_to_the_next_microcycle() {
             .first()
             .map(|session| (session.slot.date, session.state)),
         Some((Date::constant(2026, 9, 21), SessionState::Performed)),
+    );
+}
+
+/// **A session the record dates to a day accounts for its slot** (#350), where
+/// the whole day falls inside the microcycle's window.
+///
+/// 61 of the operator's 389 gym visits are dated to a day and no finer, because
+/// no source that recorded them held a clock. Asserted against the same week as
+/// the clocked case above and expecting the same answer: the Friday is answered,
+/// and the Sunday ride is still owed.
+#[test]
+fn a_session_dated_to_a_day_inside_the_window_accounts_for_its_slot() {
+    let standing = corpus::block_on(standing_at(
+        Trained::on(vec![Date::constant(2026, 9, 18)]),
+        Ridden::nothing(),
+        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 14)));
+    assert!(standing.weeks.is_empty(), "{:?}", standing.weeks);
+    assert_eq!(
+        standing
+            .sessions
+            .last()
+            .map(|session| (session.slot.date, session.state)),
+        Some((Date::constant(2026, 9, 20), SessionState::ToBePrescribed)),
+        "the Sunday ride is still owed, and the Friday was answered"
+    );
+}
+
+/// **And accounts for nothing on the day a window closes**, because a day that
+/// contains the boundary contains moments on both sides of it.
+///
+/// The gym on Monday the 21st: the week of the 14th closes at that Monday
+/// evening and the week of the 21st opens there, so a session the record places
+/// only on that day cannot be shown to be either microcycle's. Counting it would
+/// spend a week on a session that may have belonged to the week before; leaving
+/// it out leaves a session owed that the operator can see he performed, and that
+/// is the error he can correct.
+#[test]
+fn a_session_dated_to_the_day_a_window_closes_accounts_for_neither_microcycle() {
+    let standing = corpus::block_on(standing_at(
+        Trained::on(vec![Date::constant(2026, 9, 21)]),
+        Ridden::of(vec![(
+            Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+            vec![RideVenue::new("4d302bef", "20 min FTP Test Ride").expect("a venue")],
+        )]),
+        DayPart::new(Date::constant(2026, 9, 22), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_ne!(
+        standing.weeks,
+        vec![(Date::constant(2026, 9, 14), MicrocycleState::Completed)],
+        "the Friday was not trained"
+    );
+    let monday = standing
+        .sessions
+        .first()
+        .map(|session| (session.slot.date, session.state));
+    assert!(
+        matches!(
+            monday,
+            Some((date, state)) if date == Date::constant(2026, 9, 21)
+                && state != SessionState::Performed
+        ),
+        "the Monday's own slot is not answered by a session dated to that day: {monday:?}"
     );
 }

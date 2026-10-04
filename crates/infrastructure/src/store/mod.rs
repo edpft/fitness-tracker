@@ -64,7 +64,7 @@ pub use garmin_gym::{GarminGymAccountReader, GarminGymRawExtent, SqliteMeasuredG
 pub use garmin_landing::GarminHrvLandingStore;
 pub use garmin_normalised::{GarminHrvAccountReader, SqliteOvernightHrvStore};
 pub use gym_mesocycle::SqliteGymMesocycleStore;
-pub use history::{SqliteExerciseHistory, SqlitePerformedWorkoutReader};
+pub use history::SqliteExerciseHistory;
 pub use landing::HevyWorkoutLandingStore;
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
@@ -145,6 +145,25 @@ fn normalisation_run_for_storage(run: NormalisationRunId) -> Result<i64, StoreEr
 /// Something in the file that this program did not put there, or could not
 /// have. Written once here because every reader needs it and none of them needs
 /// to phrase it differently.
+/// A stored UTC instant as the wall clock read in the zone it was recorded
+/// against.
+///
+/// The zone is on the row, so this resolves through it rather than assuming the
+/// stored instant's UTC date is the day trained (§ II.3). An evening session in
+/// British Summer Time is the case that breaks the naive reading.
+pub(crate) fn moment_of(
+    started_at_utc: &str,
+    zone: &str,
+) -> Result<jiff::civil::DateTime, StoreError> {
+    let instant: jiff::Timestamp = started_at_utc.parse().map_err(|_| StoreError::Corrupt {
+        detail: format!("{started_at_utc:?} is not an instant"),
+    })?;
+    let tz = jiff::tz::TimeZone::get(zone).map_err(|_| StoreError::Corrupt {
+        detail: format!("{zone:?} is not a zone this build knows"),
+    })?;
+    Ok(instant.to_zoned(tz).datetime())
+}
+
 fn corrupt(error: &dyn std::fmt::Display) -> StoreError {
     StoreError::Corrupt {
         detail: error.to_string(),

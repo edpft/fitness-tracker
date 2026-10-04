@@ -19,8 +19,8 @@ use application::{
     prescribe::{Prescribing, PrescriptionPorts},
 };
 use infrastructure::{
-    SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqlitePerformedWorkoutReader, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteCanonicalGymSessionStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
@@ -34,7 +34,7 @@ type Prescriber = Prescribing<
     SqlitePrescriptionDeliveryStore,
 >;
 
-type Comparer = Comparing<SqlitePrescribedWorkoutStore, SqlitePerformedWorkoutReader>;
+type Comparer = Comparing<SqlitePrescribedWorkoutStore, SqliteCanonicalGymSessionStore>;
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -58,7 +58,7 @@ async fn ready() -> Fallible<(Prescriber, Comparer, tempfile::TempDir, SqlitePoo
     });
     let comparer = Comparing::new(ComparisonPorts {
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
-        workouts: SqlitePerformedWorkoutReader::new(pool.clone()),
+        workouts: SqliteCanonicalGymSessionStore::new(pool.clone()),
     });
     Ok((prescriber, comparer, directory, pool))
 }
@@ -114,6 +114,11 @@ fn publish(prescriber: &Prescriber, pool: &SqlitePool, date: Date, reference: &s
 }
 
 /// Move the block's first Friday session to the Saturday morning after it.
+///
+/// **And rebuild the canonical layer**, because that is what the comparison
+/// reads (#350). Moving a normalised row and asking the layer above it is asking
+/// a derivation about an input it was not built from — which is the mistake
+/// `fitness next` itself was making until it canonicalised between the two steps.
 fn trained_the_next_morning(pool: &SqlitePool) {
     let moved = run!(async {
         sqlx::query!(
@@ -129,6 +134,7 @@ fn trained_the_next_morning(pool: &SqlitePool) {
         1,
         "the Friday session is the one that moved"
     );
+    run!(store::canonicalise(pool));
 }
 
 /// A published session is found by its id, whatever day it was trained on.
@@ -172,18 +178,25 @@ fn an_unpublished_session_is_compared_by_the_day() {
     assert_eq!(comparison.performed_on, GATING);
 }
 
-/// Two sessions on a day and nothing naming the prescription is refused.
+/// Two accounts on a day are one visit, so the day no longer refuses.
 ///
-/// **Not resolved by taking the first.** A comparison run against the wrong
-/// workout reports divergences that are really a mismatch, which reads exactly
-/// like a session that went badly. Declining to answer is the honest result, and
-/// publishing the session is the remedy the error names.
+/// **This used to be [`application::ComparisonError::AmbiguousDay`]**, which
+/// cannot fire any more: the canonical layer matches on the day (#247, *"a day
+/// names a visit"*), so two accounts of one day are merged before this sees them
+/// and `between` can never return two sessions for one date. The guard stays in
+/// `trained_on` because the match overlay (#349) is what will make two visits on
+/// a day representable, and until then nothing can reach it.
+///
+/// **What that costs**: a day the operator genuinely trained twice on is compared
+/// as one session rather than declined. The ambiguity moved down a layer rather
+/// than going away, and asserting a merge compares is how this suite says where it
+/// went.
 #[test]
-fn two_sessions_on_a_day_are_refused_rather_than_guessed_between() {
+fn two_accounts_on_a_day_are_compared_as_one_visit() {
     let (prescriber, comparer, _directory, pool) = ready!();
     run!(prescriber.prescribe(GATING));
 
-    // The Monday after, moved onto the Friday, so the day holds two sessions.
+    // The Monday after, moved onto the Friday, so the day holds two accounts.
     let moved = run!(async {
         sqlx::query!(
             "UPDATE gym_workout \
@@ -194,14 +207,11 @@ fn two_sessions_on_a_day_are_refused_rather_than_guessed_between() {
         .await
     });
     assert_eq!(moved.rows_affected(), 1, "the Monday session moved");
+    run!(store::canonicalise(&pool));
 
-    match attempt!(comparer.compare(GATING)) {
-        Err(application::ComparisonError::AmbiguousDay { date, count }) => {
-            assert_eq!(date, GATING);
-            assert_eq!(count, 2);
-        }
-        other => panic!("two sessions on the day is refused, got {other:?}"),
-    }
+    let comparison = run!(comparer.compare(GATING));
+    assert_eq!(comparison.pairing, Pairing::Dated);
+    assert_eq!(comparison.performed_on, GATING);
 }
 
 /// A date nobody prescribed for has nothing to compare against.
