@@ -11,6 +11,7 @@
 
 pub mod account;
 pub mod auth;
+pub mod catalogue;
 pub mod class;
 pub mod holding;
 pub mod mapping;
@@ -25,8 +26,10 @@ pub mod workouts;
 
 pub use crate::token::TokenFile;
 pub use account::{LandedRide, SessionAccount};
+pub use catalogue::{Refreshed, refresh};
 pub use class::{
-    ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from, in_series_from,
+    CataloguePage, ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from,
+    power_zone_from,
 };
 pub use holding::PelotonHoldingRides;
 pub use mapping::{

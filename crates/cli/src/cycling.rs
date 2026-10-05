@@ -38,8 +38,8 @@ use domain::{
 };
 use infrastructure::{
     SqliteCyclingDeliveryStore, SqliteDiaryStore, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqlitePlanStore, SqliteRiddenVenues, connect,
-    peloton::{PelotonClasses, PelotonHoldingRides, PelotonStack},
+    SqlitePelotonClassStore, SqlitePlanStore, SqliteRiddenVenues, connect,
+    peloton::{PelotonClasses, PelotonHoldingRides, PelotonStack, catalogue::ClassCatalogue},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -100,25 +100,18 @@ pub async fn next(
             other => Failure::message(other.to_string(), exit::USAGE),
         })?;
 
-    // **A holding ride is chosen before it can be shown** (#190), so the
-    // catalogue is asked here and a Peloton that cannot be reached costs the
-    // answer as well as the delivery.
+    // **A holding ride is chosen before it can be shown** (#190), and since
+    // #246 it is chosen from the local catalogue — so an absent credential
+    // costs the delivery and no longer costs the answer. What it still costs is
+    // a class the bounded refreshes have not read yet, which `chosen` reports.
+    let stored = SqlitePelotonClassStore::new(pool.clone());
+    let catalogue = match to {
+        Ok((classes, _)) => ClassCatalogue::new(&stored, classes),
+        Err(_) => ClassCatalogue::stored(&stored),
+    };
     let (next, published) = match due {
         Due::Ride(next) => (next, programme.programme().map(|from| from.name().clone())),
-        Due::Holding(day) => match to {
-            Ok((classes, _)) => (chosen(&pool, classes, day).await?, None),
-            Err(why) => {
-                let position = match day.role.intensity() {
-                    Relative::Higher => 1,
-                    Relative::Lower => 2,
-                };
-                println!("a holding microcycle — session {position} of 2");
-                println!("{}, {}", weekday_name(day.date.weekday()), day.date);
-                println!();
-                output::not_delivered(why);
-                return Ok(());
-            }
-        },
+        Due::Holding(day) => (chosen(&pool, catalogue, day).await?, None),
     };
 
     // **In force on the session's date, not on today's.** The next ride may be
@@ -213,7 +206,7 @@ fn heading(
 /// The ride a holding day asks for, chosen from the catalogue now (#190).
 async fn chosen(
     pool: &infrastructure::SqlitePool,
-    classes: &PelotonClasses,
+    classes: ClassCatalogue<'_>,
     day: application::cycling::HoldingDay,
 ) -> Result<application::cycling::NextRide, Failure> {
     application::holding::ride(
@@ -337,9 +330,13 @@ pub async fn deliver(
     let (programme, due) = application::cycling::next_ride(&store, from, &week, &diary)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
+    let stored = SqlitePelotonClassStore::new(pool.clone());
     let (next, published) = match due {
         Due::Ride(next) => (next, programme.programme().map(|from| from.name().clone())),
-        Due::Holding(day) => (chosen(&pool, classes, day).await?, None),
+        Due::Holding(day) => (
+            chosen(&pool, ClassCatalogue::new(&stored, classes), day).await?,
+            None,
+        ),
     };
 
     println!("{}", heading(&programme, &next, published.is_none()));
@@ -623,8 +620,9 @@ pub async fn hold(
             Failure::message(format!("no plan is authored under {name}"), exit::STORE)
         })?;
 
+    let stored = SqlitePelotonClassStore::new(pool.clone());
     let held = application::holding::mesocycle(
-        &PelotonHoldingRides::new(classes),
+        &PelotonHoldingRides::new(ClassCatalogue::new(&stored, classes)),
         &SqliteRiddenVenues::new(pool.clone()),
         start,
         SessionRole::new(Relative::Higher, Relative::Lower),

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT detail AS \"detail: String\"\n              FROM peloton_class\n             WHERE reference = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "detail: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "detail"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "18fe516d497a2a64ebb13ec91d1ef0543ba1a8d1fc7c571882f30c042f4a8eb9"
+}

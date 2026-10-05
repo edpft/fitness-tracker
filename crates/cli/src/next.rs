@@ -204,6 +204,39 @@ async fn collect(
     if discipline == Discipline::Gym {
         crate::canonicalise::gym(database).await?;
     }
+    if discipline == Discipline::Cycling {
+        refresh_classes(database, credentials).await?;
+    }
+    Ok(())
+}
+
+/// Keep the local class catalogue current (#246).
+///
+/// **A side effect of collecting cycling's record, and not a command.** The
+/// operator, 2026-10-05: *"I don't want a separate command to do this, it
+/// should happen as a side effect of `fitness next`"*. This is where it
+/// belongs: cycling's record is already being collected, the Peloton
+/// credential is already resolved, and an unreachable source is already
+/// reported and stepped past.
+///
+/// **Stepped past, never fatal.** A catalogue one run out of date still answers
+/// every question `plan` and `hold` ask of it, so a Peloton that will not talk
+/// costs this week's new classes and nothing else.
+async fn refresh_classes(
+    database: &Path,
+    credentials: &infrastructure::Credentials,
+) -> Result<(), Failure> {
+    output::class_catalogue_started();
+    let pool = connect(database).await?;
+    let store = infrastructure::SqlitePelotonClassStore::new(pool.clone());
+    match plan::peloton(credentials) {
+        Ok((classes, _)) => match infrastructure::peloton::refresh(&classes, &store).await {
+            Ok(refreshed) => output::class_catalogue(&refreshed),
+            Err(error) => output::class_catalogue_not_refreshed(&error.to_string()),
+        },
+        Err(failure) => output::class_catalogue_not_refreshed(failure.message_text()),
+    }
+    pool.close().await;
     Ok(())
 }
 

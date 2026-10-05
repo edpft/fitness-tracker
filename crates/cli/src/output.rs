@@ -226,6 +226,40 @@ pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
 }
 
+pub fn class_catalogue_started() {
+    println!("refreshing Peloton's power zone classes …");
+}
+
+/// What one catalogue refresh did, and how much of the library is read.
+///
+/// **Three numbers, because they answer three different questions.** What was
+/// added says whether Peloton published anything; what was read says how far
+/// this run got through the backlog; what is outstanding says whether choosing
+/// a class is yet answerable without the network. Printing only the total would
+/// hide a catalogue that is listed in full and read not at all.
+pub fn class_catalogue(refreshed: &infrastructure::peloton::Refreshed) {
+    let held = refreshed.held;
+    print!("  {} classes", held.listed);
+    if refreshed.added > 0 {
+        print!(", {} new", refreshed.added);
+    }
+    if refreshed.read > 0 {
+        print!(", {} read this run", refreshed.read);
+    }
+    match held.outstanding() {
+        0 => println!(", all read"),
+        outstanding => println!(", {outstanding} still to read"),
+    }
+}
+
+/// A refresh that did not happen.
+///
+/// Stepped past like any unreachable source (§ 36): the catalogue the last run
+/// left still answers, just without this week's classes in it.
+pub fn class_catalogue_not_refreshed(why: &str) {
+    println!("  not refreshed: {why}. Carrying on with the catalogue already held");
+}
+
 pub fn canonicalising_started() {
     println!("canonicalising gym sessions …");
 }

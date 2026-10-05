@@ -137,12 +137,18 @@ fn the_search_asks_for_the_operators_own_four_filters() {
             .cool_down_for(INSTRUCTOR)
             .await
             .expect("the stubbed search answers");
+        // The catalogue's three fields are spelled out rather than defaulted:
+        // a cool-down listing names its instructor and says nothing about a
+        // series, which is what distinguishes it from a power zone class.
         assert_eq!(
             found,
             Some(ClassSummary {
                 id: COOL_DOWN.to_owned(),
                 title: "5 min Cool Down Ride".to_owned(),
                 duration_seconds: 300,
+                series: None,
+                instructor: Some(INSTRUCTOR.to_owned()),
+                aired_at: None,
             }),
         );
     });

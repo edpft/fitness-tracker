@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reference  AS \"reference!: String\",\n                   title      AS \"title!: String\",\n                   duration   AS \"duration!: i64\",\n                   series     AS \"series: String\",\n                   instructor AS \"instructor: String\",\n                   aired_at   AS \"aired_at: i64\"\n              FROM peloton_class\n             WHERE series = ? AND duration = ?\n             ORDER BY aired_at DESC NULLS LAST, reference ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "title!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "duration"
+          }
+        }
+      },
+      {
+        "name": "series: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "series"
+          }
+        }
+      },
+      {
+        "name": "instructor: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "instructor"
+          }
+        }
+      },
+      {
+        "name": "aired_at: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "aired_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "54b32c5ed294e4a35c3b758f920a04811a388d7f160c7ad117deb6cd81265290"
+}

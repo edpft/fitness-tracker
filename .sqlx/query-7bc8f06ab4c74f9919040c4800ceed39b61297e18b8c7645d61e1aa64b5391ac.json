@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO peloton_class\n                       (reference, title, duration, series, instructor, aired_at, listed_at)\n                VALUES (?, ?, ?, ?, ?, ?, ?)\n                ON CONFLICT (reference) DO UPDATE SET\n                       title      = excluded.title,\n                       duration   = excluded.duration,\n                       series     = excluded.series,\n                       instructor = excluded.instructor,\n                       aired_at   = excluded.aired_at,\n                       listed_at  = excluded.listed_at\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "7bc8f06ab4c74f9919040c4800ceed39b61297e18b8c7645d61e1aa64b5391ac"
+}

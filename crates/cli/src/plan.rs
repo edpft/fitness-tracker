@@ -44,9 +44,10 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePlanStore,
+    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
     peloton::{
         auth::{PelotonAuth, PelotonCredentials},
+        catalogue::ClassCatalogue,
         class::PelotonClasses,
         provider::{self, Fetched},
         skeleton,
@@ -144,8 +145,13 @@ const PAIRINGS: [Pairing; 2] = [
 ///
 /// # Errors
 ///
-/// [`Failure`] if there is nobody to ask, if the credentials are absent, if
-/// Peloton will not answer, or if the store refuses what would be authored.
+/// [`Failure`] if there is nobody to ask, if a class the catalogue has not read
+/// cannot be fetched, or if the store refuses what would be authored.
+///
+/// **The credentials are no longer required** (#246). Every class the skeletons
+/// place is in the local catalogue, and the refresh inside `fitness next` reads
+/// those before any other — so authoring reads the store and contacts Peloton
+/// only for a class it has not reached yet.
 pub async fn generate(
     database: &Path,
     zone: &OperatorZone,
@@ -155,10 +161,13 @@ pub async fn generate(
 ) -> Result<(), Failure> {
     wizard::interactive()?;
 
-    // **Resolved before a single question is asked.** Every answer below is
-    // spent reading Peloton, so a missing login found afterwards wastes the
-    // whole interrogation.
-    let access = access(credentials)?;
+    // **Resolved before a single question is asked, and no longer fatal.**
+    // Every answer below used to be spent reading Peloton, so a missing login
+    // found afterwards wasted the whole interrogation. Since #246 the classes
+    // come from the catalogue, so an absent credential costs only a class the
+    // catalogue has not read — but it is still resolved up front, because that
+    // is when it would be cheapest to say so.
+    let access = access(credentials).ok();
 
     println!("A hybrid programme: one gym provider, one cycling provider.\n");
     let start = wizard::ask_until("Monday the block begins (YYYY-MM-DD): ", |typed| {
@@ -183,20 +192,41 @@ pub async fn generate(
     let diary = SqliteDiaryStore::new(pool.clone());
     let riding_days = cycling_weekdays(&diary, start).await?;
 
-    let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
-    println!(
-        "\nreading {} from Peloton",
-        pairing.programmes.join(" and ")
-    );
+    let classes = access
+        .as_ref()
+        .map(|access| PelotonClasses::new(access.base_url.clone(), access.auth()));
+    let stored = SqlitePelotonClassStore::new(pool.clone());
+    let catalogue = ClassCatalogue::over(&stored, classes.as_ref());
+    // **The count, not the read count.** How many classes have had their
+    // detail read is not what matters here: the refresh reads the classes the
+    // skeletons place before any other, so a catalogue with rows in it answers
+    // this authoring whatever its overall progress. An *empty* catalogue is the
+    // one case worth saying out loud, because then every class is a request.
+    let held = catalogue
+        .held()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let programmes = pairing.programmes.join(" and ");
+    if held.listed == 0 {
+        println!(
+            "\nthe class catalogue is empty, so {programmes} are read from Peloton. \
+             Running fitness next fills it"
+        );
+    } else {
+        println!(
+            "\nreading {programmes} from the local catalogue of {} classes",
+            held.listed
+        );
+    }
 
     let mut read = Vec::new();
     for name in pairing.programmes {
-        read.push(fetch(&classes, name).await?);
+        read.push(fetch(catalogue, name).await?);
     }
     // **The test programme is read whichever pairing is chosen**, because it is
     // a programme in its own right rather than a microcycle borrowed from one of
     // them. Every cycling block opens by measuring FTP.
-    let testing = fetch(&classes, skeleton::POWER_ZONE_TEST).await?;
+    let testing = fetch(catalogue, skeleton::POWER_ZONE_TEST).await?;
 
     let mut offered = Vec::new();
     for one in &read {
@@ -389,7 +419,7 @@ fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
 }
 
 /// Read one published programme: every class it places, and what it trains.
-pub async fn fetch(classes: &PelotonClasses, name: &'static str) -> Result<Read, Failure> {
+pub async fn fetch(classes: ClassCatalogue<'_>, name: &'static str) -> Result<Read, Failure> {
     let placements = placements(name)?;
     let fetched = provider::fetch(classes, &placements)
         .await

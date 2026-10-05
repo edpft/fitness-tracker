@@ -23,7 +23,8 @@ use domain::{
 };
 
 use super::{
-    class::{POWER_ZONE_ENDURANCE_SERIES, POWER_ZONE_SERIES, PelotonClasses},
+    catalogue::ClassCatalogue,
+    class::{POWER_ZONE_ENDURANCE_SERIES, POWER_ZONE_SERIES},
     provider,
 };
 
@@ -48,13 +49,17 @@ const fn series_for(role: SessionRole) -> Option<&'static str> {
 }
 
 /// Peloton, as the catalogue a holding week is built from.
-#[derive(Debug, Clone)]
+///
+/// **The local catalogue, since #246.** Candidates come out of the store, so
+/// offering a holding ride contacts nothing; what the week is built from is
+/// whatever the last refresh listed.
+#[derive(Debug, Clone, Copy)]
 pub struct PelotonHoldingRides<'a> {
-    classes: &'a PelotonClasses,
+    classes: ClassCatalogue<'a>,
 }
 
 impl<'a> PelotonHoldingRides<'a> {
-    pub const fn new(classes: &'a PelotonClasses) -> Self {
+    pub const fn new(classes: ClassCatalogue<'a>) -> Self {
         Self { classes }
     }
 }
@@ -64,10 +69,7 @@ impl HoldingRides for PelotonHoldingRides<'_> {
         let Some(series) = series_for(role) else {
             return Ok(Vec::new());
         };
-        let found = self
-            .classes
-            .newest_in_series(series, HOLDING_SECONDS)
-            .await?;
+        let found = self.classes.in_series(series, HOLDING_SECONDS).await?;
         found
             .into_iter()
             .map(|class| {

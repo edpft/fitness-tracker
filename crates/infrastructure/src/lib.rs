@@ -39,6 +39,7 @@ pub use spreadsheets::{
     SpreadsheetEntity, SpreadsheetSessionTranslator, SpreadsheetTranslator,
     SpreadsheetWeighInTranslator, Workbook,
 };
+pub use store::Held;
 pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
@@ -51,10 +52,10 @@ pub use store::{
     SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
     SqliteNormalisationRunLog, SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore,
-    SqliteOvernightHrvStore, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory, SqliteWeighInStore,
-    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    SqliteOvernightHrvStore, SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory,
+    SqliteWeighInStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

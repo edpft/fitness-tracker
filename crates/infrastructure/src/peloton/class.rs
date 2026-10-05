@@ -72,13 +72,17 @@ pub(crate) const POWER_ZONE_ENDURANCE_SERIES: &str = "0f63c48726fa4533a928cae535
 /// power zone ride"* on 2026-09-20.
 pub(crate) const POWER_ZONE_SERIES: &str = "9fde039566054ea499130bed1c289eb3";
 
-/// How many candidates one browse asks for.
+/// How many classes one page of the catalogue walk asks for.
 ///
-/// Generous on purpose: every ride already taken is skipped, and the operator
-/// has ridden 29 of the 45-minute endurance classes and 19 of the plain ones.
-/// A page that ran out would mean offering a repeat rather than an error, so
-/// the page is sized to make that not happen rather than to be minimal.
-const BROWSE_PAGE: u32 = 100;
+/// A page size and not a limit: the walk continues until the source says there
+/// is no further page, so this trades round trips against response size and
+/// nothing else.
+///
+/// **It replaced a single oversized page.** Until #246 the candidates for a
+/// holding ride were one browse of a hundred classes, sized large enough never
+/// to run out — because running out would have meant offering a class already
+/// ridden. A walk cannot run out, so the question does not arise.
+const CATALOGUE_PAGE: u32 = 100;
 
 /// Whose cool-down ride is used when a class's own instructor has none.
 ///
@@ -99,16 +103,32 @@ const FALLBACK_INSTRUCTOR: &str = "304389e2bfe44830854e071bffc137c9";
 /// the five-minute one, and the browse endpoint takes an exact duration.
 const COOL_DOWN_SECONDS: u64 = 300;
 
-/// A class as the browse endpoint lists it — enough to name it and stack it.
+/// A class as the browse endpoint lists it — enough to name it, stack it, and
+/// hold it in the catalogue.
 ///
 /// Not a [`ClassSession`]: nothing here is fetched in enough detail to say what
 /// it prescribes, and a cool-down does not need to be. It has no zones by
-/// construction.
+/// construction, and [`PelotonClasses::class`] is what reads them.
+///
+/// **The last three fields are the catalogue's**, and they are here rather than
+/// on a second type because this is already the concept — a class as the
+/// listing gives it. A cool-down search ignores them; the catalogue stores them
+/// so that a class can be chosen by its format, its length and its age without
+/// reading what it prescribes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassSummary {
     pub id: String,
     pub title: String,
     pub duration_seconds: u64,
+    /// Which format it is, as Peloton groups them. `None` where the listing
+    /// omits it, and a class with none is never chosen for a role a series
+    /// defines.
+    pub series: Option<String>,
+    /// Who teaches it, by id. The name is not listed here, only on the detail.
+    pub instructor: Option<String>,
+    /// When it first aired, in Unix seconds. The catalogue's order, and so what
+    /// "newest" means without a second request.
+    pub aired_at: Option<i64>,
 }
 
 /// Read the first class out of a browse response.
@@ -124,55 +144,80 @@ pub fn cool_down_from(instructor: &str, body: &str) -> Result<Option<ClassSummar
             "the cool-down search for instructor {instructor} could not be read: {error}"
         ),
     })?;
-    Ok(listing.data.into_iter().next().map(|found| ClassSummary {
-        id: found.id,
-        title: found.title,
-        duration_seconds: found.duration,
-    }))
+    Ok(listing.data.into_iter().next().map(Listed::summary))
 }
 
-/// Read a browse response, keeping only one series, newest first.
+/// One page of the catalogue, and whether another follows.
 ///
-/// **The filter is applied here as well as asked for.** The query names the
-/// series, but this adapter does not own the endpoint and cannot promise the
-/// parameter is honoured — so what comes back is checked against what was
-/// asked for. Belt and braces over a silent wrong answer.
+/// **Every series and every length.** The catalogue holds every power zone
+/// class Peloton serves, and which of them suits a slot is a later question
+/// answered against the stored rows. The only filter is the one the query
+/// already applied, and it is applied again here because this adapter does not
+/// own the endpoint and cannot promise the parameter was honoured.
+///
+/// A class the listing gives no class type for is kept. Absence is not a
+/// statement that it is the wrong kind: the query asked for one type, and a
+/// listing that omits the field has not contradicted it.
+///
+/// **A full page continues the walk even with no `show_next`.** See the note in
+/// the body: the field is the source's own answer where it gives one, and a
+/// full page is the fallback where it does not.
 ///
 /// # Errors
 ///
-/// [`SourceError::Malformed`] where the response cannot be read, or where it
-/// lists classes and none of them says which series it is in — which would
-/// mean the endpoint no longer serves the field this selection turns on,
-/// rather than that no class matched.
-pub fn in_series_from(series: &str, body: &str) -> Result<Vec<ClassSummary>, SourceError> {
+/// [`SourceError::Malformed`] where the response cannot be read.
+pub fn power_zone_from(body: &str) -> Result<CataloguePage, SourceError> {
     let listing: Listing = serde_json::from_str(body).map_err(|error| SourceError::Malformed {
-        detail: format!("the class search for series {series} could not be read: {error}"),
+        detail: format!("a page of the power zone catalogue could not be read: {error}"),
     })?;
-    if !listing.data.is_empty() && listing.data.iter().all(|found| found.series_id.is_none()) {
-        return Err(SourceError::Malformed {
-            detail: format!(
-                "the class search for series {series} listed {} classes and none of them \
-                 stated a series, so which format each is cannot be read",
-                listing.data.len(),
-            ),
-        });
-    }
-    Ok(listing
+    // **Two reasons to keep walking, because one of them is an assumption.**
+    // `show_next` is the source's own statement and is what the workout walk
+    // reads — but that is a different endpoint, and this adapter has never seen
+    // this one answer. If the field is absent the walk would stop at the first
+    // page and a hundred classes would look like the whole library, which is
+    // exactly the wrong default `CLAUDE.md` warns a stub cannot catch. So a
+    // page that came back *full* also continues: the source filled the limit it
+    // was given, which it would not have done if that were the end.
+    //
+    // Counted before filtering, because the question is whether the endpoint
+    // had more to give, not how many of them were power zone classes.
+    let served = listing.data.len();
+    let more = listing.show_next || served >= usize::try_from(CATALOGUE_PAGE).unwrap_or(usize::MAX);
+    let classes = listing
         .data
         .into_iter()
-        .filter(|found| found.series_id.as_deref() == Some(series))
-        .map(|found| ClassSummary {
-            id: found.id,
-            title: found.title,
-            duration_seconds: found.duration,
+        .filter(|found| {
+            found
+                .class_type_ids
+                .as_ref()
+                .is_none_or(|types| types.iter().any(|kind| kind == POWER_ZONE_CLASS_TYPE))
         })
-        .collect())
+        .filter(Listed::is_rideable)
+        .map(Listed::summary)
+        .collect();
+    Ok(CataloguePage { classes, more })
+}
+
+/// What one page of the catalogue walk yields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CataloguePage {
+    pub classes: Vec<ClassSummary>,
+    /// Whether another page follows: the source said so, or it filled the page
+    /// it was given.
+    pub more: bool,
 }
 
 #[derive(Deserialize)]
 struct Listing {
     #[serde(default)]
     data: Vec<Listed>,
+    /// Whether another page follows.
+    ///
+    /// **The source's own answer, not `page` against `page_count`.** The
+    /// workout walk reads the same field for the same reason: a derived answer
+    /// would be this adapter deciding something the endpoint already said.
+    #[serde(default)]
+    show_next: bool,
 }
 
 #[derive(Deserialize)]
@@ -182,12 +227,49 @@ struct Listed {
     duration: u64,
     /// Which kind of class it is, as the source groups them.
     ///
-    /// Optional because the browse endpoint is not ours: a listing that omits
-    /// it is a listing this adapter cannot filter, and
-    /// [`PelotonClasses::newest_in_series`] says so rather than silently
-    /// answering nothing.
+    /// Optional because the browse endpoint is not ours. A class the listing
+    /// gives no series for is held with none, and so is never offered for a
+    /// role that is defined by a series — which is the honest answer, since
+    /// what format it is has not been stated.
     #[serde(default)]
     series_id: Option<String>,
+    /// Which kinds of class it is. Peloton lists several per class, so the
+    /// power zone type is looked for among them rather than compared to one.
+    #[serde(default)]
+    class_type_ids: Option<Vec<String>>,
+    #[serde(default)]
+    instructor_id: Option<String>,
+    /// Unix seconds. Nullable in principle, and a class without one simply
+    /// sorts last rather than borrowing the clock.
+    #[serde(default)]
+    original_air_time: Option<i64>,
+}
+
+impl Listed {
+    /// Whether this is a class at all.
+    ///
+    /// **A class of no length is not a class**, which is migration 0066's
+    /// ruling about an activity of no duration, applied to the other side of
+    /// the same question. One in a page is dropped rather than failing the
+    /// walk: the catalogue's job is to hold what can be ridden, and a page
+    /// refused over one unrideable entry would hold nothing.
+    ///
+    /// A nameless class goes the same way, because what the catalogue shows the
+    /// operator is the title and a blank one names nothing.
+    fn is_rideable(&self) -> bool {
+        self.duration > 0 && !self.title.trim().is_empty()
+    }
+
+    fn summary(self) -> ClassSummary {
+        ClassSummary {
+            id: self.id,
+            title: self.title,
+            duration_seconds: self.duration,
+            series: self.series_id,
+            instructor: self.instructor_id,
+            aired_at: self.original_air_time,
+        }
+    }
 }
 
 /// What one class prescribes, before it is joined to any other.
@@ -550,31 +632,20 @@ impl PelotonClasses {
         cool_down_from(instructor, &body)
     }
 
-    /// Every class of one series and one length, newest first.
+    /// One page of every power zone class Peloton serves, newest first.
     ///
-    /// **The operator's own app filters, as a query**, exactly as
-    /// [`cool_down_for`](Self::cool_down_for) is: cycling, that exact length,
-    /// the Power Zone class type, sorted by air date with the newest first.
-    /// The series is what separates *Power Zone Endurance Ride* from *Power
-    /// Zone Ride*, which the class type cannot — both carry
-    /// [`POWER_ZONE_CLASS_TYPE`].
+    /// **No duration and no series.** The catalogue holds the whole class
+    /// library and the choosing happens against the stored rows.
+    /// The operator, 2026-10-05: *"I don't just want the classes I've already
+    /// ridden, I want all power classes"*.
     ///
-    /// **Newest first and nothing skipped here.** Which of these has already
-    /// been ridden is a question about the operator's record, not about
-    /// Peloton, so it is answered a ring up. This hands back the catalogue's
-    /// answer in the catalogue's order.
-    ///
-    /// An empty list is a real answer: no class of that series is that long.
+    /// Pages are walked until [`CataloguePage::more`] is false.
     ///
     /// # Errors
     ///
     /// [`SourceError`] if the source is unreachable, refuses the token, or
     /// answers something this cannot read.
-    pub async fn newest_in_series(
-        &self,
-        series: &str,
-        duration_seconds: u64,
-    ) -> Result<Vec<ClassSummary>, SourceError> {
+    pub async fn power_zone_page(&self, page: u32) -> Result<CataloguePage, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
             .client()?
@@ -583,12 +654,11 @@ impl PelotonClasses {
             .header("Peloton-Platform", "web")
             .query(&[
                 ("browse_category", "cycling"),
-                ("duration", &duration_seconds.to_string()),
                 ("class_type_id", POWER_ZONE_CLASS_TYPE),
-                ("series_id", series),
                 ("sort_by", "original_air_time"),
                 ("desc", "true"),
-                ("limit", &BROWSE_PAGE.to_string()),
+                ("limit", &CATALOGUE_PAGE.to_string()),
+                ("page", &page.to_string()),
             ])
             .send()
             .await
@@ -602,7 +672,7 @@ impl PelotonClasses {
         }
         if !status.is_success() {
             return Err(SourceError::Unavailable {
-                detail: format!("the class search for series {series} answered {status}"),
+                detail: format!("page {page} of the power zone catalogue answered {status}"),
             });
         }
         let body = response
@@ -611,17 +681,23 @@ impl PelotonClasses {
             .map_err(|error| SourceError::Malformed {
                 detail: error.to_string(),
             })?;
-        in_series_from(series, &body)
+        power_zone_from(&body)
     }
 
-    /// One class, derived.
+    /// What `/api/ride/{id}/details` serves for one class, as served.
+    ///
+    /// **The bytes, not the reading of them.** The catalogue keeps this so that
+    /// a corrected reader costs a re-read of the store rather than a re-fetch
+    /// of the whole library — and this module's own history is the argument:
+    /// the transcription it replaced had a cool-down five minutes out, and
+    /// finding that out again should not need the network.
     ///
     /// # Errors
     ///
     /// [`SourceError::Unauthorised`] where the token is refused,
     /// [`SourceError::Unavailable`] where Peloton is not answering, and
-    /// [`SourceError::Malformed`] where the response cannot be read.
-    pub async fn class(&self, id: &str) -> Result<ClassSession, SourceError> {
+    /// [`SourceError::Malformed`] where the body cannot be read as text.
+    pub async fn detail(&self, id: &str) -> Result<String, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
             .client()?
@@ -642,12 +718,23 @@ impl PelotonClasses {
                 detail: format!("class {id} answered {status}"),
             });
         }
-        let body = response
+        response
             .text()
             .await
             .map_err(|error| SourceError::Malformed {
                 detail: error.to_string(),
-            })?;
+            })
+    }
+
+    /// One class, derived.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Unauthorised`] where the token is refused,
+    /// [`SourceError::Unavailable`] where Peloton is not answering, and
+    /// [`SourceError::Malformed`] where the response cannot be read.
+    pub async fn class(&self, id: &str) -> Result<ClassSession, SourceError> {
+        let body = self.detail(id).await?;
         derive(id, &body)
     }
 }
