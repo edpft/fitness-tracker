@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COUNT(*)                                             AS \"listed!: i64\",\n                   COALESCE(SUM(detail IS NOT NULL), 0)                 AS \"read!: i64\",\n                   COALESCE(SUM(detail IS NULL AND not_served_at IS NOT NULL), 0)\n                                                                        AS \"not_served!: i64\"\n              FROM peloton_class\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "listed!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "read!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "not_served!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d46bc68c22b174d9a333c2dcba3586e4396f23c1813f96f89633f8314a243fe2"
+}

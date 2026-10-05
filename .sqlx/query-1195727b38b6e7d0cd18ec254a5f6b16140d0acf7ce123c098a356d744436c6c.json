@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO peloton_class (reference, title, duration, listed_at)\n            VALUES (?, ?, 1, ?)\n            ON CONFLICT (reference) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1195727b38b6e7d0cd18ec254a5f6b16140d0acf7ce123c098a356d744436c6c"
+}

@@ -131,7 +131,7 @@ fn re_listing_a_class_keeps_what_was_read_of_it() {
         assert_eq!(held.read, 1, "the second listing did not undo the reading");
         assert_eq!(held.outstanding(), 0);
         assert!(
-            store.unread(50).await.expect("unread reads").is_empty(),
+            store.unread().await.expect("unread reads").is_empty(),
             "a read class is never offered as unread again"
         );
     });
@@ -164,10 +164,11 @@ fn re_listing_a_class_replaces_what_the_listing_says() {
     });
 }
 
-/// **Newest first, because that is what gets ridden.** Oldest-first would
-/// spend the first refreshes on the far end of the library.
+/// **Newest first, because that is what gets ridden.** Unbounded since #369,
+/// so the order no longer decides what gets left out — it decides what a
+/// refresh that is interrupted part-way has already read.
 #[test]
-fn the_unread_are_offered_newest_first_and_bounded() {
+fn the_unread_are_offered_newest_first() {
     let Ok(rt) = runtime() else {
         panic!("a current-thread runtime builds")
     };
@@ -182,11 +183,15 @@ fn the_unread_are_offered_newest_first_and_bounded() {
             .await
             .expect("the listing records");
 
-        let first = store.unread(2).await.expect("unread reads");
+        let first = store.unread().await.expect("unread reads");
         assert_eq!(
             first,
-            vec!["newest".to_owned(), "middle".to_owned()],
-            "newest first, and only as many as were asked for"
+            vec![
+                "newest".to_owned(),
+                "middle".to_owned(),
+                "oldest".to_owned()
+            ],
+            "newest first, and every one of them"
         );
     });
 }
@@ -207,7 +212,7 @@ fn a_class_with_no_air_date_is_read_last() {
             .await
             .expect("the listing records");
 
-        let order = store.unread(10).await.expect("unread reads");
+        let order = store.unread().await.expect("unread reads");
         assert_eq!(order, vec!["dated".to_owned(), "undated".to_owned()]);
     });
 }
@@ -277,9 +282,9 @@ fn a_class_the_listing_never_carried_is_held_from_its_detail_alone() {
         assert_eq!(held.read, 1);
         assert!(
             store
-                .is_read("never-listed")
+                .is_accounted_for("never-listed")
                 .await
-                .expect("is_read answers")
+                .expect("is_accounted_for answers")
         );
 
         let class = store
@@ -385,5 +390,137 @@ fn an_unfilled_catalogue_answers_nothing_and_says_so() {
         let held = store.held().await.expect("the counts read");
         assert_eq!(held.listed, 0);
         assert_eq!(held.outstanding(), 0);
+    });
+}
+
+/// **The thing that makes "all read" reachable** (#369). Peloton will not
+/// serve one *Peak Your Power Zones* class to the operator's account, and an
+/// unbounded refresh that left it unread would ask for it again on every single
+/// `fitness next` — and the count would read "1 still to read" for ever.
+#[test]
+fn a_class_peloton_will_not_serve_is_accounted_for_and_never_asked_again() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_listed(&[
+                listed("served", ENDURANCE, 2_700, 200),
+                listed("unserved", ENDURANCE, 2_700, 100),
+            ])
+            .await
+            .expect("the listing records");
+        store
+            .record_not_served("unserved")
+            .await
+            .expect("what the source does not serve records");
+
+        assert_eq!(
+            store.unread().await.expect("unread reads"),
+            vec!["served".to_owned()],
+            "a class the source does not serve is not offered for reading again"
+        );
+        assert!(
+            store
+                .is_accounted_for("unserved")
+                .await
+                .expect("is_accounted_for answers"),
+            "there is nothing left to ask Peloton about it"
+        );
+
+        store
+            .record_detail(
+                "served",
+                "45 min Power Zone Ride",
+                1_020,
+                &detail("45 min Power Zone Ride"),
+            )
+            .await
+            .expect("a detail records");
+
+        let held = store.held().await.expect("the counts read");
+        assert_eq!(held.listed, 2);
+        assert_eq!(held.read, 1);
+        assert_eq!(held.not_served, 1);
+        assert_eq!(
+            held.outstanding(),
+            0,
+            "a catalogue that has asked all it can is read"
+        );
+    });
+}
+
+/// A class the listing never carried and Peloton has no detail for: the fact
+/// needs somewhere to live, or the class is asked for on every run for ever.
+#[test]
+fn a_class_with_no_listing_row_still_records_that_it_is_not_served() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_not_served("never-listed")
+            .await
+            .expect("what the source does not serve records");
+
+        assert!(
+            store
+                .is_accounted_for("never-listed")
+                .await
+                .expect("is_accounted_for answers")
+        );
+        assert!(store.unread().await.expect("unread reads").is_empty());
+        assert!(
+            store
+                .in_series(ENDURANCE, 2_700)
+                .await
+                .expect("a series reads")
+                .is_empty(),
+            "a placeholder row is never a candidate"
+        );
+        assert!(
+            store
+                .class("never-listed")
+                .await
+                .expect("a read answers")
+                .is_none(),
+            "and it prescribes nothing"
+        );
+    });
+}
+
+/// **Not served is not the last word where Peloton later serves the class.**
+/// Nothing re-asks on a schedule, but a detail that does arrive — because the
+/// class was placed by a skeleton and fetched by name — clears it.
+#[test]
+fn a_detail_clears_what_was_not_served() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_listed(&[listed("a", ENDURANCE, 2_700, 100)])
+            .await
+            .expect("the listing records");
+        store
+            .record_not_served("a")
+            .await
+            .expect("what the source does not serve records");
+        store
+            .record_detail(
+                "a",
+                "45 min Power Zone Ride",
+                1_020,
+                &detail("45 min Power Zone Ride"),
+            )
+            .await
+            .expect("a detail records");
+
+        let held = store.held().await.expect("the counts read");
+        assert_eq!(held.read, 1);
+        assert_eq!(held.not_served, 0);
     });
 }

@@ -150,8 +150,9 @@ pub async fn commit(
     .await?;
     // **An absent credential no longer stops a commit** (#246). Every class a
     // published mesocycle places is in the local catalogue, so the cycling half
-    // is built from the store and Peloton is asked only for a class the
-    // bounded refreshes have not read yet.
+    // is built from the store and Peloton is asked only for a class published
+    // since the last refresh — since #369 a refresh reads every detail it
+    // listed, so there is nothing else left to ask about.
     let classes = plan::peloton(credentials).ok().map(|(classes, _)| classes);
     let stored = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = ClassCatalogue::over(&stored, classes.as_ref());

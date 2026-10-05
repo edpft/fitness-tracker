@@ -222,6 +222,13 @@ async fn collect(
 /// **Stepped past, never fatal.** A catalogue one run out of date still answers
 /// every question `plan` and `hold` ask of it, so a Peloton that will not talk
 /// costs this week's new classes and nothing else.
+///
+/// **The walk and the read are two calls, and the gap between them is where the
+/// warning goes** (#369). The first refresh against an empty catalogue reads
+/// about a thousand class details, which is ten minutes; printing how long
+/// before starting is the difference between a run that is working and a run
+/// that looks hung. Every refresh after it has nothing to read and prints
+/// nothing extra.
 async fn refresh_classes(
     database: &Path,
     credentials: &infrastructure::Credentials,
@@ -230,8 +237,14 @@ async fn refresh_classes(
     let pool = connect(database).await?;
     let store = infrastructure::SqlitePelotonClassStore::new(pool.clone());
     match plan::peloton(credentials) {
-        Ok((classes, _)) => match infrastructure::peloton::refresh(&classes, &store).await {
-            Ok(refreshed) => output::class_catalogue(&refreshed),
+        Ok((classes, _)) => match infrastructure::peloton::walk(&classes, &store).await {
+            Ok(walked) => {
+                output::class_catalogue_walked(&walked);
+                match infrastructure::peloton::read_details(&classes, &store).await {
+                    Ok(read) => output::class_catalogue(&walked, &read),
+                    Err(error) => output::class_catalogue_not_read(&error.to_string()),
+                }
+            }
             Err(error) => output::class_catalogue_not_refreshed(&error.to_string()),
         },
         Err(failure) => output::class_catalogue_not_refreshed(failure.message_text()),

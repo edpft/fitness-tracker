@@ -230,25 +230,73 @@ pub fn class_catalogue_started() {
     println!("refreshing Peloton's power zone classes …");
 }
 
+/// How long a read has to be before it is worth warning about.
+///
+/// The first refresh against an empty catalogue is ten minutes and has to say
+/// so. The weekly one is three classes and two seconds, and announcing that
+/// would be commentary.
+const WORTH_ANNOUNCING: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the reading about to start will cost, where that is worth knowing.
+///
+/// **Before it starts, not after** (#369). A thousand class details is ten
+/// minutes, and ten minutes of a silent `fitness next` is indistinguishable
+/// from one that has hung.
+pub fn class_catalogue_walked(walked: &infrastructure::peloton::Walked) {
+    let takes = walked.reading_takes();
+    if takes < WORTH_ANNOUNCING {
+        return;
+    }
+    println!(
+        "  {} classes to read — about {}",
+        walked.held.outstanding(),
+        roughly(takes)
+    );
+}
+
+/// A duration as the operator would say it.
+fn roughly(takes: std::time::Duration) -> String {
+    let seconds = takes.as_secs();
+    if seconds < 90 {
+        return format!("{seconds} seconds");
+    }
+    let minutes = (seconds + 30) / 60;
+    format!("{minutes} minutes")
+}
+
 /// What one catalogue refresh did, and how much of the library is read.
 ///
-/// **Three numbers, because they answer three different questions.** What was
+/// **Four numbers, because they answer four different questions.** What was
 /// added says whether Peloton published anything; what was read says how far
-/// this run got through the backlog; what is outstanding says whether choosing
-/// a class is yet answerable without the network. Printing only the total would
-/// hide a catalogue that is listed in full and read not at all.
-pub fn class_catalogue(refreshed: &infrastructure::peloton::Refreshed) {
-    let held = refreshed.held;
+/// this run got; what Peloton does not serve says the catalogue has asked all
+/// it can about a class and been told no; what is outstanding says whether
+/// choosing a class is yet answerable without the network. Printing only the
+/// total would hide a catalogue that is listed in full and read not at all,
+/// which is what #369 was.
+pub fn class_catalogue(
+    walked: &infrastructure::peloton::Walked,
+    read: &infrastructure::peloton::Reading,
+) {
+    let held = read.held;
     print!("  {} classes", held.listed);
-    if refreshed.added > 0 {
-        print!(", {} new", refreshed.added);
+    if walked.added > 0 {
+        print!(", {} new", walked.added);
     }
-    if refreshed.read > 0 {
-        print!(", {} read this run", refreshed.read);
+    if read.read > 0 {
+        print!(", {} read this run", read.read);
+    }
+    if held.not_served > 0 {
+        print!(", {} Peloton does not serve", held.not_served);
     }
     match held.outstanding() {
         0 => println!(", all read"),
         outstanding => println!(", {outstanding} still to read"),
+    }
+    // **A read that stopped part-way says so, and what it read still counts.**
+    // Six hundred classes read before an outage is six hundred the next refresh
+    // does not pay for again.
+    if let Some(error) = &read.stopped {
+        println!("  reading stopped: {error}. The next `fitness next` carries on");
     }
 }
 
@@ -258,6 +306,15 @@ pub fn class_catalogue(refreshed: &infrastructure::peloton::Refreshed) {
 /// left still answers, just without this week's classes in it.
 pub fn class_catalogue_not_refreshed(why: &str) {
     println!("  not refreshed: {why}. Carrying on with the catalogue already held");
+}
+
+/// A walk that landed and a read that could not be written.
+///
+/// Distinct from [`class_catalogue_not_refreshed`]: the listing *is* current, so
+/// choosing a class still works; what is missing is the zone structure of
+/// whatever had not been read yet.
+pub fn class_catalogue_not_read(why: &str) {
+    println!("  details not read: {why}. The listing is current either way");
 }
 
 pub fn canonicalising_started() {

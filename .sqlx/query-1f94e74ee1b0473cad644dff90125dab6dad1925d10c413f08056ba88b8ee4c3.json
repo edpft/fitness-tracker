@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE peloton_class\n               SET not_served_at = ?\n             WHERE reference = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1f94e74ee1b0473cad644dff90125dab6dad1925d10c413f08056ba88b8ee4c3"
+}

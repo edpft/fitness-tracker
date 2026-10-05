@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT reference AS \"reference!: String\"\n              FROM peloton_class\n             WHERE detail IS NULL\n             ORDER BY aired_at DESC NULLS LAST, reference ASC\n             LIMIT ?\n            ",
+  "query": "\n            SELECT reference AS \"reference!: String\"\n              FROM peloton_class\n             WHERE detail IS NULL AND not_served_at IS NULL\n             ORDER BY aired_at DESC NULLS LAST, reference ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false
     ]
   },
-  "hash": "985fe31e864c57ba6698870f50de7bf19ce149cd70a0af603967ab34f50fa41f"
+  "hash": "2b1a5a96371aa00dd9057749b9b3d2c6ae14d9a33f44494d3f69a88dbd2e3ccb"
 }
