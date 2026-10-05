@@ -26,16 +26,17 @@ use domain::{
     sequence::NonEmpty,
 };
 
-use super::{
-    class::{ClassSession, PelotonClasses},
-    skeleton::Placement,
-};
+use super::{catalogue::ClassCatalogue, class::ClassSession, skeleton::Placement};
 
 /// What a skeleton's classes are, once fetched: the classes at each
 /// `(microcycle, session)`, in the order they are placed.
 pub type Fetched = BTreeMap<(u32, u32), Vec<ClassSession>>;
 
-/// Fetch every class a skeleton places.
+/// Read every class a skeleton places.
+///
+/// **From the catalogue, since #246.** It was sixty-five requests per
+/// authoring, and the refresh reads the placed classes before any other, so a
+/// store that has been refreshed once answers all of them locally.
 ///
 /// **A session is one or more classes** (0033): the FTP warm-up and test pair
 /// share a cell, so classes accumulate rather than replace.
@@ -44,7 +45,7 @@ pub type Fetched = BTreeMap<(u32, u32), Vec<ClassSession>>;
 ///
 /// [`SourceError`] from the first class that will not fetch or will not read.
 pub async fn fetch(
-    classes: &PelotonClasses,
+    classes: ClassCatalogue<'_>,
     placements: &[Placement],
 ) -> Result<Fetched, SourceError> {
     let mut cells: Fetched = BTreeMap::new();

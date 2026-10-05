@@ -32,9 +32,9 @@ use domain::{
     sequence::NonEmpty,
 };
 use infrastructure::{
-    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePlanStore, SqlitePool,
-    SqliteRiddenVenues,
-    peloton::{PelotonClasses, PelotonHoldingRides, skeleton},
+    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePool, SqliteRiddenVenues,
+    peloton::{PelotonHoldingRides, catalogue::ClassCatalogue, skeleton},
 };
 use jiff::civil::Date;
 
@@ -148,8 +148,14 @@ pub async fn commit(
         start,
     )
     .await?;
-    let (classes, _) = plan::peloton(credentials)?;
-    let cycling = cycling_side(pool, &classes, due.concurrent.cycling(), start).await?;
+    // **An absent credential no longer stops a commit** (#246). Every class a
+    // published mesocycle places is in the local catalogue, so the cycling half
+    // is built from the store and Peloton is asked only for a class the
+    // bounded refreshes have not read yet.
+    let classes = plan::peloton(credentials).ok().map(|(classes, _)| classes);
+    let stored = SqlitePelotonClassStore::new(pool.clone());
+    let catalogue = ClassCatalogue::over(&stored, classes.as_ref());
+    let cycling = cycling_side(pool, catalogue, due.concurrent.cycling(), start).await?;
 
     SqlitePlanStore::new(pool.clone(), zone.clone())
         .commit(due.plan.name(), &gym, &cycling)
@@ -313,7 +319,7 @@ async fn gym_side(
 /// test week.
 async fn cycling_side(
     pool: &SqlitePool,
-    classes: &PelotonClasses,
+    classes: ClassCatalogue<'_>,
     cycling: Cycling,
     start: Date,
 ) -> Result<Vec<CyclingMesocycle>, Failure> {

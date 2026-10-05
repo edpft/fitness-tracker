@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"held!: i64\" FROM peloton_class",
+  "describe": {
+    "columns": [
+      {
+        "name": "held!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "638ad34d3741fbaead3c7c5ff0fe0f8053f5d5f27fa698b8a46e629217025063"
+}

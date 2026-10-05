@@ -27,6 +27,7 @@ pub mod normalisation_run_log;
 pub mod normalised;
 pub mod normalised_gym;
 pub mod parameters;
+pub mod peloton_class;
 pub mod peloton_landing;
 pub mod peloton_normalised;
 pub mod peloton_samples_landing;
@@ -70,6 +71,7 @@ pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use normalised_gym::SqliteNormalisedGymSessionReader;
 pub use parameters::SqliteGenerationParameterStore;
+pub use peloton_class::{Held, SqlitePelotonClassStore};
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
     PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionLog,

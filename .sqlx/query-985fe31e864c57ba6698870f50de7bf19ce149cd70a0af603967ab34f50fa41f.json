@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reference AS \"reference!: String\"\n              FROM peloton_class\n             WHERE detail IS NULL\n             ORDER BY aired_at DESC NULLS LAST, reference ASC\n             LIMIT ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "reference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "985fe31e864c57ba6698870f50de7bf19ce149cd70a0af603967ab34f50fa41f"
+}
