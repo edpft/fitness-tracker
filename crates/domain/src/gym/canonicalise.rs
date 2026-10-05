@@ -171,34 +171,189 @@ fn heart_rate(accounts: &[NormalisedGymSession]) -> Option<Attributed<MeasuredHe
         .cloned()
 }
 
-/// How long the visit took: the operator's own record of it, else the watch's.
+/// How long the visit took: the longest account of it, less any stretch at the
+/// end the watch was left running through.
 ///
-/// **Not the longest, and this is provisional.** #321 is the issue that owns
-/// it: on six of the operator's 2025 sessions the watch runs 21 to 62 minutes
-/// past Hevy's last set because he left it running on the drive home, so the
-/// longest account is not a floor on the visit but an inflated one. Nor is
-/// Hevy's end the boundary — on four of those six there are 16 to 36 minutes
-/// of *elevated* heart rate after the last logged set, so cutting there throws
-/// real training away. The two accounts bracket it and neither is it, and what
-/// resolves that needs the quiet-stretch analysis #321 is for.
+/// **The longest, because each account is a floor on the visit.** An account
+/// says he was training over the span it covers and says nothing about the rest
+/// — Hevy starts 47 minutes before the watch on 2025-03-31 and both end within
+/// a minute of each other, so he was logging before he started the watch, and
+/// Hevy holds 5 minutes of 2025-02-12's 57-minute recording. Preferring either
+/// recorder over the other loses whichever part the other one saw.
 ///
-/// Until then: a log is what the operator himself recorded of the visit, and a
-/// watch is a device that may have been left running, so the log is the better
-/// of two provisional answers and the watch's stands where nothing else does —
-/// which is 345 of his 389 sessions. Ties go to the lowest id.
+/// **A watch left running is the one way an account overstates the visit**, and
+/// #321 is the issue that found it. The operator, 2026-09-29: *"I sometimes
+/// forget to stop the session on my watch in the gym and only stop it when I
+/// get home."* So the watch's account is its recording less that stretch, and
+/// the floors are compared after it is taken off rather than before.
+///
+/// Ties go to the lowest id, so a rebuild gives the same answer.
 fn duration(accounts: &[NormalisedGymSession]) -> Option<Attributed<PositiveDuration>> {
     let stated: Vec<&NormalisedGymSession> = accounts
         .iter()
         .filter(|account| account.duration().is_some())
         .collect();
-    let logged = stated
+    stated
         .iter()
-        .filter(|account| account.recorder() == Recorder::Operator)
-        .min_by_key(|account| account.id());
-    logged
-        .or_else(|| stated.iter().min_by_key(|account| account.id()))
-        .and_then(|account| account.duration())
-        .copied()
+        .filter_map(|account| {
+            let recorded = account.duration()?;
+            let visit = match account.recorder() {
+                Recorder::Watch => {
+                    left_running(account, &stated).unwrap_or_else(|| recorded.copied())
+                }
+                Recorder::Operator => recorded.copied(),
+            };
+            Some((visit, account.id()))
+        })
+        // The longest floor, and the lowest id where two state the same.
+        .max_by_key(|(visit, id)| (*visit, std::cmp::Reverse(*id)))
+        .map(|(visit, id)| Attributed::new(visit, id))
+}
+
+/// How long a stretch has to stay below the floor before it is read as the
+/// watch having been left running rather than a rest between sets.
+///
+/// **Eight minutes, and the operator's to change.** The record does not pick
+/// it: across his 50 bracketed sessions anything from six to eight minutes
+/// gives the same three, and ten or more loses 2025-03-17, whose heart rate
+/// holds 72 to 93 for the twenty minutes after Hevy's last set. What the
+/// record does say is that five minutes is too short — it admits a four-minute
+/// trim on 2025-02-24, which is the length of walking to the car.
+const LEFT_RUNNING_MINUTES: u64 = 8;
+
+/// The length of the visit, where the watch was left running past its end.
+/// [`None`] where nothing in the record says it was.
+///
+/// **Three things together, because no two of them separate his sessions.**
+/// #321 found that no single-source statistic tells a genuinely long session
+/// from one the watch was left running through — § II.3 makes a normalised
+/// entity a function of what *one* source served, and every self-normalising
+/// form tried is interleaved. So:
+///
+/// 1. **Another account says he was still training later than this.** It gives
+///    a floor on the visit, nothing more: cutting at it would throw away the
+///    16 to 36 minutes of elevated heart rate that follow it on four of the
+///    six. Within two minutes of the watch is agreement rather than
+///    disagreement — the operator's seven 2026 long sessions agree that
+///    closely and were genuinely 94 to 104 minutes — and nothing is trimmed.
+/// 2. **The readings fall below anything he reached while that account says he
+///    was training, and stay there.** His working heart rate is not comparable
+///    across the record — the 2018–2020 sessions trained at 60 to 90bpm
+///    throughout — so the comparison is to this session's own floor and no
+///    absolute figure. The operator, 2026-09-30, ruling out the obvious one:
+///    *"the resting heart rate in the car would be a guess and one that was
+///    constantly changing."*
+/// 3. **The account bounding it covers more of the visit than the trim would
+///    discard.** Hevy holds 5 minutes of 2025-02-12's 57-minute recording, and
+///    a floor read off five minutes is not a floor; an account that covers less
+///    of the visit than this would cut is a fragment rather than evidence about
+///    its end.
+///
+/// A rise in the last minute or two is *not* required. The operator,
+/// 2026-09-30, asked whether it should be: *"It's corroboration, I could have
+/// noticed that my watch was still running while I was in the car."* 2025-07-25
+/// is the clearest case in the record and the watch wrote nothing at all for
+/// its last sixteen minutes, so a terminal rise would miss it — which is why a
+/// minute the watch wrote nothing in does not break a stretch either.
+fn left_running(
+    watch: &NormalisedGymSession,
+    stated: &[&NormalisedGymSession],
+) -> Option<PositiveDuration> {
+    let recorded = watch.duration()?.copied().as_seconds();
+    let series = watch.heart_rate()?.value().series()?;
+    let recording_began = watch.occurred().instant()?.instant();
+
+    let logged_end = stated
+        .iter()
+        .filter(|account| account.id() != watch.id())
+        .filter_map(|account| {
+            // The log may have started before the watch — Hevy does on
+            // 2025-07-25 by a minute and on 2025-08-08 by seven — so the
+            // offset is signed and only the end it works out to is not.
+            let start = account.occurred().instant()?.instant();
+            let offset = start.as_second() - recording_began.as_second();
+            let length = i64::try_from(account.duration()?.copied().as_seconds()).ok()?;
+            u64::try_from(offset.checked_add(length)?).ok()
+        })
+        .max()?;
+    // Agreement, not disagreement: his seven 2026 long sessions sit here.
+    if logged_end + AGREEMENT_SECONDS >= recorded {
+        return None;
+    }
+
+    let beats = per_minute(series);
+    let floor = beats
+        .iter()
+        .filter(|(minute, _)| *minute * 60 <= logged_end)
+        .map(|(_, median)| *median)
+        .min()?;
+    let began = quiet_stretch(&beats, logged_end, recorded, floor)?;
+    // A fragment of a log says nothing about where the visit ended.
+    if logged_end < recorded.saturating_sub(began) {
+        return None;
+    }
+    PositiveDuration::from_seconds(began).ok()
+}
+
+/// How close another account's end has to be to the watch's before the two are
+/// reading the same end rather than disagreeing about it. Two minutes: the
+/// operator's seven 2026 long sessions agree to within that, and were
+/// genuinely 94 to 104 minutes.
+const AGREEMENT_SECONDS: u64 = 120;
+
+/// The recording a minute at a time, each minute the median of its readings.
+///
+/// **The minute is the unit, because the second is not.** The watch writes on
+/// its own judgement — 2,785 readings across the 5,935 seconds of 2026-09-25,
+/// one to ten seconds apart — and a drive home has traffic lights in it, so one
+/// reading above a floor is noise where a minute above it is not.
+fn per_minute(series: &crate::measure::HeartRateSeries) -> BTreeMap<u64, u32> {
+    let mut readings: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+    for sample in series.samples().iter() {
+        readings
+            .entry(sample.at.as_seconds() / 60)
+            .or_default()
+            .push(sample.beats_per_minute.as_u32());
+    }
+    readings
+        .into_iter()
+        .filter_map(|(minute, beats)| median(beats).map(|median| (minute, median)))
+        .collect()
+}
+
+/// The middle of a minute's readings, or the lower of the two middles.
+fn median(mut beats: Vec<u32>) -> Option<u32> {
+    beats.sort_unstable();
+    beats.get((beats.len().saturating_sub(1)) / 2).copied()
+}
+
+/// Where the stretch the watch was left running through begins, in seconds
+/// from the start of the recording.
+///
+/// The longest stretch after `logged_end` that never rises to `floor` and lasts
+/// at least [`LEFT_RUNNING_MINUTES`]. A minute holding no reading continues a
+/// stretch rather than breaking it: on 2025-07-25 the watch wrote nothing for
+/// sixteen minutes, and silence is not evidence of training.
+fn quiet_stretch(
+    beats: &BTreeMap<u64, u32>,
+    logged_end: u64,
+    recorded: u64,
+    floor: u32,
+) -> Option<u64> {
+    let mut longest: Option<(u64, u64)> = None;
+    let mut began: Option<u64> = None;
+    for minute in (logged_end / 60 + 1)..=(recorded / 60) {
+        if beats.get(&minute).is_some_and(|median| *median >= floor) {
+            began = None;
+            continue;
+        }
+        let start = *began.get_or_insert(minute);
+        let minutes = minute - start + 1;
+        if minutes >= LEFT_RUNNING_MINUTES && longest.is_none_or(|(_, longest)| minutes > longest) {
+            longest = Some((start, minutes));
+        }
+    }
+    longest.map(|(start, _)| start * 60)
 }
 
 /// Where in a visit an exercise sits: its key, and which time round it is.

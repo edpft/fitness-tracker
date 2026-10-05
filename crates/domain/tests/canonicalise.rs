@@ -16,7 +16,10 @@ use domain::{
         GuessedExercise, Identified, Load, MeasuredHeartRate, NormalisedGymSession, Performed,
         Recorder, canonical_sessions, exercise::RepsExercise,
     },
-    measure::{BeatsPerMinute, HeartRateSummary, Kg, PositiveDuration, RepCount},
+    measure::{
+        BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, HeartRateSummary, Kg,
+        PositiveDuration, RepCount,
+    },
     normalised::{OperatorZone, StartedAt},
     sequence::NonEmpty,
 };
@@ -446,49 +449,271 @@ fn two_accounts_of_the_same_length_align_by_order() {
     assert_eq!(session.set_count(), 3, "three sets, not four");
 }
 
-/// A session's length, where two accounts state one.
+/// A recording, its readings at `(minute, bpm)`, one a minute.
+fn readings(beats: &[(u64, u32)]) -> Result<MeasuredHeartRate, Failure> {
+    let samples = beats
+        .iter()
+        .map(|(minute, bpm)| {
+            Ok(HeartRateSample {
+                at: Duration::from_seconds(minute * 60),
+                beats_per_minute: BeatsPerMinute::new(*bpm)?,
+            })
+        })
+        .collect::<Result<Vec<_>, Failure>>()?;
+    let highest = beats.iter().map(|(_, bpm)| *bpm).max().unwrap_or(1);
+    Ok(MeasuredHeartRate::new(
+        HeartRateSummary::new(BeatsPerMinute::new(110)?, BeatsPerMinute::new(highest)?),
+        Some(HeartRateSeries::new(NonEmpty::new(samples)?)),
+    ))
+}
+
+fn length(minutes: u64, who: NormalisedSessionId) -> Option<Attributed<PositiveDuration>> {
+    PositiveDuration::from_seconds(minutes * 60)
+        .ok()
+        .map(|stated| Attributed::new(stated, who))
+}
+
+/// A watch's account of a session, with the readings it wrote.
+fn recording(
+    number: i64,
+    occurred: Occurred,
+    minutes: u64,
+    beats: &[(u64, u32)],
+) -> Result<NormalisedGymSession, Failure> {
+    let who = id(number)?;
+    Ok(NormalisedGymSession::new(
+        who,
+        Recorder::Watch,
+        occurred,
+        length(minutes, who),
+        Some(Attributed::new(readings(beats)?, who)),
+        vec![guessed("back-squat-barbell", &[(5, 60_000)], who)?],
+    ))
+}
+
+/// Readings a minute apart from `from` to `to`, all at `bpm`.
+fn flat(from: u64, to: u64, bpm: u32) -> Vec<(u64, u32)> {
+    (from..=to).map(|minute| (minute, bpm)).collect()
+}
+
+/// 2025-07-25: the watch recorded 119 minutes, Hevy's last set is at 57, and
+/// the readings hold 75 to 80 from minute 90 to the end.
 ///
-/// #321: on six 2025 sessions the watch runs 21 to 62 minutes past Hevy's last
-/// set because it was left running on the drive home, so the longer account is
-/// not a floor on the visit. The log stands until #321 settles the boundary
-/// properly, and the watch's stands where nothing else states one.
+/// #321, and the clearest case in the operator's record. The visit is neither
+/// account's figure: cutting at Hevy's end would throw away the 29 minutes of
+/// elevated heart rate that follow it, and the watch's 119 includes the drive
+/// home.
 #[test]
-fn a_log_states_the_length_where_both_do() {
-    let length = |minutes: u64, who: NormalisedSessionId| {
-        PositiveDuration::from_seconds(minutes * 60)
-            .ok()
-            .map(|stated| Attributed::new(stated, who))
-    };
+fn the_watch_left_running_states_the_visit_not_the_recording() {
+    let mut beats = flat(0, 89, 120);
+    beats.extend(flat(90, 118, 78));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
-        at("2025-03-17T17:00:00Z").unwrap(),
-        length(58, id(1).unwrap()),
+        at("2025-07-25T17:00:00Z").unwrap(),
+        length(57, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
     );
-    let recording = NormalisedGymSession::new(
-        id(2).unwrap(),
-        Recorder::Watch,
-        at("2025-03-17T16:58:00Z").unwrap(),
-        length(104, id(2).unwrap()),
-        None,
-        vec![guessed("back-squat-barbell", &[(5, 60_000)], id(2).unwrap()).unwrap()],
-    );
+    let watched = recording(2, at("2025-07-25T17:00:00Z").unwrap(), 119, &beats).unwrap();
 
-    let sessions = canonical_sessions(vec![logged, recording]);
+    let sessions = canonical_sessions(vec![logged, watched]);
     let session = sessions.first().expect("one session");
     let stated = session.duration().expect("a length");
     assert_eq!(
         stated.copied().as_seconds(),
-        58 * 60,
-        "the operator's own record, not the watch left running"
+        90 * 60,
+        "where the readings went quiet, not 119 minutes and not Hevy's 57"
     );
+    assert_eq!(
+        stated.normalised_session(),
+        id(2).unwrap(),
+        "the watch's recording is what it was read off"
+    );
+}
+
+/// 2025-08-08: Hevy started seven minutes before the watch did.
+///
+/// The watch recorded 104 minutes from 17:07, Hevy's last set is at 17:54, and
+/// the readings fall to 95 from minute 85. The log's offset from the watch's
+/// start is negative, and an end worked out as unsigned would discard the only
+/// account that brackets the visit.
+#[test]
+fn a_log_that_started_before_the_watch_still_bounds_the_visit() {
+    let mut beats = flat(0, 84, 140);
+    beats.extend(flat(85, 103, 95));
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-08-08T17:00:00Z").unwrap(),
+        length(54, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(2, at("2025-08-08T17:07:00Z").unwrap(), 104, &beats).unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    let stated = sessions
+        .first()
+        .and_then(CanonicalGymSession::duration)
+        .expect("a length");
+    assert_eq!(
+        stated.copied().as_seconds(),
+        85 * 60,
+        "trimmed where the readings went quiet, not left at 104 minutes"
+    );
+}
+
+/// 2026-07-20: the watch recorded 98 minutes and Hevy 98, and the readings dip
+/// between sets from minute 71.
+///
+/// Two sources state the same end, so there is nothing to trim however quiet
+/// the readings go — his seven 2026 long sessions were genuinely 94 to 104
+/// minutes, and a between-sets dip is not a drive home.
+#[test]
+fn two_accounts_agreeing_on_the_end_are_not_trimmed() {
+    let mut beats = flat(0, 70, 117);
+    beats.extend(flat(71, 97, 90));
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2026-07-20T17:00:00Z").unwrap(),
+        length(98, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(2, at("2026-07-20T17:00:00Z").unwrap(), 98, &beats).unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(98 * 60),
+        "the whole recording"
+    );
+}
+
+/// 2025-02-12: Hevy holds 5 minutes of a 57-minute recording.
+///
+/// An account covering less of the visit than the trim would discard is a
+/// fragment, not evidence about where the visit ended — and a floor read off
+/// five minutes is not a floor.
+#[test]
+fn a_fragment_of_a_log_does_not_bound_the_visit() {
+    let mut beats = flat(0, 15, 128);
+    beats.extend(flat(16, 56, 100));
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-02-12T17:00:00Z").unwrap(),
+        length(5, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(2, at("2025-02-12T17:00:00Z").unwrap(), 57, &beats).unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(57 * 60),
+        "the whole recording, because the log says nothing about its end"
+    );
+}
+
+/// 2025-03-31: Hevy ran 18:00 to 19:00 and the watch 18:47 to 19:00.
+///
+/// He was logging 47 minutes before he started the watch, and both accounts end
+/// within a minute of each other. Each is a floor on the visit, so the longest
+/// stands — the watch's 12 minutes is what it recorded, not how long he was
+/// there.
+#[test]
+fn a_log_that_started_before_the_watch_states_the_visit() {
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-03-31T18:00:53Z").unwrap(),
+        length(60, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(
+        2,
+        at("2025-03-31T18:47:33Z").unwrap(),
+        12,
+        &flat(0, 11, 120),
+    )
+    .unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    let stated = sessions
+        .first()
+        .and_then(CanonicalGymSession::duration)
+        .expect("a length");
+    assert_eq!(stated.copied().as_seconds(), 60 * 60, "the hour he logged");
     assert_eq!(
         stated.normalised_session(),
         id(1).unwrap(),
         "and it says so"
     );
+}
 
-    // Alone, the watch is the only account there is.
+/// 2025-06-23: the watch recorded 104 minutes, Hevy's last set is at 70, and
+/// the readings never fall below the 80bpm he reached between sets.
+///
+/// #321's honest answer: he dipped lower while demonstrably training than he
+/// ever does afterwards, so nothing in the record separates a long session
+/// from one the watch was left running through. The measurement stands.
+#[test]
+fn a_tail_no_lower_than_his_own_rest_is_not_a_drive_home() {
+    let mut beats = flat(0, 69, 118);
+    beats.push((40, 80));
+    beats.extend(flat(70, 103, 88));
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-06-23T17:00:00Z").unwrap(),
+        length(70, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(2, at("2025-06-23T17:00:00Z").unwrap(), 104, &beats).unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(104 * 60),
+        "the whole recording, undeterminable rather than trimmed"
+    );
+}
+
+/// A sixteen-minute silence does not break a quiet stretch.
+///
+/// 2025-07-25's watch wrote nothing at all from minute 102 to 118, then one
+/// reading of 74. Treating a minute it wrote nothing in as training would miss
+/// the clearest case in the record.
+#[test]
+fn a_minute_the_watch_wrote_nothing_in_does_not_break_the_stretch() {
+    let mut beats = flat(0, 89, 120);
+    beats.extend(flat(90, 101, 78));
+    beats.push((118, 74));
+    let logged = NormalisedGymSession::from_log(
+        id(1).unwrap(),
+        at("2025-07-25T17:00:00Z").unwrap(),
+        length(57, id(1).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
+    );
+    let watched = recording(2, at("2025-07-25T17:00:00Z").unwrap(), 119, &beats).unwrap();
+
+    let sessions = canonical_sessions(vec![logged, watched]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(90 * 60),
+        "one stretch from minute 90, silence and all"
+    );
+}
+
+/// A session's length where only one account states one.
+#[test]
+fn one_account_states_the_length_alone() {
     let alone = NormalisedGymSession::new(
         id(3).unwrap(),
         Recorder::Watch,
@@ -505,5 +730,22 @@ fn a_log_states_the_length_where_both_do() {
             .map(|stated| stated.copied().as_seconds()),
         Some(47 * 60),
         "the watch's length where nothing else states one"
+    );
+
+    // A sheet states a day and a length and no clock, so nothing brackets it.
+    let sheet = NormalisedGymSession::from_log(
+        id(4).unwrap(),
+        on("2019-03-20").unwrap(),
+        length(52, id(4).unwrap()),
+        vec![recorded("back-squat-barbell", &[(5, 60_000)], id(4).unwrap()).unwrap()],
+    );
+    let sessions = canonical_sessions(vec![sheet]);
+    assert_eq!(
+        sessions
+            .first()
+            .and_then(CanonicalGymSession::duration)
+            .map(|stated| stated.copied().as_seconds()),
+        Some(52 * 60),
+        "the operator's own record where no watch recorded the visit"
     );
 }
