@@ -25,19 +25,27 @@
 //!
 //! **Three states, and the third is how the second one ends.** A class is
 //! *listed* as soon as the browse walk sees it, *read* once its detail has been
-//! fetched, and *not served* where Peloton will not give its detail to this
-//! account at all. `mapping` already records a class of that kind — a *Peak
-//! Your Power Zones* ride the operator cannot start — and before #369 such a
-//! class was simply left unread, which was invisible while the reads were
-//! bounded at fifty a run. Unbounded, it would be asked for on every single
-//! `fitness next` and the catalogue could never say it had read everything
-//! there is.
+//! fetched, and *not served* where Peloton has no detail to give for it — a 404
+//! or a 410 on an id the listing itself handed us. `mapping` already records a
+//! candidate: a *Peak Your Power Zones* ride the operator cannot start. Before
+//! #369 such a class was simply left unread, which was invisible while the
+//! reads were bounded at fifty a run. Unbounded, it would be asked for on every
+//! single `fitness next` and the catalogue could never say it had read
+//! everything there is.
+//!
+//! **Only those two statuses, and a 403 is not one of them.** `class` has the
+//! argument: #368 records that Peloton answers 403 for throttling as readily as
+//! for refusal, and a thousand requests in a row is when throttling happens, so
+//! reading it as "no detail" would write off the library silently and for
+//! good.
 //!
 //! **Not served, rather than refused.** A *refusal* in this codebase is the
 //! system declining something — what the domain will not accept
 //! (`store::refusals`), what a constraint will not admit, a credential this
 //! build turned down. This is the other direction, and one word for two
-//! directions is the drift `CLAUDE.md` warns about.
+//! directions is the drift `CLAUDE.md` warns about. It is also not a refusal in
+//! plain English: Peloton is not withholding the class, it has nothing to give
+//! for that id.
 //!
 //! So it is recorded, and such a class is neither offered as unread nor counted
 //! as outstanding. **It is not reconsidered**: what has been seen so far is a
@@ -67,14 +75,14 @@ pub struct Held {
     pub listed: u64,
     /// How many of those have had their detail read.
     pub read: u64,
-    /// How many Peloton would not serve the detail of.
+    /// How many Peloton has no detail to serve for.
     pub not_served: u64,
 }
 
 impl Held {
     /// How many are listed and still worth asking for.
     ///
-    /// **A class the source will not serve is accounted for, not outstanding.**
+    /// **A class the source has no detail for is accounted for, not outstanding.**
     /// Counting it as outstanding would mean the catalogue could never report
     /// that it had read everything there is to read, which is the number #369
     /// exists to make reach zero.
@@ -187,7 +195,7 @@ impl SqlitePelotonClassStore {
         Ok(rows.into_iter().map(|row| row.reference).collect())
     }
 
-    /// Record that Peloton will not serve this class's detail.
+    /// Record that Peloton has no detail to serve for this class.
     ///
     /// **A row is created where there is none.** A class the skeletons place
     /// but the browse listing never carried is exactly the case this exists
@@ -312,8 +320,8 @@ impl SqlitePelotonClassStore {
 
     /// Whether this class has been asked for and answered, one way or another.
     ///
-    /// True where the catalogue holds the detail, and true where Peloton would
-    /// not serve it. **Both are answers**, and the one question the
+    /// True where the catalogue holds the detail, and true where Peloton had
+    /// none to give. **Both are answers**, and the one question the
     /// refresh asks of each class the skeletons place is whether there is
     /// anything left to ask Peloton about it.
     ///

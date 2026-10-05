@@ -286,7 +286,7 @@ pub fn class_catalogue(
         print!(", {} read this run", read.read);
     }
     if held.not_served > 0 {
-        print!(", {} Peloton will not serve", held.not_served);
+        print!(", {} Peloton does not serve", held.not_served);
     }
     match held.outstanding() {
         0 => println!(", all read"),

@@ -106,7 +106,7 @@ impl Walked {
 pub struct Reading {
     /// Classes whose detail was read this time.
     pub read: u64,
-    /// Classes Peloton would not serve, recorded so they are not asked again.
+    /// Classes Peloton has no detail for, recorded so they are not asked again.
     pub not_served: u64,
     /// Why the reading stopped early, where it did.
     ///
@@ -229,20 +229,28 @@ enum Asked {
 
 /// Why asking Peloton for one class produced nothing.
 enum Failed {
-    /// The source refused the credential or stopped answering. The reading
-    /// stops: a thousand requests against a source that is failing is not
-    /// politeness, and the next run resumes where this one left off.
+    /// The source rejected the credential, is throttling, or stopped
+    /// answering. The reading stops: a thousand requests against a source that
+    /// is failing is not politeness, and the next run resumes where this one
+    /// left off. A 403 is here rather than among the answers, for the reason
+    /// `class::PelotonClasses::detail_if_served` gives.
     Source(SourceError),
     Store(application::StoreError),
 }
 
 /// Read one class's detail into the catalogue.
 ///
-/// **A class Peloton will not serve is recorded as such, not stepped past.**
-/// The library holds classes the operator's account cannot start — `mapping`
-/// names one — and leaving it unread was harmless only while the reads were
-/// bounded at fifty a run. Unbounded, it would be asked for on every `fitness
-/// next` for ever and the catalogue could never say it had read everything.
+/// **A class Peloton has no detail for is recorded as such, not stepped past.**
+/// The library lists classes the operator's account cannot start — `mapping`
+/// names one — and leaving such a class unread was harmless only while the
+/// reads were bounded at fifty a run. Unbounded, it would be asked for on every
+/// `fitness next` for ever and the catalogue could never say it had read
+/// everything.
+///
+/// **Only a 404 or a 410 counts as that**, never a 403: see
+/// `class::PelotonClasses::detail_if_served`. A 403 stops the reading, because
+/// #368 records that Peloton answers 403 for throttling too, and a burst of a
+/// thousand requests is when throttling happens.
 async fn store_detail(
     classes: &PelotonClasses,
     store: &SqlitePelotonClassStore,

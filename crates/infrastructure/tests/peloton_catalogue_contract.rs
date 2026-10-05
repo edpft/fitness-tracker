@@ -22,13 +22,15 @@
 //! built — the operator, 2026-10-05: *"What made you think I'd only want to
 //! read 50 of the available classes?"* So the read runs to exhaustion, a
 //! quarter of a second apart, and the only things that end it early are the
-//! source declining to serve one class or the source stopping altogether.
+//! source having no detail for one class or the source stopping altogether.
 //!
 //! Telling those two apart is what makes an unbounded read safe, and it is
-//! pinned here: a class Peloton will not serve is recorded and never asked
+//! pinned here: a class there is no detail for is recorded and never asked
 //! again, while an outage keeps what was read and leaves the rest for the next
 //! run. Conflate them and either those classes cost a request on every
-//! `fitness next` for ever, or one outage writes off the whole library.
+//! `fitness next` for ever, or one outage writes off the whole library — which
+//! a 403 would do, since #368 records that Peloton answers 403 for throttling
+//! as well as for refusal.
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
@@ -318,13 +320,20 @@ fn a_body_that_is_not_a_listing_is_refused() {
 }
 
 /// **The distinction an unbounded read turns on** (#369). Reading the whole
-/// library in one go means the two have to be told apart: a class Peloton will
-/// not serve this account is recorded as such and never asked for again,
-/// while a source that has stopped answering ends the reading and the next run
-/// resumes. Conflating them either re-requests those classes on every `fitness
-/// next` or writes off a thousand classes over one outage.
+/// library in one go means the two have to be told apart: a class there is no
+/// detail for is recorded as such and never asked for again, while a source
+/// that has stopped answering ends the reading and the next run resumes.
+/// Conflate them and either those classes cost a request on every `fitness
+/// next`, or one outage writes off a thousand classes.
+///
+/// **403 is on the outage side, and that is the load-bearing line here.** #368
+/// records that Peloton answers 403 for Auth0 anomaly detection and for too
+/// many logins from one address — neither of which says anything about what
+/// this account may see, and both of which are what a burst of a thousand
+/// requests provokes. Reading it as "no such class" would write off most of
+/// the library in one run, silently and permanently. 429 goes the same way.
 #[test]
-fn a_class_peloton_will_not_serve_is_an_answer_and_an_outage_is_not() {
+fn only_a_class_that_is_not_there_is_an_answer_and_a_403_is_an_outage() {
     let Ok(rt) = runtime() else {
         panic!("a current-thread runtime builds")
     };
@@ -332,7 +341,14 @@ fn a_class_peloton_will_not_serve_is_an_answer_and_an_outage_is_not() {
         let server = MockServer::start().await;
         authenticated(&server).await;
 
-        for (id, status) in [("forbidden", 403), ("missing", 404), ("gone", 410)] {
+        for (id, status) in [("missing", 404), ("gone", 410)] {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/ride/{id}/details")))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+        }
+        for (id, status) in [("forbidden", 403), ("throttled", 429), ("failing", 503)] {
             Mock::given(method("GET"))
                 .and(path(format!("/api/ride/{id}/details")))
                 .respond_with(ResponseTemplate::new(status))
@@ -340,31 +356,29 @@ fn a_class_peloton_will_not_serve_is_an_answer_and_an_outage_is_not() {
                 .await;
         }
         Mock::given(method("GET"))
-            .and(path("/api/ride/failing/details"))
-            .respond_with(ResponseTemplate::new(503))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
             .and(path("/api/ride/served/details"))
             .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"ride":{}}"#))
             .mount(&server)
             .await;
 
         let classes = classes(&server);
-        for id in ["forbidden", "missing", "gone"] {
+        for id in ["missing", "gone"] {
             assert_eq!(
                 classes
                     .detail_if_served(id)
                     .await
-                    .expect("a class not served is not a failure"),
+                    .expect("a class that is not there is not a failure"),
                 None,
-                "{id}: Peloton saying no about one class is an answer about that class"
+                "{id}: there is no such class to serve, and that is an answer"
             );
         }
-        assert!(
-            classes.detail_if_served("failing").await.is_err(),
-            "a source that has stopped answering is not a thousand such classes"
-        );
+        for id in ["forbidden", "throttled", "failing"] {
+            assert!(
+                classes.detail_if_served(id).await.is_err(),
+                "{id}: a source that is refusing or throttling is not a thousand \
+                 classes that do not exist"
+            );
+        }
         assert!(
             classes
                 .detail_if_served("served")
@@ -463,7 +477,8 @@ fn served_detail() -> serde_json::Value {
 /// **Every other class detail answers.** The read begins with the forty-odd
 /// classes the published skeletons place, whether or not the walk listed them,
 /// so a suite that mocked only its own classes would see those forty-odd come
-/// back 404 and be recorded as not served. Mounted at a lower priority than the
+/// back 404 and be recorded as not served. Mounted at a lower priority than
+/// the
 /// per-class mocks, which is what lets one of them answer differently.
 async fn every_other_class_answers(server: &MockServer) {
     Mock::given(method("GET"))
@@ -528,19 +543,20 @@ fn one_read_takes_every_class_the_catalogue_has_not_read() {
     });
 }
 
-/// **A class Peloton will not serve leaves the outstanding set.** Unbounded,
-/// leaving it unread would mean one request for it on every single `fitness
-/// next` and a count that never reached `all read`. `mapping` already records
-/// one candidate: a *Peak Your Power Zones* ride the account cannot start.
+/// **A class Peloton has no detail for leaves the outstanding set.**
+/// Unbounded, leaving it unread would mean one request for it on every single
+/// `fitness next` and a count that never reached `all read`. `mapping` already
+/// records a candidate: a *Peak Your Power Zones* ride the account cannot
+/// start.
 #[test]
-fn a_class_peloton_will_not_serve_is_recorded_and_not_asked_again() {
+fn a_class_peloton_has_no_detail_for_is_recorded_and_not_asked_again() {
     let Ok(rt) = runtime() else {
         panic!("a current-thread runtime builds")
     };
     rt.block_on(async {
         let server = MockServer::start().await;
         authenticated(&server).await;
-        one_class_answers(&server, "unserved", ResponseTemplate::new(403)).await;
+        one_class_answers(&server, "unserved", ResponseTemplate::new(404)).await;
         every_other_class_answers(&server).await;
 
         let (_directory, store) = catalogue().await.expect("a catalogue opens");
@@ -551,7 +567,7 @@ fn a_class_peloton_will_not_serve_is_recorded_and_not_asked_again() {
 
         let read = read_details(&classes(&server), &store)
             .await
-            .expect("a class not served is not a failed refresh");
+            .expect("a class that is not there is not a failed refresh");
         assert_eq!(read.not_served, 1);
         assert!(read.stopped.is_none(), "one class is not an outage");
         assert_eq!(read.held.outstanding(), 0, "nothing is left to ask");

@@ -726,39 +726,54 @@ impl PelotonClasses {
     /// # Errors
     ///
     /// [`SourceError::Unauthorised`] where the token is refused,
-    /// [`SourceError::Unavailable`] where Peloton is not answering *or will not
-    /// serve this class*, and [`SourceError::Malformed`] where the body cannot
-    /// be read as text. Where those two need telling apart, which is the
-    /// catalogue walk's whole question, use
+    /// [`SourceError::Unavailable`] where Peloton is not answering *or has no
+    /// such class*, and [`SourceError::Malformed`] where the body cannot be
+    /// read as text. Where those two need telling apart, which is the catalogue
+    /// walk's whole question, use
     /// [`detail_if_served`](Self::detail_if_served).
     pub async fn detail(&self, id: &str) -> Result<String, SourceError> {
         self.detail_if_served(id)
             .await?
             .ok_or_else(|| SourceError::Unavailable {
-                detail: format!("Peloton will not serve class {id} to this account"),
+                detail: format!("Peloton has no class {id} to serve"),
             })
     }
 
-    /// The same, where not being served is an answer rather than a failure.
+    /// The same, where there being no such class to serve is an answer rather
+    /// than a failure.
     ///
     /// **The distinction the catalogue walk turns on** (#369). It reads the
-    /// whole library in one go, so the two must be told apart: a class Peloton
-    /// refuses this account is recorded as refused and never asked for again,
+    /// whole library in one go, so the two must be told apart: a class that is
+    /// not there to be served is recorded as such and never asked for again,
     /// while a source that has stopped answering ends the reading and the next
-    /// run picks it up. Conflating them would either re-request the refusals on
-    /// every single run or write off a thousand classes over one outage.
+    /// run picks it up. Conflate them and either those classes cost a request
+    /// on every single run, or one outage writes off a thousand classes.
     ///
-    /// `Ok(None)` is 403, 404 and 410 — forbidden, gone, or never there, each
-    /// of which says the same thing about a class id the browse listing handed
-    /// us. `mapping` already records one: a *Peak Your Power Zones* class the
-    /// operator's account cannot start.
+    /// `Ok(None)` is **404 and 410 only** — never there, or gone. Both say
+    /// something about the class id the browse listing handed us, and neither
+    /// gets better on a retry.
+    ///
+    /// **403 is deliberately not among them**, and that is the whole of the
+    /// care here. #368 records that Peloton answers 403 for things that have
+    /// nothing to do with what this account may see: Auth0's anomaly detection
+    /// and too many logins from one address both arrive as one. A burst of a
+    /// thousand requests is exactly when that happens, and treating it as "no
+    /// such class" would silently write off most of the library in one run,
+    /// with nothing to un-write it. So a 403 is an unreachable source: the
+    /// reading stops, says the status, and the next run carries on.
+    ///
+    /// The cost of being careful this way round is a class the account really
+    /// may not see, if Peloton answers 403 rather than 404 for it: the reading
+    /// then stops on it every run and the catalogue never says `all read`. That
+    /// is loud, recoverable and diagnosable, which the silent direction is not.
     ///
     /// # Errors
     ///
     /// [`SourceError::Unauthorised`] where the token is refused — which is
-    /// about the credential and not about the class, so it is not a refusal —
-    /// [`SourceError::Unavailable`] where Peloton is not answering, and
-    /// [`SourceError::Malformed`] where the body cannot be read as text.
+    /// about the credential and not about the class —
+    /// [`SourceError::Unavailable`] where Peloton is not answering, is
+    /// throttling, or refuses with a 403, and [`SourceError::Malformed`] where
+    /// the body cannot be read as text.
     pub async fn detail_if_served(&self, id: &str) -> Result<Option<String>, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
@@ -777,9 +792,7 @@ impl PelotonClasses {
         }
         if matches!(
             status,
-            reqwest::StatusCode::FORBIDDEN
-                | reqwest::StatusCode::NOT_FOUND
-                | reqwest::StatusCode::GONE
+            reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
         ) {
             return Ok(None);
         }

@@ -414,12 +414,12 @@ fn a_class_peloton_will_not_serve_is_accounted_for_and_never_asked_again() {
         store
             .record_not_served("unserved")
             .await
-            .expect("what the source will not serve records");
+            .expect("what the source does not serve records");
 
         assert_eq!(
             store.unread().await.expect("unread reads"),
             vec!["served".to_owned()],
-            "a class the source will not serve is not offered for reading again"
+            "a class the source does not serve is not offered for reading again"
         );
         assert!(
             store
@@ -451,7 +451,7 @@ fn a_class_peloton_will_not_serve_is_accounted_for_and_never_asked_again() {
     });
 }
 
-/// A class the listing never carried and Peloton will not serve: the fact
+/// A class the listing never carried and Peloton has no detail for: the fact
 /// needs somewhere to live, or the class is asked for on every run for ever.
 #[test]
 fn a_class_with_no_listing_row_still_records_that_it_is_not_served() {
@@ -463,7 +463,7 @@ fn a_class_with_no_listing_row_still_records_that_it_is_not_served() {
         store
             .record_not_served("never-listed")
             .await
-            .expect("what the source will not serve records");
+            .expect("what the source does not serve records");
 
         assert!(
             store
@@ -508,7 +508,7 @@ fn a_detail_clears_what_was_not_served() {
         store
             .record_not_served("a")
             .await
-            .expect("what the source will not serve records");
+            .expect("what the source does not serve records");
         store
             .record_detail(
                 "a",
