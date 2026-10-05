@@ -118,6 +118,7 @@ fn classes(server: &MockServer) -> PelotonClasses {
         PelotonAuth::new(
             server.uri(),
             PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+            None,
         ),
     )
 }

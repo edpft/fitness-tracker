@@ -65,7 +65,7 @@ const PELOTON: &str = "Peloton";
 /// **The roots are not written down here.** They are `peloton`'s entry in
 /// [`crate::catalogue`], along with the variables that override them, so this
 /// module cannot drift from the one every other command reaches Peloton by.
-const PELOTON_SOURCE: &str = "peloton";
+const PELOTON_SOURCE: &str = crate::catalogue::PELOTON;
 
 /// A gym provider this build holds, and what choosing it settles.
 ///
@@ -352,24 +352,13 @@ struct Access {
 }
 
 impl Access {
-    /// An authenticator, with the token cache where there is one.
+    /// An authenticator, composed where every other one is.
     ///
-    /// **One per adapter rather than one shared**, as [`crate::wiring`] builds
-    /// them: each caches the token it fetches to the same file, so the second
-    /// login costs nothing and neither adapter holds the other's state.
+    /// **One per adapter rather than one shared**: each reads the token the
+    /// other cached, so the second costs no login and neither adapter holds the
+    /// other's state.
     fn auth(&self) -> PelotonAuth {
-        let mut auth = PelotonAuth::new(self.auth_base_url.clone(), self.credentials.clone());
-
-        // **Where the token is kept, when there is anywhere to keep it.**
-        // Without this every invocation walks the whole Auth0 flow to obtain a
-        // token the last one already had (#54). A machine with neither
-        // `XDG_STATE_HOME` nor `HOME` gets the old behaviour rather than an
-        // error: logging in again costs a few seconds, and refusing to run
-        // costs the session.
-        if let Ok(path) = crate::paths::token(&crate::paths::SystemEnvironment, PELOTON_SOURCE) {
-            auth = auth.caching_in(infrastructure::peloton::TokenFile::new(path));
-        }
-        auth
+        crate::wiring::peloton_auth(self.auth_base_url.clone(), self.credentials.clone())
     }
 }
 

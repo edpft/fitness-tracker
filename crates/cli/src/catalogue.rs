@@ -218,6 +218,10 @@ impl KnownStream {
 /// one place the CLI spells it.
 const SEPARATOR: char = domain::landing::STREAM_SEPARATOR;
 
+/// Peloton's name here, which is also the stem of its token file and of every
+/// variable that overrides its roots.
+pub const PELOTON: &str = "peloton";
+
 /// Every system this build can talk to.
 pub const SOURCES: [KnownSource; 4] = [
     KnownSource {
@@ -227,7 +231,7 @@ pub const SOURCES: [KnownSource; 4] = [
         credential: Credential::ApiKey,
     },
     KnownSource {
-        name: "peloton",
+        name: PELOTON,
         default_base_url: "https://api.onepeloton.com",
         credential_url: "https://members.onepeloton.com",
         credential: Credential::EmailPassword {

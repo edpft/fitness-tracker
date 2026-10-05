@@ -100,7 +100,7 @@ fn a_full_login_walks_the_flow_and_returns_a_bearer_token() {
         let server = MockServer::start().await;
         happy_path(&server, 172_800).await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let token = auth.bearer().await.expect("the stubbed flow completes");
         assert_eq!(token, "the-access-token");
     });
@@ -116,7 +116,7 @@ fn a_second_call_reuses_the_token_without_touching_the_network() {
         let server = MockServer::start().await;
         happy_path(&server, 172_800).await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let first = auth.bearer().await.expect("the stubbed flow completes");
         let second = auth.bearer().await.expect("the cached token is returned");
         assert_eq!(first, second);
@@ -142,7 +142,7 @@ fn an_expired_token_is_refreshed_rather_than_relogged() {
         // Inside the sixty-second margin, so it is spent on arrival.
         happy_path(&server, 1).await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let first = auth.bearer().await.expect("the stubbed flow completes");
         assert_eq!(first, "the-access-token");
         let second = auth.bearer().await.expect("the refresh succeeds");
@@ -190,7 +190,7 @@ fn a_rejected_credential_is_unauthorised_and_not_retried() {
             .mount(&server)
             .await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let failure = auth.bearer().await.expect_err("a 401 is not a token");
         assert_eq!(failure, SourceError::Unauthorised);
 
@@ -218,7 +218,7 @@ fn a_missing_csrf_cookie_is_reported_rather_than_guessed() {
             .mount(&server)
             .await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let failure = auth.bearer().await.expect_err("no cookie, no login");
         let SourceError::Malformed { detail } = failure else {
             panic!("a missing CSRF cookie is a malformed response, not an outage")
@@ -244,7 +244,7 @@ fn a_closed_endpoint_is_an_outage_and_not_a_bad_password() {
             .mount(&server)
             .await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials());
+        let auth = PelotonAuth::new(server.uri(), credentials(), None);
         let failure = auth.bearer().await.expect_err("no cookie means no flow");
         assert_ne!(
             failure,

@@ -257,15 +257,35 @@ async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, Wir
     }
 }
 
+/// The one way a resolved Peloton login becomes an authenticator.
+///
+/// **Whether the token is cached is not a per-call-site decision** (#366). It
+/// was: `PelotonAuth::caching_in` was called in `plan` and nowhere else, so
+/// every `fitness next` that collected cycling performed two complete Auth0
+/// password logins seconds apart, and extraction neither read nor wrote the
+/// token file. The second of the two was refused on 2026-10-05 and the graph
+/// walk landed nothing, while the catalogue refresh — which went through `plan`
+/// — succeeded on a cached token in the same invocation.
+///
+/// **A machine with neither `XDG_STATE_HOME` nor `HOME` gets no cache** rather
+/// than an error: logging in again costs a few seconds, and refusing to run
+/// costs the session.
+pub fn peloton_auth(auth_base_url: String, credentials: PelotonCredentials) -> PelotonAuth {
+    let cache = crate::paths::token(&crate::paths::SystemEnvironment, crate::catalogue::PELOTON)
+        .ok()
+        .map(|path| TokenFile::new(path, credentials.digest()));
+    PelotonAuth::new(auth_base_url, credentials, cache)
+}
+
 /// Both Peloton walks, in the one order that matters.
 ///
 /// The list is walked first: the graph walk enumerates rides itself, so running
 /// it second means the graphs it fetches are for rides this same command has
 /// just landed.
 ///
-/// Two `PelotonAuth`s rather than one shared, because each caches the token it
-/// fetches to the same file — so the second login costs nothing and neither
-/// walk holds the other's state.
+/// Two `PelotonAuth`s rather than one shared, because each reads the token the
+/// other cached — so the second walk costs no login and neither holds the
+/// other's state.
 async fn collect_rides(
     access: SourceAccess,
     landing: PelotonRideLandingStore,
@@ -293,7 +313,7 @@ async fn collect_rides(
     let rides = Extraction::new(ExtractionPorts {
         source: PelotonWorkouts::new(
             base_url.clone(),
-            PelotonAuth::new(auth_base_url.clone(), credentials.clone()),
+            peloton_auth(auth_base_url.clone(), credentials.clone()),
         ),
         landing,
         resumption: resumption.clone(),
@@ -304,7 +324,7 @@ async fn collect_rides(
     let ridden = rides.extract().await?;
 
     let graphs = Extraction::new(ExtractionPorts {
-        source: PelotonWorkoutSamples::new(base_url, PelotonAuth::new(auth_base_url, credentials)),
+        source: PelotonWorkoutSamples::new(base_url, peloton_auth(auth_base_url, credentials)),
         landing: samples_landing,
         resumption,
         runs,
@@ -323,9 +343,10 @@ async fn collect_rides(
 /// say — which figures Garmin states, which it omits, and what its status is
 /// actually a classification of — is in [`domain::body::hrv`].
 ///
-/// **No token cache**, as on Peloton and for the same reason: this adapter
-/// holds a password, so it can sign in again unattended, and a login per
-/// extraction is cheaper than a cache nothing else reads.
+/// **No token cache**, and this walk signs in for itself: the adapter holds a
+/// password, so it can do that unattended, and Garmin's other three walks share
+/// one `Arc<GarminAuth>` rather than a file. Peloton's cache is kept because
+/// its two walks and a cycling delivery cannot share an instance (#366).
 async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = GarminHrvLandingStore::new(pool.clone())?;
@@ -659,11 +680,13 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
                 });
             };
 
+            let registration =
+                WithingsClient::new(client.client_id, client.client_secret, client.redirect_uri);
             let auth = WithingsAuth::new(
                 base_url.clone(),
                 auth_base_url,
-                WithingsClient::new(client.client_id, client.client_secret, client.redirect_uri),
-                TokenFile::new(token),
+                registration.clone(),
+                TokenFile::new(token, registration.digest()),
             );
             let extraction = Extraction::new(ExtractionPorts {
                 source: WithingsMeasurements::new(base_url, auth),

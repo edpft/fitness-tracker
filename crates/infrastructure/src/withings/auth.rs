@@ -37,7 +37,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::Rng as _;
 use reqwest::{Client, Url};
 
-use crate::token::{Token, TokenFile};
+use crate::token::{CredentialDigest, Token, TokenFile};
 
 /// What the application is allowed to read: measurements, and nothing else.
 pub const SCOPE: &str = "user.metrics";
@@ -67,6 +67,21 @@ impl WithingsClient {
             client_secret: client_secret.into(),
             redirect_uri: redirect_uri.into(),
         }
+    }
+
+    /// Which registration this is, for the token it obtains to be bound to.
+    ///
+    /// **A removed or re-issued application is a different credential**, and a
+    /// token it did not obtain is not its token (#197) — the same rule the two
+    /// password sources follow, which is why the digest lives on the token
+    /// rather than in each adapter.
+    #[must_use]
+    pub fn digest(&self) -> CredentialDigest {
+        CredentialDigest::of([
+            self.client_id.as_str(),
+            self.client_secret.as_str(),
+            self.redirect_uri.as_str(),
+        ])
     }
 }
 
@@ -275,6 +290,7 @@ impl WithingsAuth {
             issued.access_token,
             Some(issued.refresh_token),
             expires_at,
+            self.client.digest(),
         ))
     }
 }
@@ -337,11 +353,13 @@ mod tests {
     use super::{TokenFile, WithingsAuth, WithingsClient, code_from};
 
     fn auth() -> WithingsAuth {
+        let registration =
+            WithingsClient::new("the-client", "the-secret", "https://example.com/back");
         WithingsAuth::new(
             "https://wbsapi.withings.net",
             "https://account.withings.com/",
-            WithingsClient::new("the-client", "the-secret", "https://example.com/back"),
-            TokenFile::new("/nowhere/withings.token.json".into()),
+            registration.clone(),
+            TokenFile::new("/nowhere/withings.token.json".into(), registration.digest()),
         )
     }
 

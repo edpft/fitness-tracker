@@ -62,7 +62,10 @@ fn a_sign_in_keeps_the_token_it_was_given() {
             .await;
 
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let cache = TokenFile::new(directory.path().join("withings.token.json"));
+        let cache = TokenFile::new(
+            directory.path().join("withings.token.json"),
+            client().digest(),
+        );
         let auth = WithingsAuth::new(server.uri(), server.uri(), client(), cache.clone());
 
         auth.sign_in("https://example.test/back?code=the-code&state=ours", "ours")
@@ -94,7 +97,10 @@ fn a_spent_token_is_renewed_and_the_rotation_is_kept() {
             .await;
 
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let cache = TokenFile::new(directory.path().join("withings.token.json"));
+        let cache = TokenFile::new(
+            directory.path().join("withings.token.json"),
+            client().digest(),
+        );
         let yesterday = jiff::Timestamp::now()
             .checked_sub(jiff::SignedDuration::from_hours(24))
             .expect("a time");
@@ -103,6 +109,7 @@ fn a_spent_token_is_renewed_and_the_rotation_is_kept() {
                 "old-access".to_owned(),
                 Some("old-refresh".to_owned()),
                 yesterday,
+                client().digest(),
             ))
             .expect("the stale token is written");
 
@@ -129,7 +136,7 @@ fn no_token_is_unauthorised_without_asking_withings() {
             server.uri(),
             server.uri(),
             client(),
-            TokenFile::new(directory.path().join("absent.json")),
+            TokenFile::new(directory.path().join("absent.json"), client().digest()),
         );
         assert!(matches!(
             auth.bearer().await,
@@ -145,13 +152,62 @@ fn no_token_is_unauthorised_without_asking_withings() {
     });
 }
 
+/// **A token the previous registration obtained is not this one's** (#197).
+/// Withings' token outlives a re-issued application exactly as Peloton's
+/// outlives a changed password, and there is nothing to renew it with: a
+/// registration that did not earn the token has to be signed in again.
+#[test]
+fn a_token_another_registration_obtained_is_a_sign_in() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let path = directory.path().join("withings.token.json");
+        let tomorrow = jiff::Timestamp::now()
+            .checked_add(jiff::SignedDuration::from_hours(24))
+            .expect("a time");
+
+        // The application the operator registered first, with a live token.
+        TokenFile::new(path.clone(), client().digest())
+            .write(&infrastructure::Token::new(
+                "the-first-application's".to_owned(),
+                Some("its-refresh".to_owned()),
+                tomorrow,
+                client().digest(),
+            ))
+            .expect("the token is written");
+
+        // The one he registered after revoking it.
+        let reissued =
+            WithingsClient::new("the-client", "a-new-secret", "https://example.test/back");
+        let auth = WithingsAuth::new(
+            server.uri(),
+            server.uri(),
+            reissued.clone(),
+            TokenFile::new(path, reissued.digest()),
+        );
+        assert!(matches!(
+            auth.bearer().await,
+            Err(SourceError::Unauthorised)
+        ));
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty(),
+            "nothing is sent on a token this registration did not obtain",
+        );
+    });
+}
+
 /// A source holding a live token. Returns a `Result`: the test exemptions for
 /// panicking do not reach a free function.
 fn signed_in(
     server: &MockServer,
     directory: &std::path::Path,
 ) -> Result<WithingsMeasurements, String> {
-    let cache = TokenFile::new(directory.join("withings.token.json"));
+    let cache = TokenFile::new(directory.join("withings.token.json"), client().digest());
     let tomorrow = jiff::Timestamp::now()
         .checked_add(jiff::SignedDuration::from_hours(24))
         .map_err(|error| error.to_string())?;
@@ -160,6 +216,7 @@ fn signed_in(
             "live-access".to_owned(),
             Some("a-refresh".to_owned()),
             tomorrow,
+            client().digest(),
         ))
         .map_err(|error| error.to_string())?;
     Ok(WithingsMeasurements::new(
