@@ -32,7 +32,7 @@ use std::{
 
 use application::GenerationParameterStore as _;
 use infrastructure::{
-    Credential as StoredCredential, Credentials, SqliteGenerationParameterStore,
+    Credential as StoredCredential, CredentialDigest, Credentials, SqliteGenerationParameterStore,
     SqliteOperatorSettingsStore, TokenFile, WithingsAuth, WithingsClient, connect,
 };
 
@@ -290,12 +290,47 @@ fn connected(
         return Ok(None);
     };
 
-    if let Credential::OAuthClient { .. } = known.credential()
-        && !token_file(known)?.path().is_file()
-    {
-        return Ok(None);
+    // **A token this registration did not obtain is not access** (#197). Asking
+    // only whether the file is there is the split that issue is about: `setup`
+    // would report a source connected on a token from an application the
+    // operator has since replaced, which the first request would be refused on.
+    if let Credential::OAuthClient { .. } = known.credential() {
+        let Some(registration) = registration(known, stored) else {
+            return Ok(None);
+        };
+        if token_file(known, registration.digest())?.read().is_none() {
+            return Ok(None);
+        }
     }
     Ok(Some(answered))
+}
+
+/// The registration a source would be reached with, from wherever it is stated.
+///
+/// The environment first, then the store: `SourceAccess::resolve` orders them
+/// that way and a second order here would be a second answer to the same
+/// question.
+fn registration(
+    known: &crate::catalogue::KnownSource,
+    stored: &Credentials,
+) -> Option<WithingsClient> {
+    if let Some(values) = from_environment(known)
+        && let [client_id, client_secret, redirect_uri] = values.as_slice()
+    {
+        return Some(WithingsClient::new(client_id, client_secret, redirect_uri));
+    }
+    match stored.credential(known.name()) {
+        Some(StoredCredential::OAuthClient {
+            client_id,
+            client_secret,
+            redirect_uri,
+        }) => Some(WithingsClient::new(
+            client_id.clone(),
+            client_secret.clone(),
+            redirect_uri.clone(),
+        )),
+        _ => None,
+    }
 }
 
 /// Every variable a source needs, if the environment sets them all.
@@ -311,9 +346,12 @@ fn from_environment(known: &crate::catalogue::KnownSource) -> Option<Vec<String>
         .collect()
 }
 
-fn token_file(known: &crate::catalogue::KnownSource) -> Result<TokenFile, Failure> {
+fn token_file(
+    known: &crate::catalogue::KnownSource,
+    obtained_with: CredentialDigest,
+) -> Result<TokenFile, Failure> {
     paths::token(&paths::SystemEnvironment, known.name())
-        .map(TokenFile::new)
+        .map(|path| TokenFile::new(path, obtained_with))
         .map_err(|error| Failure::usage(&config::ConfigError::from(error)))
 }
 
@@ -391,7 +429,7 @@ async fn verify(
             Credential::EmailPassword {
                 default_auth_base_url,
             },
-        ) => infrastructure::peloton::auth::PelotonAuth::new(
+        ) => crate::wiring::peloton_auth(
             auth_base_url(default_auth_base_url),
             infrastructure::peloton::auth::PelotonCredentials::new(email.clone(), password.clone()),
         )
@@ -434,15 +472,17 @@ async fn verify(
                 default_auth_base_url,
             },
         ) => {
-            let cache = token_file(known).map_err(|failure| failure.message_text().to_owned())?;
+            let registration = WithingsClient::new(
+                client_id.clone(),
+                client_secret.clone(),
+                redirect_uri.clone(),
+            );
+            let cache = token_file(known, registration.digest())
+                .map_err(|failure| failure.message_text().to_owned())?;
             let auth = WithingsAuth::new(
                 base_url,
                 auth_base_url(default_auth_base_url),
-                WithingsClient::new(
-                    client_id.clone(),
-                    client_secret.clone(),
-                    redirect_uri.clone(),
-                ),
+                registration,
                 cache,
             );
             sign_in(&auth).await

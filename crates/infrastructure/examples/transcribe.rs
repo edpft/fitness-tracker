@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let classes = PelotonClasses::new(
         API_BASE,
-        PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password)),
+        PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password), None),
     );
 
     let mut placed = Vec::new();

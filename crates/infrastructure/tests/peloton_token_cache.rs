@@ -10,11 +10,17 @@
 //! so every way of failing to read it is `None` rather than an error, and every
 //! way of failing to write it is ignored. Those are the cases below.
 //!
+//! **And that the token it reads is this credential's** (#197). A token
+//! outliving the password it came from is access the operator believes he has
+//! revoked, and a run holding one reports that the source rejected its
+//! credential for the half of it that logs in while succeeding for the half
+//! that sends the bearer.
+//!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use infrastructure::peloton::{
     TokenFile,
-    auth::{PelotonAuth, PelotonCredentials, Token},
+    auth::{CredentialDigest, PelotonAuth, PelotonCredentials, Token},
 };
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -79,6 +85,15 @@ fn credentials() -> PelotonCredentials {
     PelotonCredentials::new("rider@example.com", "not-a-real-password")
 }
 
+/// The same account, after the password was changed on Peloton's website.
+fn changed_password() -> PelotonCredentials {
+    PelotonCredentials::new("rider@example.com", "the-new-password")
+}
+
+fn cache_in(directory: &std::path::Path, credentials: &PelotonCredentials) -> TokenFile {
+    TokenFile::new(directory.join("peloton.token.json"), credentials.digest())
+}
+
 /// How many times the token endpoint was called.
 async fn logins(server: &MockServer) -> usize {
     server
@@ -99,14 +114,14 @@ fn a_second_run_reads_the_token_rather_than_logging_in_again() {
     let Ok(directory) = tempfile::tempdir() else {
         panic!("a temporary directory is available")
     };
-    let cache = TokenFile::new(directory.path().join("peloton.token.json"));
+    let cache = cache_in(directory.path(), &credentials());
 
     rt.block_on(async {
         let server = MockServer::start().await;
         login_flow(&server, 172_800).await;
 
         // The first run: nothing written down, so it logs in.
-        let first = PelotonAuth::new(server.uri(), credentials()).caching_in(cache.clone());
+        let first = PelotonAuth::new(server.uri(), credentials(), Some(cache.clone()));
         assert_eq!(
             first.bearer().await.expect("the stubbed flow completes"),
             "the-access-token",
@@ -114,7 +129,7 @@ fn a_second_run_reads_the_token_rather_than_logging_in_again() {
         assert_eq!(logins(&server).await, 1);
 
         // A different `PelotonAuth`, as a second invocation would build.
-        let second = PelotonAuth::new(server.uri(), credentials()).caching_in(cache.clone());
+        let second = PelotonAuth::new(server.uri(), credentials(), Some(cache.clone()));
         assert_eq!(
             second
                 .bearer()
@@ -130,9 +145,9 @@ fn a_second_run_reads_the_token_rather_than_logging_in_again() {
     });
 }
 
-/// Without a cache, nothing is written down and the old behaviour stands — which
-/// is what the contract tests rely on, and what a composition that does not own
-/// a disk should get.
+/// With `None` for the cache, nothing is written down and every run logs in —
+/// which is what the contract tests rely on, and what a composition that does
+/// not own a disk should get.
 #[test]
 fn without_a_cache_every_run_logs_in() {
     let Ok(rt) = runtime() else {
@@ -143,7 +158,7 @@ fn without_a_cache_every_run_logs_in() {
         login_flow(&server, 172_800).await;
 
         for _ in 0..2 {
-            let auth = PelotonAuth::new(server.uri(), credentials());
+            let auth = PelotonAuth::new(server.uri(), credentials(), None);
             auth.bearer().await.expect("the stubbed flow completes");
         }
         assert_eq!(logins(&server).await, 2);
@@ -161,18 +176,23 @@ fn an_expired_token_on_disk_is_not_used() {
     let Ok(directory) = tempfile::tempdir() else {
         panic!("a temporary directory is available")
     };
-    let cache = TokenFile::new(directory.path().join("peloton.token.json"));
+    let cache = cache_in(directory.path(), &credentials());
     let Ok(yesterday) = jiff::Timestamp::now().checked_sub(jiff::Span::new().hours(24)) else {
         panic!("yesterday is a time")
     };
-    let stale = Token::new("a-dead-token".to_owned(), None, yesterday);
+    let stale = Token::new(
+        "a-dead-token".to_owned(),
+        None,
+        yesterday,
+        credentials().digest(),
+    );
     cache.write(&stale).expect("the cache is writable");
 
     rt.block_on(async {
         let server = MockServer::start().await;
         login_flow(&server, 172_800).await;
 
-        let auth = PelotonAuth::new(server.uri(), credentials()).caching_in(cache.clone());
+        let auth = PelotonAuth::new(server.uri(), credentials(), Some(cache.clone()));
         assert_eq!(
             auth.bearer().await.expect("it logs in again"),
             "the-access-token",
@@ -189,12 +209,18 @@ fn an_unreadable_cache_is_absent_rather_than_fatal() {
         panic!("a temporary directory is available")
     };
 
-    let missing = TokenFile::new(directory.path().join("nothing-here.json"));
+    let whose = credentials().digest();
+
+    let missing = TokenFile::new(directory.path().join("nothing-here.json"), whose);
     assert_eq!(missing.read(), None, "no file");
 
     let nonsense = directory.path().join("nonsense.json");
     std::fs::write(&nonsense, "<html>not json</html>").expect("the file writes");
-    assert_eq!(TokenFile::new(nonsense).read(), None, "not this format");
+    assert_eq!(
+        TokenFile::new(nonsense, whose).read(),
+        None,
+        "not this format"
+    );
 
     let undated = directory.path().join("undated.json");
     std::fs::write(
@@ -202,7 +228,94 @@ fn an_unreadable_cache_is_absent_rather_than_fatal() {
         r#"{"access_token": "t", "expires_at": "the day before yesterday"}"#,
     )
     .expect("the file writes");
-    assert_eq!(TokenFile::new(undated).read(), None, "not a time");
+    assert_eq!(TokenFile::new(undated, whose).read(), None, "not a time");
+}
+
+/// **A file written before #197 names nobody**, so it is discarded. That costs
+/// one login on the first run after the upgrade and needs no migration — § II's
+/// reconstructible state, as the module notes already say of a file that will
+/// not parse.
+#[test]
+fn a_token_naming_no_credential_is_discarded() {
+    let Ok(directory) = tempfile::tempdir() else {
+        panic!("a temporary directory is available")
+    };
+    let Ok(tomorrow) = jiff::Timestamp::now().checked_add(jiff::Span::new().hours(24)) else {
+        panic!("tomorrow is a time")
+    };
+    let path = directory.path().join("peloton.token.json");
+    std::fs::write(
+        &path,
+        format!(r#"{{"access_token": "from-an-older-build", "expires_at": "{tomorrow}"}}"#),
+    )
+    .expect("the file writes");
+
+    assert_eq!(TokenFile::new(path, credentials().digest()).read(), None);
+}
+
+/// **A token the old password obtained is not the new password's token** (#197).
+/// The file is in date and perfectly readable; it is simply not this
+/// credential's, and sending it would be the tool using access the operator
+/// believes he has revoked.
+#[test]
+fn a_token_another_credential_obtained_is_not_used() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    let Ok(directory) = tempfile::tempdir() else {
+        panic!("a temporary directory is available")
+    };
+
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        login_flow(&server, 172_800).await;
+
+        // The password that was in use, logging in and filing its token.
+        let before = PelotonAuth::new(
+            server.uri(),
+            credentials(),
+            Some(cache_in(directory.path(), &credentials())),
+        );
+        before.bearer().await.expect("the stubbed flow completes");
+        assert_eq!(logins(&server).await, 1);
+
+        // The password after it was changed, reading the same file.
+        let after = PelotonAuth::new(
+            server.uri(),
+            changed_password(),
+            Some(cache_in(directory.path(), &changed_password())),
+        );
+        after.bearer().await.expect("it logs in rather than reuse");
+        assert_eq!(
+            logins(&server).await,
+            2,
+            "the old password's token must not have been sent",
+        );
+
+        // And what is now on disk is the new password's, so the run after it
+        // costs nothing.
+        let next = PelotonAuth::new(
+            server.uri(),
+            changed_password(),
+            Some(cache_in(directory.path(), &changed_password())),
+        );
+        next.bearer().await.expect("the written token is read back");
+        assert_eq!(logins(&server).await, 2);
+    });
+}
+
+/// Two credentials are two credentials however their characters run together:
+/// the digest length-prefixes each field.
+#[test]
+fn a_credential_is_its_fields_not_their_concatenation() {
+    assert_ne!(
+        CredentialDigest::of(["ab", "c"]),
+        CredentialDigest::of(["a", "bc"]),
+    );
+    assert_eq!(
+        CredentialDigest::of(["ab", "c"]),
+        CredentialDigest::of(["ab", "c"]),
+    );
 }
 
 /// A refresh token is optional and its absence must round trip as absence — a
@@ -213,16 +326,26 @@ fn a_token_round_trips_through_the_file_exactly() {
     let Ok(directory) = tempfile::tempdir() else {
         panic!("a temporary directory is available")
     };
-    let cache = TokenFile::new(directory.path().join("peloton.token.json"));
+    let cache = cache_in(directory.path(), &credentials());
     let Ok(expires_at) = "2026-09-08T09:30:00Z".parse::<jiff::Timestamp>() else {
         panic!("that is a timestamp")
     };
 
-    let with_refresh = Token::new("access".to_owned(), Some("refresh".to_owned()), expires_at);
+    let with_refresh = Token::new(
+        "access".to_owned(),
+        Some("refresh".to_owned()),
+        expires_at,
+        credentials().digest(),
+    );
     cache.write(&with_refresh).expect("the cache is writable");
     assert_eq!(cache.read(), Some(with_refresh));
 
-    let without = Token::new("access".to_owned(), None, expires_at);
+    let without = Token::new(
+        "access".to_owned(),
+        None,
+        expires_at,
+        credentials().digest(),
+    );
     cache.write(&without).expect("the cache is writable");
     assert_eq!(cache.read(), Some(without));
 }
@@ -239,12 +362,17 @@ fn the_cache_is_readable_only_by_its_owner() {
     let Ok(directory) = tempfile::tempdir() else {
         panic!("a temporary directory is available")
     };
-    let cache = TokenFile::new(directory.path().join("peloton.token.json"));
+    let cache = cache_in(directory.path(), &credentials());
     let Ok(expires_at) = "2026-09-08T09:30:00Z".parse::<jiff::Timestamp>() else {
         panic!("that is a timestamp")
     };
     cache
-        .write(&Token::new("access".to_owned(), None, expires_at))
+        .write(&Token::new(
+            "access".to_owned(),
+            None,
+            expires_at,
+            credentials().digest(),
+        ))
         .expect("the cache is writable");
 
     let mode = std::fs::metadata(cache.path())
@@ -265,6 +393,6 @@ fn forgetting_an_absent_token_succeeds() {
     let Ok(directory) = tempfile::tempdir() else {
         panic!("a temporary directory is available")
     };
-    let cache = TokenFile::new(directory.path().join("peloton.token.json"));
+    let cache = cache_in(directory.path(), &credentials());
     assert!(cache.forget().is_ok());
 }

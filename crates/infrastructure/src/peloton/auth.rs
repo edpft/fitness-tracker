@@ -40,7 +40,7 @@ use rand::Rng as _;
 use reqwest::{Client, StatusCode, cookie::CookieStore as _, cookie::Jar, redirect::Policy};
 use sha2::{Digest as _, Sha256};
 
-pub use crate::token::Token;
+pub use crate::token::{CredentialDigest, Token};
 
 /// Auth0's tenant for Peloton, and the connection a password login names.
 const TENANT: &str = "peloton-prod";
@@ -85,6 +85,12 @@ impl PelotonCredentials {
             password: password.into(),
         }
     }
+
+    /// Which credential this is, for the token it obtains to be bound to.
+    #[must_use]
+    pub fn digest(&self) -> CredentialDigest {
+        CredentialDigest::of([self.email.as_str(), self.password.as_str()])
+    }
 }
 
 /// Deliberately opaque. A credential that can be printed gets printed.
@@ -107,6 +113,11 @@ pub struct PelotonAuth {
     ///
     /// `None` is a composition that does not persist — the contract tests, and
     /// anything that would rather log in than write to a disk it does not own.
+    ///
+    /// **Without it every invocation walks the whole Auth0 flow** — five round
+    /// trips through the SSO domain — to obtain a token the last one already
+    /// had. Tolerable for a command run once a block; not for a sink that
+    /// writes on every prescription (#54).
     cache: Option<crate::token::TokenFile>,
     /// Held explicitly rather than left inside the client: the flow has to read
     /// the `_csrf` cookie back out, and a client's own jar is not readable.
@@ -126,27 +137,26 @@ impl std::fmt::Debug for PelotonAuth {
 impl PelotonAuth {
     /// `auth_base` is the Auth0 root — `https://auth.onepeloton.com` in
     /// production, and a stub in the contract tests.
-    pub fn new(auth_base: impl Into<String>, credentials: PelotonCredentials) -> Self {
+    ///
+    /// **The cache is an argument rather than a builder step** (#366). It was
+    /// `caching_in`, and three of its four call sites in `cli` never called it —
+    /// so every `fitness next` performed two full Auth0 logins seconds apart
+    /// and extraction never read the token file at all. An omitted builder call
+    /// is invisible; a `None` here is a decision somebody wrote down, which is
+    /// what Garmin's adapter already asks for.
+    pub fn new(
+        auth_base: impl Into<String>,
+        credentials: PelotonCredentials,
+        cache: Option<crate::token::TokenFile>,
+    ) -> Self {
         Self {
             auth_base: auth_base.into(),
             credentials,
-            cache: None,
+            cache,
             jar: Arc::new(Jar::default()),
             client: OnceLock::new(),
             token: Mutex::new(None),
         }
-    }
-
-    /// Keep the token here between runs.
-    ///
-    /// **Without this every invocation walks the whole Auth0 flow** — five round
-    /// trips through the SSO domain — to obtain a token the last one already
-    /// had. Tolerable for a command run once a block; not for a sink that writes
-    /// on every prescription (#54).
-    #[must_use]
-    pub fn caching_in(mut self, cache: crate::token::TokenFile) -> Self {
-        self.cache = Some(cache);
-        self
     }
 
     /// A bearer token, from cache, from a refresh, or from a full login.
@@ -243,7 +253,7 @@ impl PelotonAuth {
             .send()
             .await
             .map_err(|ref error| unreachable(error))?;
-        Self::token_from(response).await
+        self.token_from(response).await
     }
 
     async fn login(&self) -> Result<Token, SourceError> {
@@ -449,10 +459,11 @@ impl PelotonAuth {
             .send()
             .await
             .map_err(|ref error| unreachable(error))?;
-        Self::token_from(response).await
+        self.token_from(response).await
     }
 
-    async fn token_from(response: reqwest::Response) -> Result<Token, SourceError> {
+    /// What the token endpoint served, bound to the credential that asked.
+    async fn token_from(&self, response: reqwest::Response) -> Result<Token, SourceError> {
         let status = response.status();
         if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             return Err(SourceError::Unauthorised);
@@ -482,6 +493,7 @@ impl PelotonAuth {
             body.access_token,
             body.refresh_token,
             expires_at,
+            self.credentials.digest(),
         ))
     }
 

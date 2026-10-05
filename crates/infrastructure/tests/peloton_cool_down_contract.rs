@@ -130,6 +130,7 @@ fn the_search_asks_for_the_operators_own_four_filters() {
             PelotonAuth::new(
                 server.uri(),
                 PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+                None,
             ),
         );
 
@@ -204,6 +205,7 @@ fn classes(server: &MockServer) -> PelotonClasses {
         PelotonAuth::new(
             server.uri(),
             PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+            None,
         ),
     )
 }

@@ -1083,3 +1083,52 @@ fn no_peloton_credential_anywhere_names_the_command_that_stores_one() {
     assert!(message.contains("PELOTON_EMAIL"), "{message}");
     assert!(message.contains("PELOTON_PASSWORD"), "{message}");
 }
+
+/// **One place turns a Peloton login into a `PelotonAuth`** (#366).
+///
+/// `wiring::peloton_auth` is it, and whether the token file is wired is
+/// therefore not a per-call-site decision. It was: `caching_in` was called in
+/// `plan` and nowhere else, so every `fitness next` that collected cycling
+/// performed two complete Auth0 password logins seconds apart while extraction
+/// neither read nor wrote the token file — and the second of the two was
+/// refused on 2026-10-05, landing no performance graph for anything ridden.
+///
+/// A grep, because what is being asserted is about the composition rather than
+/// about a value: there is no object to ask. The adapter's own constructor
+/// stays public for the contract tests, which point it at a stub and want no
+/// cache at all.
+#[test]
+fn only_the_composition_root_constructs_a_peloton_authenticator() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sites = Vec::new();
+
+    for entry in std::fs::read_dir(&source).expect("the crate's own sources are readable") {
+        let path = entry.expect("each entry reads").path();
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("a source file reads");
+        let name = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or_default()
+            .to_owned();
+        for (number, line) in text.lines().enumerate() {
+            if line.contains("PelotonAuth::new(") {
+                sites.push(format!("{name}:{}", number + 1));
+            }
+        }
+    }
+
+    assert_eq!(
+        sites.len(),
+        1,
+        "every Peloton authenticator comes from wiring::peloton_auth, found {sites:?}"
+    );
+    assert!(
+        sites
+            .first()
+            .is_some_and(|site| site.starts_with("wiring.rs")),
+        "and that one place is the composition root, found {sites:?}"
+    );
+}

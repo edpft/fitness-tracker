@@ -66,7 +66,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rand::RngExt as _;
 use reqwest::{Client, StatusCode};
 
-use crate::token::{Token, TokenFile};
+use crate::token::{CredentialDigest, Token, TokenFile};
 
 /// The widget that establishes the session, and the form that signs in.
 ///
@@ -132,6 +132,12 @@ impl GarminCredentials {
             email: email.into(),
             password: password.into(),
         }
+    }
+
+    /// Which credential this is, for the token it obtains to be bound to.
+    #[must_use]
+    pub fn digest(&self) -> CredentialDigest {
+        CredentialDigest::of([self.email.as_str(), self.password.as_str()])
     }
 }
 
@@ -482,6 +488,7 @@ impl GarminAuth {
             issued.access_token,
             issued.refresh_token,
             expires_at,
+            self.credentials.digest(),
         ))
     }
 }

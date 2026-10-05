@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     runtime.block_on(async {
-        let auth = PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password));
+        let auth = PelotonAuth::new(AUTH_BASE, PelotonCredentials::new(email, password), None);
         let bearer = auth.bearer().await?;
         let client = reqwest::Client::builder()
             .user_agent("fitness-tracker/0.2 (+stack probe, issue #70)")

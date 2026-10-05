@@ -57,7 +57,7 @@ pub use store::{
     SqliteResumptionPointStore, SqliteRiddenVenues, SqliteSpreadsheetStore, SqliteWeighInHistory,
     SqliteWeighInStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
-pub use token::{Token, TokenFile};
+pub use token::{CredentialDigest, Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};
 
 /// The pool every store is built on, so a composition root can open one and
