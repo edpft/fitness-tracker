@@ -10,16 +10,26 @@
 //! the Peloton credential already resolved and § 36 already handling a source
 //! that cannot be reached.
 //!
-//! **A whole walk and a bounded read.** The two halves cost very different
-//! amounts, so they are paced differently:
+//! **A whole walk and then a whole read, both paced.** The two halves cost
+//! different amounts, but neither is bounded by a count:
 //!
-//! - The *listing* walk runs to exhaustion every refresh. It is a page per
-//!   hundred classes, which is what makes "every power zone class is in the
+//! - The *listing* walk is a page per hundred classes. It runs to exhaustion
+//!   every refresh, which is what makes "every power zone class is in the
 //!   store" true and what notices the ones published since the last run.
-//! - The *detail* reads are one request per class, and the whole library's
-//!   worth of them is not something to put inside a daily loop. So each refresh
-//!   reads at most [`READS_PER_REFRESH`] of the classes it has not read yet,
-//!   newest first, and the catalogue converges over a handful of runs.
+//! - The *detail* reads are one request per class, and every class that has not
+//!   had one gets one, [`BETWEEN_REQUESTS`] apart.
+//!
+//! **It was fifty a run until #369, and that was wrong.** The operator, reading
+//! the first refresh's output on 2026-10-05: *"What made you think I'd only
+//! want to read 50 of the available classes?"* Fifty was sized to the latency
+//! of his daily loop, which is the wrong thing to size it to: the whole library
+//! is a one-off of about a thousand requests, and after it the steady state is
+//! the handful of classes Peloton published that week. Three weeks of the tool
+//! not being what it said it was bought nothing.
+//!
+//! **Because the first one is long, it is announced.** The walk and the read
+//! are therefore two calls rather than one — the caller is the thing that can
+//! print, and it prints [`Walked::reading_takes`] before the reading starts.
 //!
 //! **The skeletons' classes are read whether or not the walk lists them.**
 //! `mapping` already records that one class of *Peak Your Power Zones* is
@@ -30,20 +40,33 @@
 //! read first, ahead of the newest, because they are the classes something
 //! actually depends on today.
 
+use std::{collections::HashSet, time::Duration};
+
 use application::SourceError;
 
 use super::{class, class::PelotonClasses, skeleton};
 use crate::store::{Held, SqlitePelotonClassStore};
 
-/// How many class details one refresh will fetch.
+/// How long to wait between one class's detail and the next.
 ///
-/// **One fixed decision, not a knob** (§ 14.1): it is a fact about how long the
-/// operator's daily loop may take, not a parameter of his training. At roughly
-/// a third of a second each, fifty is some fifteen seconds added to a run that
-/// already contacts four sources, and a library of a thousand classes is read
-/// inside a month of ordinary use — sooner, because the classes that matter are
-/// the newest and they are read first.
-const READS_PER_REFRESH: u32 = 50;
+/// **Politeness to the source, and the only thing bounding the read** (#369).
+/// Peloton documents no rate limit, so this is the figure the Garmin adapters
+/// already settled on for the same reason — `garmin::files` downloads two
+/// thousand activity files a quarter-second apart.
+///
+/// **One fixed decision, not a knob** (§ 14.1): it is a fact about how hard a
+/// source may be asked, not a parameter of the operator's training.
+const BETWEEN_REQUESTS: Duration = Duration::from_millis(250);
+
+/// What one detail read costs in wall-clock time, for the estimate alone.
+///
+/// [`BETWEEN_REQUESTS`] plus a third of a second for the request itself. **That
+/// third of a second is unverified**: it is the figure this module asserted
+/// when the fifty-a-run budget was sized against it, and nothing here has
+/// timed the endpoint. It is good enough for its only purpose, which is to say
+/// "about ten minutes" rather than appear to hang — and if it is out by half,
+/// the announcement is out by half and the reading still finishes.
+const PER_READ: Duration = Duration::from_millis(583);
 
 /// How many pages the listing walk will take before giving up.
 ///
@@ -54,20 +77,51 @@ const READS_PER_REFRESH: u32 = 50;
 /// is large. It also bounds what one `fitness next` can spend on the walk.
 const PAGE_LIMIT: u32 = 100;
 
-/// What one refresh did.
+/// What the listing walk found, and what is left to read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Refreshed {
+pub struct Walked {
     /// Classes the listing walk saw this time.
     pub listed: u64,
     /// Of those, the ones the catalogue had never held.
     pub added: u64,
+    /// What the catalogue holds now the walk has been recorded.
+    pub held: Held,
+}
+
+impl Walked {
+    /// Roughly how long reading the outstanding details will take.
+    ///
+    /// **Printed before the reading starts**, because the first refresh against
+    /// an empty catalogue is a thousand requests and ten minutes of silence is
+    /// indistinguishable from a hang. Zero where there is nothing to read,
+    /// which is the converged case and so the usual one.
+    #[must_use]
+    pub fn reading_takes(&self) -> Duration {
+        PER_READ.saturating_mul(u32::try_from(self.held.outstanding()).unwrap_or(u32::MAX))
+    }
+}
+
+/// What the detail reads did.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reading {
     /// Classes whose detail was read this time.
     pub read: u64,
+    /// Classes Peloton would not serve, recorded so they are not asked again.
+    pub not_served: u64,
+    /// Why the reading stopped early, where it did.
+    ///
+    /// **A partial read is reported, not thrown away.** Six hundred classes
+    /// read and then an outage is six hundred classes the next refresh does not
+    /// have to fetch, so the count stands and this says why there are more.
+    pub stopped: Option<SourceError>,
     /// What the catalogue holds now.
     pub held: Held,
 }
 
-/// Walk Peloton's power zone classes into the store, then read what fits.
+/// Walk Peloton's power zone classes into the store.
+///
+/// The cheap half, and the half that notices a newly published class. Call
+/// [`read_details`] after it.
 ///
 /// # Errors
 ///
@@ -75,14 +129,10 @@ pub struct Refreshed {
 /// [`SourceError::Malformed`] if the store will not accept what it served —
 /// which the caller reports and steps past (§ 36), because a catalogue that is
 /// one run out of date still answers.
-pub async fn refresh(
+pub async fn walk(
     classes: &PelotonClasses,
     store: &SqlitePelotonClassStore,
-) -> Result<Refreshed, SourceError> {
-    let unavailable = |error: application::StoreError| SourceError::Malformed {
-        detail: format!("the class catalogue could not be written: {error}"),
-    };
-
+) -> Result<Walked, SourceError> {
     let mut listed = 0_u64;
     let mut added = 0_u64;
     for page in 0..PAGE_LIMIT {
@@ -91,88 +141,139 @@ pub async fn refresh(
         added += store
             .record_listed(&found.classes)
             .await
-            .map_err(unavailable)?;
+            .map_err(|error| unwritable(&error))?;
         if !found.more {
             break;
         }
     }
-
-    let read = read_details(classes, store).await.map_err(unavailable)?;
-    let held = store.held().await.map_err(unavailable)?;
-    Ok(Refreshed {
+    let held = store.held().await.map_err(|error| unwritable(&error))?;
+    Ok(Walked {
         listed,
         added,
-        read,
         held,
     })
 }
 
-/// Read up to [`READS_PER_REFRESH`] class details, the depended-on first.
-async fn read_details(
+/// Read every class detail the catalogue does not hold, the depended-on first.
+///
+/// **No count bounds this** (#369): [`BETWEEN_REQUESTS`] does, and the whole
+/// library is a one-off. What ends it early is the source stopping, which
+/// comes back in [`Reading::stopped`] rather than as an error, because what was
+/// read before it stopped is kept.
+///
+/// # Errors
+///
+/// [`SourceError::Malformed`] if the store will not accept what Peloton served.
+pub async fn read_details(
     classes: &PelotonClasses,
     store: &SqlitePelotonClassStore,
-) -> Result<u64, application::StoreError> {
-    // **Attempts are what the budget counts, not successes.** A class that
-    // will not fetch has still cost a request, and budgeting on successes alone
-    // would let a run of failures spend the whole allowance twice over.
-    let mut attempted = 0_u32;
-    let mut read = 0_u64;
+) -> Result<Reading, SourceError> {
+    let mut outcome = Reading::default();
 
-    // The placed classes first. Whether each is already read is asked of the
-    // store rather than remembered, so a run after the first fetches none of
-    // them.
+    // The placed classes first. Whether each is already accounted for is asked
+    // of the store rather than remembered, so a run after the first fetches
+    // none of them.
+    let mut references = Vec::new();
     for reference in placed() {
-        if attempted >= READS_PER_REFRESH {
-            return Ok(read);
+        if !store
+            .is_accounted_for(&reference)
+            .await
+            .map_err(|error| unwritable(&error))?
+        {
+            references.push(reference);
         }
-        if store.is_read(&reference).await? {
-            continue;
+    }
+    // A placed class the walk also listed is in both lists, and asking twice
+    // would cost a request and record the same row over itself.
+    let already: HashSet<&str> = references.iter().map(String::as_str).collect();
+    let listed: Vec<String> = store
+        .unread()
+        .await
+        .map_err(|error| unwritable(&error))?
+        .into_iter()
+        .filter(|reference| !already.contains(reference.as_str()))
+        .collect();
+    references.extend(listed);
+
+    for (asked, reference) in references.into_iter().enumerate() {
+        if asked > 0 {
+            tokio::time::sleep(BETWEEN_REQUESTS).await;
         }
-        attempted += 1;
-        if store_detail(classes, store, &reference).await? {
-            read += 1;
+        match store_detail(classes, store, &reference).await {
+            Ok(Asked::Read) => outcome.read += 1,
+            Ok(Asked::NotServed) => outcome.not_served += 1,
+            Err(Failed::Store(error)) => return Err(unwritable(&error)),
+            Err(Failed::Source(error)) => {
+                outcome.stopped = Some(error);
+                break;
+            }
         }
     }
 
-    let budget = READS_PER_REFRESH.saturating_sub(attempted);
-    if budget == 0 {
-        return Ok(read);
+    outcome.held = store.held().await.map_err(|error| unwritable(&error))?;
+    Ok(outcome)
+}
+
+/// A store that will not take what the source served.
+fn unwritable(error: &application::StoreError) -> SourceError {
+    SourceError::Malformed {
+        detail: format!("the class catalogue could not be written: {error}"),
     }
-    for reference in store.unread(budget).await? {
-        if store_detail(classes, store, &reference).await? {
-            read += 1;
-        }
-    }
-    Ok(read)
+}
+
+/// What asking Peloton for one class produced.
+enum Asked {
+    Read,
+    NotServed,
+}
+
+/// Why asking Peloton for one class produced nothing.
+enum Failed {
+    /// The source refused the credential or stopped answering. The reading
+    /// stops: a thousand requests against a source that is failing is not
+    /// politeness, and the next run resumes where this one left off.
+    Source(SourceError),
+    Store(application::StoreError),
 }
 
 /// Read one class's detail into the catalogue.
 ///
-/// **A class that will not fetch is stepped past rather than fatal.** The
-/// library holds classes the operator's account cannot start, and one of them
-/// refusing is a fact about the catalogue; stopping the whole refresh on it
-/// would mean the first such class froze the catalogue permanently, one short.
+/// **A class Peloton will not serve is recorded as such, not stepped past.**
+/// The library holds classes the operator's account cannot start — `mapping`
+/// names one — and leaving it unread was harmless only while the reads were
+/// bounded at fifty a run. Unbounded, it would be asked for on every `fitness
+/// next` for ever and the catalogue could never say it had read everything.
 async fn store_detail(
     classes: &PelotonClasses,
     store: &SqlitePelotonClassStore,
     reference: &str,
-) -> Result<bool, application::StoreError> {
-    let Ok(body) = classes.detail(reference).await else {
-        return Ok(false);
+) -> Result<Asked, Failed> {
+    let body = match classes.detail_if_served(reference).await {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            store
+                .record_not_served(reference)
+                .await
+                .map_err(Failed::Store)?;
+            return Ok(Asked::NotServed);
+        }
+        Err(error) => return Err(Failed::Source(error)),
     };
-    // **Read before it is stored, for the title and the length.** A class the
-    // browse listing never carried has no row yet, and those two are all the
-    // store needs to make one — see `record_detail`. A body that will not read
-    // is not stored at all: it would be a row that claims to be read and
-    // answers nothing.
-    let Ok(class) = class::derive(reference, &body) else {
-        return Ok(false);
-    };
-    let duration = class.warm_up_seconds + class.ride_seconds + class.cool_down_seconds;
+    // **A body the reader cannot make a session of is still stored.** That is
+    // the whole argument for keeping the response: a corrected reader costs a
+    // re-read of the store rather than a re-fetch of the library, and this
+    // module's own history is the evidence, since the transcription it replaced
+    // had a cool-down five minutes out. Nor is it a class Peloton would not
+    // serve: it served this one, so there is nothing left to ask it.
+    //
+    // The title and the length are only wanted for a class the browse listing
+    // never carried, which has no row yet; see `record_detail`.
+    let (title, duration) = class::named(&body).unwrap_or_else(|| (reference.to_owned(), 1));
     store
-        .record_detail(reference, &class.title, duration, &body)
-        .await?;
-    Ok(true)
+        .record_detail(reference, &title, duration, &body)
+        .await
+        .map_err(Failed::Store)?;
+    Ok(Asked::Read)
 }
 
 /// Every class id a published programme's skeleton places.
@@ -196,11 +297,13 @@ fn placed() -> Vec<String> {
 /// is what #246 wanted off the network, and it is answered from the store
 /// alone, because the listing walk fills every row on the first refresh. What
 /// may still fall through to Peloton is reading one *named* class whose detail
-/// the bounded reads have not reached — a single request for a class already
-/// chosen, not sixty-five to choose among.
+/// the catalogue does not hold — a single request for a class already chosen,
+/// not sixty-five to choose among.
 ///
-/// So this gets quieter as the catalogue converges, and on a store whose
-/// classes have all been read it contacts Peloton not at all.
+/// **Since #369 that fall-through is for a class published since the last
+/// refresh and nothing else**, because one refresh now reads every detail it
+/// does not hold rather than fifty of them. On a converged store this contacts
+/// Peloton not at all.
 #[derive(Debug, Clone, Copy)]
 pub struct ClassCatalogue<'a> {
     stored: &'a SqlitePelotonClassStore,
@@ -233,10 +336,12 @@ impl<'a> ClassCatalogue<'a> {
     /// A catalogue with nowhere to fall through to.
     ///
     /// **What an absent credential now costs, and what it no longer does.** It
-    /// costs reading a class the bounded refreshes have not reached yet, and it
-    /// costs delivering. It no longer costs *choosing*: the listing is in the
-    /// store, so which classes could fill a holding role is answerable with
-    /// `PELOTON_EMAIL` unset, which is what #246 asked for.
+    /// costs reading a class published since the last refresh, and it costs
+    /// delivering. It no longer costs *choosing*: the listing is in the store,
+    /// so which classes could fill a holding role is answerable with
+    /// `PELOTON_EMAIL` unset, which is what #246 asked for — nor, since #369,
+    /// reading any class the catalogue has listed, because a refresh reads them
+    /// all.
     pub const fn stored(stored: &'a SqlitePelotonClassStore) -> Self {
         Self {
             stored,
@@ -360,7 +465,71 @@ mod tests {
 
     #[test]
     fn an_unread_catalogue_has_everything_outstanding() {
-        let held = Held { listed: 7, read: 0 };
+        let held = Held {
+            listed: 7,
+            read: 0,
+            not_served: 0,
+        };
         assert_eq!(held.outstanding(), 7);
+    }
+
+    /// **The number #369 exists to make reach zero.** A class Peloton will not
+    /// serve has been asked all it can be asked, so counting it as outstanding
+    /// would mean a converged catalogue never said it was read — and the
+    /// refresh would ask about it again on every single run for ever.
+    #[test]
+    fn a_class_peloton_will_not_serve_is_accounted_for_rather_than_outstanding() {
+        let held = Held {
+            listed: 7,
+            read: 6,
+            not_served: 1,
+        };
+        assert_eq!(held.outstanding(), 0);
+    }
+
+    /// The estimate the caller prints before a long read, and the thing that
+    /// makes it worth printing: a thousand classes is minutes, not seconds.
+    #[test]
+    fn the_whole_library_is_announced_in_minutes() {
+        let walked = Walked {
+            listed: 1_052,
+            added: 1_019,
+            held: Held {
+                listed: 1_052,
+                read: 0,
+                not_served: 0,
+            },
+        };
+        let takes = walked.reading_takes();
+        assert!(
+            takes >= Duration::from_mins(5),
+            "a thousand details is minutes: {takes:?}"
+        );
+        assert!(takes <= Duration::from_mins(20), "and not hours: {takes:?}");
+    }
+
+    /// A converged catalogue reads nothing, so there is nothing to announce.
+    #[test]
+    fn a_converged_catalogue_has_nothing_to_read() {
+        let walked = Walked {
+            listed: 1_052,
+            added: 0,
+            held: Held {
+                listed: 1_052,
+                read: 1_051,
+                not_served: 1,
+            },
+        };
+        assert_eq!(walked.reading_takes(), Duration::ZERO);
+    }
+
+    /// The pace is what bounds the read, so it has to be a real wait.
+    #[test]
+    fn the_reads_are_paced() {
+        assert!(BETWEEN_REQUESTS >= Duration::from_millis(100));
+        assert!(
+            PER_READ > BETWEEN_REQUESTS,
+            "the estimate counts the request as well as the wait"
+        );
     }
 }

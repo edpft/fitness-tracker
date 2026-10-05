@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT detail IS NOT NULL OR not_served_at IS NOT NULL AS \"accounted!: i64\"\n              FROM peloton_class\n             WHERE reference = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "accounted!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4d7098ad4aecc4d008436d0f94949b0551aa92fa4e30e3ca835b28290c20daea"
+}

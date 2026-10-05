@@ -435,6 +435,36 @@ pub fn derive(id: &str, body: &str) -> Result<ClassSession, SourceError> {
     })
 }
 
+/// What a detail response names the class and how long it is, and nothing else.
+///
+/// **A fallback for a body [`derive`] will not read**, which is a different
+/// thing from a body Peloton will not serve: the bytes are kept either way, so
+/// that a corrected reader costs a re-read of the store rather than a re-fetch
+/// of the library (#369), and the catalogue needs a title and a length to make
+/// a row for a class the browse listing never carried.
+///
+/// `None` where even that much is not there — no title, or no segment with a
+/// length — in which case the caller has nothing to name the class by.
+#[must_use]
+pub fn named(body: &str) -> Option<(String, u64)> {
+    let detail: Named = serde_json::from_str(body).ok()?;
+    let title = detail.ride.title.trim();
+    let duration: u64 = detail
+        .segments
+        .segment_list
+        .iter()
+        .map(|segment| segment.length)
+        .sum();
+    (!title.is_empty() && duration > 0).then(|| (title.to_owned(), duration))
+}
+
+#[derive(Deserialize)]
+struct Named {
+    ride: RideMeta,
+    #[serde(default)]
+    segments: Segments,
+}
+
 #[derive(Deserialize)]
 struct ClassDetail {
     ride: RideMeta,
@@ -459,8 +489,9 @@ struct RideMeta {
     instructor: Option<Instructor>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Segments {
+    #[serde(default)]
     segment_list: Vec<Segment>,
 }
 
@@ -695,9 +726,40 @@ impl PelotonClasses {
     /// # Errors
     ///
     /// [`SourceError::Unauthorised`] where the token is refused,
+    /// [`SourceError::Unavailable`] where Peloton is not answering *or will not
+    /// serve this class*, and [`SourceError::Malformed`] where the body cannot
+    /// be read as text. Where those two need telling apart, which is the
+    /// catalogue walk's whole question, use
+    /// [`detail_if_served`](Self::detail_if_served).
+    pub async fn detail(&self, id: &str) -> Result<String, SourceError> {
+        self.detail_if_served(id)
+            .await?
+            .ok_or_else(|| SourceError::Unavailable {
+                detail: format!("Peloton will not serve class {id} to this account"),
+            })
+    }
+
+    /// The same, where not being served is an answer rather than a failure.
+    ///
+    /// **The distinction the catalogue walk turns on** (#369). It reads the
+    /// whole library in one go, so the two must be told apart: a class Peloton
+    /// refuses this account is recorded as refused and never asked for again,
+    /// while a source that has stopped answering ends the reading and the next
+    /// run picks it up. Conflating them would either re-request the refusals on
+    /// every single run or write off a thousand classes over one outage.
+    ///
+    /// `Ok(None)` is 403, 404 and 410 — forbidden, gone, or never there, each
+    /// of which says the same thing about a class id the browse listing handed
+    /// us. `mapping` already records one: a *Peak Your Power Zones* class the
+    /// operator's account cannot start.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Unauthorised`] where the token is refused — which is
+    /// about the credential and not about the class, so it is not a refusal —
     /// [`SourceError::Unavailable`] where Peloton is not answering, and
     /// [`SourceError::Malformed`] where the body cannot be read as text.
-    pub async fn detail(&self, id: &str) -> Result<String, SourceError> {
+    pub async fn detail_if_served(&self, id: &str) -> Result<Option<String>, SourceError> {
         let bearer = self.auth.bearer().await?;
         let response = self
             .client()?
@@ -713,6 +775,14 @@ impl PelotonClasses {
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(SourceError::Unauthorised);
         }
+        if matches!(
+            status,
+            reqwest::StatusCode::FORBIDDEN
+                | reqwest::StatusCode::NOT_FOUND
+                | reqwest::StatusCode::GONE
+        ) {
+            return Ok(None);
+        }
         if !status.is_success() {
             return Err(SourceError::Unavailable {
                 detail: format!("class {id} answered {status}"),
@@ -721,6 +791,7 @@ impl PelotonClasses {
         response
             .text()
             .await
+            .map(Some)
             .map_err(|error| SourceError::Malformed {
                 detail: error.to_string(),
             })

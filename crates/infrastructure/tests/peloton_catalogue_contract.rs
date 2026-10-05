@@ -16,17 +16,40 @@
 //! **A stub cannot catch a wrong default** (`CLAUDE.md`), so the composed query
 //! is asserted parameter by parameter rather than read off a happy path.
 //!
+//! **And the walk's other half: reading every listed class's detail** (#369).
+//! The reads were bounded at fifty a run, which left 1,002 of the operator's
+//! 1,052 classes with no zone structure three weeks after the catalogue was
+//! built — the operator, 2026-10-05: *"What made you think I'd only want to
+//! read 50 of the available classes?"* So the read runs to exhaustion, a
+//! quarter of a second apart, and the only things that end it early are the
+//! source declining to serve one class or the source stopping altogether.
+//!
+//! Telling those two apart is what makes an unbounded read safe, and it is
+//! pinned here: a class Peloton will not serve is recorded and never asked
+//! again, while an outage keeps what was read and leaves the rest for the next
+//! run. Conflate them and either those classes cost a request on every
+//! `fitness next` for ever, or one outage writes off the whole library.
+//!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
-use infrastructure::peloton::{
-    auth::{PelotonAuth, PelotonCredentials},
-    class::PelotonClasses,
-    power_zone_from,
+use std::error::Error;
+
+use infrastructure::{
+    SqlitePelotonClassStore, connect,
+    peloton::{
+        ClassSummary,
+        auth::{PelotonAuth, PelotonCredentials},
+        class::PelotonClasses,
+        power_zone_from, read_details, walk,
+    },
 };
+use tempfile::TempDir;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
-    matchers::{method, path, query_param, query_param_is_missing},
+    matchers::{method, path, path_regex, query_param, query_param_is_missing},
 };
+
+type Fallible<T> = Result<T, Box<dyn Error>>;
 
 /// The one class type all three Power Zone formats share.
 const POWER_ZONE_TYPE: &str = "665395ff3abf4081bf315686227d1a51";
@@ -292,4 +315,349 @@ fn a_class_of_no_length_or_no_name_is_not_held() {
 fn a_body_that_is_not_a_listing_is_refused() {
     let refused = power_zone_from("<html>not json</html>");
     assert!(refused.is_err(), "an unreadable page is not an empty one");
+}
+
+/// **The distinction an unbounded read turns on** (#369). Reading the whole
+/// library in one go means the two have to be told apart: a class Peloton will
+/// not serve this account is recorded as such and never asked for again,
+/// while a source that has stopped answering ends the reading and the next run
+/// resumes. Conflating them either re-requests those classes on every `fitness
+/// next` or writes off a thousand classes over one outage.
+#[test]
+fn a_class_peloton_will_not_serve_is_an_answer_and_an_outage_is_not() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+
+        for (id, status) in [("forbidden", 403), ("missing", 404), ("gone", 410)] {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/ride/{id}/details")))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path("/api/ride/failing/details"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/ride/served/details"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"ride":{}}"#))
+            .mount(&server)
+            .await;
+
+        let classes = classes(&server);
+        for id in ["forbidden", "missing", "gone"] {
+            assert_eq!(
+                classes
+                    .detail_if_served(id)
+                    .await
+                    .expect("a class not served is not a failure"),
+                None,
+                "{id}: Peloton saying no about one class is an answer about that class"
+            );
+        }
+        assert!(
+            classes.detail_if_served("failing").await.is_err(),
+            "a source that has stopped answering is not a thousand such classes"
+        );
+        assert!(
+            classes
+                .detail_if_served("served")
+                .await
+                .expect("a served body answers")
+                .is_some()
+        );
+    });
+}
+
+/// **A body the reader cannot make a session of is still named and still
+/// stored**, because keeping the response is what makes a corrected reader cost
+/// a re-read of the store rather than a re-fetch of the library. The catalogue
+/// needs a title and a length to hold a class the browse listing never carried.
+#[test]
+fn a_detail_names_itself_even_where_it_will_not_derive() {
+    let body = serde_json::json!({
+        "ride": { "title": "45 min Power Zone Ride" },
+        "segments": { "segment_list": [
+            { "name": "Warm Up", "length": 300 },
+            { "name": "Power Zone", "length": 2_100 },
+            { "name": "Cool Down", "length": 300 },
+        ]},
+        "target_metrics_data": { "target_metrics": [
+            { "offsets": { "start": 300, "end": 2_399 }, "metrics": [{ "lower": 9 }] },
+        ]},
+    })
+    .to_string();
+    assert!(
+        infrastructure::peloton::class::derive("a", &body).is_err(),
+        "zone 9 is not a zone this build knows, so there is no session to derive"
+    );
+    assert_eq!(
+        infrastructure::peloton::class::named(&body),
+        Some(("45 min Power Zone Ride".to_owned(), 2_700)),
+        "but it names itself and states its length"
+    );
+}
+
+/// And a body that names nothing is `None`, so the caller falls back rather
+/// than writing a row that claims a title it does not have.
+#[test]
+fn a_detail_that_names_nothing_is_not_named() {
+    assert_eq!(infrastructure::peloton::class::named("not json"), None);
+    assert_eq!(
+        infrastructure::peloton::class::named(r#"{"ride":{"title":"   "}}"#),
+        None,
+        "a blank title names nothing"
+    );
+    assert_eq!(
+        infrastructure::peloton::class::named(r#"{"ride":{"title":"A Ride"}}"#),
+        None,
+        "and a class of no stated length has no length"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reading the details the walk listed (#369).
+// ---------------------------------------------------------------------------
+
+async fn catalogue() -> Fallible<(TempDir, SqlitePelotonClassStore)> {
+    let directory = TempDir::new()?;
+    let pool = connect(&directory.path().join("fitness.db")).await?;
+    Ok((directory, SqlitePelotonClassStore::new(pool)))
+}
+
+fn summary(id: &str, aired_at: i64) -> ClassSummary {
+    ClassSummary {
+        id: id.to_owned(),
+        title: "45 min Power Zone Ride".to_owned(),
+        duration_seconds: 2_700,
+        series: Some(ENDURANCE_SERIES.to_owned()),
+        instructor: Some("an-instructor".to_owned()),
+        aired_at: Some(aired_at),
+    }
+}
+
+/// A detail the reader can make a session of.
+fn served_detail() -> serde_json::Value {
+    serde_json::json!({
+        "ride": {
+            "title": "45 min Power Zone Ride",
+            "instructor": { "id": "an-instructor", "name": "A Teacher" },
+        },
+        "segments": { "segment_list": [
+            { "name": "Warm Up", "length": 300 },
+            { "name": "Power Zone", "length": 600 },
+            { "name": "Cool Down", "length": 120 },
+        ]},
+        "target_metrics_data": { "target_metrics": [
+            { "offsets": { "start": 300, "end": 899 }, "metrics": [{ "lower": 3 }] },
+        ]},
+    })
+}
+
+/// **Every other class detail answers.** The read begins with the forty-odd
+/// classes the published skeletons place, whether or not the walk listed them,
+/// so a suite that mocked only its own classes would see those forty-odd come
+/// back 404 and be recorded as not served. Mounted at a lower priority than the
+/// per-class mocks, which is what lets one of them answer differently.
+async fn every_other_class_answers(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/api/ride/[^/]+/details$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(served_detail()))
+        .with_priority(10)
+        .mount(server)
+        .await;
+}
+
+async fn one_class_answers(server: &MockServer, id: &str, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/ride/{id}/details")))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+/// **Every unread class, in one run.** Fifty a run was invisible on three
+/// classes, so what this pins is the state the operator's catalogue never
+/// reached: nothing outstanding after one refresh, and nothing asked for on the
+/// refresh after that.
+#[test]
+fn one_read_takes_every_class_the_catalogue_has_not_read() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        every_other_class_answers(&server).await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_listed(&[
+                summary("newest", 300),
+                summary("middle", 200),
+                summary("oldest", 100),
+            ])
+            .await
+            .expect("the listing records");
+
+        let read = read_details(&classes(&server), &store)
+            .await
+            .expect("the reading answers");
+        assert_eq!(read.not_served, 0);
+        assert!(read.stopped.is_none());
+        assert_eq!(read.held.outstanding(), 0, "the count reaches all read");
+        for id in ["newest", "middle", "oldest"] {
+            assert!(
+                store.class(id).await.expect("a read answers").is_some(),
+                "{id} was read"
+            );
+        }
+
+        let again = read_details(&classes(&server), &store)
+            .await
+            .expect("the reading answers");
+        assert_eq!(again.read, 0, "a converged catalogue asks for nothing");
+        assert_eq!(again.not_served, 0);
+        assert_eq!(again.held.outstanding(), 0, "and stays read");
+    });
+}
+
+/// **A class Peloton will not serve leaves the outstanding set.** Unbounded,
+/// leaving it unread would mean one request for it on every single `fitness
+/// next` and a count that never reached `all read`. `mapping` already records
+/// one candidate: a *Peak Your Power Zones* ride the account cannot start.
+#[test]
+fn a_class_peloton_will_not_serve_is_recorded_and_not_asked_again() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        one_class_answers(&server, "unserved", ResponseTemplate::new(403)).await;
+        every_other_class_answers(&server).await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_listed(&[summary("served", 200), summary("unserved", 100)])
+            .await
+            .expect("the listing records");
+
+        let read = read_details(&classes(&server), &store)
+            .await
+            .expect("a class not served is not a failed refresh");
+        assert_eq!(read.not_served, 1);
+        assert!(read.stopped.is_none(), "one class is not an outage");
+        assert_eq!(read.held.outstanding(), 0, "nothing is left to ask");
+
+        let again = read_details(&classes(&server), &store)
+            .await
+            .expect("the reading answers");
+        assert_eq!(
+            (again.read, again.not_served),
+            (0, 0),
+            "it was recorded, so this run asked about nothing"
+        );
+    });
+}
+
+/// **A source that has stopped answering ends the reading and keeps what it
+/// read.** A thousand requests against a failing source is not politeness, and
+/// discarding what was already read would make every outage cost the library
+/// again. The newest are read first, so what survives an interruption is what
+/// the operator is most likely to be prescribed.
+#[test]
+fn an_outage_stops_the_reading_and_keeps_what_was_read() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        one_class_answers(&server, "middle", ResponseTemplate::new(503)).await;
+        every_other_class_answers(&server).await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        store
+            .record_listed(&[
+                summary("newest", 300),
+                summary("middle", 200),
+                summary("oldest", 100),
+            ])
+            .await
+            .expect("the listing records");
+
+        let read = read_details(&classes(&server), &store)
+            .await
+            .expect("a partial read is not a failed refresh");
+        assert!(read.stopped.is_some(), "and it says why there are more");
+        assert!(
+            store
+                .class("newest")
+                .await
+                .expect("a read answers")
+                .is_some(),
+            "the newest was read before the source stopped"
+        );
+        assert!(
+            store
+                .class("oldest")
+                .await
+                .expect("a read answers")
+                .is_none(),
+            "and the reading stopped rather than carrying on through the failure"
+        );
+        assert_eq!(
+            read.held.outstanding(),
+            2,
+            "the two unread are still outstanding, for the next run"
+        );
+    });
+}
+
+/// **The walk lists and does not read, which is what there is to announce.**
+/// The caller prints how long the reading will take before it starts, and this
+/// is the number it reads off.
+#[test]
+fn the_walk_leaves_every_class_it_listed_outstanding() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/ride/archived"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    listed("a", ENDURANCE_SERIES, 2_700),
+                    listed("b", ENDURANCE_SERIES, 2_700),
+                ],
+                "show_next": false,
+            })))
+            .mount(&server)
+            .await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        let walked = walk(&classes(&server), &store)
+            .await
+            .expect("the walk answers");
+        assert_eq!(walked.listed, 2);
+        assert_eq!(walked.added, 2);
+        assert_eq!(
+            walked.held.outstanding(),
+            2,
+            "listing a class does not read it"
+        );
+        assert!(
+            !walked.reading_takes().is_zero(),
+            "so the caller has something to announce"
+        );
+    });
 }

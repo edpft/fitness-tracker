@@ -23,11 +23,29 @@
 //! library — and `peloton::class`'s own history is why that matters, since the
 //! transcription it replaced had a cool-down five minutes out.
 //!
-//! **Two states, and the second is reached a page at a time.** A class is
-//! *listed* as soon as the browse walk sees it, and *read* once its detail has
-//! been fetched. The walk is cheap and runs whole; the reads are one request
-//! each and are bounded per run, because this happens inside `fitness next` and
-//! the operator's daily loop may not become a library download.
+//! **Three states, and the third is how the second one ends.** A class is
+//! *listed* as soon as the browse walk sees it, *read* once its detail has been
+//! fetched, and *not served* where Peloton will not give its detail to this
+//! account at all. `mapping` already records a class of that kind — a *Peak
+//! Your Power Zones* ride the operator cannot start — and before #369 such a
+//! class was simply left unread, which was invisible while the reads were
+//! bounded at fifty a run. Unbounded, it would be asked for on every single
+//! `fitness next` and the catalogue could never say it had read everything
+//! there is.
+//!
+//! **Not served, rather than refused.** A *refusal* in this codebase is the
+//! system declining something — what the domain will not accept
+//! (`store::refusals`), what a constraint will not admit, a credential this
+//! build turned down. This is the other direction, and one word for two
+//! directions is the drift `CLAUDE.md` warns about.
+//!
+//! So it is recorded, and such a class is neither offered as unread nor counted
+//! as outstanding. **It is not reconsidered**: what has been seen so far is a
+//! fact about what the account may read, and re-asking on a schedule would be a
+//! knob (§ 14.1) bought with a request per run. A body that Peloton *does*
+//! serve is stored even where the reader cannot make a session of it, for the
+//! reason above — a corrected reader should cost a re-read and not a re-fetch —
+//! so a reader fault is never recorded as the source withholding anything.
 
 use application::StoreError;
 use jiff::Timestamp;
@@ -49,13 +67,22 @@ pub struct Held {
     pub listed: u64,
     /// How many of those have had their detail read.
     pub read: u64,
+    /// How many Peloton would not serve the detail of.
+    pub not_served: u64,
 }
 
 impl Held {
-    /// How many are listed but not yet read.
+    /// How many are listed and still worth asking for.
+    ///
+    /// **A class the source will not serve is accounted for, not outstanding.**
+    /// Counting it as outstanding would mean the catalogue could never report
+    /// that it had read everything there is to read, which is the number #369
+    /// exists to make reach zero.
     #[must_use]
     pub const fn outstanding(&self) -> u64 {
-        self.listed.saturating_sub(self.read)
+        self.listed
+            .saturating_sub(self.read)
+            .saturating_sub(self.not_served)
     }
 }
 
@@ -128,31 +155,91 @@ impl SqlitePelotonClassStore {
         Ok(u64::try_from(after - before).unwrap_or_default())
     }
 
-    /// Which classes are listed but not read, newest first, at most `limit`.
+    /// Which classes are listed and still worth asking Peloton for, newest first.
     ///
     /// **Newest first because that is what gets ridden.** A library read oldest
     /// first would spend its first runs on classes a decade old while this
-    /// week's were still missing.
+    /// week's were still missing — which is what the order buys now that the
+    /// whole set is read in one go: a refresh interrupted part-way through has
+    /// still read the classes most likely to be chosen.
+    ///
+    /// **No bound** (#369). It was `at most limit` until the limit turned out
+    /// to be a count per run rather than a pace, which left 1,002 of the
+    /// operator's 1,052 classes with no zone structure three weeks after the
+    /// catalogue was built. Pacing belongs to the caller, which is making one
+    /// request per answer; this is one query.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn unread(&self, limit: u32) -> Result<Vec<String>, StoreError> {
-        let limit = i64::from(limit);
+    pub async fn unread(&self) -> Result<Vec<String>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT reference AS "reference!: String"
               FROM peloton_class
-             WHERE detail IS NULL
+             WHERE detail IS NULL AND not_served_at IS NULL
              ORDER BY aired_at DESC NULLS LAST, reference ASC
-             LIMIT ?
             "#,
-            limit,
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
         Ok(rows.into_iter().map(|row| row.reference).collect())
+    }
+
+    /// Record that Peloton will not serve this class's detail.
+    ///
+    /// **A row is created where there is none.** A class the skeletons place
+    /// but the browse listing never carried is exactly the case this exists
+    /// for, and it has no listing row — so the fact would have nowhere to live
+    /// and the class would be asked for again on every run.
+    ///
+    /// Such a row carries the class's id as its title and a length of one
+    /// second, because that is all the catalogue knows of it and the columns
+    /// are `NOT NULL`. Nothing reads them: it has no series and no plausible
+    /// length, so no candidate search can return it, and with no detail it is
+    /// never prescribed.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn record_not_served(&self, reference: &str) -> Result<(), StoreError> {
+        let now = Timestamp::now().to_string();
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        sqlx::query!(
+            r#"
+            INSERT INTO peloton_class (reference, title, duration, listed_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT (reference) DO NOTHING
+            "#,
+            reference,
+            reference,
+            now,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| store_error(&error))?;
+        sqlx::query!(
+            r#"
+            UPDATE peloton_class
+               SET not_served_at = ?
+             WHERE reference = ?
+            "#,
+            now,
+            reference,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| store_error(&error))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| store_error(&error))?;
+        Ok(())
     }
 
     /// Keep what `/api/ride/{id}/details` served for one class.
@@ -206,7 +293,7 @@ impl SqlitePelotonClassStore {
         sqlx::query!(
             r#"
             UPDATE peloton_class
-               SET detail = ?, read_at = ?
+               SET detail = ?, read_at = ?, not_served_at = NULL
              WHERE reference = ?
             "#,
             body,
@@ -223,19 +310,24 @@ impl SqlitePelotonClassStore {
         Ok(())
     }
 
-    /// Whether the catalogue has read this class's detail.
+    /// Whether this class has been asked for and answered, one way or another.
+    ///
+    /// True where the catalogue holds the detail, and true where Peloton would
+    /// not serve it. **Both are answers**, and the one question the
+    /// refresh asks of each class the skeletons place is whether there is
+    /// anything left to ask Peloton about it.
     ///
     /// **Asked rather than derived from [`class`](Self::class).** That one
-    /// parses the whole stored response, and this is the question the refresh
-    /// asks of every class the skeletons place on every single run.
+    /// parses the whole stored response, and this runs over every placed class
+    /// on every single run.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn is_read(&self, reference: &str) -> Result<bool, StoreError> {
+    pub async fn is_accounted_for(&self, reference: &str) -> Result<bool, StoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT detail IS NOT NULL AS "read!: i64"
+            SELECT detail IS NOT NULL OR not_served_at IS NOT NULL AS "accounted!: i64"
               FROM peloton_class
              WHERE reference = ?
             "#,
@@ -244,7 +336,7 @@ impl SqlitePelotonClassStore {
         .fetch_optional(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
-        Ok(row.is_some_and(|row| row.read != 0))
+        Ok(row.is_some_and(|row| row.accounted != 0))
     }
 
     /// What the catalogue holds.
@@ -255,8 +347,10 @@ impl SqlitePelotonClassStore {
     pub async fn held(&self) -> Result<Held, StoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT COUNT(*)                                     AS "listed!: i64",
-                   COALESCE(SUM(detail IS NOT NULL), 0)         AS "read!: i64"
+            SELECT COUNT(*)                                             AS "listed!: i64",
+                   COALESCE(SUM(detail IS NOT NULL), 0)                 AS "read!: i64",
+                   COALESCE(SUM(detail IS NULL AND not_served_at IS NOT NULL), 0)
+                                                                        AS "not_served!: i64"
               FROM peloton_class
             "#,
         )
@@ -266,6 +360,7 @@ impl SqlitePelotonClassStore {
         Ok(Held {
             listed: u64::try_from(row.listed).unwrap_or_default(),
             read: u64::try_from(row.read).unwrap_or_default(),
+            not_served: u64::try_from(row.not_served).unwrap_or_default(),
         })
     }
 

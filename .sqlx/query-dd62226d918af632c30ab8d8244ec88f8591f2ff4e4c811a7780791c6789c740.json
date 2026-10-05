@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE peloton_class\n               SET detail = ?, read_at = ?, not_served_at = NULL\n             WHERE reference = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "dd62226d918af632c30ab8d8244ec88f8591f2ff4e4c811a7780791c6789c740"
+}

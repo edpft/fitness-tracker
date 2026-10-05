@@ -26,7 +26,7 @@ pub mod workouts;
 
 pub use crate::token::TokenFile;
 pub use account::{LandedRide, SessionAccount};
-pub use catalogue::{Refreshed, refresh};
+pub use catalogue::{Reading, Walked, read_details, walk};
 pub use class::{
     CataloguePage, ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from,
     power_zone_from,

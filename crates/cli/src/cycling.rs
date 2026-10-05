@@ -103,7 +103,8 @@ pub async fn next(
     // **A holding ride is chosen before it can be shown** (#190), and since
     // #246 it is chosen from the local catalogue — so an absent credential
     // costs the delivery and no longer costs the answer. What it still costs is
-    // a class the bounded refreshes have not read yet, which `chosen` reports.
+    // a class published since the last refresh, which `chosen` reports — and
+    // since #369 that is all it costs, because a refresh reads every detail.
     let stored = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = match to {
         Ok((classes, _)) => ClassCatalogue::new(&stored, classes),
