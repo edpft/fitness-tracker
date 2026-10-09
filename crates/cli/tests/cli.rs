@@ -12,6 +12,10 @@ use std::{
 };
 
 use tempfile::TempDir;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_fitness");
 
@@ -1130,5 +1134,305 @@ fn only_the_composition_root_constructs_a_peloton_authenticator() {
             .first()
             .is_some_and(|site| site.starts_with("wiring.rs")),
         "and that one place is the composition root, found {sites:?}"
+    );
+}
+
+// --- Peloton's two walks ----------------------------------------------------
+
+/// Auth0's self-submitting form, with the escaping that broke a regex.
+///
+/// The same shape `peloton_auth_contract` stubs, because the flow under test
+/// here is the real one: this test drives the installed command, so it has to
+/// get all the way through a login before it reaches the walks it is about.
+fn hidden_form(callback: &str) -> String {
+    format!(
+        r#"<html><body onload="document.forms[0].submit()">
+        <form method="post" action="{callback}">
+        <input type="hidden" name="wa" value="wsignin1.0" />
+        <input type="hidden" name="wresult" value="eyJhbGciOiJIUzI1NiJ9.signed" />
+        <input type="hidden" name="wctx" value="{{&quot;strategy&quot;:&quot;auth0&quot;,&quot;tenant&quot;:&quot;peloton-prod&quot;}}" />
+        </form></body></html>"#
+    )
+}
+
+/// A Peloton that logs anyone in, and an API that answers as it is told.
+///
+/// `api` is what `/api/me` answers and `graph` what a performance graph answers;
+/// between them they reach every combination of the two walks' outcomes that
+/// this source can produce. There are three rather than four: the graph walk
+/// enumerates rides through the same list the ride walk reads, so it cannot
+/// succeed where that walk was refused.
+///
+/// **`api` rather than the list endpoint** for the refusing case: `/api/me` is
+/// the first request either walk makes, so refusing it refuses both walks
+/// wherever in their enumeration they would otherwise have got to.
+async fn peloton_stub(server: &MockServer, api: u16, graph: u16) {
+    let base = server.uri();
+
+    Mock::given(method("GET"))
+        .and(path("/authorize"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("set-cookie", "_csrf=csrf-from-authorize; Path=/")
+                .insert_header("location", "/login?state=carried"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>a login page</html>"))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/usernamepassword/login"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(hidden_form(&format!("{base}/login/callback"))),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/login/callback"))
+        .respond_with(ResponseTemplate::new(302).insert_header(
+            "location",
+            "https://members.onepeloton.com/callback?code=the-authorization-code&state=carried",
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            br#"{"access_token":"the-access-token","refresh_token":"the-refresh-token","token_type":"Bearer","expires_in":172800}"#.to_vec(),
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/me"))
+        .respond_with(
+            ResponseTemplate::new(api)
+                .set_body_raw(br#"{"id":"the-rider"}"#.to_vec(), "application/json"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/user/the-rider/workouts"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            br#"{"data":[{"id":"the-ride","created_at":1759000000}],"show_next":false}"#.to_vec(),
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/workout/the-ride/performance_graph"))
+        .respond_with(ResponseTemplate::new(graph).set_body_raw(
+            br#"{"segment_list":[],"seconds_since_pedaling_start":[]}"#.to_vec(),
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+}
+
+/// `extract peloton.rides` against a stub, with the operator's own machine shut
+/// out: no home, so nothing of this run is cached anywhere real, and both roots
+/// pointed at the stub.
+fn peloton_rides(database: &Path, stub: &str) -> std::io::Result<Output> {
+    let mut command = Command::new(BINARY);
+    command
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("FITNESS_TRACKER_TIMEZONE")
+        .env_remove("HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .args(["extract", "peloton.rides"])
+        .arg("--database")
+        .arg(database);
+    for (name, value) in [
+        ("PELOTON_EMAIL", "rider@example.com"),
+        ("PELOTON_PASSWORD", "not-a-real-password"),
+        ("PELOTON_API_BASE_URL", stub),
+        ("PELOTON_AUTH_BASE_URL", stub),
+    ] {
+        command.env(name, value);
+    }
+    command.output()
+}
+
+/// What one collection of `peloton.rides` produced: what the command printed and
+/// exited with, and what `status` made of the same walks afterwards.
+struct Collected {
+    printed: String,
+    code: i32,
+    /// The run log's account, which must not contradict the output.
+    reported: String,
+    standing: i32,
+}
+
+/// Collect `peloton.rides` against a stub answering this way.
+///
+/// **Returns `Result` and asserts nothing.** `expect` is allowed in a `#[test]`
+/// function and not in a helper beside one, so this one hands back what it
+/// gathered and the test unwraps and judges at the call site.
+fn collecting_against(api: u16, graph: u16) -> Result<Collected, Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+        peloton_stub(&server, api, graph).await;
+
+        let directory = TempDir::new()?;
+        let database = directory.path().join("fitness.db");
+        let peloton = server.uri();
+
+        let run = {
+            let database = database.clone();
+            tokio::task::spawn_blocking(move || peloton_rides(&database, &peloton)).await??
+        };
+        let standing = tokio::task::spawn_blocking(move || {
+            fitness(&["status", "peloton.rides"], Some(&database), None)
+        })
+        .await??;
+
+        Ok(Collected {
+            printed: stdout(&run),
+            code: code(&run),
+            reported: stdout(&standing),
+            standing: code(&standing),
+        })
+    })
+}
+
+/// The entry's own row in a `status` table, which is the ride walk's: `status`
+/// reads the stream the catalogue names.
+fn rides_row(reported: &str) -> &str {
+    reported
+        .lines()
+        .find(|line| line.starts_with("peloton.rides"))
+        .unwrap_or_default()
+}
+
+/// **A walk that failed names itself, and does not take the others with it**
+/// (#367).
+///
+/// `collect_rides` propagated the graph walk's error with `?`, so the ride
+/// walk's summary was never built and the one line the operator got named the
+/// entry — `peloton.rides`, the walk that had just landed fifty rides. Both
+/// halves are asserted here: the failure names `peloton.ride_samples`, and the
+/// successful walk's summary still reaches the output.
+///
+/// A current-thread runtime built by hand, because `#[tokio::test]` generates
+/// `#[allow(clippy::unwrap_used)]` and panics are `forbid`. The mock server runs
+/// on a thread of its own, so it keeps serving while this one waits on the
+/// subprocess.
+#[test]
+fn a_refused_graph_names_its_own_walk_and_keeps_the_rides_summary() {
+    let Collected {
+        printed,
+        code,
+        reported,
+        standing,
+    } = collecting_against(200, 401).expect("the stub serves and the binary runs");
+    assert_eq!(standing, 0, "status answers afterwards: {reported}");
+
+    assert!(
+        printed.contains("peloton.rides — run"),
+        "the walk that worked is named: {printed}"
+    );
+    assert!(
+        printed.contains("1 events seen, 1 records landed"),
+        "the rides summary survives the graph walk's failure: {printed}"
+    );
+    assert!(
+        printed.contains("peloton.ride_samples — not collected"),
+        "the walk that failed is the one named: {printed}"
+    );
+    assert!(
+        !printed.contains("peloton.rides — not collected"),
+        "the walk that worked is not reported as refused: {printed}"
+    );
+    assert_eq!(
+        code, 1,
+        "a walk the source refused still exits on the source"
+    );
+
+    let row = rides_row(&reported);
+    assert!(
+        !row.contains("never"),
+        "the run log holds the rides walk's success: {reported}"
+    );
+    assert_eq!(
+        row.split_whitespace().last(),
+        Some("1"),
+        "and the record it landed: {reported}"
+    );
+}
+
+/// Both walks succeeding, which is the combination that was already reported —
+/// as two anonymous `run N succeeded` blocks. Each is named now, so the output
+/// says which stream landed what.
+#[test]
+fn two_walks_that_both_worked_are_both_named() {
+    let Collected {
+        printed,
+        code,
+        reported,
+        standing,
+    } = collecting_against(200, 200).expect("the stub serves and the binary runs");
+    assert_eq!(standing, 0, "status answers afterwards: {reported}");
+
+    assert_eq!(code, 0, "nothing was refused: {printed}");
+    assert!(
+        printed.contains("peloton.rides — run"),
+        "the ride walk is named: {printed}"
+    );
+    assert!(
+        printed.contains("peloton.ride_samples — run"),
+        "and so is the graph walk: {printed}"
+    );
+    assert!(
+        !printed.contains("not collected"),
+        "neither walk is reported as refused: {printed}"
+    );
+    assert!(
+        !rides_row(&reported).contains("never"),
+        "the run log agrees: {reported}"
+    );
+}
+
+/// A credential the source will not take at all. Both walks reach it through
+/// `/api/me`, so both are refused — and neither is reported as having
+/// succeeded, which is the half of #367 that concealed a run.
+#[test]
+fn a_refused_credential_refuses_both_walks_and_claims_no_success() {
+    let Collected {
+        printed,
+        code,
+        reported,
+        standing,
+    } = collecting_against(401, 200).expect("the stub serves and the binary runs");
+    assert_eq!(standing, 0, "status answers afterwards: {reported}");
+
+    assert_eq!(
+        code, 1,
+        "a refused credential exits on the source: {printed}"
+    );
+    assert!(
+        printed.contains("peloton.rides — not collected"),
+        "the ride walk is named: {printed}"
+    );
+    assert!(
+        printed.contains("peloton.ride_samples — not collected"),
+        "and so is the graph walk: {printed}"
+    );
+    assert!(
+        !printed.contains("succeeded"),
+        "no walk claims a success: {printed}"
+    );
+    assert!(
+        rides_row(&reported).contains("never"),
+        "and the run log holds no success either: {reported}"
     );
 }

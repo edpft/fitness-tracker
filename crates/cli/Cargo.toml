@@ -25,6 +25,11 @@ rpassword.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# A stub Peloton, for the one test that has to get through an Auth0 login before
+# it reaches what it is about. That flow is a redirect chain, a cookie and a
+# self-submitting form; the `TcpListener` the other tests stand up would be a
+# second implementation of it.
+wiremock.workspace = true
 
 [lints]
 workspace = true

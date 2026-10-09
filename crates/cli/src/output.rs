@@ -37,12 +37,33 @@ fn to_the_second(value: &str) -> String {
 
 pub fn run_succeeded(summary: &RunSummary) {
     folder_landed(summary);
+    resumption_point(summary);
+}
 
+/// Where the run left the resumption point, which is the fact a reader needs to
+/// know whether the next run starts where this one stopped.
+fn resumption_point(summary: &RunSummary) {
     match (summary.resumption_point, summary.resumption_point_moved) {
         (Some(mark), true) => println!("resumption point advanced to {mark}"),
         (Some(mark), false) => println!("resumption point unchanged at {mark}"),
         (None, _) => println!("resumption point unset: the source served nothing to advance to"),
     }
+}
+
+/// One walk of several behind a single catalogue entry.
+///
+/// **Named, where a single-walk run is not.** `extracting peloton.rides …`
+/// opens the command and names the entry; behind it `peloton.rides` and
+/// `peloton.ride_samples` are two runs against two endpoints, and before #367
+/// they printed as two anonymous `run N succeeded` blocks — so the output said
+/// nothing a reader could line up against the run log. One walk per line,
+/// carrying the stream it ran against.
+pub fn walk_succeeded(stream: &LandingStream, summary: &RunSummary) {
+    println!(
+        "{stream} — run {} succeeded: {} events seen, {} records landed",
+        summary.run_id, summary.events_seen, summary.records_landed
+    );
+    resumption_point(summary);
 }
 
 /// A run over a folder, which is read whole every time and so has no
@@ -161,6 +182,10 @@ impl ExtractionRunView {
 }
 
 /// A collection that did not happen, in a command that carries on without it.
+///
+/// **One phrasing for one concept**, whether what would not collect is the whole
+/// entry or one walk behind it (#367): the stream names which, and what is
+/// already landed still answers either way.
 pub fn not_collected(stream: &LandingStream, why: &str) {
     println!("{stream} — not collected: {why}. Carrying on with what is already landed");
 }
