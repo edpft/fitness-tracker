@@ -180,11 +180,17 @@ pub async fn strength(
 /// `Outcome` variants belong to commands that answer a question rather than
 /// advance the loop, and a match arm for them here would be a claim that `next`
 /// might one day reset a watermark.
+///
+/// **A walk that would not run is reported and stepped past** (§ 36, #367). The
+/// plumbing's `report` prints it and hands the failure back for its caller to
+/// price; here the price is nothing, because `next` carries on from an
+/// unreachable source with what is already landed — so the failure is spent on
+/// the line that named it.
 pub fn report(stream: &domain::landing::LandingStream, outcome: wiring::Outcome) {
     match outcome {
         wiring::Outcome::Extracted(summary) => output::run_succeeded(&summary),
         wiring::Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         // Every discipline collects from a system, never a folder.
-        other => crate::report(stream, true, other),
+        other => drop(crate::report(stream, true, other)),
     }
 }

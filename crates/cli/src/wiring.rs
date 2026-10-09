@@ -22,7 +22,7 @@ use application::{
     status::ExtractionStatus,
 };
 use domain::{
-    landing::{FetchedAt, Watermark},
+    landing::{FetchedAt, LandingStream, Watermark},
     normalised::OperatorZone,
 };
 use infrastructure::{
@@ -74,7 +74,15 @@ pub enum Outcome {
     /// Several walks under one entry, reported one by one, because they are
     /// separate runs against separate endpoints and a single merged number would
     /// hide one of them failing to land anything (§ 38). In the order they ran.
-    ExtractedEach(Vec<RunSummary>),
+    ///
+    /// **A walk that failed is one of the entries, not the absence of them**
+    /// (#367). This carried `RunSummary`, so the only way to report a failed
+    /// walk was to propagate its error — which discarded the walks that had
+    /// already run, and left the caller printing the catalogue entry's own name
+    /// over a failure belonging to a walk behind it. On 2026-10-05 that told the
+    /// operator `peloton.rides` was not collected, when `peloton.rides` had
+    /// landed fifty rides and `peloton.ride_samples` was the walk refused.
+    ExtractedEach(Vec<Walk>),
     Derived(Box<NormalisationSummary>),
     Refused(Box<RefusalReport>),
     Reported {
@@ -89,6 +97,30 @@ pub enum Outcome {
     Reset {
         previous: Option<Watermark>,
     },
+}
+
+/// One of several walks behind a single catalogue entry.
+///
+/// The stream is the walk's own, read off its landing store before the ports are
+/// assembled — the one thing that can answer which stream a run is extracting
+/// without being told ([`LandingStore::stream`]). The entry's name is the wrong
+/// answer here: `peloton.rides` names two walks and is the stream of only one.
+pub struct Walk {
+    pub stream: LandingStream,
+    pub result: Result<RunSummary, ExtractionError>,
+}
+
+/// Run one walk and label it with the stream it ran against.
+///
+/// **The failure is carried, not raised.** A `?` here is how #367 happened: it
+/// is the one place where a walk's error can swallow the walks either side of
+/// it, and the only way to keep that from coming back is for a walk's outcome to
+/// have nowhere else to go.
+async fn walk(stream: LandingStream, extraction: impl WorkoutExtractor) -> Walk {
+    Walk {
+        stream,
+        result: extraction.extract().await,
+    }
 }
 
 /// The wall clock, which is the only thing a real run should take its timings
@@ -286,6 +318,11 @@ pub fn peloton_auth(auth_base_url: String, credentials: PelotonCredentials) -> P
 /// Two `PelotonAuth`s rather than one shared, because each reads the token the
 /// other cached — so the second walk costs no login and neither holds the
 /// other's state.
+///
+/// **The second walk runs whatever the first did.** The graph walk enumerates
+/// rides from the source rather than from the list walk's table, so it has no
+/// premise the first walk could break — and a walk skipped because of another's
+/// failure is a walk with no outcome to report, which is the shape #367 was.
 async fn collect_rides(
     access: SourceAccess,
     landing: PelotonRideLandingStore,
@@ -310,6 +347,7 @@ async fn collect_rides(
     };
 
     let credentials = PelotonCredentials::new(email, password);
+    let rides_stream = landing.stream().clone();
     let rides = Extraction::new(ExtractionPorts {
         source: PelotonWorkouts::new(
             base_url.clone(),
@@ -321,8 +359,9 @@ async fn collect_rides(
         lock: FileRunLock::beside(database),
         clock: SystemClock,
     });
-    let ridden = rides.extract().await?;
+    let ridden = walk(rides_stream, rides).await;
 
+    let samples_stream = samples_landing.stream().clone();
     let graphs = Extraction::new(ExtractionPorts {
         source: PelotonWorkoutSamples::new(base_url, peloton_auth(auth_base_url, credentials)),
         landing: samples_landing,
@@ -331,7 +370,7 @@ async fn collect_rides(
         lock: FileRunLock::beside(database),
         clock: SystemClock,
     });
-    let sampled = graphs.extract().await?;
+    let sampled = walk(samples_stream, graphs).await;
 
     Ok(Outcome::ExtractedEach(vec![ridden, sampled]))
 }
@@ -572,6 +611,10 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
 /// sign-in page, and a run that signed in once per walk was refused by it on
 /// the operator's account. The token is held behind a lock, so the walks share
 /// it without sharing anything else.
+///
+/// **Each walk reports its own outcome**, as Peloton's two do (#367): the three
+/// all run, and one that could not is named rather than standing in for the
+/// entry.
 async fn collect_activities(
     access: SourceAccess,
     (landing, sets_landing, files_landing): (
@@ -607,38 +650,47 @@ async fn collect_activities(
         None,
     ));
 
-    let listed = Extraction::new(ExtractionPorts {
-        source: garmin::GarminActivities::new(base_url.clone(), std::sync::Arc::clone(&auth)),
-        landing,
-        resumption: resumption.clone(),
-        runs: runs.clone(),
-        lock: FileRunLock::beside(database),
-        clock: SystemClock,
-    })
-    .extract()
-    .await?;
+    let activities_stream = landing.stream().clone();
+    let listed = walk(
+        activities_stream,
+        Extraction::new(ExtractionPorts {
+            source: garmin::GarminActivities::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    )
+    .await;
 
-    let sets = Extraction::new(ExtractionPorts {
-        source: garmin::GarminExerciseSets::new(base_url.clone(), std::sync::Arc::clone(&auth)),
-        landing: sets_landing,
-        resumption: resumption.clone(),
-        runs: runs.clone(),
-        lock: FileRunLock::beside(database),
-        clock: SystemClock,
-    })
-    .extract()
-    .await?;
+    let sets_stream = sets_landing.stream().clone();
+    let sets = walk(
+        sets_stream,
+        Extraction::new(ExtractionPorts {
+            source: garmin::GarminExerciseSets::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            landing: sets_landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    )
+    .await;
 
-    let recordings = Extraction::new(ExtractionPorts {
-        source: garmin::GarminActivityFiles::new(base_url, auth),
-        landing: files_landing,
-        resumption,
-        runs,
-        lock: FileRunLock::beside(database),
-        clock: SystemClock,
-    })
-    .extract()
-    .await?;
+    let files_stream = files_landing.stream().clone();
+    let recordings = walk(
+        files_stream,
+        Extraction::new(ExtractionPorts {
+            source: garmin::GarminActivityFiles::new(base_url, auth),
+            landing: files_landing,
+            resumption,
+            runs,
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    )
+    .await;
 
     Ok(Outcome::ExtractedEach(vec![listed, sets, recordings]))
 }

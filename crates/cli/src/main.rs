@@ -36,7 +36,7 @@ use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
 use catalogue::{Credential, KnownSource, KnownStream, ServedBy};
 use config::{ConfigError, SourceAccess};
-use wiring::{Command, Outcome, WiringError};
+use wiring::{Command, Outcome, Walk, WiringError};
 
 /// Exit codes are part of the contract: an external scheduler distinguishes
 /// outcomes by them, so they are named rather than assorted numbers.
@@ -1419,11 +1419,13 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         Ok(outcome) => outcome,
         Err(error) => return Err(rejected_credential(error, origin.as_deref())),
     };
-    report(
+    if let Some(error) = report(
         &stream,
         matches!(known.served_by(), ServedBy::System(_)),
         outcome,
-    );
+    ) {
+        return Err(rejected_credential(error, origin.as_deref()));
+    }
 
     // § 38 on the prescribed side: which programme is in force, where its ladder
     // stands, and how current the record it derives from is. Appended to `status`
@@ -1627,15 +1629,17 @@ pub(crate) fn source_access_for(
 
 /// `resumes` is false for a stream read from a folder, which is read whole and
 /// has no resumption point to report.
-fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) {
+///
+/// **Reporting and exiting are two decisions** (#367). Every walk behind an
+/// entry is printed here, and the first that failed is handed back rather than
+/// acted on, because what a part-collected entry costs is the caller's to say:
+/// `extract` must not exit zero on a walk that landed nothing, and `next`
+/// carries on from one (§ 36).
+fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) -> Option<WiringError> {
     match outcome {
         Outcome::Extracted(summary) if !resumes => output::folder_landed(&summary),
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
-        Outcome::ExtractedEach(summaries) => {
-            for summary in &summaries {
-                output::run_succeeded(summary);
-            }
-        }
+        Outcome::ExtractedEach(walks) => return walks_reported(walks),
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         Outcome::Refused(report) => output::refusals(stream, &report),
         Outcome::Reported {
@@ -1644,4 +1648,26 @@ fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) {
         } => output::status(&extraction, derivation.as_deref(), resumes),
         Outcome::Reset { previous } => output::reset(stream, previous),
     }
+    None
+}
+
+/// Every walk behind one entry, each naming the stream it ran against, and the
+/// first that failed.
+///
+/// **The first, not the last**: it is the one whose exit code says what stopped
+/// this run. The error itself rather than its message, so that a rejected
+/// credential still reaches [`rejected_credential`] and names where the
+/// credential came from.
+fn walks_reported(walks: Vec<Walk>) -> Option<WiringError> {
+    let mut refused = None;
+    for walk in walks {
+        match walk.result {
+            Ok(summary) => output::walk_succeeded(&walk.stream, &summary),
+            Err(error) => {
+                output::not_collected(&walk.stream, &error.to_string());
+                refused = refused.or(Some(error));
+            }
+        }
+    }
+    refused.map(WiringError::Extraction)
 }
