@@ -567,6 +567,111 @@ fn the_microcycle_reports_a_state_for_every_session() {
     );
 }
 
+/// **#390: a prescribed session still in its window is the current one.**
+///
+/// The same Saturday evening: the Friday's gym session was delivered and not
+/// trained, and nothing is slotted before the Sunday morning, so it can still
+/// be performed. The Sunday ride is the first session *to be prescribed*, and
+/// delivering it was the defect — the gym's second session in the operator's
+/// week of 5 October was prescribed that way, from the previous microcycle's.
+#[test]
+fn a_prescribed_session_that_can_still_be_performed_is_the_current_one() {
+    let standing = corpus::block_on(async {
+        let (pool, _directory) = autumn().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+
+        Ok::<_, Box<dyn std::error::Error>>(
+            Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::nothing(),
+                    cycling_performed: Ridden::of(vec![(
+                        Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                        Vec::new(),
+                    )]),
+                },
+                hevy()?,
+                peloton()?,
+            )
+            .standing(DayPart::new(
+                Date::constant(2026, 9, 19),
+                PartOfDay::Evening,
+            ))
+            .await?,
+        )
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        standing.current().map(|session| (
+            session.slot.discipline,
+            session.slot.date,
+            session.state
+        )),
+        Some((
+            Discipline::Gym,
+            Date::constant(2026, 9, 18),
+            SessionState::Prescribed
+        )),
+        "the Friday's gym session is delivered again, and the Sunday ride waits"
+    );
+}
+
+/// Once the prescribed session's window has closed, the next session is
+/// current: on the Sunday morning the Friday's gym session is *not performed*,
+/// and the ride is the one to deliver.
+#[test]
+fn the_next_session_is_current_once_the_window_closes() {
+    let standing = corpus::block_on(async {
+        let (pool, _directory) = autumn().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+
+        Ok::<_, Box<dyn std::error::Error>>(
+            Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::nothing(),
+                    cycling_performed: Ridden::of(vec![(
+                        Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                        Vec::new(),
+                    )]),
+                },
+                hevy()?,
+                peloton()?,
+            )
+            .standing(DayPart::new(
+                Date::constant(2026, 9, 20),
+                PartOfDay::Morning,
+            ))
+            .await?,
+        )
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(
+        standing.current().map(|session| (
+            session.slot.discipline,
+            session.slot.date,
+            session.state
+        )),
+        Some((
+            Discipline::Cycling,
+            Date::constant(2026, 9, 20),
+            SessionState::ToBePrescribed
+        )),
+    );
+}
+
 /// **A ride recorded as delivered is prescribed** — the gap #185 exists to
 /// close. Without the record the Sunday reads *to be prescribed* and a second
 /// run would send the same session again.

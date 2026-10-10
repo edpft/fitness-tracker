@@ -9,7 +9,7 @@
 //!
 //! **Nothing here decides anything and nothing here writes.** It reads the
 //! plan, the diary and the record, and hands back a state per session.
-//! Delivering the first one still to be prescribed is the caller's, and
+//! Delivering [`Standing::current`] is the caller's, and
 //! rescheduling what was lost is #177's.
 
 use domain::{
@@ -66,6 +66,29 @@ pub struct Standing {
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
     pub mesocycle: Option<Span>,
+}
+
+impl Standing {
+    /// The session `fitness next` delivers: the first that can still be
+    /// performed, whether or not it has been prescribed.
+    ///
+    /// **A prescribed session still in its window is the current one** (#390).
+    /// This was the first session *to be prescribed* until 2026-10-10, so a
+    /// rerun stepped past the gym session the operator had not yet trained and
+    /// prescribed the next — whose loads were then worked out from the previous
+    /// microcycle's. The operator: *"I don't think we should prescribe the next
+    /// session while the current session is still in a performable state."* A
+    /// rerun prescribes and delivers the current session again, which is
+    /// nothing where nothing has changed.
+    #[must_use]
+    pub fn current(&self) -> Option<&Session> {
+        self.sessions.iter().find(|session| {
+            matches!(
+                session.state,
+                SessionState::ToBePrescribed | SessionState::Prescribed
+            )
+        })
+    }
 }
 
 /// One week read against the plan, and when it ended if it has.
