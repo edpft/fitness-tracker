@@ -1260,6 +1260,26 @@ pub fn microcycle_complete(after: Option<domain::schedule::ScheduledSlot>) {
 ///
 /// Named as the table above names it, so the line and the row are visibly the
 /// same session rather than two descriptions of one.
+/// A skip, as the parts of the day it took: the last is the one before the
+/// next session's slot begins.
+pub fn skipped(session: &application::microcycle::Session, skip: &domain::schedule::Skip) {
+    let mut last = skip.from();
+    while let Some(next) = last.next().filter(|next| *next < skip.until()) {
+        last = next;
+    }
+    println!(
+        "skipped {} {} ({}): no training from {:?} {} to {:?} {}",
+        session.slot.discipline,
+        session.number,
+        skip.reason(),
+        skip.from().date.weekday(),
+        skip.from(),
+        last.date.weekday(),
+        last,
+    );
+    println!();
+}
+
 pub fn next_slot(session: &application::microcycle::Session) {
     println!(
         "next: {} {}, {:?} {} {}",

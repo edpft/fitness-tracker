@@ -244,6 +244,11 @@ fn next_command() -> ClapCommand {
                      session still has time left. Defaults to now",
                 ),
         )
+        .arg(Arg::new("skip").long("skip").value_name("reason").help(
+            "Take no training from now until the current session's \
+                     window closes, and say why. That session reads skipped, \
+                     and the one after it is delivered",
+        ))
 }
 
 /// The daily loop, under the discipline it belongs to.
@@ -1027,6 +1032,7 @@ async fn next_command_run(
         &zone,
         sub.get_one::<String>("date").map(String::as_str),
         sub.get_one::<String>("part").map(String::as_str),
+        sub.get_one::<String>("skip").map(String::as_str),
         credentials,
     )
     .await

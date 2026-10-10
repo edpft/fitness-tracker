@@ -498,7 +498,10 @@ pub enum Absence {
 
 impl Absence {
     pub const fn as_str(&self) -> &'static str {
-        self.kind().as_str()
+        match self {
+            Self::FamilyHoliday { .. } => "holiday",
+            Self::Illness => "illness",
+        }
     }
 
     /// Which of the two this is, without what it carries.
@@ -515,25 +518,33 @@ impl Absence {
     }
 }
 
-/// Which kind of absence, with nothing it carries.
+/// Which kind of absence, with nothing an alteration carries.
 ///
 /// **Named after [`Absence`]'s own variants**, which #178 settled, rather than
 /// after the distinction between them. An earlier proposal called the pair
 /// `Intentional` and `Illness`: that reads one of the two as the absence of the
 /// other's property, and a holiday is a holiday whether or not it was planned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// **A skip is the third, and carries its reason** (#391). The operator,
+/// 2026-10-10: the reason is free text *"at the level of illness and family
+/// holiday"*, and a category that emerges from it becomes a variant of its
+/// own. It is not an [`Absence`], because an alteration is a run of whole days
+/// and a skip starts in the part of the day it is said.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AbsenceKind {
     FamilyHoliday,
     Illness,
+    Skip { reason: String },
 }
 
 impl AbsenceKind {
     /// The stable key. Persisted, so it outlives a rename — which is why a
     /// family holiday is still stored as `holiday`.
-    pub const fn as_str(self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::FamilyHoliday => "holiday",
             Self::Illness => "illness",
+            Self::Skip { .. } => "skip",
         }
     }
 }
@@ -543,7 +554,81 @@ impl std::fmt::Display for AbsenceKind {
         f.write_str(match self {
             Self::FamilyHoliday => "family holiday",
             Self::Illness => "illness",
+            Self::Skip { reason } => reason,
         })
+    }
+}
+
+/// Time the operator will not train in, from when he says so to the end of the
+/// window then open (#391).
+///
+/// **Time, not a session.** The operator, 2026-10-10: a skip *"marks that time
+/// as unavailable for training, not that it skips a specific session"*. Run on
+/// a Monday afternoon with the gym slotted that evening and the next session a
+/// Wednesday evening ride, it takes every part from the Monday afternoon to the
+/// Wednesday afternoon. Taking only the evening could leave time to perform the
+/// session, and then it was not skipped. What happens to the session follows
+/// from the time being gone, which is what lets an essential one move to a
+/// later slot of its discipline (#392).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skip {
+    from: DayPart,
+    until: DayPart,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidSkip {
+    #[error("a skip says why")]
+    NoReason,
+    #[error("a skip ends after it begins")]
+    Empty,
+}
+
+impl Skip {
+    /// Every part of a day from `from` up to, and not including, `until`: the
+    /// moment the next session's slot begins.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidSkip`] if the reason is blank, or `until` is not after `from`.
+    pub fn new(from: DayPart, until: DayPart, reason: &str) -> Result<Self, InvalidSkip> {
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return Err(InvalidSkip::NoReason);
+        }
+        if until <= from {
+            return Err(InvalidSkip::Empty);
+        }
+        Ok(Self {
+            from,
+            until,
+            reason: reason.to_owned(),
+        })
+    }
+
+    pub const fn from(&self) -> DayPart {
+        self.from
+    }
+
+    /// Where it stops: the start of the slot that closed the window.
+    pub const fn until(&self) -> DayPart {
+        self.until
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    pub fn covers(&self, at: DayPart) -> bool {
+        at >= self.from && at < self.until
+    }
+
+    /// What it takes a part of a day as.
+    pub fn kind(&self) -> AbsenceKind {
+        AbsenceKind::Skip {
+            reason: self.reason.clone(),
+        }
     }
 }
 
@@ -659,6 +744,7 @@ impl Availability {
 pub struct Diary {
     patterns: Vec<TrainingPattern>,
     alterations: Vec<Alteration>,
+    skips: Vec<Skip>,
 }
 
 impl Diary {
@@ -669,7 +755,15 @@ impl Diary {
         Self {
             patterns,
             alterations,
+            skips: Vec::new(),
         }
+    }
+
+    /// The same diary, holding these skips as well.
+    #[must_use]
+    pub fn with_skips(mut self, skips: Vec<Skip>) -> Self {
+        self.skips = skips;
+        self
     }
 
     pub fn patterns(&self) -> &[TrainingPattern] {
@@ -678,6 +772,21 @@ impl Diary {
 
     pub fn alterations(&self) -> &[Alteration] {
         &self.alterations
+    }
+
+    pub fn skips(&self) -> &[Skip] {
+        &self.skips
+    }
+
+    /// The skip that took what was left of a window closing at `closes`.
+    ///
+    /// **Keyed on where the window closes**, because that is where every skip
+    /// ends: the session whose window it is reads *skipped* however much of the
+    /// window had already gone, and the session before it — whose window closed
+    /// where this one's slot began — is untouched. The latest wins, so saying
+    /// it again with another reason corrects it.
+    pub fn skipped_until(&self, closes: DayPart) -> Option<&Skip> {
+        self.skips.iter().rfind(|skip| skip.until == closes)
     }
 
     /// What a date looks like: the pattern in force, as amended by any
@@ -930,11 +1039,20 @@ impl Diary {
             }
         }
 
-        let (slots, kind) = stated?;
-        let kept = slots
-            .keys()
-            .any(|slot| slot.weekday == at.date.weekday() && slot.part == at.part);
-        (!kept).then_some(kind)
+        // **An alteration is read first**: illness takes a toll a skip does not
+        // (#180), so where both cover a part, the part is the illness's.
+        if let Some((slots, kind)) = stated {
+            let kept = slots
+                .keys()
+                .any(|slot| slot.weekday == at.date.weekday() && slot.part == at.part);
+            if !kept {
+                return Some(kind);
+            }
+        }
+        self.skips
+            .iter()
+            .rfind(|skip| skip.covers(at))
+            .map(Skip::kind)
     }
 
     /// Every slot on one date, in the order the day runs, after every

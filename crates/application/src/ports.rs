@@ -44,7 +44,7 @@ use domain::prescription::{
     Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId, WeekIndex,
 };
-use domain::schedule::{Alteration, Diary, Holidays, SessionRole, TrainingPattern};
+use domain::schedule::{Alteration, Diary, Holidays, SessionRole, Skip, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{
@@ -2364,4 +2364,14 @@ pub trait DiaryAuthor {
         &self,
         alteration: &Alteration,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Record a skip — the rest of a window the operator will not train in.
+    ///
+    /// Only ever adds: a second skip of the same window is a correction, and
+    /// [`Diary::skipped_until`] reads the latest.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_skip(&self, skip: &Skip) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

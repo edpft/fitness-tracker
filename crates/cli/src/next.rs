@@ -23,10 +23,10 @@
 
 use std::path::Path;
 
-use application::DiaryStore as _;
+use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
-    schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot},
+    schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot, Skip},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 
@@ -48,6 +48,7 @@ pub async fn next(
     zone: &OperatorZone,
     date: Option<&str>,
     part: Option<&str>,
+    skip: Option<&str>,
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
@@ -79,7 +80,11 @@ pub async fn next(
     }
 
     // 3. Where the plan stands: every week since it began, and this one.
-    let standing = rescheduling::standing(&pool, zone, now).await?;
+    let mut standing = rescheduling::standing(&pool, zone, now).await?;
+    if let Some(reason) = skip {
+        skipping(&pool, &standing, now, reason).await?;
+        standing = rescheduling::standing(&pool, zone, now).await?;
+    }
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
     pool.close().await;
 
@@ -125,6 +130,42 @@ pub async fn next(
     output::next_slot(next);
     println!();
     run(next.slot, database, zone, credentials).await
+}
+
+/// Take what is left of the current session's window (#391).
+///
+/// **From now, not from the slot.** The operator, 2026-10-10: on a Monday
+/// afternoon with the gym that evening and a ride on the Wednesday evening, a
+/// skip takes every part from the Monday afternoon to the Wednesday afternoon.
+/// The standing is read again afterwards, so the session after it is the one
+/// delivered in the same run.
+async fn skipping(
+    pool: &infrastructure::SqlitePool,
+    standing: &application::microcycle::Standing,
+    now: DayPart,
+    reason: &str,
+) -> Result<(), Failure> {
+    let Some(current) = standing.current() else {
+        return Err(Failure::message(
+            "nothing in this microcycle can still be performed, so there is nothing to skip",
+            exit::USAGE,
+        ));
+    };
+    let Some(until) = current.closes else {
+        return Err(Failure::message(
+            format!(
+                "nothing is slotted after {} {}, so its window has no end to skip to",
+                current.slot.discipline, current.number,
+            ),
+            exit::USAGE,
+        ));
+    };
+    let skip = Skip::new(now, until, reason).map_err(|error| Failure::usage(&error))?;
+    SqliteDiaryStore::new(pool.clone())
+        .record_skip(&skip)
+        .await?;
+    output::skipped(current, &skip);
+    Ok(())
 }
 
 /// Where the operator's day has got to.
