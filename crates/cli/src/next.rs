@@ -17,7 +17,8 @@
 //! judged. An unreachable source is reported and stepped past (§ 36).
 //!
 //! **Then each session of the microcycle gets a state**, and the first one
-//! still to be prescribed is the one delivered. Recording why a session was
+//! that can still be performed is the one delivered — again, if it already
+//! was (#390). Recording why a session was
 //! missed is #178's, which is done; moving anything because of it is #177's.
 
 use std::path::Path;
@@ -25,7 +26,6 @@ use std::path::Path;
 use application::DiaryStore as _;
 use domain::{
     normalised::OperatorZone,
-    planner::SessionState,
     schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
@@ -112,11 +112,9 @@ pub async fn next(
     output::microcycle(sessions);
     println!();
 
-    // 4. The first still to be prescribed, which is the one delivered.
-    let Some(next) = sessions
-        .iter()
-        .find(|session| session.state == SessionState::ToBePrescribed)
-    else {
+    // 4. The first that can still be performed, prescribed or not, which is
+    //    the one delivered (#390).
+    let Some(next) = standing.current() else {
         let after = sessions
             .last()
             .and_then(|last| diary.first_ordinary_after(last.slot.date));
