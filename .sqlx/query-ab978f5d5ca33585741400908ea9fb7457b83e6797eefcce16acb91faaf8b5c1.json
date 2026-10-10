@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO skip (authored_at, from_date, from_part, until_date, until_part, reason)\n            VALUES (?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "ab978f5d5ca33585741400908ea9fb7457b83e6797eefcce16acb91faaf8b5c1"
+}

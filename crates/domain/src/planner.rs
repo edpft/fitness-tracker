@@ -168,7 +168,7 @@ pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<
 /// gym closures, etc), unintentional absences that may or may not be known
 /// about in advance (illness), and just not running the tool at all"*. Illness
 /// is not a state of its own; it is the kind an absence carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionState {
     /// Nothing has been issued and there is still time to issue it.
     ToBePrescribed,
@@ -177,7 +177,8 @@ pub enum SessionState {
     Prescribed,
     /// A session of its discipline accounts for it.
     Performed,
-    /// An absence covered its slot before anything was prescribed.
+    /// An absence covered its slot before anything was prescribed, or a skip
+    /// took what was left of its window, prescribed or not (#391).
     Skipped { absence: AbsenceKind },
     /// The window closed with nothing prescribed and no absence to explain it:
     /// the tool was not run, so *"nothing could be prescribed that should have
@@ -223,7 +224,7 @@ pub struct Recorded {
 }
 
 /// What is left of a session's window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Remaining {
     /// At least one part of a day is still usable.
     Time,
@@ -277,9 +278,15 @@ pub fn remaining(slot: DayPart, closes: Option<DayPart>, now: DayPart, diary: &D
 /// The checks run in this order:
 ///
 /// 1. Performed — whatever else is true.
-/// 2. Prescribed: still time, or else not performed.
-/// 3. Not prescribed, and an absence covers its own slot: skipped.
-/// 4. Not prescribed: still time to, or else it never was.
+/// 2. Skipped, where a skip took what was left of the window (#391).
+/// 3. Prescribed: still time, or else not performed.
+/// 4. Not prescribed, and an absence covers its own slot: skipped.
+/// 5. Not prescribed: still time to, or else it never was.
+///
+/// **A skip is read before the prescription**, unlike an illness. The operator
+/// skips the session he was given — *"with gym 1 prescribed and open marks it
+/// skipped"* — and it reads skipped however the window then runs out, where an
+/// illness that closes a prescribed window reads *not performed (illness)*.
 ///
 /// **A performance is read first, and the operator is why.** His own record
 /// has a ride performed on 16 September against a prescription this build
@@ -299,6 +306,12 @@ pub fn state_of(
 ) -> SessionState {
     if recorded.performed {
         return SessionState::Performed;
+    }
+
+    if let Some(skip) = closes.and_then(|closes| diary.skipped_until(closes)) {
+        return SessionState::Skipped {
+            absence: skip.kind(),
+        };
     }
 
     let left = remaining(slot, closes, now, diary);
@@ -428,7 +441,7 @@ pub fn eased_by_illness(
 /// is the discipline, the role and the state; the number and the part of the
 /// day are the report's business and carrying them here would make this look
 /// like a view model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed {
     pub discipline: Discipline,
     pub role: SessionRole,

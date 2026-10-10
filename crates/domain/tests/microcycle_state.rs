@@ -131,7 +131,7 @@ fn one_discipline_completing_and_one_losing_is_partially_completed() {
 fn an_essential_session_with_time_left_keeps_the_week_running() {
     for state in [SessionState::ToBePrescribed, SessionState::Prescribed] {
         let week = [
-            session(Discipline::Gym, ESSENTIAL, state),
+            session(Discipline::Gym, ESSENTIAL, state.clone()),
             session(Discipline::Cycling, ESSENTIAL, SessionState::Performed),
         ];
 
@@ -181,7 +181,7 @@ fn every_way_of_not_performing_the_essential_session_loses_it() {
             absence: Some(AbsenceKind::Illness),
         },
     ] {
-        let week = [session(Discipline::Gym, ESSENTIAL, state)];
+        let week = [session(Discipline::Gym, ESSENTIAL, state.clone())];
         assert_eq!(owed_by(&week, Discipline::Gym), Owed::Lost, "{state}");
     }
 }

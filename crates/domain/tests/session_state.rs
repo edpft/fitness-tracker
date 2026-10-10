@@ -19,7 +19,7 @@ use domain::{
     planner::{Recorded, SessionState, state_of},
     schedule::{
         Absence, AbsenceKind, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay,
-        Relative, SessionRole, TrainingPattern, TrainingSlot,
+        Relative, SessionRole, Skip, TrainingPattern, TrainingSlot,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -445,5 +445,131 @@ fn a_moment_before_the_morning_is_that_mornings() {
             date(2026, 9, 20).expect("a real Sunday"),
             PartOfDay::Morning
         ),
+    );
+}
+
+/// The operator's example for #391: Monday 21 September in the afternoon, the
+/// gym slotted that evening, and the next session the Wednesday evening ride.
+/// The skip runs to where the ride's slot begins.
+fn skipped_monday_afternoon() -> Built<Diary> {
+    let skip = Skip::new(
+        at(date(2026, 9, 21)?, PartOfDay::Afternoon),
+        at(date(2026, 9, 23)?, PartOfDay::Evening),
+        "work dinner",
+    )?;
+    Ok(september()?.with_skips(vec![skip]))
+}
+
+fn work_dinner() -> AbsenceKind {
+    AbsenceKind::Skip {
+        reason: "work dinner".to_owned(),
+    }
+}
+
+/// **A skip takes time, not a session**: every part from the Monday afternoon
+/// to the Wednesday afternoon, and not the Wednesday evening the ride is in.
+#[test]
+fn a_skip_takes_every_part_from_when_it_is_said_to_the_next_slot() {
+    let diary = skipped_monday_afternoon().expect("the diary builds");
+    let monday = date(2026, 9, 21).expect("a date");
+    let tuesday = date(2026, 9, 22).expect("a date");
+    let wednesday = date(2026, 9, 23).expect("a date");
+
+    let taken: Vec<DayPart> = [monday, tuesday, wednesday]
+        .into_iter()
+        .flat_map(|on| PartOfDay::ALL.iter().map(move |part| at(on, *part)))
+        .filter(|part| diary.taken(*part).is_some())
+        .collect();
+
+    assert_eq!(
+        taken,
+        vec![
+            at(monday, PartOfDay::Afternoon),
+            at(monday, PartOfDay::Evening),
+            at(tuesday, PartOfDay::Morning),
+            at(tuesday, PartOfDay::Afternoon),
+            at(tuesday, PartOfDay::Evening),
+            at(wednesday, PartOfDay::Morning),
+            at(wednesday, PartOfDay::Afternoon),
+        ],
+    );
+    assert_eq!(
+        diary.taken(at(tuesday, PartOfDay::Morning)),
+        Some(work_dinner())
+    );
+}
+
+/// With gym 1 prescribed and its window open, the skip marks it *skipped*, and
+/// it stays skipped for the rest of the window and after it closes.
+#[test]
+fn a_prescribed_session_whose_window_is_skipped_reads_skipped() {
+    let diary = skipped_monday_afternoon().expect("the diary builds");
+    let monday = date(2026, 9, 21).expect("a date");
+    let slot = at(monday, PartOfDay::Evening);
+    let closes = Some(at(date(2026, 9, 23).expect("a date"), PartOfDay::Evening));
+
+    for now in [
+        at(monday, PartOfDay::Afternoon),
+        at(monday, PartOfDay::Evening),
+        at(date(2026, 9, 22).expect("a date"), PartOfDay::Evening),
+        at(date(2026, 9, 24).expect("a date"), PartOfDay::Morning),
+    ] {
+        assert_eq!(
+            state_of(slot, closes, now, &diary, PRESCRIBED),
+            SessionState::Skipped {
+                absence: work_dinner()
+            },
+            "{now}"
+        );
+        assert_eq!(
+            state_of(slot, closes, now, &diary, NEITHER),
+            SessionState::Skipped {
+                absence: work_dinner()
+            },
+            "{now}, not prescribed"
+        );
+    }
+    assert_eq!(
+        SessionState::Skipped {
+            absence: work_dinner()
+        }
+        .to_string(),
+        "skipped (work dinner)"
+    );
+}
+
+/// **Performed still wins**: a skipped session trained anyway reads performed.
+#[test]
+fn a_skipped_session_trained_anyway_is_performed() {
+    let diary = skipped_monday_afternoon().expect("the diary builds");
+    let slot = at(date(2026, 9, 21).expect("a date"), PartOfDay::Evening);
+    let closes = Some(at(date(2026, 9, 23).expect("a date"), PartOfDay::Evening));
+
+    assert_eq!(
+        state_of(
+            slot,
+            closes,
+            at(date(2026, 9, 22).expect("a date"), PartOfDay::Morning),
+            &diary,
+            PERFORMED
+        ),
+        SessionState::Performed,
+    );
+}
+
+/// The ride whose slot ends the skip is untouched by it.
+#[test]
+fn the_session_after_a_skip_is_still_to_be_prescribed() {
+    let diary = skipped_monday_afternoon().expect("the diary builds");
+
+    assert_eq!(
+        state_of(
+            at(date(2026, 9, 23).expect("a date"), PartOfDay::Evening),
+            Some(at(date(2026, 9, 25).expect("a date"), PartOfDay::Evening)),
+            at(date(2026, 9, 21).expect("a date"), PartOfDay::Afternoon),
+            &diary,
+            NEITHER
+        ),
+        SessionState::ToBePrescribed,
     );
 }

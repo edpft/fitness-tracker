@@ -41,6 +41,7 @@ use domain::{
     provider::ProgrammeName,
     schedule::{
         Absence, AbsenceKind, Alteration, DayPart, Discipline, PartOfDay, Relative, SessionRole,
+        Skip,
     },
     sequence::NonEmpty,
 };
@@ -611,7 +612,7 @@ fn a_prescribed_session_that_can_still_be_performed_is_the_current_one() {
         standing.current().map(|session| (
             session.slot.discipline,
             session.slot.date,
-            session.state
+            session.state.clone()
         )),
         Some((
             Discipline::Gym,
@@ -619,6 +620,88 @@ fn a_prescribed_session_that_can_still_be_performed_is_the_current_one() {
             SessionState::Prescribed
         )),
         "the Friday's gym session is delivered again, and the Sunday ride waits"
+    );
+}
+
+/// **#391: a skip takes what is left of the current session's window**, and
+/// the session after it becomes current.
+///
+/// The same Saturday evening as above, with the Friday's gym session delivered
+/// and not trained. Skipping takes the Saturday evening up to the Sunday ride's
+/// slot: the gym session reads *skipped (work dinner)* — through the store, so
+/// the skip round-trips — and the ride is the one to deliver. Read again on the
+/// Sunday morning, the gym session is still skipped rather than *not
+/// performed*.
+#[test]
+fn a_skip_makes_the_session_after_it_current() {
+    let saturday = DayPart::new(Date::constant(2026, 9, 19), PartOfDay::Evening);
+    let sunday = DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Morning);
+    let (skipped, later) = corpus::block_on(async {
+        let (pool, _directory) = autumn().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+
+        let microcycle = || -> Fallible<_> {
+            Ok(Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::nothing(),
+                    cycling_performed: Ridden::of(vec![(
+                        Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                        Vec::new(),
+                    )]),
+                },
+                hevy()?,
+                peloton()?,
+            ))
+        };
+
+        let before = microcycle()?.standing(saturday).await?;
+        let until = before
+            .current()
+            .and_then(|session| session.closes)
+            .ok_or("the Friday's window closes")?;
+        SqliteDiaryStore::new(pool.clone())
+            .record_skip(&Skip::new(saturday, until, "work dinner")?)
+            .await?;
+
+        Ok::<_, Box<dyn std::error::Error>>((
+            microcycle()?.standing(saturday).await?,
+            microcycle()?.standing(sunday).await?,
+        ))
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    let work_dinner = SessionState::Skipped {
+        absence: AbsenceKind::Skip {
+            reason: "work dinner".to_owned(),
+        },
+    };
+    let friday = |standing: &application::microcycle::Standing| {
+        standing
+            .sessions
+            .iter()
+            .find(|session| session.slot.date == Date::constant(2026, 9, 18))
+            .map(|session| session.state.clone())
+    };
+    assert_eq!(friday(&skipped), Some(work_dinner.clone()));
+    assert_eq!(friday(&later), Some(work_dinner));
+    assert_eq!(
+        skipped.current().map(|session| (
+            session.slot.discipline,
+            session.slot.date,
+            session.state.clone()
+        )),
+        Some((
+            Discipline::Cycling,
+            Date::constant(2026, 9, 20),
+            SessionState::ToBePrescribed
+        )),
+        "the Sunday ride is delivered in the same run"
     );
 }
 
@@ -662,7 +745,7 @@ fn the_next_session_is_current_once_the_window_closes() {
         standing.current().map(|session| (
             session.slot.discipline,
             session.slot.date,
-            session.state
+            session.state.clone()
         )),
         Some((
             Discipline::Cycling,
@@ -824,7 +907,7 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
     let read: Vec<String> = sessions
         .iter()
         .filter(|session| session.slot.discipline == Discipline::Cycling)
-        .map(|session| format!("{} — {}", session.slot.date, session.state))
+        .map(|session| format!("{} — {}", session.slot.date, session.state.clone()))
         .collect();
 
     assert_eq!(
@@ -1328,7 +1411,7 @@ fn performing_the_final_session_ends_the_microcycle() {
         standing
             .sessions
             .first()
-            .map(|session| (session.slot.date, session.state)),
+            .map(|session| (session.slot.date, session.state.clone())),
         Some((Date::constant(2026, 9, 21), SessionState::ToBePrescribed)),
         "the next microcycle's first session is the one to prescribe"
     );
@@ -1353,7 +1436,7 @@ fn an_unperformed_final_session_holds_the_microcycle_until_its_window_closes() {
         standing
             .sessions
             .last()
-            .map(|session| (session.slot.date, session.state)),
+            .map(|session| (session.slot.date, session.state.clone())),
         Some((Date::constant(2026, 9, 20), SessionState::ToBePrescribed)),
     );
 }
@@ -1406,7 +1489,7 @@ fn the_session_that_closes_the_window_belongs_to_the_next_microcycle() {
         standing
             .sessions
             .first()
-            .map(|session| (session.slot.date, session.state)),
+            .map(|session| (session.slot.date, session.state.clone())),
         Some((Date::constant(2026, 9, 21), SessionState::Performed)),
     );
 }
@@ -1434,7 +1517,7 @@ fn a_session_dated_to_a_day_inside_the_window_accounts_for_its_slot() {
         standing
             .sessions
             .last()
-            .map(|session| (session.slot.date, session.state)),
+            .map(|session| (session.slot.date, session.state.clone())),
         Some((Date::constant(2026, 9, 20), SessionState::ToBePrescribed)),
         "the Sunday ride is still owed, and the Friday was answered"
     );
@@ -1471,12 +1554,12 @@ fn a_session_dated_to_the_day_a_window_closes_accounts_for_neither_microcycle() 
     let monday = standing
         .sessions
         .first()
-        .map(|session| (session.slot.date, session.state));
+        .map(|session| (session.slot.date, session.state.clone()));
     assert!(
         matches!(
             monday,
-            Some((date, state)) if date == Date::constant(2026, 9, 21)
-                && state != SessionState::Performed
+            Some((date, ref state)) if date == Date::constant(2026, 9, 21)
+                && *state != SessionState::Performed
         ),
         "the Monday's own slot is not answered by a session dated to that day: {monday:?}"
     );

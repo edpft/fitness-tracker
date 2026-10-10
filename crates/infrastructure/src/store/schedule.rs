@@ -20,8 +20,8 @@ use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
-        TrainingPattern, TrainingSlot, TrainingWeek,
+        Absence, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay, Relative,
+        SessionRole, Skip, TrainingPattern, TrainingSlot, TrainingWeek,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -193,8 +193,36 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        Ok(Diary::new(patterns, read_alterations(&self.pool).await?))
+        Ok(Diary::new(patterns, read_alterations(&self.pool).await?)
+            .with_skips(read_skips(&self.pool).await?))
     }
+}
+
+/// Every skip, oldest first, so the latest of two for one window is last.
+async fn read_skips(pool: &SqlitePool) -> Result<Vec<Skip>, StoreError> {
+    let rows = sqlx::query!(
+        r"
+        SELECT from_date, from_part, until_date, until_part, reason
+        FROM skip
+        ORDER BY id
+        "
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    rows.into_iter()
+        .map(|row| {
+            Skip::new(
+                DayPart::new(date_of(&row.from_date)?, part_of(&row.from_part)?),
+                DayPart::new(date_of(&row.until_date)?, part_of(&row.until_part)?),
+                &row.reason,
+            )
+            .map_err(|error| StoreError::Corrupt {
+                detail: format!("a stored skip: {error}"),
+            })
+        })
+        .collect()
 }
 
 /// Every alteration, with the slots each one states.
@@ -407,5 +435,30 @@ impl DiaryAuthor for SqliteDiaryStore {
         }
 
         tx.commit().await.map_err(|error| store_error(&error))
+    }
+
+    async fn record_skip(&self, skip: &Skip) -> Result<(), StoreError> {
+        let authored_at = Timestamp::now().to_string();
+        let from_date = skip.from().date.to_string();
+        let from_part = skip.from().part.as_str();
+        let until_date = skip.until().date.to_string();
+        let until_part = skip.until().part.as_str();
+        let reason = skip.reason();
+        sqlx::query!(
+            r"
+            INSERT INTO skip (authored_at, from_date, from_part, until_date, until_part, reason)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ",
+            authored_at,
+            from_date,
+            from_part,
+            until_date,
+            until_part,
+            reason
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(())
     }
 }

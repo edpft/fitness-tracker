@@ -44,6 +44,11 @@ pub struct Session {
     /// Whether the plan has a test in the slot: the 1RM test or the FTP test.
     pub test: bool,
     pub state: SessionState,
+    /// Where its window closes: the start of the next slot of either
+    /// discipline. `None` where the diary describes nothing after it.
+    ///
+    /// What a skip runs to (#391).
+    pub closes: Option<DayPart>,
 }
 
 /// Where a plan stands on a day.
@@ -410,6 +415,7 @@ where
                 programmed: planned.session.is_ok(),
                 test: planned.session.as_ref().is_ok_and(Filled::is_test),
                 state,
+                closes,
             });
         }
 
@@ -599,7 +605,7 @@ fn placed(sessions: &[Session]) -> Vec<Placed> {
         .map(|session| Placed {
             discipline: session.slot.discipline,
             role: session.slot.role,
-            state: session.state,
+            state: session.state.clone(),
             test: session.test,
         })
         .collect()
