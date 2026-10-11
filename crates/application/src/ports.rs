@@ -1307,6 +1307,22 @@ pub trait MesocycleStore {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<RerunOrdinal>, StoreError>> + Send;
+
+    /// The role the gym's slot rides on a date, where it is not the one the
+    /// operator's week gives it (#392): a skipped essential session moved into
+    /// it, or the session displaced into the skipped slot.
+    ///
+    /// **Here for the reason [`Self::rerun_on`] is**: it is a fact about what
+    /// happened, which the diary records and the calendar does not. `None`
+    /// where the calendar's own role stands.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn role_on(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<SessionRole>, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.

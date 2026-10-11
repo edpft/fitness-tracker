@@ -384,6 +384,9 @@ where
         };
 
         let (week, role) = programme.calendar().place(date)?;
+        // A skipped essential session earlier in the week is prescribed here
+        // instead (#392).
+        let role = self.ports.programmes.role_on(date).await?.unwrap_or(role);
 
         // Every exercise the programme can prescribe that progresses, in one
         // call. Both sides of every alternating fill, because this session

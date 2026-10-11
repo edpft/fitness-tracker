@@ -24,7 +24,7 @@ use domain::{
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
     planner::{self, Rerun, RerunOrdinal},
     prescription::GymMesocycle,
-    schedule::{Diary, Discipline},
+    schedule::{Diary, Discipline, SessionRole},
 };
 use jiff::civil::Date;
 
@@ -192,6 +192,16 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
             Discipline::Gym,
             date,
         ))
+    }
+
+    async fn role_on(&self, date: Date) -> Result<Option<SessionRole>, StoreError> {
+        let ordinary = self
+            .reschedule
+            .diary
+            .training_week(date, Discipline::Gym)
+            .and_then(|week| week.role_on(date.weekday()));
+        let rides = planner::role_on(&self.reschedule.diary, date, Discipline::Gym);
+        Ok(rides.filter(|rides| Some(*rides) != ordinary))
     }
 }
 

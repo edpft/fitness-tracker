@@ -142,7 +142,9 @@ fn ride_in(
     diary: &Diary,
 ) -> Option<Due> {
     let date = programme.next_riding_day(from, week)?;
-    let asked = week.role_on(date.weekday())?;
+    let ordinary = week.role_on(date.weekday())?;
+    // A skipped essential ride earlier in the week rides here instead (#392).
+    let asked = planner::role_on(diary, date, Discipline::Cycling).unwrap_or(ordinary);
     let eased = planner::eased_by_illness(diary, date, Discipline::Cycling, asked);
 
     if programme.holds_on(date) {
@@ -159,7 +161,7 @@ fn ride_in(
         }));
     }
     let (microcycle, session, ride) = programme.on(date, week)?;
-    let (session, ride) = if eased == asked {
+    let (session, ride) = if eased == ordinary {
         (session, ride)
     } else {
         programme
