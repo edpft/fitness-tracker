@@ -1564,3 +1564,82 @@ fn a_session_dated_to_the_day_a_window_closes_accounts_for_neither_microcycle() 
         "the Monday's own slot is not answered by a session dated to that day: {monday:?}"
     );
 }
+
+/// **#392: a skipped essential ride takes the Sunday.** The FTP test is the
+/// Wednesday's, and skipping it on the Wednesday evening takes the time up to
+/// the Friday's gym slot. The Sunday is left, so it rides the test, and the endurance ride
+/// is what the week gives up. Riding the test on the Sunday completes the microcycle, so
+/// nothing runs again.
+#[test]
+fn a_skipped_essential_ride_is_ridden_on_the_sunday_instead() {
+    let wednesday = DayPart::new(Date::constant(2026, 9, 16), PartOfDay::Evening);
+    let monday = DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Evening);
+    let (skipped, after) = corpus::block_on(async {
+        let (pool, _directory) = autumn_on_the_bike().await?;
+        let microcycle = |ridden: Ridden| -> Fallible<_> {
+            Ok(Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::nothing(),
+                    cycling_performed: ridden,
+                },
+                hevy()?,
+                peloton()?,
+            ))
+        };
+
+        let before = microcycle(Ridden::of(Vec::new()))?
+            .standing(wednesday)
+            .await?;
+        let until = before
+            .current()
+            .and_then(|session| session.closes)
+            .ok_or("the Wednesday's window closes")?;
+        SqliteDiaryStore::new(pool.clone())
+            .record_skip(&Skip::new(wednesday, until, "work dinner")?)
+            .await?;
+
+        let ftp_on_the_sunday = Ridden::of(vec![(
+            Date::constant(2026, 9, 20).at(9, 0, 0, 0),
+            vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+        )]);
+        Ok::<_, Box<dyn std::error::Error>>((
+            microcycle(Ridden::of(Vec::new()))?
+                .standing(wednesday)
+                .await?,
+            microcycle(ftp_on_the_sunday)?.standing(monday).await?,
+        ))
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    // The plan rides only, so the Friday's gym slot comes between and is
+    // programmed by nothing.
+    let sunday = skipped
+        .sessions
+        .iter()
+        .find(|session| session.slot.discipline == Discipline::Cycling && session.number == 2);
+    assert_eq!(
+        sunday.map(|session| (
+            session.slot.date,
+            session.slot.role,
+            session.test,
+            session.state.clone()
+        )),
+        Some((
+            Date::constant(2026, 9, 20),
+            SessionRole::new(Relative::Higher, Relative::Lower),
+            true,
+            SessionState::ToBePrescribed
+        )),
+        "the Sunday rides the FTP test"
+    );
+    assert!(
+        after.reruns.is_empty(),
+        "the test was ridden that week, so nothing runs again: {:?}",
+        after.weeks
+    );
+}

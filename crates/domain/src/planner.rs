@@ -137,11 +137,9 @@ pub fn commencing(date: Date) -> Date {
 /// alteration is read for that rather than to decide what is here.
 #[must_use]
 pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<'a>> {
-    let monday = commencing(containing);
     let mut counted: BTreeMap<Discipline, u8> = BTreeMap::new();
-    (0..7)
-        .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
-        .flat_map(|date| diary.ordinary_slots_of(date))
+    slots(diary, containing)
+        .into_iter()
         .map(|slot| {
             let number = counted
                 .entry(slot.discipline)
@@ -154,6 +152,96 @@ pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<
             }
         })
         .collect()
+}
+
+/// Every slot of the calendar week containing a date, with the role each one
+/// rides once a skipped essential session has moved.
+///
+/// **A skipped essential session takes the next slot of its discipline that
+/// week** (#392). The operator, 2026-10-11: *"If there is another slot for this
+/// discipline in the week, the essential session moves to that slot, if not we
+/// must rerun."* So the two slots swap roles: the later one rides the essential
+/// session, and the skipped one is left the session it displaced, which is the
+/// one the week loses. Where no later slot of the discipline is left, nothing
+/// moves, the essential session reads skipped, and the microcycle re-runs.
+///
+/// **Slots, never weekdays.** The rule reads the diary's slots and their roles,
+/// so it is the same rule whatever days the operator trains.
+///
+/// **Only a skip moves it.** An illness eases what survives it instead
+/// ([`eased_by_illness`]), because illness costs fitness and a skip does not.
+///
+/// A slot is skipped where a skip runs to the close of its window, as
+/// [`state_of`] reads it, and a later slot is left where nothing has taken it:
+/// not skipped itself, and not covered by an absence.
+#[must_use]
+pub fn slots(diary: &Diary, containing: Date) -> Vec<ScheduledSlot> {
+    let monday = commencing(containing);
+    let mut slots: Vec<ScheduledSlot> = (0..7)
+        .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
+        .flat_map(|date| diary.ordinary_slots_of(date))
+        .collect();
+
+    let after = slots
+        .last()
+        .and_then(|last| diary.first_ordinary_after(last.date))
+        .map(|slot| DayPart::new(slot.date, slot.slot.part));
+    let closes: Vec<Option<DayPart>> = (0..slots.len())
+        .map(|at| {
+            slots
+                .get(at.saturating_add(1))
+                .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)))
+        })
+        .collect();
+    let skipped = |at: usize| {
+        closes
+            .get(at)
+            .copied()
+            .flatten()
+            .is_some_and(|closes| diary.skipped_until(closes).is_some())
+    };
+
+    for discipline in Discipline::ALL {
+        let Some(essential) = slots.iter().enumerate().position(|(at, slot)| {
+            slot.discipline == *discipline && slot.role == ESSENTIAL && skipped(at)
+        }) else {
+            continue;
+        };
+        let Some(into) = slots
+            .iter()
+            .enumerate()
+            .skip(essential.saturating_add(1))
+            .find(|(at, slot)| {
+                slot.discipline == *discipline
+                    && !skipped(*at)
+                    && diary
+                        .taken(DayPart::new(slot.date, slot.slot.part))
+                        .is_none()
+            })
+            .map(|(at, _)| at)
+        else {
+            continue;
+        };
+        let displaced = slots.get(into).map(|slot| slot.role);
+        if let (Some(displaced), Some(skipped)) = (displaced, slots.get_mut(essential)) {
+            skipped.role = displaced;
+        }
+        if let Some(later) = slots.get_mut(into) {
+            later.role = ESSENTIAL;
+        }
+    }
+    slots
+}
+
+/// The role a discipline's slot rides on a date, once a skipped essential
+/// session has moved ([`slots`]). `None` where the diary gives that discipline
+/// no slot on the date.
+#[must_use]
+pub fn role_on(diary: &Diary, date: Date, discipline: Discipline) -> Option<SessionRole> {
+    slots(diary, date)
+        .into_iter()
+        .find(|slot| slot.date == date && slot.discipline == discipline)
+        .map(|slot| slot.role)
 }
 
 /// Where one session of the microcycle stands.

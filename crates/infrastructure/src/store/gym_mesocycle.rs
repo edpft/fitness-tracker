@@ -637,6 +637,13 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn rerun_on(&self, _date: Date) -> Result<Option<RerunOrdinal>, StoreError> {
         Ok(None)
     }
+
+    /// **The authored plan's roles stand**, for the reason `rerun_on` answers
+    /// `None`: a moved session is a fact about the diary, which this store does
+    /// not read.
+    async fn role_on(&self, _date: Date) -> Result<Option<SessionRole>, StoreError> {
+        Ok(None)
+    }
 }
 
 /// Write one gym mesocycle of a plan, inside the plan's own transaction.

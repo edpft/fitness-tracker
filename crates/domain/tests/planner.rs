@@ -439,3 +439,162 @@ fn an_illness_in_another_discipline_does_not_ease_this_one() {
         "the Friday is the gym's slot, and the bike does not read it"
     );
 }
+
+/// The diary with one skip, from `from` up to `until`.
+fn skipping(
+    diary: Diary,
+    from: (jiff::civil::Date, PartOfDay),
+    until: (jiff::civil::Date, PartOfDay),
+) -> Built<Diary> {
+    let skip = domain::schedule::Skip::new(
+        domain::schedule::DayPart::new(from.0, from.1),
+        domain::schedule::DayPart::new(until.0, until.1),
+        "work dinner",
+    )?;
+    Ok(diary.with_skips(vec![skip]))
+}
+
+/// The role each slot of a discipline rides in the week of Monday 21 September.
+fn roles(diary: &Diary, discipline: Discipline) -> Vec<(jiff::civil::Date, SessionRole)> {
+    planner::slots(diary, date(2026, 9, 21))
+        .into_iter()
+        .filter(|slot| slot.discipline == discipline)
+        .map(|slot| (slot.date, slot.role))
+        .collect()
+}
+
+/// **A skipped essential ride takes the Sunday** (#392). Skipping the Wednesday
+/// evening runs to the Friday evening gym slot, which leaves the Sunday's slot
+/// free, so the harder ride moves there and the easier one is what the week
+/// loses.
+#[test]
+fn a_skipped_essential_session_takes_the_next_slot_of_its_discipline() {
+    let Ok(diary) = diary().and_then(|diary| {
+        skipping(
+            diary,
+            (date(2026, 9, 23), PartOfDay::Evening),
+            (date(2026, 9, 25), PartOfDay::Evening),
+        )
+    }) else {
+        panic!("the fixture diary is valid")
+    };
+
+    assert_eq!(
+        roles(&diary, Discipline::Cycling),
+        vec![(date(2026, 9, 23), easier()), (date(2026, 9, 27), harder())],
+    );
+    assert_eq!(
+        planner::role_on(&diary, date(2026, 9, 27), Discipline::Cycling),
+        Some(harder()),
+    );
+    assert_eq!(
+        roles(&diary, Discipline::Gym),
+        vec![(date(2026, 9, 21), easier()), (date(2026, 9, 25), harder())],
+        "the gym's week is not touched by a ride's skip"
+    );
+}
+
+/// **No later slot of the discipline, nothing moves.** The Friday is the gym's
+/// last slot, so a skipped Friday leaves the essential session where it was,
+/// skipped, and the microcycle re-runs.
+#[test]
+fn a_skipped_essential_session_with_no_later_slot_stays_put() {
+    let Ok(diary) = diary().and_then(|diary| {
+        skipping(
+            diary,
+            (date(2026, 9, 25), PartOfDay::Evening),
+            (date(2026, 9, 27), PartOfDay::Morning),
+        )
+    }) else {
+        panic!("the fixture diary is valid")
+    };
+
+    assert_eq!(
+        roles(&diary, Discipline::Gym),
+        vec![(date(2026, 9, 21), easier()), (date(2026, 9, 25), harder())],
+    );
+}
+
+/// **A skipped session that is not essential moves nothing.**
+#[test]
+fn a_skipped_session_that_is_not_essential_moves_nothing() {
+    let Ok(ordinary) = diary() else {
+        panic!("the fixture diary is valid")
+    };
+    let Ok(skipped) = skipping(
+        ordinary.clone(),
+        (date(2026, 9, 21), PartOfDay::Afternoon),
+        (date(2026, 9, 23), PartOfDay::Evening),
+    ) else {
+        panic!("the skip is valid")
+    };
+
+    assert_eq!(
+        planner::slots(&skipped, date(2026, 9, 21)),
+        planner::slots(&ordinary, date(2026, 9, 21)),
+    );
+}
+
+/// **A later slot already taken is not left.** With the Sunday lost to a
+/// holiday, a skipped Wednesday has nowhere to go.
+#[test]
+fn a_later_slot_taken_by_an_absence_does_not_take_the_essential_session() {
+    let Ok(diary) = absent(date(2026, 9, 27), holiday()).and_then(|diary| {
+        skipping(
+            diary,
+            (date(2026, 9, 23), PartOfDay::Evening),
+            (date(2026, 9, 25), PartOfDay::Evening),
+        )
+    }) else {
+        panic!("the fixture diary is valid")
+    };
+
+    assert_eq!(
+        roles(&diary, Discipline::Cycling),
+        vec![(date(2026, 9, 23), harder()), (date(2026, 9, 27), easier())],
+    );
+}
+
+/// **The rule reads slots, not weekdays.** A week with the heavy gym session
+/// on the Tuesday and two lighter ones after it: skipping the Tuesday puts the
+/// heavy session in the Thursday, the next gym slot, and leaves the Saturday as
+/// it was.
+#[test]
+fn the_next_slot_takes_it_whatever_day_it_is() {
+    let slots: BTreeMap<TrainingSlot, Allocation> = [
+        (Weekday::Tuesday, harder()),
+        (Weekday::Thursday, easier()),
+        (Weekday::Saturday, easier()),
+    ]
+    .into_iter()
+    .map(|(day, role)| {
+        (
+            TrainingSlot::new(day, PartOfDay::Evening),
+            Allocation::new(Discipline::Gym, role),
+        )
+    })
+    .collect();
+    let Ok(zone) = domain::normalised::OperatorZone::try_from("Europe/London") else {
+        panic!("a real zone")
+    };
+    let week = Diary::new(
+        vec![TrainingPattern::new(date(2026, 1, 1), zone, slots)],
+        vec![],
+    );
+    let Ok(diary) = skipping(
+        week,
+        (date(2026, 9, 22), PartOfDay::Evening),
+        (date(2026, 9, 24), PartOfDay::Evening),
+    ) else {
+        panic!("the skip is valid")
+    };
+
+    assert_eq!(
+        roles(&diary, Discipline::Gym),
+        vec![
+            (date(2026, 9, 22), easier()),
+            (date(2026, 9, 24), harder()),
+            (date(2026, 9, 26), easier()),
+        ],
+    );
+}
