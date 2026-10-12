@@ -247,6 +247,43 @@
           }
         );
 
+        # A user service, so the page is up whenever the laptop is without
+        # anyone starting it from a terminal (#399). It names the store path
+        # of `web` rather than putting `web` on PATH, and the reference keeps
+        # that build alive for as long as the profile holds the unit.
+        #
+        # **No address here** (§ 34): `FITNESS_WEB_LISTEN` comes from a
+        # drop-in on the machine, as the firewall rule admitting the phone
+        # does. Without one `web` exits saying `--listen` is required, and
+        # the restart delay keeps that from spinning.
+        webService = pkgs.writeTextFile {
+          name = "fitness-web-service";
+          destination = "/share/systemd/user/fitness-web.service";
+          text = ''
+            [Unit]
+            Description=The fitness tracker's web interface
+
+            [Service]
+            ExecStart=${lib.getExe web}
+            Restart=on-failure
+            RestartSec=10
+
+            [Install]
+            WantedBy=default.target
+          '';
+        };
+
+        # What `nix profile` installs: the `fitness` command and the unit that
+        # serves the page, upgraded together.
+        installed = pkgs.symlinkJoin {
+          name = "fitness-tracker-${revision}";
+          paths = [
+            cli
+            webService
+          ];
+          meta.mainProgram = "fitness";
+        };
+
       in
       {
         checks = {
@@ -563,10 +600,10 @@
         };
 
         packages = {
-          # `cli` is the default because it is the one that does something:
-          # `nix run` should hand you the working tool, not the dormant HTTP
-          # stub. Both are exposed by name.
-          default = cli;
+          # The default is what the operator installs, so `nix run` hands you
+          # `fitness` and `nix profile upgrade` brings the web service with it.
+          # Both binaries are exposed by name.
+          default = installed;
           inherit cli web;
 
           # Named for CI rather than for anyone to install: each check runs on
