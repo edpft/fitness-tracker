@@ -17,7 +17,6 @@ path = "src/main.rs"
 application.workspace = true
 configurator.workspace = true
 domain.workspace = true
-infrastructure.workspace = true
 
 clap.workspace = true
 jiff.workspace = true

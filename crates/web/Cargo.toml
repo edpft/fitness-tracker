@@ -7,7 +7,7 @@ publish.workspace = true
 
 # A driving adapter, the operator's other entry point. Its use cases come from
 # `configurator`, and it names no adapter itself: `infrastructure` is not a
-# dependency (#402 does the same for `cli`).
+# dependency, and the `architecture` check fails if it becomes one (#402).
 [dependencies]
 application.workspace = true
 configurator.workspace = true

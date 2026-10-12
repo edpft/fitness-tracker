@@ -7,20 +7,17 @@
 use std::path::Path;
 
 use application::{
-    GenerationParameterStore as _, PrescriptionDeliverer as _, WorkoutPrescriber as _,
-    compare::{Comparing, ComparisonPorts},
-    deliver::{Delivering, DeliveryPorts},
-    prescribe::{NextSession, Prescribing, PrescriptionPorts},
+    GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _,
+    WorkoutPrescriber as _, prescribe::NextSession,
+};
+use configurator::{
+    prescribing::{self, PreviewFailure},
+    store::Store,
 };
 use domain::normalised::OperatorZone;
-use infrastructure::{
-    HevyRoutinePreview, SqliteCanonicalGymSessionStore, SqliteExerciseHistory,
-    SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    connect,
-};
 use jiff::civil::Date;
 
-use crate::{Failure, catalogue, config, exit, output, rescheduling};
+use crate::{Failure, catalogue, config, exit, output};
 
 /// Report the parameters every prescription is generated against (§ 14).
 ///
@@ -28,11 +25,12 @@ use crate::{Failure, catalogue, config, exit, output, rescheduling};
 /// reads one — what a prescription was generated against is recorded on the
 /// prescription itself, which is what makes that safe.
 pub async fn parameters(database: &Path) -> Result<(), Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let current = SqliteGenerationParameterStore::new(pool)
+    let current = store
+        .parameters()
         .current()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -63,17 +61,11 @@ pub async fn standing(
     zone: &OperatorZone,
     on: Option<&str>,
 ) -> Result<(), Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let prescriber = Prescribing::new(PrescriptionPorts {
-        history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: rescheduling::gym(&pool, zone).await?,
-        parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-        lifecycle: SqlitePrescriptionDeliveryStore::new(pool),
-    });
+    let prescriber = prescribing::prescriber(&store, zone).await?;
 
     // **A date, because programmes succeed one another** (decision 0012). With
     // one programme ever in force "the programme" was unambiguous; with three in
@@ -103,18 +95,12 @@ pub async fn prescribe(
     zone: &OperatorZone,
     date: Option<&str>,
 ) -> Result<(), Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = rescheduling::gym(&pool, zone).await?;
-    let prescriber = Prescribing::new(PrescriptionPorts {
-        history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: rescheduling::gym(&pool, zone).await?,
-        parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
-    });
+    let programmes = prescribing::programmes(&store, zone).await?;
+    let prescriber = prescribing::prescriber(&store, zone).await?;
 
     let Some(date) = resolve(&programmes, zone, date).await? else {
         return Ok(());
@@ -143,7 +129,7 @@ pub async fn prescribe(
 /// answers for the date it was given, so a day the block skips is refused when
 /// the prescription is derived. Only the porcelain searches — see [`next`].
 async fn resolve(
-    programmes: &rescheduling::GymMesocycles,
+    programmes: &(impl MesocycleStore + Sync),
     zone: &OperatorZone,
     given: Option<&str>,
 ) -> Result<Option<Date>, Failure> {
@@ -171,10 +157,10 @@ pub async fn next(
     zone: &OperatorZone,
     from: Option<&str>,
 ) -> Result<Option<Date>, Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let programmes = rescheduling::gym(&pool, zone).await?;
+    let programmes = prescribing::programmes(&store, zone).await?;
 
     let from = match from {
         Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
@@ -184,7 +170,7 @@ pub async fn next(
 }
 
 async fn search(
-    programmes: &rescheduling::GymMesocycles,
+    programmes: &(impl MesocycleStore + Sync),
     from: Date,
 ) -> Result<Option<Date>, Failure> {
     let found = application::prescribe::next_session(programmes, from)
@@ -216,30 +202,33 @@ pub async fn deliver(
     date: Option<&str>,
     preview: bool,
     known: &'static catalogue::KnownSource,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = rescheduling::gym(&pool, zone).await?;
+    let programmes = prescribing::programmes(&store, zone).await?;
     let Some(date) = resolve(&programmes, zone, date).await? else {
         return Ok(());
     };
 
-    let prescriptions = SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned());
     if preview {
-        return preview_delivery(prescriptions, rescheduling::gym(&pool, zone).await?, date).await;
+        // **The store it writes to is thrown away**, so a preview cannot leave a
+        // record claiming a session was delivered. The rendering is the real one.
+        let (delivered, body) =
+            prescribing::preview(&store, zone, date)
+                .await
+                .map_err(|failure| match failure {
+                    PreviewFailure::Next(failure) => Failure::from(failure),
+                    other => Failure::message(other.to_string(), exit::STORE),
+                })?;
+        output::preview(&delivered, &body);
+        return Ok(());
     }
 
     let destination = configurator::access::hevy_routines(known, credentials)?;
-
-    let delivering = Delivering::new(DeliveryPorts {
-        prescriptions,
-        programmes: rescheduling::gym(&pool, zone).await?,
-        deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
-        destination,
-    });
+    let delivering = prescribing::delivering(&store, zone, destination).await?;
 
     let delivered = delivering
         .deliver(date)
@@ -248,116 +237,6 @@ pub async fn deliver(
 
     output::delivery(&delivered);
     Ok(())
-}
-
-/// The whole path except the two irreversible steps.
-///
-/// **The store it writes to is thrown away**, so a preview cannot leave a record
-/// claiming a session was delivered — which would make the real delivery a
-/// no-op and lose the session entirely. The rendering is the real one.
-async fn preview_delivery(
-    prescriptions: SqlitePrescribedWorkoutStore,
-    programmes: rescheduling::GymMesocycles,
-    date: Date,
-) -> Result<(), Failure> {
-    let destination = HevyRoutinePreview::new()
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let delivering = Delivering::new(DeliveryPorts {
-        prescriptions,
-        programmes,
-        deliveries: ForgetfulDeliveries,
-        destination: &destination,
-    });
-
-    let delivered = delivering
-        .deliver(date)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let Some(body) = destination.body() else {
-        return Err(Failure::message("nothing was rendered", exit::STORE));
-    };
-
-    output::preview(&delivered, &body);
-    Ok(())
-}
-
-/// A delivery store that remembers nothing.
-///
-/// Not a test double: it is what makes a preview safe to run against the real
-/// store, because the one thing a preview must not do is record a delivery that
-/// never happened.
-struct ForgetfulDeliveries;
-
-impl application::PrescriptionDeliveryStore for ForgetfulDeliveries {
-    async fn reference_for(
-        &self,
-        _prescription: application::PrescribedWorkoutId,
-        _destination: &application::DestinationName,
-    ) -> Result<Option<application::DeliveryReference>, application::StoreError> {
-        Ok(None)
-    }
-
-    /// **Nothing occupies anything, so a preview always renders a first
-    /// delivery.** Answering otherwise would send the preview down the
-    /// replacement path and have it print what a `PUT` would send — which is
-    /// the same bytes, but aimed at a routine this run has no business naming.
-    async fn occupying(
-        &self,
-        _date: jiff::civil::Date,
-        _destination: &application::DestinationName,
-    ) -> Result<Option<application::Occupant>, application::StoreError> {
-        Ok(None)
-    }
-
-    async fn record(
-        &self,
-        _prescription: application::PrescribedWorkoutId,
-        _destination: &application::DestinationName,
-        _reference: &application::DeliveryReference,
-        _rendering: &application::RenderingDigest,
-        _at: jiff::Timestamp,
-    ) -> Result<(), application::StoreError> {
-        Ok(())
-    }
-
-    async fn record_rendering(
-        &self,
-        _prescription: application::PrescribedWorkoutId,
-        _destination: &application::DestinationName,
-        _reference: &application::DeliveryReference,
-        _rendering: &application::RenderingDigest,
-        _at: jiff::Timestamp,
-    ) -> Result<(), application::StoreError> {
-        Ok(())
-    }
-
-    async fn hand_over(
-        &self,
-        _from: application::PrescribedWorkoutId,
-        _to: application::PrescribedWorkoutId,
-        _destination: &application::DestinationName,
-        _reference: &application::DeliveryReference,
-        _rendering: &application::RenderingDigest,
-        _at: jiff::Timestamp,
-    ) -> Result<(), application::StoreError> {
-        Ok(())
-    }
-
-    /// **Nothing is answered, so nothing is kept.** The preview destination
-    /// contacts no one and hands back no reply, so this is never reached with
-    /// one — and it forgets on principle either way, which is what makes running
-    /// a preview against the real store safe.
-    async fn record_reply(
-        &self,
-        _prescription: application::PrescribedWorkoutId,
-        _destination: &application::DestinationName,
-        _reply: &application::DestinationReply,
-        _at: jiff::Timestamp,
-    ) -> Result<(), application::StoreError> {
-        Ok(())
-    }
 }
 
 /// What a session did against what it was told.
@@ -370,15 +249,12 @@ pub async fn compare(
     zone: &OperatorZone,
     date: Option<&str>,
 ) -> Result<(), Failure> {
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = rescheduling::gym(&pool, zone).await?;
-    let comparing = Comparing::new(ComparisonPorts {
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-        workouts: SqliteCanonicalGymSessionStore::new(pool),
-    });
+    let programmes = prescribing::programmes(&store, zone).await?;
+    let comparing = prescribing::comparing(&store, zone);
 
     let Some(date) = resolve(&programmes, zone, date).await? else {
         return Ok(());

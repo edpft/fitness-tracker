@@ -35,7 +35,7 @@ pub async fn next(
     date: Option<&str>,
     part: Option<&str>,
     skip: Option<&str>,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
     let report =

@@ -38,31 +38,19 @@
 
 use std::path::Path;
 
+use configurator::{
+    corrections::{self, FoundSet, StandIn},
+    store::Store,
+};
 use domain::{
     gym::exercise::Exercise,
     measure::{InvalidMass, InvalidQuantity, Kg, RepCount},
     normalised::{Corrected, CorrectionId, CorrectionReason, OperatorZone, SetFigures},
     sequence::NonEmpty,
 };
-use infrastructure::{
-    GarminExerciseSetLandingStore, GarminRecordedSets, HevyStandIns, HevyWorkoutLandingStore,
-    SqliteEditOverlayStore, SqlitePool, connect, garmin::FoundSet, hevy::StandIn,
-};
-use jiff::{Timestamp, civil::Date};
+use jiff::civil::Date;
 
 use crate::{Failure, exit};
-
-/// The streams a correction can be asserted against.
-///
-/// Not [`crate::catalogue::KNOWN`]: `garmin.exercise_sets` is not a stream the
-/// operator collects — it is fetched per activity behind `garmin.activities`
-/// (#172) — and it is the one whose records a figures correction anchors in. A
-/// stream nobody has corrected answers with nothing, so reading all of them
-/// costs one query each and keeps the numbering one space.
-const CORRECTED: [&str; 2] = [
-    HevyWorkoutLandingStore::STREAM,
-    GarminExerciseSetLandingStore::STREAM,
-];
 
 /// What `add` was asked to assert about an exercise a source named.
 pub struct Assertion<'a> {
@@ -124,9 +112,8 @@ pub async fn add(
         ));
     }
 
-    let pool = pool(database).await?;
-    let found = HevyStandIns::new(pool.clone())
-        .reading_as(was, zone, from, until)
+    let store = store(database).await?;
+    let found = corrections::reading_as(&store, was, zone, from, until)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -147,9 +134,7 @@ pub async fn add(
 
     report(&found, assertion.was, assertion.actually);
 
-    let id = SqliteEditOverlayStore::new(pool, HevyWorkoutLandingStore::STREAM)
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-        .assert(actually, Timestamp::now(), &reason, &terms)
+    let id = corrections::assert_exercise(&store, actually, &reason, &terms)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -188,9 +173,8 @@ pub async fn add_figures(
         )
     })?;
 
-    let pool = pool(database).await?;
-    let found = GarminRecordedSets::new(pool.clone())
-        .recording(recorded, zone, on)
+    let store = store(database).await?;
+    let found = corrections::recording(&store, recorded, zone, on)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -203,9 +187,7 @@ pub async fn add_figures(
 
     report_figures(&found, on, recorded, actually);
 
-    let id = SqliteEditOverlayStore::new(pool, GarminExerciseSetLandingStore::STREAM)
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-        .assert_figures(recorded, actually, Timestamp::now(), &reason, &sets)
+    let id = corrections::assert_figures(&store, recorded, actually, &reason, &sets)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -227,18 +209,10 @@ pub async fn add_figures(
 /// [`Failure`] if the store cannot be reached or holds a key the vocabulary no
 /// longer has.
 pub async fn show(database: &Path) -> Result<(), Failure> {
-    let pool = pool(database).await?;
-    let mut corrections = Vec::new();
-    for stream in CORRECTED {
-        corrections.extend(
-            SqliteEditOverlayStore::new(pool.clone(), stream)
-                .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-                .all()
-                .await
-                .map_err(|error| Failure::message(error.to_string(), exit::STORE))?,
-        );
-    }
-    corrections.sort_by_key(|correction| (correction.asserted_at(), correction.id()));
+    let store = store(database).await?;
+    let corrections = corrections::all(&store)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     if corrections.is_empty() {
         println!("No corrections. The normalised layer is exactly what the sources said.");
@@ -280,19 +254,13 @@ pub async fn remove(database: &Path, id: &str) -> Result<(), Failure> {
         .parse()
         .map_err(|_| Failure::message(format!("{id} is not a correction number"), exit::USAGE))?;
 
-    let pool = pool(database).await?;
-    // One numbering across every stream, so the number `show` printed is the
-    // one that is retracted whichever source it was asserted against.
-    for stream in CORRECTED {
-        let retracted = SqliteEditOverlayStore::new(pool.clone(), stream)
-            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-            .retract(CorrectionId::from(id))
-            .await
-            .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-        if retracted {
-            println!("Retracted correction {id}. The next derivation reads what the source said.");
-            return Ok(());
-        }
+    let store = store(database).await?;
+    let retracted = corrections::retract(&store, CorrectionId::from(id))
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    if retracted {
+        println!("Retracted correction {id}. The next derivation reads what the source said.");
+        return Ok(());
     }
 
     Err(Failure::message(
@@ -426,8 +394,8 @@ fn within(from: Option<Date>, until: Option<Date>) -> String {
     }
 }
 
-async fn pool(database: &Path) -> Result<SqlitePool, Failure> {
-    connect(database)
+async fn store(database: &Path) -> Result<Store, Failure> {
+    Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
