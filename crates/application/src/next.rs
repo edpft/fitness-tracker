@@ -35,13 +35,15 @@ use domain::{
 use jiff::civil::Date;
 
 use crate::{
-    CanonicalGymSessionStore, ClassSource, CyclingMesocycleStore, Delivery, DeliveryError,
-    DiaryAuthor, DiaryStore, ExerciseHistory, ExtractionError, GenerationParameterStore,
-    HolidayCalendar, MesocycleStore, NextLock, NormalisationError, NormalisedGymSessionReader,
-    PlanStore, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer as _,
-    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionError, PrescriptionLifecycle,
-    RideDestination, RidesPlaced, RunLockError, RunSummary, SourceError, StoreError,
-    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber as _,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, ClassSource, CyclingMesocycleStore,
+    Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory, ExtractionError,
+    GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock, NormalisationError,
+    NormalisedCyclingSessionReader, NormalisedGymSessionReader, PlanStore, PrescribedWorkoutStore,
+    Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
+    PrescriptionError, PrescriptionLifecycle, RideDestination, RidesPlaced, RunLockError,
+    RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutNormaliser,
+    WorkoutPrescriber as _,
+    canonicalise::Canonicalised,
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
@@ -142,8 +144,8 @@ pub struct Records<W, N> {
 pub enum Step {
     Fetching(LandingStream),
     Normalising(LandingStream),
-    /// Rebuilding the canonical gym layer from the normalised one.
-    Canonicalising,
+    /// Rebuilding a discipline's canonical layer from the normalised one.
+    Canonicalising(Discipline),
     /// Keeping the local class catalogue current (#246).
     RefreshingClasses,
     /// Committing the next concurrent mesocycle (#222).
@@ -564,13 +566,50 @@ where
     }
 }
 
+/// Rebuilding the canonical layers.
+pub trait Canonicalising {
+    /// # Errors
+    ///
+    /// [`StoreError`] if either layer cannot be read or written.
+    fn gym(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if either layer cannot be read or written.
+    fn cycling(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+}
+
+/// Each discipline's normalised layer, and the canonical layer built from it.
+pub struct CanonicalPorts<GR, GC, CR, CC> {
+    pub normalised_gym: GR,
+    pub canonical_gym: GC,
+    pub normalised_cycling: CR,
+    pub canonical_cycling: CC,
+}
+
+impl<GR, GC, CR, CC> Canonicalising for CanonicalPorts<GR, GC, CR, CC>
+where
+    GR: NormalisedGymSessionReader + Sync,
+    GC: CanonicalGymSessionStore + Sync,
+    CR: NormalisedCyclingSessionReader + Sync,
+    CC: CanonicalCyclingSessionStore + Sync,
+{
+    async fn gym(&self) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym).await
+    }
+
+    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::cycling_sessions(&self.normalised_cycling, &self.canonical_cycling)
+            .await
+    }
+}
+
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L> {
+pub struct NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L> {
     pub gym_records: Records<GW, GN>,
     pub cycling_records: Records<CW, CN>,
-    /// The normalised gym layer, and the canonical layer built from it.
-    pub normalised: NR,
-    pub canonical: CS,
+    /// Each discipline's canonical layer, rebuilt once its record is collected.
+    pub canonical: CL,
     pub classes: Result<K, NoAccess>,
     pub holidays: HC,
     pub diary: D,
@@ -589,19 +628,18 @@ pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L> {
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L> {
-    ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>,
+pub struct Next<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L> {
+    ports: NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>,
 }
 
-impl<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>
-    Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>
+impl<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>
+    Next<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>
 where
     GW: Walks + Sync,
     GN: WorkoutNormaliser + Sync,
     CW: Walks + Sync,
     CN: WorkoutNormaliser + Sync,
-    NR: NormalisedGymSessionReader + Sync,
-    CS: CanonicalGymSessionStore + Sync,
+    CL: Canonicalising + Sync,
     K: ClassSource + Sync,
     HC: HolidayCalendar + Sync,
     D: DiaryStore + DiaryAuthor + Sync,
@@ -616,9 +654,7 @@ where
         clippy::type_complexity,
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
-    pub const fn new(
-        ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>,
-    ) -> Self {
+    pub const fn new(ports: NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>) -> Self {
         Self { ports }
     }
 
@@ -654,21 +690,30 @@ where
         // 1. Every source, before anything is judged.
         self.collect(&self.ports.gym_records, progress, &mut run)
             .await?;
-        // **The gym's canonical layer is rebuilt here, and that is the whole of
-        // #361.** Deriving a gym stream deletes it, and the standing read below
-        // inside that window once told the operator he had lost every week.
-        progress.started(&Step::Canonicalising);
-        let canonicalised =
-            crate::canonicalise::gym_sessions(&self.ports.normalised, &self.ports.canonical)
-                .await?;
+        // **Each canonical layer is rebuilt here, and for the gym that is the
+        // whole of #361.** Deriving a stream deletes its discipline's layer, and
+        // the standing read below inside that window once told the operator he
+        // had lost every week.
+        let step = Step::Canonicalising(Discipline::Gym);
+        progress.started(&step);
+        let canonicalised = self.ports.canonical.gym().await?;
         finish(
             progress,
             &mut run,
-            Step::Canonicalising,
+            step,
             Ok(Found::Canonical(canonicalised.written)),
         );
         self.collect(&self.ports.cycling_records, progress, &mut run)
             .await?;
+        let step = Step::Canonicalising(Discipline::Cycling);
+        progress.started(&step);
+        let canonicalised = self.ports.canonical.cycling().await?;
+        finish(
+            progress,
+            &mut run,
+            step,
+            Ok(Found::Canonical(canonicalised.written)),
+        );
         let (step, outcome) = self.refresh(progress).await;
         finish(progress, &mut run, step, outcome);
 

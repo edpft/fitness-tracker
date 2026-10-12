@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT ride AS \"key!: i64\",\n                   json_group_array(json_array(at_seconds, beats_per_minute)) AS \"rows!: String\"\n              FROM bike_plus_ride_heart_rate\n             GROUP BY ride\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "key!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_heart_rate",
+            "name": "ride"
+          }
+        }
+      },
+      {
+        "name": "rows!: String",
+        "ordinal": 1,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "6537f3fb3aaf77fd99099afd5a94c1acc9f53edca7a39fdaaf315deadf2be0f8"
+}

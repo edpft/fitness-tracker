@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT DISTINCT venue_reference AS \"reference!: String\",\n                            venue_called    AS \"called!: String\"\n              FROM bike_plus_ride\n             WHERE venue_reference IS NOT NULL\n               AND venue_called IS NOT NULL\n            ",
+  "query": "\n            SELECT DISTINCT venue_reference AS \"reference!: String\",\n                            venue_called    AS \"called!: String\"\n              FROM canonical_bike_plus_ride\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "bike_plus_ride",
+            "table": "canonical_bike_plus_ride",
             "name": "venue_reference"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "bike_plus_ride",
+            "table": "canonical_bike_plus_ride",
             "name": "venue_called"
           }
         }
@@ -30,9 +30,9 @@
       "Right": 0
     },
     "nullable": [
-      true,
-      true
+      false,
+      false
     ]
   },
-  "hash": "306a14496ec0252e615a4266e7ee2b1a906e191bf0af5215a80612a0729b4bca"
+  "hash": "3068b61d4ac79c1bff1141c79d219e0213db60d9e01b85d4b34b569a58f2eccc"
 }

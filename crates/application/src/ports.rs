@@ -23,8 +23,8 @@ use jiff::{
 use domain::analytical::Weighed;
 use domain::canonical::{Occurred, SessionCount};
 use domain::cycling::{
-    CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, PublishedProgramme,
-    RideVenue,
+    CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
+    Ftp, PublishedProgramme, RideVenue,
 };
 use domain::gym::{
     CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
@@ -637,6 +637,44 @@ pub trait CanonicalGymSessionStore {
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<CanonicalGymSession>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn count(&self) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
+}
+
+/// Every normalised cycling session the store holds, as the canonical layer
+/// reads it (#408).
+///
+/// **A projection, for [`NormalisedGymSessionReader`]'s reason**: each session
+/// comes back in the canonical shape with every field attributed to itself, and
+/// not as the normalised entity with its landing records and provenance, which
+/// the canonical layer would only drop again.
+pub trait NormalisedCyclingSessionReader {
+    /// Every normalised cycling session, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+}
+
+/// The canonical layer for cycling sessions: one entry per session ridden,
+/// whatever number of sources recorded it (§ II.4).
+///
+/// No stream and no run, for [`CanonicalGymSessionStore`]'s reasons.
+pub trait CanonicalCyclingSessionStore {
+    /// Replace the canonical layer entirely, in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if a session names a
+    /// normalised session the store does not hold.
+    fn replace(
+        &self,
+        sessions: Vec<CanonicalCyclingSession>,
+    ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 
     /// # Errors
     ///

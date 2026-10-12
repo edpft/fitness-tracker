@@ -268,8 +268,8 @@ pub fn roughly(takes: std::time::Duration) -> String {
     format!("{minutes} minutes")
 }
 
-pub fn canonicalising_started() {
-    println!("canonicalising gym sessions …");
+pub fn canonicalising_started(discipline: domain::schedule::Discipline) {
+    println!("canonicalising {} sessions …", discipline.as_str());
 }
 
 /// What the canonicalising read and what it wrote.
@@ -1026,7 +1026,9 @@ pub fn step(step: &application::next::Step) -> String {
     let name = match step {
         Step::Fetching(stream) => format!("Fetching {stream}"),
         Step::Normalising(stream) => format!("Normalising {stream}"),
-        Step::Canonicalising => "Canonicalising gym sessions".to_owned(),
+        Step::Canonicalising(discipline) => {
+            format!("Canonicalising {} sessions", discipline.as_str())
+        }
         // **The driving adapter knows which catalogue this build keeps**, as it
         // knows where rides are done.
         Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),
