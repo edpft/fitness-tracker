@@ -19,14 +19,24 @@
 
 use std::collections::BTreeMap;
 
-use application::SourceError;
+use application::{
+    PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead, SourceError,
+};
 use domain::{
     cycling::{CyclingSession, Interval, PublishedProgramme, Ride, RideVenue, ZoneProfile},
     measure::PositiveDuration,
+    provider::{ExternalProgramme, ProgrammeName, Provider},
     sequence::NonEmpty,
 };
 
-use super::{catalogue::ClassCatalogue, class::ClassSession, skeleton::Placement};
+use super::{
+    catalogue::ClassCatalogue,
+    class::ClassSession,
+    skeleton::{
+        BOOST_YOUR_BASE, BUILD_YOUR_POWER_ZONES, POWER_ZONE_TEST, Placement, peak_your_power_zones,
+        power_zone_test,
+    },
+};
 
 /// What a skeleton's classes are, once fetched: the classes at each
 /// `(microcycle, session)`, in the order they are placed.
@@ -148,4 +158,111 @@ pub fn session(
         NonEmpty::new(venues).map_err(|_| malformed(format!("{where_it_is} names no class")))?;
 
     Ok((CyclingSession::new(warm_up, ride, cool_down), venues))
+}
+
+/// Who publishes the cycling programmes this build reads.
+const PELOTON: &str = "Peloton";
+
+/// Peloton's names for the published programmes.
+const BASE: &str = "Boost Your Base";
+const BUILD: &str = "Build Your Power Zones";
+const PEAK: &str = "Peak Your Power Zones";
+
+/// Peloton, as the publisher of the cycling programmes a plan is built from.
+///
+/// **From the local catalogue** ([`ClassCatalogue`]), so a store that has been
+/// refreshed once reads every programme without contacting Peloton.
+#[derive(Debug, Clone, Copy)]
+pub struct PelotonProgrammes<'a> {
+    classes: ClassCatalogue<'a>,
+}
+
+impl<'a> PelotonProgrammes<'a> {
+    pub const fn new(classes: ClassCatalogue<'a>) -> Self {
+        Self { classes }
+    }
+}
+
+/// Peloton's name for a programme, and where its classes are placed.
+fn skeleton(which: PublishedCycling) -> (&'static str, Vec<Placement>) {
+    match which {
+        PublishedCycling::Base => (BASE, BOOST_YOUR_BASE.placements().to_vec()),
+        PublishedCycling::Build => (BUILD, BUILD_YOUR_POWER_ZONES.placements().to_vec()),
+        PublishedCycling::Peak => (PEAK, peak_your_power_zones()),
+        PublishedCycling::Test => (POWER_ZONE_TEST, power_zone_test()),
+    }
+}
+
+fn named(name: &str) -> Result<ExternalProgramme, SourceError> {
+    let malformed = |error: &dyn std::fmt::Display| SourceError::Malformed {
+        detail: error.to_string(),
+    };
+    Ok(ExternalProgramme::new(
+        Provider::try_from(PELOTON.to_owned()).map_err(|error| malformed(&error))?,
+        ProgrammeName::try_from(name.to_owned()).map_err(|error| malformed(&error))?,
+    ))
+}
+
+impl PublishedProgrammes for PelotonProgrammes<'_> {
+    async fn read(&self, which: PublishedCycling) -> Result<PublishedRead, SourceError> {
+        let (name, placements) = skeleton(which);
+        let fetched = fetch(self.classes, &placements).await?;
+        let cells = fetched
+            .iter()
+            .map(|(at, classes)| {
+                (
+                    *at,
+                    PublishedCell {
+                        ride: session(*at, classes),
+                        measures_ftp: classes.iter().any(|class| class.is_ftp_test),
+                    },
+                )
+            })
+            .collect();
+        Ok(PublishedRead {
+            from: named(name)?,
+            programme: programme(&fetched),
+            cells,
+        })
+    }
+
+    fn which(&self, programme: &ExternalProgramme) -> Option<PublishedCycling> {
+        identify(programme)
+    }
+}
+
+/// Which programme a provenance names, by the names Peloton gives them.
+fn identify(programme: &ExternalProgramme) -> Option<PublishedCycling> {
+    if programme.provider().as_str() != PELOTON {
+        return None;
+    }
+    match programme.name().as_str() {
+        BASE => Some(PublishedCycling::Base),
+        BUILD => Some(PublishedCycling::Build),
+        PEAK => Some(PublishedCycling::Peak),
+        POWER_ZONE_TEST => Some(PublishedCycling::Test),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Read and identified under one name**, so a mesocycle committed from a
+    /// programme is recognised as that programme when the next is chosen.
+    #[test]
+    fn every_programme_is_identified_by_the_name_it_is_read_under() {
+        for which in [
+            PublishedCycling::Base,
+            PublishedCycling::Build,
+            PublishedCycling::Peak,
+            PublishedCycling::Test,
+        ] {
+            let (name, placements) = skeleton(which);
+            assert!(!placements.is_empty(), "{name} places no class");
+            let from = named(name).expect("a programme name is valid");
+            assert_eq!(identify(&from), Some(which), "{name}");
+        }
+    }
 }

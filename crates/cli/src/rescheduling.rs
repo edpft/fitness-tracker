@@ -13,18 +13,15 @@ use application::{
 };
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use infrastructure::{
-    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteCyclingSessionLog, SqliteDiaryStore, SqliteGymMesocycleStore, SqlitePlanStore,
-    SqlitePool, SqlitePrescriptionDeliveryStore,
+    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingSessionLog,
+    SqliteDiaryStore, SqliteGymMesocycleStore, SqlitePlanStore, SqlitePool,
+    SqlitePrescriptionDeliveryStore,
 };
 
 use crate::{Failure, next};
 
 /// The gym's mesocycles, as the plan now stands.
 pub type GymMesocycles = Rescheduled<SqliteGymMesocycleStore, SqlitePlanStore>;
-
-/// Cycling's mesocycles, as the plan now stands.
-pub type CyclingMesocycles = Rescheduled<SqliteCyclingMesocycleStore, SqlitePlanStore>;
 
 /// Where the plan stands at a moment: every week since it began, and this one.
 ///
@@ -77,19 +74,6 @@ pub async fn reschedule(pool: &SqlitePool, zone: &OperatorZone) -> Result<Resche
 pub async fn gym(pool: &SqlitePool, zone: &OperatorZone) -> Result<GymMesocycles, Failure> {
     Ok(Rescheduled::new(
         SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
-        SqlitePlanStore::new(pool.clone(), zone.clone()),
-        reschedule(pool, zone).await?,
-    ))
-}
-
-/// Cycling's mesocycles, as the plan now stands.
-///
-/// # Errors
-///
-/// As [`reschedule`].
-pub async fn cycling(pool: &SqlitePool, zone: &OperatorZone) -> Result<CyclingMesocycles, Failure> {
-    Ok(Rescheduled::new(
-        SqliteCyclingMesocycleStore::new(pool.clone()),
         SqlitePlanStore::new(pool.clone(), zone.clone()),
         reschedule(pool, zone).await?,
     ))

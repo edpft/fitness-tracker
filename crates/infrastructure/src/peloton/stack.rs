@@ -320,3 +320,62 @@ struct UserStack {
 struct StackedClass {
     peloton_class_id: String,
 }
+
+/// Peloton, as where a cycling session is put to be ridden.
+///
+/// **The stack, and the classes the cool-down is chosen from.** The cool-down
+/// is the most recent five-minute one by the session's own instructor, which
+/// the authored programme does not carry — it stores where a ride is done, not
+/// who teaches it — so the last class is read back to find out.
+#[derive(Debug, Clone, Copy)]
+pub struct PelotonRideDestination<'a> {
+    classes: &'a super::PelotonClasses,
+    stack: &'a PelotonStack,
+}
+
+impl<'a> PelotonRideDestination<'a> {
+    pub const fn new(classes: &'a super::PelotonClasses, stack: &'a PelotonStack) -> Self {
+        Self { classes, stack }
+    }
+}
+
+impl application::RideDestination for PelotonRideDestination<'_> {
+    async fn holding(&self) -> Result<usize, SourceError> {
+        Ok(self.stack.view().await?.count())
+    }
+
+    async fn deliver(
+        &self,
+        rides: &domain::sequence::NonEmpty<domain::cycling::RideVenue>,
+    ) -> Result<application::RidesPlaced, SourceError> {
+        let replaced = self.stack.view().await?.count();
+
+        let last = rides.iter().last().map_or("", |venue| venue.reference());
+        let taught_by = self.classes.class(last).await?.instructor;
+        let cool_down = self
+            .classes
+            .cool_down_after(taught_by.as_ref().map(|who| who.id.as_str()))
+            .await?;
+
+        let mut stacked: Vec<String> = rides
+            .iter()
+            .map(|venue| venue.reference().to_owned())
+            .collect();
+        stacked.push(cool_down.id.clone());
+        let now = self.stack.set(&stacked).await?;
+
+        Ok(application::RidesPlaced {
+            replaced,
+            cool_down: domain::cycling::RideVenue::new(&cool_down.id, &cool_down.title).map_err(
+                |error| SourceError::Malformed {
+                    detail: format!("the cool-down could not be named: {error}"),
+                },
+            )?,
+            taught_by: taught_by.map(|who| who.name),
+            holds: now.count(),
+            // **A total of zero is Peloton's answer, not a failure.** It counts
+            // the FTP warm-up and test pair as nothing.
+            total: domain::measure::PositiveDuration::from_seconds(now.total_seconds).ok(),
+        })
+    }
+}

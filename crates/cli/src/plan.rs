@@ -29,19 +29,19 @@
 
 use std::path::Path;
 
-use application::{Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _};
+use application::{
+    Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _, PublishedCycling,
+    PublishedProgrammes as _, PublishedRead,
+    published::{self, BuildError},
+};
 use domain::{
-    cycling::{
-        Answer, CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, PlannedRide,
-        PublishedProgramme, SessionPosition,
-    },
+    cycling::{Answer, CyclingMesocycle},
     gym::exercise::RepsExercise,
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
     prescription::PrimaryPattern,
-    provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Discipline, Relative, SessionRole},
-    sequence::NonEmpty,
+    provider::{ExternalProgramme, ProgrammeName, Provider},
+    schedule::Discipline,
 };
 use infrastructure::{
     SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
@@ -49,16 +49,13 @@ use infrastructure::{
         auth::{PelotonAuth, PelotonCredentials},
         catalogue::ClassCatalogue,
         class::PelotonClasses,
-        provider::{self, Fetched},
+        provider::PelotonProgrammes,
         skeleton,
     },
 };
 use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit, wizard};
-
-/// Who publishes the cycling programmes this build reads.
-const PELOTON: &str = "Peloton";
 
 /// The same system, under the name the catalogue files it by.
 ///
@@ -107,37 +104,46 @@ const PROGRESSIONS: usize = 3;
 /// the report below widens it to index with.
 pub const SBS_MICROCYCLES: u32 = 4;
 
-/// One published programme, read once.
-pub struct Read {
-    name: &'static str,
-    published: ProgrammeName,
-    pub fetched: Fetched,
-    pub programme: PublishedProgramme,
-}
-
 /// One cycling mesocycle, named, with what it answers.
-pub struct Offered<'a> {
+struct Offered<'a> {
     name: String,
     own: usize,
-    pub answer: Option<Answer>,
-    from: &'a Read,
+    answer: Option<Answer>,
+    from: &'a PublishedRead,
+}
+
+/// Each mesocycle of a programme, named as the wizard lists it.
+fn offered(read: &PublishedRead, microcycles: usize, sessions: usize) -> Vec<Offered<'_>> {
+    published::mesocycles_of(read, microcycles, sessions)
+        .into_iter()
+        .map(|one| Offered {
+            name: format!("{} {}", read.from.name(), one.index + 1),
+            own: one.own,
+            answer: one.answer,
+            from: read,
+        })
+        .collect()
 }
 
 /// The pairings a cycling provider offers over three mesocycles.
 #[derive(Clone, Copy)]
 struct Pairing {
     label: &'static str,
-    programmes: [&'static str; 2],
+    /// The two programmes, as the wizard says them.
+    names: &'static str,
+    programmes: [PublishedCycling; 2],
 }
 
 const PAIRINGS: [Pairing; 2] = [
     Pairing {
         label: "Boost Your Base, then Build Your Power Zones",
-        programmes: ["Boost Your Base", "Build Your Power Zones"],
+        names: "Boost Your Base and Build Your Power Zones",
+        programmes: [PublishedCycling::Base, PublishedCycling::Build],
     },
     Pairing {
         label: "Build Your Power Zones, then Peak Your Power Zones",
-        programmes: ["Build Your Power Zones", "Peak Your Power Zones"],
+        names: "Build Your Power Zones and Peak Your Power Zones",
+        programmes: [PublishedCycling::Build, PublishedCycling::Peak],
     },
 ];
 
@@ -206,7 +212,7 @@ pub async fn generate(
         .held()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let programmes = pairing.programmes.join(" and ");
+    let programmes = pairing.names;
     if held.listed == 0 {
         println!(
             "\nthe class catalogue is empty, so {programmes} are read from Peloton. \
@@ -219,20 +225,21 @@ pub async fn generate(
         );
     }
 
+    let publisher = PelotonProgrammes::new(catalogue);
     let mut read = Vec::new();
-    for name in pairing.programmes {
-        read.push(fetch(catalogue, name).await?);
+    for which in pairing.programmes {
+        read.push(fetch(&publisher, which).await?);
     }
     // **The test programme is read whichever pairing is chosen**, because it is
     // a programme in its own right rather than a microcycle borrowed from one of
     // them. Every cycling block opens by measuring FTP.
-    let testing = fetch(catalogue, skeleton::POWER_ZONE_TEST).await?;
+    let testing = fetch(&publisher, PublishedCycling::Test).await?;
 
-    let mut offered = Vec::new();
-    for one in &read {
-        offered.extend(mesocycles_of(one, microcycles, sessions));
-    }
-    let test = test_microcycle(&testing, sessions);
+    let offered: Vec<Offered> = read
+        .iter()
+        .flat_map(|one| offered(one, microcycles, sessions))
+        .collect();
+    let test = published::test_microcycle(&testing, sessions);
 
     report(
         &offered,
@@ -394,95 +401,32 @@ fn access(credentials: &infrastructure::Credentials) -> Result<Access, Failure> 
     })
 }
 
-fn placements(name: &str) -> Result<Vec<skeleton::Placement>, Failure> {
-    match name {
-        "Boost Your Base" => Ok(skeleton::BOOST_YOUR_BASE.placements().to_vec()),
-        "Build Your Power Zones" => Ok(skeleton::BUILD_YOUR_POWER_ZONES.placements().to_vec()),
-        "Peak Your Power Zones" => Ok(skeleton::peak_your_power_zones()),
-        skeleton::POWER_ZONE_TEST => Ok(skeleton::power_zone_test()),
-        other => Err(Failure::message(
-            format!("this build holds no skeleton for {other:?}"),
-            exit::USAGE,
-        )),
-    }
-}
-
 /// Read one published programme: every class it places, and what it trains.
-pub async fn fetch(classes: ClassCatalogue<'_>, name: &'static str) -> Result<Read, Failure> {
-    let placements = placements(name)?;
-    let fetched = provider::fetch(classes, &placements)
+async fn fetch(
+    publisher: &PelotonProgrammes<'_>,
+    which: PublishedCycling,
+) -> Result<PublishedRead, Failure> {
+    publisher
+        .read(which)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
-    let programme = provider::programme(&fetched);
-    Ok(Read {
-        name,
-        published: ProgrammeName::try_from(name).map_err(|error| Failure::usage(&error))?,
-        fetched,
-        programme,
-    })
+        .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))
 }
 
-/// Split a programme and ask each mesocycle for the shape wanted.
-pub fn mesocycles_of(read: &Read, microcycles: usize, sessions: usize) -> Vec<Offered<'_>> {
-    read.programme
-        .mesocycles()
-        .into_iter()
-        .enumerate()
-        .map(|(at, mesocycle)| Offered {
-            name: format!("{} {}", read.name, at + 1),
-            own: mesocycle.len(),
-            answer: read
-                .programme
-                .answer(&mesocycle, microcycles, sessions)
-                .into_iter()
-                .next(),
-            from: read,
-        })
-        .collect()
-}
-
-/// Which of the test programme's sessions are ridden.
-///
-/// **The FTP test is taken, and the rest of the week fills up around it.** A
-/// test week that dropped the session measuring FTP would be a week of ordinary
-/// riding wearing the name.
-///
-/// The microcycle is the programme's own first and only one, so there is nothing
-/// to choose there — which is the point of it being a programme rather than a
-/// microcycle of Build.
-/// Whether any session ridden in this microcycle measures FTP.
-///
-/// **The class says so, not the programme.** Peloton marks the test rides
-/// themselves, which is what makes this answerable for a microcycle chosen out
-/// of the middle of a programme — Build's µ5 is a test week whether it is ridden
-/// as Build's fifth or as our fourth.
-pub fn measures(read: &Read, microcycle: u32, sessions: &[u32]) -> bool {
-    sessions.iter().any(|session| {
-        read.fetched
-            .get(&(microcycle, *session))
-            .is_some_and(|classes| classes.iter().any(|class| class.is_ftp_test))
-    })
-}
-
-pub fn test_microcycle(read: &Read, sessions: usize) -> Option<Vec<u32>> {
-    let number = read.programme.microcycles().first().copied()?;
-
-    let mut taken: Vec<u32> = read
-        .programme
-        .sessions()
-        .into_iter()
-        .filter(|session| measures(read, number, &[*session]))
-        .collect();
-    for session in read.programme.sessions() {
-        if taken.len() >= sessions {
-            break;
+/// A mesocycle of the programme read, or why it would not build.
+fn build(
+    start: Date,
+    read: &PublishedRead,
+    microcycles: &[u32],
+    sessions: &[u32],
+    riding_days: &[Weekday],
+) -> Result<CyclingMesocycle, Failure> {
+    published::build(start, read, microcycles, sessions, riding_days).map_err(|error| match error {
+        BuildError::TooFewDays { .. } => {
+            Failure::message(format!("{error}: fitness schedule add"), exit::USAGE)
         }
-        if !taken.contains(&session) {
-            taken.push(session);
-        }
-    }
-    taken.sort_unstable();
-    Some(taken)
+        BuildError::Source(_) => Failure::message(error.to_string(), exit::SOURCE),
+        BuildError::Unbuildable { .. } => Failure::usage(&error),
+    })
 }
 
 /// Write the plan: both programmes, and every mesocycle in them.
@@ -502,7 +446,7 @@ async fn author(
     provider: &GymProvider,
     lift: RepsExercise,
     riding_days: &[Weekday],
-    test: Option<(&Read, &[u32])>,
+    test: Option<(&PublishedRead, &[u32])>,
     taken: &[&Offered<'_>],
 ) -> Result<(), Failure> {
     println!();
@@ -653,119 +597,6 @@ fn week_after(date: Date, weeks: usize) -> Result<Date, Failure> {
         .map_err(|error| Failure::usage(&error))
 }
 
-/// Turn an answer into a programme the store can hold.
-///
-/// **Both axes are renumbered from one and both keep their provenance.** An
-/// answer of µ1-2-4-5 by sessions 1+3 authors four microcycles of two rides, and
-/// each says which published microcycle and which published session it came
-/// from. The operator rides a first and a second session in the week; that they
-/// are the published first and third is a fact about where they were taken from,
-/// not what to call them.
-///
-/// **A ride's role is read off its length, not off its published order.** The
-/// shorter of the week's rides is the higher-intensity one — that is what the
-/// pairing means (issue #177) — and it is what places it in the week: the
-/// harder, shorter slot rather than the longer one. Peloton puts the FTP test
-/// second in its test microcycle, which by published order would land it on
-/// the Sunday; it is the shortest ride of that week, so it goes to the
-/// Wednesday. The operator, 2026-09-19: *"it does make more sense for the
-/// cycling test to keep the shorter / harder cycling slot on the Wednesday"*.
-///
-/// **A tie goes to the earlier session.** Two rides of exactly equal length
-/// have nothing in them to tell apart, and the published order is the only
-/// thing left; it is a fallback rather than a rule, and the case has not
-/// arisen.
-pub fn build(
-    start: Date,
-    read: &Read,
-    microcycles: &[u32],
-    sessions: &[u32],
-    riding_days: &[Weekday],
-) -> Result<CyclingMesocycle, Failure> {
-    if riding_days.len() < sessions.len() {
-        return Err(Failure::message(
-            format!(
-                "the schedule gives cycling {} day(s) a week and this answer rides {} — \
-                 record the week the block is trained in first: fitness schedule add",
-                riding_days.len(),
-                sessions.len(),
-            ),
-            exit::USAGE,
-        ));
-    }
-
-    // This programme's own numbering: the first ride of the week is session one
-    // whichever published session it was taken from.
-    let positions = (1..=sessions.len())
-        .map(|ordinal| {
-            u8::try_from(ordinal)
-                .ok()
-                .and_then(|number| SessionPosition::new(number).ok())
-                .ok_or_else(|| Failure::message("more rides than a week can hold", exit::USAGE))
-        })
-        .collect::<Result<Vec<_>, Failure>>()?;
-
-    let mut weeks = Vec::with_capacity(microcycles.len());
-    for number in microcycles {
-        let mut read_rides = Vec::with_capacity(positions.len());
-        for (position, session) in positions.iter().zip(sessions) {
-            let classes = read.fetched.get(&(*number, *session)).ok_or_else(|| {
-                Failure::message(
-                    format!(
-                        "nothing was read for {} µ{number} session {session}",
-                        read.name
-                    ),
-                    exit::SOURCE,
-                )
-            })?;
-            let (ride, at) = provider::session((*number, *session), classes)
-                .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))?;
-            read_rides.push((*position, ride, at, *session));
-        }
-
-        // The shortest ride of the week is the higher-intensity one; the rest
-        // are the longer, easier ones. Settled after the sessions are chosen,
-        // because a role is relative to the sessions actually ridden.
-        //
-        // **A tie is legitimate rather than arbitrary** (the operator,
-        // 2026-09-20). The volume comparison admits equality, so two rides of
-        // one length satisfy the rule whichever way round the roles go; the
-        // position break below picks one and both are valid. What it cannot do
-        // is say which *kind* of class is the harder one — an assembled week
-        // states its roles instead of deriving them (#180).
-        let shortest = read_rides
-            .iter()
-            .min_by_key(|(position, ride, _, _)| (ride.total(), *position))
-            .map(|(position, _, _, _)| *position);
-
-        let mut rides = std::collections::BTreeMap::new();
-        for (position, ride, at, session) in read_rides {
-            let role = if Some(position) == shortest {
-                SessionRole::new(Relative::Higher, Relative::Lower)
-            } else {
-                SessionRole::new(Relative::Lower, Relative::Higher)
-            };
-            let at_published =
-                PublishedAt::new(*number, session).map_err(|error| Failure::usage(&error))?;
-            rides.insert(
-                position,
-                PlannedRide::provided(ride, at, at_published, role),
-            );
-        }
-        weeks.push(CyclingMicrocycle::new(rides).map_err(|error| Failure::usage(&error))?);
-    }
-
-    CyclingMesocycle::new(
-        CyclingProvenance::Provided(ExternalProgramme::new(
-            Provider::try_from(PELOTON.to_owned()).map_err(|error| Failure::usage(&error))?,
-            read.published.clone(),
-        )),
-        start,
-        NonEmpty::new(weeks).map_err(|error| Failure::usage(&error))?,
-    )
-    .map_err(|error| Failure::usage(&error))
-}
-
 fn report(
     offered: &[Offered],
     gym: &GymProvider,
@@ -840,7 +671,7 @@ fn report(
             // theirs — and this printed the wrong one until 2026-09-07. What
             // they answer is the table above, which still names them.
             let ridden = answer.microcycles.get(index).copied().unwrap_or_default();
-            let riding = if measures(one.from, ridden, &answer.sessions) {
+            let riding = if published::measures(one.from, ridden, &answer.sessions) {
                 format!("{} µ{within} — the FTP test", one.name)
             } else {
                 format!("{} µ{within}", one.name)

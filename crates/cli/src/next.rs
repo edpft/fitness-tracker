@@ -1,48 +1,53 @@
-//! `fitness next` — where the microcycle is up to, and the session to deliver.
+//! `fitness next` — collect everything, say where the plan stands, and deliver
+//! what is next.
 //!
-//! The operator, 2026-09-19: *"This command is all about what's next, based on
-//! what has happened and what should happen."* (#137)
-//!
-//! **It reports from the first session of the microcycle, not from the slot
-//! before today** (#185). His first run of the installed build checked only the
-//! previous slot, so it collected the gym and not the bike and could not say
-//! where the week was up to: *"We should be checking from the last performed
-//! session, not the last prescribed session"*, and then *"Maybe we should
-//! always start from the beginning of the microcycle."*
-//!
-//! **Every source is collected first, and unconditionally.** Deciding what to
-//! collect from what the store already holds is how the bike went unasked: the
-//! store said nothing was outstanding because nothing had been prescribed. So
-//! each discipline's record is collected and derived before anything is
-//! judged. An unreachable source is reported and stepped past (§ 36).
-//!
-//! **Then each session of the microcycle gets a state**, and the first one
-//! that can still be performed is the one delivered — again, if it already
-//! was (#390). Recording why a session was
-//! missed is #178's, which is done; moving anything because of it is #177's.
+//! **The use case is `application::next`** (#397), so a browser can offer the
+//! same run. What is left here is the transport's: reading the clock and the
+//! flags, composing the use case from this build's adapters, printing progress
+//! as each step runs, and rendering the report.
 
-use std::path::Path;
+use std::{
+    io::Write as _,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use application::{DiaryAuthor as _, DiaryStore as _};
+use application::{
+    commit::{CommitPorts, Committing},
+    microcycle::{Microcycle, MicrocyclePorts},
+    next::{
+        CyclingPorts, Done, GymPorts, Next, NextError, NextPorts, NoAccess, Prescribed, Progress,
+        Step, Undelivered, WhatIsNext,
+    },
+};
 use domain::{
     normalised::OperatorZone,
-    schedule::{DayPart, Discipline, PartOfDay, ScheduledSlot, Skip},
+    schedule::{DayPart, Discipline, PartOfDay},
 };
-use infrastructure::{SqliteDiaryStore, connect};
+use infrastructure::{
+    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingSessionLog,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteNormalisedGymSessionReader, SqlitePelotonClassStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    SqliteRiddenVenues, connect,
+    peloton::{
+        PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
+        catalogue::ClassCatalogue,
+    },
+};
 
 use crate::{
-    Failure, catalogue, committing, config, cycling, exit, gym, holidays, output, plan,
-    rescheduling, wiring, wiring::Command,
+    Failure, catalogue, config, cycling, exit, holidays, output, plan, prescribing, wiring,
 };
 
-/// Collect everything, report the microcycle, and deliver what is next.
+/// Collect everything, report where the plan stands, and deliver what is next.
 ///
 /// # Errors
 ///
-/// [`Failure`] if the store is unavailable, if no week has been recorded, or
-/// if the next discipline's own `next` fails. A source that cannot be reached
-/// while collecting is reported and stepped past (§ 36): the record already
-/// landed still answers, and the next session is still worth delivering.
+/// [`Failure`] if the store is unavailable, if no week has been recorded, if a
+/// skip cannot be taken, or if the next session could not be prescribed or
+/// delivered. A source that cannot be reached while collecting is a failed step
+/// and nothing more (§ 36): the record already landed still answers.
 pub async fn next(
     database: &Path,
     zone: &OperatorZone,
@@ -52,120 +57,235 @@ pub async fn next(
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
-
     let pool = connect(database).await?;
-    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    if diary.patterns().is_empty() {
-        return Err(Failure::message(
-            "no week has been recorded, so nothing says what is next. \
-             Record one first: fitness schedule add",
-            exit::USAGE,
-        ));
-    }
-    pool.close().await;
 
-    // 1. Every source, before anything is judged.
-    for discipline in [Discipline::Gym, Discipline::Cycling] {
-        collect(discipline, database, zone, credentials).await?;
-    }
-    println!();
-
-    // 2. The next concurrent mesocycle, if the one before it has ended (#222).
-    let pool = connect(database).await?;
-    if let Some(due) = committing::due(&pool, zone, now).await? {
-        match committing::commit(&pool, zone, &due, credentials).await {
-            Ok(()) => output::committed(&due),
-            Err(failure) => output::not_committed(&due, &failure.message),
-        }
-    }
-
-    // 3. Where the plan stands: every week since it began, and this one.
-    let mut standing = rescheduling::standing(&pool, zone, now).await?;
-    if let Some(reason) = skip {
-        skipping(&pool, &standing, now, reason).await?;
-        standing = rescheduling::standing(&pool, zone, now).await?;
-    }
-    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    pool.close().await;
-
-    let holidays = holidays::read().await;
-    output::macrocycle(
-        now.date,
-        holidays.as_ref().map_err(Failure::message_text),
-        standing.mesocycle,
-    );
-    output::rescheduled(&standing.weeks, &standing.reruns);
-
-    let sessions = &standing.sessions;
-    if sessions.is_empty() {
-        // **Two empty answers, and they are different facts.** A week the
-        // diary holds nothing for is a week off; a week it holds slots for
-        // that no plan covers is a plan to author.
-        let monday = standing
-            .commencing
-            .unwrap_or_else(|| domain::planner::commencing(now.date));
-        let has_slots = (0..7)
-            .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
-            .any(|date| !diary.ordinary_slots_of(date).is_empty());
-        if has_slots {
-            output::no_plan_covers(monday);
-        } else {
-            output::no_next_slot(now.date);
-        }
-        return Ok(());
-    }
-    output::microcycle(sessions);
-    println!();
-
-    // 4. The first that can still be performed, prescribed or not, which is
-    //    the one delivered (#390).
-    let Some(next) = standing.current() else {
-        let after = sessions
-            .last()
-            .and_then(|last| diary.first_ordinary_after(last.slot.date));
-        output::microcycle_complete(after);
-        return Ok(());
+    // **This build collects the gym from Hevy and cycling from Peloton**, and
+    // the catalogue says so: a second source for either is an entry there and
+    // an arm in `wiring`.
+    let no_access = |failure: Failure| NoAccess {
+        detail: failure.message_text().to_owned(),
     };
+    let access = |discipline| -> Result<_, Failure> {
+        Ok(
+            crate::source_access(known(discipline)?.collects(), None, credentials)
+                .map_err(no_access),
+        )
+    };
+    let gym_records =
+        wiring::hevy_records(access(Discipline::Gym)?, database, zone.clone()).await?;
+    let cycling_records =
+        wiring::peloton_records(access(Discipline::Cycling)?, database, zone.clone()).await?;
 
-    output::next_slot(next);
+    // **A credential that is absent costs what needs it, and nothing else.**
+    // The catalogue answers choosing a class and building a mesocycle without
+    // Peloton; refreshing it and delivering to the stack are what it costs.
+    let peloton = plan::peloton(credentials);
+    let stored = SqlitePelotonClassStore::new(pool.clone());
+    let classes = peloton.as_ref().ok().map(|(classes, _)| classes);
+    let catalogue = ClassCatalogue::over(&stored, classes);
+    let unreachable = |failure: &Failure| NoAccess {
+        detail: failure.message_text().to_owned(),
+    };
+    let class_source = peloton
+        .as_ref()
+        .map(|(classes, _)| PelotonClassSource::new(classes, &stored))
+        .map_err(unreachable);
+    let ride_destination = peloton
+        .as_ref()
+        .map(|(classes, stack)| PelotonRideDestination::new(classes, stack))
+        .map_err(unreachable);
+    let gym_destination =
+        prescribing::hevy_routines(known(Discipline::Gym)?.delivers_to(), credentials)
+            .map_err(no_access);
+
+    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+    let parameters = SqliteGenerationParameterStore::new(pool.clone());
+    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    let next = Next::new(NextPorts {
+        gym_records,
+        cycling_records,
+        normalised: SqliteNormalisedGymSessionReader::new(pool.clone()),
+        canonical: SqliteCanonicalGymSessionStore::new(pool.clone()),
+        classes: class_source,
+        holidays: holidays::Calendars,
+        diary: SqliteDiaryStore::new(pool.clone()),
+        plans: plans.clone(),
+        microcycle: Microcycle::new(
+            MicrocyclePorts {
+                diary: SqliteDiaryStore::new(pool.clone()),
+                plans: plans.clone(),
+                gym_deliveries: deliveries.clone(),
+                cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
+                cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
+            },
+            destination(Discipline::Gym)?,
+            destination(Discipline::Cycling)?,
+        ),
+        committing: Committing::new(
+            CommitPorts {
+                plans: plans.clone(),
+                parameters: parameters.clone(),
+                holding: PelotonHoldingRides::new(catalogue),
+                ridden: SqliteRiddenVenues::new(pool.clone()),
+                published: PelotonProgrammes::new(catalogue),
+            },
+            zone.clone(),
+        ),
+        gym: GymPorts {
+            history: SqliteExerciseHistory::new(pool.clone()),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+            plans,
+            parameters,
+            prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+            lifecycle: deliveries.clone(),
+            deliveries,
+            destination: gym_destination,
+        },
+        cycling: CyclingPorts {
+            riding: cycling::riding(&pool, zone, catalogue)?,
+            destination: ride_destination,
+        },
+    });
+
+    let report = next
+        .run(now, skip, &Terminal::default())
+        .await
+        .map_err(refused)?;
     println!();
-    run(next.slot, database, zone, credentials).await
+    output::plan_standing(&report.plan);
+    println!();
+    render(&report.next)
 }
 
-/// Take what is left of the current session's window (#391).
+/// Why the run could not answer at all, as the operator is told it.
+fn refused(error: NextError) -> Failure {
+    match error {
+        NextError::NoWeek => Failure::message(
+            format!("{error}. Record one first: fitness schedule add"),
+            exit::USAGE,
+        ),
+        NextError::Store(error) => Failure::from(error),
+        NextError::Normalisation(error) => Failure::from(error),
+        NextError::Skip(_) => Failure::usage(&error),
+    }
+}
+
+/// What is next, and the failure that should set the exit code, if any.
 ///
-/// **From now, not from the slot.** The operator, 2026-10-10: on a Monday
-/// afternoon with the gym that evening and a ride on the Wednesday evening, a
-/// skip takes every part from the Monday afternoon to the Wednesday afternoon.
-/// The standing is read again afterwards, so the session after it is the one
-/// delivered in the same run.
-async fn skipping(
-    pool: &infrastructure::SqlitePool,
-    standing: &application::microcycle::Standing,
-    now: DayPart,
-    reason: &str,
-) -> Result<(), Failure> {
-    let Some(current) = standing.current() else {
-        return Err(Failure::message(
-            "nothing in this microcycle can still be performed, so there is nothing to skip",
-            exit::USAGE,
-        ));
+/// **A session that could not be prescribed or delivered fails the run**, after
+/// it has been reported: the operator reading the terminal has the reason
+/// already, and the exit code is for whatever started the run. An absent
+/// credential is not a failure (§ 36) — it is said, and the run succeeds.
+fn render(next: &WhatIsNext) -> Result<(), Failure> {
+    let (session, prescribed) = match next {
+        WhatIsNext::Session {
+            session,
+            prescribed,
+        } => (session, prescribed),
+        WhatIsNext::MicrocycleComplete { after } => {
+            output::microcycle_complete(*after);
+            return Ok(());
+        }
+        WhatIsNext::NoPlanCovers { week_of } => {
+            output::no_plan_covers(*week_of);
+            return Ok(());
+        }
+        WhatIsNext::NoSlot { from } => {
+            output::no_next_slot(*from);
+            return Ok(());
+        }
     };
-    let Some(until) = current.closes else {
-        return Err(Failure::message(
-            format!(
-                "nothing is slotted after {} {}, so its window has no end to skip to",
-                current.slot.discipline, current.number,
-            ),
-            exit::USAGE,
-        ));
-    };
-    let skip = Skip::new(now, until, reason).map_err(|error| Failure::usage(&error))?;
-    SqliteDiaryStore::new(pool.clone())
-        .record_skip(&skip)
-        .await?;
-    output::skipped(current, &skip);
-    Ok(())
+    output::next_session(session);
+
+    match prescribed {
+        Prescribed::Gym(Err(error)) => {
+            output::not_prescribed(error);
+            Err(Failure::message(error.to_string(), exit::USAGE))
+        }
+        Prescribed::Gym(Ok(application::next::GymPrescribed::NothingPlanned { from, last })) => {
+            output::nothing_planned(*from, last.as_ref());
+            Ok(())
+        }
+        Prescribed::Gym(Ok(application::next::GymPrescribed::Issued { issued, delivery })) => {
+            output::prescribed_session(issued);
+            println!();
+            match delivery {
+                Ok(delivered) => {
+                    output::delivery(delivered);
+                    Ok(())
+                }
+                Err(Undelivered::NoAccess(why)) => {
+                    output::not_delivered(&why.detail);
+                    Ok(())
+                }
+                Err(Undelivered::Failed(error)) => {
+                    output::not_delivered(&error.to_string());
+                    Err(Failure::message(error.to_string(), exit::SOURCE))
+                }
+            }
+        }
+        Prescribed::Cycling(Err(error)) => {
+            output::not_prescribed(error);
+            Err(cycling::riding_failure(session.slot.date, error))
+        }
+        Prescribed::Cycling(Ok(prescribed)) => {
+            println!("  {}", cycling::heading(&prescribed.ride));
+            println!();
+            cycling::session(&prescribed.ride);
+            println!();
+            match &prescribed.delivery {
+                Ok(placed) => {
+                    cycling::delivered(&prescribed.ride, placed);
+                    Ok(())
+                }
+                Err(Undelivered::NoAccess(why)) => {
+                    output::not_delivered(&why.detail);
+                    Ok(())
+                }
+                Err(Undelivered::Failed(error)) => {
+                    output::not_delivered(&error.to_string());
+                    Err(Failure::message(error.to_string(), exit::SOURCE))
+                }
+            }
+        }
+    }
+}
+
+/// Progress, a line per step, printed as each one runs.
+///
+/// **The step's name is printed when it starts**, so a long first walk or the
+/// first catalogue refresh says what it is doing rather than looking hung, and
+/// its outcome finishes the line.
+#[derive(Default)]
+struct Terminal {
+    /// Whether a step's name is on the current line, waiting for its outcome.
+    open: AtomicBool,
+}
+
+impl Progress for Terminal {
+    fn started(&self, step: &Step) {
+        print!("{}", output::step(step));
+        let _ = std::io::stdout().flush();
+        self.open.store(true, Ordering::Relaxed);
+    }
+
+    fn estimated(&self, _step: &Step, outstanding: u64, takes: std::time::Duration) {
+        if output::worth_announcing(takes) {
+            println!(
+                "{outstanding} classes to read, about {}",
+                output::roughly(takes)
+            );
+            self.open.store(false, Ordering::Relaxed);
+        }
+    }
+
+    fn finished(&self, done: &Done) {
+        if !self.open.swap(false, Ordering::Relaxed) {
+            print!("{}", output::step(&done.step));
+        }
+        println!("{}", output::outcome(done));
+    }
 }
 
 /// Where the operator's day has got to.
@@ -194,138 +314,6 @@ pub fn destination(discipline: Discipline) -> Result<application::DestinationNam
     let known = known(discipline)?;
     application::DestinationName::try_from(known.delivers_to().name().to_owned())
         .map_err(|error| Failure::usage(&error))
-}
-
-/// Collect and derive one discipline's record, into the shape the rest of this
-/// command reads it in.
-///
-/// **An unreachable source is reported and stepped past**, as `gym strength`
-/// does: what is already landed still answers, just less recently. Deriving
-/// is not stepped past, because it contacts nothing.
-///
-/// **The gym's canonical layer is rebuilt here, and that is the whole of
-/// #361.** Deriving a gym stream deletes the layer — every canonical field
-/// names the `gym_session` row it came from, and the derivation rewrites those
-/// rows under new ids — so between step 1 and `gym next`'s own rebuild there
-/// was a window in which the operator's entire gym history read as nothing.
-/// Step 3 below reads the standing inside that window, and on 4 October 2026 it
-/// told him the gym had lost its essential session in every week of the plan,
-/// including two he had trained. Rebuilding it as part of collecting is what
-/// makes "each discipline's record is collected and derived before anything is
-/// judged" true rather than nearly true.
-async fn collect(
-    discipline: Discipline,
-    database: &Path,
-    zone: &OperatorZone,
-    credentials: &infrastructure::Credentials,
-) -> Result<(), Failure> {
-    let known = known(discipline)?.collects();
-    let stream = known
-        .landing_stream()
-        .map_err(|error| Failure::usage(&error))?;
-
-    output::run_started(&stream);
-    let collected = match crate::source_access(known, None, credentials) {
-        Ok(access) => wiring::run(Command::Extract(access), known, database)
-            .await
-            .map_err(Failure::from),
-        Err(failure) => Err(failure),
-    };
-    match collected {
-        Ok(outcome) => gym::report(&stream, outcome),
-        Err(failure) => output::not_collected(&stream, failure.message_text()),
-    }
-
-    output::derivation_started(&stream);
-    let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
-    gym::report(&stream, derived);
-
-    if discipline == Discipline::Gym {
-        crate::canonicalise::gym(database).await?;
-    }
-    if discipline == Discipline::Cycling {
-        refresh_classes(database, credentials).await?;
-    }
-    Ok(())
-}
-
-/// Keep the local class catalogue current (#246).
-///
-/// **A side effect of collecting cycling's record, and not a command.** The
-/// operator, 2026-10-05: *"I don't want a separate command to do this, it
-/// should happen as a side effect of `fitness next`"*. This is where it
-/// belongs: cycling's record is already being collected, the Peloton
-/// credential is already resolved, and an unreachable source is already
-/// reported and stepped past.
-///
-/// **Stepped past, never fatal.** A catalogue one run out of date still answers
-/// every question `plan` and `hold` ask of it, so a Peloton that will not talk
-/// costs this week's new classes and nothing else.
-///
-/// **The walk and the read are two calls, and the gap between them is where the
-/// warning goes** (#369). The first refresh against an empty catalogue reads
-/// about a thousand class details, which is ten minutes; printing how long
-/// before starting is the difference between a run that is working and a run
-/// that looks hung. Every refresh after it has nothing to read and prints
-/// nothing extra.
-async fn refresh_classes(
-    database: &Path,
-    credentials: &infrastructure::Credentials,
-) -> Result<(), Failure> {
-    output::class_catalogue_started();
-    let pool = connect(database).await?;
-    let store = infrastructure::SqlitePelotonClassStore::new(pool.clone());
-    match plan::peloton(credentials) {
-        Ok((classes, _)) => match infrastructure::peloton::walk(&classes, &store).await {
-            Ok(walked) => {
-                output::class_catalogue_walked(&walked);
-                match infrastructure::peloton::read_details(&classes, &store).await {
-                    Ok(read) => output::class_catalogue(&walked, &read),
-                    Err(error) => output::class_catalogue_not_read(&error.to_string()),
-                }
-            }
-            Err(error) => output::class_catalogue_not_refreshed(&error.to_string()),
-        },
-        Err(failure) => output::class_catalogue_not_refreshed(failure.message_text()),
-    }
-    pool.close().await;
-    Ok(())
-}
-
-/// The next slot's discipline's own `next`, from the slot's date.
-///
-/// **An arm per discipline**, because the two take different inputs: the gym
-/// collects, derives, prescribes and delivers, and cycling reads its authored
-/// programme and delivers. A third discipline is an entry and an arm.
-async fn run(
-    next: ScheduledSlot,
-    database: &Path,
-    zone: &OperatorZone,
-    credentials: &infrastructure::Credentials,
-) -> Result<(), Failure> {
-    let discipline = known(next.discipline)?;
-    match next.discipline {
-        Discipline::Gym => {
-            let access = crate::source_access(discipline.collects(), None, credentials)?;
-            gym::next(
-                discipline,
-                database,
-                zone,
-                Some(&next.date.to_string()),
-                access,
-                credentials,
-            )
-            .await
-        }
-        // A credential that is absent costs the delivery and not the answer, as
-        // it does for `cycling next` — and says so, rather than printing a
-        // session that looks delivered (#184).
-        Discipline::Cycling => {
-            let peloton = plan::peloton(credentials);
-            let to = crate::to_peloton(&peloton);
-            cycling::next(database, zone, next.date, None, to).await
-        }
-    }
 }
 
 fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, Failure> {

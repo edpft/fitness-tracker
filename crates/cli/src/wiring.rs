@@ -18,6 +18,7 @@ use application::{
     ResumptionPointResetter, ResumptionPointStore, RunSummary, StatusError, StreamStatus,
     WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
+    next::{NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
@@ -36,7 +37,7 @@ use infrastructure::{
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
     SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
     SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog,
-    SqliteOvernightHrvStore, SqliteRefusalStore, SqliteResumptionPointStore,
+    SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore, SqliteResumptionPointStore,
     SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, connect, garmin,
@@ -224,24 +225,7 @@ async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, Wir
             collect_rides(access, landing, samples_landing, resumption, runs, database).await
         }
         Command::Normalise(zone) => {
-            // No lock, as on the gym side: a derivation reads raw and writes
-            // only its own tables.
-            let normalisation = Normalisation::new(
-                NormalisationPorts {
-                    raw: PelotonSessionAccountReader::new(pool.clone())?,
-                    translator: PelotonSessionTranslator,
-                    workouts: SqliteCyclingSessionStore::new(pool.clone())?,
-                    refusals: SqliteRefusalStore::new(
-                        pool.clone(),
-                        PelotonRideLandingStore::STREAM,
-                    )?,
-                    runs: SqliteNormalisationRunLog::new(pool),
-                    clock: SystemClock,
-                },
-                zone,
-            );
-
-            let summary = normalisation.normalise().await?;
+            let summary = peloton_normalisation(pool, zone)?.normalise().await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -331,6 +315,30 @@ async fn collect_rides(
     runs: SqliteExtractionRunLog,
     database: &Path,
 ) -> Result<Outcome, WiringError> {
+    let (rides, graphs) =
+        peloton_walks(access, landing, samples_landing, resumption, runs, database)?;
+    let ridden = walk(rides.stream, rides.extraction).await;
+    let sampled = walk(graphs.stream, graphs.extraction).await;
+    Ok(Outcome::ExtractedEach(vec![ridden, sampled]))
+}
+
+/// Peloton's two walks, the list first: the graph walk enumerates rides itself,
+/// so running it second means the graphs it fetches are for rides this same
+/// run has just landed.
+fn peloton_walks(
+    access: SourceAccess,
+    landing: PelotonRideLandingStore,
+    samples_landing: PelotonRideSampleLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<
+    (
+        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+    ),
+    WiringError,
+> {
     let SourceAccess::EmailPassword {
         base_url,
         auth_base_url,
@@ -347,32 +355,93 @@ async fn collect_rides(
     };
 
     let credentials = PelotonCredentials::new(email, password);
-    let rides_stream = landing.stream().clone();
-    let rides = Extraction::new(ExtractionPorts {
-        source: PelotonWorkouts::new(
-            base_url.clone(),
-            peloton_auth(auth_base_url.clone(), credentials.clone()),
+    let rides = application::next::Walk {
+        stream: landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: PelotonWorkouts::new(
+                base_url.clone(),
+                peloton_auth(auth_base_url.clone(), credentials.clone()),
+            ),
+            landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    };
+    let graphs = application::next::Walk {
+        stream: samples_landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: PelotonWorkoutSamples::new(base_url, peloton_auth(auth_base_url, credentials)),
+            landing: samples_landing,
+            resumption,
+            runs,
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    };
+    Ok((rides, graphs))
+}
+
+/// Peloton's sessions, derived from both walks.
+///
+/// No lock, as on the gym side: a derivation reads raw and writes only its own
+/// tables.
+fn peloton_normalisation(
+    pool: SqlitePool,
+    zone: OperatorZone,
+) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+    Ok(Normalisation::new(
+        NormalisationPorts {
+            raw: PelotonSessionAccountReader::new(pool.clone())?,
+            translator: PelotonSessionTranslator,
+            workouts: SqliteCyclingSessionStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
+            runs: SqliteNormalisationRunLog::new(pool),
+            clock: SystemClock,
+        },
+        zone,
+    ))
+}
+
+/// Peloton's rides as `next` collects them: both walks, then the derivation.
+///
+/// # Errors
+///
+/// [`WiringError`] if the store is unavailable. A login that is absent or of
+/// the wrong kind is [`NoAccess`], which `next` reports and steps past.
+pub async fn peloton_records(
+    access: Result<SourceAccess, NoAccess>,
+    database: &Path,
+    zone: OperatorZone,
+) -> Result<
+    Records<
+        (
+            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
         ),
-        landing,
-        resumption: resumption.clone(),
-        runs: runs.clone(),
-        lock: FileRunLock::beside(database),
-        clock: SystemClock,
-    });
-    let ridden = walk(rides_stream, rides).await;
-
-    let samples_stream = samples_landing.stream().clone();
-    let graphs = Extraction::new(ExtractionPorts {
-        source: PelotonWorkoutSamples::new(base_url, peloton_auth(auth_base_url, credentials)),
-        landing: samples_landing,
-        resumption,
-        runs,
-        lock: FileRunLock::beside(database),
-        clock: SystemClock,
-    });
-    let sampled = walk(samples_stream, graphs).await;
-
-    Ok(Outcome::ExtractedEach(vec![ridden, sampled]))
+        impl WorkoutNormaliser + Sync + use<>,
+    >,
+    WiringError,
+> {
+    let pool = connect(database).await?;
+    let entry = LandingStream::try_from(PelotonRideLandingStore::STREAM)?;
+    let walks = match access {
+        Err(why) => Err(why),
+        Ok(access) => accessible(peloton_walks(
+            access,
+            PelotonRideLandingStore::new(pool.clone())?,
+            PelotonRideSampleLandingStore::new(pool.clone())?,
+            SqliteResumptionPointStore::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool.clone()),
+            database,
+        ))?,
+    };
+    Ok(Records {
+        entry,
+        walks,
+        normaliser: peloton_normalisation(pool, zone)?,
+    })
 }
 
 /// Garmin's overnight HRV, landed and derived into nights.
@@ -803,6 +872,115 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
     }
 }
 
+/// Hevy's workout events, as one walk.
+fn hevy_walk(
+    access: SourceAccess,
+    landing: HevyWorkoutLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
+    let SourceAccess::ApiKey {
+        base_url, api_key, ..
+    } = access
+    else {
+        return Err(WiringError::WrongCredential {
+            stream: HevyWorkoutLandingStore::STREAM.to_owned(),
+            wanted: "a key",
+            given: "something else",
+        });
+    };
+    Ok(application::next::Walk {
+        stream: landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: HevyWorkoutEvents::new(base_url, api_key),
+            landing,
+            resumption,
+            runs,
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    })
+}
+
+/// Hevy's sessions, derived from what raw holds.
+///
+/// No lock. A derivation reads raw and writes only its own tables, so it
+/// neither takes the extraction lock nor advances the resumption point — the
+/// two commands can run at once.
+///
+/// The overlay is read here, as the zone is, and handed to the translator
+/// already resolved: § II.2 applies a correction while the layer is rebuilt,
+/// and this is that moment. A store that holds none yields an empty overlay and
+/// the derivation is the one it always was.
+async fn hevy_normalisation(
+    pool: SqlitePool,
+    zone: OperatorZone,
+) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+    let overlay = SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
+        .overlay()
+        .await?;
+    Ok(Normalisation::new(
+        NormalisationPorts {
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator::correcting(overlay),
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
+            runs: SqliteNormalisationRunLog::new(pool),
+            clock: SystemClock,
+        },
+        zone,
+    ))
+}
+
+/// Hevy's workouts as `next` collects them: one walk, then the derivation.
+///
+/// # Errors
+///
+/// [`WiringError`] if the store is unavailable. A key that is absent or of the
+/// wrong kind is [`NoAccess`], which `next` reports and steps past.
+pub async fn hevy_records(
+    access: Result<SourceAccess, NoAccess>,
+    database: &Path,
+    zone: OperatorZone,
+) -> Result<
+    Records<
+        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+        impl WorkoutNormaliser + Sync + use<>,
+    >,
+    WiringError,
+> {
+    let pool = connect(database).await?;
+    let entry = LandingStream::try_from(HevyWorkoutLandingStore::STREAM)?;
+    let walks = match access {
+        Err(why) => Err(why),
+        Ok(access) => accessible(hevy_walk(
+            access,
+            HevyWorkoutLandingStore::new(pool.clone())?,
+            SqliteResumptionPointStore::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool.clone()),
+            database,
+        ))?,
+    };
+    Ok(Records {
+        entry,
+        walks,
+        normaliser: hevy_normalisation(pool, zone).await?,
+    })
+}
+
+/// A credential of the wrong kind is no access, like an absent one; anything
+/// else is a failure to build the walks at all.
+fn accessible<W>(built: Result<W, WiringError>) -> Result<Result<W, NoAccess>, WiringError> {
+    match built {
+        Ok(walks) => Ok(Ok(walks)),
+        Err(error @ WiringError::WrongCredential { .. }) => Ok(Err(NoAccess {
+            detail: error.to_string(),
+        })),
+        Err(other) => Err(other),
+    }
+}
+
 /// Hevy's workout events feed, landed into the table shaped for it.
 async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
@@ -815,59 +993,14 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             stream: HevyWorkoutLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let SourceAccess::ApiKey {
-                base_url, api_key, ..
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: HevyWorkoutLandingStore::STREAM.to_owned(),
-                    wanted: "a key",
-                    given: "something else",
-                });
-            };
-
-            let extraction = Extraction::new(ExtractionPorts {
-                source: HevyWorkoutEvents::new(base_url, api_key),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-
-            let summary = extraction.extract().await?;
+            let summary = hevy_walk(access, landing, resumption, runs, database)?
+                .extraction
+                .extract()
+                .await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
         Command::Normalise(zone) => {
-            // No lock. A derivation reads raw and writes only its own tables,
-            // so it neither takes the extraction lock nor advances the
-            // resumption point — the two commands can run at once.
-            // The overlay is read here, as the zone is, and handed to the
-            // translator already resolved: § II.2 applies a correction while
-            // the layer is rebuilt, and this is that moment. A store that
-            // holds none yields an empty overlay and the derivation is the
-            // one it always was.
-            let overlay =
-                SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
-                    .overlay()
-                    .await?;
-
-            let normalisation = Normalisation::new(
-                NormalisationPorts {
-                    raw: HevySessionAccountReader::new(pool.clone())?,
-                    translator: HevySessionTranslator::correcting(overlay),
-                    workouts: SqliteGymSessionStore::new(pool.clone())?,
-                    refusals: SqliteRefusalStore::new(
-                        pool.clone(),
-                        HevyWorkoutLandingStore::STREAM,
-                    )?,
-                    runs: SqliteNormalisationRunLog::new(pool),
-                    clock: SystemClock,
-                },
-                zone,
-            );
-
-            let summary = normalisation.normalise().await?;
+            let summary = hevy_normalisation(pool, zone).await?.normalise().await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {

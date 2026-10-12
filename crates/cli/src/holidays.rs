@@ -4,7 +4,7 @@
 //! school and by the government, so this asks them each time and stores
 //! nothing. During either, the ordinary week cannot be assumed to hold.
 
-use application::HolidayCalendar as _;
+use application::{HolidayCalendar, SourceError};
 use domain::schedule::Holidays;
 use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 
@@ -28,9 +28,18 @@ pub async fn list() -> Result<(), Failure> {
 ///
 /// [`Failure`] if either source cannot be read.
 pub async fn read() -> Result<Holidays, Failure> {
-    let school = SchoolCalendar::new(SCHOOL_CALENDAR).holidays().await?;
-    let public = BankHolidays::new(GOV_UK_BANK_HOLIDAYS).holidays().await?;
-    Ok(school.and(public))
+    Ok(Calendars.holidays().await?)
+}
+
+/// Both calendars, as one: what a macrocycle is read against.
+pub struct Calendars;
+
+impl HolidayCalendar for Calendars {
+    async fn holidays(&self) -> Result<Holidays, SourceError> {
+        let school = SchoolCalendar::new(SCHOOL_CALENDAR).holidays().await?;
+        let public = BankHolidays::new(GOV_UK_BANK_HOLIDAYS).holidays().await?;
+        Ok(school.and(public))
+    }
 }
 
 #[cfg(test)]

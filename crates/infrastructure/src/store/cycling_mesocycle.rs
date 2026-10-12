@@ -41,6 +41,7 @@ use sqlx::SqlitePool;
 use super::{corrupt, store_error};
 
 /// The authored cycling side, in SQLite.
+#[derive(Debug, Clone)]
 pub struct SqliteCyclingMesocycleStore {
     pool: SqlitePool,
 }
