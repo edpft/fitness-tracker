@@ -158,10 +158,13 @@ at ring 3 and neither depending on the other, and both frontends (§ 19).
 
 **The goal is a domain independent of the interface, not parity between the
 two.** The operator withdrew parity on 2026-09-25: it was only ever a way of
-checking independence. `web` is for what a browser does better, visualising
-data and the wizards that set up the tool and start a macrocycle, and `cli`
-keeps the rest. A capability that the other interface would have to
-reimplement to offer has been built into a transport.
+checking independence. Almost everything the tool does should be reachable
+from either `cli` or `web`, its logic in `application` and agnostic of the
+transport. The browser is better where more interaction helps than a terminal
+without a TUI offers, visualising data and the wizards above all, but that is
+where it is stronger, not the limit of what it serves. A capability that the
+other interface would have to reimplement to offer has been built into a
+transport.
 
 `application` re-exports its ports and errors at the crate root but keeps its
 use cases behind `extract`, `normalise` and `status`. That is not tidiness: it
