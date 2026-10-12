@@ -45,24 +45,11 @@ use domain::{
 };
 use infrastructure::{
     SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
-    peloton::{
-        auth::{PelotonAuth, PelotonCredentials},
-        catalogue::ClassCatalogue,
-        class::PelotonClasses,
-        provider::PelotonProgrammes,
-        skeleton,
-    },
+    peloton::{catalogue::ClassCatalogue, provider::PelotonProgrammes, skeleton},
 };
 use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit, wizard};
-
-/// The same system, under the name the catalogue files it by.
-///
-/// **The roots are not written down here.** They are `peloton`'s entry in
-/// [`crate::catalogue`], along with the variables that override them, so this
-/// module cannot drift from the one every other command reaches Peloton by.
-const PELOTON_SOURCE: &str = crate::catalogue::PELOTON;
 
 /// A gym provider this build holds, and what choosing it settles.
 ///
@@ -173,7 +160,7 @@ pub async fn generate(
     // come from the catalogue, so an absent credential costs only a class the
     // catalogue has not read — but it is still resolved up front, because that
     // is when it would be cheapest to say so.
-    let access = access(credentials).ok();
+    let peloton = configurator::access::peloton(credentials).ok();
 
     println!("A hybrid programme: one gym provider, one cycling provider.\n");
     let start = wizard::ask_until("Monday the block begins (YYYY-MM-DD): ", |typed| {
@@ -198,9 +185,7 @@ pub async fn generate(
     let diary = SqliteDiaryStore::new(pool.clone());
     let riding_days = cycling_weekdays(&diary, start).await?;
 
-    let classes = access
-        .as_ref()
-        .map(|access| PelotonClasses::new(access.base_url.clone(), access.auth()));
+    let classes = peloton.map(|(classes, _)| classes);
     let stored = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = ClassCatalogue::over(&stored, classes.as_ref());
     // **The count, not the read count.** How many classes have had their
@@ -321,83 +306,6 @@ fn choose(question: &str, options: &[&str]) -> Result<usize, Failure> {
             .filter(|chosen| (1..=count).contains(chosen))
             .map(|chosen| chosen - 1)
             .ok_or_else(|| format!("choose a number from 1 to {count}"))
-    })
-}
-
-/// The Peloton adapters, from a resolved login.
-///
-/// **One place composes both**, because they need the same login and the same
-/// cached token, and building them twice from two places is how one of them
-/// ends up without the cache.
-///
-/// **The login is resolved the way every other source's is**: the environment
-/// first, then the store `fitness credentials peloton` writes to. It read
-/// `PELOTON_EMAIL` and `PELOTON_PASSWORD` out of the environment and nowhere
-/// else until #184, which made the store invisible to `cycling next` — and on
-/// the installed build the store is the only place a credential is kept.
-///
-/// # Errors
-///
-/// [`Failure`] if neither the environment nor the store holds a Peloton login.
-pub fn peloton(
-    credentials: &infrastructure::Credentials,
-) -> Result<(PelotonClasses, infrastructure::peloton::PelotonStack), Failure> {
-    let access = access(credentials)?;
-    let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
-    let stack = infrastructure::peloton::PelotonStack::new(
-        infrastructure::peloton::stack::GATEWAY.to_owned(),
-        access.auth(),
-    );
-    Ok((classes, stack))
-}
-
-/// A resolved Peloton login, and the root it is exchanged at.
-struct Access {
-    base_url: String,
-    auth_base_url: String,
-    credentials: PelotonCredentials,
-}
-
-impl Access {
-    /// An authenticator, composed where every other one is.
-    ///
-    /// **One per adapter rather than one shared**: each reads the token the
-    /// other cached, so the second costs no login and neither adapter holds the
-    /// other's state.
-    fn auth(&self) -> PelotonAuth {
-        crate::wiring::peloton_auth(self.auth_base_url.clone(), self.credentials.clone())
-    }
-}
-
-fn access(credentials: &infrastructure::Credentials) -> Result<Access, Failure> {
-    let known = crate::catalogue::source(PELOTON_SOURCE).ok_or_else(|| {
-        Failure::message(
-            format!("this build does not connect to {PELOTON_SOURCE}"),
-            exit::USAGE,
-        )
-    })?;
-
-    // The catalogue says Peloton authenticates with a login, so the other two
-    // arms are a contradiction rather than a case: they would mean its entry
-    // and the call that read its credential disagree.
-    let crate::config::SourceAccess::EmailPassword {
-        base_url,
-        auth_base_url,
-        email,
-        password,
-        ..
-    } = crate::source_access_for(known, None, credentials)?
-    else {
-        return Err(Failure::message(
-            format!("{PELOTON_SOURCE} is reached with a login"),
-            exit::USAGE,
-        ));
-    };
-
-    Ok(Access {
-        base_url,
-        auth_base_url,
-        credentials: PelotonCredentials::new(email, password),
     })
 }
 
@@ -694,30 +602,4 @@ fn join(items: &[u32], between: &str) -> String {
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(between)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::PELOTON_SOURCE;
-    use crate::catalogue::{Credential, source};
-
-    /// **The roots this module used to compile in are the catalogue's.**
-    ///
-    /// `AUTH_BASE` and `API_BASE` were private constants here until #184, and a
-    /// stub-based test could not have seen them disagree with the entry every
-    /// other Peloton command reads — nothing pointed both at the same stub.
-    /// Pinning the literals is what makes deleting them safe.
-    #[test]
-    fn peloton_is_reached_at_the_roots_this_module_used_to_hold() {
-        let known = source(PELOTON_SOURCE).expect("peloton is a known source");
-        assert_eq!(known.default_base_url(), "https://api.onepeloton.com");
-
-        let Credential::EmailPassword {
-            default_auth_base_url,
-        } = known.credential()
-        else {
-            panic!("peloton is reached with a login");
-        };
-        assert_eq!(default_auth_base_url, "https://auth.onepeloton.com");
-    }
 }

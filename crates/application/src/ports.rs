@@ -275,6 +275,22 @@ pub trait RunLock {
     fn try_acquire(&self, stream: &LandingStream) -> Result<Self::Guard, RunLockError>;
 }
 
+/// Single-flight for `next` as a whole, whichever frontend starts it.
+///
+/// **Not [`RunLock`] again**: a run of `next` walks several streams, and each
+/// walk still takes its own stream's lock. This one says a second run is refused
+/// before it starts, rather than failing at every fetch and then delivering
+/// anyway.
+pub trait NextLock {
+    type Guard: Send;
+
+    /// # Errors
+    ///
+    /// [`RunLockError::Held`] if another run of `next` has it. Fails
+    /// immediately rather than waiting.
+    fn try_acquire(&self) -> Result<Self::Guard, RunLockError>;
+}
+
 /// The current instant.
 ///
 /// A port so that a run's timings are injectable and its behaviour testable

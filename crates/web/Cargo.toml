@@ -5,18 +5,20 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# The composition root is the one crate allowed to know every adapter.
+# A driving adapter, the operator's other entry point. Its use cases come from
+# `configurator`, and it names no adapter itself: `infrastructure` is not a
+# dependency (#402 does the same for `cli`).
 [dependencies]
 application.workspace = true
+configurator.workspace = true
 domain.workspace = true
-infrastructure.workspace = true
 
-# Dormant by design (see `main.rs`), so none of the above is used yet. They are
-# not speculative: these three path edges are what the `architecture` check
-# reads to assert this crate's ring, and dropping them to quiet the scan would
-# quietly stop that check watching web at all.
-[package.metadata.cargo-machete]
-ignored = ["application", "domain", "infrastructure"]
+axum.workspace = true
+clap.workspace = true
+jiff.workspace = true
+maud.workspace = true
+tokio = { workspace = true, features = ["net", "sync"] }
+tokio-stream.workspace = true
 
 [lints]
 workspace = true

@@ -6,21 +6,17 @@
 //! code.
 
 mod canonicalise;
-mod catalogue;
-mod config;
 mod corrections;
 mod cycling;
 mod gym;
 mod holidays;
 mod next;
 mod output;
-mod paths;
 mod plan;
 mod prescribing;
 mod rescheduling;
 mod scheduling;
 mod setup;
-mod wiring;
 mod wizard;
 
 use std::{
@@ -33,7 +29,9 @@ use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_p
 use domain::landing::LandingStream;
 use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
-use catalogue::{Credential, KnownSource, KnownStream, ServedBy};
+use configurator::{catalogue, config, paths, wiring};
+
+use catalogue::{KnownStream, ServedBy};
 use config::{ConfigError, SourceAccess};
 use wiring::{Command, Outcome, Walk, WiringError};
 
@@ -755,6 +753,41 @@ impl From<NormalisationError> for Failure {
     }
 }
 
+impl From<configurator::access::AccessError> for Failure {
+    fn from(error: configurator::access::AccessError) -> Self {
+        use configurator::access::AccessError;
+        match error {
+            AccessError::Config(error) => Self::from(error),
+            AccessError::Unconnected { .. } => Self::usage(&error),
+            // A build whose catalogue and credential disagree, or a client
+            // that would not build: neither is something the operator typed.
+            AccessError::WrongKind { .. } | AccessError::Delivery(_) => {
+                Self::message(error.to_string(), exit::STORE)
+            }
+        }
+    }
+}
+
+impl From<configurator::next::NextFailure> for Failure {
+    fn from(error: configurator::next::NextFailure) -> Self {
+        use configurator::next::NextFailure;
+        match error {
+            NextFailure::Store(error)
+            | NextFailure::Next(application::next::NextError::Store(error)) => Self::from(error),
+            NextFailure::Wiring(error) => Self::from(error),
+            NextFailure::Next(application::next::NextError::Normalisation(error)) => {
+                Self::from(error)
+            }
+            NextFailure::Next(application::next::NextError::AlreadyRunning) => {
+                Self::message(error.to_string(), exit::ALREADY_RUNNING)
+            }
+            NextFailure::NoLoop { .. } | NextFailure::Destination(_) | NextFailure::Next(_) => {
+                Self::usage(&error)
+            }
+        }
+    }
+}
+
 impl From<WiringError> for Failure {
     fn from(error: WiringError) -> Self {
         match error {
@@ -1236,7 +1269,7 @@ async fn cycling_command_run(
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
-        let (classes, _) = plan::peloton(credentials)?;
+        let (classes, _) = configurator::access::peloton(credentials)?;
         return cycling::hold(database, zone, from, &classes).await;
     }
 
@@ -1245,7 +1278,7 @@ async fn cycling_command_run(
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
-        let (classes, stack) = plan::peloton(credentials)?;
+        let (classes, stack) = configurator::access::peloton(credentials)?;
         return cycling::deliver(
             database,
             zone,
@@ -1293,7 +1326,7 @@ async fn cycling_command_run(
     // programme is in the store and the ride prints from it, so a machine with
     // no Peloton credential still says what to do (§ 36) — and says that it
     // sent nothing, which is the half that was missing (#184).
-    let peloton = plan::peloton(credentials);
+    let peloton = configurator::access::peloton(credentials).map_err(Failure::from);
     let to = to_peloton(&peloton);
     cycling::next(database, zone, from, ftp, to).await
 }
@@ -1571,65 +1604,7 @@ fn source_access(
             exit::USAGE,
         ));
     };
-    source_access_for(system, base_url, credentials)
-}
-
-/// The same resolution, for a source this invocation reaches without collecting
-/// from it.
-///
-/// **Reachable from the crate because a destination is not a stream.**
-/// Delivering a session lands nothing, so Peloton is reached here by the source
-/// the cycling discipline delivers to — and reading its credential some other
-/// way is how `cycling next` came to ignore the store (#184).
-pub(crate) fn source_access_for(
-    source: &'static KnownSource,
-    base_url: Option<String>,
-    credentials: &infrastructure::Credentials,
-) -> Result<SourceAccess, Failure> {
-    let base_url = base_url
-        .or_else(|| std::env::var(source.base_url_variable()).ok())
-        .unwrap_or_else(|| source.default_base_url().to_owned());
-
-    // The kind of credential decides how it is read. Both paths derive their
-    // variables from the source's name, so a third source adds an arm here and
-    // nothing else.
-    Ok(match source.credential() {
-        Credential::ApiKey => SourceAccess::resolve(
-            source,
-            base_url,
-            std::env::var(source.api_key_variable()),
-            credentials.credential(source.name()),
-        )?,
-        Credential::EmailPassword {
-            default_auth_base_url,
-        } => {
-            let auth_base_url = std::env::var(source.auth_base_url_variable())
-                .unwrap_or_else(|_| default_auth_base_url.to_owned());
-            SourceAccess::resolve_login(
-                source,
-                base_url,
-                auth_base_url,
-                std::env::var(source.email_variable()),
-                std::env::var(source.password_variable()),
-                credentials.credential(source.name()),
-            )?
-        }
-        Credential::OAuthClient {
-            default_auth_base_url,
-        } => {
-            let auth_base_url = std::env::var(source.auth_base_url_variable())
-                .unwrap_or_else(|_| default_auth_base_url.to_owned());
-            let token = paths::token(&paths::SystemEnvironment, source.name())
-                .map_err(ConfigError::from)?;
-            SourceAccess::resolve_oauth_client(
-                source,
-                (base_url, auth_base_url),
-                source.oauth_client_variables().map(std::env::var),
-                credentials.credential(source.name()),
-                token,
-            )?
-        }
-    })
+    Ok(config::source_access_for(system, base_url, credentials)?)
 }
 
 /// `resumes` is false for a stream read from a folder, which is read whole and

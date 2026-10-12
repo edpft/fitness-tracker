@@ -2,9 +2,9 @@
 //! what is next.
 //!
 //! **The use case is `application::next`** (#397), so a browser can offer the
-//! same run. What is left here is the transport's: reading the clock and the
-//! flags, composing the use case from this build's adapters, printing progress
-//! as each step runs, and rendering the report.
+//! same run, and the configurator composes it from this build's adapters
+//! (#398). What is left here is the transport's: reading the clock and the
+//! flags, printing progress as each step runs, and rendering the report.
 
 use std::{
     io::Write as _,
@@ -12,33 +12,14 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use application::{
-    commit::{CommitPorts, Committing},
-    microcycle::{Microcycle, MicrocyclePorts},
-    next::{
-        CyclingPorts, Done, GymPorts, Next, NextError, NextPorts, NoAccess, Prescribed, Progress,
-        Step, Undelivered, WhatIsNext,
-    },
-};
+use application::next::{Done, NextError, Prescribed, Progress, Step, Undelivered, WhatIsNext};
+use configurator::next::NextFailure;
 use domain::{
     normalised::OperatorZone,
-    schedule::{DayPart, Discipline, PartOfDay},
-};
-use infrastructure::{
-    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingSessionLog,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedGymSessionReader, SqlitePelotonClassStore,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteRiddenVenues, connect,
-    peloton::{
-        PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
-        catalogue::ClassCatalogue,
-    },
+    schedule::{DayPart, PartOfDay},
 };
 
-use crate::{
-    Failure, catalogue, config, cycling, exit, holidays, output, plan, prescribing, wiring,
-};
+use crate::{Failure, config, cycling, exit, output};
 
 /// Collect everything, report where the plan stands, and deliver what is next.
 ///
@@ -57,101 +38,10 @@ pub async fn next(
     credentials: &infrastructure::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
-    let pool = connect(database).await?;
-
-    // **This build collects the gym from Hevy and cycling from Peloton**, and
-    // the catalogue says so: a second source for either is an entry there and
-    // an arm in `wiring`.
-    let no_access = |failure: Failure| NoAccess {
-        detail: failure.message_text().to_owned(),
-    };
-    let access = |discipline| -> Result<_, Failure> {
-        Ok(
-            crate::source_access(known(discipline)?.collects(), None, credentials)
-                .map_err(no_access),
-        )
-    };
-    let gym_records =
-        wiring::hevy_records(access(Discipline::Gym)?, database, zone.clone()).await?;
-    let cycling_records =
-        wiring::peloton_records(access(Discipline::Cycling)?, database, zone.clone()).await?;
-
-    // **A credential that is absent costs what needs it, and nothing else.**
-    // The catalogue answers choosing a class and building a mesocycle without
-    // Peloton; refreshing it and delivering to the stack are what it costs.
-    let peloton = plan::peloton(credentials);
-    let stored = SqlitePelotonClassStore::new(pool.clone());
-    let classes = peloton.as_ref().ok().map(|(classes, _)| classes);
-    let catalogue = ClassCatalogue::over(&stored, classes);
-    let unreachable = |failure: &Failure| NoAccess {
-        detail: failure.message_text().to_owned(),
-    };
-    let class_source = peloton
-        .as_ref()
-        .map(|(classes, _)| PelotonClassSource::new(classes, &stored))
-        .map_err(unreachable);
-    let ride_destination = peloton
-        .as_ref()
-        .map(|(classes, stack)| PelotonRideDestination::new(classes, stack))
-        .map_err(unreachable);
-    let gym_destination =
-        prescribing::hevy_routines(known(Discipline::Gym)?.delivers_to(), credentials)
-            .map_err(no_access);
-
-    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
-    let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
-    let next = Next::new(NextPorts {
-        gym_records,
-        cycling_records,
-        normalised: SqliteNormalisedGymSessionReader::new(pool.clone()),
-        canonical: SqliteCanonicalGymSessionStore::new(pool.clone()),
-        classes: class_source,
-        holidays: holidays::Calendars,
-        diary: SqliteDiaryStore::new(pool.clone()),
-        plans: plans.clone(),
-        microcycle: Microcycle::new(
-            MicrocyclePorts {
-                diary: SqliteDiaryStore::new(pool.clone()),
-                plans: plans.clone(),
-                gym_deliveries: deliveries.clone(),
-                cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-                gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
-                cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
-            },
-            destination(Discipline::Gym)?,
-            destination(Discipline::Cycling)?,
-        ),
-        committing: Committing::new(
-            CommitPorts {
-                plans: plans.clone(),
-                parameters: parameters.clone(),
-                holding: PelotonHoldingRides::new(catalogue),
-                ridden: SqliteRiddenVenues::new(pool.clone()),
-                published: PelotonProgrammes::new(catalogue),
-            },
-            zone.clone(),
-        ),
-        gym: GymPorts {
-            history: SqliteExerciseHistory::new(pool.clone()),
-            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
-            plans,
-            parameters,
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-            lifecycle: deliveries.clone(),
-            deliveries,
-            destination: gym_destination,
-        },
-        cycling: CyclingPorts {
-            riding: cycling::riding(&pool, zone, catalogue)?,
-            destination: ride_destination,
-        },
-    });
-
-    let report = next
-        .run(now, skip, &Terminal::default())
-        .await
-        .map_err(refused)?;
+    let report =
+        configurator::next::run(database, zone, credentials, now, skip, &Terminal::default())
+            .await
+            .map_err(refused)?;
     println!();
     output::plan_standing(&report.plan);
     println!();
@@ -159,15 +49,21 @@ pub async fn next(
 }
 
 /// Why the run could not answer at all, as the operator is told it.
-fn refused(error: NextError) -> Failure {
-    match error {
-        NextError::NoWeek => Failure::message(
+fn refused(failure: NextFailure) -> Failure {
+    match failure {
+        NextFailure::Next(error @ NextError::NoWeek) => Failure::message(
             format!("{error}. Record one first: fitness schedule add"),
             exit::USAGE,
         ),
-        NextError::Store(error) => Failure::from(error),
-        NextError::Normalisation(error) => Failure::from(error),
-        NextError::Skip(_) => Failure::usage(&error),
+        NextFailure::Next(error @ NextError::AlreadyRunning) => {
+            Failure::message(error.to_string(), exit::ALREADY_RUNNING)
+        }
+        NextFailure::Next(NextError::Store(error)) | NextFailure::Store(error) => {
+            Failure::from(error)
+        }
+        NextFailure::Next(NextError::Normalisation(error)) => Failure::from(error),
+        NextFailure::Next(error @ NextError::Skip(_)) => Failure::usage(&error),
+        other => Failure::from(other),
     }
 }
 
@@ -307,20 +203,4 @@ fn moment(zone: &OperatorZone, date: Option<&str>, part: Option<&str>) -> Result
         None => DayPart::containing(here.datetime()).part,
     };
     Ok(DayPart::new(date, part))
-}
-
-/// Where a discipline's sessions are put, as the catalogue names it.
-pub fn destination(discipline: Discipline) -> Result<application::DestinationName, Failure> {
-    let known = known(discipline)?;
-    application::DestinationName::try_from(known.delivers_to().name().to_owned())
-        .map_err(|error| Failure::usage(&error))
-}
-
-fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, Failure> {
-    catalogue::discipline(discipline.as_str()).ok_or_else(|| {
-        Failure::message(
-            format!("this build has no daily loop for {discipline}"),
-            exit::USAGE,
-        )
-    })
 }

@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# A driving adapter and a composition root: the operator's entry point.
+# A driving adapter: the operator's entry point. Its use cases are composed by
+# `configurator`, which `web` shares.
 # Extraction is invoked from a terminal or an external scheduler, never over
 # HTTP, which is why this is not a subcommand of `web`.
 [[bin]]
@@ -14,12 +15,12 @@ path = "src/main.rs"
 
 [dependencies]
 application.workspace = true
+configurator.workspace = true
 domain.workspace = true
 infrastructure.workspace = true
 
 clap.workspace = true
 jiff.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 rpassword.workspace = true
 
