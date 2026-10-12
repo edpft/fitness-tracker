@@ -8,6 +8,9 @@ extend-exclude = [
   "flake.lock",
   "**/*.pinned.json",
   "crates/infrastructure/tests/fixtures/*.jsonl",
+  # htmx, vendored and minified: someone else's bytes, and its two-letter
+  # identifiers read as misspelt words.
+  "crates/web/assets/*.js",
 ]
 
 [default.extend-words]

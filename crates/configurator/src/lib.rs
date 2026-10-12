@@ -13,4 +13,8 @@ pub mod config;
 pub mod holidays;
 pub mod next;
 pub mod paths;
+pub mod rides;
 pub mod wiring;
+
+/// What the operator stored, as a frontend passes it to a run.
+pub use infrastructure::Credentials;

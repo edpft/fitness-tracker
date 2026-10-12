@@ -95,6 +95,15 @@ calamine = "0.36.1"
 # read-side flate2 plus write-side zopfli, and nothing here writes an archive.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
+# The web frontend (§ 20): server-rendered HTML, pushed to the page as server-sent
+# events. `maud` writes the templates in Rust, so no template language enters the
+# tree and the compiler checks every one. `tokio-stream`'s `sync` feature turns a
+# `watch` channel into the event stream: a page that connects mid-run gets where
+# the run has got to first, then each change.
+axum = "0.8.9"
+maud = { version = "0.27.0", features = ["axum"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+
 # Test-only.
 proptest = "1.11.0"
 wiremock = "0.6.5"

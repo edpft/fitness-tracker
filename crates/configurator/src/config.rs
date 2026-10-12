@@ -458,6 +458,44 @@ fn from_environment(
 // variable clap folds into it, and the specification's default — which is why
 // there is no function here for it.
 
+/// The credentials the operator stored, or none.
+///
+/// **A machine that cannot say where they live simply has none.** Failing here
+/// would refuse to run for want of a file that half the commands never consult
+/// — `status` and `reset` must work with no credential at all.
+///
+/// # Errors
+///
+/// [`ConfigError`] if the file exists but will not parse.
+pub fn credentials() -> Result<infrastructure::Credentials, ConfigError> {
+    match crate::paths::credentials(&crate::paths::SystemEnvironment) {
+        Ok(path) => Ok(infrastructure::Credentials::read(&path)?),
+        Err(_) => Ok(infrastructure::Credentials::default()),
+    }
+}
+
+/// The zone the operator stated once, if the store holds one.
+///
+/// **A store that cannot be opened states nothing**, so the zone falls back to
+/// what the invocation passed, and the store's own failure is reported by
+/// whatever reads it next.
+///
+/// # Errors
+///
+/// [`application::StoreError`] if the store opens and cannot be read.
+pub async fn stated_timezone(
+    database: &std::path::Path,
+) -> Result<Option<String>, application::StoreError> {
+    let Ok(pool) = infrastructure::connect(database).await else {
+        return Ok(None);
+    };
+    let stated = infrastructure::SqliteOperatorSettingsStore::new(pool.clone())
+        .timezone()
+        .await;
+    pool.close().await;
+    stated
+}
+
 /// How a source is reached: its base URL and its credential, the environment
 /// first and then the store `fitness credentials` writes to.
 ///

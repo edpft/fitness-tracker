@@ -68,6 +68,9 @@
             (craneLib.fileset.commonCargoSources ./crates/configurator)
             (craneLib.fileset.commonCargoSources ./crates/web)
             (craneLib.fileset.commonCargoSources ./crates/cli)
+            # htmx and its server-sent events extension, which `web` embeds
+            # with `include_str!` and serves (§ 20).
+            ./crates/web/assets
             # `sqlx::migrate!` embeds these, and `query!` is verified against
             # the schema they produce.
             ./migrations
@@ -512,13 +515,18 @@
               {
                 nativeBuildInputs = [ pkgs.typos ];
               }
+              # **From inside the tree, not with the tree as an argument.**
+              # typos reads `_typos.toml`'s exclusions relative to where it
+              # runs, so pointed at the source from the build directory it
+              # excluded nothing — invisible until vendored htmx arrived (#398).
               ''
-                typos ${
+                cd ${
                   lib.fileset.toSource {
                     root = ./.;
                     fileset = ./.;
                   }
                 }
+                typos .
                 touch "$out"
               '';
 

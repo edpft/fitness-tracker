@@ -21,7 +21,6 @@ infrastructure.workspace = true
 
 clap.workspace = true
 jiff.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 rpassword.workspace = true
 
