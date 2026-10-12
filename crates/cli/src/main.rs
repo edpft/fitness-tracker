@@ -1,9 +1,8 @@
-//! The operator's entry point, and a composition root.
+//! The operator's entry point.
 //!
 //! Translates between the terminal and the driving ports: it reads an
-//! invocation, resolves configuration, hands the work to [`wiring`] — which
-//! picks the adapters — and turns whatever comes back into output and an exit
-//! code.
+//! invocation, hands the work to the configurator — which picks the adapters
+//! (#402) — and turns whatever comes back into output and an exit code.
 
 mod canonicalise;
 mod corrections;
@@ -14,7 +13,6 @@ mod next;
 mod output;
 mod plan;
 mod prescribing;
-mod rescheduling;
 mod scheduling;
 mod setup;
 mod wizard;
@@ -27,7 +25,6 @@ use std::{
 use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
-use infrastructure::peloton::{PelotonStack, class::PelotonClasses};
 
 use configurator::{catalogue, config, paths, wiring};
 
@@ -856,7 +853,7 @@ fn run(matches: &ArgMatches) -> Result<(), Failure> {
 /// command was asked for, and only one of the two is about the operator's
 /// intent.
 struct Locations {
-    credentials: infrastructure::Credentials,
+    credentials: configurator::Credentials,
     /// What the operator stated once, read from the store. Unparsed: which of
     /// the flag, the variable and this one wins is decided in `config`.
     timezone: Option<String>,
@@ -878,8 +875,8 @@ async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
     // no credential at all.
     let environment = paths::SystemEnvironment;
     let credentials = match paths::credentials(&environment) {
-        Ok(path) => infrastructure::Credentials::read(&path).map_err(config::ConfigError::from)?,
-        Err(_) => infrastructure::Credentials::default(),
+        Ok(path) => configurator::Credentials::read(&path).map_err(config::ConfigError::from)?,
+        Err(_) => configurator::Credentials::default(),
     };
 
     // The default store is resolved only if nothing else supplied one, so a
@@ -922,15 +919,9 @@ async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
 /// that creates one, and refusing to run it because there is nothing to read
 /// would be a setup command that requires the thing it sets up.
 async fn stated_timezone(database: &Path) -> Result<Option<String>, Failure> {
-    let Ok(pool) = infrastructure::connect(database).await else {
-        return Ok(None);
-    };
-    let stated = infrastructure::SqliteOperatorSettingsStore::new(pool.clone())
-        .timezone()
+    config::stated_timezone(database)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    pool.close().await;
-    Ok(stated)
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
 
 /// The commands that need no stream.
@@ -942,7 +933,7 @@ async fn stated_timezone(database: &Path) -> Result<Option<String>, Failure> {
 async fn authored_command(
     name: &str,
     sub: &ArgMatches,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
     database: &Path,
 ) -> Option<Result<(), Failure>> {
@@ -1052,7 +1043,7 @@ async fn authored_command(
 async fn next_command_run(
     sub: &ArgMatches,
     database: &Path,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
 ) -> Result<(), Failure> {
     let zone = config::timezone(
@@ -1076,7 +1067,7 @@ async fn deliver_command_run(
     sub: &ArgMatches,
     zone: &domain::normalised::OperatorZone,
     database: &Path,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     // The flat command names the build's only sink. A second one arrives with
     // the discipline that needs it, and `gym next` already takes its own rather
@@ -1107,7 +1098,7 @@ async fn deliver_command_run(
 async fn discipline_command_run(
     name: &str,
     sub: &ArgMatches,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
     database: &Path,
 ) -> Result<(), Failure> {
@@ -1221,7 +1212,7 @@ async fn plan_command_run(
     sub: &ArgMatches,
     database: &Path,
     zone: &domain::normalised::OperatorZone,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let count = |name: &str| -> Result<usize, Failure> {
         sub.get_one::<String>(name)
@@ -1256,7 +1247,7 @@ async fn cycling_command_run(
     sub: &ArgMatches,
     zone: &domain::normalised::OperatorZone,
     database: &Path,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
         value.parse::<jiff::civil::Date>().map_err(|error| {
@@ -1269,8 +1260,8 @@ async fn cycling_command_run(
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
-        let (classes, _) = configurator::access::peloton(credentials)?;
-        return cycling::hold(database, zone, from, &classes).await;
+        let peloton = configurator::access::peloton(credentials)?;
+        return cycling::hold(database, zone, from, &peloton).await;
     }
 
     if let Some(("deliver", delivering)) = sub.subcommand() {
@@ -1278,14 +1269,13 @@ async fn cycling_command_run(
             Some(value) => parse_date(value)?,
             None => jiff::Zoned::now().date(),
         };
-        let (classes, stack) = configurator::access::peloton(credentials)?;
+        let peloton = configurator::access::peloton(credentials)?;
         return cycling::deliver(
             database,
             zone,
             from,
             delivering.get_flag("replace"),
-            &classes,
-            &stack,
+            &peloton,
         )
         .await;
     }
@@ -1337,10 +1327,10 @@ async fn cycling_command_run(
 /// borrow to outlive the call, and because the message an operator reads when
 /// nothing is sent should not depend on which command they typed.
 pub(crate) fn to_peloton(
-    resolved: &Result<(PelotonClasses, PelotonStack), Failure>,
-) -> Result<(&PelotonClasses, &PelotonStack), &str> {
+    resolved: &Result<configurator::access::Peloton, Failure>,
+) -> Result<&configurator::access::Peloton, &str> {
     match resolved {
-        Ok((classes, stack)) => Ok((classes, stack)),
+        Ok(peloton) => Ok(peloton),
         Err(failure) => Err(failure.message_text()),
     }
 }
@@ -1593,7 +1583,7 @@ fn named_stream(sub: &ArgMatches) -> Result<&'static KnownStream, Failure> {
 fn source_access(
     known: &KnownStream,
     base_url: Option<String>,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<SourceAccess, Failure> {
     let Some(system) = known.system() else {
         return Err(Failure::message(

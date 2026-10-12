@@ -635,6 +635,33 @@ impl Skip {
 /// Illness's slots, so [`Alteration::slots`] can lend a map whatever the kind.
 static NO_SLOTS: BTreeMap<TrainingSlot, Allocation> = BTreeMap::new();
 
+/// The weekdays a run of days actually covers, in the order it meets them.
+///
+/// **A run meets only some weekdays.** A trip from Friday to Monday has no
+/// Wednesday in it, and a slot stated for one would be a fact about a day the
+/// alteration never touches — silently meaningless, and reasonable to expect
+/// otherwise. A run of a week or more meets every weekday, once each.
+///
+/// Run order rather than Monday-first, because that is the order the operator
+/// lives it: the Friday they leave, then the weekend, then the Monday back.
+pub fn covered_weekdays(start: Date, days: NonZeroU8) -> Vec<Weekday> {
+    let mut covered: Vec<Weekday> = Vec::new();
+    let mut cursor = start;
+
+    for _ in 0..days.get() {
+        if !covered.contains(&cursor.weekday()) {
+            covered.push(cursor.weekday());
+        }
+        if covered.len() == 7 {
+            break;
+        }
+        let Ok(next) = cursor.tomorrow() else { break };
+        cursor = next;
+    }
+
+    covered
+}
+
 /// A run of days that departs from the ordinary pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alteration {

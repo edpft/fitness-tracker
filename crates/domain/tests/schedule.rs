@@ -11,7 +11,7 @@ use domain::{
     normalised::OperatorZone,
     schedule::{
         Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, RecordedSession, Relative,
-        ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted,
+        ScheduledSlot, SessionRole, TrainingPattern, TrainingSlot, accounted, covered_weekdays,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -729,4 +729,56 @@ fn illness_empties_the_day_and_keeps_the_zone() {
     assert_eq!(ill.zone, rome, "still in Rome");
     assert!(ill.slots.is_empty(), "no room to train while ill");
     assert_eq!(diary.alterations()[2].slots(), Some(&BTreeMap::new()));
+}
+
+/// **A run covers the days it contains, and no others.**
+///
+/// Friday to Monday has no Wednesday in it. Asking anyway invites a slot
+/// stated for a day the alteration never touches, which would be silently
+/// meaningless — and reasonable to expect otherwise.
+#[test]
+fn a_short_run_covers_only_the_days_it_meets() {
+    // Friday 11 September 2026 through the Monday.
+    let covered = covered_weekdays(
+        date(2026, 9, 11).expect("a real date"),
+        days(4).expect("four days"),
+    );
+
+    assert_eq!(
+        covered,
+        vec![
+            Weekday::Friday,
+            Weekday::Saturday,
+            Weekday::Sunday,
+            Weekday::Monday
+        ],
+        "in the order the trip meets them, not Monday first"
+    );
+}
+
+/// One day is one weekday.
+#[test]
+fn a_single_day_covers_one_weekday() {
+    let covered = covered_weekdays(
+        date(2026, 9, 14).expect("a real date"),
+        days(1).expect("one day"),
+    );
+    assert_eq!(covered, vec![Weekday::Monday]);
+}
+
+/// A week or more meets every weekday, and each once.
+#[test]
+fn a_week_or_more_covers_every_weekday_once() {
+    for length in [7_u8, 10, 30] {
+        let covered = covered_weekdays(
+            date(2026, 9, 11).expect("a real date"),
+            days(length).expect("a run of days"),
+        );
+        assert_eq!(covered.len(), 7, "{length} days meets all seven");
+
+        let mut seen = covered.clone();
+        seen.sort_unstable_by_key(|day| day.to_monday_zero_offset());
+        seen.dedup();
+        assert_eq!(seen.len(), 7, "{length} days covers each one once");
+    }
 }

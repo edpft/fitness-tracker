@@ -30,9 +30,10 @@ use std::{
 };
 
 use application::{
-    DiaryStore as _, ExerciseHistory as _, GenerationParameterStore as _, PlanAuthor as _,
-    PlanStore as _, prescribe::Authoring,
+    DiaryStore as _, ExerciseHistory, GenerationParameterStore, PlanAuthor as _, PlanStore as _,
+    prescribe::Authoring,
 };
+use configurator::store::Store;
 use domain::{
     gym::{
         Load,
@@ -52,13 +53,9 @@ use domain::{
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
 };
-use infrastructure::{
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteGenerationParameterStore, SqlitePlanStore,
-    connect,
-};
 use jiff::civil::Date;
 
-use crate::{Failure, exit, output, plan::SBS_MICROCYCLES};
+use crate::{Failure, exit, output};
 
 fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
@@ -120,7 +117,7 @@ fn parse_count(what: &str, typed: &str) -> Result<u32, String> {
 /// list itself is his, because which exercises belong in a slot is preference
 /// rather than a fact about anybody.
 async fn offered(
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     slot: SlotId,
 ) -> Result<Vec<(String, Option<usize>)>, Failure> {
     let mut offers = Vec::new();
@@ -207,7 +204,7 @@ fn count(value: u32) -> Result<RepCount, Failure> {
 /// the store: what one step up the bar is, and so what "beat it" comes to, is
 /// the plate grid in `scales` rather than anything to ask about.
 pub async fn ready(
-    parameters: &SqliteGenerationParameterStore,
+    parameters: &(impl GenerationParameterStore + Sync),
 ) -> Result<GenerationParameters, Failure> {
     parameters
         .current()
@@ -228,7 +225,7 @@ pub async fn ready(
 /// The plyometric and power blocks are set at the start of a block and read no
 /// history, so they state their whole prescription and never alternate.
 async fn ask_static(
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     slot: SlotId,
 ) -> Result<Fill<StaticFill>, Failure> {
     let offers = offered(history, slot).await?;
@@ -250,7 +247,7 @@ async fn ask_static(
 /// Ask which exercise fills a slot that takes its prescription from the
 /// parameters.
 async fn ask_single(
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     slot: SlotId,
     pattern: PrimaryPattern,
     primary: Exercise,
@@ -297,7 +294,7 @@ async fn ask_single(
 /// no lookup that could fail. Adding a slot to the template is a compile error
 /// here until it is asked.
 async fn ask_fills(
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     pattern: PrimaryPattern,
     primary: Exercise,
 ) -> Result<SlotFills, Failure> {
@@ -603,7 +600,7 @@ fn as_one_rep_max(load: Kg, reps: RepCount) -> Option<Kg> {
 /// `None` where nothing has been performed, which is a real state: an exercise
 /// exists before it is prescribed and is prescribed before it has been done.
 async fn best_of(
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     lift: RepsExercise,
     scale: Option<&LoadSteps>,
 ) -> Result<Option<Best>, Failure> {
@@ -806,7 +803,7 @@ pub fn ask_lift(template: &str, pattern: PrimaryPattern) -> Result<RepsExercise,
 async fn ask_programme(
     template: &'static str,
     diary: &Diary,
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     parameters: &GenerationParameters,
 ) -> Result<(PlanName, Authored), Failure> {
     match template {
@@ -822,7 +819,7 @@ async fn ask_programme(
 /// start alone.
 async fn ask_test(
     diary: &Diary,
-    history: &SqliteExerciseHistory,
+    history: &(impl ExerciseHistory + Sync),
     parameters: &GenerationParameters,
 ) -> Result<(PlanName, Authored), Failure> {
     println!("A test: one week, measuring.\n");
@@ -962,7 +959,7 @@ fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), 
         // is read off the record when a session is asked for, which is what lets
         // `fitness plan` author three of these months ahead.
         Climbing::Sbs => Shape::Provided {
-            from: ask_provided((1..=SBS_MICROCYCLES).collect())?,
+            from: ask_provided((1..=domain::prescription::sbs::WEEKS).collect())?,
         },
         Climbing::Block => {
             let entry_reps = ask_until(
@@ -1035,19 +1032,20 @@ fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), 
 pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     interactive()?;
 
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let history = SqliteExerciseHistory::new(pool.clone());
+    let history = store.exercise_history();
 
     // **Asked before the first question, not discovered after the last.** A
     // programme cannot be authored against nothing (§ 14), and finding that out
     // at the end costs the operator every answer he has just given. Setting the
     // machine up is what puts them there; see `setup::seed_parameters`.
-    let parameter_store = SqliteGenerationParameterStore::new(pool.clone());
+    let parameter_store = store.parameters();
     let parameters = ready(&parameter_store).await?;
 
-    let diary = SqliteDiaryStore::new(pool.clone())
+    let diary = store
+        .diary()
         .diary()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -1077,7 +1075,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     )
     .map_err(|error| Failure::usage(&error))?;
 
-    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+    let plans = store.plans(zone);
     let existing = plans
         .named(&name)
         .await
@@ -1241,7 +1239,7 @@ fn ask_entry_test(
 /// [`Failure`] if the schedule gives the gym no days as of `start`, if there is
 /// nobody to ask, or if the answers do not assemble into a mesocycle.
 pub async fn gym_side(
-    pool: &infrastructure::SqlitePool,
+    store: &Store,
     zone: &OperatorZone,
     parameters: &GenerationParameters,
     outline: &GymOutline<'_>,
@@ -1254,8 +1252,9 @@ pub async fn gym_side(
         progressions,
         test_microcycle,
     } = *outline;
-    let history = SqliteExerciseHistory::new(pool.clone());
-    let diary = SqliteDiaryStore::new(pool.clone())
+    let history = store.exercise_history();
+    let diary = store
+        .diary()
         .diary()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -1274,9 +1273,9 @@ pub async fn gym_side(
 
     let mut shapes: Vec<(Date, Shape)> = vec![(start, entry)];
     for cycle in 0..progressions {
-        let weeks = 1 + cycle * (SBS_MICROCYCLES as usize);
+        let weeks = 1 + cycle * (domain::prescription::sbs::WEEKS as usize);
         let at = week_after(start, weeks)?;
-        let numbers: Vec<u32> = (1..=SBS_MICROCYCLES).collect();
+        let numbers: Vec<u32> = (1..=domain::prescription::sbs::WEEKS).collect();
         shapes.push((
             at,
             Shape::Provided {

@@ -189,6 +189,14 @@
           cli = 4;
         };
 
+        # A strict decrease is not enough on its own: a frontend could still
+        # reach past the configurator to an adapter, and compose for itself what
+        # the configurator composes for both (#402). So a crate named here may
+        # be depended on by the one crate it names, and by nothing else.
+        crateOnlyDependent = {
+          infrastructure = "configurator";
+        };
+
         # Add one of these per workspace member you want to build.
         domain = craneLib.buildPackage (
           individualCrateArgs
@@ -453,23 +461,35 @@
                   lib.escapeShellArgs (lib.mapAttrsToList (crate: ring: "${crate} ${toString ring}") crateRings)
                 } > rings
 
+                printf '%s\n' ${
+                  lib.escapeShellArgs (
+                    lib.mapAttrsToList (crate: dependent: "${crate} ${dependent}") crateOnlyDependent
+                  )
+                } > only
+
                 awk '
-                  NR == FNR { ring[$1] = $2; next }
+                  FILENAME == "rings" { ring[$1] = $2; next }
+                  FILENAME == "only" { only[$1] = $2; next }
                   !($1 in ring) { print "  " $1 " is in no ring"; bad = 1; next }
                   !($2 in ring) { print "  " $2 " is in no ring"; bad = 1; next }
                   ring[$2] >= ring[$1] {
                     printf "  %s (ring %d) depends on %s (ring %d)\n", $1, ring[$1], $2, ring[$2]
                     bad = 1
                   }
+                  ($2 in only) && $1 != only[$2] {
+                    printf "  %s depends on %s, which only %s may\n", $1, $2, only[$2]
+                    bad = 1
+                  }
                   END { exit bad }
-                ' rings edges && exit_code=0 || exit_code=1
+                ' rings only edges && exit_code=0 || exit_code=1
 
                 if [ "$exit_code" -ne 0 ]; then
                   echo
                   echo "Constitution § 16: dependencies point inward only —"
                   echo "{cli, web} -> configurator -> infrastructure -> application -> domain. A crate"
                   echo "in no ring is a new one: give it a ring in flake.nix,"
-                  echo "which is the decision worth making deliberately."
+                  echo "which is the decision worth making deliberately. A frontend"
+                  echo "gets its adapters from the configurator, never directly."
                   exit 1
                 fi
 

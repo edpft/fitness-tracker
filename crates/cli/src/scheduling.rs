@@ -23,15 +23,15 @@ use std::{
     path::Path,
 };
 
-use application::{DiaryAuthor as _, DiaryStore as _};
+use application::{DiaryAuthor, DiaryStore};
+use configurator::store::Store;
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
+        self, Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
         TrainingPattern, TrainingSlot,
     },
 };
-use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Date, Weekday};
 
 use crate::{Failure, exit, output};
@@ -204,36 +204,13 @@ fn ask_slots(
     Ok(slots)
 }
 
-/// The weekdays a run of days actually covers, in the order it meets them.
-///
-/// **Asking about all seven is asking about days that do not occur.** A trip
-/// from Friday to Monday has no Wednesday in it, and a slot stated for one
-/// would be a fact about a day the alteration never touches — silently
-/// meaningless, and reasonable to expect otherwise. A run of a week or more
-/// meets every weekday and is asked about every weekday.
-///
-/// Run order rather than Monday-first, because that is the order the operator
-/// lives it: the Friday they leave, then the weekend, then the Monday back.
+/// The weekdays a run of days covers, named, in the order it meets them.
 fn covered_weekdays(start: Date, days: NonZeroU8) -> Vec<(Weekday, &'static str)> {
-    let mut covered: Vec<(Weekday, &'static str)> = Vec::new();
-    let mut cursor = start;
-
-    for _ in 0..days.get() {
-        if let Some(&(weekday, name)) = WEEKDAYS
-            .iter()
-            .find(|(weekday, _)| *weekday == cursor.weekday())
-            && !covered.iter().any(|(seen, _)| *seen == weekday)
-        {
-            covered.push((weekday, name));
-        }
-        if covered.len() == WEEKDAYS.len() {
-            break;
-        }
-        let Ok(next) = cursor.tomorrow() else { break };
-        cursor = next;
-    }
-
-    covered
+    schedule::covered_weekdays(start, days)
+        .into_iter()
+        .filter_map(|covered| WEEKDAYS.iter().find(|(weekday, _)| *weekday == covered))
+        .copied()
+        .collect()
 }
 
 fn yes(typed: &str) -> bool {
@@ -246,11 +223,11 @@ fn no(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "n" | "no")
 }
 
-async fn store(database: &Path) -> Result<SqliteDiaryStore, Failure> {
-    let pool = connect(database)
+async fn store(database: &Path) -> Result<impl DiaryStore + DiaryAuthor, Failure> {
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    Ok(SqliteDiaryStore::new(pool))
+    Ok(store.diary())
 }
 
 /// Ask for the ordinary pattern and record it.
@@ -384,65 +361,8 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
-    use super::{covered_weekdays, no, parse_parts, yes};
+    use super::{no, parse_parts, yes};
     use domain::schedule::PartOfDay;
-    use jiff::civil::{Weekday, date};
-
-    /// **A run asks about the days it contains, and no others.**
-    ///
-    /// Friday to Monday has no Wednesday in it. Asking anyway invites a slot
-    /// stated for a day the alteration never touches, which would be silently
-    /// meaningless — and reasonable to expect otherwise.
-    #[test]
-    fn a_short_run_covers_only_the_days_it_meets() {
-        let Some(four) = std::num::NonZeroU8::new(4) else {
-            panic!("four is not zero")
-        };
-        // Friday 11 September 2026 through the Monday.
-        let covered: Vec<Weekday> = covered_weekdays(date(2026, 9, 11), four)
-            .into_iter()
-            .map(|(weekday, _)| weekday)
-            .collect();
-
-        assert_eq!(
-            covered,
-            vec![
-                Weekday::Friday,
-                Weekday::Saturday,
-                Weekday::Sunday,
-                Weekday::Monday
-            ],
-            "in the order the trip meets them, not Monday first"
-        );
-    }
-
-    /// One day is one weekday.
-    #[test]
-    fn a_single_day_covers_one_weekday() {
-        let Some(one) = std::num::NonZeroU8::new(1) else {
-            panic!("one is not zero")
-        };
-        let covered = covered_weekdays(date(2026, 9, 14), one);
-        assert_eq!(covered.len(), 1);
-        assert_eq!(covered[0].0, Weekday::Monday);
-    }
-
-    /// A week or more meets every weekday, and each is asked about once.
-    #[test]
-    fn a_week_or_more_covers_every_weekday_once() {
-        for length in [7_u8, 10, 30] {
-            let Some(days) = std::num::NonZeroU8::new(length) else {
-                panic!("{length} is not zero")
-            };
-            let covered = covered_weekdays(date(2026, 9, 11), days);
-            assert_eq!(covered.len(), 7, "{length} days meets all seven");
-
-            let mut seen: Vec<Weekday> = covered.iter().map(|(day, _)| *day).collect();
-            seen.sort_unstable_by_key(|day| day.to_monday_zero_offset());
-            seen.dedup();
-            assert_eq!(seen.len(), 7, "{length} days asks about each one once");
-        }
-    }
 
     /// **An empty line takes the offered default, and the defaults differ.**
     ///

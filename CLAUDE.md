@@ -163,7 +163,8 @@ was a stub.
 
 Two driving adapters, both operator entry points, both at ring 4, neither
 depending on the other, and both frontends (§ 19). They request, render and
-interact. #402 takes `infrastructure` away from them altogether.
+interact. Neither depends on `infrastructure`, and the `architecture` check
+fails if one does (#402).
 
 **The goal is a domain independent of the interface, not parity between the
 two.** The operator withdrew parity on 2026-09-25: it was only ever a way of

@@ -10,10 +10,16 @@
 pub mod access;
 pub mod catalogue;
 pub mod config;
+pub mod corrections;
+pub mod cycling;
 pub mod holidays;
 pub mod next;
 pub mod paths;
+pub mod prescribing;
+pub mod rescheduling;
 pub mod rides;
+pub mod setup;
+pub mod store;
 pub mod wiring;
 
 /// What the operator stored, as a frontend passes it to a run.

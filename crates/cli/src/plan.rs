@@ -30,22 +30,19 @@
 use std::path::Path;
 
 use application::{
-    Authored, DiaryStore as _, PlanAuthor as _, PlanStore as _, PublishedCycling,
-    PublishedProgrammes as _, PublishedRead,
+    Authored, DiaryStore, PlanAuthor as _, PlanStore as _, PublishedCycling, PublishedRead,
     published::{self, BuildError},
 };
+use configurator::{access::Peloton, store::Store};
 use domain::{
     cycling::{Answer, CyclingMesocycle},
     gym::exercise::RepsExercise,
+    macrocycle::PROGRESSIONS,
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
-    prescription::PrimaryPattern,
+    prescription::{PrimaryPattern, sbs},
     provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::Discipline,
-};
-use infrastructure::{
-    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
-    peloton::{catalogue::ClassCatalogue, provider::PelotonProgrammes, skeleton},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -78,18 +75,8 @@ const GYM_PROVIDERS: [GymProvider; 1] = [GymProvider {
     provider: "Stronger By Science",
     programme: "Squat 2x Int",
     pattern: PrimaryPattern::KneeDominant,
-    test_microcycle: SBS_MICROCYCLES,
+    test_microcycle: sbs::WEEKS,
 }];
-
-/// Progressions after the entry test. Three of four, against thirteen weeks of
-/// cycling (decision 0034).
-const PROGRESSIONS: usize = 3;
-
-/// Microcycles in a mesocycle, and where the test sits in an SBS one.
-///
-/// Counted as a microcycle *number* because that is what the wizard asks for;
-/// the report below widens it to index with.
-pub const SBS_MICROCYCLES: u32 = 4;
 
 /// One cycling mesocycle, named, with what it answers.
 struct Offered<'a> {
@@ -150,7 +137,7 @@ pub async fn generate(
     zone: &OperatorZone,
     microcycles: usize,
     sessions: usize,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     wizard::interactive()?;
 
@@ -181,44 +168,36 @@ pub async fn generate(
     // The days are read before anything is fetched: a schedule that says
     // nothing about the start date makes the whole run pointless, and finding
     // that out after a minute of requests is a minute wasted.
-    let pool = infrastructure::connect(database).await?;
-    let diary = SqliteDiaryStore::new(pool.clone());
-    let riding_days = cycling_weekdays(&diary, start).await?;
+    let store = Store::open(database).await?;
+    let riding_days = cycling_weekdays(&store.diary(), start).await?;
 
-    let classes = peloton.map(|(classes, _)| classes);
-    let stored = SqlitePelotonClassStore::new(pool.clone());
-    let catalogue = ClassCatalogue::over(&stored, classes.as_ref());
     // **The count, not the read count.** How many classes have had their
     // detail read is not what matters here: the refresh reads the classes the
     // skeletons place before any other, so a catalogue with rows in it answers
     // this authoring whatever its overall progress. An *empty* catalogue is the
     // one case worth saying out loud, because then every class is a request.
-    let held = catalogue
-        .held()
+    let listed = configurator::cycling::listed(&store)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let programmes = pairing.names;
-    if held.listed == 0 {
+    if listed == 0 {
         println!(
             "\nthe class catalogue is empty, so {programmes} are read from Peloton. \
              Running fitness next fills it"
         );
     } else {
-        println!(
-            "\nreading {programmes} from the local catalogue of {} classes",
-            held.listed
-        );
+        println!("\nreading {programmes} from the local catalogue of {listed} classes");
     }
 
-    let publisher = PelotonProgrammes::new(catalogue);
+    let peloton = peloton.as_ref();
     let mut read = Vec::new();
     for which in pairing.programmes {
-        read.push(fetch(&publisher, which).await?);
+        read.push(fetch(&store, peloton, which).await?);
     }
     // **The test programme is read whichever pairing is chosen**, because it is
     // a programme in its own right rather than a microcycle borrowed from one of
     // them. Every cycling block opens by measuring FTP.
-    let testing = fetch(&publisher, PublishedCycling::Test).await?;
+    let testing = fetch(&store, peloton, PublishedCycling::Test).await?;
 
     let offered: Vec<Offered> = read
         .iter()
@@ -241,10 +220,8 @@ pub async fn generate(
         .take(3)
         .collect();
     author(
-        &pool,
+        &store,
         zone,
-        SqlitePlanStore::new(pool.clone(), zone.clone()),
-        SqliteGenerationParameterStore::new(pool.clone()),
         start,
         gym,
         lift,
@@ -263,7 +240,7 @@ pub async fn generate(
 /// offers the discipline's ordinary days, and what runs on them is the
 /// programme's to fix.
 pub async fn cycling_weekdays(
-    diary: &SqliteDiaryStore,
+    diary: &(impl DiaryStore + Sync),
     start: Date,
 ) -> Result<Vec<Weekday>, Failure> {
     let diary = diary
@@ -311,11 +288,11 @@ fn choose(question: &str, options: &[&str]) -> Result<usize, Failure> {
 
 /// Read one published programme: every class it places, and what it trains.
 async fn fetch(
-    publisher: &PelotonProgrammes<'_>,
+    store: &Store,
+    peloton: Option<&Peloton>,
     which: PublishedCycling,
 ) -> Result<PublishedRead, Failure> {
-    publisher
-        .read(which)
+    configurator::cycling::published(store, peloton, which)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::SOURCE))
 }
@@ -346,10 +323,8 @@ fn build(
 /// own, asked through [`wizard::gym_side`] rather than restated here.
 #[expect(clippy::too_many_arguments, reason = "one plan's worth of answers")]
 async fn author(
-    pool: &infrastructure::SqlitePool,
+    store: &Store,
     zone: &OperatorZone,
-    plans: SqlitePlanStore,
-    parameter_store: SqliteGenerationParameterStore,
     start: Date,
     provider: &GymProvider,
     lift: RepsExercise,
@@ -383,6 +358,7 @@ async fn author(
     // **Before the first question, not after the last.** A plan cannot be
     // authored against no parameters (§ 14), and finding that out at the end
     // costs every answer just given.
+    let parameter_store = store.parameters();
     let parameters = wizard::ready(&parameter_store).await?;
 
     let published = ExternalProgramme::new(
@@ -391,7 +367,7 @@ async fn author(
             .map_err(|error| Failure::usage(&error))?,
     );
     let gym_side = wizard::gym_side(
-        pool,
+        store,
         zone,
         &parameters,
         &wizard::GymOutline {
@@ -435,6 +411,7 @@ async fn author(
         })
         .collect();
 
+    let plans = store.plans(zone);
     let existing = plans
         .named(&name)
         .await
@@ -544,7 +521,7 @@ fn report(
     // microcycle of the block that follows it: the gym's is a `test` programme
     // and cycling's is *Power Zone test*.
     let test = if tests {
-        format!("{} µ1 — the FTP test", skeleton::POWER_ZONE_TEST)
+        format!("{} µ1 — the FTP test", configurator::rides::TEST_PROGRAMME)
     } else {
         "—".to_owned()
     };
@@ -554,12 +531,12 @@ fn report(
     for (cycle, one) in usable.iter().take(3).enumerate() {
         let Some(answer) = &one.answer else { continue };
         for index in 0..answer.microcycles.len() {
-            let ordinal = cycle * SBS_MICROCYCLES as usize + index + 1;
+            let ordinal = cycle * sbs::WEEKS as usize + index + 1;
             let date =
                 start.saturating_add(jiff::Span::new().weeks(i64::try_from(ordinal).unwrap_or(0)));
             let within = index + 1;
             let named = format!("{} {} µ{within}", gym.programme, cycle + 1);
-            let named = if within == SBS_MICROCYCLES as usize {
+            let named = if within == sbs::WEEKS as usize {
                 format!("{named} — 1RM test")
             } else {
                 named
@@ -588,7 +565,7 @@ fn report(
         }
     }
 
-    if microcycles != SBS_MICROCYCLES as usize {
+    if microcycles != sbs::WEEKS as usize {
         println!(
             "\n  ! {microcycles}-microcycle mesocycles against 4-microcycle SBS cycles \
              will not line up"

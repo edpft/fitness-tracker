@@ -54,13 +54,17 @@ pub enum AccessError {
 ///
 /// [`AccessError`] if neither the environment nor the store holds a Peloton
 /// login.
-pub fn peloton(
-    credentials: &infrastructure::Credentials,
-) -> Result<(PelotonClasses, PelotonStack), AccessError> {
+pub fn peloton(credentials: &infrastructure::Credentials) -> Result<Peloton, AccessError> {
     let access = access(credentials)?;
     let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
     let stack = PelotonStack::new(GATEWAY.to_owned(), access.auth());
-    Ok((classes, stack))
+    Ok(Peloton { classes, stack })
+}
+
+/// Peloton, logged in: its classes, and the stack a ride is put in.
+pub struct Peloton {
+    pub(crate) classes: PelotonClasses,
+    pub(crate) stack: PelotonStack,
 }
 
 /// A resolved Peloton login, and the root it is exchanged at.

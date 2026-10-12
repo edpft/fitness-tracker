@@ -102,15 +102,15 @@ pub async fn run(
     };
     let peloton = access::peloton(credentials);
     let stored = SqlitePelotonClassStore::new(pool.clone());
-    let classes = peloton.as_ref().ok().map(|(classes, _)| classes);
+    let classes = peloton.as_ref().ok().map(|peloton| &peloton.classes);
     let catalogue = ClassCatalogue::over(&stored, classes);
     let class_source = peloton
         .as_ref()
-        .map(|(classes, _)| PelotonClassSource::new(classes, &stored))
+        .map(|peloton| PelotonClassSource::new(&peloton.classes, &stored))
         .map_err(unreachable);
     let ride_destination = peloton
         .as_ref()
-        .map(|(classes, stack)| PelotonRideDestination::new(classes, stack))
+        .map(|peloton| PelotonRideDestination::new(&peloton.classes, &peloton.stack))
         .map_err(unreachable);
     let gym_destination = access::hevy_routines(known(Discipline::Gym)?.delivers_to(), credentials)
         .map_err(|error| unreachable(&error));

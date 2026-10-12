@@ -186,9 +186,13 @@ pub enum Chain {
     BuildThenPeak,
 }
 
+/// How many mesocycles follow a macrocycle's entry test, in either discipline:
+/// three of four weeks, against thirteen weeks of cycling (decision 0034).
+pub const PROGRESSIONS: usize = 3;
+
 impl Chain {
     /// Its mesocycles, in the order they are run.
-    pub const fn mesocycles(self) -> [Cycling; 3] {
+    pub const fn mesocycles(self) -> [Cycling; PROGRESSIONS] {
         match self {
             Self::BaseThenBuild => [Cycling::Base1, Cycling::Base2, Cycling::Build],
             Self::BuildThenPeak => [Cycling::Build, Cycling::Peak1, Cycling::Peak2],

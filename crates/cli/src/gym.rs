@@ -33,11 +33,11 @@ use crate::{
     wiring, wiring::Command,
 };
 use application::strength::RelativeStrength;
+use configurator::store::Store;
 use domain::{
     analytical::Rts,
     normalised::{OperatorZone, StartedAt},
 };
-use infrastructure::{SqliteCanonicalGymSessionStore, SqliteWeighInHistory, connect};
 
 /// Run the discipline's daily loop: collect, derive, prescribe, deliver.
 ///
@@ -50,7 +50,7 @@ pub async fn next(
     zone: &OperatorZone,
     date: Option<&str>,
     access: SourceAccess,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let known = discipline.collects();
     let stream = known
@@ -122,7 +122,7 @@ pub async fn strength(
     discipline: &KnownDiscipline,
     database: &Path,
     zone: &OperatorZone,
-    credentials: &infrastructure::Credentials,
+    credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let weigh_ins = catalogue::lookup(WEIGH_INS).ok_or_else(|| {
         Failure::message(
@@ -158,18 +158,14 @@ pub async fn strength(
     crate::canonicalise::gym(database).await?;
     println!();
 
-    let pool = connect(database).await?;
-    let figures = RelativeStrength::new(
-        Rts,
-        SqliteCanonicalGymSessionStore::new(pool.clone()),
-        SqliteWeighInHistory::new(pool),
-    )
-    .report(
-        StartedAt::new(jiff::Timestamp::now(), zone.clone())
-            .wall_clock()
-            .date(),
-    )
-    .await?;
+    let store = Store::open(database).await?;
+    let figures = RelativeStrength::new(Rts, store.canonical_gym(), store.weigh_ins())
+        .report(
+            StartedAt::new(jiff::Timestamp::now(), zone.clone())
+                .wall_clock()
+                .date(),
+        )
+        .await?;
     output::strength(&figures);
     Ok(())
 }

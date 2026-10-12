@@ -24,23 +24,16 @@
 use std::path::Path;
 
 use application::{
-    DiaryStore as _, PlanAuthor as _, PlanStore as _, RidesPlaced,
-    cycling::{PrescribedRide, RideDeliveryError, Riding, RidingError},
+    PlanAuthor as _, PlanStore as _, RidesPlaced,
+    cycling::{PrescribedRide, RideDeliveryError, RidingError},
 };
+use configurator::{access::Peloton, store::Store};
 use domain::{
     cycling::{CyclingMicrocycle, Ftp, PlannedRide, Ride, clock},
     measure::PositiveDuration,
     normalised::OperatorZone,
     plan::{Plan, Programme},
     schedule::{Relative, SessionRole},
-};
-use infrastructure::{
-    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
-    SqliteRiddenVenues, connect,
-    peloton::{
-        PelotonClasses, PelotonHoldingRides, PelotonRideDestination, PelotonStack,
-        catalogue::ClassCatalogue,
-    },
 };
 use jiff::civil::{Date, Weekday};
 
@@ -76,13 +69,12 @@ pub async fn next(
     zone: &OperatorZone,
     from: Date,
     ftp: Option<Ftp>,
-    to: Result<(&PelotonClasses, &PelotonStack), &str>,
+    to: Result<&Peloton, &str>,
 ) -> Result<(), Failure> {
-    let pool = connect(database).await?;
-    let stored = SqlitePelotonClassStore::new(pool.clone());
-    let catalogue = ClassCatalogue::over(&stored, to.ok().map(|(classes, _)| classes));
-    let riding = configurator::next::riding(&pool, zone, catalogue)?;
-    let ride = prescribed(&riding, &pool, zone, from, ftp).await?;
+    let store = Store::open(database).await?;
+    let ride = configurator::cycling::prescribed(&store, zone, from, ftp, to.ok())
+        .await?
+        .map_err(|error| riding_failure(from, &error))?;
 
     report(&ride);
     println!();
@@ -92,10 +84,9 @@ pub async fn next(
         // command he trains from, and it named a `--replace` it did not take,
         // so there was no way through from it at all (#121). What it replaced
         // is said, not silently discarded.
-        Ok((classes, stack)) => {
-            let placed = riding
-                .deliver(&ride, &PelotonRideDestination::new(classes, stack), true)
-                .await
+        Ok(peloton) => {
+            let placed = configurator::cycling::deliver(&store, zone, &ride, peloton, true)
+                .await?
                 .map_err(|error| delivery_failure(&error))?;
             delivered(&ride, &placed);
             Ok(())
@@ -105,30 +96,6 @@ pub async fn next(
             Ok(())
         }
     }
-}
-
-/// The ride at or after a date, as the plan now stands.
-async fn prescribed<S, P, H, R, F, Y>(
-    riding: &Riding<S, P, H, R, F, Y>,
-    pool: &infrastructure::SqlitePool,
-    zone: &OperatorZone,
-    from: Date,
-    ftp: Option<Ftp>,
-) -> Result<PrescribedRide, Failure>
-where
-    S: application::CyclingMesocycleStore + Clone + Send + Sync,
-    P: application::PlanStore + Clone + Send + Sync,
-    H: application::HoldingRides + Sync,
-    R: application::RiddenVenues + Sync,
-    F: application::FtpHistory + Sync,
-    Y: application::CyclingDeliveryStore + Sync,
-{
-    let reschedule = crate::rescheduling::reschedule(pool, zone).await?;
-    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    riding
-        .next(from, reschedule, &diary, ftp)
-        .await
-        .map_err(|error| riding_failure(from, &error))
 }
 
 /// What the operator is told when the next ride cannot be said.
@@ -222,8 +189,8 @@ pub fn session(ride: &PrescribedRide) {
     // reference into a link is the one place it is allowed to show.
     for venue in planned.at().iter() {
         println!("  {venue}");
-        println!("  {}", infrastructure::peloton::url_for(venue.reference()));
-        if infrastructure::peloton::is_known_unavailable(venue.reference()) {
+        println!("  {}", configurator::rides::link(venue.reference()));
+        if configurator::rides::known_unavailable(venue.reference()) {
             println!(
                 "  ! this class reads Unavailable on the operator's account. \
                  A substitute has to match its zone profile."
@@ -307,13 +274,12 @@ pub async fn deliver(
     zone: &OperatorZone,
     from: Date,
     replace: bool,
-    classes: &PelotonClasses,
-    stack: &PelotonStack,
+    peloton: &Peloton,
 ) -> Result<(), Failure> {
-    let pool = connect(database).await?;
-    let stored = SqlitePelotonClassStore::new(pool.clone());
-    let riding = configurator::next::riding(&pool, zone, ClassCatalogue::new(&stored, classes))?;
-    let ride = prescribed(&riding, &pool, zone, from, None).await?;
+    let store = Store::open(database).await?;
+    let ride = configurator::cycling::prescribed(&store, zone, from, None, Some(peloton))
+        .await?
+        .map_err(|error| riding_failure(from, &error))?;
 
     println!("{}", heading(&ride));
     println!(
@@ -322,9 +288,8 @@ pub async fn deliver(
         ride.next.date
     );
     println!();
-    let placed = riding
-        .deliver(&ride, &PelotonRideDestination::new(classes, stack), replace)
-        .await
+    let placed = configurator::cycling::deliver(&store, zone, &ride, peloton, replace)
+        .await?
         .map_err(|error| delivery_failure(&error))?;
     delivered(&ride, &placed);
     Ok(())
@@ -391,11 +356,11 @@ pub async fn hold(
     database: &Path,
     zone: &OperatorZone,
     start: Date,
-    classes: &PelotonClasses,
+    peloton: &Peloton,
 ) -> Result<(), Failure> {
-    let pool = connect(database).await?;
-    let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+    let store = Store::open(database).await?;
+    let parameters = store.parameters();
+    let plans = store.plans(zone);
 
     // The Monday of the week asked for. A microcycle begins on a Monday and a
     // date in the middle of one names that week rather than a new one.
@@ -426,10 +391,9 @@ pub async fn hold(
             Failure::message(format!("no plan is authored under {name}"), exit::STORE)
         })?;
 
-    let stored = SqlitePelotonClassStore::new(pool.clone());
-    let held = application::holding::mesocycle(
-        &PelotonHoldingRides::new(ClassCatalogue::new(&stored, classes)),
-        &SqliteRiddenVenues::new(pool.clone()),
+    let held = configurator::cycling::holding(
+        &store,
+        peloton,
         start,
         SessionRole::new(Relative::Higher, Relative::Lower),
         SessionRole::new(Relative::Lower, Relative::Higher),

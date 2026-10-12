@@ -13,15 +13,15 @@
 use std::path::Path;
 
 use application::canonicalise;
-use infrastructure::{SqliteCanonicalGymSessionStore, SqliteNormalisedGymSessionReader, connect};
+use configurator::store::Store;
 
 use crate::{Failure, output};
 
 /// Rebuild the canonical gym layer and report what it now holds.
 pub async fn gym(database: &Path) -> Result<(), Failure> {
-    let pool = connect(database).await?;
-    let normalised = SqliteNormalisedGymSessionReader::new(pool.clone());
-    let canonical = SqliteCanonicalGymSessionStore::new(pool);
+    let store = Store::open(database).await?;
+    let normalised = store.normalised_gym();
+    let canonical = store.canonical_gym();
 
     output::canonicalising_started();
     let done = canonicalise::gym_sessions(&normalised, &canonical).await?;

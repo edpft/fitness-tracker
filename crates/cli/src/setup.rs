@@ -30,10 +30,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::GenerationParameterStore as _;
-use infrastructure::{
-    Credential as StoredCredential, CredentialDigest, Credentials, SqliteGenerationParameterStore,
-    SqliteOperatorSettingsStore, TokenFile, WithingsAuth, WithingsClient, connect,
+use application::GenerationParameterStore;
+use configurator::{
+    Credentials,
+    setup::{self, Credential as StoredCredential, from_environment},
+    store::Store,
 };
 
 use crate::{Failure, catalogue::Credential, config, exit, paths};
@@ -106,12 +107,11 @@ pub async fn init(
             exit::STORE,
         )
     })?;
-    let pool = connect(database)
+    let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let settings = SqliteOperatorSettingsStore::new(pool.clone());
-    let in_force = settings
+    let in_force = store
         .timezone()
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -135,16 +135,16 @@ pub async fn init(
         (Some(stated), Some(given)) if stated == given => stated.to_owned(),
         _ => {
             let obtained = zone_for(declared, in_force.as_deref())?;
-            settings
-                .author(jiff::Timestamp::now(), &obtained)
+            store
+                .state_timezone(jiff::Timestamp::now(), &obtained)
                 .await
                 .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
             obtained
         }
     };
 
-    let parameters = seed_parameters(&SqliteGenerationParameterStore::new(pool.clone())).await?;
-    pool.close().await;
+    let parameters = seed_parameters(&store.parameters()).await?;
+    store.close().await;
 
     let credentials_path =
         paths::credentials(&paths::SystemEnvironment).map_err(config::ConfigError::from)?;
@@ -165,7 +165,7 @@ pub async fn init(
 /// other, so the value in force at a time stays recoverable and a later change
 /// to what this build ships rewrites nothing already authored.
 async fn seed_parameters(
-    store: &SqliteGenerationParameterStore,
+    store: &(impl GenerationParameterStore + Sync),
 ) -> Result<ParameterOutcome, Failure> {
     if store
         .current()
@@ -294,65 +294,12 @@ fn connected(
     // only whether the file is there is the split that issue is about: `setup`
     // would report a source connected on a token from an application the
     // operator has since replaced, which the first request would be refused on.
-    if let Credential::OAuthClient { .. } = known.credential() {
-        let Some(registration) = registration(known, stored) else {
-            return Ok(None);
-        };
-        if token_file(known, registration.digest())?.read().is_none() {
-            return Ok(None);
-        }
+    if let Credential::OAuthClient { .. } = known.credential()
+        && !setup::granted(known, stored).map_err(|error| Failure::usage(&error))?
+    {
+        return Ok(None);
     }
     Ok(Some(answered))
-}
-
-/// The registration a source would be reached with, from wherever it is stated.
-///
-/// The environment first, then the store: `SourceAccess::resolve` orders them
-/// that way and a second order here would be a second answer to the same
-/// question.
-fn registration(
-    known: &crate::catalogue::KnownSource,
-    stored: &Credentials,
-) -> Option<WithingsClient> {
-    if let Some(values) = from_environment(known)
-        && let [client_id, client_secret, redirect_uri] = values.as_slice()
-    {
-        return Some(WithingsClient::new(client_id, client_secret, redirect_uri));
-    }
-    match stored.credential(known.name()) {
-        Some(StoredCredential::OAuthClient {
-            client_id,
-            client_secret,
-            redirect_uri,
-        }) => Some(WithingsClient::new(
-            client_id.clone(),
-            client_secret.clone(),
-            redirect_uri.clone(),
-        )),
-        _ => None,
-    }
-}
-
-/// Every variable a source needs, if the environment sets them all.
-fn from_environment(known: &crate::catalogue::KnownSource) -> Option<Vec<String>> {
-    known
-        .required_variables()
-        .iter()
-        .map(|variable| {
-            std::env::var(variable)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .collect()
-}
-
-fn token_file(
-    known: &crate::catalogue::KnownSource,
-    obtained_with: CredentialDigest,
-) -> Result<TokenFile, Failure> {
-    paths::token(&paths::SystemEnvironment, known.name())
-        .map(|path| TokenFile::new(path, obtained_with))
-        .map_err(|error| Failure::usage(&config::ConfigError::from(error)))
 }
 
 /// Take one source's credential, check it, and record it in `stored`.
@@ -400,110 +347,24 @@ async fn take(
     })
 }
 
-/// Offer a credential to its source and see whether it is accepted.
-///
-/// **An arm per source, like `cli::wiring`'s**, and for the same reason: which
-/// adapter can answer for a credential is a fact about the source, not about the
-/// shape of the credential. A build that grows a second key-based source adds an
-/// arm here rather than inheriting Hevy's client by accident.
+/// Offer a credential to its source, sending the operator to a browser where
+/// signing in needs one.
 async fn verify(
     known: &crate::catalogue::KnownSource,
     credential: &StoredCredential,
 ) -> Result<(), String> {
-    let base_url = std::env::var(known.base_url_variable())
-        .unwrap_or_else(|_| known.default_base_url().to_owned());
-    let auth_base_url = |default: &str| {
-        std::env::var(known.auth_base_url_variable()).unwrap_or_else(|_| default.to_owned())
-    };
-
-    match (known.name(), credential, known.credential()) {
-        ("hevy", StoredCredential::ApiKey { key }, _) => {
-            infrastructure::HevyWorkoutEvents::new(base_url, key.clone())
-                .verify()
-                .await
-                .map_err(|error| error.to_string())
-        }
-        (
-            "peloton",
-            StoredCredential::Login { email, password },
-            Credential::EmailPassword {
-                default_auth_base_url,
-            },
-        ) => crate::wiring::peloton_auth(
-            auth_base_url(default_auth_base_url),
-            infrastructure::peloton::auth::PelotonCredentials::new(email.clone(), password.clone()),
-        )
-        .bearer()
-        .await
-        .map(|_| ())
-        .map_err(|error| error.to_string()),
-        // **Garmin's own arm, though it shares Peloton's credential kind.**
-        // Which adapter answers for a login is a fact about the source: these
-        // two both take an email and a password and neither can check the
-        // other's. Garmin also needs two hosts rather than one, and the second
-        // is derived from the first so that a stub reaches both.
-        (
-            "garmin",
-            StoredCredential::Login { email, password },
-            Credential::EmailPassword {
-                default_auth_base_url,
-            },
-        ) => {
-            let sso = auth_base_url(default_auth_base_url);
-            infrastructure::GarminAuth::new(
-                sso.clone(),
-                infrastructure::garmin::token_base_for(&sso),
-                infrastructure::GarminCredentials::new(email.clone(), password.clone()),
-                None,
-            )
-            .bearer()
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-        }
-        (
-            "withings",
-            StoredCredential::OAuthClient {
-                client_id,
-                client_secret,
-                redirect_uri,
-            },
-            Credential::OAuthClient {
-                default_auth_base_url,
-            },
-        ) => {
-            let registration = WithingsClient::new(
-                client_id.clone(),
-                client_secret.clone(),
-                redirect_uri.clone(),
-            );
-            let cache = token_file(known, registration.digest())
-                .map_err(|failure| failure.message_text().to_owned())?;
-            let auth = WithingsAuth::new(
-                base_url,
-                auth_base_url(default_auth_base_url),
-                registration,
-                cache,
-            );
-            sign_in(&auth).await
-        }
-        (name, _, _) => Err(format!("this build cannot check a {name} credential")),
-    }
+    setup::verify(known, credential, paste).await
 }
 
-/// Send the operator to a browser, and exchange what they bring back.
+/// Send the operator to a browser, and take the address they land on.
 ///
 /// **The paste is read with echo on.** It is an address with a single-use code
 /// that expires in thirty seconds, and a paste nobody can see is one nobody can
 /// check was whole.
-async fn sign_in(auth: &WithingsAuth) -> Result<(), String> {
+fn paste(address: &str) -> Result<String, String> {
     if !std::io::stdin().is_terminal() {
         return Err("signing in needs a browser and a terminal to paste into".to_owned());
     }
-    let state = WithingsAuth::new_state();
-    let address = auth
-        .authorisation_url(&state)
-        .map_err(|error| error.to_string())?;
 
     println!();
     println!("Open this address, allow access, and paste the address your browser lands on.");
@@ -520,10 +381,7 @@ async fn sign_in(auth: &WithingsAuth) -> Result<(), String> {
     std::io::stdin()
         .read_line(&mut pasted)
         .map_err(|error| error.to_string())?;
-
-    auth.sign_in(&pasted, &state)
-        .await
-        .map_err(|error| error.to_string())
+    Ok(pasted)
 }
 
 /// One source's credential, from standard input or from a prompt.

@@ -15,3 +15,6 @@ pub fn link(reference: &str) -> String {
 pub fn known_unavailable(reference: &str) -> bool {
     infrastructure::peloton::is_known_unavailable(reference)
 }
+
+/// The standalone FTP test programme, as the authored record names it.
+pub const TEST_PROGRAMME: &str = infrastructure::peloton::skeleton::POWER_ZONE_TEST;
