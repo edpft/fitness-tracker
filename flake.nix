@@ -273,13 +273,70 @@
           '';
         };
 
-        # What `nix profile` installs: the `fitness` command and the unit that
-        # serves the page, upgraded together.
+        # `nix profile upgrade` runs no hook, and a running service keeps the
+        # unit it was started from, so the page went on serving the build it
+        # replaced (#405). This watches the profile instead: any change to it
+        # reloads the user units and restarts the page if it is running. A
+        # change that is not an upgrade of this flake costs a restart.
+        #
+        # The directory, not `profile` in it: an upgrade adds a generation
+        # here and then renames a new `profile` symlink over the old one, and
+        # a watch on the symlink sees no rename. The generation fires the
+        # watch first, so the rename can land while the reload is running,
+        # when the path unit drops events; the loop goes round until `profile`
+        # stays put. `systemctl` is the host's, inherited from the service's
+        # PATH, so it speaks the running manager's version.
+        followProfile = pkgs.writeShellApplication {
+          name = "fitness-web-follow-profile";
+          runtimeInputs = [ pkgs.coreutils ];
+          text = ''
+            profile="$1"
+            while true; do
+              before="$(readlink "$profile")"
+              systemctl --user daemon-reload
+              systemctl --user try-restart fitness-web.service
+              [ "$(readlink "$profile")" = "$before" ] && break
+            done
+          '';
+        };
+
+        webUpgradePath = pkgs.writeTextFile {
+          name = "fitness-web-upgrade-path";
+          destination = "/share/systemd/user/fitness-web-upgrade.path";
+          text = ''
+            [Unit]
+            Description=Serve the newly installed build of the fitness tracker's web interface
+
+            [Path]
+            PathChanged=%h/.local/state/nix/profiles
+
+            [Install]
+            WantedBy=default.target
+          '';
+        };
+
+        webUpgradeService = pkgs.writeTextFile {
+          name = "fitness-web-upgrade-service";
+          destination = "/share/systemd/user/fitness-web-upgrade.service";
+          text = ''
+            [Unit]
+            Description=Serve the newly installed build of the fitness tracker's web interface
+
+            [Service]
+            Type=oneshot
+            ExecStart=${lib.getExe followProfile} %h/.local/state/nix/profiles/profile
+          '';
+        };
+
+        # What `nix profile` installs: the `fitness` command and the units that
+        # serve the page, upgraded together.
         installed = pkgs.symlinkJoin {
           name = "fitness-tracker-${revision}";
           paths = [
             cli
             webService
+            webUpgradePath
+            webUpgradeService
           ];
           meta.mainProgram = "fitness";
         };
