@@ -251,10 +251,6 @@ pub fn derivation_started(stream: &LandingStream) {
     println!("deriving {stream} …");
 }
 
-pub fn class_catalogue_started() {
-    println!("refreshing Peloton's power zone classes …");
-}
-
 /// How long a read has to be before it is worth warning about.
 ///
 /// The first refresh against an empty catalogue is ten minutes and has to say
@@ -262,84 +258,14 @@ pub fn class_catalogue_started() {
 /// would be commentary.
 const WORTH_ANNOUNCING: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// What the reading about to start will cost, where that is worth knowing.
-///
-/// **Before it starts, not after** (#369). A thousand class details is ten
-/// minutes, and ten minutes of a silent `fitness next` is indistinguishable
-/// from one that has hung.
-pub fn class_catalogue_walked(walked: &infrastructure::peloton::Walked) {
-    let takes = walked.reading_takes();
-    if takes < WORTH_ANNOUNCING {
-        return;
-    }
-    println!(
-        "  {} classes to read — about {}",
-        walked.held.outstanding(),
-        roughly(takes)
-    );
-}
-
 /// A duration as the operator would say it.
-fn roughly(takes: std::time::Duration) -> String {
+pub fn roughly(takes: std::time::Duration) -> String {
     let seconds = takes.as_secs();
     if seconds < 90 {
         return format!("{seconds} seconds");
     }
     let minutes = (seconds + 30) / 60;
     format!("{minutes} minutes")
-}
-
-/// What one catalogue refresh did, and how much of the library is read.
-///
-/// **Four numbers, because they answer four different questions.** What was
-/// added says whether Peloton published anything; what was read says how far
-/// this run got; what Peloton does not serve says the catalogue has asked all
-/// it can about a class and been told no; what is outstanding says whether
-/// choosing a class is yet answerable without the network. Printing only the
-/// total would hide a catalogue that is listed in full and read not at all,
-/// which is what #369 was.
-pub fn class_catalogue(
-    walked: &infrastructure::peloton::Walked,
-    read: &infrastructure::peloton::Reading,
-) {
-    let held = read.held;
-    print!("  {} classes", held.listed);
-    if walked.added > 0 {
-        print!(", {} new", walked.added);
-    }
-    if read.read > 0 {
-        print!(", {} read this run", read.read);
-    }
-    if held.not_served > 0 {
-        print!(", {} Peloton does not serve", held.not_served);
-    }
-    match held.outstanding() {
-        0 => println!(", all read"),
-        outstanding => println!(", {outstanding} still to read"),
-    }
-    // **A read that stopped part-way says so, and what it read still counts.**
-    // Six hundred classes read before an outage is six hundred the next refresh
-    // does not pay for again.
-    if let Some(error) = &read.stopped {
-        println!("  reading stopped: {error}. The next `fitness next` carries on");
-    }
-}
-
-/// A refresh that did not happen.
-///
-/// Stepped past like any unreachable source (§ 36): the catalogue the last run
-/// left still answers, just without this week's classes in it.
-pub fn class_catalogue_not_refreshed(why: &str) {
-    println!("  not refreshed: {why}. Carrying on with the catalogue already held");
-}
-
-/// A walk that landed and a read that could not be written.
-///
-/// Distinct from [`class_catalogue_not_refreshed`]: the listing *is* current, so
-/// choosing a class still works; what is missing is the zone structure of
-/// whatever had not been read yet.
-pub fn class_catalogue_not_read(why: &str) {
-    println!("  details not read: {why}. The listing is current either way");
 }
 
 pub fn canonicalising_started() {
@@ -1089,152 +1015,195 @@ fn derived_phrase(
     }
 }
 
-/// The macrocycle a date is in, and its phase (#224).
-///
-/// **Said even when it cannot be known**: past the school calendar's reach, or
-/// with the calendar unreachable, there is no data, which is not the same as
-/// no term.
-pub fn macrocycle(
-    date: jiff::civil::Date,
-    holidays: Result<&domain::schedule::Holidays, &str>,
-    mesocycle: Option<domain::plan::Span>,
-) {
-    use domain::macrocycle::Macrocycle;
+// --- `fitness next` ---------------------------------------------------------
 
-    let holidays = match holidays {
-        Ok(holidays) => holidays,
-        Err(reason) => {
-            println!("macrocycle unknown: the school calendar could not be read ({reason})\n");
-            return;
+/// How wide a step's name is, so the outcomes line up.
+const STEP_WIDTH: usize = 35;
+
+/// A step of `next`'s run, named and padded for its outcome.
+pub fn step(step: &application::next::Step) -> String {
+    use application::next::Step;
+    let name = match step {
+        Step::Fetching(stream) => format!("Fetching {stream}"),
+        Step::Normalising(stream) => format!("Normalising {stream}"),
+        Step::Canonicalising => "Canonicalising gym sessions".to_owned(),
+        // **The driving adapter knows which catalogue this build keeps**, as it
+        // knows where rides are done.
+        Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),
+        Step::Committing => "Committing the next mesocycle".to_owned(),
+        Step::Skipping => "Skipping".to_owned(),
+    };
+    format!("{name:<STEP_WIDTH$}")
+}
+
+/// How a step ended: done with a count of what it found, or failed and why.
+pub fn outcome(done: &application::next::Done) -> String {
+    use std::fmt::Write as _;
+
+    use application::next::Found;
+    let found = match &done.outcome {
+        Err(failure) => return format!("failed: {failure}"),
+        Ok(found) => found,
+    };
+    let what = match found {
+        Found::Landed(records) if records.as_usize() == 0 => "nothing new".to_owned(),
+        Found::Landed(records) => format!("{records} new"),
+        Found::Sessions(sessions) => format!("{sessions} sessions"),
+        Found::Canonical(sessions) => format!("{sessions} sessions"),
+        Found::Classes {
+            added,
+            outstanding,
+            stopped,
+            ..
+        } => {
+            let mut said = match added {
+                0 => "nothing new".to_owned(),
+                added => format!("{added} new classes"),
+            };
+            if *outstanding > 0 {
+                let _ = write!(said, ", {outstanding} still to read");
+            }
+            // **A read that stopped part-way says so, and what it read still
+            // counts**: the next refresh does not pay for it again.
+            if let Some(error) = stopped {
+                let _ = write!(said, "; reading stopped: {error}");
+            }
+            said
+        }
+        Found::Committed { concurrent, span } => format!("{concurrent}, {span}"),
+        Found::Skipped { session, skip } => {
+            let mut last = skip.from();
+            while let Some(next) = last.next().filter(|next| *next < skip.until()) {
+                last = next;
+            }
+            format!(
+                "{} ({}): no training from {} to {}",
+                named(session),
+                skip.reason(),
+                when(skip.from()),
+                when(last),
+            )
         }
     };
-    let Some(macrocycle) = Macrocycle::on(date, holidays) else {
-        let reach = holidays
-            .school_published_to()
-            .map_or_else(|| "nowhere".to_owned(), |to| to.to_string());
-        println!("macrocycle unknown: the school calendar is published to {reach}\n");
-        return;
-    };
-    let kind = holidays
-        .kind(&macrocycle.holiday())
-        .map_or_else(|| "holiday".to_owned(), |kind| kind.to_string());
-    println!(
-        "macrocycle {macrocycle}, {} phase: term {} to {}, transition {} to {} ({kind})\n",
-        macrocycle.phase(date, mesocycle),
-        macrocycle.start(),
-        macrocycle.last_day_of_term(),
-        macrocycle.transition(),
-        macrocycle.last(),
-    );
+    format!("done, {what}")
 }
 
-/// The concurrent mesocycle just committed, and the days it runs (#222).
-pub fn committed(due: &crate::committing::Due) {
-    println!("committed {}: {}\n", due.concurrent, due.span);
+/// Whether a read is long enough to say how long before it starts (#369).
+pub fn worth_announcing(takes: std::time::Duration) -> bool {
+    takes >= WORTH_ANNOUNCING
 }
 
-/// A concurrent mesocycle the macrocycle chose and that could not be built.
-///
-/// **Said out loud**, as a delivery that did not happen is: the week still
-/// reports, and the next run tries again.
-pub fn not_committed(due: &crate::committing::Due, why: &str) {
-    println!("not committed {}, {}: {why}\n", due.concurrent, due.span);
+/// A word with its first letter capitalised, to open a line.
+fn capitalised(word: &str) -> String {
+    let mut letters = word.chars();
+    letters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(letters).collect()
+    })
 }
 
-/// Every week since the plan began that did not complete, and what that means
-/// for this one (#177).
-///
-/// **Only the weeks that moved something**: a completed week is the plan
-/// running as written and says nothing worth a line. Nothing is printed when
-/// every week completed.
-pub fn rescheduled(
-    weeks: &[(jiff::civil::Date, domain::planner::MicrocycleState)],
-    reruns: &[domain::planner::Rerun],
-) {
-    use domain::planner::MicrocycleState;
+/// A session as the microcycle names it: `Gym 1`, `Cycling 2`.
+fn named(session: &application::microcycle::Session) -> String {
+    format!(
+        "{} {}",
+        capitalised(session.slot.discipline.as_str()),
+        session.number
+    )
+}
 
-    let mut said = false;
-    for (monday, state) in weeks {
-        let holding = reruns
-            .iter()
-            .find(|rerun| rerun.monday == *monday)
-            .and_then(|rerun| rerun.holding);
-        match (state, holding) {
-            (MicrocycleState::Incomplete, _) => {
-                println!(
-                    "the microcycle of Monday {monday} was incomplete: no essential session \
-                     was performed, so it runs again and everything after it moves back a week"
-                );
-            }
-            (MicrocycleState::PartiallyCompleted { completed, lost }, Some(_)) => {
-                println!(
-                    "the microcycle of Monday {monday} was partially completed: {completed} \
-                     did its test and {lost} did not, so {lost} runs its test again while \
-                     {completed} holds for a week, and everything after it moves back a week"
-                );
-            }
-            (MicrocycleState::PartiallyCompleted { completed, lost }, None) => {
-                println!(
-                    "the microcycle of Monday {monday} was partially completed: {completed} \
-                     performed its essential session and {lost} did not, so it runs again \
-                     for both and everything after it moves back a week"
-                );
-            }
-            (MicrocycleState::Running | MicrocycleState::Completed, _) => continue,
+/// A part of a day, by its weekday: `Wednesday evening`.
+fn when(part: domain::schedule::DayPart) -> String {
+    format!("{} {}", part.date.strftime("%A"), part.part)
+}
+
+/// Where the plan stands: the macrocycle's week, each discipline's mesocycle,
+/// and this microcycle's sessions.
+pub fn plan_standing(plan: &application::next::PlanStanding) {
+    use application::next::{MacrocycleStanding, WeekPosition};
+
+    match &plan.macrocycle {
+        MacrocycleStanding::Week {
+            macrocycle,
+            week,
+            of,
+        } => println!(
+            "{} macrocycle, week {week} of {of}",
+            capitalised(&macrocycle.to_string())
+        ),
+        // **Said even when it cannot be known**: past the school calendar's
+        // reach there is no data, which is not the same as no term.
+        MacrocycleStanding::Unknown { published_to } => println!(
+            "Macrocycle unknown: the school calendar is published to {}",
+            published_to.map_or_else(|| "nowhere".to_owned(), |to| to.to_string())
+        ),
+        MacrocycleStanding::Unreadable(error) => {
+            println!("Macrocycle unknown: the school calendar could not be read ({error})");
         }
-        said = true;
     }
-    if said {
-        println!();
-    }
-}
 
-/// Where every session of the microcycle stands, in the order the week runs.
-///
-/// **From the first session, not from the last slot** (#185). The operator, on
-/// his first run of the installed build: *"Maybe we should always start from
-/// the beginning of the microcycle."* A week reported from its opening says
-/// where the week is up to; one reported from last night says only what
-/// happened last night.
-pub fn microcycle(sessions: &[application::microcycle::Session]) {
-    let Some(first) = sessions.first() else {
+    let width = plan
+        .disciplines
+        .iter()
+        .map(|(discipline, _)| discipline.as_str().chars().count())
+        .max()
+        .unwrap_or(0);
+    for (discipline, position) in &plan.disciplines {
+        let name = capitalised(discipline.as_str());
+        let Some(position) = position else {
+            println!("  {name:<width$}  no mesocycle this microcycle");
+            continue;
+        };
+        let week = match position.week {
+            WeekPosition::Microcycle { number, of, rerun } => format!(
+                "microcycle {number} of {of}{}",
+                rerun.map_or_else(String::new, |rerun| format!(", rerun {rerun}"))
+            ),
+            WeekPosition::Holding => "holding".to_owned(),
+        };
+        println!("  {name:<width$}  mesocycle {}, {week}", position.mesocycle);
+    }
+
+    let Some((monday, sessions)) = &plan.microcycle else {
         return;
     };
-    println!(
-        "this microcycle, from {:?} {}",
-        first.slot.date.weekday(),
-        first.slot.date,
-    );
-    println!();
-
-    let named: Vec<(String, String, String)> = sessions
+    println!("This microcycle, from {}", monday.strftime("%A %-d %B"));
+    let rows: Vec<(String, String, String)> = sessions
         .iter()
         .map(|session| {
             (
-                format!("{} {}", session.slot.discipline, session.number),
+                named(session),
                 format!(
-                    "{:?} {} {}",
-                    session.slot.date.weekday(),
-                    session.slot.date,
-                    session.slot.slot.part,
+                    "{} {}",
+                    session.slot.date.strftime("%a"),
+                    session.slot.slot.part
                 ),
                 session.state.to_string(),
             )
         })
         .collect();
     let widest = |at: fn(&(String, String, String)) -> &String| {
-        named
-            .iter()
+        rows.iter()
             .map(|row| at(row).chars().count())
             .max()
             .unwrap_or(0)
     };
     let name = widest(|row| &row.0);
-    let when = widest(|row| &row.1);
-
-    for (session, slot, state) in &named {
-        println!("  {session:name$}   {slot:when$}   {state}");
+    let slot = widest(|row| &row.1);
+    for (session, at, state) in &rows {
+        println!("  {session:name$}   {at:slot$}   {state}");
     }
+}
+
+/// Which session is next, and how long it can still be performed.
+pub fn next_session(session: &application::microcycle::Session) {
+    let until = session
+        .closes
+        .map_or_else(String::new, |closes| format!(", until {}", when(closes)));
+    println!("Next: {}, {}{until}", named(session), when(session.at()));
+}
+
+/// A session that could not be prescribed, under the line naming it.
+pub fn not_prescribed(why: &dyn std::fmt::Display) {
+    println!("  not prescribed: {why}");
 }
 
 /// The microcycle holds nothing left to prescribe.
@@ -1253,42 +1222,6 @@ pub fn microcycle_complete(after: Option<domain::schedule::ScheduledSlot>) {
             "nothing in this microcycle is still to be prescribed, and the schedule holds no slot after it"
         ),
     }
-}
-
-/// Which session is next, and when — what the schedule says before the
-/// discipline's own `next` says the rest.
-///
-/// Named as the table above names it, so the line and the row are visibly the
-/// same session rather than two descriptions of one.
-/// A skip, as the parts of the day it took: the last is the one before the
-/// next session's slot begins.
-pub fn skipped(session: &application::microcycle::Session, skip: &domain::schedule::Skip) {
-    let mut last = skip.from();
-    while let Some(next) = last.next().filter(|next| *next < skip.until()) {
-        last = next;
-    }
-    println!(
-        "skipped {} {} ({}): no training from {:?} {} to {:?} {}",
-        session.slot.discipline,
-        session.number,
-        skip.reason(),
-        skip.from().date.weekday(),
-        skip.from(),
-        last.date.weekday(),
-        last,
-    );
-    println!();
-}
-
-pub fn next_slot(session: &application::microcycle::Session) {
-    println!(
-        "next: {} {}, {:?} {} {}",
-        session.slot.discipline,
-        session.number,
-        session.slot.date.weekday(),
-        session.slot.date,
-        session.slot.slot.part,
-    );
 }
 
 pub fn no_next_slot(from: jiff::civil::Date) {
@@ -1359,7 +1292,51 @@ pub fn prescription(issued: &application::Prescription) {
             .unwrap_or_default(),
     );
     println!();
+    prescribed_session(issued);
 
+    println!();
+    match &issued.issuance {
+        Issuance::Issued => println!("issued as prescription {}", issued.id),
+        Issuance::Superseded { previous, stranded } => {
+            println!(
+                "issued as prescription {}, superseding {previous}",
+                issued.id
+            );
+            // **Since decision 0022 this is stale rather than stranded.** The
+            // destination still holds the superseded session, and `deliver`
+            // will replace it in place rather than landing a second one beside
+            // it — so what the operator needs is the instruction, not a warning
+            // about tidying up by hand.
+            if let Some(reference) = stranded {
+                println!(
+                    "  {reference} at the destination is still the superseded session; \
+                     deliver to replace it"
+                );
+            }
+        }
+        // The derivation ran and produced this. Saying so is the whole value of
+        // the line: "unchanged" is a statement about the record having been
+        // read, not about it having been skipped.
+        Issuance::Unchanged => println!(
+            "unchanged since prescription {} — the record has moved on, the session has not",
+            issued.id
+        ),
+        Issuance::Performed { reference } => println!(
+            "prescription {} was performed as {reference}, and a performed session is not \
+             re-derived",
+            issued.id
+        ),
+    }
+}
+
+/// The session itself: its blocks, its exercises and their sets, and any slot
+/// that could not be derived.
+///
+/// **What `next` shows of a gym prescription** (#397), because it is what can
+/// diverge from what reaches the destination. The lines about the derivation
+/// — what it found, the shares, the prescription's number — are `prescribe`'s.
+pub fn prescribed_session(issued: &application::Prescription) {
+    let workout = &issued.workout;
     let mut block = None;
     for item in workout.shape().items().iter() {
         let Some(slot) = item.slots().next() else {
@@ -1394,40 +1371,6 @@ pub fn prescription(issued: &application::Prescription) {
                 slot.slot, slot.exercise, slot.reason
             );
         }
-    }
-
-    println!();
-    match &issued.issuance {
-        Issuance::Issued => println!("issued as prescription {}", issued.id),
-        Issuance::Superseded { previous, stranded } => {
-            println!(
-                "issued as prescription {}, superseding {previous}",
-                issued.id
-            );
-            // **Since decision 0022 this is stale rather than stranded.** The
-            // destination still holds the superseded session, and `deliver`
-            // will replace it in place rather than landing a second one beside
-            // it — so what the operator needs is the instruction, not a warning
-            // about tidying up by hand.
-            if let Some(reference) = stranded {
-                println!(
-                    "  {reference} at the destination is still the superseded session; \
-                     deliver to replace it"
-                );
-            }
-        }
-        // The derivation ran and produced this. Saying so is the whole value of
-        // the line: "unchanged" is a statement about the record having been
-        // read, not about it having been skipped.
-        Issuance::Unchanged => println!(
-            "unchanged since prescription {} — the record has moved on, the session has not",
-            issued.id
-        ),
-        Issuance::Performed { reference } => println!(
-            "prescription {} was performed as {reference}, and a performed session is not \
-             re-derived",
-            issued.id
-        ),
     }
 }
 

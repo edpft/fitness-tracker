@@ -7,7 +7,6 @@
 
 mod canonicalise;
 mod catalogue;
-mod committing;
 mod config;
 mod corrections;
 mod cycling;

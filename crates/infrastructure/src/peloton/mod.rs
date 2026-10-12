@@ -26,7 +26,7 @@ pub mod workouts;
 
 pub use crate::token::TokenFile;
 pub use account::{LandedRide, SessionAccount};
-pub use catalogue::{Reading, Walked, read_details, walk};
+pub use catalogue::{PelotonClassSource, Reading, Walked, read_details, walk};
 pub use class::{
     CataloguePage, ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from,
     power_zone_from,
@@ -35,9 +35,10 @@ pub use holding::PelotonHoldingRides;
 pub use mapping::{
     MappedSession, PEAK_YOUR_POWER_ZONES, PelotonClass, is_known_unavailable, url_for,
 };
+pub use provider::PelotonProgrammes;
 pub use samples::{PelotonWorkoutSamples, SamplePage};
 pub use sessions::group;
 pub use skeleton::{POWER_ZONE_TEST, Placement, Skeleton};
-pub use stack::{PelotonStack, Stacked, join_token};
+pub use stack::{PelotonRideDestination, PelotonStack, Stacked, join_token};
 pub use translate::PelotonSessionTranslator;
 pub use workouts::{PelotonWorkouts, WorkoutPage};

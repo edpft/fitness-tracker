@@ -23,7 +23,8 @@ use jiff::{
 use domain::analytical::Weighed;
 use domain::canonical::{Occurred, SessionCount};
 use domain::cycling::{
-    CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, RideVenue,
+    CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, PublishedProgramme,
+    RideVenue,
 };
 use domain::gym::{
     CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
@@ -33,7 +34,7 @@ use domain::landing::{
     PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
     Watermark,
 };
-use domain::measure::RepCount;
+use domain::measure::{PositiveDuration, RepCount};
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
     RefusalCount, WorkoutCount,
@@ -44,6 +45,7 @@ use domain::prescription::{
     Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
     Progress, SlotId, WeekIndex,
 };
+use domain::provider::ExternalProgramme;
 use domain::schedule::{Alteration, Diary, Holidays, SessionRole, Skip, TrainingPattern};
 use domain::sequence::NonEmpty;
 
@@ -1485,6 +1487,164 @@ pub trait RiddenVenues {
     /// [`StoreError`] if the store is unavailable or holds something
     /// unreadable.
     fn ridden(&self) -> impl Future<Output = Result<BTreeSet<RideVenue>, StoreError>> + Send;
+}
+
+/// What one listing of the class catalogue's source found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClassesListed {
+    /// Classes listed this time.
+    pub listed: u64,
+    /// Of those, the ones the catalogue had never held.
+    pub added: u64,
+    /// Classes the catalogue lists and has not read the detail of.
+    pub outstanding: u64,
+    /// Roughly how long reading those will take, which is worth saying
+    /// before it starts: the first refresh is a thousand of them.
+    pub reading_takes: std::time::Duration,
+}
+
+/// What reading the outstanding class details did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassesRead {
+    /// Classes the catalogue holds.
+    pub held: u64,
+    /// Classes whose detail was read this time.
+    pub read: u64,
+    /// Classes the source has no detail for, which are not asked about again.
+    pub not_served: u64,
+    /// Classes still to read.
+    pub outstanding: u64,
+    /// Why the reading stopped early, where it did. What was read before it
+    /// stopped is kept.
+    pub stopped: Option<SourceError>,
+}
+
+/// Where the local class catalogue is refreshed from (#246).
+///
+/// **Two calls, and the gap between them is where an estimate goes** (#369):
+/// listing is cheap and says how much reading there is; reading is what takes
+/// the time.
+pub trait ClassSource {
+    /// List the source's classes into the catalogue.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the credential, or
+    /// the catalogue will not take what it served.
+    fn list(&self) -> impl Future<Output = Result<ClassesListed, SourceError>> + Send;
+
+    /// Read every class detail the catalogue does not hold.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Malformed`] if the catalogue will not take what was
+    /// served. The source stopping part-way is [`ClassesRead::stopped`].
+    fn read(&self) -> impl Future<Output = Result<ClassesRead, SourceError>> + Send;
+}
+
+/// What a ride destination did with a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RidesPlaced {
+    /// How many rides it held before, all of which this replaced.
+    pub replaced: usize,
+    /// The cool-down it chose to end the session with, which no authored
+    /// record holds.
+    pub cool_down: RideVenue,
+    /// Who teaches the cool-down, where the destination said.
+    pub taught_by: Option<String>,
+    /// How many rides it holds now.
+    pub holds: usize,
+    /// How long they run in all, where the destination gives a total.
+    pub total: Option<PositiveDuration>,
+}
+
+/// Where a cycling session is put to be ridden.
+///
+/// **One place for the rider, not one per date**, and shared with whatever
+/// else they queue: delivering replaces all of it, which is why
+/// [`holding`](Self::holding) is asked first by anything that would rather not.
+///
+/// **The cool-down is the destination's to choose**: the most recent one by
+/// the session's instructor, resolved at the moment of delivery, which is a
+/// fact about the destination's catalogue rather than the programme.
+pub trait RideDestination {
+    /// How many rides it holds now.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if it cannot be reached or refuses the credential.
+    fn holding(&self) -> impl Future<Output = Result<usize, SourceError>> + Send;
+
+    /// Replace whatever it holds with these rides and a cool-down after them.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if it cannot be reached, refuses the credential, or
+    /// answers something unreadable.
+    fn deliver(
+        &self,
+        rides: &NonEmpty<RideVenue>,
+    ) -> impl Future<Output = Result<RidesPlaced, SourceError>> + Send;
+}
+
+/// The published cycling programmes a plan is built from.
+///
+/// **The macrocycle's names for them**, so nothing above the port spells the
+/// publisher's: Base, Build and Peak are what `domain::macrocycle::Cycling`
+/// chooses between, and the test is the standalone FTP test week.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PublishedCycling {
+    Base,
+    Build,
+    Peak,
+    Test,
+}
+
+/// One published cycling programme, read in full.
+#[derive(Debug, Clone)]
+pub struct PublishedRead {
+    /// Who published it, and under what name.
+    pub from: ExternalProgramme,
+    /// What it trains, as the grid of zone profiles a provider is asked for.
+    pub programme: PublishedProgramme,
+    /// Each `(microcycle, session)` it places, as a ride that can be authored.
+    pub cells: BTreeMap<(u32, u32), PublishedCell>,
+}
+
+/// One session of a published programme.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedCell {
+    /// The session it prescribes and where it is ridden, or why the classes
+    /// placed there do not make one.
+    ///
+    /// **Per cell, not per programme.** A programme is read whole and authored in
+    /// part, so a cell nobody takes must not stop the rest being authored.
+    pub ride: Result<(CyclingSession, NonEmpty<RideVenue>), SourceError>,
+    /// Whether a class placed here measures FTP. The class says so, not the
+    /// programme.
+    pub measures_ftp: bool,
+}
+
+/// Where published cycling programmes are read from.
+///
+/// **Both directions**, because committing a mesocycle has to say which one
+/// the plan is already on: [`which`](Self::which) reads a mesocycle's
+/// provenance back into the name it was read under.
+pub trait PublishedProgrammes {
+    /// Read every class a programme places.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] from the first class that cannot be read. A programme
+    /// scored from fourteen of sixteen classes looks exactly like one scored
+    /// from all of them, so it fails rather than answering with a hole.
+    fn read(
+        &self,
+        which: PublishedCycling,
+    ) -> impl Future<Output = Result<PublishedRead, SourceError>> + Send;
+
+    /// Which programme a provenance names, if it is one of these.
+    fn which(&self, programme: &ExternalProgramme) -> Option<PublishedCycling>;
 }
 
 /// A cycling mesocycle, read out of the plan that holds it.

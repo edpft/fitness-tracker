@@ -17,13 +17,25 @@
 //! (§ 36).
 
 use domain::{
-    cycling::{CyclingMesocycle, CyclingMesocycleId, PlannedRide, SessionPosition},
+    cycling::{
+        CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, PlannedRide,
+        RideVenue, SessionPosition,
+    },
+    measure::PositiveDuration,
     planner,
+    provider::ProgrammeName,
     schedule::{Diary, Discipline, SessionRole, TrainingWeek},
+    sequence::NonEmpty,
 };
 use jiff::civil::Date;
 
-use crate::{CyclingMesocycleStore, PrescriptionError};
+use crate::{
+    CyclingDeliveryStore, CyclingMesocycleStore, DestinationName, FtpHistory, HoldingRides,
+    PlanStore, PrescriptionError, RiddenVenues, RideDestination, RidesPlaced, SourceError,
+    StoreError,
+    holding::NoHoldingRide,
+    reschedule::{Reschedule, Rescheduled},
+};
 
 /// The next ride, and everything needed to say where it sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,4 +189,219 @@ fn ride_in(
         session,
         ride: ride.clone(),
     }))
+}
+
+/// The operator's own cool-down, ridden after the minute Peloton builds in.
+///
+/// A generation parameter (§ 14) held here rather than in the authored
+/// programme, so the record of what a class actually contains stays faithful.
+const EXTRA_COOL_DOWN_SECONDS: u64 = 300;
+
+/// Why the next ride could not be said.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RidingError {
+    #[error(transparent)]
+    Prescription(#[from] PrescriptionError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The schedule gives cycling no day to ride on.
+    #[error(
+        "the schedule gives cycling no day of the week as of {from}, so there is no day to ride on"
+    )]
+    NoDay { from: Date },
+    /// A holding week's ride could not be chosen.
+    #[error(transparent)]
+    Holding(#[from] NoHoldingRide),
+}
+
+/// Why a ride was not delivered.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RideDeliveryError {
+    /// The destination holds rides, and replacing them was not asked for.
+    #[error(
+        "the stack already holds {holds} class(es), and it is shared with everything else \
+         you queue. Delivering replaces the whole list, so this would discard them"
+    )]
+    Occupied { holds: usize },
+    #[error(transparent)]
+    Source(#[from] SourceError),
+    /// Delivered, and the record of it could not be written.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("{detail}")]
+    Unbuildable { detail: String },
+}
+
+/// The next ride, as it will be ridden.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrescribedRide {
+    /// The mesocycle it belongs to.
+    pub mesocycle: CyclingMesocycle,
+    pub next: NextRide,
+    /// The published programme it was taken from. `None` for a holding ride,
+    /// which nobody published.
+    pub published: Option<ProgrammeName>,
+    /// What is ridden, with the operator's own cool-down added.
+    pub session: CyclingSession,
+    /// The FTP in force on the ride's date, where a test or an override says.
+    pub ftp: Option<Ftp>,
+}
+
+impl PrescribedRide {
+    /// Whether it is a ride of a holding week rather than of the programme.
+    #[must_use]
+    pub const fn holding(&self) -> bool {
+        self.published.is_none()
+    }
+}
+
+/// Everything the next ride is read from.
+pub struct RidingPorts<S, P, H, R, F, Y> {
+    /// Cycling's mesocycles as authored; read through the reschedule each call.
+    pub mesocycles: S,
+    pub plans: P,
+    /// The catalogue a holding ride is chosen from.
+    pub holding: H,
+    pub ridden: R,
+    pub ftp: F,
+    pub deliveries: Y,
+}
+
+/// The use case: which ride is next, and putting it where it is ridden.
+///
+/// **Reads the store and nothing else until it delivers.** What a class
+/// contains was read when the programme was authored, so a source being
+/// unavailable costs the delivery and not the answer (§ 36).
+pub struct Riding<S, P, H, R, F, Y> {
+    ports: RidingPorts<S, P, H, R, F, Y>,
+    /// Where this build's rides are delivered, as the record names it.
+    destination: DestinationName,
+}
+
+impl<S, P, H, R, F, Y> Riding<S, P, H, R, F, Y>
+where
+    S: CyclingMesocycleStore + Clone + Sync,
+    P: PlanStore + Clone + Sync,
+    H: HoldingRides + Sync,
+    R: RiddenVenues + Sync,
+    F: FtpHistory + Sync,
+    Y: CyclingDeliveryStore + Sync,
+{
+    pub const fn new(ports: RidingPorts<S, P, H, R, F, Y>, destination: DestinationName) -> Self {
+        Self { ports, destination }
+    }
+
+    /// The first ride at or after a date, as the plan now stands.
+    ///
+    /// **The FTP is the one in force on the ride's date, not on today's.** The
+    /// next ride may be a fortnight away, and a test ridden between now and
+    /// then is the one that applies to it. An override stands whatever the
+    /// record says.
+    ///
+    /// # Errors
+    ///
+    /// [`RidingError`] if no programme covers the date, if the schedule gives
+    /// cycling no day, if a holding ride cannot be chosen, or if the store is
+    /// unavailable.
+    pub async fn next(
+        &self,
+        from: Date,
+        reschedule: Reschedule,
+        diary: &Diary,
+        ftp: Option<Ftp>,
+    ) -> Result<PrescribedRide, RidingError> {
+        let store = Rescheduled::new(
+            self.ports.mesocycles.clone(),
+            self.ports.plans.clone(),
+            reschedule,
+        );
+        let week = diary
+            .training_week(from, Discipline::Cycling)
+            .ok_or(RidingError::NoDay { from })?;
+        let (mesocycle, due) = next_ride(&store, from, &week, diary).await?;
+
+        let (next, published) = match due {
+            Due::Ride(next) => (next, mesocycle.programme().map(|from| from.name().clone())),
+            Due::Holding(day) => (
+                crate::holding::ride(&self.ports.holding, &self.ports.ridden, day).await?,
+                None,
+            ),
+        };
+
+        let ftp = match ftp {
+            Some(asserted) => Some(asserted),
+            None => self.ports.ftp.in_force_on(next.date).await?,
+        };
+
+        let extra = PositiveDuration::from_seconds(EXTRA_COOL_DOWN_SECONDS).map_err(|error| {
+            StoreError::Corrupt {
+                detail: error.to_string(),
+            }
+        })?;
+        let session = next.ride.session().with_extra_cool_down(extra);
+
+        Ok(PrescribedRide {
+            mesocycle,
+            next,
+            published,
+            session,
+            ftp,
+        })
+    }
+
+    /// Put a ride where it is ridden, and record what went.
+    ///
+    /// **The record is written after the destination, and only if the
+    /// destination took it.** It is the evidence that a ride was prescribed —
+    /// nothing else in the store says so, because a cycling session is authored
+    /// in full and has no derived prescription to leave behind (#185).
+    ///
+    /// **What is recorded is what went, not what the programme holds.** The
+    /// cool-down is the destination's choice and appears in no authored record.
+    ///
+    /// # Errors
+    ///
+    /// [`RideDeliveryError::Occupied`] if the destination holds rides and
+    /// `replace` is false, and otherwise whatever the destination or the store
+    /// gives.
+    pub async fn deliver<T: RideDestination + Sync>(
+        &self,
+        ride: &PrescribedRide,
+        to: &T,
+        replace: bool,
+    ) -> Result<RidesPlaced, RideDeliveryError> {
+        if !replace {
+            let holds = to.holding().await?;
+            if holds > 0 {
+                return Err(RideDeliveryError::Occupied { holds });
+            }
+        }
+        let placed = to.deliver(ride.next.ride.at()).await?;
+
+        let unbuildable = |error: &dyn std::fmt::Display| RideDeliveryError::Unbuildable {
+            detail: error.to_string(),
+        };
+        let mut written: Vec<RideVenue> = ride.next.ride.at().iter().cloned().collect();
+        written.push(placed.cool_down.clone());
+        let microcycle = u32::try_from(ride.next.microcycle).map_err(|_| {
+            unbuildable(&format!(
+                "microcycle {} is past counting",
+                ride.next.microcycle
+            ))
+        })?;
+
+        self.ports
+            .deliveries
+            .record(&DeliveredRide {
+                prescribed_for: ride.next.date,
+                destination: self.destination.clone(),
+                programme: ride.published.clone(),
+                microcycle,
+                session: ride.next.session,
+                classes: NonEmpty::new(written).map_err(|error| unbuildable(&error))?,
+                delivered_at: jiff::Timestamp::now(),
+            })
+            .await?;
+        Ok(placed)
+    }
 }

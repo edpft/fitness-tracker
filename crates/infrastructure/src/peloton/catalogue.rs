@@ -451,6 +451,42 @@ impl<'a> ClassCatalogue<'a> {
     }
 }
 
+/// Peloton, as the source the class catalogue is refreshed from.
+#[derive(Debug, Clone, Copy)]
+pub struct PelotonClassSource<'a> {
+    classes: &'a PelotonClasses,
+    store: &'a SqlitePelotonClassStore,
+}
+
+impl<'a> PelotonClassSource<'a> {
+    pub const fn new(classes: &'a PelotonClasses, store: &'a SqlitePelotonClassStore) -> Self {
+        Self { classes, store }
+    }
+}
+
+impl application::ClassSource for PelotonClassSource<'_> {
+    async fn list(&self) -> Result<application::ClassesListed, SourceError> {
+        let walked = walk(self.classes, self.store).await?;
+        Ok(application::ClassesListed {
+            listed: walked.listed,
+            added: walked.added,
+            outstanding: walked.held.outstanding(),
+            reading_takes: walked.reading_takes(),
+        })
+    }
+
+    async fn read(&self) -> Result<application::ClassesRead, SourceError> {
+        let read = read_details(self.classes, self.store).await?;
+        Ok(application::ClassesRead {
+            held: read.held.listed,
+            read: read.read,
+            not_served: read.held.not_served,
+            outstanding: read.held.outstanding(),
+            stopped: read.stopped,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
