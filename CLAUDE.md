@@ -149,12 +149,21 @@ work. That is not a fact about the project.
 
 ## Layout
 
-`{cli, web} → infrastructure → application → domain`, inward only. Ports are
-declared in `application` — the standard hexagonal position, because a port is
-defined by what the core needs rather than by what an adapter offers.
+`{cli, web} → configurator → infrastructure → application → domain`, inward
+only. Ports are declared in `application` — the standard hexagonal position,
+because a port is defined by what the core needs rather than by what an adapter
+offers.
 
-Two driving adapters, both operator entry points, both composition roots, both
-at ring 3 and neither depending on the other, and both frontends (§ 19).
+**`configurator` is the composition root**, Cockburn's term for the part that
+connects adapters to ports: what this build collects, where credentials and the
+store are found, and which adapters a use case runs over. Both frontends get
+their use cases from it, so neither composes one for itself. Until 2026-10-12
+each frontend was its own composition root, which was harmless only while `web`
+was a stub.
+
+Two driving adapters, both operator entry points, both at ring 4, neither
+depending on the other, and both frontends (§ 19). They request, render and
+interact. #402 takes `infrastructure` away from them altogether.
 
 **The goal is a domain independent of the interface, not parity between the
 two.** The operator withdrew parity on 2026-09-25: it was only ever a way of
@@ -236,10 +245,10 @@ empty file inside the sandbox while passing on your machine.
   and everything else — lock, run log, resumption point, record tags — reads it
   from there. Two streams that must agree are one stream or a silent data loss;
   see `contracts/ports.md`.
-- **What this build can collect lives in `cli::catalogue`.** One entry per
+- **What this build can collect lives in `configurator::catalogue`.** One entry per
   stream — `hevy.workouts`, not `hevy` — and everything a source needs from the
   environment is derived from its name (`HEVY_API_KEY`, `HEVY_API_BASE_URL`), so
-  a second source adds an entry and an arm in `cli::wiring` rather than a
+  a second source adds an entry and an arm in `configurator::wiring` rather than a
   constant and a flag.
 
   **Three tables, and the third is the porcelain's.** Sources are systems,

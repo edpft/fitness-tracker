@@ -86,3 +86,22 @@ fn separate_databases_lock_separately() {
         .expect("a different store must not be blocked");
     drop(held);
 }
+
+/// **One run of `next` at a time**, whichever frontend starts it (#398), and
+/// without blocking the walks inside it, which take their streams' locks.
+#[test]
+fn a_second_run_of_next_is_refused_and_its_walks_are_not() {
+    let directory = TempDir::new().expect("a temporary directory");
+    let lock = FileRunLock::beside(&directory.path().join("fitness.db"));
+
+    let held = application::NextLock::try_acquire(&lock).expect("the first run takes it");
+    assert_eq!(
+        application::NextLock::try_acquire(&lock).expect_err("the second run must be refused"),
+        RunLockError::Held
+    );
+    RunLock::try_acquire(&lock, &stream("workouts").expect("a stream"))
+        .expect("a walk inside the run is not blocked by it");
+
+    drop(held);
+    application::NextLock::try_acquire(&lock).expect("a released lock is available again");
+}

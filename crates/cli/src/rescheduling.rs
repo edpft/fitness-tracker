@@ -18,7 +18,7 @@ use infrastructure::{
     SqlitePrescriptionDeliveryStore,
 };
 
-use crate::{Failure, next};
+use crate::Failure;
 
 /// The gym's mesocycles, as the plan now stands.
 pub type GymMesocycles = Rescheduled<SqliteGymMesocycleStore, SqlitePlanStore>;
@@ -43,8 +43,8 @@ pub async fn standing(
             gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
             cycling_performed: SqliteCyclingSessionLog::new(pool.clone()),
         },
-        next::destination(domain::schedule::Discipline::Gym)?,
-        next::destination(domain::schedule::Discipline::Cycling)?,
+        configurator::next::destination(domain::schedule::Discipline::Gym)?,
+        configurator::next::destination(domain::schedule::Discipline::Cycling)?,
     )
     .standing(now)
     .await?)

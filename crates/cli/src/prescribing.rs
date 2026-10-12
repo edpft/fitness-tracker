@@ -14,7 +14,7 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    HevyRoutinePreview, HevyRoutines, SqliteCanonicalGymSessionStore, SqliteExerciseHistory,
+    HevyRoutinePreview, SqliteCanonicalGymSessionStore, SqliteExerciseHistory,
     SqliteGenerationParameterStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
     connect,
 };
@@ -232,7 +232,7 @@ pub async fn deliver(
         return preview_delivery(prescriptions, rescheduling::gym(&pool, zone).await?, date).await;
     }
 
-    let destination = hevy_routines(known, credentials)?;
+    let destination = configurator::access::hevy_routines(known, credentials)?;
 
     let delivering = Delivering::new(DeliveryPorts {
         prescriptions,
@@ -248,49 +248,6 @@ pub async fn deliver(
 
     output::delivery(&delivered);
     Ok(())
-}
-
-/// Where a gym session is put, from the credential the source is reached with.
-///
-/// **The destination is passed in rather than named here.** It used to be the
-/// string "hevy", which was honest while there was one of them and became a
-/// scaling question the moment a second discipline was contemplated: a
-/// discipline knows its own sink, so `gym next` hands its one over and the flat
-/// command names the build's only one. Neither guesses.
-///
-/// # Errors
-///
-/// [`Failure`] if there is no key, or the catalogue says the source is reached
-/// some other way.
-pub fn hevy_routines(
-    known: &'static catalogue::KnownSource,
-    credentials: &infrastructure::Credentials,
-) -> Result<HevyRoutines, Failure> {
-    let base_url = std::env::var(known.base_url_variable())
-        .unwrap_or_else(|_| known.default_base_url().to_owned());
-    let access = config::SourceAccess::resolve(
-        known,
-        base_url,
-        std::env::var(known.api_key_variable()),
-        credentials.credential(known.name()),
-    )
-    .map_err(|error| Failure::usage(&error))?;
-
-    // `resolve` above builds the key-based kind, so the other arm is a
-    // contradiction rather than a case: it would mean this source's catalogue
-    // entry and the call that read its credential disagree.
-    let config::SourceAccess::ApiKey {
-        base_url, api_key, ..
-    } = access
-    else {
-        return Err(Failure::message(
-            format!("{} is reached with an API key", known.name()),
-            exit::STORE,
-        ));
-    };
-
-    HevyRoutines::new(base_url, api_key)
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
 
 /// The whole path except the two irreversible steps.

@@ -25,19 +25,18 @@ use std::path::Path;
 
 use application::{
     DiaryStore as _, PlanAuthor as _, PlanStore as _, RidesPlaced,
-    cycling::{PrescribedRide, RideDeliveryError, Riding, RidingError, RidingPorts},
+    cycling::{PrescribedRide, RideDeliveryError, Riding, RidingError},
 };
 use domain::{
     cycling::{CyclingMicrocycle, Ftp, PlannedRide, Ride, clock},
     measure::PositiveDuration,
     normalised::OperatorZone,
     plan::{Plan, Programme},
-    schedule::{Discipline, Relative, SessionRole},
+    schedule::{Relative, SessionRole},
 };
 use infrastructure::{
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore, SqliteRiddenVenues,
-    connect,
+    SqliteDiaryStore, SqliteGenerationParameterStore, SqlitePelotonClassStore, SqlitePlanStore,
+    SqliteRiddenVenues, connect,
     peloton::{
         PelotonClasses, PelotonHoldingRides, PelotonRideDestination, PelotonStack,
         catalogue::ClassCatalogue,
@@ -82,7 +81,7 @@ pub async fn next(
     let pool = connect(database).await?;
     let stored = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = ClassCatalogue::over(&stored, to.ok().map(|(classes, _)| classes));
-    let riding = riding(&pool, zone, catalogue)?;
+    let riding = configurator::next::riding(&pool, zone, catalogue)?;
     let ride = prescribed(&riding, &pool, zone, from, ftp).await?;
 
     report(&ride);
@@ -106,35 +105,6 @@ pub async fn next(
             Ok(())
         }
     }
-}
-
-/// The cycling use case, over this build's stores and catalogue.
-pub fn riding<'a>(
-    pool: &infrastructure::SqlitePool,
-    zone: &OperatorZone,
-    catalogue: ClassCatalogue<'a>,
-) -> Result<
-    Riding<
-        SqliteCyclingMesocycleStore,
-        SqlitePlanStore,
-        PelotonHoldingRides<'a>,
-        SqliteRiddenVenues,
-        SqliteFtpHistory,
-        SqliteCyclingDeliveryStore,
-    >,
-    Failure,
-> {
-    Ok(Riding::new(
-        RidingPorts {
-            mesocycles: SqliteCyclingMesocycleStore::new(pool.clone()),
-            plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
-            holding: PelotonHoldingRides::new(catalogue),
-            ridden: SqliteRiddenVenues::new(pool.clone()),
-            ftp: SqliteFtpHistory::new(pool.clone()),
-            deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-        },
-        crate::next::destination(Discipline::Cycling)?,
-    ))
 }
 
 /// The ride at or after a date, as the plan now stands.
@@ -342,7 +312,7 @@ pub async fn deliver(
 ) -> Result<(), Failure> {
     let pool = connect(database).await?;
     let stored = SqlitePelotonClassStore::new(pool.clone());
-    let riding = riding(&pool, zone, ClassCatalogue::new(&stored, classes))?;
+    let riding = configurator::next::riding(&pool, zone, ClassCatalogue::new(&stored, classes))?;
     let ride = prescribed(&riding, &pool, zone, from, None).await?;
 
     println!("{}", heading(&ride));

@@ -42,7 +42,7 @@ pub use ports::{
     DestinationName, DestinationReply, DiaryAuthor, DiaryStore, EventBatch, ExerciseHistory,
     ExtractionRunLog, ExtractionStatusReporter, FtpHistory, FulfilledSession,
     GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance, LadderStanding,
-    LandingStore, LastPerformance, MesocycleInForce, MesocycleStore, NormalisationRunLog,
+    LandingStore, LastPerformance, MesocycleInForce, MesocycleStore, NextLock, NormalisationRunLog,
     NormalisationSummary, NormalisedEntityStore, NormalisedGymSessionReader, Occupant, Performance,
     PerformedGymSessions, PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore,
     PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,

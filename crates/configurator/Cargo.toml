@@ -1,0 +1,23 @@
+[package]
+name = "configurator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The configurator, in Cockburn's sense: the one crate that knows every
+# adapter and connects them to the application's ports. `cli` and `web` are
+# driving adapters above it, and neither depends on the other.
+[dependencies]
+application.workspace = true
+domain.workspace = true
+infrastructure.workspace = true
+
+jiff.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

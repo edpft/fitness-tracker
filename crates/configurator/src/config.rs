@@ -11,7 +11,7 @@ use std::env::VarError;
 use domain::normalised::OperatorZone;
 use jiff::civil::Date;
 
-use crate::catalogue::KnownSource;
+use crate::catalogue::{Credential, KnownSource};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
@@ -457,6 +457,68 @@ fn from_environment(
 // be known before the settings can be read at all. It stays the flag, the
 // variable clap folds into it, and the specification's default — which is why
 // there is no function here for it.
+
+/// How a source is reached: its base URL and its credential, the environment
+/// first and then the store `fitness credentials` writes to.
+///
+/// **Taken by source rather than by stream, because a destination is not a
+/// stream.** Delivering a session lands nothing, so Peloton is reached here by
+/// the source the cycling discipline delivers to — and reading its credential some other
+/// way is how `cycling next` came to ignore the store (#184).
+///
+/// # Errors
+///
+/// [`ConfigError`] if no credential of the kind the source takes is found.
+pub fn source_access_for(
+    source: &'static KnownSource,
+    base_url: Option<String>,
+    credentials: &infrastructure::Credentials,
+) -> Result<SourceAccess, ConfigError> {
+    let base_url = base_url
+        .or_else(|| std::env::var(source.base_url_variable()).ok())
+        .unwrap_or_else(|| source.default_base_url().to_owned());
+
+    // The kind of credential decides how it is read. Both paths derive their
+    // variables from the source's name, so a third source adds an arm here and
+    // nothing else.
+    Ok(match source.credential() {
+        Credential::ApiKey => SourceAccess::resolve(
+            source,
+            base_url,
+            std::env::var(source.api_key_variable()),
+            credentials.credential(source.name()),
+        )?,
+        Credential::EmailPassword {
+            default_auth_base_url,
+        } => {
+            let auth_base_url = std::env::var(source.auth_base_url_variable())
+                .unwrap_or_else(|_| default_auth_base_url.to_owned());
+            SourceAccess::resolve_login(
+                source,
+                base_url,
+                auth_base_url,
+                std::env::var(source.email_variable()),
+                std::env::var(source.password_variable()),
+                credentials.credential(source.name()),
+            )?
+        }
+        Credential::OAuthClient {
+            default_auth_base_url,
+        } => {
+            let auth_base_url = std::env::var(source.auth_base_url_variable())
+                .unwrap_or_else(|_| default_auth_base_url.to_owned());
+            let token = crate::paths::token(&crate::paths::SystemEnvironment, source.name())
+                .map_err(ConfigError::from)?;
+            SourceAccess::resolve_oauth_client(
+                source,
+                (base_url, auth_base_url),
+                source.oauth_client_variables().map(std::env::var),
+                credentials.credential(source.name()),
+                token,
+            )?
+        }
+    })
+}
 
 #[cfg(test)]
 mod tests {

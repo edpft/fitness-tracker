@@ -317,6 +317,7 @@ version = "0.0.0"
 dependencies = [
  "application",
  "clap",
+ "configurator",
  "domain",
  "infrastructure",
  "jiff",
@@ -365,6 +366,18 @@ checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "configurator"
+version = "0.0.0"
+dependencies = [
+ "application",
+ "domain",
+ "infrastructure",
+ "jiff",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

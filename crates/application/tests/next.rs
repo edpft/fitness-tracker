@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use application::{
     CanonicalGymSessionStore, ClassSource, ClassesListed, ClassesRead, DiaryAuthor, DiaryStore,
-    ExtractionError, HolidayCalendar, NormalisationError, NormalisationSummary,
-    NormalisedGymSessionReader, PlanStore, PrescriptionError, RunSummary, SourceError, StoreError,
-    WorkoutNormaliser,
+    ExtractionError, HolidayCalendar, NextLock, NormalisationError, NormalisationSummary,
+    NormalisedGymSessionReader, PlanStore, PrescriptionError, RunLockError, RunSummary,
+    SourceError, StoreError, WorkoutNormaliser,
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
@@ -392,7 +392,25 @@ type Ports<H = Unreachable> = NextPorts<
     Committer,
     Unplanned,
     Dayless,
+    Lock,
 >;
+
+/// Whether another run of `next` holds the lock.
+pub struct Lock {
+    held: bool,
+}
+
+impl NextLock for Lock {
+    type Guard = ();
+
+    fn try_acquire(&self) -> Result<(), RunLockError> {
+        if self.held {
+            Err(RunLockError::Held)
+        } else {
+            Ok(())
+        }
+    }
+}
 
 /// The gym walked and landed two; Peloton has no credential; the school
 /// calendar does not answer.
@@ -434,6 +452,7 @@ fn calendar<H>(
         committing: committer,
         gym: Unplanned,
         cycling: Dayless,
+        lock: Lock { held: false },
     })
 }
 
@@ -684,4 +703,24 @@ fn a_settled_microcycle_prescribes_nothing() {
         .expect("the run answers");
 
     assert!(matches!(report.next, WhatIsNext::MicrocycleComplete { .. }));
+}
+
+/// **A second run is refused before it reads anything**, whichever frontend
+/// started the first (#398).
+#[test]
+fn a_run_while_another_is_going_is_refused_before_anything_runs() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![SessionState::ToBePrescribed]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    ports.lock = Lock { held: true };
+    let heard = Heard::default();
+    let refused = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, &heard));
+
+    assert_eq!(refused.err(), Some(NextError::AlreadyRunning));
+    assert!(heard.events().is_empty());
 }

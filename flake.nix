@@ -65,6 +65,7 @@
             (craneLib.fileset.commonCargoSources ./crates/domain)
             (craneLib.fileset.commonCargoSources ./crates/application)
             (craneLib.fileset.commonCargoSources ./crates/infrastructure)
+            (craneLib.fileset.commonCargoSources ./crates/configurator)
             (craneLib.fileset.commonCargoSources ./crates/web)
             (craneLib.fileset.commonCargoSources ./crates/cli)
             # `sqlx::migrate!` embeds these, and `query!` is verified against
@@ -170,16 +171,19 @@
         # which is the question worth being asked; what a crate takes from
         # crates.io is not this check's business — § 16 tags the vendor rule
         # `[review]`, and chrono or uuid in the domain is nobody's emergency.
-        # `cli` and `web` are peers: two driving adapters, two composition
-        # roots, neither depending on the other. Equal ring numbers make that
-        # structural — the check requires a strict decrease across every edge,
-        # so a dependency either way fails.
+        # `configurator` connects adapters to ports for both frontends — the
+        # composition root, in Cockburn's sense — so it sits between them and
+        # `infrastructure` (#398). `cli` and `web` are peers above it: two
+        # driving adapters, neither depending on the other. Equal ring numbers
+        # make that structural — the check requires a strict decrease across
+        # every edge, so a dependency either way fails.
         crateRings = {
           domain = 0;
           application = 1;
           infrastructure = 2;
-          web = 3;
-          cli = 3;
+          configurator = 3;
+          web = 4;
+          cli = 4;
         };
 
         # Add one of these per workspace member you want to build.
@@ -194,6 +198,13 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p application";
+          }
+        );
+
+        configurator = craneLib.buildPackage (
+          individualCrateArgs
+          // {
+            cargoExtraArgs = "-p configurator";
           }
         );
 
@@ -240,6 +251,7 @@
             domain
             application
             infrastructure
+            configurator
             web
             cli
             ;
@@ -358,7 +370,7 @@
                 if [ "$exit_code" -ne 0 ]; then
                   echo
                   echo "Constitution § 16: dependencies point inward only —"
-                  echo "web -> infrastructure -> application -> domain. A crate"
+                  echo "{cli, web} -> configurator -> infrastructure -> application -> domain. A crate"
                   echo "in no ring is a new one: give it a ring in flake.nix,"
                   echo "which is the decision worth making deliberately."
                   exit 1

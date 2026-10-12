@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::{RunLock, RunLockError};
+use application::{NextLock, RunLock, RunLockError};
 use domain::landing::LandingStream;
 
 /// An advisory file lock, one file per stream.
@@ -67,28 +67,40 @@ impl RunLock for FileRunLock {
     type Guard = FileRunGuard;
 
     fn try_acquire(&self, stream: &LandingStream) -> Result<Self::Guard, RunLockError> {
-        let path = self.path_for(stream);
+        acquire(&self.path_for(stream))
+    }
+}
 
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(|error| RunLockError::Unavailable {
-                detail: format!("{}: {error}", path.display()),
-            })?;
+/// **A file of its own**, `.next.lock`, which no stream can collide with: a
+/// stream's name is always `source.entity`.
+impl NextLock for FileRunLock {
+    type Guard = FileRunGuard;
 
-        // Try, never block. Waiting would turn a loud "already running" into a
-        // silent queue, and an operator running extraction twice by mistake
-        // wants to be told, not to wait.
-        file.try_lock().map_err(|error| match error {
-            TryLockError::WouldBlock => RunLockError::Held,
-            TryLockError::Error(error) => RunLockError::Unavailable {
-                detail: error.to_string(),
-            },
+    fn try_acquire(&self) -> Result<Self::Guard, RunLockError> {
+        acquire(&self.directory.join(".next.lock"))
+    }
+}
+
+fn acquire(path: &Path) -> Result<FileRunGuard, RunLockError> {
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|error| RunLockError::Unavailable {
+            detail: format!("{}: {error}", path.display()),
         })?;
 
-        Ok(FileRunGuard { file })
-    }
+    // Try, never block. Waiting would turn a loud "already running" into a
+    // silent queue, and an operator running extraction twice by mistake
+    // wants to be told, not to wait.
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => RunLockError::Held,
+        TryLockError::Error(error) => RunLockError::Unavailable {
+            detail: error.to_string(),
+        },
+    })?;
+
+    Ok(FileRunGuard { file })
 }

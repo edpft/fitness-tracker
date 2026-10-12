@@ -37,11 +37,11 @@ use jiff::civil::Date;
 use crate::{
     CanonicalGymSessionStore, ClassSource, CyclingMesocycleStore, Delivery, DeliveryError,
     DiaryAuthor, DiaryStore, ExerciseHistory, ExtractionError, GenerationParameterStore,
-    HolidayCalendar, MesocycleStore, NormalisationError, NormalisedGymSessionReader, PlanStore,
-    PrescribedWorkoutStore, Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore,
-    PrescriptionDestination, PrescriptionError, PrescriptionLifecycle, RideDestination,
-    RidesPlaced, RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutNormaliser,
-    WorkoutPrescriber as _,
+    HolidayCalendar, MesocycleStore, NextLock, NormalisationError, NormalisedGymSessionReader,
+    PlanStore, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer as _,
+    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionError, PrescriptionLifecycle,
+    RideDestination, RidesPlaced, RunLockError, RunSummary, SourceError, StoreError,
+    WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber as _,
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
@@ -221,6 +221,9 @@ pub trait Progress {
 /// cannot be taken.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NextError {
+    /// Another run of `next` is going, from this frontend or the other.
+    #[error("a run of next is already going")]
+    AlreadyRunning,
     /// No week has been recorded, so nothing says what is next.
     #[error("no week has been recorded, so nothing says what is next")]
     NoWeek,
@@ -562,7 +565,7 @@ where
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY> {
+pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L> {
     pub gym_records: Records<GW, GN>,
     pub cycling_records: Records<CW, CN>,
     /// The normalised gym layer, and the canonical layer built from it.
@@ -577,6 +580,8 @@ pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY> {
     pub committing: C,
     pub gym: GY,
     pub cycling: CY,
+    /// One run at a time, whichever frontend starts it.
+    pub lock: L,
 }
 
 /// The use case.
@@ -584,12 +589,12 @@ pub struct NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY> {
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY> {
-    ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY>,
+pub struct Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L> {
+    ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>,
 }
 
-impl<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY>
-    Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY>
+impl<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>
+    Next<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>
 where
     GW: Walks + Sync,
     GN: WorkoutNormaliser + Sync,
@@ -605,12 +610,15 @@ where
     C: MesocycleCommitter + Sync,
     GY: GymSessions + Sync,
     CY: CyclingSessions + Sync,
+    L: NextLock + Sync,
 {
     #[expect(
         clippy::type_complexity,
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
-    pub const fn new(ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY>) -> Self {
+    pub const fn new(
+        ports: NextPorts<GW, GN, CW, CN, NR, CS, K, HC, D, P, M, C, GY, CY, L>,
+    ) -> Self {
         Self { ports }
     }
 
@@ -629,6 +637,15 @@ where
         skip: Option<&str>,
         progress: &(impl Progress + Sync),
     ) -> Result<Report, NextError> {
+        // **Held for the whole run**, and taken before anything is read: a
+        // second run that got as far as delivering would put a session at the
+        // destination the first is about to replace.
+        let _guard = self.ports.lock.try_acquire().map_err(|error| match error {
+            RunLockError::Held => NextError::AlreadyRunning,
+            RunLockError::Unavailable { detail } => {
+                NextError::Store(StoreError::Unavailable { detail })
+            }
+        })?;
         if self.ports.diary.diary().await?.patterns().is_empty() {
             return Err(NextError::NoWeek);
         }

@@ -26,6 +26,7 @@ version = "0.0.0"
 domain = { path = "crates/domain" }
 application = { path = "crates/application" }
 infrastructure = { path = "crates/infrastructure" }
+configurator = { path = "crates/configurator" }
 
 # Data types. These are allowed in `domain`: they describe values rather than
 # machinery, and a core that cannot name a timestamp ends up passing strings
