@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM myfitnesspal_weigh_in",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "98ec3a791c46912349686169bc2581e84a179a02b4cff5f1e5ef5134bfac0d99"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)\n                VALUES (?, ?, ?, ?)\n                RETURNING id AS \"id!: i64\"\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "59dd5750a266f5225374ba1049f0a8b336ec656621abbac7ac243e8c15b29e5d"
+}

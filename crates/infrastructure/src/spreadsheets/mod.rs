@@ -18,7 +18,7 @@ use self::sheet::Sheet;
 use crate::scribe::Scribe;
 
 mod sessions;
-mod sheet;
+pub(crate) mod sheet;
 mod weigh_ins;
 
 pub use sessions::SpreadsheetSessionTranslator;

@@ -1,7 +1,19 @@
 <!--
 Sync Impact Report
-- Version: 5.0.0, amended 2026-10-01. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 6.0.0, amended 2026-10-13. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 6.0.0 — § 10's genuine disagreements are settled by the merge rather than surfaced: an
+  account stating when it was entered wins; copies of one entry are one account, the
+  earliest-saved standing where they differ; then a majority of more than two independent
+  accounts; and otherwise the event is left out. MAJOR: a rule redefined incompatibly. The
+  operator, 2026-10-13, on three days where six copies of his spreadsheets disagreed (#409): *"I
+  don't want to have to loosen the model to allow data quality issues. I have no way of
+  confirming one way or the other what a weigh in was 10 years ago."* MyFitnessPal's export
+  timestamps each weight as it was typed. On copies: *"3 copies of spreadsheet x that have the
+  same value are really 1 vote"*, and where they disagree an earlier save *"suggests that copy a
+  is more accurate, it's highly unlikely that something would have happened after 2022-01-01
+  that would make me change a value for a weigh in recorded in 2020."* No decision record: he
+  stated the rule.
 - 5.0.0 — § 10's second bullet redefined. It said choosing between two sources' accounts was
   an analytical-layer decision, "never resolved by discarding one"; it now says the normalised
   layer discards nothing and the canonical layer merges, field by field, each field naming the
@@ -225,7 +237,14 @@ Both are re-runnable at any time. Neither consults an overlay.
 
   **The canonical layer merges them, which is what it is for.** One entry per real-world event (§ II.4) is one account of that event, assembled field by field from whichever normalised entities recorded each field, and every field names the normalised entity it was taken from. A field none of them recorded is not held; a field one of them recorded is held as that one gave it; a field several recorded and agree on is held once. Where they differ because one source's input could not express the value another gave — a load entered on a dial that takes whole kilogrammes against the same load written down as 47.5 — the canonical entity holds the one that could express it and names it. The one not taken is not discarded: it stands unchanged in the normalised layer, which the merge never rewrites.
 
-  Two normalised entities that could each express a value and still differ are a genuine disagreement, and merging is not how it is settled: the merge surfaces it rather than picking. Method-dependent quantities (§ 6) are never merged into one value at all, because there is no single value for them to be. Choosing which series to read remains an analytical-layer decision (§ 5).
+  Two normalised entities that could each express a value and still differ are a genuine disagreement. Nobody can settle one later — what a scale read ten years ago is not knowable now — so the merge settles it by evidence or leaves the event out, and never carries an unresolved value:
+
+  - **An account that states when it was entered beats one that does not.** It is the nearest to the observation there is. Where several state it and they agree, their value stands.
+  - **Copies of one entry are one account.** A value typed once and carried forward — into copies of a workbook, or into other workbooks — is one entry however many files hold it. Where the copies differ, the copy whose document was last saved earliest stands, by the document's own record of saving rather than the file system's: a value changed years after it was typed is a slip, not a correction.
+  - **With neither, and more than two independent accounts, the value most of them hold stands.** Three accounts typed separately, holding 63.4, 63.4 and 63.5, are one weigh-in of 63.4.
+  - **Otherwise the event is left out of the canonical layer**, and the merge names it: two accounts that differ, or no majority. A gap stays visible (§ 37); a guess would not.
+
+  Method-dependent quantities (§ 6) are never merged into one value at all, because there is no single value for them to be. Choosing which series to read remains an analytical-layer decision (§ 5).
 
 Consequences:
 
@@ -339,4 +358,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 5.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-01
+**Version**: 6.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-13

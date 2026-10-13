@@ -17,6 +17,7 @@ use application::{AccountReader, StoreError, WeighInHistory};
 use domain::{
     analytical::Weighed,
     body::ManualWeighIn,
+    canonical::Occurred,
     landing::{
         FetchedAt, FilePath, FileProvenance, InvalidStream, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, ModifiedAt, RawPayload, SourceRecordId,
@@ -26,7 +27,10 @@ use domain::{
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::{SpreadsheetFileLandingStore, corrupt, count_from_storage, store_error};
+use super::{
+    MyFitnessPalExportLandingStore, SpreadsheetFileLandingStore, corrupt, count_from_storage,
+    store_error,
+};
 use crate::spreadsheets::Workbook;
 
 /// Raw, read-only, for the historical spreadsheets. One account per workbook,
@@ -173,12 +177,11 @@ pub(super) async fn count_manual_weigh_ins(pool: &SqlitePool) -> Result<usize, S
 
 /// Weigh-ins, read back for relative strength.
 ///
-/// **Only those with an instant.** Relative strength reads a session against
-/// the weigh-in closest to its start on the same day, and a manual weigh-in has
-/// a day and no time. More to the point, the same day sits in up to six
-/// spreadsheets, and choosing between the copies is the canonical layer's work,
-/// which does not exist yet. Until it does, only the Body Scan's weigh-ins are
-/// read here, as they were before.
+/// **The Body Scan's, and MyFitnessPal's, and not the spreadsheets'.** The
+/// same day sits in up to nine spreadsheets, and choosing between the copies
+/// is the canonical layer's work (#409), which does not exist yet. MyFitnessPal
+/// holds one weight a day, so there is nothing to choose between and it is read
+/// here, dated to its day (#242).
 #[derive(Debug, Clone)]
 pub struct SqliteWeighInHistory {
     pool: SqlitePool,
@@ -194,13 +197,15 @@ impl WeighInHistory for SqliteWeighInHistory {
     async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT measured_at_utc AS "measured_at!: String",
-                   zone AS "zone!: String",
+            SELECT measured_at_utc AS "measured_at: String",
+                   zone AS "zone: String",
+                   on_day AS "on_day: String",
                    mass_grams AS "mass_grams!: i64"
             FROM weigh_in
-            WHERE measured_at_utc IS NOT NULL
-            ORDER BY measured_at_utc ASC
-            "#
+            WHERE measured_at_utc IS NOT NULL OR stream = ?
+            ORDER BY COALESCE(measured_at_utc, on_day) ASC
+            "#,
+            MyFitnessPalExportLandingStore::STREAM
         )
         .fetch_all(&self.pool)
         .await
@@ -208,14 +213,28 @@ impl WeighInHistory for SqliteWeighInHistory {
 
         rows.into_iter()
             .map(|row| {
-                let instant = row
-                    .measured_at
-                    .parse::<jiff::Timestamp>()
-                    .map_err(|error| corrupt(&error))?;
-                let zone = OperatorZone::try_from(row.zone).map_err(|error| corrupt(&error))?;
+                let at = match (row.measured_at, row.zone, row.on_day) {
+                    (Some(measured_at), Some(zone), None) => {
+                        let instant = measured_at
+                            .parse::<jiff::Timestamp>()
+                            .map_err(|error| corrupt(&error))?;
+                        let zone = OperatorZone::try_from(zone).map_err(|error| corrupt(&error))?;
+                        Occurred::At(StartedAt::new(instant, zone))
+                    }
+                    (None, None, Some(on_day)) => Occurred::On(
+                        on_day
+                            .parse::<jiff::civil::Date>()
+                            .map_err(|error| corrupt(&error))?,
+                    ),
+                    _ => {
+                        return Err(StoreError::Corrupt {
+                            detail: "a weigh-in is neither at an instant nor on a day".to_owned(),
+                        });
+                    }
+                };
                 let grams = u64::try_from(row.mass_grams).map_err(|error| corrupt(&error))?;
                 Ok(Weighed {
-                    at: StartedAt::new(instant, zone),
+                    at,
                     mass: Kg::from_grams(grams),
                 })
             })

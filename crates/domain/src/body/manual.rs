@@ -13,8 +13,12 @@
 //! analytical layer's, and the operator's rule is that the copy nearest the
 //! original entry beats the latest one. So the identity here is the cell, never
 //! the day.
+//!
+//! **Some places say when he typed it** (#242). MyFitnessPal records when each
+//! weight was entered; a spreadsheet cell does not. Where it is known, it is the
+//! evidence § 10 settles a disagreement between copies by, so it is carried.
 
-use jiff::civil::Date;
+use jiff::{Timestamp, civil::Date};
 
 pub use crate::landing::{Cell, CellRef, InvalidCellRef, InvalidSheetName, SheetName};
 use crate::{landing::SourceRecordId, measure::Kg, normalised::NormalisedEntity};
@@ -33,6 +37,7 @@ pub struct ManualWeighIn {
     on: Date,
     mass: Kg,
     written_in: Cell,
+    entered_at: Option<Timestamp>,
 }
 
 impl ManualWeighIn {
@@ -47,7 +52,15 @@ impl ManualWeighIn {
             on,
             mass,
             written_in,
+            entered_at: None,
         })
+    }
+
+    /// The same weigh-in, stating when it was typed.
+    #[must_use]
+    pub const fn entered(mut self, at: Timestamp) -> Self {
+        self.entered_at = Some(at);
+        self
     }
 
     pub const fn on(&self) -> Date {
@@ -60,6 +73,11 @@ impl ManualWeighIn {
 
     pub const fn written_in(&self) -> &Cell {
         &self.written_in
+    }
+
+    /// When it was typed, where the place it was typed into records that.
+    pub const fn entered_at(&self) -> Option<Timestamp> {
+        self.entered_at
     }
 }
 

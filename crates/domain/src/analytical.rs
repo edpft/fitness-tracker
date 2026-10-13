@@ -25,10 +25,9 @@ use jiff::civil::Date;
 
 use crate::{
     body::BodyScanWeighIn,
-    canonical::Attributed,
+    canonical::{Attributed, Occurred},
     gym::{CanonicalExercise, CanonicalGymSession, Identified, Load, Rir, exercise::RepsExercise},
     measure::{Kg, RepCount},
-    normalised::StartedAt,
     sequence::NonEmpty,
 };
 
@@ -209,17 +208,19 @@ impl fmt::Display for RelativeStrength {
 /// A body mass, and when it was weighed.
 ///
 /// All the report needs of a weigh-in, so reading one back does not mean
-/// rebuilding the whole of it.
+/// rebuilding the whole of it. **A day where no clock was read**: a weight
+/// typed into MyFitnessPal is dated to the day it was logged against, and
+/// when it was typed is not when it was weighed (#242).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Weighed {
-    pub at: StartedAt,
+    pub at: Occurred,
     pub mass: Kg,
 }
 
 impl From<&BodyScanWeighIn> for Weighed {
     fn from(weigh_in: &BodyScanWeighIn) -> Self {
         Self {
-            at: weigh_in.measured_at().clone(),
+            at: Occurred::At(weigh_in.measured_at().clone()),
             mass: weigh_in.mass(),
         }
     }
@@ -236,11 +237,6 @@ pub struct SessionStrength {
     pub relative: Option<RelativeStrength>,
 }
 
-/// The local day something happened on, in its own zone.
-fn day_of(at: &StartedAt) -> Date {
-    at.wall_clock().date()
-}
-
 /// The weigh-in a session is read against: the same local day, and of several
 /// that day the one closest to the session's start. The earlier wins a tie.
 ///
@@ -248,25 +244,27 @@ fn day_of(at: &StartedAt) -> Date {
 /// operator's visits are dated to a day and no finer, so there is no moment for
 /// a weigh-in to be near; the earliest is a choice a rebuild repeats rather than
 /// an account of which reading was closest.
+///
+/// **A weigh-in dated to a day comes after every one with a clock**, because
+/// it cannot be nearer than one that was. No day in the record has both.
 fn weigh_in_for<'a>(
     session: &CanonicalGymSession,
     weigh_ins: &'a [Weighed],
 ) -> Option<&'a Weighed> {
-    let occurred = session.occurred();
+    nearest(session.occurred(), weigh_ins)
+}
+
+/// [`weigh_in_for`]'s rule, over when the session happened.
+fn nearest<'a>(occurred: &Occurred, weigh_ins: &'a [Weighed]) -> Option<&'a Weighed> {
     let day = occurred.day();
-    let on_the_day = weigh_ins
-        .iter()
-        .filter(|weigh_in| day_of(&weigh_in.at) == day);
+    let on_the_day = weigh_ins.iter().filter(|weigh_in| weigh_in.at.day() == day);
+    let clock = |weigh_in: &Weighed| weigh_in.at.instant().map(|at| at.instant().as_second());
     match occurred.instant() {
         Some(started) => on_the_day.min_by_key(|weigh_in| {
-            let gap = weigh_in
-                .at
-                .instant()
-                .as_second()
-                .abs_diff(started.instant().as_second());
-            (gap, weigh_in.at.instant())
+            let gap = clock(weigh_in).map(|at| at.abs_diff(started.instant().as_second()));
+            (gap.is_none(), gap, clock(weigh_in))
         }),
-        None => on_the_day.min_by_key(|weigh_in| weigh_in.at.instant()),
+        None => on_the_day.min_by_key(|weigh_in| (clock(weigh_in).is_none(), clock(weigh_in))),
     }
 }
 
@@ -321,10 +319,12 @@ pub fn relative_strength<E: OneRepMaxEstimator>(
 
 #[cfg(test)]
 mod tests {
-    use super::{OneRepMaxEstimator, RelativeStrength, Rts};
+    use super::{OneRepMaxEstimator, RelativeStrength, Rts, Weighed, nearest};
     use crate::{
+        canonical::Occurred,
         gym::Rir,
         measure::{Kg, RepCount},
+        normalised::{OperatorZone, StartedAt},
     };
 
     fn kg(grams: u64) -> Kg {
@@ -390,6 +390,47 @@ mod tests {
         assert!(Rts.estimate(kg(20_000), reps(40), Rir::Zero).is_some());
         assert_eq!(Rts.estimate(kg(20_000), reps(41), Rir::Zero), None);
         assert_eq!(Rts.estimate(kg(20_000), reps(35), Rir::Three), None);
+    }
+
+    fn at(timestamp: &str) -> Occurred {
+        let zone = OperatorZone::try_from("Europe/London").expect("a zone");
+        Occurred::At(StartedAt::new(timestamp.parse().expect("an instant"), zone))
+    }
+
+    fn weighed(at: Occurred, grams: u64) -> Weighed {
+        Weighed {
+            at,
+            mass: kg(grams),
+        }
+    }
+
+    #[test]
+    fn a_weight_dated_to_a_day_is_read_for_a_session_that_day() {
+        let day = jiff::civil::date(2018, 7, 12);
+        let weigh_ins = [
+            weighed(Occurred::On(jiff::civil::date(2018, 7, 11)), 72_800),
+            weighed(Occurred::On(day), 72_600),
+        ];
+        assert_eq!(
+            nearest(&at("2018-07-12T17:30:00Z"), &weigh_ins).map(|weighed| weighed.mass),
+            Some(kg(72_600))
+        );
+        assert_eq!(
+            nearest(&Occurred::On(day), &weigh_ins).map(|weighed| weighed.mass),
+            Some(kg(72_600))
+        );
+    }
+
+    #[test]
+    fn a_weight_with_a_clock_is_nearer_than_one_dated_to_the_day() {
+        let weigh_ins = [
+            weighed(Occurred::On(jiff::civil::date(2026, 3, 2)), 80_000),
+            weighed(at("2026-03-02T21:00:00Z"), 80_400),
+        ];
+        assert_eq!(
+            nearest(&at("2026-03-02T07:00:00Z"), &weigh_ins).map(|weighed| weighed.mass),
+            Some(kg(80_400))
+        );
     }
 
     #[test]
