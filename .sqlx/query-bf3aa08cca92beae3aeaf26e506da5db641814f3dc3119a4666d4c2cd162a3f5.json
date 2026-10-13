@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO device_statement\n                 (stated_at, kind, device, other_device, first_used, last_used, name, measures)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "bf3aa08cca92beae3aeaf26e506da5db641814f3dc3119a4666d4c2cd162a3f5"
+}

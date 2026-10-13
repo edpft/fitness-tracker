@@ -43,7 +43,7 @@ const ATTRIBUTED: [i64; 2] = [0, 8];
 const UNATTRIBUTED: i64 = 1;
 
 /// Measure types, by what they are.
-mod kind {
+pub(super) mod kind {
     pub const MASS: i64 = 1;
     pub const FAT_FREE_MASS: i64 = 5;
     /// Fat mass over mass, exactly. Served and deliberately not carried (§ 5).
@@ -84,7 +84,7 @@ const SINUS_RHYTHM: i64 = 9;
 const HIGH_HEART_RATE: i64 = 10;
 const NOT_CLASSIFIED: i64 = 5;
 
-const COMPOSITION: [i64; 15] = [
+pub(super) const COMPOSITION: [i64; 15] = [
     kind::MASS,
     kind::FAT_FREE_MASS,
     kind::FAT_RATIO,

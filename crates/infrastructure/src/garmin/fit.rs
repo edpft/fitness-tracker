@@ -406,9 +406,179 @@ fn u16_at(file: &[u8], at: usize, little_endian: bool) -> Option<u16> {
     })
 }
 
+/// What a recording says about the hardware that made it.
+///
+/// **The file's own account, which the activity list does not give.** The list
+/// names one device id per activity, and a peloton-to-garmin upload presents as
+/// a watch the operator never owned. The file names the device that wrote it
+/// (`file_id`) and every sensor paired to it (`device_info`), each by the serial
+/// number the hardware reports — which is what tells two straps of one model
+/// apart (#427).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hardware {
+    /// What wrote the recording, as `file_id` states it.
+    pub recorder: Identity,
+    /// Everything `device_info` lists, the recorder's own entry among them.
+    pub listed: Vec<Listed>,
+}
+
+/// Who made a device, which of their products it is, and its serial number.
+///
+/// Each is [`None`] where the file says it does not know, which is what FIT's
+/// invalid values mean.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub manufacturer: Option<u16>,
+    pub product: Option<u16>,
+    pub serial: Option<u32>,
+}
+
+/// One `device_info` entry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Listed {
+    /// Which device of the recording this is; zero is the recorder itself.
+    pub index: Option<u8>,
+    pub identity: Identity,
+    /// The device type, read against [`Self::link`]'s table.
+    pub kind: Option<u8>,
+    /// How it was connected: ANT, ANT+, Bluetooth, onboard. Old files leave it
+    /// out.
+    pub link: Option<u8>,
+}
+
+/// The hardware a recording names.
+///
+/// # Errors
+///
+/// [`UnreadableRecording`] if the archive or the file inside it will not read.
+pub fn hardware(archive: &[u8]) -> Result<Hardware, UnreadableRecording> {
+    let recording = only_file(archive)?;
+    identities(&recording)
+}
+
+/// `file_id` and `device_info`, and the fields of each that identify hardware.
+/// The FIT profile fixes every number.
+const FILE_ID: u16 = 0;
+const DEVICE_INFO: u16 = 23;
+const FILE_ID_MANUFACTURER: u8 = 1;
+const FILE_ID_PRODUCT: u8 = 2;
+const FILE_ID_SERIAL: u8 = 3;
+const DEVICE_INDEX: u8 = 0;
+const DEVICE_TYPE: u8 = 1;
+const DEVICE_MANUFACTURER: u8 = 2;
+const DEVICE_SERIAL: u8 = 3;
+const DEVICE_PRODUCT: u8 = 4;
+const SOURCE_TYPE: u8 = 25;
+
+/// What a `uint16` is when the field was not measured.
+const NO_UINT16: u16 = 0xFFFF;
+
+fn identities(file: &[u8]) -> Result<Hardware, UnreadableRecording> {
+    let (mut at, end) = extent(file)?;
+    let mut definitions: [Option<Definition>; 16] = std::array::from_fn(|_| None);
+    let mut hardware = Hardware::default();
+    let mut recorder_stated = false;
+
+    while at < end {
+        let header = *file.get(at).ok_or(UnreadableRecording::Truncated { at })?;
+        let started_at = at;
+        at = at.saturating_add(1);
+
+        let local = if header & 0x80 == 0 {
+            if header & 0x40 != 0 {
+                let definition = read_definition(file, &mut at, header, started_at)?;
+                if let Some(slot) = definitions.get_mut(usize::from(header & 0x0F)) {
+                    *slot = Some(definition);
+                }
+                continue;
+            }
+            usize::from(header & 0x0F)
+        } else {
+            usize::from((header >> 5) & 0x03)
+        };
+        let definition = definitions
+            .get(local)
+            .and_then(Option::as_ref)
+            .ok_or(UnreadableRecording::Undefined { at: started_at })?;
+        let fields = numbers(file, &mut at, definition, started_at)?;
+        let field = |number: u8| {
+            fields
+                .iter()
+                .find(|(declared, _)| *declared == number)
+                .and_then(|(_, value)| *value)
+        };
+        let byte = |number: u8| {
+            field(number)
+                .and_then(|value| u8::try_from(value).ok())
+                .filter(|value| *value != NO_UINT8)
+        };
+        let short = |number: u8| {
+            field(number)
+                .and_then(|value| u16::try_from(value).ok())
+                .filter(|value| *value != NO_UINT16)
+        };
+        let serial = |number: u8| {
+            field(number)
+                .and_then(|value| u32::try_from(value).ok())
+                .filter(|value| *value != 0 && *value != NO_UINT32)
+        };
+        match definition.global {
+            FILE_ID if !recorder_stated => {
+                recorder_stated = true;
+                hardware.recorder = Identity {
+                    manufacturer: short(FILE_ID_MANUFACTURER),
+                    product: short(FILE_ID_PRODUCT),
+                    serial: serial(FILE_ID_SERIAL),
+                };
+            }
+            DEVICE_INFO => hardware.listed.push(Listed {
+                index: byte(DEVICE_INDEX),
+                identity: Identity {
+                    manufacturer: short(DEVICE_MANUFACTURER),
+                    product: short(DEVICE_PRODUCT),
+                    serial: serial(DEVICE_SERIAL),
+                },
+                kind: byte(DEVICE_TYPE),
+                link: byte(SOURCE_TYPE),
+            }),
+            _ => {}
+        }
+    }
+
+    Ok(hardware)
+}
+
+/// Every one-, two- and four-byte field of a message as an unsigned number,
+/// stepping `at` past the whole message. Anything else is stepped over.
+fn numbers(
+    file: &[u8],
+    at: &mut usize,
+    definition: &Definition,
+    started_at: usize,
+) -> Result<Vec<(u8, Option<u64>)>, UnreadableRecording> {
+    let mut fields = Vec::with_capacity(definition.fields.len());
+    for field in &definition.fields {
+        let ends_at = at
+            .checked_add(field.size)
+            .ok_or(UnreadableRecording::Truncated { at: started_at })?;
+        if ends_at > file.len() {
+            return Err(UnreadableRecording::Truncated { at: started_at });
+        }
+        let value = match field.size {
+            1 => file.get(*at).copied().map(u64::from),
+            2 => u16_at(file, *at, definition.little_endian).map(u64::from),
+            4 => u32_at(file, *at, definition.little_endian).map(u64::from),
+            _ => None,
+        };
+        fields.push((field.number, value));
+        *at = ends_at;
+    }
+    Ok(fields)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{UnreadableRecording, readings};
+    use super::{Identity, Listed, UnreadableRecording, identities, readings};
 
     /// A FIT file around the messages a test writes.
     fn file(messages: &[u8]) -> Vec<u8> {
@@ -509,6 +679,68 @@ mod tests {
         assert_eq!(
             read(&file(&messages)),
             Err(UnreadableRecording::Truncated { at: 21 }),
+        );
+    }
+
+    #[test]
+    fn a_recording_names_its_recorder_and_every_sensor_paired_to_it() {
+        // `file_id`: manufacturer 1, product 4432, serial 3483897389.
+        let mut messages = vec![
+            0x40, 0x00, 0x00, 0, 0, 3, 1, 2, 0x84, 2, 2, 0x84, 3, 4, 0x8C,
+        ];
+        messages.push(0x00);
+        messages.extend_from_slice(&1_u16.to_le_bytes());
+        messages.extend_from_slice(&4432_u16.to_le_bytes());
+        messages.extend_from_slice(&3_483_897_389_u32.to_le_bytes());
+        // `device_info`: index, type, manufacturer, serial, product, source.
+        messages.extend_from_slice(&[
+            0x41, 0x00, 0x00, 23, 0, 6, 0, 1, 0x02, 1, 1, 0x02, 2, 2, 0x84, 3, 4, 0x8C, 4, 2, 0x84,
+            25, 1, 0x00,
+        ]);
+        // A Wahoo strap over ANT+, then an entry whose serial says nothing.
+        for (index, serial) in [(1_u8, 3_339_528_293_u32), (2, 0)] {
+            messages.push(0x01);
+            messages.extend_from_slice(&[index, 120]);
+            messages.extend_from_slice(&32_u16.to_le_bytes());
+            messages.extend_from_slice(&serial.to_le_bytes());
+            messages.extend_from_slice(&0xFFFF_u16.to_le_bytes());
+            messages.push(1);
+        }
+
+        let hardware = identities(&file(&messages)).expect("a recording");
+
+        assert_eq!(
+            hardware.recorder,
+            Identity {
+                manufacturer: Some(1),
+                product: Some(4432),
+                serial: Some(3_483_897_389),
+            }
+        );
+        assert_eq!(
+            hardware.listed,
+            vec![
+                Listed {
+                    index: Some(1),
+                    identity: Identity {
+                        manufacturer: Some(32),
+                        product: None,
+                        serial: Some(3_339_528_293),
+                    },
+                    kind: Some(120),
+                    link: Some(1),
+                },
+                Listed {
+                    index: Some(2),
+                    identity: Identity {
+                        manufacturer: Some(32),
+                        product: None,
+                        serial: None,
+                    },
+                    kind: Some(120),
+                    link: Some(1),
+                },
+            ]
         );
     }
 }

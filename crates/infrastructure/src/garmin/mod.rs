@@ -16,6 +16,7 @@ pub mod account;
 pub mod activities;
 pub mod auth;
 pub mod corrections;
+pub mod devices;
 pub mod exercise_sets;
 pub mod files;
 pub mod fit;

@@ -33,18 +33,19 @@ use infrastructure::{
     GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
     MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
-    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
-    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
-    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore,
-    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
-    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
+    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore,
+    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
+    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
+    SqliteRefusalStore, SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore,
+    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
+        paired::PelotonAccount,
     },
 };
 
@@ -224,7 +225,15 @@ async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, Wir
             stream: PelotonRideLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            collect_rides(access, landing, samples_landing, resumption, runs, database).await
+            let account_landing = PelotonAccountLandingStore::new(pool.clone())?;
+            collect_rides(
+                access,
+                (landing, samples_landing, account_landing),
+                resumption,
+                runs,
+                database,
+            )
+            .await
         }
         Command::Normalise(zone) => {
             let summary = peloton_normalisation(pool, zone)?.normalise().await?;
@@ -311,32 +320,41 @@ pub fn peloton_auth(auth_base_url: String, credentials: PelotonCredentials) -> P
 /// failure is a walk with no outcome to report, which is the shape #367 was.
 async fn collect_rides(
     access: SourceAccess,
-    landing: PelotonRideLandingStore,
-    samples_landing: PelotonRideSampleLandingStore,
+    landings: PelotonLandings,
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
     database: &Path,
 ) -> Result<Outcome, WiringError> {
-    let (rides, graphs) =
-        peloton_walks(access, landing, samples_landing, resumption, runs, database)?;
+    let ((rides, graphs), account) = peloton_walks(access, landings, resumption, runs, database)?;
     let ridden = walk(rides.stream, rides.extraction).await;
     let sampled = walk(graphs.stream, graphs.extraction).await;
-    Ok(Outcome::ExtractedEach(vec![ridden, sampled]))
+    let paired = walk(account.stream, account.extraction).await;
+    Ok(Outcome::ExtractedEach(vec![ridden, sampled, paired]))
 }
 
-/// Peloton's two walks, the list first: the graph walk enumerates rides itself,
+/// Peloton's three landing tables: the rides, their graphs, and the account
+/// that says what the bike is paired with (#427).
+type PelotonLandings = (
+    PelotonRideLandingStore,
+    PelotonRideSampleLandingStore,
+    PelotonAccountLandingStore,
+);
+
+/// Peloton's walks, the list first: the graph walk enumerates rides itself,
 /// so running it second means the graphs it fetches are for rides this same
-/// run has just landed.
+/// run has just landed. The account is third, and depends on neither.
 fn peloton_walks(
     access: SourceAccess,
-    landing: PelotonRideLandingStore,
-    samples_landing: PelotonRideSampleLandingStore,
+    (landing, samples_landing, account_landing): PelotonLandings,
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
     database: &Path,
 ) -> Result<
     (
-        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+        (
+            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+        ),
         application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
     ),
     WiringError,
@@ -374,15 +392,29 @@ fn peloton_walks(
     let graphs = application::next::Walk {
         stream: samples_landing.stream().clone(),
         extraction: Extraction::new(ExtractionPorts {
-            source: PelotonWorkoutSamples::new(base_url, peloton_auth(auth_base_url, credentials)),
+            source: PelotonWorkoutSamples::new(
+                base_url.clone(),
+                peloton_auth(auth_base_url.clone(), credentials.clone()),
+            ),
             landing: samples_landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    };
+    let account = application::next::Walk {
+        stream: account_landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: PelotonAccount::new(base_url, peloton_auth(auth_base_url, credentials)),
+            landing: account_landing,
             resumption,
             runs,
             lock: FileRunLock::beside(database),
             clock: SystemClock,
         }),
     };
-    Ok((rides, graphs))
+    Ok(((rides, graphs), account))
 }
 
 /// Peloton's sessions, derived from both walks.
@@ -419,7 +451,10 @@ pub async fn peloton_records(
 ) -> Result<
     Records<
         (
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+            (
+                application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+                application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+            ),
             application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
         ),
         impl WorkoutNormaliser + Sync + use<>,
@@ -432,8 +467,11 @@ pub async fn peloton_records(
         Err(why) => Err(why),
         Ok(access) => accessible(peloton_walks(
             access,
-            PelotonRideLandingStore::new(pool.clone())?,
-            PelotonRideSampleLandingStore::new(pool.clone())?,
+            (
+                PelotonRideLandingStore::new(pool.clone())?,
+                PelotonRideSampleLandingStore::new(pool.clone())?,
+                PelotonAccountLandingStore::new(pool.clone())?,
+            ),
             SqliteResumptionPointStore::new(pool.clone()),
             SqliteExtractionRunLog::new(pool.clone()),
             database,

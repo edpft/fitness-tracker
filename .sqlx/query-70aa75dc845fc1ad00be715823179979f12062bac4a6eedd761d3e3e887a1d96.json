@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO device_statement\n                 (stated_at, kind, first_used, last_used, name, measures)\n             VALUES (?, 'added', ?, ?, ?, ?)\n             RETURNING id AS \"id!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "device_statement",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "70aa75dc845fc1ad00be715823179979f12062bac4a6eedd761d3e3e887a1d96"
+}

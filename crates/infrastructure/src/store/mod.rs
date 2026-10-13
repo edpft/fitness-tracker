@@ -13,6 +13,7 @@ pub mod canonical_gym;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
+pub mod devices;
 pub mod edit_overlay;
 pub mod garmin_activity_file_landing;
 pub mod garmin_activity_landing;
@@ -30,6 +31,7 @@ pub mod normalisation_run_log;
 pub mod normalised;
 pub mod normalised_gym;
 pub mod parameters;
+pub mod peloton_account_landing;
 pub mod peloton_class;
 pub mod peloton_landing;
 pub mod peloton_normalised;
@@ -63,6 +65,10 @@ pub use canonical_gym::SqliteCanonicalGymSessionStore;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
+pub use devices::{
+    GarminRecordedDevices, PelotonRecordedDevices, SqliteDeviceStatementStore,
+    WithingsRecordedDevices,
+};
 pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;
 pub use garmin_activity_landing::GarminActivityLandingStore;
@@ -79,6 +85,7 @@ pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use normalised_gym::SqliteNormalisedGymSessionReader;
 pub use parameters::SqliteGenerationParameterStore;
+pub use peloton_account_landing::PelotonAccountLandingStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
