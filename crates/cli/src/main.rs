@@ -185,6 +185,7 @@ fn command() -> ClapCommand {
 async fn canonicalise_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
     match sub.subcommand() {
         Some(("gym", _)) => canonicalise::gym(database).await,
+        Some(("cycling", _)) => canonicalise::cycling(database).await,
         _ => Err(Failure::message(
             "no canonicalise command given",
             exit::USAGE,
@@ -208,6 +209,10 @@ fn canonicalise_command() -> ClapCommand {
             "One canonical session per gym visit, merged from Hevy, the watch, \
              Beyond The White Board and the historical spreadsheets",
         ))
+        .subcommand(
+            ClapCommand::new("cycling")
+                .about("One canonical session per cycling session, from Peloton's record of it"),
+        )
 }
 
 /// `fitness next` — whichever discipline the schedule says is next.

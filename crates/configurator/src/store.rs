@@ -8,19 +8,19 @@
 use std::path::Path;
 
 use application::{
-    CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, ExerciseHistory,
-    FtpHistory, GenerationParameterStore, MesocycleStore, NormalisedGymSessionReader,
-    PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, RiddenSessionLog, RiddenVenues, StoreError,
-    WeighInHistory,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor,
+    DiaryStore, ExerciseHistory, FtpHistory, GenerationParameterStore, MesocycleStore,
+    NormalisedCyclingSessionReader, NormalisedGymSessionReader, PerformedGymSessions,
+    PerformedSessionLog, PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore,
+    PrescriptionLifecycle, RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingSessionLog,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore,
     SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore,
-    SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    SqliteRiddenVenues, SqliteWeighInHistory, connect,
+    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore, SqlitePlanStore, SqlitePool,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteWeighInHistory, connect,
 };
 
 /// The operator's store, opened.
@@ -113,16 +113,28 @@ impl Store {
         SqliteNormalisedGymSessionReader::new(self.pool.clone())
     }
 
-    /// The rides performed.
+    /// Every cycling session, however many sources recorded it.
     #[must_use]
-    pub fn rides(&self) -> impl RiddenSessionLog + Send + Sync + use<> {
-        SqliteCyclingSessionLog::new(self.pool.clone())
+    pub fn canonical_cycling(&self) -> impl CanonicalCyclingSessionStore + Send + Sync + use<> {
+        SqliteCanonicalCyclingSessionStore::new(self.pool.clone())
     }
 
-    /// The classes already ridden.
+    /// Every cycling session each source recorded, in our terms.
+    #[must_use]
+    pub fn normalised_cycling(&self) -> impl NormalisedCyclingSessionReader + Send + Sync + use<> {
+        SqliteNormalisedCyclingSessionReader::new(self.pool.clone())
+    }
+
+    /// The rides performed, as the canonical layer holds them.
+    #[must_use]
+    pub fn rides(&self) -> impl RiddenSessionLog + Send + Sync + use<> {
+        SqliteCanonicalCyclingSessionStore::new(self.pool.clone())
+    }
+
+    /// The classes already ridden, as the canonical layer holds them.
     #[must_use]
     pub fn ridden_venues(&self) -> impl RiddenVenues + Send + Sync + use<> {
-        SqliteRiddenVenues::new(self.pool.clone())
+        SqliteCanonicalCyclingSessionStore::new(self.pool.clone())
     }
 
     /// The functional threshold power, as it has been tested.

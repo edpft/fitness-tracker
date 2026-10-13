@@ -8,23 +8,24 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 use application::{
-    CanonicalGymSessionStore, ClassSource, ClassesListed, ClassesRead, DiaryAuthor, DiaryStore,
-    ExtractionError, HolidayCalendar, NextLock, NormalisationError, NormalisationSummary,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, ClassSource, ClassesListed,
+    ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar, NextLock,
+    NormalisationError, NormalisationSummary, NormalisedCyclingSessionReader,
     NormalisedGymSessionReader, PlanStore, PrescriptionError, RunLockError, RunSummary,
     SourceError, StoreError, WorkoutNormaliser,
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
-        CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed, GymSessions,
-        MesocycleCommitter, Next, NextError, NextPorts, NoAccess, Prescribed, Progress, Records,
-        SkipRefused, StandingReader, Step, StepFailure, Walks, WhatIsNext,
+        CanonicalPorts, CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed,
+        GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, Prescribed,
+        Progress, Records, SkipRefused, StandingReader, Step, StepFailure, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
 use domain::{
     canonical::SessionCount,
-    cycling::CyclingMesocycle,
+    cycling::{CanonicalCyclingSession, CyclingMesocycle},
     gym::{CanonicalGymSession, NormalisedGymSession},
     landing::{LandingStream, RecordCount, RunId},
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
@@ -96,6 +97,25 @@ struct Empty;
 impl NormalisedGymSessionReader for Empty {
     async fn all(&self) -> Result<Vec<NormalisedGymSession>, StoreError> {
         Ok(Vec::new())
+    }
+}
+
+impl NormalisedCyclingSessionReader for Empty {
+    async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
+impl CanonicalCyclingSessionStore for Empty {
+    async fn replace(
+        &self,
+        sessions: Vec<CanonicalCyclingSession>,
+    ) -> Result<SessionCount, StoreError> {
+        Ok(SessionCount::from(sessions.len()))
+    }
+
+    async fn count(&self) -> Result<SessionCount, StoreError> {
+        Ok(SessionCount::from(0))
     }
 }
 
@@ -382,8 +402,7 @@ type Ports<H = Unreachable> = NextPorts<
     Deriving,
     Walking,
     Deriving,
-    Empty,
-    Empty,
+    CanonicalPorts<Empty, Empty, Empty, Empty>,
     Converged,
     H,
     Recorded,
@@ -442,8 +461,12 @@ fn calendar<H>(
             }),
             normaliser: Deriving(156),
         },
-        normalised: Empty,
-        canonical: Empty,
+        canonical: CanonicalPorts {
+            normalised_gym: Empty,
+            canonical_gym: Empty,
+            normalised_cycling: Empty,
+            canonical_cycling: Empty,
+        },
         classes: Ok(Converged),
         holidays,
         diary,
@@ -494,9 +517,10 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
         vec![
             (&Step::Fetching(hevy.clone()), true),
             (&Step::Normalising(hevy), true),
-            (&Step::Canonicalising, true),
+            (&Step::Canonicalising(Discipline::Gym), true),
             (&Step::Fetching(peloton.clone()), false),
             (&Step::Normalising(peloton), true),
+            (&Step::Canonicalising(Discipline::Cycling), true),
             (&Step::RefreshingClasses, true),
         ]
     );

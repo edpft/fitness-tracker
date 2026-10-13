@@ -30,7 +30,9 @@ pub fn step(step: &Step) -> String {
     match step {
         Step::Fetching(stream) => format!("Fetching {stream}"),
         Step::Normalising(stream) => format!("Normalising {stream}"),
-        Step::Canonicalising => "Canonicalising gym sessions".to_owned(),
+        Step::Canonicalising(discipline) => {
+            format!("Canonicalising {} sessions", discipline.as_str())
+        }
         // **The configurator knows which catalogue this build keeps**, as it
         // knows where rides are done.
         Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),

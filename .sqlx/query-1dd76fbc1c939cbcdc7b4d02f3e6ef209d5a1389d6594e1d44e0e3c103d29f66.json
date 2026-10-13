@@ -1,0 +1,136 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT r.role AS \"role!: String\",\n                      r.started_at_normalised_session AS \"started!: i64\",\n                      r.venue_normalised_session AS \"venue!: i64\",\n                      r.duration_normalised_session AS \"duration!: i64\",\n                      r.distance_normalised_session AS \"distance!: i64\",\n                      r.average_power_normalised_session AS \"power!: i64\",\n                      r.samples_normalised_session AS \"samples!: i64\",\n                      r.heart_rate_normalised_session AS \"heart_rate: i64\",\n                      (SELECT count(*) FROM canonical_bike_plus_ride_sample AS s\n                        WHERE s.session = r.session AND s.ride_position = r.position)\n                        AS \"sample_count!: i64\",\n                      (SELECT count(*) FROM canonical_bike_plus_ride_heart_rate AS h\n                        WHERE h.session = r.session AND h.ride_position = r.position)\n                        AS \"beat_count!: i64\",\n                      (SELECT kind FROM canonical_cycling_session AS c WHERE c.id = r.session)\n                        AS \"kind!: String\"\n                 FROM canonical_bike_plus_ride AS r\n                ORDER BY r.position",
+  "describe": {
+    "columns": [
+      {
+        "name": "role!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "name": "started!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "started_at_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "venue!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "venue_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "duration_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "distance!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "distance_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "power!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "average_power_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "samples!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "samples_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "heart_rate: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "heart_rate_normalised_session"
+          }
+        }
+      },
+      {
+        "name": "sample_count!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "beat_count!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "kind!: String",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_cycling_session",
+            "name": "kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1dd76fbc1c939cbcdc7b4d02f3e6ef209d5a1389d6594e1d44e0e3c103d29f66"
+}

@@ -5,7 +5,7 @@
 //! canonical layer is cross-source by definition — one entry per visit,
 //! whatever number of sources recorded it — so there is no stream to name here
 //! where `extract` and `normalise` both have one. What it takes instead is the
-//! entity: `gym`, and a second discipline is another arm.
+//! entity: `gym` or `cycling`.
 //!
 //! It contacts nothing and holds no run of its own. The inputs are already in
 //! our terms, so there is nothing to refuse and nothing to resume.
@@ -14,6 +14,7 @@ use std::path::Path;
 
 use application::canonicalise;
 use configurator::store::Store;
+use domain::schedule::Discipline;
 
 use crate::{Failure, output};
 
@@ -23,8 +24,20 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
     let normalised = store.normalised_gym();
     let canonical = store.canonical_gym();
 
-    output::canonicalising_started();
+    output::canonicalising_started(Discipline::Gym);
     let done = canonicalise::gym_sessions(&normalised, &canonical).await?;
+    output::canonicalised(done.read, done.written);
+    Ok(())
+}
+
+/// Rebuild the canonical cycling layer and report what it now holds.
+pub async fn cycling(database: &Path) -> Result<(), Failure> {
+    let store = Store::open(database).await?;
+    let normalised = store.normalised_cycling();
+    let canonical = store.canonical_cycling();
+
+    output::canonicalising_started(Discipline::Cycling);
+    let done = canonicalise::cycling_sessions(&normalised, &canonical).await?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }

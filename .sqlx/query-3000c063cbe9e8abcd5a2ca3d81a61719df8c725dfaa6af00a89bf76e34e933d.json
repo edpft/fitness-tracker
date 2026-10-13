@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT landing_record_id AS \"id!: i64\" FROM cycling_session",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "landing_record_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3000c063cbe9e8abcd5a2ca3d81a61719df8c725dfaa6af00a89bf76e34e933d"
+}

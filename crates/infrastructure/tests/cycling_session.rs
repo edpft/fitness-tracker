@@ -10,7 +10,9 @@
 //! omission that passes on this machine and finds an empty file in the sandbox.
 
 use application::{
-    ExtractionRunLog as _, NormalisationSummary, RefusalReporter as _, WorkoutNormaliser as _,
+    CanonicalCyclingSessionStore as _, ExtractionRunLog as _, NormalisationSummary,
+    RefusalReporter as _, RiddenSessionLog as _, RiddenVenues as _, WorkoutNormaliser as _,
+    canonicalise::{self, Canonicalised},
     normalise::{Normalisation, NormalisationPorts, Refusals},
 };
 use domain::{
@@ -22,8 +24,9 @@ use domain::{
 };
 use infrastructure::{
     PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
-    SqliteCyclingSessionStore, SqliteExtractionRunLog, SqliteNormalisationRunLog,
-    SqliteRefusalStore, connect, peloton::PelotonSessionTranslator,
+    SqliteCanonicalCyclingSessionStore, SqliteCyclingSessionStore, SqliteExtractionRunLog,
+    SqliteNormalisationRunLog, SqliteNormalisedCyclingSessionReader, SqliteRefusalStore, connect,
+    peloton::PelotonSessionTranslator,
 };
 use sqlx::SqlitePool;
 
@@ -232,6 +235,15 @@ async fn derive(pool: &SqlitePool) -> Built<NormalisationSummary> {
         OperatorZone::try_from("Europe/London")?,
     );
     Ok(normalisation.normalise().await?)
+}
+
+/// Rebuild the canonical cycling layer from what `derive` wrote.
+async fn canonicalise(pool: &SqlitePool) -> Built<Canonicalised> {
+    Ok(canonicalise::cycling_sessions(
+        &SqliteNormalisedCyclingSessionReader::new(pool.clone()),
+        &SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+    )
+    .await?)
 }
 
 async fn refusals(pool: &SqlitePool) -> Built<Vec<domain::normalised::Refusal>> {
@@ -1113,11 +1125,11 @@ fn every_ride_records_the_class_it_was_ridden_to() {
         let summary = derive(&pool).await.expect("a derivation");
         assert_eq!(summary.workouts_written.as_usize(), 1, "one session");
 
-        let ridden = application::RiddenVenues::ridden(&infrastructure::SqliteRiddenVenues::new(
-            pool.clone(),
-        ))
-        .await
-        .expect("the venues read back");
+        canonicalise(&pool).await.expect("a canonical layer");
+        let ridden = SqliteCanonicalCyclingSessionStore::new(pool.clone())
+            .ridden()
+            .await
+            .expect("the venues read back");
 
         let references: Vec<&str> = {
             let mut seen: Vec<&str> = ridden
@@ -1168,11 +1180,138 @@ fn a_class_ridden_twice_is_named_once() {
         let summary = derive(&pool).await.expect("a derivation");
         assert_eq!(summary.workouts_written.as_usize(), 2, "two sessions");
 
-        let ridden = application::RiddenVenues::ridden(&infrastructure::SqliteRiddenVenues::new(
-            pool.clone(),
-        ))
-        .await
-        .expect("the venues read back");
+        canonicalise(&pool).await.expect("a canonical layer");
+        let ridden = SqliteCanonicalCyclingSessionStore::new(pool.clone())
+            .ridden()
+            .await
+            .expect("the venues read back");
         assert_eq!(ridden.len(), 1, "{ridden:?}");
+    });
+}
+
+/// **An FTP test is one canonical session, and every field names the
+/// normalised session it came from** (#408). The warm-up and the effort are two
+/// workouts to Peloton and one session here, as they are one normalised
+/// session; `next` reads them back as one ridden session naming both classes.
+#[test]
+fn a_test_is_one_canonical_session_whose_fields_name_where_they_came_from() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm-up", workout("warm-up", Kind::WarmUp, 100, 400)),
+                ("effort", workout("effort", Kind::Test, 400, 1600)),
+            ],
+            vec![
+                ("warm-up", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                (
+                    "effort",
+                    graph(
+                        &[1, 2, 3],
+                        &[180, 200, 210],
+                        Some((&[120, 140, 150], "0")),
+                        "8.0",
+                        "km",
+                    ),
+                ),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+        derive(&pool).await.expect("a derivation");
+
+        let done = canonicalise(&pool).await.expect("a canonical layer");
+        assert_eq!(done.read.as_usize(), 1);
+        assert_eq!(done.written.as_usize(), 1);
+
+        let rides = sqlx::query!(
+            r#"SELECT r.role AS "role!: String",
+                      r.started_at_normalised_session AS "started!: i64",
+                      r.venue_normalised_session AS "venue!: i64",
+                      r.duration_normalised_session AS "duration!: i64",
+                      r.distance_normalised_session AS "distance!: i64",
+                      r.average_power_normalised_session AS "power!: i64",
+                      r.samples_normalised_session AS "samples!: i64",
+                      r.heart_rate_normalised_session AS "heart_rate: i64",
+                      (SELECT count(*) FROM canonical_bike_plus_ride_sample AS s
+                        WHERE s.session = r.session AND s.ride_position = r.position)
+                        AS "sample_count!: i64",
+                      (SELECT count(*) FROM canonical_bike_plus_ride_heart_rate AS h
+                        WHERE h.session = r.session AND h.ride_position = r.position)
+                        AS "beat_count!: i64",
+                      (SELECT kind FROM canonical_cycling_session AS c WHERE c.id = r.session)
+                        AS "kind!: String"
+                 FROM canonical_bike_plus_ride AS r
+                ORDER BY r.position"#
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("the canonical rides");
+        let normalised =
+            sqlx::query_scalar!(r#"SELECT landing_record_id AS "id!: i64" FROM cycling_session"#)
+                .fetch_one(&pool)
+                .await
+                .expect("the normalised session");
+
+        let roles: Vec<&str> = rides.iter().map(|ride| ride.role.as_str()).collect();
+        assert_eq!(roles, vec!["warm-up", "effort"]);
+        for ride in &rides {
+            assert_eq!(ride.kind, "test");
+            for named in [
+                ride.started,
+                ride.venue,
+                ride.duration,
+                ride.distance,
+                ride.power,
+                ride.samples,
+            ] {
+                assert_eq!(named, normalised, "{} names its session", ride.role);
+            }
+        }
+        assert_eq!(rides[0].sample_count, 2);
+        assert_eq!(rides[0].heart_rate, None, "the warm-up had no heart rate");
+        assert_eq!(rides[1].sample_count, 3);
+        assert_eq!(rides[1].heart_rate, Some(normalised));
+        assert_eq!(rides[1].beat_count, 3);
+
+        let day = jiff::civil::date(1970, 1, 1);
+        let ridden = SqliteCanonicalCyclingSessionStore::new(pool.clone())
+            .ridden_between(day, day)
+            .await
+            .expect("the sessions ridden");
+        assert_eq!(ridden.len(), 1, "one session, not two rides");
+        let classes: Vec<&str> = ridden[0]
+            .at
+            .iter()
+            .map(domain::cycling::RideVenue::reference)
+            .collect();
+        assert_eq!(classes.len(), 2, "both classes: {classes:?}");
+    });
+}
+
+/// **Re-deriving the rides empties the canonical layer**, because every field
+/// of it names a normalised session the derivation deletes; the next
+/// canonicalising builds it again.
+#[test]
+fn re_deriving_the_rides_empties_the_canonical_layer_until_it_is_rebuilt() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![("ride-1", workout("ride-1", Kind::Main, 100, 400))],
+            vec![("ride-1", graph(&[1], &[93], None, "2.0", "km"))],
+        )
+        .await
+        .expect("a landed corpus");
+        let canonical = SqliteCanonicalCyclingSessionStore::new(pool.clone());
+
+        derive(&pool).await.expect("a derivation");
+        canonicalise(&pool).await.expect("a canonical layer");
+        assert_eq!(canonical.count().await.expect("a count").as_usize(), 1);
+
+        derive(&pool).await.expect("a second derivation");
+        assert_eq!(canonical.count().await.expect("a count").as_usize(), 0);
+
+        canonicalise(&pool).await.expect("the layer rebuilt");
+        assert_eq!(canonical.count().await.expect("a count").as_usize(), 1);
     });
 }

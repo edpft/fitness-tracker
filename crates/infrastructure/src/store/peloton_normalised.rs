@@ -27,7 +27,7 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    cycling::{BikePlusRide, Ftp, FtpProvenance, PerformedSession, RideVenue, Watts},
+    cycling::{BikePlusRide, Ftp, FtpProvenance, PerformedSession, Watts},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -37,7 +37,7 @@ use domain::{
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::peloton::{LandedRide, SessionAccount, group};
 
@@ -244,7 +244,9 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
         // One transaction, and a replacement rather than an update: § II says a
         // derivation is never mutated in place, and a derivation that failed
         // part-way must leave the previous one standing. Children first, so
-        // nothing is orphaned between statements.
+        // nothing is orphaned between statements — and the canonical layer
+        // before them all, because every field of it names a session here.
+        super::canonical_cycling::clear(&mut tx).await?;
         sqlx::query!("DELETE FROM bike_plus_ride_heart_rate")
             .execute(&mut *tx)
             .await
@@ -599,141 +601,6 @@ impl application::FtpHistory for SqliteFtpHistory {
         Ftp::new(watts, from, provenance)
             .map(Some)
             .map_err(|error| corrupt(error.to_string()))
-    }
-}
-
-/// Every class the record says was ridden.
-///
-/// **A reader over the same rows the derivation writes.** `venue_reference` is
-/// filled by every normalisation from 2026-09-20 onward; a row written before
-/// that has none, and is skipped rather than guessed at (§ 37). Re-normalising
-/// the stream fills them all, which is why #180 asks for it.
-#[derive(Debug, Clone)]
-pub struct SqliteRiddenVenues {
-    pool: SqlitePool,
-}
-
-impl SqliteRiddenVenues {
-    pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-impl application::RiddenVenues for SqliteRiddenVenues {
-    async fn ridden(&self) -> Result<BTreeSet<RideVenue>, StoreError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT DISTINCT venue_reference AS "reference!: String",
-                            venue_called    AS "called!: String"
-              FROM bike_plus_ride
-             WHERE venue_reference IS NOT NULL
-               AND venue_called IS NOT NULL
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        rows.into_iter()
-            .map(|row| {
-                RideVenue::new(&row.reference, &row.called).map_err(|error| StoreError::Corrupt {
-                    detail: error.to_string(),
-                })
-            })
-            .collect()
-    }
-}
-
-/// When cycling sessions were ridden.
-///
-/// A session's day is its first ride's, which is also what it is keyed on: a
-/// session that ran past midnight is filed under the day it started, as a gym
-/// session is.
-#[derive(Debug, Clone)]
-pub struct SqliteCyclingSessionLog {
-    pool: SqlitePool,
-}
-
-impl SqliteCyclingSessionLog {
-    pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-impl application::RiddenSessionLog for SqliteCyclingSessionLog {
-    async fn ridden_between(
-        &self,
-        from: Date,
-        to: Date,
-    ) -> Result<Vec<application::RiddenSession>, StoreError> {
-        // Widened in SQL and narrowed in Rust, as `dates_between` is and for
-        // the same reason: the day depends on the zone on each row.
-        let lower = from
-            .checked_sub(jiff::Span::new().days(1))
-            .map_err(|_| StoreError::Corrupt {
-                detail: "a date before the calendar".to_owned(),
-            })?
-            .to_string();
-        let upper = to
-            .checked_add(jiff::Span::new().days(2))
-            .map_err(|_| StoreError::Corrupt {
-                detail: "a date beyond the calendar".to_owned(),
-            })?
-            .to_string();
-
-        // **Every ride of the session, not only the first.** A session's day is
-        // its first ride's, and the classes it was ridden to are all of them —
-        // an FTP test is a warm-up class and an effort class, and a planned
-        // session naming either is the session this was.
-        let rows = sqlx::query!(
-            r#"
-            SELECT s.landing_record_id AS "session!: i64",
-                   first.started_at_utc AS "started_at_utc!: String",
-                   first.zone           AS "zone!: String",
-                   part.venue_reference AS "reference: String",
-                   part.venue_called    AS "called: String"
-              FROM cycling_session AS s
-              JOIN bike_plus_ride AS first ON first.landing_record_id = s.landing_record_id
-              JOIN bike_plus_ride AS part ON part.landing_record_id = s.landing_record_id
-             WHERE first.started_at_utc >= ? AND first.started_at_utc < ?
-             ORDER BY first.started_at_utc ASC
-            "#,
-            lower,
-            upper,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        let mut sessions: Vec<application::RiddenSession> = Vec::new();
-        let mut seen: Vec<i64> = Vec::new();
-        for row in rows {
-            let moment = super::moment_of(&row.started_at_utc, &row.zone)?;
-            if moment.date() < from || moment.date() > to {
-                continue;
-            }
-            let at = if let Some(at) = seen.iter().position(|id| *id == row.session) {
-                at
-            } else {
-                seen.push(row.session);
-                sessions.push(application::RiddenSession {
-                    started: moment,
-                    at: BTreeSet::new(),
-                });
-                seen.len().saturating_sub(1)
-            };
-            let (Some(reference), Some(called)) = (row.reference, row.called) else {
-                continue;
-            };
-            let venue =
-                RideVenue::new(&reference, &called).map_err(|error| StoreError::Corrupt {
-                    detail: error.to_string(),
-                })?;
-            if let Some(session) = sessions.get_mut(at) {
-                session.at.insert(venue);
-            }
-        }
-        Ok(sessions)
     }
 }
 

@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.landing_record_id AS \"session!: i64\",\n                   s.kind AS \"kind!: String\",\n                   r.landing_record_id AS \"key!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\",\n                   r.zone AS \"zone!: String\",\n                   r.venue_reference, r.venue_called,\n                   r.duration_seconds, r.distance_millimetres, r.average_power_watts,\n                   r.heart_rate_declared_missing_seconds\n              FROM cycling_session AS s\n              JOIN bike_plus_ride AS r ON r.session = s.landing_record_id\n             ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "kind!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "key!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "venue_reference",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "venue_reference"
+          }
+        }
+      },
+      {
+        "name": "venue_called",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "venue_called"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance_millimetres",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "distance_millimetres"
+          }
+        }
+      },
+      {
+        "name": "average_power_watts",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "average_power_watts"
+          }
+        }
+      },
+      {
+        "name": "heart_rate_declared_missing_seconds",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride",
+            "name": "heart_rate_declared_missing_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "da269904a996e51fb9722a47a253021caa8899ad6165ad25be7f68533ca3cdd1"
+}

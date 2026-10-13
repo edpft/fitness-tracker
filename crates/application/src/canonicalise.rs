@@ -1,5 +1,5 @@
-//! Building the canonical layer for gym sessions from the normalised one
-//! (#247).
+//! Building the canonical layer from the normalised one: gym sessions (#247)
+//! and cycling sessions (#408).
 //!
 //! § II.4's second derivation, and the shortest use case in the crate: read
 //! every normalised gym session, match and merge them, replace the canonical
@@ -14,11 +14,14 @@
 //! transaction, and a count of what was written is the whole of what there is
 //! to report.
 
-use domain::{canonical::SessionCount, gym::canonical_sessions};
+use domain::{canonical::SessionCount, cycling, gym};
 
 use crate::{
     error::StoreError,
-    ports::{CanonicalGymSessionStore, NormalisedGymSessionReader},
+    ports::{
+        CanonicalCyclingSessionStore, CanonicalGymSessionStore, NormalisedCyclingSessionReader,
+        NormalisedGymSessionReader,
+    },
 };
 
 /// What one run of the canonicalising did.
@@ -50,7 +53,28 @@ pub async fn gym_sessions<
 ) -> Result<Canonicalised, StoreError> {
     let accounts = normalised.all().await?;
     let read = SessionCount::from(accounts.len());
-    let sessions = canonical_sessions(accounts);
+    let sessions = gym::canonical_sessions(accounts);
+    let written = canonical.replace(sessions).await?;
+    Ok(Canonicalised { read, written })
+}
+
+/// Replace the canonical cycling layer with what the normalised layer now
+/// gives.
+///
+/// # Errors
+///
+/// [`StoreError`] if either store is unavailable, or if the normalised layer
+/// holds something unreadable.
+pub async fn cycling_sessions<
+    R: NormalisedCyclingSessionReader + Sync,
+    C: CanonicalCyclingSessionStore + Sync,
+>(
+    normalised: &R,
+    canonical: &C,
+) -> Result<Canonicalised, StoreError> {
+    let accounts = normalised.all().await?;
+    let read = SessionCount::from(accounts.len());
+    let sessions = cycling::canonical_sessions(accounts);
     let written = canonical.replace(sessions).await?;
     Ok(Canonicalised { read, written })
 }

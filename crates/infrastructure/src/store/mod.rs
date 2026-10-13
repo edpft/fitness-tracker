@@ -8,6 +8,7 @@
 
 pub mod btwb_export_landing;
 pub mod btwb_normalised;
+pub mod canonical_cycling;
 pub mod canonical_gym;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
@@ -53,6 +54,9 @@ use domain::{
 
 pub use btwb_export_landing::BtwbExportLandingStore;
 pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
+pub use canonical_cycling::{
+    SqliteCanonicalCyclingSessionStore, SqliteNormalisedCyclingSessionReader,
+};
 pub use canonical_gym::SqliteCanonicalGymSessionStore;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
@@ -74,8 +78,7 @@ pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
-    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionLog,
-    SqliteCyclingSessionStore, SqliteFtpHistory, SqliteRiddenVenues,
+    PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionStore, SqliteFtpHistory,
 };
 pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;
