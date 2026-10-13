@@ -1,5 +1,5 @@
-//! Building the canonical layer from the normalised one: gym sessions (#247)
-//! and cycling sessions (#408).
+//! Building the canonical layer from the normalised one: gym sessions (#247),
+//! cycling sessions (#408) and weigh-ins (#409).
 //!
 //! § II.4's second derivation, and the shortest use case in the crate: read
 //! every normalised gym session, match and merge them, replace the canonical
@@ -14,13 +14,17 @@
 //! transaction, and a count of what was written is the whole of what there is
 //! to report.
 
-use domain::{canonical::SessionCount, cycling, gym};
+use domain::{
+    body::{self, LeftOut, WeighInCount},
+    canonical::SessionCount,
+    cycling, gym,
+};
 
 use crate::{
     error::StoreError,
     ports::{
-        CanonicalCyclingSessionStore, CanonicalGymSessionStore, NormalisedCyclingSessionReader,
-        NormalisedGymSessionReader,
+        CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
+        NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
     },
 };
 
@@ -77,4 +81,38 @@ pub async fn cycling_sessions<
     let sessions = cycling::canonical_sessions(accounts);
     let written = canonical.replace(sessions).await?;
     Ok(Canonicalised { read, written })
+}
+
+/// What one run of canonicalising the weigh-ins did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeighInsCanonicalised {
+    /// How many normalised weigh-ins were read.
+    pub read: WeighInCount,
+    /// How many weighings they made. Fewer than were read wherever one day is
+    /// in several copies.
+    pub written: WeighInCount,
+    /// Every weighing the merge could not settle, named (§ 10).
+    pub left_out: Vec<LeftOut>,
+}
+
+/// Replace the canonical weigh-in layer with what the normalised layer now
+/// gives.
+///
+/// # Errors
+///
+/// [`StoreError`] if either store is unavailable, or if the normalised layer
+/// holds something unreadable.
+pub async fn weigh_ins<R: NormalisedWeighInReader + Sync, C: CanonicalWeighInStore + Sync>(
+    normalised: &R,
+    canonical: &C,
+) -> Result<WeighInsCanonicalised, StoreError> {
+    let accounts = normalised.all().await?;
+    let read = WeighInCount::from(accounts.len());
+    let merged = body::canonical_weigh_ins(accounts);
+    let written = canonical.replace(merged.weighed).await?;
+    Ok(WeighInsCanonicalised {
+        read,
+        written,
+        left_out: merged.left_out,
+    })
 }

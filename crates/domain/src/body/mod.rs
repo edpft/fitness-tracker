@@ -8,17 +8,23 @@
 //! series, and it is always read against the mass from the same step on the
 //! same scale (operator, 2026-09-27, #273).
 
+pub mod canonical;
 pub mod hrv;
 pub mod manual;
 pub mod quantity;
 pub mod weigh_in;
 
+pub use canonical::{
+    CanonicalWeighIn, LeftOut, NegativeNormalisedWeighInId, NormalisedWeighInId, Stated, Unsettled,
+    WeighInAccount, WeighInCount, WeighIns, canonical_weigh_ins,
+};
 pub use hrv::{
     HrvBaseline, HrvReading, HrvStatus, InvalidWindow, LastNight, MeasurementWindow, OvernightHrv,
     OvernightHrvRecord, WeeklyStatus,
 };
 pub use manual::{
-    Cell, CellRef, InvalidCellRef, InvalidSheetName, InvalidWeighIn, ManualWeighIn, SheetName,
+    Cell, CellRef, Entry, InvalidCellRef, InvalidSheetName, InvalidWeighIn, LastSaved,
+    ManualWeighIn, SheetName,
 };
 pub use quantity::{Age, KilocaloriesPerDay, PulseWaveVelocity, SkinConductance, VisceralFat};
 pub use weigh_in::{

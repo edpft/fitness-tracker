@@ -139,6 +139,7 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
             .begin()
             .await
             .map_err(|error| store_error(&error))?;
+        super::canonical_weigh_in::clear(&mut tx).await?;
         sqlx::query!("DELETE FROM myfitnesspal_weigh_in")
             .execute(&mut *tx)
             .await

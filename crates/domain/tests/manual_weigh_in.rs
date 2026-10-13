@@ -1,7 +1,7 @@
 //! The address of a manual weigh-in, and what one may hold (#273).
 
 use domain::{
-    body::{Cell, CellRef, InvalidWeighIn, ManualWeighIn, SheetName},
+    body::{Cell, CellRef, Entry, InvalidWeighIn, LastSaved, ManualWeighIn, SheetName},
     landing::{FilePath, LandingRecordId, SourceRecordId},
     measure::Kg,
 };
@@ -38,11 +38,14 @@ fn a_weigh_in_of_no_mass_is_not_a_weigh_in() {
         cell: CellRef::at(5, 2),
     };
 
+    let saved = Entry::Saved(LastSaved::ByTheDocument(
+        "2016-09-17T10:39:10Z".parse().expect("an instant"),
+    ));
     assert_eq!(
-        ManualWeighIn::new(date(2016, 1, 5), Kg::NONE, cell.clone()),
+        ManualWeighIn::new(date(2016, 1, 5), Kg::NONE, cell.clone(), saved),
         Err(InvalidWeighIn::NoMass)
     );
-    let weigh_in =
-        ManualWeighIn::new(date(2016, 1, 5), Kg::from_grams(66_300), cell).expect("a weigh-in");
+    let weigh_in = ManualWeighIn::new(date(2016, 1, 5), Kg::from_grams(66_300), cell, saved)
+        .expect("a weigh-in");
     assert_eq!(weigh_in.mass().to_string(), "66.3");
 }

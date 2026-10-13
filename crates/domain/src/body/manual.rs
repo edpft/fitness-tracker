@@ -9,14 +9,13 @@
 //! **Each copy is its own weigh-in.** The same day sits in up to six files,
 //! because the sheets were copied forward from year to year, and a copy can
 //! differ from the original: a row slipped in one of them. Whether two copies
-//! are one weigh-in is the canonical layer's question. Which to believe is the
-//! analytical layer's, and the operator's rule is that the copy nearest the
-//! original entry beats the latest one. So the identity here is the cell, never
-//! the day.
+//! are one weigh-in, and which to believe, is the canonical layer's question
+//! ([`super::canonical`]). So the identity here is the cell, never the day.
 //!
 //! **Some places say when he typed it** (#242). MyFitnessPal records when each
-//! weight was entered; a spreadsheet cell does not. Where it is known, it is the
-//! evidence § 10 settles a disagreement between copies by, so it is carried.
+//! weight was entered; a spreadsheet cell does not, and its document records
+//! only when it was last saved (#409). Either is the evidence § 10 settles a
+//! disagreement between accounts by, so it is carried as an [`Entry`].
 
 use jiff::{Timestamp, civil::Date};
 
@@ -29,6 +28,41 @@ pub enum InvalidWeighIn {
     NoMass,
 }
 
+/// What says when a manual weigh-in was typed.
+///
+/// **§ 10 settles a disagreement by this**, so it is carried on every one: an
+/// entry stamped when it was typed beats one that is not, and of copies of one
+/// entry, the copy in the document saved earliest stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entry {
+    /// The place it was typed into stamped when. MyFitnessPal does (#242).
+    Stamped(Timestamp),
+    /// A spreadsheet stamps no cell, so all there is is when the document
+    /// holding this copy was last saved.
+    Saved(LastSaved),
+}
+
+/// When a document was last saved, and what says so.
+///
+/// **The document's own record first** (`docProps/core.xml`), because the file
+/// system's date is when Dropbox copied the file: `Body Weight 2018 (2).xlsx`
+/// is dated 2019-04-03 and records its last save as 2017-12-31. Four workbooks
+/// record none, and for those the file system's is all there is (the operator,
+/// 2026-10-13, #409).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastSaved {
+    ByTheDocument(Timestamp),
+    ByTheFileSystem(Timestamp),
+}
+
+impl LastSaved {
+    pub const fn at(self) -> Timestamp {
+        match self {
+            Self::ByTheDocument(at) | Self::ByTheFileSystem(at) => at,
+        }
+    }
+}
+
 /// A body mass the operator read off the scale and wrote down.
 ///
 /// **A day and never a time**: no sheet records when in the day he stepped on.
@@ -37,14 +71,14 @@ pub struct ManualWeighIn {
     on: Date,
     mass: Kg,
     written_in: Cell,
-    entered_at: Option<Timestamp>,
+    entry: Entry,
 }
 
 impl ManualWeighIn {
     /// # Errors
     ///
     /// [`InvalidWeighIn::NoMass`] for a mass of zero.
-    pub fn new(on: Date, mass: Kg, written_in: Cell) -> Result<Self, InvalidWeighIn> {
+    pub fn new(on: Date, mass: Kg, written_in: Cell, entry: Entry) -> Result<Self, InvalidWeighIn> {
         if mass.is_none() {
             return Err(InvalidWeighIn::NoMass);
         }
@@ -52,15 +86,8 @@ impl ManualWeighIn {
             on,
             mass,
             written_in,
-            entered_at: None,
+            entry,
         })
-    }
-
-    /// The same weigh-in, stating when it was typed.
-    #[must_use]
-    pub const fn entered(mut self, at: Timestamp) -> Self {
-        self.entered_at = Some(at);
-        self
     }
 
     pub const fn on(&self) -> Date {
@@ -75,9 +102,25 @@ impl ManualWeighIn {
         &self.written_in
     }
 
-    /// When it was typed, where the place it was typed into records that.
+    pub const fn entry(&self) -> Entry {
+        self.entry
+    }
+
+    /// When it was typed, where the place it was typed into stamped that.
     pub const fn entered_at(&self) -> Option<Timestamp> {
-        self.entered_at
+        match self.entry {
+            Entry::Stamped(at) => Some(at),
+            Entry::Saved(_) => None,
+        }
+    }
+
+    /// When the document holding it was last saved, where it was typed into
+    /// one.
+    pub const fn last_saved(&self) -> Option<LastSaved> {
+        match self.entry {
+            Entry::Saved(saved) => Some(saved),
+            Entry::Stamped(_) => None,
+        }
     }
 }
 

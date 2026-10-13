@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.id AS \"id!: i64\",\n                   w.on_day AS \"on_day: String\",\n                   w.measured_at_utc AS \"measured_at_utc: String\",\n                   w.zone AS \"zone: String\",\n                   w.mass_grams AS \"mass_grams!: i64\",\n                   f.entered_at_utc AS \"entered_at_utc?: String\",\n                   m.weigh_in AS \"copied?: i64\",\n                   m.last_saved_at_utc AS \"last_saved_at_utc?: String\"\n            FROM weigh_in w\n            LEFT JOIN myfitnesspal_weigh_in f ON f.weigh_in = w.id\n            LEFT JOIN manual_weigh_in m ON m.weigh_in = w.id\n            ORDER BY w.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "mass_grams!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "mass_grams"
+          }
+        }
+      },
+      {
+        "name": "entered_at_utc?: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "myfitnesspal_weigh_in",
+            "name": "entered_at_utc"
+          }
+        }
+      },
+      {
+        "name": "copied?: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "manual_weigh_in",
+            "name": "weigh_in"
+          }
+        }
+      },
+      {
+        "name": "last_saved_at_utc?: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "manual_weigh_in",
+            "name": "last_saved_at_utc"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "cdd41fef279606a379e15603e3637c21c9509993d04ef18967001001bbaec989"
+}

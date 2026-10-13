@@ -23,11 +23,11 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore,
-    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
+    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -97,6 +97,8 @@ pub async fn run(
         wiring::hevy_records(access(Discipline::Gym)?, database, zone.clone()).await?;
     let cycling_records =
         wiring::peloton_records(access(Discipline::Cycling)?, database, zone.clone()).await?;
+    let weigh_in_records =
+        wiring::withings_records(weigh_in_access(credentials), database, zone.clone()).await?;
 
     // **A credential that is absent costs what needs it, and nothing else.**
     // The catalogue answers choosing a class and building a mesocycle without
@@ -125,11 +127,14 @@ pub async fn run(
     let next = Next::new(NextPorts {
         gym_records,
         cycling_records,
+        weigh_in_records,
         canonical: CanonicalPorts {
             normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
             canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
             normalised_cycling: SqliteNormalisedCyclingSessionReader::new(pool.clone()),
             canonical_cycling: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+            normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
+            canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
         },
         classes: class_source,
         holidays: Calendars,
@@ -178,6 +183,21 @@ pub async fn run(
 
     Ok(next.run(now, skip, progress).await?)
 }
+
+/// Where body weight is collected from: `withings.measurements`, the one stream
+/// `next` collects that no discipline does.
+fn weigh_in_access(credentials: &infrastructure::Credentials) -> Result<SourceAccess, NoAccess> {
+    let no_access = |detail: String| NoAccess { detail };
+    let stream = catalogue::lookup(WEIGH_INS)
+        .ok_or_else(|| no_access(format!("this build does not collect {WEIGH_INS}")))?;
+    let system = stream
+        .system()
+        .ok_or_else(|| no_access(format!("{WEIGH_INS} is read from a folder, not a system")))?;
+    source_access_for(system, None, credentials).map_err(|error| no_access(error.to_string()))
+}
+
+/// Where body weight comes from.
+pub const WEIGH_INS: &str = "withings.measurements";
 
 /// The cycling use case, over this build's stores and catalogue.
 ///

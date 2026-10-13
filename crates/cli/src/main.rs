@@ -186,6 +186,7 @@ async fn canonicalise_command_run(sub: &ArgMatches, database: &Path) -> Result<(
     match sub.subcommand() {
         Some(("gym", _)) => canonicalise::gym(database).await,
         Some(("cycling", _)) => canonicalise::cycling(database).await,
+        Some(("body-weight", _)) => canonicalise::body_weight(database).await,
         _ => Err(Failure::message(
             "no canonicalise command given",
             exit::USAGE,
@@ -199,8 +200,8 @@ async fn canonicalise_command_run(sub: &ArgMatches, database: &Path) -> Result<(
 /// name a stream because each runs against one source; the canonical layer is
 /// one entry per visit whatever number of sources recorded it, so there is no
 /// stream to name. What it takes is the entity, and a second discipline is a
-/// second subcommand rather than an argument — body measurements have a source
-/// and no sessions to match.
+/// second subcommand rather than an argument. Body weight is one too, though
+/// it is no discipline: it has sources and no session to prescribe (#409).
 fn canonicalise_command() -> ClapCommand {
     ClapCommand::new("canonicalise")
         .about("Build the canonical layer: one entry per real session, from every record of it")
@@ -213,6 +214,10 @@ fn canonicalise_command() -> ClapCommand {
             ClapCommand::new("cycling")
                 .about("One canonical session per cycling session, from Peloton's record of it"),
         )
+        .subcommand(ClapCommand::new("body-weight").about(
+            "One canonical weigh-in per weighing, merged from Withings, MyFitnessPal and \
+             the historical spreadsheets",
+        ))
 }
 
 /// `fitness next` — whichever discipline the schedule says is next.

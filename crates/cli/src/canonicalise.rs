@@ -30,6 +30,19 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
+/// Rebuild the canonical weigh-ins and report what they now hold, naming every
+/// weighing left out (#409).
+pub async fn body_weight(database: &Path) -> Result<(), Failure> {
+    let store = Store::open(database).await?;
+    let normalised = store.normalised_weigh_ins();
+    let canonical = store.canonical_weigh_ins();
+
+    output::canonicalising_weigh_ins_started();
+    let done = canonicalise::weigh_ins(&normalised, &canonical).await?;
+    output::weigh_ins_canonicalised(&done);
+    Ok(())
+}
+
 /// Rebuild the canonical cycling layer and report what it now holds.
 pub async fn cycling(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
