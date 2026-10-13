@@ -10,7 +10,7 @@ use jiff::civil::Date;
 
 /// One cell's content, as far as a reader needs to know.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum Value {
+pub enum Value {
     Empty,
     Number(f64),
     Text(String),
@@ -23,7 +23,7 @@ pub(super) enum Value {
 }
 
 impl Value {
-    pub(super) fn from_cell(cell: &Data) -> Self {
+    pub fn from_cell(cell: &Data) -> Self {
         match cell {
             Data::Empty => Self::Empty,
             Data::Float(number) => Self::Number(*number),
@@ -52,7 +52,7 @@ impl Value {
         }
     }
 
-    pub(super) fn text(&self) -> Option<&str> {
+    pub fn text(&self) -> Option<&str> {
         match self {
             Self::Text(text) => Some(text.trim()),
             _ => None,
@@ -61,16 +61,16 @@ impl Value {
 }
 
 /// One sheet of a workbook, addressed as the workbook addresses it.
-pub(super) struct Sheet {
-    pub(super) name: String,
+pub struct Sheet {
+    pub name: String,
     /// Where the first cell held sits, zero-based. A sheet whose first row or
     /// column is empty starts further in.
-    pub(super) origin: (u32, u32),
-    pub(super) rows: Vec<Vec<Value>>,
+    pub origin: (u32, u32),
+    pub rows: Vec<Vec<Value>>,
 }
 
 impl Sheet {
-    pub(super) fn get(&self, row: u32, column: u32) -> &Value {
+    pub fn get(&self, row: u32, column: u32) -> &Value {
         const EMPTY: &Value = &Value::Empty;
         let (Some(row), Some(column)) = (
             row.checked_sub(self.origin.0),
@@ -85,13 +85,13 @@ impl Sheet {
             .unwrap_or(EMPTY)
     }
 
-    pub(super) fn height(&self) -> u32 {
+    pub fn height(&self) -> u32 {
         u32::try_from(self.rows.len())
             .unwrap_or(u32::MAX)
             .saturating_add(self.origin.0)
     }
 
-    pub(super) fn width(&self) -> u32 {
+    pub fn width(&self) -> u32 {
         let widest = self.rows.iter().map(Vec::len).max().unwrap_or(0);
         u32::try_from(widest)
             .unwrap_or(u32::MAX)
@@ -100,7 +100,7 @@ impl Sheet {
 }
 
 /// Every sheet of a workbook, or why it could not be read as one.
-pub(super) fn workbook(bytes: &[u8]) -> Result<Vec<Sheet>, String> {
+pub fn workbook(bytes: &[u8]) -> Result<Vec<Sheet>, String> {
     let mut workbook =
         open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let mut sheets = Vec::new();
@@ -122,7 +122,7 @@ pub(super) fn workbook(bytes: &[u8]) -> Result<Vec<Sheet>, String> {
 
 /// A CSV file as the one sheet a spreadsheet program shows it as, named after
 /// the file. Every cell is text; the layout decides what it means.
-pub(super) fn csv(bytes: &[u8], file: &FileProvenance) -> Result<Vec<Sheet>, String> {
+pub fn csv(bytes: &[u8], file: &FileProvenance) -> Result<Vec<Sheet>, String> {
     let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
     let name = file
         .path()

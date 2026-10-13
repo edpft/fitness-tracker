@@ -290,7 +290,8 @@ pub const SOURCES: [KnownSource; 4] = [
 ///
 /// **Beyond The White Board serves exports**: one record is the file it sent on
 /// request, whole. Only an export is served, so the export is the entity.
-pub const KNOWN: [KnownStream; 7] = [
+/// **MyFitnessPal** likewise, sent once on a request under the UK GDPR.
+pub const KNOWN: [KnownStream; 8] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[0]),
         entity: "workouts",
@@ -328,6 +329,12 @@ pub const KNOWN: [KnownStream; 7] = [
     },
     KnownStream {
         served_by: ServedBy::Folder { name: "btwb" },
+        entity: "exports",
+    },
+    KnownStream {
+        served_by: ServedBy::Folder {
+            name: "myfitnesspal",
+        },
         entity: "exports",
     },
 ];

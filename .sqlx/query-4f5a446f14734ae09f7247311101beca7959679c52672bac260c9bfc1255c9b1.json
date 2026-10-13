@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT measured_at_utc AS \"measured_at: String\",\n                   zone AS \"zone: String\",\n                   on_day AS \"on_day: String\",\n                   mass_grams AS \"mass_grams!: i64\"\n            FROM weigh_in\n            WHERE measured_at_utc IS NOT NULL OR stream = ?\n            ORDER BY COALESCE(measured_at_utc, on_day) ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "measured_at: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "mass_grams!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "mass_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4f5a446f14734ae09f7247311101beca7959679c52672bac260c9bfc1255c9b1"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO myfitnesspal_weigh_in (\n                    weigh_in, landing_record_id, sheet, cell, entered_at_utc\n                )\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "5d92c2b6efcb16cadfed4e8191e76fd650d0c5c31da2104737729be8896814f5"
+}

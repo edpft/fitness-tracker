@@ -32,15 +32,16 @@ use infrastructure::{
     GarminExerciseSetLandingStore, GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
     GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
+    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
     PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
     PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
     SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog,
-    SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
-    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
-    WithingsWeighInTranslator, connect, garmin,
+    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
+    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
+    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -186,6 +187,7 @@ pub async fn run(
         GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
         SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
         BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
+        MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -1191,13 +1193,88 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
     }
 }
 
+/// MyFitnessPal's export: the file the operator decrypted, landed whole, and
+/// derived as the weights he logged in it (#242).
+async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = MyFitnessPalExportLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+
+    match command {
+        Command::ExtractFolder(folder) => {
+            let extraction = Extraction::new(ExtractionPorts {
+                source: FolderFiles::new(folder),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+        }
+        Command::Extract(_) => Err(WiringError::WrongCredential {
+            stream: MyFitnessPalExportLandingStore::STREAM.to_owned(),
+            wanted: "a folder",
+            given: "a credential",
+        }),
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: MyFitnessPalExportAccountReader::new(pool.clone())?,
+                    translator: MyFitnessPalWeighInTranslator,
+                    workouts: SqliteMyFitnessPalStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(
+                        pool.clone(),
+                        MyFitnessPalExportLandingStore::STREAM,
+                    )?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), MyFitnessPalExportLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
+        Command::Status => {
+            let derivation = DerivationStanding::new(
+                MyFitnessPalExportLandingStore::new(pool.clone())?,
+                SqliteMyFitnessPalStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), MyFitnessPalExportLandingStore::STREAM)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: Some(Box::new(derivation)),
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(landing, resumption, runs)
+                .reset()
+                .await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
         GarminExerciseSetLandingStore, GarminHrvLandingStore, HevyWorkoutLandingStore,
-        PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
-        WithingsMeasurementLandingStore,
+        MyFitnessPalExportLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+        SpreadsheetFileLandingStore, WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -1224,6 +1301,7 @@ mod tests {
             GarminActivityFileLandingStore::STREAM,
             SpreadsheetFileLandingStore::STREAM,
             BtwbExportLandingStore::STREAM,
+            MyFitnessPalExportLandingStore::STREAM,
         ];
 
         for known in &KNOWN {

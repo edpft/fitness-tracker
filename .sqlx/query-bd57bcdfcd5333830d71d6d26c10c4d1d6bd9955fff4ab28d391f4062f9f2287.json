@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO myfitnesspal_export_landing (\n                    fetched_at, source_record_id, path, modified_at,\n                    payload, payload_digest, revision_digest,\n                    run_id, serve_ordinal\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "bd57bcdfcd5333830d71d6d26c10c4d1d6bd9955fff4ab28d391f4062f9f2287"
+}

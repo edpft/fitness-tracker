@@ -13,6 +13,7 @@ pub mod folder;
 pub mod garmin;
 pub mod hevy;
 pub mod lock;
+pub mod myfitnesspal;
 pub mod peloton;
 pub mod private_file;
 pub mod scribe;
@@ -34,6 +35,7 @@ pub use hevy::{
     PageCount, PageNumber, RetryPolicy,
 };
 pub use lock::FileRunLock;
+pub use myfitnesspal::{MyFitnessPalExports, MyFitnessPalWeighInTranslator};
 pub use peloton::{MappedSession, PelotonClass, PelotonWorkoutSamples, PelotonWorkouts};
 pub use spreadsheets::{
     SpreadsheetEntity, SpreadsheetSessionTranslator, SpreadsheetTranslator,
@@ -44,13 +46,14 @@ pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, HevySessionAccountReader,
-    HevyWorkoutLandingStore, OverlayError, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
-    SpreadsheetFileLandingStore, SqliteBtwbStore, SqliteCanonicalCyclingSessionStore,
-    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory,
-    SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
+    HevyWorkoutLandingStore, MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore,
+    OverlayError, PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
+    SqliteBtwbStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionStore,
+    SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
     SqliteNormalisationRunLog, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore, SqliteOvernightHrvStore,
     SqlitePelotonClassStore, SqlitePlanStore, SqlitePrescribedWorkoutStore,
