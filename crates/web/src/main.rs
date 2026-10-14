@@ -10,6 +10,7 @@ mod chart;
 mod page;
 mod report;
 mod run;
+mod weight;
 
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -111,6 +112,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     let app = Router::new()
         .route("/", get(index))
         .route("/heart-rate", get(heart_rate))
+        .route("/body-weight", get(body_weight))
         .route("/run", post(start))
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
@@ -145,6 +147,20 @@ async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     match rides {
         Ok(rides) => chart::page(&rides),
         Err(error) => chart::unreadable(&error.to_string()),
+    }
+}
+
+/// Every weigh-in as one series, read afresh from the store.
+async fn body_weight(State(runs): State<Arc<Runs>>) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return weight::unreadable(&error.to_string()),
+    };
+    let series = configurator::body_weight::series(&store).await;
+    store.close().await;
+    match series {
+        Ok(series) => weight::page(&series),
+        Err(error) => weight::unreadable(&error.to_string()),
     }
 }
 
