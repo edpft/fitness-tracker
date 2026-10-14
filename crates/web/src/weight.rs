@@ -4,10 +4,21 @@
 //! a line between two weigh-ins would claim something about the days between
 //! them, and a gap in the record is drawn as the empty stretch it is (§ 37).
 //!
+//! **The trend is the line** (#252): an estimate of a continuous mass, drawn
+//! as one line per unbroken run `domain` gives, so where it has no trend the
+//! line breaks.
+//!
 //! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
 //! the table beneath is the same figures.
 
-use domain::{analytical::Weighed, canonical::Occurred, measure::Kg};
+use domain::{
+    analytical::{
+        Weighed,
+        body_weight::{METHOD, Series, Trend},
+    },
+    canonical::Occurred,
+    measure::Kg,
+};
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
@@ -23,7 +34,7 @@ const RADIUS: f64 = 2.5;
 const STEP_GRAMS: u32 = 5_000;
 
 /// The whole page.
-pub fn page(series: &[Weighed]) -> Markup {
+pub fn page(series: &Series) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -84,13 +95,14 @@ impl Frame {
     }
 }
 
-fn chart(series: &[Weighed]) -> Markup {
-    let (Some(first), Some(last)) = (series.first(), series.last()) else {
+fn chart(series: &Series) -> Markup {
+    let weigh_ins = series.weigh_ins.as_slice();
+    let (Some(first), Some(last)) = (weigh_ins.first(), weigh_ins.last()) else {
         return html! { p { "No weigh-in has been recorded." } };
     };
     let first = first.at.day();
     let last = last.at.day();
-    let (low, high) = mass_range(series);
+    let (low, high) = mass_range(weigh_ins);
     let frame = Frame {
         first,
         days: days_between(first, last),
@@ -98,15 +110,16 @@ fn chart(series: &[Weighed]) -> Markup {
         high,
     };
     html! {
+        p.legend { "points: each weigh-in · line: trend, the " (METHOD) }
         div.plot { (plot(series, &frame, last)) }
-        (table(series))
+        (table(weigh_ins))
     }
 }
 
-fn plot(series: &[Weighed], frame: &Frame, last: Date) -> Markup {
+fn plot(series: &Series, frame: &Frame, last: Date) -> Markup {
     html! {
         svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-            aria-label="Body weight, one point per weigh-in, by date" {
+            aria-label="Body weight, one point per weigh-in, and its trend as a line, by date" {
             @for grams in (frame.low..=frame.high).step_by(STEP_GRAMS as usize) {
                 line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(grams)) y2=(frame.y(grams)) {}
                 text.axis x=(LEFT - 6.0) y=(frame.y(grams) + 4.0) text-anchor="end" {
@@ -118,12 +131,32 @@ fn plot(series: &[Weighed], frame: &Frame, last: Date) -> Markup {
                 text.axis x=(frame.x(year) + 3.0) y=(FLOOR + 14.0) { (year.year()) }
             }
             line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-            @for weighed in series {
+            @for run in &series.trend {
+                polyline.trend points=(points(run, frame)) {}
+                @for day in run {
+                    circle.reading cx=(frame.x(day.on)) cy=(frame.y(grams(day.mass)))
+                        r=(RADIUS) { title { (day.on) " · trend " (to_tenth(day.mass)) "kg" } }
+                }
+            }
+            @for weighed in &series.weigh_ins {
                 circle.point cx=(frame.x(weighed.at.day())) cy=(frame.y(grams(weighed.mass)))
                     r=(RADIUS) { title { (when(&weighed.at)) " · " (weighed.mass) "kg" } }
             }
         }
     }
+}
+
+/// A run of the trend as SVG polyline points.
+fn points(run: &[Trend], frame: &Frame) -> String {
+    run.iter()
+        .map(|day| format!("{:.1},{:.1}", frame.x(day.on), frame.y(grams(day.mass))))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A trend to the nearest 0.1 kg: it is a mean, and its grams are arithmetic.
+const fn to_tenth(mass: Kg) -> Kg {
+    Kg::from_grams((mass.as_grams() + 50) / 100 * 100)
 }
 
 /// The same figures as a table.
@@ -177,9 +210,9 @@ fn days_between(from: Date, to: Date) -> i32 {
 
 const STYLE: &str = "
 main.wide { max-width: 60rem; }
-:root { --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; }
+:root { --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; --trend: #0b0b0b; }
 @media (prefers-color-scheme: dark) { :root {
-  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835; --mark: #3987e5;
+  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835; --mark: #3987e5; --trend: #ffffff;
 } }
 body { background: var(--surface); color: var(--ink); }
 h1 { font-size: 1.25rem; }
@@ -189,6 +222,9 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 .baseline { stroke: var(--axis); stroke-width: 1; }
 .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .point { fill: var(--mark); }
+.trend { fill: none; stroke: var(--trend); stroke-width: 2; stroke-linejoin: round; }
+.reading { fill: transparent; }
+p.legend { color: var(--muted); font-size: 0.9rem; }
 table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 table.figures th { text-align: left; padding-right: 0.75rem; }
 ";
@@ -196,7 +232,7 @@ table.figures th { text-align: left; padding-right: 0.75rem; }
 #[cfg(test)]
 mod tests {
     use domain::{
-        analytical::Weighed,
+        analytical::{Weighed, body_weight::Series},
         canonical::Occurred,
         measure::Kg,
         normalised::{OperatorZone, StartedAt},
@@ -211,7 +247,7 @@ mod tests {
             .to_zoned(zone.as_time_zone())
             .expect("a time")
             .timestamp();
-        let series = [
+        let series = Series::of(vec![
             Weighed {
                 at: Occurred::On(date(2021, 3, 10)),
                 mass: Kg::from_grams(79_000),
@@ -220,7 +256,7 @@ mod tests {
                 at: Occurred::At(StartedAt::new(at, zone)),
                 mass: Kg::from_grams(84_100),
             },
-        ];
+        ]);
         let page = super::page(&series).into_string();
         assert_eq!(page.matches(r#"class="point""#).count(), 2);
         assert!(!page.contains("<polyline") && !page.contains("<path"));
@@ -230,8 +266,25 @@ mod tests {
 
     #[test]
     fn no_weigh_ins_is_said_rather_than_drawn() {
-        let page = super::page(&[]).into_string();
+        let page = super::page(&Series::of(Vec::new())).into_string();
         assert!(page.contains("No weigh-in has been recorded."));
         assert!(!page.contains("<svg class=\"chart\""));
+    }
+
+    #[test]
+    fn the_trend_is_one_line_per_unbroken_run() {
+        let day = |d: i8, grams: u64| Weighed {
+            at: Occurred::On(date(2026, 9, d)),
+            mass: Kg::from_grams(grams),
+        };
+        // Two weeks of daily weigh-ins either side of a fortnight with none.
+        let series = Series::of((1..=7).chain(22..=28).map(|d| day(d, 84_043)).collect());
+        let page = super::page(&series).into_string();
+        assert_eq!(page.matches(r#"class="trend""#).count(), 2);
+        assert_eq!(page.matches(r#"class="point""#).count(), 14);
+        assert!(
+            page.contains("2026-09-07 · trend 84kg"),
+            "to the nearest 0.1 kg"
+        );
     }
 }
