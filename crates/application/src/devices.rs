@@ -1,92 +1,41 @@
-//! The devices the operator uses, and when each was in use (#427).
+//! Which device sent a reading that arrives without naming one (#427).
 //!
-//! **What the record shows, with what the operator stated applied.** The
-//! register is `domain`'s ([`register`]); this reads the two things it is a
-//! function of and keeps a statement once the register says it can be made.
-//! Every frontend reaches the register through here, so the terminal and the
-//! browser offer the same thing without either knowing how it is derived.
+//! **The register is `domain`'s** ([`register`]); this reads what every
+//! source's record says about the devices it used, and which days a watch was
+//! worn, and hands both over. Nothing is written: the register re-derives from
+//! what has landed exactly (§ 7).
 
-use domain::device::{
-    AddedDevice, Contradiction, Device, DeviceStatement, Stated, Statement, check, register,
-};
-use jiff::Timestamp;
+use domain::device::{Register, register};
 
 use crate::{
     error::StoreError,
-    ports::{DeviceStatements, RecordedDevices},
+    ports::{RecordedDevices, WearRecord},
 };
 
-/// Why a statement was not kept.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum StatementRefused {
-    #[error(transparent)]
-    Store(#[from] StoreError),
-    #[error(transparent)]
-    Contradiction(#[from] Contradiction),
-}
-
 /// The register use case.
-pub struct DeviceRegister<R, S> {
+pub struct DeviceRegister<R, W> {
     recorded: R,
-    statements: S,
+    wear: W,
 }
 
-impl<R, S> DeviceRegister<R, S>
+impl<R, W> DeviceRegister<R, W>
 where
     R: RecordedDevices + Sync,
-    S: DeviceStatements + Sync,
+    W: WearRecord + Sync,
 {
-    pub const fn new(recorded: R, statements: S) -> Self {
-        Self {
-            recorded,
-            statements,
-        }
+    pub const fn new(recorded: R, wear: W) -> Self {
+        Self { recorded, wear }
     }
 
-    /// Every device, ordered by first use.
+    /// Every device the record identifies, and the days a watch was worn.
     ///
     /// # Errors
     ///
-    /// [`StoreError`] if either store is unavailable.
-    pub async fn devices(&self) -> Result<Vec<Device>, StoreError> {
-        let sightings = self.recorded.sightings().await?;
-        let statements = self.statements.statements().await?;
-        Ok(register(&sightings, &statements))
-    }
-
-    /// Keep a statement about a device, and answer with the register it
-    /// leaves.
-    ///
-    /// # Errors
-    ///
-    /// [`StatementRefused::Contradiction`] if the register would not apply it
-    /// — it names no device, or puts a last use before a first — and
-    /// [`StatementRefused::Store`] if either store is unavailable.
-    pub async fn state(
-        &self,
-        at: Timestamp,
-        statement: DeviceStatement,
-    ) -> Result<Vec<Device>, StatementRefused> {
-        let sightings = self.recorded.sightings().await?;
-        let mut statements = self.statements.statements().await?;
-        let stated = Stated {
-            at,
-            statement: Statement::About(statement.clone()),
-        };
-        check(&register(&sightings, &statements), &stated)?;
-        self.statements.state(at, &statement).await?;
-        statements.push(stated);
-        Ok(register(&sightings, &statements))
-    }
-
-    /// Keep a device no recording names, and answer with the register it
-    /// leaves.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if either store is unavailable.
-    pub async fn add(&self, at: Timestamp, added: AddedDevice) -> Result<Vec<Device>, StoreError> {
-        self.statements.add(at, &added).await?;
-        self.devices().await
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn register(&self) -> Result<Register, StoreError> {
+        Ok(register(
+            &self.recorded.sightings().await?,
+            self.wear.wear().await?,
+        ))
     }
 }

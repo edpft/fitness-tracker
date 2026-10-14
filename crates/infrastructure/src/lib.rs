@@ -44,15 +44,15 @@ pub use spreadsheets::{
 pub use store::Held;
 pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
-    GarminActivityLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
-    GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
-    HevySessionAccountReader, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
-    MyFitnessPalExportLandingStore, OverlayError, PelotonAccountLandingStore, PelotonRawExtent,
-    PelotonRecordedDevices, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
-    SqliteBtwbStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionStore,
-    SqliteDeviceStatementStore, SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory,
+    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore,
+    GarminGymAccountReader, GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore,
+    GarminRecordedDevices, GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore,
+    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
+    PelotonAccountLandingStore, PelotonRawExtent, PelotonRecordedDevices, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
+    SpreadsheetFileLandingStore, SqliteBtwbStore, SqliteCanonicalCyclingSessionStore,
+    SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteCyclingSessionStore, SqliteDiaryStore, SqliteEditOverlayStore, SqliteExerciseHistory,
     SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
     SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteNormalisedCyclingSessionReader,
@@ -60,8 +60,7 @@ pub use store::{
     SqlitePelotonClassStore, SqlitePlanStore, SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore, SqliteRefusalStore, SqliteResumptionPointStore,
     SqliteSpreadsheetStore, SqliteWeighInHistory, SqliteWeighInStore,
-    WithingsMeasurementLandingStore, WithingsRecordedDevices, WithingsWeighInAccountReader,
-    connect,
+    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use token::{CredentialDigest, Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};

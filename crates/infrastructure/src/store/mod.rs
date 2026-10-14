@@ -17,6 +17,7 @@ pub mod devices;
 pub mod edit_overlay;
 pub mod garmin_activity_file_landing;
 pub mod garmin_activity_landing;
+pub mod garmin_daily_heart_rate_landing;
 pub mod garmin_exercise_set_landing;
 pub mod garmin_gym;
 pub mod garmin_landing;
@@ -65,13 +66,11 @@ pub use canonical_gym::SqliteCanonicalGymSessionStore;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
-pub use devices::{
-    GarminRecordedDevices, PelotonRecordedDevices, SqliteDeviceStatementStore,
-    WithingsRecordedDevices,
-};
+pub use devices::{GarminRecordedDevices, GarminWear, PelotonRecordedDevices};
 pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;
 pub use garmin_activity_landing::GarminActivityLandingStore;
+pub use garmin_daily_heart_rate_landing::GarminDailyHeartRateLandingStore;
 pub use garmin_exercise_set_landing::GarminExerciseSetLandingStore;
 pub use garmin_gym::{GarminGymAccountReader, GarminGymRawExtent, SqliteMeasuredGymSessionStore};
 pub use garmin_landing::GarminHrvLandingStore;

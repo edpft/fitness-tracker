@@ -29,18 +29,19 @@ use domain::{
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth, GarminCredentials,
-    GarminExerciseSetLandingStore, GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
-    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
-    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
-    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
-    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
-    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore,
-    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
-    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
-    SqliteRefusalStore, SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore,
-    TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
+    GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
+    GarminGymRawExtent, GarminGymTranslator, GarminHrv, GarminHrvAccountReader,
+    GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
+    HevyWorkoutEvents, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
+    MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator, PelotonAccountLandingStore,
+    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
+    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
+    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
+    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore,
+    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
+    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
     WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
@@ -622,9 +623,10 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
             stream: GarminActivityLandingStore::STREAM,
         }),
         Command::Extract(access) => {
+            let daily_landing = GarminDailyHeartRateLandingStore::new(pool.clone())?;
             collect_activities(
                 access,
-                (landing, sets_landing, files_landing),
+                (landing, sets_landing, files_landing, daily_landing),
                 resumption,
                 runs,
                 database,
@@ -726,10 +728,11 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
 /// entry.
 async fn collect_activities(
     access: SourceAccess,
-    (landing, sets_landing, files_landing): (
+    (landing, sets_landing, files_landing, daily_landing): (
         GarminActivityLandingStore,
         GarminExerciseSetLandingStore,
         GarminActivityFileLandingStore,
+        GarminDailyHeartRateLandingStore,
     ),
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
@@ -791,8 +794,27 @@ async fn collect_activities(
     let recordings = walk(
         files_stream,
         Extraction::new(ExtractionPorts {
-            source: garmin::GarminActivityFiles::new(base_url, auth),
+            source: garmin::GarminActivityFiles::new(
+                base_url.clone(),
+                std::sync::Arc::clone(&auth),
+            ),
             landing: files_landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    )
+    .await;
+
+    // The wrist's all-day heart rate, which says which days a watch was worn
+    // and, for about four months, what it read during a ride (#427).
+    let daily_stream = daily_landing.stream().clone();
+    let daily = walk(
+        daily_stream,
+        Extraction::new(ExtractionPorts {
+            source: garmin::daily::GarminDailyHeartRate::new(base_url, auth, today()),
+            landing: daily_landing,
             resumption,
             runs,
             lock: FileRunLock::beside(database),
@@ -801,7 +823,9 @@ async fn collect_activities(
     )
     .await;
 
-    Ok(Outcome::ExtractedEach(vec![listed, sets, recordings]))
+    Ok(Outcome::ExtractedEach(vec![
+        listed, sets, recordings, daily,
+    ]))
 }
 
 /// The last night worth asking Garmin about.

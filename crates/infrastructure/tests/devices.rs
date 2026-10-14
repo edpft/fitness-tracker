@@ -1,18 +1,12 @@
-//! The devices the operator uses (#427), through the use case over the real
-//! store: Garmin's recordings as the baseline, his statements over it.
+//! Which device sent a Bike+ ride's heart rate (#427), through the use case
+//! over the real store: Garmin's recordings and Peloton's account.
 //!
-//! The serial numbers and dates are his; the recordings are built here, in the
-//! shape his landed ones hold.
+//! The serial numbers and dates are the operator's; the recordings are built
+//! here, in the shape his landed ones hold.
 
-use application::{
-    ExtractionRunLog as _, LandingStore,
-    devices::{DeviceRegister, StatementRefused},
-};
+use application::{ExtractionRunLog as _, LandingStore, devices::DeviceRegister};
 use domain::{
-    device::{
-        AddedDevice, Contradiction, DeviceIdentifier, DeviceName, DeviceStatement, InUse, LastUsed,
-        Measurand, SerialNumber, sent_by,
-    },
+    device::{Device, DeviceIdentifier, InUse, Measurand, Register, SerialNumber},
     landing::{
         Endpoint, EventKind, EventProvenance, FetchedAt, LandingRecord, LandingStream, RawPayload,
         SourceRecordId,
@@ -20,11 +14,11 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminRecordedDevices,
-    SqliteDeviceStatementStore, SqliteExtractionRunLog, WithingsMeasurementLandingStore,
-    WithingsRecordedDevices, connect,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminDailyHeartRateLandingStore,
+    GarminRecordedDevices, GarminWear, PelotonAccountLandingStore, PelotonRecordedDevices,
+    SqliteExtractionRunLog, connect,
 };
-use jiff::{Timestamp, civil::date};
+use jiff::civil::date;
 use serde_json::json;
 use sqlx::SqlitePool;
 
@@ -33,7 +27,11 @@ type Failure = Box<dyn std::error::Error + Send + Sync>;
 const FORERUNNER_165: u32 = 3_483_897_389;
 const VIVOACTIVE_3: u32 = 3_960_966_298;
 const TICKR: u32 = 3_339_528_293;
+/// The TICKR as Garmin records it over Bluetooth: the serial it reports,
+/// 07211011341 in Wahoo's app, less its first two digits.
+const TICKR_BLUETOOTH: u32 = 211_011_341;
 const EDGE_530: u32 = 3_442_801_430;
+const FORERUNNER_310XT: u32 = 3_820_129_853;
 
 /// A sensor a recording lists: its index, kind, maker, serial, product and link.
 type Listed = (u8, u8, u16, u32, u16, u8);
@@ -122,36 +120,24 @@ async fn land(pool: &SqlitePool, id: &str, started: &str, recording: &[u8]) -> R
     Ok(())
 }
 
-/// One weigh-in on the Body Scan, as Withings serves its group.
-async fn weigh(pool: &SqlitePool) -> Result<(), Failure> {
+/// Peloton's account as it answered on 2026-10-13: the Bike+ paired with
+/// monitor 3629.
+async fn paired(pool: &SqlitePool) -> Result<(), Failure> {
     let runs = SqliteExtractionRunLog::new(pool.clone());
-    let group = serde_json::to_vec(&json!({
-        "grpid": 7_269_264_664_i64,
-        "attrib": 0,
-        "date": 1_790_834_400_i64,
-        "timezone": "Europe/London",
-        "deviceid": "9883ca686c39eca2f2bad69a72e2e0e6af8f71fa",
-        "hash_deviceid": "9883ca686c39eca2f2bad69a72e2e0e6af8f71fa",
-        "model": "Body Scan",
-        "modelid": 10,
-        "measures": [
-            { "value": 88_000, "type": 1, "unit": -3 },
-            { "value": 61, "type": 11, "unit": 0 },
+    let account = serde_json::to_vec(&json!({
+        "id": "f051be7977044fd39797c05a854a6f59",
+        "paired_devices": [
+            { "name": "Device: 3629", "paired_device_type": "heart_rate_monitor", "serial_number": "3629" },
         ],
     }))?;
     let record = LandingRecord::land(
-        LandingStream::try_from("withings.measurements")?,
-        FetchedAt::try_from("2026-10-13T08:00:00Z")?,
-        SourceRecordId::try_from("7269264664")?,
-        EventProvenance::new(
-            Endpoint::try_from("/measure")?,
-            EventKind::try_from("updated")?,
-            None,
-        )
-        .into(),
-        RawPayload::try_from(group)?,
+        LandingStream::try_from("peloton.account")?,
+        FetchedAt::try_from("2026-10-13T19:00:00Z")?,
+        SourceRecordId::try_from("f051be7977044fd39797c05a854a6f59")?,
+        EventProvenance::new(Endpoint::try_from("/api/me")?, EventKind::Updated, None).into(),
+        RawPayload::try_from(account)?,
     );
-    let landing = WithingsMeasurementLandingStore::new(pool.clone())?;
+    let landing = PelotonAccountLandingStore::new(pool.clone())?;
     let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
     landing.append(run, vec![record]).await?;
     Ok(())
@@ -159,8 +145,9 @@ async fn weigh(pool: &SqlitePool) -> Result<(), Failure> {
 
 /// A store holding the operator's recordings in the shapes that matter: the
 /// Vivoactive 3 with the TICKR paired, the Forerunner 165 on its own wrist and
-/// broadcasting to the Edge 530, a Peloton class peloton-to-garmin pushed in as
-/// a "Forerunner 945", and a weigh-in on the Body Scan.
+/// broadcasting to the Edge 530, a Peloton class pushed in as a "Forerunner
+/// 945", the 310XT once with a date and once with its placeholder, and
+/// Peloton's account.
 async fn store() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
@@ -213,29 +200,70 @@ async fn store() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
         ),
     )
     .await?;
-    weigh(&pool).await?;
+    land(
+        &pool,
+        "5",
+        "2007-04-01 00:00:51",
+        &recording((1, 1018, FORERUNNER_310XT), &[]),
+    )
+    .await?;
+    land(
+        &pool,
+        "6",
+        "2014-12-04 07:42:19",
+        &recording((1, 1018, FORERUNNER_310XT), &[]),
+    )
+    .await?;
+    paired(&pool).await?;
     Ok((pool, directory))
 }
 
-type Recorded = (GarminRecordedDevices, WithingsRecordedDevices);
-
-fn register(
-    pool: &SqlitePool,
-) -> Result<DeviceRegister<Recorded, SqliteDeviceStatementStore>, Failure> {
+async fn devices(pool: &SqlitePool) -> Result<Register, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
     Ok(DeviceRegister::new(
         (
             GarminRecordedDevices::new(pool.clone(), zone.clone()),
-            WithingsRecordedDevices::new(pool.clone(), zone)?,
+            PelotonRecordedDevices::new(pool.clone(), zone),
         ),
-        SqliteDeviceStatementStore::new(pool.clone()),
-    ))
+        GarminWear::new(pool.clone()),
+    )
+    .register()
+    .await?)
 }
 
-fn serial(number: u32) -> Result<DeviceIdentifier, Failure> {
-    Ok(DeviceIdentifier::Serial(SerialNumber::try_from(
-        number.to_string(),
-    )?))
+/// One day of Garmin's daily heart rate: worn, with a resting heart rate, or
+/// not, with nothing.
+async fn day(pool: &SqlitePool, date: &str, worn: bool) -> Result<(), Failure> {
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+    let payload = serde_json::to_vec(&if worn {
+        json!({ "calendarDate": date, "restingHeartRate": 55, "heartRateValues": [[1, 60]] })
+    } else {
+        json!({ "calendarDate": date, "restingHeartRate": null, "heartRateValues": null })
+    })?;
+    let record = LandingRecord::land(
+        LandingStream::try_from("garmin.daily_heart_rate")?,
+        FetchedAt::try_from("2026-10-13T08:00:00Z")?,
+        SourceRecordId::try_from(date)?,
+        EventProvenance::new(
+            Endpoint::try_from("/wellness-service/wellness/dailyHeartRate")?,
+            EventKind::Updated,
+            None,
+        )
+        .into(),
+        RawPayload::try_from(payload)?,
+    );
+    let landing = GarminDailyHeartRateLandingStore::new(pool.clone())?;
+    let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+    landing.append(run, vec![record]).await?;
+    Ok(())
+}
+
+fn find(register: &Register, serial: u32) -> Option<&Device> {
+    let identifier = DeviceIdentifier::Serial(SerialNumber::try_from(serial.to_string()).ok()?);
+    register
+        .devices()
+        .iter()
+        .find(|device| device.is(&identifier))
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime, Failure> {
@@ -244,195 +272,155 @@ fn runtime() -> Result<tokio::runtime::Runtime, Failure> {
         .build()?)
 }
 
-fn at(text: &str) -> Timestamp {
-    text.parse().unwrap_or(Timestamp::UNIX_EPOCH)
-}
-
-/// Each device the recordings name is one entry, named for what it is, and
-/// measuring what it supplied: the strap the heart rate of the ride it was
-/// paired for, the watch beside it nothing. A sync is no device. The scale is
-/// named by the id Withings gave it.
+/// Each device the record identifies is one entry, named for what it is: the
+/// Forerunner 165 once, though Garmin names it by serial and Peloton by ANT+
+/// number. A sync is no device.
 #[test]
-fn the_recordings_are_the_baseline() {
+fn every_device_is_one_entry() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = store().await.expect("a store");
-        let devices = register(&pool)
-            .expect("a register")
-            .devices()
-            .await
-            .expect("the register");
+        let devices = devices(&pool).await.expect("the register");
 
-        let names: Vec<(&str, Vec<Measurand>)> = devices
+        let names: Vec<&str> = devices
+            .devices()
             .iter()
-            .map(|device| {
-                (
-                    device.name().value.as_str(),
-                    device.measures().iter().copied().collect(),
-                )
-            })
+            .map(|device| device.name().as_str())
             .collect();
         assert_eq!(
             names,
             vec![
+                "Forerunner 310XT",
                 // First used the same day, so ordered by identifier.
-                ("Wahoo heart rate sensor", vec![Measurand::HeartRate]),
-                ("Vivoactive 3", vec![]),
-                ("Edge 530", vec![]),
-                ("Forerunner 165", vec![Measurand::HeartRate]),
-                ("Body Scan", vec![Measurand::HeartRate, Measurand::BodyMass]),
+                "Wahoo heart rate sensor",
+                "Vivoactive 3",
+                "Edge 530",
+                "Forerunner 165",
             ]
         );
-        let watch = devices
-            .iter()
-            .find(|device| device.is(&serial(FORERUNNER_165).expect("a serial")))
-            .expect("the watch");
-        assert_eq!(watch.first_used().value, date(2025, 3, 2));
-        assert!(watch.sends().value.contains(&Measurand::HeartRate));
-        let scale = devices
-            .iter()
-            .find(|device| device.name().value.as_str() == "Body Scan")
-            .expect("the scale");
-        assert_eq!(
-            scale.identifier().map(ToString::to_string).as_deref(),
-            Some("issued/Withings/9883ca686c39eca2f2bad69a72e2e0e6af8f71fa")
-        );
-        assert!(scale.sends().value.is_empty());
+        let watch = find(&devices, FORERUNNER_165).expect("the watch");
+        assert_eq!(watch.first_used(), date(2025, 3, 2));
+        assert_eq!(watch.last_used(), date(2026, 10, 13));
     });
 }
 
-/// What the operator says is kept, survives being read back by another
-/// register, and attributes the rides the record alone could not.
+/// A recording the watch dated with its placeholder says nothing about when
+/// the watch was in use.
 #[test]
-fn a_statement_is_kept_and_applied() {
+fn a_placeholder_date_is_no_date() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = store().await.expect("a store");
-        let watch = serial(FORERUNNER_165).expect("a serial");
+        let devices = devices(&pool).await.expect("the register");
 
-        register(&pool)
-            .expect("a register")
-            .state(
-                at("2026-10-13T20:00:00Z"),
-                DeviceStatement::LastUsed {
-                    device: watch.clone(),
-                    last: LastUsed::StillInUse,
-                },
-            )
-            .await
-            .expect("the statement is kept");
-        register(&pool)
-            .expect("a register")
-            .state(
-                at("2026-10-13T20:01:00Z"),
-                DeviceStatement::Named {
-                    device: serial(TICKR).expect("a serial"),
-                    name: DeviceName::try_from("Wahoo TICKR").expect("a name"),
-                },
-            )
-            .await
-            .expect("the statement is kept");
+        let watch = find(&devices, FORERUNNER_310XT).expect("the 310XT");
+        assert_eq!(watch.first_used(), date(2014, 12, 4));
+    });
+}
 
-        let devices = register(&pool)
-            .expect("a register")
-            .devices()
-            .await
-            .expect("the register");
-        let InUse::One(device) = sent_by(&devices, Measurand::HeartRate, date(2026, 10, 7)) else {
-            panic!("the watch measured the ride of 2026-10-07");
+/// Both watches broadcast heart rate, which is the model's, not something a
+/// recording shows: the Vivoactive 3 is a candidate beside the TICKR it was
+/// paired with that day. The Edge 530 sends nothing.
+#[test]
+fn a_watch_that_broadcasts_is_a_candidate() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = store().await.expect("a store");
+        let devices = devices(&pool).await.expect("the register");
+
+        let InUse::Several(candidates) = devices.sent_by(Measurand::HeartRate, date(2024, 6, 30))
+        else {
+            panic!("the strap and the watch were both in use");
         };
-        assert!(device.is(&watch));
-        // The morning of a weigh-in: the scale measured a pulse, and sent it
-        // nowhere.
-        let InUse::One(device) = sent_by(&devices, Measurand::HeartRate, date(2026, 10, 1)) else {
-            panic!("the watch alone could have sent a ride's heart rate on 2026-10-01");
+        let mut named: Vec<&str> = candidates
+            .iter()
+            .map(|device| device.name().as_str())
+            .collect();
+        named.sort_unstable();
+        assert_eq!(named, vec!["Vivoactive 3", "Wahoo heart rate sensor"]);
+        let edge = find(&devices, EDGE_530).expect("the Edge");
+        assert!(edge.sends().is_empty());
+    });
+}
+
+/// Peloton's account carries the watch past its last Garmin activity, so the
+/// rides after it are the watch's with nothing stated.
+#[test]
+fn the_paired_monitor_carries_the_watch_forward() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = store().await.expect("a store");
+        let devices = devices(&pool).await.expect("the register");
+
+        for ride in [date(2026, 9, 30), date(2026, 10, 4), date(2026, 10, 7)] {
+            let InUse::One(device) = devices.sent_by(Measurand::HeartRate, ride) else {
+                panic!("one device sent the heart rate of {ride}");
+            };
+            assert_eq!(device.name().as_str(), "Forerunner 165");
+        }
+    });
+}
+
+/// A day Garmin shows nothing worn takes the watch out, and the strap paired
+/// to it that day is the one device left.
+#[test]
+fn a_day_the_watch_was_not_worn_leaves_the_strap() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = store().await.expect("a store");
+        day(&pool, "2024-06-30", false).await.expect("a day");
+        let unworn = devices(&pool).await.expect("the register");
+
+        let InUse::One(device) = unworn.sent_by(Measurand::HeartRate, date(2024, 6, 30)) else {
+            panic!("the strap alone was in use");
         };
-        assert!(device.is(&watch));
-        assert!(
-            devices
-                .iter()
-                .any(|device| device.name().value.as_str() == "Wahoo TICKR")
-        );
-    });
-}
+        assert_eq!(device.name().as_str(), "Wahoo heart rate sensor");
 
-/// A device no recording names is added, and numbered so later statements
-/// can be addressed to it.
-#[test]
-fn a_device_is_added_and_can_be_spoken_of() {
-    let runtime = runtime().expect("a runtime");
-    runtime.block_on(async {
-        let (pool, _directory) = store().await.expect("a store");
-        let use_case = register(&pool).expect("a register");
-
-        let devices = use_case
-            .add(
-                at("2026-10-13T20:00:00Z"),
-                AddedDevice::new(
-                    DeviceName::try_from("Bike+").expect("a name"),
-                    [Measurand::Power, Measurand::Cadence, Measurand::Speed]
-                        .into_iter()
-                        .collect(),
-                    date(2023, 12, 21),
-                    LastUsed::StillInUse,
-                )
-                .expect("an ordered period"),
-            )
+        day(&pool, "2024-06-30", true)
             .await
-            .expect("the device is added");
-        let bike = devices
-            .iter()
-            .find(|device| device.name().value.as_str() == "Bike+")
-            .and_then(|device| device.identifier().cloned())
-            .expect("the bike is in the register");
-        assert_eq!(bike.to_string(), "stated/1");
-
-        let devices = use_case
-            .state(
-                at("2026-10-13T20:05:00Z"),
-                DeviceStatement::LastUsed {
-                    device: bike.clone(),
-                    last: LastUsed::On(date(2026, 10, 13)),
-                },
-            )
-            .await
-            .expect("the statement is kept");
-        let held = devices
-            .iter()
-            .find(|device| device.is(&bike))
-            .expect("the bike");
-        assert_eq!(held.last_used().value, LastUsed::On(date(2026, 10, 13)));
-    });
-}
-
-/// A statement the register could not apply is refused and not kept.
-#[test]
-fn a_contradiction_is_refused_and_not_kept() {
-    let runtime = runtime().expect("a runtime");
-    runtime.block_on(async {
-        let (pool, _directory) = store().await.expect("a store");
-        let use_case = register(&pool).expect("a register");
-
-        let refused = use_case
-            .state(
-                at("2026-10-13T20:00:00Z"),
-                DeviceStatement::LastUsed {
-                    device: serial(FORERUNNER_165).expect("a serial"),
-                    last: LastUsed::On(date(2024, 1, 1)),
-                },
-            )
-            .await;
-
+            .expect("a later answer");
+        let worn = devices(&pool).await.expect("the register");
         assert!(matches!(
-            refused,
-            Err(StatementRefused::Contradiction(
-                Contradiction::LastBeforeFirst { .. }
-            ))
+            worn.sent_by(Measurand::HeartRate, date(2024, 6, 30)),
+            InUse::Several(_)
         ));
-        let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM device_statement")
-            .fetch_one(&pool)
-            .await
-            .expect("a count");
-        assert_eq!(kept, 0);
+    });
+}
+
+/// Garmin recorded the TICKR over ANT+ and over Bluetooth under two serials,
+/// and they are one strap: the ANT+ serial's high half is the Bluetooth
+/// serial's low half. So a ride on a day only the Bluetooth entry was recorded,
+/// with the watch not worn, is the strap's alone.
+#[test]
+fn the_strap_over_bluetooth_is_the_strap_over_ant() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = store().await.expect("a store");
+        // Bluetooth Low Energy is link 3, and its kind for heart rate is 1.
+        land(
+            &pool,
+            "7",
+            "2024-01-15 18:00:00",
+            &recording(
+                (1, 2700, VIVOACTIVE_3),
+                &[
+                    (0, 255, 1, VIVOACTIVE_3, 2700, 5),
+                    (1, 10, 0xFFFF, 0, 0xFFFF, 5),
+                    (2, 1, 32, TICKR_BLUETOOTH, 7, 3),
+                ],
+            ),
+        )
+        .await
+        .expect("a recording");
+        day(&pool, "2024-01-20", false).await.expect("a day");
+        let devices = devices(&pool).await.expect("the register");
+
+        let strap = find(&devices, TICKR).expect("the strap");
+        assert_eq!(find(&devices, TICKR_BLUETOOTH), Some(strap));
+        assert_eq!(strap.first_used(), date(2024, 1, 15));
+        let InUse::One(device) = devices.sent_by(Measurand::HeartRate, date(2024, 1, 20)) else {
+            panic!("the strap alone was in use");
+        };
+        assert_eq!(device, strap);
     });
 }

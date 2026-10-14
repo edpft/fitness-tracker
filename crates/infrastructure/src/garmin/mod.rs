@@ -16,6 +16,7 @@ pub mod account;
 pub mod activities;
 pub mod auth;
 pub mod corrections;
+pub mod daily;
 pub mod devices;
 pub mod exercise_sets;
 pub mod files;
@@ -65,7 +66,10 @@ async fn answer(response: reqwest::Response, path: &str) -> Result<String, Sourc
 /// **Bytes, not text**, for the one answer that is not text: an activity's
 /// file is an archive, and decoding it as UTF-8 would corrupt what § II.1 says
 /// lands exactly as served.
-async fn answer_bytes(response: reqwest::Response, path: &str) -> Result<Vec<u8>, SourceError> {
+pub(super) async fn answer_bytes(
+    response: reqwest::Response,
+    path: &str,
+) -> Result<Vec<u8>, SourceError> {
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(SourceError::Unauthorised);

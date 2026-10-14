@@ -6,7 +6,6 @@
 //! configurator, so this crate requests, renders and interacts, and names no
 //! adapter.
 
-mod devices;
 mod page;
 mod report;
 mod run;
@@ -103,13 +102,6 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     let credentials = configurator::config::credentials().map_err(|error| error.to_string())?;
 
-    let store = configurator::store::Store::open(&database)
-        .await
-        .map_err(|error| error.to_string())?;
-    let register = Arc::new(devices::Register {
-        store,
-        zone: zone.clone(),
-    });
     let runs = Arc::new(Runs::new(Setting {
         database,
         zone,
@@ -121,8 +113,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
         .route("/sse.min.js", get(sse))
-        .with_state(runs)
-        .merge(devices::routes(register));
+        .with_state(runs);
 
     let Some(address) = matches.get_one::<SocketAddr>("listen") else {
         return Err("--listen is required".to_owned());

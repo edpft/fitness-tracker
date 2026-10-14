@@ -2623,8 +2623,19 @@ pub trait RecordedDevices {
     ) -> impl Future<Output = Result<Vec<domain::device::Sighting>, StoreError>> + Send;
 }
 
-/// Two sources' recordings, read as one: Garmin's watches and sensors, and
-/// Withings' scales.
+/// Which days a wrist device was worn (#427).
+pub trait WearRecord {
+    /// Every day the account holds, and whether anything was worn on it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn wear(&self) -> impl Future<Output = Result<domain::device::Wear, StoreError>> + Send;
+}
+
+/// Two sources' records, read as one: Garmin's recordings and Peloton's
+/// account.
 impl<A, B> RecordedDevices for (A, B)
 where
     A: RecordedDevices + Sync,
@@ -2635,39 +2646,4 @@ where
         sightings.extend(self.1.sightings().await?);
         Ok(sightings)
     }
-}
-
-/// What the operator has said about his devices, kept as he said it (§ 13).
-pub trait DeviceStatements {
-    /// Every statement, superseded ones included.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable or holds something
-    /// unreadable.
-    fn statements(
-        &self,
-    ) -> impl Future<Output = Result<Vec<domain::device::Stated>, StoreError>> + Send;
-
-    /// Keep a statement about a device the register holds.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn state(
-        &self,
-        at: Timestamp,
-        statement: &domain::device::DeviceStatement,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
-
-    /// Keep a device the operator added, and number it.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn add(
-        &self,
-        at: Timestamp,
-        added: &domain::device::AddedDevice,
-    ) -> impl Future<Output = Result<domain::device::StatedDevice, StoreError>> + Send;
 }

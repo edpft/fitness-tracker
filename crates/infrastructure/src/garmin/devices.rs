@@ -23,13 +23,13 @@ use domain::{
     device::{
         AntDeviceNumber, DeviceIdentifier, DeviceName, Measurand, Role, SerialNumber, Sighting,
     },
-    normalised::OperatorZone,
+    normalised::{OperatorZone, StartedAt},
 };
 use serde::Deserialize;
 
 use super::{
     ActivityAccount,
-    fit::{self, Identity, Listed},
+    fit::{self, Hardware, Identity, Listed},
     gym::started,
 };
 
@@ -51,24 +51,9 @@ struct Activity {
 /// not a census.
 #[must_use]
 pub fn sightings(account: &ActivityAccount, zone: &OperatorZone) -> Vec<Sighting> {
-    let Some(recording) = account.recording() else {
+    let Some((at, hardware)) = dated(account, zone) else {
         return Vec::new();
     };
-    let Ok(activity) = serde_json::from_slice::<Activity>(account.activity().payload().as_bytes())
-    else {
-        return Vec::new();
-    };
-    let Some(at) = activity
-        .started_at
-        .as_deref()
-        .and_then(|stamp| started(stamp, zone).ok())
-    else {
-        return Vec::new();
-    };
-    let Ok(hardware) = fit::hardware(recording.payload().as_bytes()) else {
-        return Vec::new();
-    };
-
     let Some(recorder) = identified(hardware.recorder) else {
         return Vec::new();
     };
@@ -119,6 +104,7 @@ pub fn sightings(account: &ActivityAccount, zone: &OperatorZone) -> Vec<Sighting
             },
             name,
             role: Role::Paired,
+            worn: false,
             // Paired is sent: whatever it measured reached the recorder.
             sent: measured.clone(),
             measured,
@@ -144,13 +130,92 @@ pub fn sightings(account: &ActivityAccount, zone: &OperatorZone) -> Vec<Sighting
             also: broadcast(recorder),
             name,
             role: Role::Recorder,
+            worn: wrist,
             measured,
-            sent: BTreeSet::new(),
+            sent: if broadcasts_heart_rate(hardware.recorder) {
+                BTreeSet::from([Measurand::HeartRate])
+            } else {
+                BTreeSet::new()
+            },
             at,
             source: SOURCE,
         },
     );
     found
+}
+
+/// Every recording's sightings, with a strap Garmin recorded over Bluetooth
+/// joined to the same strap recorded over ANT+.
+///
+/// **Garmin writes one strap's serial two ways.** Over Bluetooth it is the
+/// serial the strap reports; over ANT+ it is the low sixteen bits of that
+/// serial above the strap's ANT+ number. The operator's TICKR reports
+/// 07211011341 and ANT+ number 10341 in Wahoo's app (2026-10-14), and Garmin
+/// recorded it as 211011341 over Bluetooth and `C70D2865` over ANT+, where
+/// `C70D` is the low half of 211011341 and `2865` is 10341.
+///
+/// **A match joins only where it is the only one**: a Bluetooth strap whose
+/// low half matches two ANT+ straps is joined to neither.
+#[must_use]
+pub fn joined(mut found: Vec<Sighting>) -> Vec<Sighting> {
+    let over_ant: Vec<(u16, DeviceIdentifier)> = found
+        .iter()
+        .filter(|seen| strap(seen))
+        .filter_map(|seen| {
+            let high = u16::try_from(serial(seen)? >> 16).ok()?;
+            let number = seen
+                .also
+                .iter()
+                .find(|other| matches!(other, DeviceIdentifier::Ant(_)))?;
+            Some((high, number.clone()))
+        })
+        .collect();
+    for seen in found
+        .iter_mut()
+        .filter(|seen| strap(seen) && seen.also.is_empty())
+    {
+        let Some(low) = serial(seen).and_then(|serial| u16::try_from(serial & 0xFFFF).ok()) else {
+            continue;
+        };
+        let matched: BTreeSet<&DeviceIdentifier> = over_ant
+            .iter()
+            .filter(|(high, _)| *high == low)
+            .map(|(_, number)| number)
+            .collect();
+        if let [only] = matched.into_iter().collect::<Vec<_>>()[..] {
+            seen.also.push(only.clone());
+        }
+    }
+    found
+}
+
+/// A heart rate strap one of Garmin's recordings had paired. One recorded over
+/// Bluetooth states no ANT+ number, so its `also` is empty.
+fn strap(seen: &Sighting) -> bool {
+    seen.source == SOURCE
+        && seen.role == Role::Paired
+        && seen.measured.contains(&Measurand::HeartRate)
+}
+
+fn serial(seen: &Sighting) -> Option<u32> {
+    match &seen.device {
+        DeviceIdentifier::Serial(serial) => serial.as_str().parse().ok(),
+        DeviceIdentifier::Ant(_) => None,
+    }
+}
+
+/// When a recording was made, and the hardware it names, where it says both.
+fn dated(account: &ActivityAccount, zone: &OperatorZone) -> Option<(StartedAt, Hardware)> {
+    let recording = account.recording()?;
+    let activity =
+        serde_json::from_slice::<Activity>(account.activity().payload().as_bytes()).ok()?;
+    let at = activity
+        .started_at
+        .as_deref()
+        .filter(|stamp| !stamp.starts_with(NO_TIME_FIX))
+        .and_then(|stamp| started(stamp, zone).ok())?;
+    let hardware = fit::hardware(recording.payload().as_bytes()).ok()?;
+    Some((at, hardware))
 }
 
 /// The ANT+ number a device with this serial broadcasts by, which is how the
@@ -160,6 +225,29 @@ fn broadcast(serial: u32) -> Vec<DeviceIdentifier> {
         .map(DeviceIdentifier::Ant)
         .into_iter()
         .collect()
+}
+
+/// The date a Garmin watch writes when it has no time at all — no GPS fix and
+/// an unset clock — into the file and the activity list alike. Ten of the
+/// operator's 2015 and 2016 recordings on the Forerunner 310XT carry it.
+///
+/// **A placeholder is not a date**, so a recording carrying it says nothing
+/// about when its devices were in use.
+const NO_TIME_FIX: &str = "2007-04-01";
+
+/// Whether a watch can send the heart rate its wrist measures to another
+/// device over ANT+, which is a fact about the model rather than anything a
+/// recording shows: a watch broadcasting to the Bike+ leaves no Garmin trace.
+///
+/// Garmin's manuals document it for the Vivoactive 3 ("Broadcasting Heart Rate
+/// to Garmin Devices") and the Forerunner 165, which the operator's own
+/// recordings also show broadcasting to the Edge 530. The Forerunner 310XT and
+/// 10 have no wrist sensor, and the Edge 530 measures none.
+const fn broadcasts_heart_rate(identity: Identity) -> bool {
+    matches!(
+        (identity.manufacturer, identity.product),
+        (Some(1), Some(2700 | 4432))
+    )
 }
 
 /// The serial number, where it identifies something.

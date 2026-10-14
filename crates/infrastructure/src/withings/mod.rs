@@ -7,7 +7,6 @@
 
 pub mod account;
 pub mod auth;
-pub mod devices;
 pub mod measurements;
 pub mod translate;
 

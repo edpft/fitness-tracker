@@ -119,6 +119,7 @@ pub fn sightings(landed: &LandedRecord, zone: &OperatorZone) -> Vec<Sighting> {
                 also: Vec::new(),
                 name,
                 role: Role::Paired,
+                worn: false,
                 measured: BTreeSet::from([Measurand::HeartRate]),
                 sent: BTreeSet::from([Measurand::HeartRate]),
                 at: at.clone(),
