@@ -15,6 +15,7 @@ pub mod catalogue;
 pub mod class;
 pub mod holding;
 pub mod mapping;
+pub mod paired;
 pub mod payload;
 pub mod provider;
 pub mod samples;

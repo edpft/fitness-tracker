@@ -65,18 +65,18 @@ impl GarminGymAccountReader {
 }
 
 /// One row of either landing table, before it is a [`LandedRecord`].
-struct Row {
-    id: i64,
-    endpoint: String,
-    fetched_at: String,
-    source_record_id: String,
-    event_kind: String,
-    event_time: Option<String>,
-    payload: Vec<u8>,
+pub(super) struct Row {
+    pub(super) id: i64,
+    pub(super) endpoint: String,
+    pub(super) fetched_at: String,
+    pub(super) source_record_id: String,
+    pub(super) event_kind: String,
+    pub(super) event_time: Option<String>,
+    pub(super) payload: Vec<u8>,
 }
 
 impl Row {
-    fn into_record(self, stream: &LandingStream) -> Result<LandedRecord, StoreError> {
+    pub(super) fn into_record(self, stream: &LandingStream) -> Result<LandedRecord, StoreError> {
         let occurred_at = self
             .event_time
             .as_deref()

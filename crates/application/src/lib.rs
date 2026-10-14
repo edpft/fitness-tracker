@@ -18,6 +18,7 @@ pub mod commit;
 pub mod compare;
 pub mod cycling;
 pub mod deliver;
+pub mod devices;
 pub mod error;
 pub mod extract;
 pub mod holding;
@@ -49,9 +50,10 @@ pub use ports::{
     PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionLifecycle, PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead,
-    RawExtent, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest, ReplyStatus,
-    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
-    RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent,
-    StreamStatus, Translation, Translator, UnderivableReason, UnderivableSlot, Unexpressed,
-    WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
+    RawExtent, RecordedDevices, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
+    ReplyStatus, ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog,
+    RiddenVenues, RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount,
+    SourceEvent, StreamStatus, Translation, Translator, UnderivableReason, UnderivableSlot,
+    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
+    WorkoutNormaliser, WorkoutPrescriber,
 };

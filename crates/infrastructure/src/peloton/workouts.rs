@@ -125,7 +125,7 @@ fn revision_of(payload: &RawPayload) -> PayloadDigest {
 
 /// Who the session belongs to. The list endpoint is addressed by user, so the
 /// walk needs this before it can ask for anything.
-const ME_ENDPOINT: &str = "/api/me";
+pub(super) const ME_ENDPOINT: &str = "/api/me";
 
 /// The path the list is served from, once the user is known.
 fn workouts_path(user: &str) -> String {

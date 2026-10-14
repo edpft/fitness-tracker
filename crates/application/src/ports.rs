@@ -2642,3 +2642,45 @@ pub trait DiaryAuthor {
     /// [`StoreError`] if the store is unavailable.
     fn record_skip(&self, skip: &Skip) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
+
+/// What a source's recordings say about the devices that made them (#427).
+///
+/// **A translation of what has landed, on demand.** Nothing is stored: the
+/// baseline moves forward as recordings arrive, and re-derives from raw
+/// exactly (§ 7).
+pub trait RecordedDevices {
+    /// Every device every recording names, once per recording.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn sightings(
+        &self,
+    ) -> impl Future<Output = Result<Vec<domain::device::Sighting>, StoreError>> + Send;
+}
+
+/// Which days a wrist device was worn (#427).
+pub trait WearRecord {
+    /// Every day the account holds, and whether anything was worn on it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn wear(&self) -> impl Future<Output = Result<domain::device::Wear, StoreError>> + Send;
+}
+
+/// Two sources' records, read as one: Garmin's recordings and Peloton's
+/// account.
+impl<A, B> RecordedDevices for (A, B)
+where
+    A: RecordedDevices + Sync,
+    B: RecordedDevices + Sync,
+{
+    async fn sightings(&self) -> Result<Vec<domain::device::Sighting>, StoreError> {
+        let mut sightings = self.0.sightings().await?;
+        sightings.extend(self.1.sightings().await?);
+        Ok(sightings)
+    }
+}
