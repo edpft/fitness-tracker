@@ -8,11 +8,11 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 use application::{
-    CanonicalCyclingSessionStore, CanonicalGymSessionStore, ClassSource, ClassesListed,
-    ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar, NextLock,
-    NormalisationError, NormalisationSummary, NormalisedCyclingSessionReader,
-    NormalisedGymSessionReader, PlanStore, PrescriptionError, RunLockError, RunSummary,
-    SourceError, StoreError, WorkoutNormaliser,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
+    ClassesListed, ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar,
+    NextLock, NormalisationError, NormalisationSummary, NormalisedCyclingSessionReader,
+    NormalisedGymSessionReader, NormalisedWeighInReader, PlanStore, PrescriptionError,
+    RunLockError, RunSummary, SourceError, StoreError, WorkoutNormaliser,
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
@@ -24,6 +24,7 @@ use application::{
     reschedule::Reschedule,
 };
 use domain::{
+    body::{CanonicalWeighIn, WeighInAccount, WeighInCount},
     canonical::SessionCount,
     cycling::{CanonicalCyclingSession, CyclingMesocycle},
     gym::{CanonicalGymSession, NormalisedGymSession},
@@ -116,6 +117,22 @@ impl CanonicalCyclingSessionStore for Empty {
 
     async fn count(&self) -> Result<SessionCount, StoreError> {
         Ok(SessionCount::from(0))
+    }
+}
+
+impl NormalisedWeighInReader for Empty {
+    async fn all(&self) -> Result<Vec<WeighInAccount>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
+impl CanonicalWeighInStore for Empty {
+    async fn replace(&self, weigh_ins: Vec<CanonicalWeighIn>) -> Result<WeighInCount, StoreError> {
+        Ok(WeighInCount::from(weigh_ins.len()))
+    }
+
+    async fn count(&self) -> Result<WeighInCount, StoreError> {
+        Ok(WeighInCount::from(0))
     }
 }
 
@@ -402,7 +419,9 @@ type Ports<H = Unreachable> = NextPorts<
     Deriving,
     Walking,
     Deriving,
-    CanonicalPorts<Empty, Empty, Empty, Empty>,
+    Walking,
+    Deriving,
+    CanonicalPorts<Empty, Empty, Empty, Empty, Empty, Empty>,
     Converged,
     H,
     Recorded,
@@ -461,11 +480,21 @@ fn calendar<H>(
             }),
             normaliser: Deriving(156),
         },
+        weigh_in_records: Records {
+            entry: stream("withings.measurements")?,
+            walks: Ok(Walking(vec![(
+                stream("withings.measurements")?,
+                Ok(landed(1)),
+            )])),
+            normaliser: Deriving(227),
+        },
         canonical: CanonicalPorts {
             normalised_gym: Empty,
             canonical_gym: Empty,
             normalised_cycling: Empty,
             canonical_cycling: Empty,
+            normalised_weigh_ins: Empty,
+            canonical_weigh_ins: Empty,
         },
         classes: Ok(Converged),
         holidays,
@@ -512,6 +541,7 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
         .collect();
     let hevy = stream("hevy.workouts").expect("a stream");
     let peloton = stream("peloton.rides").expect("a stream");
+    let withings = stream("withings.measurements").expect("a stream");
     assert_eq!(
         steps,
         vec![
@@ -521,6 +551,9 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
             (&Step::Fetching(peloton.clone()), false),
             (&Step::Normalising(peloton), true),
             (&Step::Canonicalising(Discipline::Cycling), true),
+            (&Step::Fetching(withings.clone()), true),
+            (&Step::Normalising(withings), true),
+            (&Step::CanonicalisingWeighIns, true),
             (&Step::RefreshingClasses, true),
         ]
     );
@@ -582,6 +615,10 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
                 Some(Found::Landed(RecordCount::from(50)))
             ),
             ("peloton.ride_samples".to_owned(), None),
+            (
+                "withings.measurements".to_owned(),
+                Some(Found::Landed(RecordCount::from(1)))
+            ),
         ]
     );
 }

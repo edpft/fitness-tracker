@@ -8,29 +8,23 @@
 //! Body Scan's composition in `body_scan_weigh_in`, and a spreadsheet's cell in
 //! `manual_weigh_in`.
 //!
-//! Two adapters here and the writer's half of a third: the spreadsheet reader
-//! has no `append`, the history reads the mass back for relative strength, and
-//! [`super::spreadsheet_normalised`] writes the derivation, weigh-ins and gym
-//! sessions together, through the functions below.
+//! One adapter here and the writer's half of another: the spreadsheet reader
+//! has no `append`, and [`super::spreadsheet_normalised`] writes the
+//! derivation, weigh-ins and gym sessions together, through the functions
+//! below. Body weight is read back from the canonical layer
+//! ([`super::canonical_weigh_in`]), where copies of one day are one weigh-in.
 
-use application::{AccountReader, StoreError, WeighInHistory};
+use application::{AccountReader, StoreError};
 use domain::{
-    analytical::Weighed,
-    body::ManualWeighIn,
-    canonical::Occurred,
+    body::{LastSaved, ManualWeighIn},
     landing::{
         FetchedAt, FilePath, FileProvenance, InvalidStream, LandedRecord, LandingRecord,
         LandingRecordId, LandingStream, ModifiedAt, RawPayload, SourceRecordId,
     },
-    measure::Kg,
-    normalised::{OperatorZone, StartedAt},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::{
-    MyFitnessPalExportLandingStore, SpreadsheetFileLandingStore, corrupt, count_from_storage,
-    store_error,
-};
+use super::{SpreadsheetFileLandingStore, corrupt, count_from_storage, store_error};
 use crate::spreadsheets::Workbook;
 
 /// Raw, read-only, for the historical spreadsheets. One account per workbook,
@@ -117,6 +111,7 @@ pub(super) async fn replace_manual_weigh_ins(
     stream: &str,
     weigh_ins: &[ManualWeighIn],
 ) -> Result<(), StoreError> {
+    super::canonical_weigh_in::clear(tx).await?;
     sqlx::query!("DELETE FROM manual_weigh_in")
         .execute(&mut **tx)
         .await
@@ -133,6 +128,11 @@ pub(super) async fn replace_manual_weigh_ins(
         let landed_as = cell.landed_as.as_i64();
         let sheet = cell.sheet.as_str();
         let reference = cell.cell.as_str();
+        let (last_saved_at, last_saved_by) = match weigh_in.last_saved() {
+            Some(LastSaved::ByTheDocument(at)) => (Some(at.to_string()), Some("document")),
+            Some(LastSaved::ByTheFileSystem(at)) => (Some(at.to_string()), Some("file system")),
+            None => (None, None),
+        };
 
         let row = sqlx::query!(
             r#"
@@ -151,13 +151,17 @@ pub(super) async fn replace_manual_weigh_ins(
 
         sqlx::query!(
             r#"
-            INSERT INTO manual_weigh_in (weigh_in, landing_record_id, sheet, cell)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO manual_weigh_in (
+                weigh_in, landing_record_id, sheet, cell, last_saved_at_utc, last_saved_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
             row.id,
             landed_as,
             sheet,
             reference,
+            last_saved_at,
+            last_saved_by,
         )
         .execute(&mut **tx)
         .await
@@ -173,71 +177,4 @@ pub(super) async fn count_manual_weigh_ins(pool: &SqlitePool) -> Result<usize, S
         .await
         .map_err(|error| store_error(&error))?;
     count_from_storage(Some(row.total))
-}
-
-/// Weigh-ins, read back for relative strength.
-///
-/// **The Body Scan's, and MyFitnessPal's, and not the spreadsheets'.** The
-/// same day sits in up to nine spreadsheets, and choosing between the copies
-/// is the canonical layer's work (#409), which does not exist yet. MyFitnessPal
-/// holds one weight a day, so there is nothing to choose between and it is read
-/// here, dated to its day (#242).
-#[derive(Debug, Clone)]
-pub struct SqliteWeighInHistory {
-    pool: SqlitePool,
-}
-
-impl SqliteWeighInHistory {
-    pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-impl WeighInHistory for SqliteWeighInHistory {
-    async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT measured_at_utc AS "measured_at: String",
-                   zone AS "zone: String",
-                   on_day AS "on_day: String",
-                   mass_grams AS "mass_grams!: i64"
-            FROM weigh_in
-            WHERE measured_at_utc IS NOT NULL OR stream = ?
-            ORDER BY COALESCE(measured_at_utc, on_day) ASC
-            "#,
-            MyFitnessPalExportLandingStore::STREAM
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        rows.into_iter()
-            .map(|row| {
-                let at = match (row.measured_at, row.zone, row.on_day) {
-                    (Some(measured_at), Some(zone), None) => {
-                        let instant = measured_at
-                            .parse::<jiff::Timestamp>()
-                            .map_err(|error| corrupt(&error))?;
-                        let zone = OperatorZone::try_from(zone).map_err(|error| corrupt(&error))?;
-                        Occurred::At(StartedAt::new(instant, zone))
-                    }
-                    (None, None, Some(on_day)) => Occurred::On(
-                        on_day
-                            .parse::<jiff::civil::Date>()
-                            .map_err(|error| corrupt(&error))?,
-                    ),
-                    _ => {
-                        return Err(StoreError::Corrupt {
-                            detail: "a weigh-in is neither at an instant nor on a day".to_owned(),
-                        });
-                    }
-                };
-                let grams = u64::try_from(row.mass_grams).map_err(|error| corrupt(&error))?;
-                Ok(Weighed {
-                    at,
-                    mass: Kg::from_grams(grams),
-                })
-            })
-            .collect()
-    }
 }

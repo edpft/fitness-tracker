@@ -9,6 +9,7 @@ use std::{fs, path::Path};
 
 use application::{
     Clock, StoreError, WeighInHistory as _, WorkoutExtractor as _, WorkoutNormaliser as _,
+    canonicalise,
     extract::{Extraction, ExtractionPorts},
     normalise::{Normalisation, NormalisationPorts},
 };
@@ -20,9 +21,9 @@ use domain::{
 };
 use infrastructure::{
     FileRunLock, FolderFiles, MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore,
-    MyFitnessPalWeighInTranslator, SqliteExtractionRunLog, SqliteMyFitnessPalStore,
-    SqliteNormalisationRunLog, SqlitePool, SqliteRefusalStore, SqliteResumptionPointStore,
-    SqliteWeighInHistory, connect,
+    MyFitnessPalWeighInTranslator, SqliteCanonicalWeighInStore, SqliteExtractionRunLog,
+    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteNormalisedWeighInReader, SqlitePool,
+    SqliteRefusalStore, SqliteResumptionPointStore, connect,
 };
 use jiff::civil::date;
 
@@ -202,12 +203,17 @@ fn the_history_reads_a_weight_dated_to_a_day() {
         let pool = connect(&database).await.expect("a store");
         land(&folder, &pool, &database).await.expect("lands");
         normalise(&pool).await.expect("derives");
-        normalise(&pool).await.expect("derives again");
-
-        let history = SqliteWeighInHistory::new(pool.clone())
-            .weigh_ins()
+        let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
+        let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
+        canonicalise::weigh_ins(&normalised, &canonical)
             .await
-            .expect("the history");
+            .expect("canonicalises");
+        normalise(&pool).await.expect("derives again");
+        canonicalise::weigh_ins(&normalised, &canonical)
+            .await
+            .expect("canonicalises again");
+
+        let history = canonical.weigh_ins().await.expect("the history");
         assert_eq!(history.len(), 3, "a rebuild replaces rather than adds");
         assert_eq!(
             history.first(),

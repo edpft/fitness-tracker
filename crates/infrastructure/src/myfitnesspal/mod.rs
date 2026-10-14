@@ -23,7 +23,7 @@ use application::{
     ports::{SourceAccount, Translator},
 };
 use domain::{
-    body::{Cell, CellRef, ManualWeighIn, SheetName},
+    body::{Cell, CellRef, Entry, ManualWeighIn, SheetName},
     landing::LandedRecord,
     measure::Kg,
     normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason},
@@ -274,8 +274,8 @@ fn weigh_in(
         }
     };
 
-    match ManualWeighIn::new(on, mass, cell) {
-        Ok(weigh_in) => Some(weigh_in.entered(entered_at)),
+    match ManualWeighIn::new(on, mass, cell, Entry::Stamped(entered_at)) {
+        Ok(weigh_in) => Some(weigh_in),
         Err(error) => {
             refuse("value", error.to_string());
             None

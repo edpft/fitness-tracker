@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO canonical_weigh_in_account (canonical, weigh_in) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e55d4fcf32ccd0288198c053c619d30ad56f4799f44afc45f63d05fb28a9f9c1"
+}

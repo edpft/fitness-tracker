@@ -10,6 +10,7 @@ pub mod btwb_export_landing;
 pub mod btwb_normalised;
 pub mod canonical_cycling;
 pub mod canonical_gym;
+pub mod canonical_weigh_in;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
@@ -60,6 +61,7 @@ pub use canonical_cycling::{
     SqliteCanonicalCyclingSessionStore, SqliteNormalisedCyclingSessionReader,
 };
 pub use canonical_gym::SqliteCanonicalGymSessionStore;
+pub use canonical_weigh_in::{SqliteCanonicalWeighInStore, SqliteNormalisedWeighInReader};
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
@@ -95,7 +97,7 @@ pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
 pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
 pub use spreadsheet_normalised::SqliteSpreadsheetStore;
-pub use weigh_in::{SpreadsheetFileAccountReader, SqliteWeighInHistory};
+pub use weigh_in::SpreadsheetFileAccountReader;
 pub use withings_landing::WithingsMeasurementLandingStore;
 pub use withings_normalised::{SqliteWeighInStore, WithingsWeighInAccountReader};
 

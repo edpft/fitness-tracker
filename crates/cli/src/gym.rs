@@ -154,8 +154,9 @@ pub async fn strength(
     }
 
     // The report reads the canonical layer, which is a derivation of what the
-    // loop above has just re-derived (#350).
+    // loop above has just re-derived (#350, #409).
     crate::canonicalise::gym(database).await?;
+    crate::canonicalise::body_weight(database).await?;
     println!();
 
     let store = Store::open(database).await?;

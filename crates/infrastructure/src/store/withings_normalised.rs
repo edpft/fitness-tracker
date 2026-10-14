@@ -158,6 +158,7 @@ impl NormalisedEntityStore for SqliteWeighInStore {
             .await
             .map_err(|error| store_error(&error))?;
 
+        super::canonical_weigh_in::clear(&mut tx).await?;
         for statement in [
             "DELETE FROM body_scan_part",
             "DELETE FROM body_scan_vascular",

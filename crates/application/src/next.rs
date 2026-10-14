@@ -23,6 +23,7 @@
 use std::future::Future;
 
 use domain::{
+    body::{LeftOut, WeighInCount},
     canonical::SessionCount,
     landing::{LandingStream, RecordCount},
     macrocycle::{Concurrent, Macrocycle},
@@ -35,15 +36,16 @@ use domain::{
 use jiff::civil::Date;
 
 use crate::{
-    CanonicalCyclingSessionStore, CanonicalGymSessionStore, ClassSource, CyclingMesocycleStore,
-    Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory, ExtractionError,
-    GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock, NormalisationError,
-    NormalisedCyclingSessionReader, NormalisedGymSessionReader, PlanStore, PrescribedWorkoutStore,
-    Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
+    CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory,
+    ExtractionError, GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock,
+    NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
+    NormalisedWeighInReader, PlanStore, PrescribedWorkoutStore, Prescription,
+    PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, RideDestination, RidesPlaced, RunLockError,
     RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutNormaliser,
     WorkoutPrescriber as _,
-    canonicalise::Canonicalised,
+    canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
@@ -146,6 +148,9 @@ pub enum Step {
     Normalising(LandingStream),
     /// Rebuilding a discipline's canonical layer from the normalised one.
     Canonicalising(Discipline),
+    /// Rebuilding the canonical weigh-ins (#409). Not a discipline: body
+    /// weight has a source and no session to prescribe.
+    CanonicalisingWeighIns,
     /// Keeping the local class catalogue current (#246).
     RefreshingClasses,
     /// Committing the next concurrent mesocycle (#222).
@@ -163,6 +168,13 @@ pub enum Found {
     Sessions(WorkoutCount),
     /// Canonical sessions the record now holds.
     Canonical(SessionCount),
+    /// Weigh-ins the derivation wrote.
+    WeighIns(WeighInCount),
+    /// Canonical weigh-ins the record now holds, and the weighings left out.
+    CanonicalWeighIns {
+        written: WeighInCount,
+        left_out: Vec<LeftOut>,
+    },
     Classes {
         /// Classes the source published since the last refresh.
         added: u64,
@@ -577,22 +589,31 @@ pub trait Canonicalising {
     ///
     /// [`StoreError`] if either layer cannot be read or written.
     fn cycling(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if either layer cannot be read or written.
+    fn weigh_ins(&self) -> impl Future<Output = Result<WeighInsCanonicalised, StoreError>> + Send;
 }
 
-/// Each discipline's normalised layer, and the canonical layer built from it.
-pub struct CanonicalPorts<GR, GC, CR, CC> {
+/// Each normalised layer, and the canonical layer built from it.
+pub struct CanonicalPorts<GR, GC, CR, CC, WR, WC> {
     pub normalised_gym: GR,
     pub canonical_gym: GC,
     pub normalised_cycling: CR,
     pub canonical_cycling: CC,
+    pub normalised_weigh_ins: WR,
+    pub canonical_weigh_ins: WC,
 }
 
-impl<GR, GC, CR, CC> Canonicalising for CanonicalPorts<GR, GC, CR, CC>
+impl<GR, GC, CR, CC, WR, WC> Canonicalising for CanonicalPorts<GR, GC, CR, CC, WR, WC>
 where
     GR: NormalisedGymSessionReader + Sync,
     GC: CanonicalGymSessionStore + Sync,
     CR: NormalisedCyclingSessionReader + Sync,
     CC: CanonicalCyclingSessionStore + Sync,
+    WR: NormalisedWeighInReader + Sync,
+    WC: CanonicalWeighInStore + Sync,
 {
     async fn gym(&self) -> Result<Canonicalised, StoreError> {
         crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym).await
@@ -602,13 +623,19 @@ where
         crate::canonicalise::cycling_sessions(&self.normalised_cycling, &self.canonical_cycling)
             .await
     }
+
+    async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
+        crate::canonicalise::weigh_ins(&self.normalised_weigh_ins, &self.canonical_weigh_ins).await
+    }
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L> {
+pub struct NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
     pub gym_records: Records<GW, GN>,
     pub cycling_records: Records<CW, CN>,
-    /// Each discipline's canonical layer, rebuilt once its record is collected.
+    /// Body weight, which no discipline collects (#409, #357).
+    pub weigh_in_records: Records<BW, BN>,
+    /// Each canonical layer, rebuilt once its record is collected.
     pub canonical: CL,
     pub classes: Result<K, NoAccess>,
     pub holidays: HC,
@@ -628,17 +655,19 @@ pub struct NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L> {
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L> {
-    ports: NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>,
+pub struct Next<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
+    ports: NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>,
 }
 
-impl<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>
-    Next<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>
+impl<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>
+    Next<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>
 where
     GW: Walks + Sync,
     GN: WorkoutNormaliser + Sync,
     CW: Walks + Sync,
     CN: WorkoutNormaliser + Sync,
+    BW: Walks + Sync,
+    BN: WorkoutNormaliser + Sync,
     CL: Canonicalising + Sync,
     K: ClassSource + Sync,
     HC: HolidayCalendar + Sync,
@@ -654,7 +683,9 @@ where
         clippy::type_complexity,
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
-    pub const fn new(ports: NextPorts<GW, GN, CW, CN, CL, K, HC, D, P, M, C, GY, CY, L>) -> Self {
+    pub const fn new(
+        ports: NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>,
+    ) -> Self {
         Self { ports }
     }
 
@@ -688,7 +719,7 @@ where
         let mut run = Vec::new();
 
         // 1. Every source, before anything is judged.
-        self.collect(&self.ports.gym_records, progress, &mut run)
+        self.collect(&self.ports.gym_records, Found::Sessions, progress, &mut run)
             .await?;
         // **Each canonical layer is rebuilt here, and for the gym that is the
         // whole of #361.** Deriving a stream deletes its discipline's layer, and
@@ -703,8 +734,13 @@ where
             step,
             Ok(Found::Canonical(canonicalised.written)),
         );
-        self.collect(&self.ports.cycling_records, progress, &mut run)
-            .await?;
+        self.collect(
+            &self.ports.cycling_records,
+            Found::Sessions,
+            progress,
+            &mut run,
+        )
+        .await?;
         let step = Step::Canonicalising(Discipline::Cycling);
         progress.started(&step);
         let canonicalised = self.ports.canonical.cycling().await?;
@@ -713,6 +749,23 @@ where
             &mut run,
             step,
             Ok(Found::Canonical(canonicalised.written)),
+        );
+        // **Body weight is collected with everything else** (#357), so a
+        // weighing this morning is in the record the run reports on.
+        let weigh_ins = |count: WorkoutCount| Found::WeighIns(WeighInCount::from(count.as_usize()));
+        self.collect(&self.ports.weigh_in_records, weigh_ins, progress, &mut run)
+            .await?;
+        let step = Step::CanonicalisingWeighIns;
+        progress.started(&step);
+        let canonicalised = self.ports.canonical.weigh_ins().await?;
+        finish(
+            progress,
+            &mut run,
+            step,
+            Ok(Found::CanonicalWeighIns {
+                written: canonicalised.written,
+                left_out: canonicalised.left_out,
+            }),
         );
         let (step, outcome) = self.refresh(progress).await;
         finish(progress, &mut run, step, outcome);
@@ -753,6 +806,7 @@ where
     async fn collect<W: Walks + Sync, N: WorkoutNormaliser + Sync>(
         &self,
         records: &Records<W, N>,
+        found: impl FnOnce(WorkoutCount) -> Found,
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
@@ -782,12 +836,7 @@ where
         let step = Step::Normalising(records.entry.clone());
         progress.started(&step);
         let derived = records.normaliser.normalise().await?;
-        finish(
-            progress,
-            run,
-            step,
-            Ok(Found::Sessions(derived.workouts_written)),
-        );
+        finish(progress, run, step, Ok(found(derived.workouts_written)));
         Ok(())
     }
 

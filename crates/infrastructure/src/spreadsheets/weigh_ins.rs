@@ -19,14 +19,14 @@
 
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
-    body::{Cell, CellRef, ManualWeighIn, SheetName},
+    body::{Cell, CellRef, Entry, ManualWeighIn, SheetName},
     landing::{FileProvenance, LandedRecord},
     measure::Kg,
     normalised::{OperatorZone, RefusalLocus, RefusalReason},
 };
 use jiff::civil::Date;
 
-use super::sheet::{Sheet, Value};
+use super::sheet::{self, Sheet, Value};
 use crate::scribe::Scribe;
 
 /// How a sheet lays its weigh-ins out.
@@ -157,9 +157,10 @@ pub(super) fn read_weigh_ins(
     sheets: &[Sheet],
     scribe: &mut Scribe,
 ) -> Vec<ManualWeighIn> {
+    let entry = Entry::Saved(sheet::last_saved(record.payload().as_bytes(), file));
     let mut weigh_ins = Vec::new();
     for sheet in sheets {
-        read_sheet(record, file, sheet, scribe, &mut weigh_ins);
+        read_sheet(record, file, sheet, entry, scribe, &mut weigh_ins);
     }
     weigh_ins
 }
@@ -169,6 +170,7 @@ fn read_sheet(
     record: &LandedRecord,
     file: &FileProvenance,
     sheet: &Sheet,
+    entry: Entry,
     scribe: &mut Scribe,
     weigh_ins: &mut Vec<ManualWeighIn>,
 ) {
@@ -205,6 +207,7 @@ fn read_sheet(
                         sheet.get(row, date),
                         sheet.get(row, mass),
                         place(row, mass),
+                        entry,
                         scribe,
                         weigh_ins,
                     );
@@ -223,6 +226,7 @@ fn read_sheet(
                         sheet.get(date_row, column),
                         sheet.get(mass_row, column),
                         place(mass_row, column),
+                        entry,
                         scribe,
                         weigh_ins,
                     );
@@ -238,6 +242,7 @@ fn weigh_in(
     date: &Value,
     mass: &Value,
     cell: Cell,
+    entry: Entry,
     scribe: &mut Scribe,
     weigh_ins: &mut Vec<ManualWeighIn>,
 ) {
@@ -268,7 +273,7 @@ fn weigh_in(
         }
     };
 
-    match ManualWeighIn::new(on, mass, cell) {
+    match ManualWeighIn::new(on, mass, cell, entry) {
         Ok(weigh_in) => weigh_ins.push(weigh_in),
         Err(error) => refuse(scribe, &at, "mass", &error.to_string()),
     }
