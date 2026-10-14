@@ -8,19 +8,22 @@
 use std::path::Path;
 
 use application::{
-    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor,
-    DiaryStore, ExerciseHistory, FtpHistory, GenerationParameterStore, MesocycleStore,
-    NormalisedCyclingSessionReader, NormalisedGymSessionReader, PerformedGymSessions,
-    PerformedSessionLog, PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore,
-    PrescriptionLifecycle, RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
+    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
+    CyclingDeliveryStore, DiaryAuthor, DiaryStore, ExerciseHistory, FtpHistory,
+    GenerationParameterStore, MesocycleStore, NormalisedCyclingSessionReader,
+    NormalisedGymSessionReader, NormalisedWeighInReader, PerformedGymSessions, PerformedSessionLog,
+    PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle,
+    RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqliteCyclingDeliveryStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
+    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqliteOperatorSettingsStore, SqlitePlanStore, SqlitePool,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteWeighInHistory, connect,
+    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore,
+    SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    connect,
 };
 
 /// The operator's store, opened.
@@ -143,10 +146,22 @@ impl Store {
         SqliteFtpHistory::new(self.pool.clone())
     }
 
-    /// Body weight, as it was measured.
+    /// Body weight, one weigh-in per weighing.
     #[must_use]
     pub fn weigh_ins(&self) -> impl WeighInHistory + Send + Sync + use<> {
-        SqliteWeighInHistory::new(self.pool.clone())
+        SqliteCanonicalWeighInStore::new(self.pool.clone())
+    }
+
+    /// Every weigh-in, however many sources recorded it.
+    #[must_use]
+    pub fn canonical_weigh_ins(&self) -> impl CanonicalWeighInStore + Send + Sync + use<> {
+        SqliteCanonicalWeighInStore::new(self.pool.clone())
+    }
+
+    /// Every weigh-in each source recorded, in our terms.
+    #[must_use]
+    pub fn normalised_weigh_ins(&self) -> impl NormalisedWeighInReader + Send + Sync + use<> {
+        SqliteNormalisedWeighInReader::new(self.pool.clone())
     }
 
     /// The zone the operator stated, if they stated one.

@@ -33,6 +33,7 @@ pub fn step(step: &Step) -> String {
         Step::Canonicalising(discipline) => {
             format!("Canonicalising {} sessions", discipline.as_str())
         }
+        Step::CanonicalisingWeighIns => "Canonicalising weigh-ins".to_owned(),
         // **The configurator knows which catalogue this build keeps**, as it
         // knows where rides are done.
         Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),
@@ -52,6 +53,14 @@ pub fn outcome(done: &Done) -> String {
         Found::Landed(records) => format!("{records} new"),
         Found::Sessions(sessions) => format!("{sessions} sessions"),
         Found::Canonical(sessions) => format!("{sessions} sessions"),
+        Found::WeighIns(weigh_ins) => format!("{weigh_ins} weigh-ins"),
+        Found::CanonicalWeighIns { written, left_out } => {
+            let mut said = format!("{written} weigh-ins");
+            for left_out in left_out {
+                let _ = write!(said, "; left out {left_out}");
+            }
+            said
+        }
         Found::Classes {
             added,
             outstanding,

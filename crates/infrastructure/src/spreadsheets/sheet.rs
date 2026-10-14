@@ -2,11 +2,12 @@
 //! the cells mean. Shared by the weigh-in and gym-session readers, which each
 //! recognise their own layouts in the same sheets.
 
-use std::io::Cursor;
+use std::io::{Cursor, Read as _};
 
 use calamine::{Data, Reader as _, open_workbook_auto_from_rs};
-use domain::landing::FileProvenance;
-use jiff::civil::Date;
+use domain::{body::LastSaved, landing::FileProvenance};
+use jiff::{Timestamp, civil::Date};
+use quick_xml::events::Event;
 
 /// One cell's content, as far as a reader needs to know.
 #[derive(Debug, Clone, PartialEq)]
@@ -156,4 +157,41 @@ pub fn csv(bytes: &[u8], file: &FileProvenance) -> Result<Vec<Sheet>, String> {
 /// because a float cast would truncate silently where this cannot.
 fn seconds_of_day(fraction: f64) -> Option<u64> {
     format!("{:.0}", fraction * 86_400.0).parse().ok()
+}
+
+/// When a copy was last saved: by its document's own record where it keeps
+/// one, and by the file system's date where it does not (#409).
+///
+/// **The document's record is `dcterms:modified` in `docProps/core.xml`**,
+/// which Excel writes on every save. A CSV has no such part, and four of the
+/// operator's workbooks leave it out, so for those the file system's date is
+/// all there is.
+pub fn last_saved(bytes: &[u8], file: &FileProvenance) -> LastSaved {
+    document_saved(bytes).map_or_else(
+        || LastSaved::ByTheFileSystem(file.modified_at().as_timestamp()),
+        LastSaved::ByTheDocument,
+    )
+}
+
+/// `dcterms:modified`, where the workbook records one.
+fn document_saved(bytes: &[u8]) -> Option<Timestamp> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let mut core = String::new();
+    archive
+        .by_name("docProps/core.xml")
+        .ok()?
+        .read_to_string(&mut core)
+        .ok()?;
+
+    let mut reader = quick_xml::Reader::from_str(&core);
+    let mut inside = false;
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(start) => inside = start.name().as_ref() == b"dcterms:modified",
+            Event::Text(text) if inside => return text.decode().ok()?.trim().parse().ok(),
+            Event::End(_) => inside = false,
+            Event::Eof => return None,
+            _ => {}
+        }
+    }
 }

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO canonical_weigh_in (\n                    on_day, measured_at_utc, zone, occurred_weigh_in, mass_grams, mass_weigh_in\n                )\n                VALUES (?, ?, ?, ?, ?, ?)\n                RETURNING id AS \"id!: i64\"\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3e268773ea6cacd348ccbc684861a786634829745a8a18928754c36f29901f64"
+}

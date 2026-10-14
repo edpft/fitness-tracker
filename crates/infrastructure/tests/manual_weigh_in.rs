@@ -166,7 +166,7 @@ fn a_file_that_is_not_a_spreadsheet_is_refused_as_such() {
 mod store {
     use application::{
         ExtractionRunLog as _, LandingStore as _, NormalisationSummary, WeighInHistory as _,
-        WorkoutNormaliser as _,
+        WorkoutNormaliser as _, canonicalise,
         normalise::{Normalisation, NormalisationPorts},
         ports::Clock,
     };
@@ -176,8 +176,8 @@ mod store {
     };
     use infrastructure::{
         SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-        SqliteExtractionRunLog, SqliteNormalisationRunLog, SqliteRefusalStore,
-        SqliteSpreadsheetStore, SqliteWeighInHistory, connect,
+        SqliteCanonicalWeighInStore, SqliteExtractionRunLog, SqliteNormalisationRunLog,
+        SqliteNormalisedWeighInReader, SqliteRefusalStore, SqliteSpreadsheetStore, connect,
     };
     use sqlx::SqlitePool;
 
@@ -259,7 +259,12 @@ mod store {
             )
             .execute(&pool)
             .await?;
+            let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
+            let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
+            canonicalise::weigh_ins(&normalised, &canonical).await?;
 
+            // **The canonical rows name the ones this deletes**, so a
+            // re-derivation that did not clear them first would fail here.
             let second = derive(&pool).await?;
             assert_eq!(second.workouts_written.as_usize(), 5);
             assert_eq!(
@@ -285,11 +290,24 @@ mod store {
                 "another source's weigh-in survives"
             );
 
-            let history = SqliteWeighInHistory::new(pool.clone()).weigh_ins().await?;
+            assert_eq!(
+                count(
+                    &pool,
+                    "SELECT COUNT(*) FROM manual_weigh_in WHERE last_saved_at_utc IS NOT NULL"
+                )
+                .await?,
+                5,
+                "every copy says when its workbook was last saved"
+            );
+
+            let done = canonicalise::weigh_ins(&normalised, &canonical).await?;
+            assert_eq!(done.read.as_usize(), 6);
+            assert!(done.left_out.is_empty());
+            let history = canonical.weigh_ins().await?;
             assert_eq!(
                 history.len(),
-                1,
-                "relative strength reads only weigh-ins with a moment"
+                6,
+                "relative strength reads every weighing, the spreadsheets' included"
             );
             Ok(())
         })

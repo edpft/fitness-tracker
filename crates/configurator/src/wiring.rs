@@ -850,58 +850,14 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
             stream: WithingsMeasurementLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let SourceAccess::OAuthClient {
-                base_url,
-                auth_base_url,
-                client,
-                token,
-                ..
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: WithingsMeasurementLandingStore::STREAM.to_owned(),
-                    wanted: "an application",
-                    given: "something else",
-                });
-            };
-
-            let registration =
-                WithingsClient::new(client.client_id, client.client_secret, client.redirect_uri);
-            let auth = WithingsAuth::new(
-                base_url.clone(),
-                auth_base_url,
-                registration.clone(),
-                TokenFile::new(token, registration.digest()),
-            );
-            let extraction = Extraction::new(ExtractionPorts {
-                source: WithingsMeasurements::new(base_url, auth),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-
-            let summary = extraction.extract().await?;
+            let summary = withings_walk(access, landing, resumption, runs, database)?
+                .extraction
+                .extract()
+                .await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
         Command::Normalise(zone) => {
-            let normalisation = Normalisation::new(
-                NormalisationPorts {
-                    raw: WithingsWeighInAccountReader::new(pool.clone())?,
-                    translator: WithingsWeighInTranslator,
-                    workouts: SqliteWeighInStore::new(pool.clone())?,
-                    refusals: SqliteRefusalStore::new(
-                        pool.clone(),
-                        WithingsMeasurementLandingStore::STREAM,
-                    )?,
-                    runs: SqliteNormalisationRunLog::new(pool),
-                    clock: SystemClock,
-                },
-                zone,
-            );
-
-            let summary = normalisation.normalise().await?;
+            let summary = withings_normalisation(pool, zone)?.normalise().await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -995,6 +951,108 @@ async fn hevy_normalisation(
         },
         zone,
     ))
+}
+
+/// Withings' measure groups, walked with the application's own credential.
+fn withings_walk(
+    access: SourceAccess,
+    landing: WithingsMeasurementLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
+    let SourceAccess::OAuthClient {
+        base_url,
+        auth_base_url,
+        client,
+        token,
+        ..
+    } = access
+    else {
+        return Err(WiringError::WrongCredential {
+            stream: WithingsMeasurementLandingStore::STREAM.to_owned(),
+            wanted: "an application",
+            given: "something else",
+        });
+    };
+
+    let registration =
+        WithingsClient::new(client.client_id, client.client_secret, client.redirect_uri);
+    let auth = WithingsAuth::new(
+        base_url.clone(),
+        auth_base_url,
+        registration.clone(),
+        TokenFile::new(token, registration.digest()),
+    );
+    Ok(application::next::Walk {
+        stream: landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: WithingsMeasurements::new(base_url, auth),
+            landing,
+            resumption,
+            runs,
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    })
+}
+
+/// Body Scan weigh-ins, derived from what raw holds.
+fn withings_normalisation(
+    pool: SqlitePool,
+    zone: OperatorZone,
+) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+    Ok(Normalisation::new(
+        NormalisationPorts {
+            raw: WithingsWeighInAccountReader::new(pool.clone())?,
+            translator: WithingsWeighInTranslator,
+            workouts: SqliteWeighInStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(
+                pool.clone(),
+                WithingsMeasurementLandingStore::STREAM,
+            )?,
+            runs: SqliteNormalisationRunLog::new(pool),
+            clock: SystemClock,
+        },
+        zone,
+    ))
+}
+
+/// Withings' weigh-ins as `next` collects them: one walk, then the derivation
+/// (#409, #357).
+///
+/// # Errors
+///
+/// [`WiringError`] if the store is unavailable. A credential that is absent or
+/// of the wrong kind is [`NoAccess`], which `next` reports and steps past.
+pub async fn withings_records(
+    access: Result<SourceAccess, NoAccess>,
+    database: &Path,
+    zone: OperatorZone,
+) -> Result<
+    Records<
+        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+        impl WorkoutNormaliser + Sync + use<>,
+    >,
+    WiringError,
+> {
+    let pool = connect(database).await?;
+    let entry = LandingStream::try_from(WithingsMeasurementLandingStore::STREAM)?;
+    let walks = match access {
+        Err(why) => Err(why),
+        Ok(access) => accessible(withings_walk(
+            access,
+            WithingsMeasurementLandingStore::new(pool.clone())?,
+            SqliteResumptionPointStore::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool.clone()),
+            database,
+        ))?,
+    };
+    Ok(Records {
+        entry,
+        walks,
+        normaliser: withings_normalisation(pool, zone)?,
+    })
 }
 
 /// Hevy's workouts as `next` collects them: one walk, then the derivation.

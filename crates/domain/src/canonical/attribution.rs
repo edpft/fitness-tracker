@@ -27,27 +27,35 @@ use super::session::NormalisedSessionId;
 /// normalised layer. Holding both would be a canonical entity that names what it
 /// stands on instead of merging it, which is what #297 did and what the operator
 /// rejected.
+///
+/// **Generic over what it names**, because not every normalised entity is a
+/// session: a weigh-in's mass names the normalised weigh-in it was taken from
+/// (#409).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Attributed<T> {
+pub struct Attributed<T, By = NormalisedSessionId> {
     value: T,
-    normalised_session: NormalisedSessionId,
+    taken_from: By,
 }
 
 impl<T> Attributed<T> {
-    pub const fn new(value: T, normalised_session: NormalisedSessionId) -> Self {
-        Self {
-            value,
-            normalised_session,
-        }
+    /// The normalised session this value was taken from.
+    pub const fn normalised_session(&self) -> NormalisedSessionId {
+        self.taken_from
+    }
+}
+
+impl<T, By: Copy> Attributed<T, By> {
+    pub const fn new(value: T, taken_from: By) -> Self {
+        Self { value, taken_from }
     }
 
     pub const fn value(&self) -> &T {
         &self.value
     }
 
-    /// The normalised session this value was taken from.
-    pub const fn normalised_session(&self) -> NormalisedSessionId {
-        self.normalised_session
+    /// The normalised entity this value was taken from.
+    pub const fn taken_from(&self) -> By {
+        self.taken_from
     }
 
     /// The value, given up, where a caller is past caring where it came from.
@@ -60,23 +68,23 @@ impl<T> Attributed<T> {
     /// The attribution travels with it, because a value computed from one
     /// normalised session's value is still that session's claim and nothing
     /// else's.
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Attributed<U> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Attributed<U, By> {
         Attributed {
             value: f(self.value),
-            normalised_session: self.normalised_session,
+            taken_from: self.taken_from,
         }
     }
 }
 
-impl<T: Copy> Attributed<T> {
+impl<T: Copy, By: Copy> Attributed<T, By> {
     /// The value where it is cheap to copy, which most of them are.
     pub const fn copied(&self) -> T {
         self.value
     }
 }
 
-impl<T: fmt::Display> fmt::Display for Attributed<T> {
+impl<T: fmt::Display, By: fmt::Display> fmt::Display for Attributed<T, By> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({})", self.value, self.normalised_session)
+        write!(f, "{} ({})", self.value, self.taken_from)
     }
 }

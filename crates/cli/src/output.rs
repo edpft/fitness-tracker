@@ -286,6 +286,25 @@ pub fn canonicalised(read: SessionCount, written: SessionCount) {
     println!("  canonical sessions       {written:>5}");
 }
 
+/// The canonical weigh-ins are being rebuilt.
+pub fn canonicalising_weigh_ins_started() {
+    println!("canonicalising weigh-ins …");
+}
+
+/// What canonicalising the weigh-ins read, wrote and left out.
+///
+/// **Every weighing left out is named**, because a gap is only visible if it is
+/// said (§ 37): the count alone would not say which days.
+pub fn weigh_ins_canonicalised(done: &application::canonicalise::WeighInsCanonicalised) {
+    println!("canonicalising succeeded");
+    println!("  normalised weigh-ins read {:>5}", done.read);
+    println!("  canonical weigh-ins       {:>5}", done.written);
+    println!("  weighings left out        {:>5}", done.left_out.len());
+    for left_out in &done.left_out {
+        println!("    {left_out}");
+    }
+}
+
 /// The numbers that must add up.
 ///
 /// `records read` equals `records composed` plus `records superseded` plus
@@ -1029,6 +1048,7 @@ pub fn step(step: &application::next::Step) -> String {
         Step::Canonicalising(discipline) => {
             format!("Canonicalising {} sessions", discipline.as_str())
         }
+        Step::CanonicalisingWeighIns => "Canonicalising weigh-ins".to_owned(),
         // **The driving adapter knows which catalogue this build keeps**, as it
         // knows where rides are done.
         Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),
@@ -1052,6 +1072,14 @@ pub fn outcome(done: &application::next::Done) -> String {
         Found::Landed(records) => format!("{records} new"),
         Found::Sessions(sessions) => format!("{sessions} sessions"),
         Found::Canonical(sessions) => format!("{sessions} sessions"),
+        Found::WeighIns(weigh_ins) => format!("{weigh_ins} weigh-ins"),
+        Found::CanonicalWeighIns { written, left_out } => {
+            let mut said = format!("{written} weigh-ins");
+            for left_out in left_out {
+                let _ = write!(said, "; left out {left_out}");
+            }
+            said
+        }
         Found::Classes {
             added,
             outstanding,

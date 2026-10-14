@@ -38,10 +38,18 @@ pub async fn next(
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
-    let report =
-        configurator::next::run(database, zone, credentials, now, skip, &Terminal::default())
-            .await
-            .map_err(refused)?;
+    // **Boxed, because the run is large**: it holds every source's walk, and a
+    // third (#409) took it past what a stack frame should carry.
+    let report = Box::pin(configurator::next::run(
+        database,
+        zone,
+        credentials,
+        now,
+        skip,
+        &Terminal::default(),
+    ))
+    .await
+    .map_err(refused)?;
     println!();
     output::plan_standing(&report.plan);
     println!();

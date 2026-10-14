@@ -21,6 +21,7 @@ use jiff::{
 };
 
 use domain::analytical::Weighed;
+use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, SessionCount};
 use domain::cycling::{
     CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
@@ -1226,13 +1227,49 @@ pub trait RiddenSessionLog {
 /// **A mass and a moment, not the whole weigh-in.** Relative strength needs
 /// nothing else, and rebuilding every part of a weigh-in to throw most of it
 /// away would be work with no reader.
+///
+/// **Canonical ones** (#409), so a day written into six spreadsheets is one
+/// weigh-in here and not six.
 pub trait WeighInHistory {
-    /// Every weigh-in the normalised layer holds, oldest first.
+    /// Every canonical weigh-in, oldest first.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn weigh_ins(&self) -> impl Future<Output = Result<Vec<Weighed>, StoreError>> + Send;
+}
+
+/// Every normalised weigh-in the store holds, whatever source recorded it
+/// (#409).
+///
+/// **One port over every source**, for the reason [`NormalisedGymSessionReader`]
+/// is one: matching reads across the sources by definition. What comes back is
+/// what the merge needs of each account — when, how much, and what it states
+/// about when it was entered — and not the entity.
+pub trait NormalisedWeighInReader {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<WeighInAccount>, StoreError>> + Send;
+}
+
+/// The canonical weigh-in layer (#409).
+pub trait CanonicalWeighInStore {
+    /// Replace the layer entirely, in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if a weigh-in names a
+    /// normalised one the store does not hold.
+    fn replace(
+        &self,
+        weigh_ins: Vec<CanonicalWeighIn>,
+    ) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn count(&self) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
 }
 
 /// The § 14 parameters, in force as one version.
