@@ -21,6 +21,7 @@
 
 pub mod body_weight;
 pub mod heart_rate;
+pub mod one_rep_max;
 
 use std::fmt;
 
