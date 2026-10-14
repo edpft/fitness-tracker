@@ -16,7 +16,7 @@ use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
-    extract::State,
+    extract::{Query, State},
     http::header,
     response::{
         IntoResponse,
@@ -150,16 +150,20 @@ async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     }
 }
 
-/// Every weigh-in as one series, read afresh from the store.
-async fn body_weight(State(runs): State<Arc<Runs>>) -> Markup {
+/// Body weight over a range, read afresh from the store.
+async fn body_weight(
+    State(runs): State<Arc<Runs>>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Markup {
+    let over = weight::Over::named(query.get("over").map(String::as_str));
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return weight::unreadable(&error.to_string()),
     };
-    let series = configurator::body_weight::series(&store).await;
+    let view = configurator::body_weight::view(&store, &runs.setting().zone).await;
     store.close().await;
-    match series {
-        Ok(series) => weight::page(&series),
+    match view {
+        Ok(view) => weight::page(&view, over),
         Err(error) => weight::unreadable(&error.to_string()),
     }
 }

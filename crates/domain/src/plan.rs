@@ -509,6 +509,25 @@ impl Plan {
         PlanWindow::new(self.name.clone(), self.span())
     }
 
+    /// The days of each mesocycle in it, oldest first.
+    #[must_use]
+    pub fn mesocycle_spans(&self) -> Vec<Span> {
+        let span = self.span();
+        let mut spans: Vec<Span> = Vec::new();
+        for monday in span
+            .start()
+            .series(jiff::Span::new().weeks(1))
+            .take_while(|monday| *monday < span.end())
+        {
+            if let Some(mesocycle) = self.mesocycle_on(monday)
+                && spans.last() != Some(&mesocycle.span())
+            {
+                spans.push(mesocycle.span());
+            }
+        }
+        spans
+    }
+
     /// The mesocycle running on a date, both disciplines' halves of it.
     ///
     /// `None` for a day neither programme covers: a gap, or outside the plan.
