@@ -102,7 +102,7 @@ fn record() -> Fallible<Vec<Sighting>> {
         )?,
         garmin(
             TICKR,
-            "Wahoo heart rate sensor",
+            "TICKR",
             Paired,
             &[HeartRate],
             &[HeartRate],
@@ -110,7 +110,7 @@ fn record() -> Fallible<Vec<Sighting>> {
         )?,
         garmin(
             TICKR,
-            "Wahoo heart rate sensor",
+            "TICKR",
             Paired,
             &[HeartRate],
             &[HeartRate],
@@ -262,7 +262,7 @@ fn a_watch_not_worn_that_day_is_no_candidate() {
 
     assert_eq!(
         named(&gapped.sent_by(Measurand::HeartRate, date(2024, 1, 15))),
-        Some("Wahoo heart rate sensor")
+        Some("TICKR")
     );
     assert_eq!(
         named(&gapped.sent_by(Measurand::HeartRate, date(2024, 8, 1))),

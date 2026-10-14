@@ -19,6 +19,8 @@
 //! figure from [`Rts`] and a figure from another formula are different series
 //! (§ 6), so a caller says which it used, and the report prints it.
 
+pub mod heart_rate;
+
 use std::fmt;
 
 use jiff::civil::Date;

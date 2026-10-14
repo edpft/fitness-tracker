@@ -298,20 +298,27 @@ const fn maker(identity: Identity) -> Option<&'static str> {
     }
 }
 
-/// What a recorder is called: its model, where the profile names one the
-/// operator used, or its maker's product number.
+/// A device's model, where the profile names one the operator used.
 ///
-/// Checked against Garmin's FIT SDK profile (`garminProduct`), 2026-10-13.
-fn recorder_name(identity: Identity) -> String {
-    let model = match (identity.manufacturer, identity.product) {
+/// Garmin's checked against its FIT SDK profile (`garminProduct`),
+/// 2026-10-13. The profile lists no Wahoo products: Wahoo's product 7 is the
+/// TICKR because every recording of it carries the TICKR's serial
+/// (operator, 2026-10-14).
+const fn model(identity: Identity) -> Option<&'static str> {
+    match (identity.manufacturer, identity.product) {
         (Some(1), Some(1018)) => Some("Forerunner 310XT"),
         (Some(1), Some(1482)) => Some("Forerunner 10"),
         (Some(1), Some(2700)) => Some("Vivoactive 3"),
         (Some(1), Some(3121)) => Some("Edge 530"),
         (Some(1), Some(4432)) => Some("Forerunner 165"),
+        (Some(32), Some(7)) => Some("TICKR"),
         _ => None,
-    };
-    match (model, maker(identity), identity.product) {
+    }
+}
+
+/// What a recorder is called: its model, or its maker's product number.
+fn recorder_name(identity: Identity) -> String {
+    match (model(identity), maker(identity), identity.product) {
         (Some(model), _, _) => model.to_owned(),
         (None, Some(maker), Some(product)) => format!("{maker} product {product}"),
         (None, Some(maker), None) => format!("{maker} device"),
@@ -319,9 +326,12 @@ fn recorder_name(identity: Identity) -> String {
     }
 }
 
-/// What a paired sensor is called: its maker, where stated, and what it
-/// measures.
+/// What a paired sensor is called: its model, or else its maker, where
+/// stated, and what it measures.
 fn paired_name(identity: Identity, measured: &BTreeSet<Measurand>) -> String {
+    if let Some(model) = model(identity) {
+        return model.to_owned();
+    }
     let kind = if measured.contains(&Measurand::HeartRate) {
         "heart rate sensor"
     } else if measured.contains(&Measurand::Power) {

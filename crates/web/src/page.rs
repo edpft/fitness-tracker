@@ -27,6 +27,7 @@ pub fn index(view: &View) -> Markup {
                         button type="submit" { "Run next" }
                     }
                     div #notice {}
+                    p { a href="/heart-rate" { "Heart rate per power zone" } }
                     div hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
                         (view.render())
                     }
@@ -44,7 +45,7 @@ pub fn notice(refused: Option<&str>) -> Markup {
 }
 
 /// Phone width first: one column, nothing wider than the screen.
-const STYLE: &str = "
+pub const STYLE: &str = "
 :root { color-scheme: light dark; --muted: #6b7280; --failed: #b91c1c; }
 @media (prefers-color-scheme: dark) { :root { --muted: #9ca3af; --failed: #f87171; } }
 body { margin: 0; font: 16px/1.45 system-ui, sans-serif; }

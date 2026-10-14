@@ -11,7 +11,8 @@
 
 use application::{
     CanonicalCyclingSessionStore as _, ExtractionRunLog as _, NormalisationSummary,
-    RefusalReporter as _, RiddenSessionLog as _, RiddenVenues as _, WorkoutNormaliser as _,
+    NormalisedCyclingSessionReader as _, PerformedCyclingSessions as _, RefusalReporter as _,
+    RiddenSessionLog as _, RiddenVenues as _, WorkoutNormaliser as _,
     canonicalise::{self, Canonicalised},
     normalise::{Normalisation, NormalisationPorts, Refusals},
 };
@@ -1286,6 +1287,57 @@ fn a_test_is_one_canonical_session_whose_fields_name_where_they_came_from() {
             .map(domain::cycling::RideVenue::reference)
             .collect();
         assert_eq!(classes.len(), 2, "both classes: {classes:?}");
+    });
+}
+
+/// **The canonical layer reads back as it was written**: what the analytical
+/// layer reads (#152) is the session canonicalising built, every field naming
+/// where it came from and every series in full.
+#[test]
+fn the_canonical_layer_reads_back_the_sessions_it_holds() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm-up", workout("warm-up", Kind::WarmUp, 100, 400)),
+                ("effort", workout("effort", Kind::Test, 400, 1600)),
+                ("ride-1", workout("ride-1", Kind::Main, 90_000, 92_700)),
+            ],
+            vec![
+                ("warm-up", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                (
+                    "effort",
+                    graph(
+                        &[1, 2, 3],
+                        &[180, 200, 210],
+                        Some((&[120, 140, 150], "0")),
+                        "8.0",
+                        "km",
+                    ),
+                ),
+                (
+                    "ride-1",
+                    graph(&[1, 2], &[140, 150], Some((&[110, 115], "3")), "20.0", "km"),
+                ),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+        derive(&pool).await.expect("a derivation");
+        canonicalise(&pool).await.expect("a canonical layer");
+
+        let built = domain::cycling::canonical_sessions(
+            SqliteNormalisedCyclingSessionReader::new(pool.clone())
+                .all()
+                .await
+                .expect("the normalised sessions"),
+        );
+        let read = SqliteCanonicalCyclingSessionStore::new(pool.clone())
+            .all()
+            .await
+            .expect("the canonical sessions");
+        assert_eq!(read.len(), 2, "a test and a ride");
+        assert_eq!(read, built);
     });
 }
 

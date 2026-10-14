@@ -6,6 +6,7 @@
 //! configurator, so this crate requests, renders and interacts, and names no
 //! adapter.
 
+mod chart;
 mod page;
 mod report;
 mod run;
@@ -109,6 +110,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     }));
     let app = Router::new()
         .route("/", get(index))
+        .route("/heart-rate", get(heart_rate))
         .route("/run", post(start))
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
@@ -129,6 +131,21 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
 
 async fn index(State(runs): State<Arc<Runs>>) -> Markup {
     page::index(&runs.view())
+}
+
+/// Every main ride's heart rate per power zone, read afresh from the store.
+async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
+    let setting = runs.setting();
+    let store = match configurator::store::Store::open(&setting.database).await {
+        Ok(store) => store,
+        Err(error) => return chart::unreadable(&error.to_string()),
+    };
+    let rides = configurator::heart_rate::rides(&store, &setting.zone).await;
+    store.close().await;
+    match rides {
+        Ok(rides) => chart::page(&rides),
+        Err(error) => chart::unreadable(&error.to_string()),
+    }
 }
 
 /// Start a run, answering with what the page should say about starting it:

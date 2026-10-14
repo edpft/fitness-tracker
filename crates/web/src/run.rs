@@ -96,6 +96,11 @@ impl Runs {
         self.view.subscribe()
     }
 
+    /// What the operator configured.
+    pub const fn setting(&self) -> &Setting {
+        &self.setting
+    }
+
     pub fn view(&self) -> View {
         self.view.borrow().clone()
     }
