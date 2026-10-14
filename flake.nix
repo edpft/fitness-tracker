@@ -264,6 +264,10 @@
         # drop-in on the machine, as the firewall rule admitting the phone
         # does. Without one `web` exits saying `--listen` is required, and
         # the restart delay keeps that from spinning.
+        #
+        # `always`, not `on-failure`: systemd counts SIGTERM as a clean exit,
+        # so a stray `kill` left the page down until someone noticed (#430).
+        # `systemctl --user stop` still stops it.
         webService = pkgs.writeTextFile {
           name = "fitness-web-service";
           destination = "/share/systemd/user/fitness-web.service";
@@ -273,7 +277,7 @@
 
             [Service]
             ExecStart=${lib.getExe web}
-            Restart=on-failure
+            Restart=always
             RestartSec=10
 
             [Install]
