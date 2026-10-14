@@ -13,6 +13,7 @@
 //! a driven adapter from quietly calling the application it is supposed to be
 //! driven by.
 
+pub mod body_weight;
 pub mod canonicalise;
 pub mod commit;
 pub mod compare;
