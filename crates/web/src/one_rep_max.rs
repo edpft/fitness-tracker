@@ -1,31 +1,30 @@
-//! Estimated 1RM as a trend, one planned macrocycle at a time, as a chart
-//! (#420).
+//! Estimated 1RM as a trend, from one test to the next, as a chart (#420).
 //!
-//! **Weeks into the macrocycle across, estimate up**, so each macrocycle's line
-//! starts at the left: as one improves on the last, the lines stack. The
-//! current macrocycle is drawn in colour and the earlier ones in grey.
+//! **Sessions since the test across, estimate up**, so each stretch starts at
+//! its test on the left and the stretches stack. The latest is drawn in colour
+//! and the earlier ones in grey.
 //!
-//! **A point per session, a line per macrocycle, and the band around it.** The
-//! band is how sure the line is; with few or noisy sessions it is wide, and
-//! nothing reads a verdict off it (the operator, 2026-10-14). Nothing joins two
-//! macrocycles, and a stretch with no session is empty (§ 37).
+//! **A test is a square with no band; an estimate is a point.** The line and
+//! its band run through the estimates only, and the projection is a whisker at
+//! the session the next test falls on: where the line puts it, and the range a
+//! single test could land in. Nothing reads a verdict off either (the
+//! operator, 2026-10-14).
 //!
-//! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
+//! **Server-rendered SVG** (§ 20), so the tooltip is each mark's `title`, and
 //! the table beneath is the same figures.
 
 use application::one_rep_max::View;
 use domain::{
-    analytical::one_rep_max::{CONFIDENCE, Line, Planned, Point, Reading},
+    analytical::one_rep_max::{CONFIDENCE, Line, Point, Projection, Reading, Stretch},
     gym::exercise::RepsExercise,
 };
-use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 const TITLE: &str = "Estimated 1RM";
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 360.0;
 const LEFT: f64 = 48.0;
-const RIGHT: f64 = 12.0;
+const RIGHT: f64 = 24.0;
 const TOP: f64 = 12.0;
 const FLOOR: f64 = 336.0;
 const RADIUS: f64 = 3.0;
@@ -47,11 +46,12 @@ pub fn page(view: &View) -> Markup {
                     h1 { (TITLE) }
                     p.legend {
                         "estimator: " (view.estimator)
-                        " · points: each session's highest estimate · squares: tested, beneath a failed attempt · line: least squares over the macrocycle · band: "
-                        (CONFIDENCE) " confidence"
+                        " · points: each session's highest estimate · squares: tests, beneath a failed attempt"
+                        " · line: least squares through the estimates, band " (CONFIDENCE)
+                        " · whisker: where the test could fall, " (CONFIDENCE)
                     }
-                    @for (lift, planned) in &view.lifts {
-                        (lift_section(*lift, planned))
+                    @for (lift, stretches) in &view.lifts {
+                        (lift_section(*lift, stretches))
                     }
                 }
             }
@@ -75,22 +75,27 @@ pub fn unreadable(error: &str) -> Markup {
     }
 }
 
-fn lift_section(lift: RepsExercise, planned: &[Planned]) -> Markup {
+fn lift_section(lift: RepsExercise, stretches: &[Stretch]) -> Markup {
     html! {
         h2 { (lift.as_str()) }
-        @if planned.is_empty() {
-            p { "No macrocycle has been planned." }
+        @if stretches.is_empty() {
+            p { "No test has been recorded." }
         } @else {
-            @for (index, each) in planned.iter().enumerate() {
-                p.reading.(class(index, planned.len())) { (reading(each)) }
+            @for (index, stretch) in stretches.iter().enumerate() {
+                div.(class(index, stretches.len())) {
+                    p.reading { (opening(stretch)) }
+                    @if let Some(reading) = prediction(stretch) {
+                        p.reading { (reading) }
+                    }
+                }
             }
-            (chart(lift, planned))
-            (table(planned))
+            (chart(lift, stretches))
+            (table(stretches))
         }
     }
 }
 
-/// The current macrocycle in colour, the earlier ones in grey.
+/// The latest stretch in colour, the earlier ones in grey.
 const fn class(index: usize, count: usize) -> &'static str {
     if index + 1 == count {
         "current"
@@ -99,49 +104,56 @@ const fn class(index: usize, count: usize) -> &'static str {
     }
 }
 
-/// A macrocycle's days, sessions and slope.
-fn reading(planned: &Planned) -> String {
-    let days = format!("{} to {}", planned.span.start(), last_day(planned));
-    let sessions = match planned.points.len() {
-        0 => "no session gave an estimate".to_owned(),
-        1 => "1 session".to_owned(),
-        count => format!("{count} sessions"),
+/// The test a stretch starts from, and how many estimates follow it.
+fn opening(stretch: &Stretch) -> String {
+    let estimates = match stretch.estimates.len() {
+        0 => "no estimate since".to_owned(),
+        1 => "1 estimate since".to_owned(),
+        count => format!("{count} estimates since"),
     };
-    let slope = match (&planned.line, planned.points.len()) {
-        (Some(line), _) => {
-            let (low, high) = line.per_week_interval();
-            format!(
-                " · {} kg a week ({CONFIDENCE}: {} to {})",
-                tenths(line.per_week()),
-                tenths(low),
-                tenths(high)
-            )
-        }
-        (None, 1 | 2) => " · a line needs at least 3".to_owned(),
-        (None, _) => String::new(),
+    let line = match (&stretch.line, stretch.estimates.len()) {
+        (None, 1 | 2) => " · a line needs at least 3",
+        _ => "",
     };
-    format!("{} · {days} · {sessions}{slope}", planned.name)
+    format!(
+        "test on {} · {} · {estimates}{line}",
+        stretch.test.on,
+        from(&stretch.test)
+    )
 }
 
-/// The last day a macrocycle's span occupies.
-fn last_day(planned: &Planned) -> Date {
-    planned
-        .span
-        .end()
-        .yesterday()
-        .unwrap_or_else(|_| planned.span.end())
+/// What the line predicts for the test that ends the stretch, and that test
+/// where it has been performed.
+fn prediction(stretch: &Stretch) -> Option<String> {
+    let projection = stretch.projection?;
+    let predicted = format!(
+        "predicted {} ({} – {})",
+        kg(projection.mass),
+        kg(projection.low),
+        kg(projection.high)
+    );
+    Some(match stretch.closed_by {
+        Some((_, test)) => format!(
+            "test on {}, session {}: {}kg; {predicted}",
+            projection.on, projection.session, test.estimate.one_rep_max
+        ),
+        None => format!(
+            "next test {}, session {}: {predicted}",
+            projection.on, projection.session
+        ),
+    })
 }
 
-/// Where a day into a macrocycle and a mass fall on the chart.
+/// Where a session since the test and a mass fall on the chart.
 struct Frame {
-    days: f64,
+    sessions: f64,
     low: f64,
     high: f64,
 }
 
 impl Frame {
-    fn x(&self, day: i32) -> f64 {
-        (WIDTH - LEFT - RIGHT).mul_add(f64::from(day) / self.days, LEFT)
+    fn x(&self, session: u32) -> f64 {
+        (WIDTH - LEFT - RIGHT).mul_add(f64::from(session) / self.sessions, LEFT)
     }
 
     fn y(&self, grams: f64) -> f64 {
@@ -150,84 +162,137 @@ impl Frame {
     }
 }
 
-fn chart(lift: RepsExercise, planned: &[Planned]) -> Markup {
-    let weeks = planned
-        .iter()
-        .map(|each| each.span.calendar_weeks())
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    let Some((low, high, step)) = mass_range(planned) else {
+/// The last session a stretch reaches: its projection, its closing test or its
+/// last estimate.
+fn reach(stretch: &Stretch) -> u32 {
+    let projected = stretch
+        .projection
+        .map_or(0, |projection| projection.session);
+    let closed = stretch.closed_by.map_or(0, |(session, _)| session);
+    let estimated = stretch.estimates.last().map_or(0, |(session, _)| *session);
+    projected.max(closed).max(estimated)
+}
+
+fn chart(lift: RepsExercise, stretches: &[Stretch]) -> Markup {
+    let sessions = stretches.iter().map(reach).max().unwrap_or(1).max(1);
+    let Some((low, high, step)) = mass_range(stretches) else {
         return html! {};
     };
     let frame = Frame {
-        days: f64::from(weeks) * 7.0,
+        sessions: f64::from(sessions),
         low,
         high,
     };
     html! {
         div.plot {
             svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-                aria-label=(format!("{} estimated 1RM by week into the macrocycle", lift.as_str())) {
+                aria-label=(format!("{} estimated 1RM by session since the test", lift.as_str())) {
                 @for kg in (0..).map(|n| f64::from(n).mul_add(step, low)).take_while(|kg| *kg <= high) {
                     line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(kg)) y2=(frame.y(kg)) {}
                     text.axis x=(LEFT - 6.0) y=(frame.y(kg) + 4.0) text-anchor="end" {
                         (format!("{:.0}", kg / 1_000.0)) "kg"
                     }
                 }
-                @for week in 0..weeks {
-                    @let day = i32::try_from(week * 7).unwrap_or(0);
-                    line.grid x1=(frame.x(day)) x2=(frame.x(day)) y1=(TOP) y2=(FLOOR) {}
-                    text.axis x=(frame.x(day) + 3.0) y=(FLOOR + 14.0) { "week " (week + 1) }
+                @for session in 0..=sessions {
+                    line.grid x1=(frame.x(session)) x2=(frame.x(session)) y1=(TOP) y2=(FLOOR) {}
+                    text.axis x=(frame.x(session)) y=(FLOOR + 14.0) text-anchor="middle" {
+                        @if session == 0 { "test" } @else { (session) }
+                    }
                 }
                 line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-                @for (index, each) in planned.iter().enumerate() {
-                    g.(class(index, planned.len())) { (marks(each, &frame)) }
+                @for (index, stretch) in stretches.iter().enumerate() {
+                    g.(class(index, stretches.len())) { (marks(stretch, &frame)) }
                 }
             }
         }
     }
 }
 
-/// A macrocycle's band, line and points.
-fn marks(planned: &Planned, frame: &Frame) -> Markup {
-    let start = planned.span.start();
+/// A stretch's band, line, projection and points.
+fn marks(stretch: &Stretch, frame: &Frame) -> Markup {
     html! {
-        @if let Some(line) = &planned.line {
+        @if let Some(line) = &stretch.line {
             polygon.band points=(band(line, frame)) {}
-            line.trend x1=(frame.x(line.first())) y1=(frame.y(line.at(line.first())))
-                x2=(frame.x(line.last())) y2=(frame.y(line.at(line.last()))) {
-                title { (planned.name) " · " (tenths(line.per_week())) " kg a week" }
+            line.trend x1=(frame.x(first(line))) y1=(frame.y(line.at(line.first())))
+                x2=(frame.x(last(line))) y2=(frame.y(line.at(line.last()))) {
+                title { (kg_signed(line.per_session())) " a session" }
+            }
+            @if let Some(projection) = &stretch.projection {
+                (whisker(line, projection, frame))
             }
         }
-        @for point in &planned.points {
-            @if let Some(day) = day_of(start, point.on) {
-                @let (x, y) = (frame.x(day), frame.y(grams(point)));
-                @let title = format!("{} · {}kg · {}", point.on, point.estimate.one_rep_max, from(point));
-                @match point.reading {
-                    Reading::Estimated => circle.point cx=(x) cy=(y) r=(RADIUS) { title { (title) } },
-                    Reading::Tested { .. } => rect.point.tested x=(RADIUS.mul_add(-1.5, x)) y=(RADIUS.mul_add(-1.5, y))
-                        width=(RADIUS * 3.0) height=(RADIUS * 3.0) { title { (title) } },
-                }
+        (test_mark(0, &stretch.test, frame))
+        @for (session, point) in &stretch.estimates {
+            circle.point cx=(frame.x(*session)) cy=(frame.y(grams(point))) r=(RADIUS) {
+                title { "session " (session) " · " (point.on) " · " (point.estimate.one_rep_max) "kg · " (from(point)) }
             }
+        }
+        @if let Some((session, test)) = &stretch.closed_by {
+            (test_mark(*session, test, frame))
         }
     }
 }
 
-/// The band as one polygon: along the top from the first session to the last,
+/// A test, as a square.
+fn test_mark(session: u32, test: &Point, frame: &Frame) -> Markup {
+    let (x, y) = (frame.x(session), frame.y(grams(test)));
+    html! {
+        rect.point x=(RADIUS.mul_add(-1.5, x)) y=(RADIUS.mul_add(-1.5, y))
+            width=(RADIUS * 3.0) height=(RADIUS * 3.0) {
+            title { (test.on) " · " (test.estimate.one_rep_max) "kg · " (from(test)) }
+        }
+    }
+}
+
+/// The line carried on to the test, and the range the test could fall in.
+fn whisker(line: &Line, projection: &Projection, frame: &Frame) -> Markup {
+    let x = frame.x(projection.session);
+    let title = format!(
+        "{}, session {}: predicted {} ({} – {})",
+        projection.on,
+        projection.session,
+        kg(projection.mass),
+        kg(projection.low),
+        kg(projection.high)
+    );
+    html! {
+        line.projected x1=(frame.x(last(line))) y1=(frame.y(line.at(line.last())))
+            x2=(x) y2=(frame.y(projection.mass)) {}
+        line.whisker x1=(x) x2=(x) y1=(frame.y(projection.low)) y2=(frame.y(projection.high)) {}
+        line.whisker x1=(x - 6.0) x2=(x + 6.0) y1=(frame.y(projection.low)) y2=(frame.y(projection.low)) {}
+        line.whisker x1=(x - 6.0) x2=(x + 6.0) y1=(frame.y(projection.high)) y2=(frame.y(projection.high)) {}
+        circle.predicted cx=(x) cy=(frame.y(projection.mass)) r=(RADIUS + 1.0) { title { (title) } }
+    }
+}
+
+fn first(line: &Line) -> u32 {
+    u32::try_from(line.first()).unwrap_or(0)
+}
+
+fn last(line: &Line) -> u32 {
+    u32::try_from(line.last()).unwrap_or(0)
+}
+
+/// The band as one polygon: along the top from the first estimate to the last,
 /// and back along the bottom.
 fn band(line: &Line, frame: &Frame) -> String {
-    let days: Vec<i32> = (line.first()..=line.last()).collect();
-    let upper = days
+    let sessions: Vec<i32> = (line.first()..=line.last()).collect();
+    let upper = sessions
         .iter()
-        .map(|day| (*day, line.at(*day) + line.band(*day)));
-    let lower = days
+        .map(|session| (*session, line.at(*session) + line.band(*session)));
+    let lower = sessions
         .iter()
         .rev()
-        .map(|day| (*day, line.at(*day) - line.band(*day)));
+        .map(|session| (*session, line.at(*session) - line.band(*session)));
     upper
         .chain(lower)
-        .map(|(day, grams)| format!("{:.1},{:.1}", frame.x(day), frame.y(grams)))
+        .map(|(session, grams)| {
+            format!(
+                "{:.1},{:.1}",
+                frame.x(u32::try_from(session).unwrap_or(0)),
+                frame.y(grams)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -235,25 +300,34 @@ fn band(line: &Line, frame: &Frame) -> String {
 /// The masses the axis runs between, in grams, and how often it is marked:
 /// every 5 kg across a wide spread, every 1 kg across a narrow one. `None` with
 /// nothing to draw.
-fn mass_range(planned: &[Planned]) -> Option<(f64, f64, f64)> {
-    let points = planned
+fn mass_range(stretches: &[Stretch]) -> Option<(f64, f64, f64)> {
+    let points = stretches.iter().flat_map(|stretch| {
+        std::iter::once(&stretch.test)
+            .chain(stretch.estimates.iter().map(|(_, point)| point))
+            .chain(stretch.closed_by.iter().map(|(_, point)| point))
+            .map(grams)
+    });
+    let bands = stretches
         .iter()
-        .flat_map(|each| each.points.iter().map(grams));
-    let bands = planned
-        .iter()
-        .filter_map(|each| each.line)
+        .filter_map(|stretch| stretch.line)
         .flat_map(|line| {
             [line.first(), line.last()]
                 .into_iter()
-                .flat_map(move |day| [line.at(day) - line.band(day), line.at(day) + line.band(day)])
+                .flat_map(move |at| [line.at(at) - line.band(at), line.at(at) + line.band(at)])
         });
-    let (min, max) = points
-        .chain(bands)
-        .fold(None, |range: Option<(f64, f64)>, grams| {
-            Some(range.map_or((grams, grams), |(min, max)| {
-                (min.min(grams), max.max(grams))
-            }))
-        })?;
+    let projections = stretches
+        .iter()
+        .filter_map(|stretch| stretch.projection)
+        .flat_map(|projection| [projection.low, projection.high]);
+    let (min, max) =
+        points
+            .chain(bands)
+            .chain(projections)
+            .fold(None, |range: Option<(f64, f64)>, grams| {
+                Some(range.map_or((grams, grams), |(min, max)| {
+                    (min.min(grams), max.max(grams))
+                }))
+            })?;
     let step = if max - min > 8_000.0 {
         5_000.0
     } else {
@@ -267,25 +341,36 @@ fn mass_range(planned: &[Planned]) -> Option<(f64, f64, f64)> {
 }
 
 /// The same figures as a table.
-fn table(planned: &[Planned]) -> Markup {
+fn table(stretches: &[Stretch]) -> Markup {
     html! {
         details {
             summary { "Every session as a table" }
             table.figures {
-                thead { tr { th { "macrocycle" } th { "date" } th { "kg" } th { "from" } } }
+                thead { tr { th { "test on" } th { "session" } th { "date" } th { "kg" } th { "from" } } }
                 tbody {
-                    @for each in planned {
-                        @for point in &each.points {
-                            tr {
-                                td { (each.name) }
-                                td { (point.on) }
-                                td { (point.estimate.one_rep_max) }
-                                td { (from(point)) }
-                            }
+                    @for stretch in stretches {
+                        (row(stretch, 0, &stretch.test))
+                        @for (session, point) in &stretch.estimates {
+                            (row(stretch, *session, point))
+                        }
+                        @if let Some((session, test)) = &stretch.closed_by {
+                            (row(stretch, *session, test))
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+fn row(stretch: &Stretch, session: u32, point: &Point) -> Markup {
+    html! {
+        tr {
+            td { (stretch.test.on) }
+            td { (session) }
+            td { (point.on) }
+            td { (point.estimate.one_rep_max) }
+            td { (from(point)) }
         }
     }
 }
@@ -301,22 +386,23 @@ fn from(point: &Point) -> String {
     }
 }
 
-fn day_of(start: Date, on: Date) -> Option<i32> {
-    start.until(on).ok().map(|span| span.get_days())
-}
-
 fn grams(point: &Point) -> f64 {
     u32::try_from(point.estimate.one_rep_max.as_grams()).map_or(f64::MAX, f64::from)
 }
 
+/// Grams as kilograms to the nearest 0.1.
+fn kg(grams: f64) -> String {
+    format!("{:.1}kg", (grams / 100.0).round() / 10.0)
+}
+
 /// Grams as kilograms to the nearest 0.1, with its sign.
-fn tenths(grams: f64) -> String {
+fn kg_signed(grams: f64) -> String {
     let kg = format!("{:.1}", (grams / 100.0).round() / 10.0);
     match kg.strip_prefix('-') {
-        Some("0.0") => "0.0".to_owned(),
-        Some(magnitude) => format!("−{magnitude}"),
-        None if kg == "0.0" => kg,
-        None => format!("+{kg}"),
+        Some("0.0") => "0.0kg".to_owned(),
+        Some(magnitude) => format!("−{magnitude}kg"),
+        None if kg == "0.0" => format!("{kg}kg"),
+        None => format!("+{kg}kg"),
     }
 }
 
@@ -334,13 +420,16 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 .grid { stroke: var(--grid); stroke-width: 1; }
 .baseline { stroke: var(--axis); stroke-width: 1; }
 .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-g.current { --series: var(--mark); }
-g.earlier { --series: var(--muted); }
+.current { --series: var(--mark); }
+.earlier { --series: var(--muted); }
 .point { fill: var(--series); }
 .trend { stroke: var(--series); stroke-width: 2; }
+.projected { stroke: var(--series); stroke-width: 2; stroke-dasharray: 4 4; }
+.whisker { stroke: var(--series); stroke-width: 1.5; }
+.predicted { fill: var(--surface); stroke: var(--series); stroke-width: 2; }
 .band { fill: var(--series); fill-opacity: 0.15; stroke: none; }
-p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-p.reading.earlier { color: var(--muted); }
+p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; margin: 0.25rem 0; }
+div.earlier p.reading { color: var(--muted); }
 p.legend { color: var(--muted); font-size: 0.9rem; }
 table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 table.figures th { text-align: left; padding-right: 0.75rem; }
@@ -353,92 +442,120 @@ mod tests {
     use domain::{
         analytical::{
             Estimate,
-            one_rep_max::{LIFTS, Point, Reading, by_macrocycle},
+            one_rep_max::{LIFTS, NextTest, Point, Reading, stretches},
         },
         gym::Rir,
         measure::{Kg, RepCount},
-        plan::{PlanName, PlanWindow, Span},
     };
     use jiff::civil::{Date, date};
 
     use super::page;
 
-    /// A session's estimate on each day, read off 80 kg × 3 @ 2.
-    fn points(days: &[(Date, u64)]) -> Option<Vec<Point>> {
-        days.iter()
-            .map(|(on, grams)| {
-                Some(Point {
-                    on: *on,
-                    estimate: Estimate {
-                        one_rep_max: Kg::from_grams(*grams),
-                        load: Kg::from_grams(80_000),
-                        reps: RepCount::new(3).ok()?,
-                        rir: Rir::Two,
-                    },
-                    reading: Reading::Estimated,
-                })
-            })
-            .collect()
+    fn estimate_on(on: Date, grams: u64) -> Option<Point> {
+        Some(Point {
+            on,
+            estimate: Estimate {
+                one_rep_max: Kg::from_grams(grams),
+                load: Kg::from_grams(80_000),
+                reps: RepCount::new(3).ok()?,
+                rir: Rir::Two,
+            },
+            reading: Reading::Estimated,
+        })
     }
 
-    fn view(points: &[Point], plans: &[PlanWindow]) -> View {
-        View {
-            estimator: "rts",
-            lifts: LIFTS
-                .into_iter()
-                .map(|lift| (lift, by_macrocycle(points, plans)))
-                .collect(),
-        }
+    fn test_on(on: Date, grams: u64) -> Option<Point> {
+        Some(Point {
+            on,
+            estimate: Estimate {
+                one_rep_max: Kg::from_grams(grams),
+                load: Kg::from_grams(grams),
+                reps: RepCount::new(1).ok()?,
+                rir: Rir::Zero,
+            },
+            reading: Reading::Tested {
+                failed: Kg::from_grams(95_000),
+            },
+        })
     }
 
-    fn autumn() -> Option<PlanWindow> {
-        Some(PlanWindow::new(
-            PlanName::try_from("2026-autumn".to_owned()).ok()?,
-            Span::new(date(2026, 9, 14), 6),
-        ))
-    }
-
-    #[test]
-    fn a_macrocycle_reads_its_slope_and_its_interval() {
-        let points = points(&[
-            (date(2026, 9, 7), 90_000),
+    /// The entry test and the five sessions since, as the store held them on
+    /// 2026-10-14.
+    fn autumn() -> Option<Vec<Point>> {
+        let mut points = vec![test_on(date(2026, 9, 25), 92_500)?];
+        for (on, grams) in [
             (date(2026, 9, 29), 90_625),
             (date(2026, 10, 2), 96_774),
             (date(2026, 10, 5), 94_117),
             (date(2026, 10, 9), 94_117),
             (date(2026, 10, 12), 94_594),
-        ])
-        .expect("points");
-        let page = page(&view(&points, &[autumn().expect("a plan")])).into_string();
+        ] {
+            points.push(estimate_on(on, grams)?);
+        }
+        Some(points)
+    }
+
+    fn view(points: &[Point], next: Option<NextTest>) -> View {
+        let days: Vec<Date> = points.iter().map(|point| point.on).collect();
+        View {
+            estimator: "rts",
+            lifts: LIFTS
+                .into_iter()
+                .map(|lift| (lift, stretches(points, &days, next)))
+                .collect(),
+        }
+    }
+
+    const NEXT: NextTest = NextTest {
+        on: date(2026, 10, 23),
+        sessions: 3,
+    };
+
+    #[test]
+    fn the_prediction_reads_as_a_mass_and_its_range() {
+        let page = page(&view(&autumn().expect("points"), Some(NEXT))).into_string();
         assert!(
             page.contains(
-                "2026-autumn · 2026-09-14 to 2026-10-25 · 5 sessions · +1.1 kg a week (95%: −4.0 to +6.1)"
+                "test on 2026-09-25 · tested: 92.5kg × 1, 95kg failed · 5 estimates since"
             ),
             "{page}"
         );
-        assert_eq!(page.matches(r#"class="point""#).count(), 5);
-        assert_eq!(page.matches(r#"class="band""#).count(), 1);
-        assert!(page.contains("front-squat-barbell"));
-        assert!(page.contains("2026-10-02 · 96.774kg · 80kg × 3 @ 2"));
-    }
-
-    #[test]
-    fn two_sessions_are_points_without_a_line() {
-        let points =
-            points(&[(date(2026, 9, 29), 90_625), (date(2026, 10, 2), 96_774)]).expect("points");
-        let page = page(&view(&points, &[autumn().expect("a plan")])).into_string();
         assert!(
-            page.contains("2 sessions · a line needs at least 3"),
+            page.contains("next test 2026-10-23, session 8: predicted 96.7kg (82.3kg – 111.1kg)"),
             "{page}"
         );
-        assert!(!page.contains(r#"class="band""#) && !page.contains(r#"class="trend""#));
+        assert_eq!(page.matches(r#"class="point""#).count(), 6);
+        assert_eq!(page.matches("<rect").count(), 1, "the test is a square");
+        assert_eq!(page.matches(r#"class="band""#).count(), 1);
     }
 
     #[test]
-    fn no_plan_is_said_rather_than_drawn() {
-        let points = points(&[(date(2026, 9, 29), 90_625)]).expect("points");
-        let page = page(&view(&points, &[])).into_string();
-        assert!(page.contains("No macrocycle has been planned."));
+    fn a_performed_test_reads_beside_its_prediction() {
+        let mut points = autumn().expect("points");
+        points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
+        let page = page(&view(&points, None)).into_string();
+        assert!(
+            page.contains("test on 2026-10-23, session 6: 97.5kg; predicted 95.6kg"),
+            "{page}"
+        );
+    }
+
+    #[test]
+    fn two_estimates_are_points_without_a_line() {
+        let points: Vec<Point> = autumn().expect("points").into_iter().take(3).collect();
+        let page = page(&view(&points, Some(NEXT))).into_string();
+        assert!(
+            page.contains("2 estimates since · a line needs at least 3"),
+            "{page}"
+        );
+        assert!(!page.contains(r#"class="band""#) && !page.contains("next test"));
+    }
+
+    #[test]
+    fn no_test_is_said_rather_than_drawn() {
+        let points = vec![estimate_on(date(2026, 9, 29), 90_625).expect("a point")];
+        let page = page(&view(&points, Some(NEXT))).into_string();
+        assert!(page.contains("No test has been recorded."));
         assert!(!page.contains("<svg"));
     }
 }
