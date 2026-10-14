@@ -3,7 +3,7 @@
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Direction, Trend, body_weight, trend, week_changes},
+        body_weight::{Direction, Range, Series, Trend, body_weight, changes, trend},
     },
     canonical::Occurred,
     measure::Kg,
@@ -150,59 +150,59 @@ fn no_weigh_ins_is_no_trend() {
     assert!(trend(&[]).is_empty());
 }
 
-/// A trend of `grams[i]` on day `i` from 2026-09-01, unbroken.
-fn trend_of(grams: &[u64]) -> Fallible<Vec<Vec<Trend>>> {
-    let mut run = Vec::new();
-    for (offset, &g) in (0_i64..).zip(grams) {
-        run.push(Trend {
-            on: date(2026, 9, 1).checked_add(jiff::Span::new().days(offset))?,
-            mass: Kg::from_grams(g),
-        });
-    }
-    Ok(vec![run])
-}
-
 #[test]
-fn within_an_eighth_of_a_kilo_over_the_week_is_maintaining() {
-    let week = |last: u64| -> Vec<u64> { [84_000; 7].into_iter().chain([last]).collect() };
-    let direction = |last: u64| {
-        let changes = week_changes(&trend_of(&week(last)).expect("a trend"));
-        let [change] = changes.as_slice() else {
-            panic!("one day has a week before it: {changes:?}");
-        };
+fn within_an_eighth_of_a_kilo_over_seven_days_is_maintaining() {
+    // A week at 84 kg from 2026-09-01, then single days at other masses: each
+    // day's trend is read against the trend 7 days before it.
+    let reading = |last: u64| {
+        let mut series = daily(date(2026, 9, 1), 7, 84_000, &[]).expect("a series");
+        series.extend(daily(date(2026, 9, 8), 7, last, &[]).expect("a series"));
+        let changes = changes(&trend(&series));
+        let change = changes
+            .iter()
+            .find(|change| change.on == date(2026, 9, 14))
+            .expect("a reading a week after a full week");
         (change.grams, change.direction)
     };
-    assert_eq!(direction(84_125), (125, Direction::Maintaining));
-    assert_eq!(direction(83_875), (-125, Direction::Maintaining));
-    assert_eq!(direction(84_126), (126, Direction::Rising));
+    assert_eq!(reading(84_125), (125, Direction::Maintaining));
+    assert_eq!(reading(83_875), (-125, Direction::Maintaining));
+    assert_eq!(reading(84_126), (126, Direction::Rising));
     assert_eq!(
-        direction(83_750),
+        reading(83_750),
         (-250, Direction::Falling),
         "the aim is falling, not maintaining"
     );
 }
 
 #[test]
-fn a_day_whose_week_before_has_no_trend_has_no_direction() {
-    let mut runs = trend_of(&[84_000; 3]).expect("a trend");
-    runs.extend(
-        trend_of(&[83_000; 20])
-            .expect("a trend")
-            .into_iter()
-            .map(|run| {
-                run.into_iter()
-                    .map(|day| Trend {
-                        on: day
-                            .on
-                            .checked_add(jiff::Span::new().days(10))
-                            .expect("a day"),
-                        ..day
-                    })
-                    .collect()
-            }),
+fn a_day_whose_trend_a_week_before_is_missing_has_no_reading() {
+    // Trend from 09-04; the first day with a trend 7 days before it is 09-11.
+    let series = daily(date(2026, 9, 1), 14, 84_000, &[]).expect("a series");
+    let changes = changes(&trend(&series));
+    assert_eq!(
+        changes.first().map(|change| change.on),
+        Some(date(2026, 9, 11))
     );
-    // Days 1–3 and 11–30: day 11 looks back to day 4, which has none.
-    let changes = week_changes(&runs);
-    assert_eq!(changes.first().map(|c| c.on), Some(date(2026, 9, 18)));
-    assert_eq!(changes.len(), 13);
+    assert_eq!(changes.len(), 4);
+}
+
+#[test]
+fn a_range_keeps_the_readings_of_its_own_days() {
+    let series = Series::of(daily(date(2026, 9, 1), 30, 84_000, &[]).expect("a series"));
+    let within = series.within(Range {
+        from: date(2026, 9, 14),
+        to: date(2026, 9, 20),
+    });
+    assert_eq!(within.weigh_ins.len(), 7);
+    assert_eq!(
+        within.changes.len(),
+        7,
+        "each day's reading is the trend's, not the range's"
+    );
+    assert_eq!(
+        within
+            .summary()
+            .map(|summary| (summary.average, summary.difference)),
+        Some((Kg::from_grams(84_000), Some(0)))
+    );
 }
