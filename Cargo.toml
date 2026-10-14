@@ -93,7 +93,7 @@ calamine = "0.36.1"
 # bytes as served — so reading one is normalisation's work and needs inflate.
 # Already in the tree under `calamine`, with the same feature: `deflate` is
 # read-side flate2 plus write-side zopfli, and nothing here writes an archive.
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.1", default-features = false, features = ["deflate"] }
 # A workbook records when it was last saved in `docProps/core.xml`, and § 10
 # orders copies of one entry by it (#409). Already in the tree under `calamine`.
 quick-xml = "0.41.0"
