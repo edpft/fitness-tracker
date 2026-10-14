@@ -14,7 +14,7 @@
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{METHOD, Series, Trend},
+        body_weight::{Direction, METHOD, Series, Trend, WeekChange},
     },
     canonical::Occurred,
     measure::Kg,
@@ -110,6 +110,9 @@ fn chart(series: &Series) -> Markup {
         high,
     };
     html! {
+        @if let Some(change) = series.changes.last() {
+            p.reading { (reading(change)) }
+        }
         p.legend { "points: each weigh-in · line: trend, the " (METHOD) }
         div.plot { (plot(series, &frame, last)) }
         (table(weigh_ins))
@@ -117,6 +120,11 @@ fn chart(series: &Series) -> Markup {
 }
 
 fn plot(series: &Series, frame: &Frame, last: Date) -> Markup {
+    let changes: std::collections::BTreeMap<Date, &WeekChange> = series
+        .changes
+        .iter()
+        .map(|change| (change.on, change))
+        .collect();
     html! {
         svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
             aria-label="Body weight, one point per weigh-in, and its trend as a line, by date" {
@@ -134,8 +142,15 @@ fn plot(series: &Series, frame: &Frame, last: Date) -> Markup {
             @for run in &series.trend {
                 polyline.trend points=(points(run, frame)) {}
                 @for day in run {
-                    circle.reading cx=(frame.x(day.on)) cy=(frame.y(grams(day.mass)))
-                        r=(RADIUS) { title { (day.on) " · trend " (to_tenth(day.mass)) "kg" } }
+                    circle.hover cx=(frame.x(day.on)) cy=(frame.y(grams(day.mass)))
+                        r=(RADIUS) {
+                        title {
+                            (day.on) " · trend " (to_tenth(day.mass)) "kg"
+                            @if let Some(change) = changes.get(&day.on) {
+                                " · " (week(change))
+                            }
+                        }
+                    }
                 }
             }
             @for weighed in &series.weigh_ins {
@@ -152,6 +167,36 @@ fn points(run: &[Trend], frame: &Frame) -> String {
         .map(|day| format!("{:.1},{:.1}", frame.x(day.on), frame.y(grams(day.mass))))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The latest week's change, and which way it went.
+fn reading(change: &WeekChange) -> String {
+    format!("week to {}: {}", change.on, week(change))
+}
+
+/// A week's change to the nearest 0.01 kg, and which way it went.
+///
+/// **Hundredths, not the trend's tenths**: the line between maintaining and
+/// not is 0.125 kg, and −0.14 kg shown as −0.1 would read as maintaining.
+fn week(change: &WeekChange) -> String {
+    let hundredths = (change.grams.abs() + 5) / 10;
+    let sign = if change.grams < 0 && hundredths > 0 {
+        "−"
+    } else if change.grams > 0 && hundredths > 0 {
+        "+"
+    } else {
+        ""
+    };
+    let direction = match change.direction {
+        Direction::Rising => "rising",
+        Direction::Maintaining => "maintaining",
+        Direction::Falling => "falling",
+    };
+    format!(
+        "{sign}{}.{:02} kg over the week, {direction}",
+        hundredths / 100,
+        hundredths % 100
+    )
 }
 
 /// A trend to the nearest 0.1 kg: it is a mean, and its grams are arithmetic.
@@ -223,7 +268,8 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .point { fill: var(--mark); }
 .trend { fill: none; stroke: var(--trend); stroke-width: 2; stroke-linejoin: round; }
-.reading { fill: transparent; }
+.hover { fill: transparent; }
+p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 p.legend { color: var(--muted); font-size: 0.9rem; }
 table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 table.figures th { text-align: left; padding-right: 0.75rem; }
@@ -285,6 +331,26 @@ mod tests {
         assert!(
             page.contains("2026-09-07 · trend 84kg"),
             "to the nearest 0.1 kg"
+        );
+    }
+
+    #[test]
+    fn the_latest_week_is_read_as_rising_falling_or_maintaining() {
+        let day = |d: i8, grams: u64| Weighed {
+            at: Occurred::On(date(2026, 9, d)),
+            mass: Kg::from_grams(grams),
+        };
+        // Daily from the 1st; the second week 250 g lighter than the first.
+        let series = Series::of(
+            (1..=7)
+                .map(|d| day(d, 84_000))
+                .chain((8..=14).map(|d| day(d, 83_750)))
+                .collect(),
+        );
+        let page = super::page(&series).into_string();
+        assert!(
+            page.contains("week to 2026-09-14: −0.25 kg over the week, falling"),
+            "{page}"
         );
     }
 }

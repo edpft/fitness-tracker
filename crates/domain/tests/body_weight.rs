@@ -3,7 +3,7 @@
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Trend, body_weight, trend},
+        body_weight::{Direction, Trend, body_weight, trend, week_changes},
     },
     canonical::Occurred,
     measure::Kg,
@@ -148,4 +148,61 @@ fn a_long_gap_has_no_trend_and_nothing_runs_past_the_last_weigh_in() {
 #[test]
 fn no_weigh_ins_is_no_trend() {
     assert!(trend(&[]).is_empty());
+}
+
+/// A trend of `grams[i]` on day `i` from 2026-09-01, unbroken.
+fn trend_of(grams: &[u64]) -> Fallible<Vec<Vec<Trend>>> {
+    let mut run = Vec::new();
+    for (offset, &g) in (0_i64..).zip(grams) {
+        run.push(Trend {
+            on: date(2026, 9, 1).checked_add(jiff::Span::new().days(offset))?,
+            mass: Kg::from_grams(g),
+        });
+    }
+    Ok(vec![run])
+}
+
+#[test]
+fn within_an_eighth_of_a_kilo_over_the_week_is_maintaining() {
+    let week = |last: u64| -> Vec<u64> { [84_000; 7].into_iter().chain([last]).collect() };
+    let direction = |last: u64| {
+        let changes = week_changes(&trend_of(&week(last)).expect("a trend"));
+        let [change] = changes.as_slice() else {
+            panic!("one day has a week before it: {changes:?}");
+        };
+        (change.grams, change.direction)
+    };
+    assert_eq!(direction(84_125), (125, Direction::Maintaining));
+    assert_eq!(direction(83_875), (-125, Direction::Maintaining));
+    assert_eq!(direction(84_126), (126, Direction::Rising));
+    assert_eq!(
+        direction(83_750),
+        (-250, Direction::Falling),
+        "the aim is falling, not maintaining"
+    );
+}
+
+#[test]
+fn a_day_whose_week_before_has_no_trend_has_no_direction() {
+    let mut runs = trend_of(&[84_000; 3]).expect("a trend");
+    runs.extend(
+        trend_of(&[83_000; 20])
+            .expect("a trend")
+            .into_iter()
+            .map(|run| {
+                run.into_iter()
+                    .map(|day| Trend {
+                        on: day
+                            .on
+                            .checked_add(jiff::Span::new().days(10))
+                            .expect("a day"),
+                        ..day
+                    })
+                    .collect()
+            }),
+    );
+    // Days 1–3 and 11–30: day 11 looks back to day 4, which has none.
+    let changes = week_changes(&runs);
+    assert_eq!(changes.first().map(|c| c.on), Some(date(2026, 9, 18)));
+    assert_eq!(changes.len(), 13);
 }

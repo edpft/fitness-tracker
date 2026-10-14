@@ -36,6 +36,27 @@ const WINDOW_DAYS: i64 = 7;
 /// How many of them must have a weigh-in for there to be a trend.
 const WEIGHED_DAYS: usize = 4;
 
+/// The most the trend may move in a week and still be maintaining: half the
+/// operator's aim of losing 0.25 kg a week (2026-10-14, #252).
+const MAINTAINING_GRAMS: i64 = 125;
+
+/// Which way the trend went over the week ending on a day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Rising,
+    Maintaining,
+    Falling,
+}
+
+/// The trend on a day against the trend 7 days earlier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeekChange {
+    pub on: Date,
+    /// Positive when the trend rose.
+    pub grams: i64,
+    pub direction: Direction,
+}
+
 /// Body weight's trend on one day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Trend {
@@ -43,20 +64,27 @@ pub struct Trend {
     pub mass: Kg,
 }
 
-/// Every weigh-in, and the trend through them.
+/// Every weigh-in, the trend through them, and which way it went.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Series {
     /// Oldest first, as [`body_weight`] orders them.
     pub weigh_ins: Vec<Weighed>,
     /// As [`trend`] gives it.
     pub trend: Vec<Vec<Trend>>,
+    /// As [`week_changes`] gives them.
+    pub changes: Vec<WeekChange>,
 }
 
 impl Series {
     pub fn of(weigh_ins: Vec<Weighed>) -> Self {
         let weigh_ins = body_weight(weigh_ins);
         let trend = trend(&weigh_ins);
-        Self { weigh_ins, trend }
+        let changes = week_changes(&trend);
+        Self {
+            weigh_ins,
+            trend,
+            changes,
+        }
     }
 }
 
@@ -118,4 +146,37 @@ fn mean_of_week(by_day: &BTreeMap<Date, Vec<u64>>, on: Date) -> Option<Kg> {
     let count = u64::try_from(grams.len()).ok()?;
     let total: u64 = grams.iter().sum();
     Some(Kg::from_grams((total + count / 2) / count))
+}
+
+/// Each day's change in the trend over the week, oldest first, wherever the
+/// day and the day 7 before it both have a trend.
+///
+/// **Within 0.125 kg either way is maintaining.**
+pub fn week_changes(trend: &[Vec<Trend>]) -> Vec<WeekChange> {
+    let by_day: BTreeMap<Date, Kg> = trend
+        .iter()
+        .flatten()
+        .map(|day| (day.on, day.mass))
+        .collect();
+    by_day
+        .iter()
+        .filter_map(|(&on, &mass)| {
+            let before = on.checked_sub(jiff::Span::new().days(WINDOW_DAYS)).ok()?;
+            let earlier = by_day.get(&before)?;
+            let grams =
+                i64::try_from(mass.as_grams()).ok()? - i64::try_from(earlier.as_grams()).ok()?;
+            let direction = if grams > MAINTAINING_GRAMS {
+                Direction::Rising
+            } else if grams < -MAINTAINING_GRAMS {
+                Direction::Falling
+            } else {
+                Direction::Maintaining
+            };
+            Some(WeekChange {
+                on,
+                grams,
+                direction,
+            })
+        })
+        .collect()
 }
