@@ -13,8 +13,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
-    CanonicalCyclingSessionStore, NormalisedCyclingSessionReader, RiddenSession, RiddenSessionLog,
-    RiddenVenues, StoreError,
+    CanonicalCyclingSessionStore, NormalisedCyclingSessionReader, PerformedCyclingSessions,
+    RiddenSession, RiddenSessionLog, RiddenVenues, StoreError,
 };
 use domain::{
     canonical::{Attributed, NormalisedSessionId, SessionCount},
@@ -184,6 +184,196 @@ impl CanonicalCyclingSessionStore for SqliteCanonicalCyclingSessionStore {
                 .map_err(|e| store_error(&e))?;
         Ok(SessionCount::from(count_from_storage(Some(count))?))
     }
+}
+
+/// One canonical ride's own row, each field beside the normalised session it
+/// was taken from.
+struct CanonicalRideRow {
+    session: i64,
+    kind: String,
+    position: i64,
+    started_at_utc: String,
+    zone: String,
+    started_at_from: i64,
+    venue_reference: String,
+    venue_called: String,
+    venue_from: i64,
+    duration_seconds: i64,
+    duration_from: i64,
+    distance_millimetres: i64,
+    distance_from: i64,
+    average_power_watts: i64,
+    average_power_from: i64,
+    samples_from: i64,
+    heart_rate_from: Option<i64>,
+    heart_rate_declared_missing_seconds: Option<i64>,
+    heart_rate_declared_missing_from: Option<i64>,
+}
+
+impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
+    async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        let rides = sqlx::query_as!(
+            CanonicalRideRow,
+            r#"
+            SELECT s.id AS "session!: i64", s.kind AS "kind!: String",
+                   r.position AS "position!: i64",
+                   r.started_at_utc AS "started_at_utc!: String", r.zone AS "zone!: String",
+                   r.started_at_normalised_session AS "started_at_from!: i64",
+                   r.venue_reference AS "venue_reference!: String",
+                   r.venue_called AS "venue_called!: String",
+                   r.venue_normalised_session AS "venue_from!: i64",
+                   r.duration_seconds AS "duration_seconds!: i64",
+                   r.duration_normalised_session AS "duration_from!: i64",
+                   r.distance_millimetres AS "distance_millimetres!: i64",
+                   r.distance_normalised_session AS "distance_from!: i64",
+                   r.average_power_watts AS "average_power_watts!: i64",
+                   r.average_power_normalised_session AS "average_power_from!: i64",
+                   r.samples_normalised_session AS "samples_from!: i64",
+                   r.heart_rate_normalised_session AS "heart_rate_from: i64",
+                   r.heart_rate_declared_missing_seconds AS "heart_rate_declared_missing_seconds: i64",
+                   r.heart_rate_declared_missing_normalised_session AS "heart_rate_declared_missing_from: i64"
+              FROM canonical_cycling_session AS s
+              JOIN canonical_bike_plus_ride AS r ON r.session = s.id
+             ORDER BY s.id, r.position
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+
+        // One row per ride, its series as a JSON array, as the normalised
+        // reader does and for its reason.
+        let samples = sqlx::query!(
+            r#"
+            SELECT session AS "session!: i64", ride_position AS "position!: i64",
+                   json_group_array(json_array(
+                       at_seconds, power_watts, cadence_rpm,
+                       resistance_percentage, speed_millimetres_per_hour
+                   )) AS "rows!: String"
+              FROM canonical_bike_plus_ride_sample
+             GROUP BY session, ride_position
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut series: BTreeMap<(i64, i64), Vec<RideSample>> = BTreeMap::new();
+        for row in samples {
+            let values: Vec<[i64; 5]> = serde_json::from_str(&row.rows).map_err(|e| corrupt(&e))?;
+            let mut ride = values
+                .into_iter()
+                .map(|[at, power, cadence, resistance, speed]| {
+                    sample(at, power, cadence, resistance, speed)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            ride.sort_by_key(|sample| sample.at);
+            series.insert((row.session, row.position), ride);
+        }
+
+        let heart_rate = sqlx::query!(
+            r#"
+            SELECT session AS "session!: i64", ride_position AS "position!: i64",
+                   json_group_array(json_array(at_seconds, beats_per_minute)) AS "rows!: String"
+              FROM canonical_bike_plus_ride_heart_rate
+             GROUP BY session, ride_position
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut hearts: BTreeMap<(i64, i64), Vec<HeartRateSample>> = BTreeMap::new();
+        for row in heart_rate {
+            let values: Vec<[i64; 2]> = serde_json::from_str(&row.rows).map_err(|e| corrupt(&e))?;
+            let mut beats = values
+                .into_iter()
+                .map(|[at, beats]| beat(at, beats))
+                .collect::<Result<Vec<_>, _>>()?;
+            beats.sort_by_key(|beat| beat.at);
+            hearts.insert((row.session, row.position), beats);
+        }
+
+        let mut grouped: Vec<(i64, String, Vec<CanonicalBikePlusRide>)> = Vec::new();
+        for row in rides {
+            let session = row.session;
+            let kind = row.kind.clone();
+            let ride = canonical_ride_of(row, &mut series, &mut hearts)?;
+            match grouped.last_mut() {
+                Some((last, _, rides)) if *last == session => rides.push(ride),
+                _ => grouped.push((session, kind, vec![ride])),
+            }
+        }
+        let mut sessions = grouped
+            .into_iter()
+            .map(|(_, kind, rides)| session_of(&kind, rides))
+            .collect::<Result<Vec<_>, _>>()?;
+        sessions.sort_by_key(|session| session.started_at().instant());
+        Ok(sessions)
+    }
+}
+
+fn canonical_ride_of(
+    row: CanonicalRideRow,
+    series: &mut BTreeMap<(i64, i64), Vec<RideSample>>,
+    hearts: &mut BTreeMap<(i64, i64), Vec<HeartRateSample>>,
+) -> Result<CanonicalBikePlusRide, StoreError> {
+    let key = (row.session, row.position);
+    let from = normalised_session_from_storage;
+    let instant: Timestamp = row.started_at_utc.parse().map_err(|e| corrupt(&e))?;
+    let zone = OperatorZone::try_from(row.zone).map_err(|e| corrupt(&e))?;
+    let venue = RideVenue::new(&row.venue_reference, &row.venue_called).map_err(|e| corrupt(&e))?;
+    let samples = NonEmpty::new(series.remove(&key).unwrap_or_default()).map_err(|_| {
+        StoreError::Corrupt {
+            detail: format!(
+                "the canonical ride at {} has no samples",
+                row.started_at_utc
+            ),
+        }
+    })?;
+    let heart_rate = match row.heart_rate_from {
+        None => None,
+        Some(id) => {
+            let beats = NonEmpty::new(hearts.remove(&key).unwrap_or_default()).map_err(|_| {
+                StoreError::Corrupt {
+                    detail: format!(
+                        "the canonical ride at {} names a heart rate it does not hold",
+                        row.started_at_utc
+                    ),
+                }
+            })?;
+            Some(Attributed::new(HeartRateSeries::new(beats), from(id)?))
+        }
+    };
+    let heart_rate_declared_missing = match (
+        row.heart_rate_declared_missing_seconds,
+        row.heart_rate_declared_missing_from,
+    ) {
+        (Some(seconds), Some(id)) => {
+            Some(Attributed::new(seconds_from_storage(seconds)?, from(id)?))
+        }
+        _ => None,
+    };
+
+    Ok(CanonicalBikePlusRide::new(CanonicalRideRecord {
+        started_at: Attributed::new(StartedAt::new(instant, zone), from(row.started_at_from)?),
+        at: Attributed::new(venue, from(row.venue_from)?),
+        duration: Attributed::new(
+            seconds_from_storage(row.duration_seconds)?,
+            from(row.duration_from)?,
+        ),
+        distance: Attributed::new(
+            Metres::from_millimetres(
+                u64::try_from(row.distance_millimetres).map_err(|e| corrupt(&e))?,
+            ),
+            from(row.distance_from)?,
+        ),
+        average_power: Attributed::new(
+            Watts::from_u32(u32::try_from(row.average_power_watts).map_err(|e| corrupt(&e))?),
+            from(row.average_power_from)?,
+        ),
+        samples: Attributed::new(samples, from(row.samples_from)?),
+        heart_rate,
+        heart_rate_declared_missing,
+    }))
 }
 
 /// When each session was ridden, and every class it was ridden to.

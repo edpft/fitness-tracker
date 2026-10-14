@@ -683,6 +683,17 @@ pub trait CanonicalCyclingSessionStore {
     fn count(&self) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 }
 
+/// Every cycling session the canonical layer holds, as the analytical layer
+/// reads it (§ II.4).
+pub trait PerformedCyclingSessions {
+    /// Every canonical cycling session, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+}
+
 /// What the domain would not accept, for one stream.
 pub trait RefusalStore {
     fn stream(&self) -> &LandingStream;

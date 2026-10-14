@@ -21,6 +21,7 @@ pub mod deliver;
 pub mod devices;
 pub mod error;
 pub mod extract;
+pub mod heart_rate;
 pub mod holding;
 pub mod microcycle;
 pub mod next;
@@ -46,14 +47,14 @@ pub use ports::{
     Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce, MesocycleStore,
     NextLock, NormalisationRunLog, NormalisationSummary, NormalisedCyclingSessionReader,
     NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, Occupant,
-    Performance, PerformedGymSessions, PerformedSessionLog, PerformedSetSummary, Placed,
-    PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
-    PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
-    PrescriptionLifecycle, PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead,
-    RawExtent, RecordedDevices, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
-    ReplyStatus, ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog,
-    RiddenVenues, RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount,
-    SourceEvent, StreamStatus, Translation, Translator, UnderivableReason, UnderivableSlot,
-    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber,
+    Performance, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog,
+    PerformedSetSummary, Placed, PlanAuthor, PlanStore, PrescribedWorkoutId,
+    PrescribedWorkoutStore, Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore,
+    PrescriptionDestination, PrescriptionLifecycle, PublishedCell, PublishedCycling,
+    PublishedProgrammes, PublishedRead, RawExtent, RecordedDevices, RefusalReport, RefusalReporter,
+    RefusalStore, RenderingDigest, ReplyStatus, ResumptionPointResetter, ResumptionPointStore,
+    RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced, RunLock,
+    RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation, Translator,
+    UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
+    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
 };

@@ -13,6 +13,7 @@ pub mod config;
 pub mod corrections;
 pub mod cycling;
 pub mod devices;
+pub mod heart_rate;
 pub mod holidays;
 pub mod next;
 pub mod paths;
