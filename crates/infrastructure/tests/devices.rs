@@ -292,7 +292,7 @@ fn every_device_is_one_entry() {
             vec![
                 "Forerunner 310XT",
                 // First used the same day, so ordered by identifier.
-                "Wahoo heart rate sensor",
+                "TICKR",
                 "Vivoactive 3",
                 "Edge 530",
                 "Forerunner 165",
@@ -337,7 +337,7 @@ fn a_watch_that_broadcasts_is_a_candidate() {
             .map(|device| device.name().as_str())
             .collect();
         named.sort_unstable();
-        assert_eq!(named, vec!["Vivoactive 3", "Wahoo heart rate sensor"]);
+        assert_eq!(named, vec!["TICKR", "Vivoactive 3"]);
         let edge = find(&devices, EDGE_530).expect("the Edge");
         assert!(edge.sends().is_empty());
     });
@@ -374,7 +374,7 @@ fn a_day_the_watch_was_not_worn_leaves_the_strap() {
         let InUse::One(device) = unworn.sent_by(Measurand::HeartRate, date(2024, 6, 30)) else {
             panic!("the strap alone was in use");
         };
-        assert_eq!(device.name().as_str(), "Wahoo heart rate sensor");
+        assert_eq!(device.name().as_str(), "TICKR");
 
         day(&pool, "2024-06-30", true)
             .await
