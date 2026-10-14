@@ -21,7 +21,7 @@ use maud::{DOCTYPE, Markup, html};
 
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 400.0;
-const LEFT: f64 = 60.0;
+const LEFT: f64 = 92.0;
 const RIGHT: f64 = 12.0;
 const TOP: f64 = 12.0;
 /// The plot's floor, above the two rows of rides that have no points.
@@ -131,7 +131,7 @@ pub fn chart(rides: &[RideHeartRate]) -> Markup {
     let series = series(rides);
     let zones = zones_held(rides);
     html! {
-        p.method { (METHOD) ". Each device is its own series." }
+        p.method { (METHOD) }
         div.plot { (plot(rides, &series, &frame)) }
         (legend(&zones, &series))
         (table(rides, &series, &zones))
@@ -151,8 +151,8 @@ fn plot(rides: &[RideHeartRate], series: &[Series<'_>], frame: &Frame) -> Markup
                 text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (year) }
             }
             line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-            text.axis x=(LEFT - 6.0) y=(NO_HEART_RATE_ROW + 4.0) text-anchor="end" { "no HR" }
-            text.axis x=(LEFT - 6.0) y=(NO_POINT_ROW + 4.0) text-anchor="end" { "no zone" }
+            text.axis x=(LEFT - 6.0) y=(NO_HEART_RATE_ROW + 4.0) text-anchor="end" { "no heart rate" }
+            text.axis x=(LEFT - 6.0) y=(NO_POINT_ROW + 4.0) text-anchor="end" { "no zones" }
             @for ride in rides {
                 @let x = frame.x(seconds(ride));
                 @match &ride.by_zone {
