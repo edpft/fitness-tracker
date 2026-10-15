@@ -58,6 +58,16 @@ impl FillChanges {
         })
     }
 
+    /// The last change for a slot's session of one intensity, whatever date
+    /// it holds from: what a slot is to hold, where it differs from what it
+    /// holds now.
+    #[must_use]
+    pub fn latest(&self, slot: SlotId, intensity: Relative) -> Option<&FillChange> {
+        self.0.iter().rev().find(|change| {
+            change.slot == slot && change.intensity.is_none_or(|changed| changed == intensity)
+        })
+    }
+
     /// The fills as they stood on a date. A slot changed for both
     /// intensities alike holds one exercise; otherwise each keeps its own.
     #[must_use]

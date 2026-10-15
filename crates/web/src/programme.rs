@@ -113,8 +113,13 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
                                 " " span.change { "(from " (change.from) ")" }
                             }
                         }
-                        @if let Exercise::Reps(current) = exercise {
-                            (form(slot, alternates.then_some(intensity), current, banded, today))
+                        // **The form starts from the latest change**, so a slot
+                        // changed from a later date offers what it is about to
+                        // hold rather than what it holds today.
+                        @let latest = found.changes.latest(slot, intensity);
+                        @let start = latest.map_or(exercise, |change| change.exercise);
+                        @if let Exercise::Reps(current) = start {
+                            (form(slot, alternates.then_some(intensity), current, latest.and_then(|change| change.assisted_by.as_ref()), banded, today))
                         }
                     }
                 }
@@ -134,6 +139,7 @@ fn form(
     slot: SlotId,
     intensity: Option<Relative>,
     current: RepsExercise,
+    assisted: Option<&Specific>,
     banded: &[&Specific],
     today: Date,
 ) -> Markup {
@@ -152,7 +158,7 @@ fn form(
                 select name="assisted" aria-label="Assisted by" {
                     option value="" { "unassisted" }
                     @for specific in banded {
-                        option value=(format!("{}\u{1f}{}", specific.maker, specific.model)) { "assisted by " (specific) }
+                        option value=(format!("{}\u{1f}{}", specific.maker, specific.model)) selected[assisted == Some(*specific)] { "assisted by " (specific) }
                     }
                 }
             }
