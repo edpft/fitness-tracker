@@ -136,9 +136,8 @@ impl HevyRoutines {
 
     /// Create every [`CUSTOM`] template the account does not already have.
     ///
-    /// Hevy answers a creation with a number rather than the id its templates
-    /// are named by elsewhere, so the id reported is the one the listing gives
-    /// the new template afterwards.
+    /// The id reported is the one the listing gives the new template
+    /// afterwards, since what Hevy answers a creation with is not that id.
     ///
     /// # Errors
     ///
@@ -165,8 +164,11 @@ impl HevyRoutines {
                     other_muscles: &from.secondary_muscle_groups,
                 },
             })?;
-            let _: serde_json::Value = self
-                .read(|client| {
+            // What Hevy answers a creation with is not read: its spec says
+            // an object with a numeric id, and in practice the body is not
+            // JSON at all (2026-10-15). The status says whether it was made.
+            let (status, _) = self
+                .ask(|client| {
                     client
                         .post(self.url(TEMPLATES_ENDPOINT))
                         .header("api-key", self.api_key())
@@ -174,6 +176,7 @@ impl HevyRoutines {
                         .body(body)
                 })
                 .await?;
+            Self::accepted(status)?;
             let id = self.custom_titled(custom.title).await?.ok_or_else(|| {
                 DeliveryError::Unreachable {
                     destination: "hevy".to_owned(),

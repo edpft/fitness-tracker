@@ -207,7 +207,7 @@ impl HevyRoutines {
     /// The three steps that fail before there is anything to keep, in one place
     /// so that the two acts below can say "either an answer or nothing" without
     /// spelling the alternatives out twice.
-    async fn ask(
+    pub(super) async fn ask(
         &self,
         build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
     ) -> Result<(StatusCode, DestinationReply), DeliveryError> {
@@ -280,7 +280,7 @@ impl HevyRoutines {
     ///
     /// Separate from [`Self::parse`] because an act whose answer carries nothing
     /// worth reading still has a status worth honouring.
-    fn accepted(status: StatusCode) -> Result<(), DeliveryError> {
+    pub(super) fn accepted(status: StatusCode) -> Result<(), DeliveryError> {
         if status.is_success() {
             return Ok(());
         }
