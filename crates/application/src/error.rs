@@ -122,7 +122,9 @@ pub enum FillChangeError {
     /// the mesocycle progresses: neither is a fill to swap.
     #[error("the {slot} slot cannot be changed partway through a mesocycle")]
     NotChangeable { slot: &'static str },
-    #[error("{specific} is not a range of bands known on {date}: declare it on the equipment page first")]
+    #[error(
+        "{specific} is not a range of bands known on {date}: declare it on the equipment page first"
+    )]
     UnknownSpecific {
         specific: String,
         date: jiff::civil::Date,

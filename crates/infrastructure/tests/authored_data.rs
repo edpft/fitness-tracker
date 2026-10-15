@@ -737,7 +737,11 @@ fn a_range_of_bands_round_trips() {
         )
     };
     let settings = BandRange::new(
-        vec![band("1/5 stars", 9), band("2/5 stars", 11), band("4/5 stars", 21)],
+        vec![
+            band("1/5 stars", 9),
+            band("2/5 stars", 11),
+            band("4/5 stars", 21),
+        ],
         vec![
             step(&["4/5 stars"]),
             step(&["1/5 stars", "2/5 stars"]),

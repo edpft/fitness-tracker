@@ -85,10 +85,7 @@ const SESSIONS: [(Relative, &str); 2] = [
 ];
 
 fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup {
-    let fills = found
-        .mesocycle
-        .clone()
-        .changed_on(&found.changes, today);
+    let fills = found.mesocycle.clone().changed_on(&found.changes, today);
     html! {
         @for slot in SlotId::ALL.iter().copied().filter(|slot| changeable(*slot)) {
             h3 { (slot.as_str()) }

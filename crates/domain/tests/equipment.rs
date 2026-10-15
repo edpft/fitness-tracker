@@ -4,8 +4,8 @@
 use domain::{
     gym::{
         equipment::{
-            Band, BandLadder, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId, InvalidSettings,
-            Maker, Model, Specific, Stack, Timeline,
+            Band, BandLadder, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId,
+            InvalidSettings, Maker, Model, Specific, Stack, Timeline,
         },
         exercise::Implement,
     },

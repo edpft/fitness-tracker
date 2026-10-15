@@ -9,11 +9,12 @@ use std::path::Path;
 
 use application::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
-    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, FillChangeStore, ExerciseHistory, FtpHistory,
-    GenerationParameterStore, MesocycleStore, NormalisedCyclingSessionReader,
-    NormalisedGymSessionReader, NormalisedWeighInReader, PerformedGymSessions, PerformedSessionLog,
-    PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle,
-    RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
+    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory,
+    FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
+    NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
+    PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
+    PrescriptionDeliveryStore, PrescriptionLifecycle, RiddenSessionLog, RiddenVenues, StoreError,
+    WeighInHistory,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{

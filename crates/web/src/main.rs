@@ -8,9 +8,9 @@
 
 mod chart;
 mod equipment;
-mod programme;
 mod one_rep_max;
 mod page;
+mod programme;
 mod report;
 mod run;
 mod weight;

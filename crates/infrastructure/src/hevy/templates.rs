@@ -60,8 +60,14 @@ pub const CUSTOM: &[CustomTemplate] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Made {
     /// It was already on the account.
-    Existing { title: &'static str, id: String },
-    Created { title: &'static str, id: String },
+    Existing {
+        title: &'static str,
+        id: String,
+    },
+    Created {
+        title: &'static str,
+        id: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]

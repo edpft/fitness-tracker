@@ -11,9 +11,7 @@ use domain::{
 };
 use jiff::{Timestamp, civil::Date};
 
-use crate::{
-    EquipmentStore, FillChangeError, FillChangeStore, MesocycleInForce, MesocycleStore,
-};
+use crate::{EquipmentStore, FillChangeError, FillChangeStore, MesocycleInForce, MesocycleStore};
 
 /// The use case, over the mesocycles, where changes are kept, and the
 /// equipment.

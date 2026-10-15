@@ -55,6 +55,13 @@ pub async fn change(
     assisted_by: Option<Specific>,
 ) -> Result<(), FillChangeError> {
     refilling(store, zone)
-        .change(slot, intensity, from, exercise, assisted_by, jiff::Timestamp::now())
+        .change(
+            slot,
+            intensity,
+            from,
+            exercise,
+            assisted_by,
+            jiff::Timestamp::now(),
+        )
         .await
 }

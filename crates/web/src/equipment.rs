@@ -452,7 +452,11 @@ fn statement(form: &Fields) -> Result<Statement, String> {
 /// The band rows, skipping any left wholly empty.
 fn bands(form: &Fields) -> Result<Vec<Band>, String> {
     let mut bands = Vec::new();
-    for (name, force) in form.all("band_name").into_iter().zip(form.all("band_force")) {
+    for (name, force) in form
+        .all("band_name")
+        .into_iter()
+        .zip(form.all("band_force"))
+    {
         match (name.is_empty(), force.is_empty()) {
             (true, true) => {}
             (false, false) => bands.push(Band {
@@ -472,9 +476,9 @@ fn band_steps(form: &Fields) -> Result<Vec<Combination>, String> {
     let mut current = Vec::new();
     for (key, value) in &form.0 {
         match key.as_str() {
-            "step_band" if !value.trim().is_empty() => current.push(
-                BandName::try_from(value.trim()).map_err(|error| error.to_string())?,
-            ),
+            "step_band" if !value.trim().is_empty() => {
+                current.push(BandName::try_from(value.trim()).map_err(|error| error.to_string())?)
+            }
             "step_end" => {
                 if let Ok(bands) = NonEmpty::new(std::mem::take(&mut current)) {
                     steps.push(Combination::new(bands));

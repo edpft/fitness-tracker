@@ -56,8 +56,8 @@ pub use authored::{Authored, AuthoringError};
 // holds that name at the crate root, and the two are different things — a group
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
-pub use change::{FillChange, FillChanges};
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
+pub use change::{FillChange, FillChanges};
 pub use delivery::{
     DeliveryReference, DestinationName, DestinationReply, InvalidDelivery, PrescriptionState,
     RenderingDigest, ReplyStatus, SessionOrdinal, WrongRenderingWidth,

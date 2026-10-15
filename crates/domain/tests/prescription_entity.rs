@@ -97,7 +97,11 @@ fn reps_exercise() -> impl Strategy<Value = PrescribedExercise> {
         .prop_filter_map("one or more sets is a NonEmpty", |(exercise, sets)| {
             NonEmpty::new(sets)
                 .ok()
-                .map(|sets| PrescribedExercise::ForReps { exercise, sets, assisted: None  })
+                .map(|sets| PrescribedExercise::ForReps {
+                    exercise,
+                    sets,
+                    assisted: None,
+                })
         })
 }
 
@@ -207,7 +211,11 @@ fn a_superset_may_fill_one_slot_twice() {
         )]) else {
             panic!("one set was built")
         };
-        PrescribedExercise::ForReps { exercise, sets, assisted: None  }
+        PrescribedExercise::ForReps {
+            exercise,
+            sets,
+            assisted: None,
+        }
     };
 
     let paired_into_one_slot = PrescribedSuperset {

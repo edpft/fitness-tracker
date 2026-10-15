@@ -366,7 +366,12 @@ impl HevySessionTranslator {
             return Ok(None);
         }
 
-        Ok(Self::sets(entry, mapped, scribe, &Corrections { overlay, record }))
+        Ok(Self::sets(
+            entry,
+            mapped,
+            scribe,
+            &Corrections { overlay, record },
+        ))
     }
 
     /// The entry's sets, in the measure its exercise is counted in.

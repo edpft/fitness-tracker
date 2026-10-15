@@ -204,7 +204,11 @@ pub async fn templates(
         .await
         .map_err(|error| Failure::message(error.to_string(), crate::exit::SOURCE))?;
     for template in made {
-        let what = if template.created { "created" } else { "already there" };
+        let what = if template.created {
+            "created"
+        } else {
+            "already there"
+        };
         println!("{}: {} ({what})", template.title, template.id);
     }
     Ok(())

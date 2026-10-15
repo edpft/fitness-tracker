@@ -82,9 +82,7 @@ async fn read_band_ranges(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Band>>,
 }
 
 /// Every range's declared steps, by fact, in order.
-async fn read_band_steps(
-    pool: &SqlitePool,
-) -> Result<BTreeMap<i64, Vec<Combination>>, StoreError> {
+async fn read_band_steps(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Combination>>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT fact AS "fact!: i64", step AS "step!: i64", band AS "band!: String"
@@ -200,7 +198,11 @@ pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, Stor
                         value,
                     });
             }
-            other => return Err(corrupt(&format!("{other:?} is not a category of equipment"))),
+            other => {
+                return Err(corrupt(&format!(
+                    "{other:?} is not a category of equipment"
+                )));
+            }
         }
     }
 
@@ -217,7 +219,9 @@ fn specific_of(maker: Option<String>, model: Option<String>) -> Result<Specific,
             maker: Maker::try_from(maker).map_err(|error| corrupt(&error))?,
             model: Model::try_from(model).map_err(|error| corrupt(&error))?,
         }),
-        _ => Err(corrupt(&"a machine or a range of bands with no maker and model")),
+        _ => Err(corrupt(
+            &"a machine or a range of bands with no maker and model",
+        )),
     }
 }
 
@@ -261,9 +265,8 @@ async fn write_bands(
     bands: &NonEmpty<Band>,
     steps: &NonEmpty<Combination>,
 ) -> Result<(), StoreError> {
-    let index = |at: usize| {
-        i64::try_from(at).map_err(|_| corrupt(&"more bands than the store can hold"))
-    };
+    let index =
+        |at: usize| i64::try_from(at).map_err(|_| corrupt(&"more bands than the store can hold"));
     for (position, band) in bands.iter().enumerate() {
         let position = index(position)?;
         let name = band.name.as_str();
