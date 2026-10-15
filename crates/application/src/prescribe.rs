@@ -2385,7 +2385,110 @@ mod progression_tests {
     use jiff::civil::Date;
 
     use super::{Consulted, programming};
-    use super::{Performance, PerformedSetSummary, progressed_load};
+    use super::{Performance, PerformedSetSummary, banded_load, progressed_load};
+
+    /// The operator's Supaflex chart of 2026-10-15, at each band's force at
+    /// twice its length.
+    fn supaflex() -> Result<domain::gym::equipment::BandLadder, Box<dyn std::error::Error>> {
+        use domain::gym::equipment::{
+            Band, BandLadder, BandName, Combination, Maker, Model, Settings, Specific,
+        };
+        let band = |name: &str, kg: u64| -> Result<Band, Box<dyn std::error::Error>> {
+            Ok(Band {
+                name: BandName::try_from(name)?,
+                at_twice_length: Kg::from_grams(kg * 1_000),
+            })
+        };
+        let step = |bands: &[&str]| -> Result<Combination, Box<dyn std::error::Error>> {
+            let names = bands
+                .iter()
+                .map(|band| BandName::try_from(*band))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Combination::new(
+                domain::sequence::NonEmpty::new(names).map_err(|_| "no bands")?,
+            ))
+        };
+        let settings = Settings::bands(
+            vec![
+                band("1/5 stars", 9)?,
+                band("2/5 stars", 11)?,
+                band("3/5 stars", 13)?,
+                band("4/5 stars", 21)?,
+            ],
+            vec![
+                step(&["4/5 stars"])?,
+                step(&["1/5 stars", "2/5 stars"])?,
+                step(&["1/5 stars", "1/5 stars"])?,
+                step(&["3/5 stars"])?,
+                step(&["2/5 stars"])?,
+                step(&["1/5 stars"])?,
+            ],
+        )?;
+        let specific = Specific {
+            maker: Maker::try_from("Physical")?,
+            model: Model::try_from("Supaflex")?,
+        };
+        BandLadder::of(&specific, &settings).ok_or_else(|| "bands".into())
+    }
+
+    fn assisted(kg: i64) -> Load {
+        Load::relative(SignedKg::from_grams(-kg * 1_000))
+    }
+
+    /// 2026-10-12's dips, re-issued on the bands: `-15, -7, -7` is not three
+    /// sixes at `-7`, and `-7` is nearest the 1/5 band.
+    #[test]
+    fn a_banded_slot_re_issues_the_band_nearest_its_last_load() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(15), 6).expect("a set"),
+            set(assisted(7), 6).expect("a set"),
+            set(assisted(7), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, assisted(9));
+        assert_eq!(
+            setting.map(|setting| setting.to_string()).as_deref(),
+            Some("Physical Supaflex 1/5 stars")
+        );
+    }
+
+    /// Three sixes on the 4/5 band step to the next on the chart.
+    #[test]
+    fn a_banded_slot_topped_steps_down_the_chart() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(21), 6).expect("a set"),
+            set(assisted(21), 6).expect("a set"),
+            set(assisted(21), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, assisted(20));
+        assert_eq!(
+            setting.map(|setting| setting.to_string()).as_deref(),
+            Some("Physical Supaflex 1/5 stars + 2/5 stars")
+        );
+    }
+
+    /// Past the last band is no band at all.
+    #[test]
+    fn the_last_band_topped_is_bodyweight() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(9), 6).expect("a set"),
+            set(assisted(9), 6).expect("a set"),
+            set(assisted(9), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, Load::relative(SignedKg::ZERO));
+        assert!(setting.is_none());
+    }
 
     /// One completed set. Returns `Result`: the test exemptions do not reach a
     /// helper defined beside a `#[test]`.

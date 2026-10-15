@@ -177,12 +177,13 @@ fn every_exercise_key_is_distinct_and_reversible() {
 
     assert_eq!(
         seen.len(),
-        186,
+        187,
         "the vocabulary this build has needed so far: 136, 14 from the spreadsheets (#274), \
          the suitcase carry from `CT 2017`'s earlier copies (#280), 25 from Beyond The \
          White Board (#285), the triceps pushdown and triceps dip the record needed \
          and no source could name (#300), and eight more the operator named on 2026-09-29 so \
-         the watch's own terms had somewhere to land (#305)"
+         the watch's own terms had somewhere to land (#305), and the lying overhead triceps \
+         extension on the EZ bar, logged as skullcrushers (#454)"
     );
 }
 
