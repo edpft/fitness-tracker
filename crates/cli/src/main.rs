@@ -253,6 +253,16 @@ fn next_command() -> ClapCommand {
                      window closes, and say why. That session reads skipped, \
                      and the one after it is delivered",
         ))
+        .arg(
+            Arg::new("if-closed")
+                .long("if-closed")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("skip")
+                .help(
+                    "Run only if a session's window has closed since its \
+                     discipline was last collected. What the timer runs",
+                ),
+        )
 }
 
 /// The daily loop, under the discipline it belongs to.
@@ -1066,6 +1076,7 @@ async fn next_command_run(
         sub.get_one::<String>("date").map(String::as_str),
         sub.get_one::<String>("part").map(String::as_str),
         sub.get_one::<String>("skip").map(String::as_str),
+        sub.get_flag("if-closed"),
         credentials,
     )
     .await

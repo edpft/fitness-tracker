@@ -9,17 +9,18 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use application::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
-    ClassesListed, ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar,
-    NextLock, NormalisationError, NormalisationSummary, NormalisedCyclingSessionReader,
-    NormalisedGymSessionReader, NormalisedWeighInReader, PlanStore, PrescriptionError,
-    RunLockError, RunSummary, SourceError, StoreError, WorkoutNormaliser,
+    ClassesListed, ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, ExtractionRunLog,
+    HolidayCalendar, NextLock, NormalisationError, NormalisationSummary,
+    NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader, PlanStore,
+    PrescriptionError, RunLockError, RunSummary, SourceError, StoreError, WorkoutNormaliser,
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
         CanonicalPorts, CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed,
         GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, Prescribed,
-        Progress, Records, SkipRefused, StandingReader, Step, StepFailure, Walks, WhatIsNext,
+        Progress, Records, SkipRefused, StandingReader, Step, StepFailure, Uncollected, Walks,
+        WhatIsNext, uncollected,
     },
     reschedule::Reschedule,
 };
@@ -28,7 +29,9 @@ use domain::{
     canonical::SessionCount,
     cycling::{CanonicalCyclingSession, CyclingMesocycle},
     gym::{CanonicalGymSession, NormalisedGymSession},
-    landing::{LandingStream, RecordCount, RunId},
+    landing::{
+        EventCount, ExtractionRun, FetchedAt, LandingStream, RecordCount, RunId, RunOutcome,
+    },
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
     plan::{Plan, PlanId, PlanName, PlanWindow},
     planner::SessionState,
@@ -784,4 +787,116 @@ fn a_run_while_another_is_going_is_refused_before_anything_runs() {
 
     assert_eq!(refused.err(), Some(NextError::AlreadyRunning));
     assert!(heard.events().is_empty());
+}
+
+/// When each stream last succeeded, as the run log would say.
+struct Collected(Vec<(LandingStream, &'static str)>);
+
+impl ExtractionRunLog for Collected {
+    async fn begin(&self, _stream: &LandingStream, _at: FetchedAt) -> Result<RunId, StoreError> {
+        Ok(RunId::from(1))
+    }
+
+    async fn finish(&self, _run: RunId, _outcome: RunOutcome) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn latest_success(
+        &self,
+        stream: &LandingStream,
+    ) -> Result<Option<ExtractionRun>, StoreError> {
+        let Some((_, at)) = self.0.iter().find(|(collected, _)| collected == stream) else {
+            return Ok(None);
+        };
+        let at = FetchedAt::try_from(*at).map_err(|error| StoreError::Corrupt {
+            detail: error.to_string(),
+        })?;
+        Ok(Some(ExtractionRun::new(
+            RunId::from(1),
+            stream.clone(),
+            at,
+            RunOutcome::Succeeded {
+                finished_at: at,
+                events_seen: EventCount::from(0),
+                records_landed: RecordCount::from(0),
+            },
+        )))
+    }
+}
+
+/// **#434: a window that closed after its discipline was last collected is
+/// what a scheduled run is for.** Monday evening's gym closes on the Tuesday
+/// morning; Hevy was last collected during it, Peloton after the previous
+/// Wednesday's ride had closed.
+#[test]
+fn a_window_closed_since_its_discipline_was_collected_is_uncollected() {
+    let diary = Recorded::week().expect("a week");
+    let zone = OperatorZone::try_from("Europe/London".to_owned()).expect("a zone");
+    let hevy = stream("hevy.workouts").expect("a stream");
+    let peloton = stream("peloton.rides").expect("a stream");
+    let collects = [
+        (Discipline::Gym, hevy.clone()),
+        (Discipline::Cycling, peloton.clone()),
+    ];
+    let tuesday = DayPart::new(Date::constant(2026, 10, 13), PartOfDay::Morning);
+    let runtime = runtime().expect("a current-thread runtime builds");
+
+    let before = Collected(vec![
+        (hevy.clone(), "2026-10-12T19:00:00Z"),
+        (peloton.clone(), "2026-10-08T08:00:00Z"),
+    ]);
+    assert_eq!(
+        runtime
+            .block_on(uncollected(&diary, &before, &collects, &zone, tuesday))
+            .expect("the store answers"),
+        vec![Uncollected {
+            discipline: Discipline::Gym,
+            closed: tuesday,
+            collected: Some(DayPart::new(
+                Date::constant(2026, 10, 12),
+                PartOfDay::Evening
+            )),
+        }],
+    );
+
+    let after = Collected(vec![
+        (hevy, "2026-10-13T05:00:30Z"),
+        (peloton, "2026-10-08T08:00:00Z"),
+    ]);
+    assert_eq!(
+        runtime
+            .block_on(uncollected(&diary, &after, &collects, &zone, tuesday))
+            .expect("the store answers"),
+        Vec::new(),
+        "a run since the close leaves nothing for the timer"
+    );
+}
+
+/// **A source never collected is uncollected once a window closes**, which is
+/// how a missing credential is said on every scheduled run rather than once.
+#[test]
+fn a_discipline_never_collected_is_uncollected() {
+    let diary = Recorded::week().expect("a week");
+    let zone = OperatorZone::try_from("Europe/London".to_owned()).expect("a zone");
+    let peloton = stream("peloton.rides").expect("a stream");
+    let thursday = DayPart::new(Date::constant(2026, 10, 15), PartOfDay::Morning);
+
+    let found = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(uncollected(
+            &diary,
+            &Collected(Vec::new()),
+            &[(Discipline::Cycling, peloton)],
+            &zone,
+            thursday,
+        ))
+        .expect("the store answers");
+    assert_eq!(
+        found,
+        vec![Uncollected {
+            discipline: Discipline::Cycling,
+            closed: thursday,
+            collected: None,
+        }],
+    );
 }

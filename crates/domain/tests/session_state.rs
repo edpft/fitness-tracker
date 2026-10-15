@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     normalised::OperatorZone,
-    planner::{Recorded, SessionState, closes, state_of},
+    planner::{Recorded, SessionState, closes, last_closed, state_of},
     schedule::{
         Absence, AbsenceKind, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay,
         Relative, SessionRole, Skip, TrainingPattern, TrainingSlot,
@@ -635,6 +635,31 @@ fn a_window_closes_at_the_next_slot_where_that_is_earlier() {
         closes(at(monday, PartOfDay::Evening), None),
         Some(at(date(2026, 9, 22).expect("a date"), PartOfDay::Morning)),
         "the end of the day closes it where the diary describes nothing after"
+    );
+}
+
+/// **#434: what the scheduled run is keyed on.** Monday evening's gym closes on
+/// the Tuesday morning, and until then the last gym window to close is the
+/// previous Friday's; the Sunday ride's closes on the Monday morning.
+#[test]
+fn the_last_window_to_close_is_the_slots_day_end() {
+    let diary = september().expect("the diary builds");
+    let monday = date(2026, 9, 21).expect("a date");
+    let tuesday = date(2026, 9, 22).expect("a date");
+
+    assert_eq!(
+        last_closed(&diary, Discipline::Gym, at(monday, PartOfDay::Evening)),
+        Some(at(date(2026, 9, 19).expect("a date"), PartOfDay::Morning)),
+        "Friday evening's gym closed on the Saturday morning"
+    );
+    assert_eq!(
+        last_closed(&diary, Discipline::Gym, at(tuesday, PartOfDay::Morning)),
+        Some(at(tuesday, PartOfDay::Morning)),
+    );
+    assert_eq!(
+        last_closed(&diary, Discipline::Cycling, at(tuesday, PartOfDay::Morning)),
+        Some(at(monday, PartOfDay::Morning)),
+        "Sunday morning's ride closed on the Monday morning"
     );
 }
 

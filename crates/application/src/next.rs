@@ -27,7 +27,7 @@ use domain::{
     canonical::SessionCount,
     landing::{LandingStream, RecordCount},
     macrocycle::{Concurrent, Macrocycle},
-    normalised::WorkoutCount,
+    normalised::{OperatorZone, WorkoutCount},
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
     planner::{self, RerunOrdinal},
     prescription::{GymMesocycle, schedule::WeekKind},
@@ -38,8 +38,8 @@ use jiff::civil::Date;
 use crate::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
     CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory,
-    ExtractionError, GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock,
-    NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
+    ExtractionError, ExtractionRunLog, GenerationParameterStore, HolidayCalendar, MesocycleStore,
+    NextLock, NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
     NormalisedWeighInReader, PlanStore, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, RideDestination, RidesPlaced, RunLockError,
@@ -648,6 +648,64 @@ pub struct NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
     pub cycling: CY,
     /// One run at a time, whichever frontend starts it.
     pub lock: L,
+}
+
+/// A session's window that closed after its discipline was last collected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uncollected {
+    pub discipline: Discipline,
+    pub closed: DayPart,
+    /// Where the operator's day had got to when the discipline was last
+    /// collected, if it ever was.
+    pub collected: Option<DayPart>,
+}
+
+/// The windows that have closed since their discipline was last collected:
+/// what a scheduled run of `next` is started for (#434).
+///
+/// **Read from the run log, not recorded**: collecting is what moves it on,
+/// whichever frontend or timer started the run, so a run by hand after a
+/// window closes leaves nothing for the timer, and a missed timer is caught
+/// up by the next. `collects` names the stream each discipline's record is
+/// collected from.
+///
+/// **Only a run that succeeded counts.** A source with no credential is never
+/// collected, so every scheduled run after its window closes is started again,
+/// and says so.
+///
+/// # Errors
+///
+/// [`StoreError`] if the store is unavailable.
+pub async fn uncollected(
+    diary: &(impl DiaryStore + Sync),
+    runs: &(impl ExtractionRunLog + Sync),
+    collects: &[(Discipline, LandingStream)],
+    zone: &OperatorZone,
+    now: DayPart,
+) -> Result<Vec<Uncollected>, StoreError> {
+    let diary = diary.diary().await?;
+    let mut uncollected = Vec::new();
+    for (discipline, stream) in collects {
+        let Some(closed) = planner::last_closed(&diary, *discipline, now) else {
+            continue;
+        };
+        let collected = runs.latest_success(stream).await?.map(|run| {
+            DayPart::containing(
+                run.started_at()
+                    .as_timestamp()
+                    .to_zoned(zone.as_time_zone())
+                    .datetime(),
+            )
+        });
+        if collected.is_none_or(|collected| collected < closed) {
+            uncollected.push(Uncollected {
+                discipline: *discipline,
+                closed,
+                collected,
+            });
+        }
+    }
+    Ok(uncollected)
 }
 
 /// The use case.

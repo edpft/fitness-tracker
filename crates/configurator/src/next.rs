@@ -13,10 +13,11 @@ use application::{
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
         CanonicalPorts, CyclingPorts, GymPorts, Next, NextError, NextPorts, NoAccess, Progress,
-        Report,
+        Report, Uncollected, uncollected,
     },
 };
 use domain::{
+    landing::LandingStream,
     normalised::OperatorZone,
     prescription::{DestinationName, InvalidDelivery},
     schedule::{DayPart, Discipline},
@@ -24,8 +25,8 @@ use domain::{
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
     SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
     peloton::{
@@ -182,6 +183,37 @@ pub async fn run(
     });
 
     Ok(next.run(now, skip, progress).await?)
+}
+
+/// The windows that have closed since their discipline was last collected
+/// (#434): whether a scheduled run of `next` has anything to do.
+///
+/// # Errors
+///
+/// [`NextFailure`] if the store is unavailable, or a discipline's stream is not
+/// one this build has.
+pub async fn uncollected_windows(
+    database: &Path,
+    zone: &OperatorZone,
+    now: DayPart,
+) -> Result<Vec<Uncollected>, NextFailure> {
+    let pool = connect(database).await?;
+    let collects = Discipline::ALL
+        .iter()
+        .map(|discipline| {
+            let stream = LandingStream::try_from(known(*discipline)?.collects().name().as_str())
+                .map_err(WiringError::from)?;
+            Ok((*discipline, stream))
+        })
+        .collect::<Result<Vec<_>, NextFailure>>()?;
+    Ok(uncollected(
+        &SqliteDiaryStore::new(pool.clone()),
+        &SqliteExtractionRunLog::new(pool),
+        &collects,
+        zone,
+        now,
+    )
+    .await?)
 }
 
 /// Where body weight is collected from: `withings.measurements`, the one stream

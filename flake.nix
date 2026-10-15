@@ -340,8 +340,45 @@
           '';
         };
 
-        # What `nix profile` installs: the `fitness` command and the units that
-        # serve the page, upgraded together.
+        # `next` when a session's window closes, without anyone starting it
+        # (#434). A window closes only where a part of the day begins, so the
+        # timer fires at each; `--if-closed` runs only where one has closed
+        # since its discipline was last collected, which is what makes a
+        # firing on waking (`Persistent`) catch up rather than repeat.
+        #
+        # The hours are the machine's clock; `next` reads the operator's zone,
+        # so the two must agree for a run to land on the close.
+        nextService = pkgs.writeTextFile {
+          name = "fitness-next-service";
+          destination = "/share/systemd/user/fitness-next.service";
+          text = ''
+            [Unit]
+            Description=Collect and deliver when a session's window closes
+
+            [Service]
+            Type=oneshot
+            ExecStart=${lib.getExe cli} next --if-closed
+          '';
+        };
+
+        nextTimer = pkgs.writeTextFile {
+          name = "fitness-next-timer";
+          destination = "/share/systemd/user/fitness-next.timer";
+          text = ''
+            [Unit]
+            Description=Collect and deliver when a session's window closes
+
+            [Timer]
+            OnCalendar=*-*-* 06,12,18:00:00
+            Persistent=true
+
+            [Install]
+            WantedBy=timers.target
+          '';
+        };
+
+        # What `nix profile` installs: the `fitness` command, the units that
+        # serve the page, and the timer that runs `next`, upgraded together.
         installed = pkgs.symlinkJoin {
           name = "fitness-tracker-${revision}";
           paths = [
@@ -349,6 +386,8 @@
             webService
             webUpgradePath
             webUpgradeService
+            nextService
+            nextTimer
           ];
           meta.mainProgram = "fitness";
         };

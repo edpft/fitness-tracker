@@ -1244,6 +1244,17 @@ pub fn not_prescribed(why: &dyn std::fmt::Display) {
 /// and the slot after it says when the next one opens without prescribing it.
 /// Deriving next week's session against a record that has a week left to
 /// change would be issuing something nobody can train from yet.
+/// A window the timer's run is for (#434).
+pub fn window_closed(window: &application::next::Uncollected) {
+    let collected = window
+        .collected
+        .map_or_else(|| "never".to_owned(), |at| at.to_string());
+    println!(
+        "A {} session's window closed {}; {} was last collected {collected}.",
+        window.discipline, window.closed, window.discipline
+    );
+}
+
 pub fn microcycle_complete(after: Option<domain::schedule::ScheduledSlot>) {
     match after {
         Some(slot) => println!(

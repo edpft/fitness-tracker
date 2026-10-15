@@ -23,6 +23,9 @@ use crate::{Failure, config, cycling, exit, output};
 
 /// Collect everything, report where the plan stands, and deliver what is next.
 ///
+/// With `if_closed`, only if a session's window has closed since its
+/// discipline was last collected.
+///
 /// # Errors
 ///
 /// [`Failure`] if the store is unavailable, if no week has been recorded, if a
@@ -35,9 +38,26 @@ pub async fn next(
     date: Option<&str>,
     part: Option<&str>,
     skip: Option<&str>,
+    if_closed: bool,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let now = moment(zone, date, part)?;
+    // **The timer's run** (#434): it fires at every part of the day a window
+    // can close on, and runs only where one has since its discipline was last
+    // collected.
+    if if_closed {
+        let closed = configurator::next::uncollected_windows(database, zone, now)
+            .await
+            .map_err(refused)?;
+        if closed.is_empty() {
+            println!("No session's window has closed since it was collected.");
+            return Ok(());
+        }
+        for window in &closed {
+            output::window_closed(window);
+        }
+        println!();
+    }
     // **Boxed, because the run is large**: it holds every source's walk, and a
     // third (#409) took it past what a stack frame should carry.
     let report = Box::pin(configurator::next::run(

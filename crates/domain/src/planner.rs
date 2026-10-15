@@ -354,6 +354,45 @@ pub fn closes(slot: DayPart, next: Option<DayPart>) -> Option<DayPart> {
     }
 }
 
+/// Where the last window of a discipline's sessions to close, closed: at or
+/// before `now`, or `None` if none closed in the week before it.
+///
+/// **What collecting on a schedule is keyed on** (#434). The operator,
+/// 2026-10-14: a session's records are collected *"either on demand or when
+/// the window for completing them expires."* A week back, because a window
+/// closes no later than the morning after its slot, so a laptop asleep for
+/// longer than that has more to catch up on than one window.
+///
+/// Every slot the ordinary week gives, an absence notwithstanding: collecting
+/// after a slot a holiday took costs a walk that finds nothing.
+#[must_use]
+pub fn last_closed(diary: &Diary, discipline: Discipline, now: DayPart) -> Option<DayPart> {
+    let from = now.date.checked_sub(jiff::Span::new().days(7)).ok()?;
+    let mut slots = Vec::new();
+    let mut cursor = from;
+    while cursor <= now.date {
+        slots.extend(diary.ordinary_slots_of(cursor));
+        cursor = cursor.tomorrow().ok()?;
+    }
+    let after = slots
+        .last()
+        .and_then(|last| diary.first_ordinary_after(last.date))
+        .map(|slot| DayPart::new(slot.date, slot.slot.part));
+
+    slots
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.discipline == discipline)
+        .filter_map(|(at, slot)| {
+            let next = slots
+                .get(at.saturating_add(1))
+                .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)));
+            closes(DayPart::new(slot.date, slot.slot.part), next)
+        })
+        .filter(|closed| *closed <= now)
+        .max()
+}
+
 /// How much of a session's window is left.
 ///
 /// **From the later of its own slot and now, to where it [`closes`].** Counted
