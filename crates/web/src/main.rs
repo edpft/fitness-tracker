@@ -277,6 +277,7 @@ async fn programme_post(
                     &store,
                     &runs.setting().zone,
                     asked.slot,
+                    asked.intensity,
                     asked.from,
                     asked.exercise,
                     asked.assisted_by,

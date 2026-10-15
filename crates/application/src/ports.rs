@@ -1325,17 +1325,17 @@ pub trait GenerationParameterStore {
         date: jiff::civil::Date,
     ) -> impl Future<Output = Result<domain::prescription::Scales, StoreError>> + Send;
 
-    /// A specific's settings as now known to have been true on a date: what a
-    /// fill assisted by it is prescribed against (#454).
+    /// A range of bands as now known to have been on a date: what a fill
+    /// assisted by it is prescribed against (#454).
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn specific_on(
+    fn bands_on(
         &self,
         specific: &domain::gym::equipment::Specific,
         date: jiff::civil::Date,
-    ) -> impl Future<Output = Result<Option<domain::gym::equipment::Settings>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<domain::gym::equipment::BandRange>, StoreError>> + Send;
 }
 
 /// The equipment the operator trains on, as bitemporal facts (issue #450).

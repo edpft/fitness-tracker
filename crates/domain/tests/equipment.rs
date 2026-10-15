@@ -4,8 +4,8 @@
 use domain::{
     gym::{
         equipment::{
-            Band, BandLadder, BandName, Combination, EquipmentFacts, Fact, FactId, InvalidSettings,
-            Maker, Model, Settings, Specific, Timeline,
+            Band, BandLadder, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId, InvalidSettings,
+            Maker, Model, Specific, Stack, Timeline,
         },
         exercise::Implement,
     },
@@ -68,18 +68,18 @@ fn the_scales_on_a_date_are_each_kinds_fact_then() {
 #[test]
 fn a_stack_ends_on_one_of_its_own_loads() {
     let steps = LoadSteps::uniform(Kg::from_grams(7_000)).expect("7kg");
-    assert!(Settings::stack(steps.clone(), Kg::from_grams(84_000)).is_ok());
+    assert!(Stack::new(steps.clone(), Kg::from_grams(84_000)).is_ok());
     assert_eq!(
-        Settings::stack(steps.clone(), Kg::from_grams(80_000)),
+        Stack::new(steps.clone(), Kg::from_grams(80_000)),
         Err(InvalidSettings::MostOffTheStack)
     );
     assert_eq!(
-        Settings::stack(steps, Kg::NONE),
+        Stack::new(steps, Kg::NONE),
         Err(InvalidSettings::EmptyStack)
     );
 }
 
-fn supaflex() -> Result<(Specific, Settings), Box<dyn std::error::Error>> {
+fn supaflex() -> Result<(Specific, BandRange), Box<dyn std::error::Error>> {
     let band = |stars: &str, kg: u64| -> Result<Band, Box<dyn std::error::Error>> {
         Ok(Band {
             name: BandName::try_from(stars)?,
@@ -95,7 +95,7 @@ fn supaflex() -> Result<(Specific, Settings), Box<dyn std::error::Error>> {
             NonEmpty::new(names).map_err(|_| "a step of no bands")?,
         ))
     };
-    let settings = Settings::bands(
+    let settings = BandRange::new(
         vec![
             band("1/5 stars", 9)?,
             band("2/5 stars", 11)?,
@@ -124,7 +124,7 @@ fn supaflex() -> Result<(Specific, Settings), Box<dyn std::error::Error>> {
 #[test]
 fn bands_used_together_add_and_step_down_the_chart() {
     let (specific, settings) = supaflex().expect("the operator's chart");
-    let ladder = BandLadder::of(&specific, &settings).expect("bands");
+    let ladder = BandLadder::of(&specific, &settings);
 
     let top = ladder.nearest(Kg::from_grams(21_000)).expect("4/5");
     assert_eq!(top.to_string(), "Physical Supaflex 4/5 stars");
@@ -143,7 +143,7 @@ fn bands_used_together_add_and_step_down_the_chart() {
 #[test]
 fn assistance_off_the_chart_is_its_nearest_step() {
     let (specific, settings) = supaflex().expect("the operator's chart");
-    let ladder = BandLadder::of(&specific, &settings).expect("bands");
+    let ladder = BandLadder::of(&specific, &settings);
     let dips = ladder.nearest(Kg::from_grams(7_000)).expect("a band");
     assert_eq!(dips.to_string(), "Physical Supaflex 1/5 stars");
     assert_eq!(ladder.nearest(Kg::from_grams(4_000)), None, "nearer none");
@@ -158,22 +158,22 @@ fn a_chart_steps_down_bands_the_range_has() {
     };
     let step = |band: &str| Combination::new(NonEmpty::of(name(band), vec![]));
     assert_eq!(
-        Settings::bands(vec![band("1/5", 9)], vec![step("2/5")]),
+        BandRange::new(vec![band("1/5", 9)], vec![step("2/5")]),
         Err(InvalidSettings::UnknownBand)
     );
     assert_eq!(
-        Settings::bands(
+        BandRange::new(
             vec![band("1/5", 9), band("2/5", 11)],
             vec![step("1/5"), step("2/5")]
         ),
         Err(InvalidSettings::StepsOutOfOrder)
     );
     assert_eq!(
-        Settings::bands(vec![band("1/5", 9), band("1/5", 11)], vec![step("1/5")]),
+        BandRange::new(vec![band("1/5", 9), band("1/5", 11)], vec![step("1/5")]),
         Err(InvalidSettings::RepeatedBand)
     );
     assert_eq!(
-        Settings::bands(vec![band("1/5", 9)], vec![]),
+        BandRange::new(vec![band("1/5", 9)], vec![]),
         Err(InvalidSettings::NoSteps)
     );
 }

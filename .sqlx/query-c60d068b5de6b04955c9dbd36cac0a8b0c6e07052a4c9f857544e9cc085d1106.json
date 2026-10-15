@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT id AS \"id!: i64\",\n               implement,\n               maker,\n               model,\n               valid_from,\n               recorded_at AS \"recorded_at!: String\",\n               most_grams\n        FROM equipment_fact\n        WHERE id NOT IN (SELECT corrects FROM equipment_fact WHERE corrects IS NOT NULL)\n        ORDER BY id\n        ",
+  "query": "\n        SELECT id AS \"id!: i64\",\n               category AS \"category!: String\",\n               implement,\n               maker,\n               model,\n               valid_from,\n               recorded_at AS \"recorded_at!: String\",\n               most_grams\n        FROM equipment_fact\n        WHERE id NOT IN (SELECT corrects FROM equipment_fact WHERE corrects IS NOT NULL)\n        ORDER BY id\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "implement",
+        "name": "category!: String",
         "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "name": "implement",
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "maker",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "model",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "valid_from",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "recorded_at!: String",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "most_grams",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -86,6 +97,7 @@
     },
     "nullable": [
       false,
+      false,
       true,
       true,
       true,
@@ -94,5 +106,5 @@
       true
     ]
   },
-  "hash": "70617002eea054bc38ce87eb329db040f5325a7f49bde33c460b896c02200eb3"
+  "hash": "c60d068b5de6b04955c9dbd36cac0a8b0c6e07052a4c9f857544e9cc085d1106"
 }

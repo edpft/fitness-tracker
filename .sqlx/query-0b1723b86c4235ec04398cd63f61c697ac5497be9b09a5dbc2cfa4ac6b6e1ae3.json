@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT count(*) AS \"count!: i64\" FROM equipment_fact WHERE implement IS NOT NULL",
+  "query": "SELECT count(*) AS \"count!: i64\" FROM equipment_fact WHERE category = 'kind'",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "b3f5966d1bba5eeffa3962d5fdaac888ef3b67af8abec292257493b8c2766e0b"
+  "hash": "0b1723b86c4235ec04398cd63f61c697ac5497be9b09a5dbc2cfa4ac6b6e1ae3"
 }

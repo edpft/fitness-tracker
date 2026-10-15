@@ -6,6 +6,7 @@ use domain::{
     gym::{Exercise, equipment::Specific},
     normalised::OperatorZone,
     prescription::SlotId,
+    schedule::Relative,
 };
 use jiff::civil::Date;
 
@@ -48,11 +49,12 @@ pub async fn change(
     store: &Store,
     zone: &OperatorZone,
     slot: SlotId,
+    intensity: Option<Relative>,
     from: Date,
     exercise: Exercise,
     assisted_by: Option<Specific>,
 ) -> Result<(), FillChangeError> {
     refilling(store, zone)
-        .change(slot, from, exercise, assisted_by, jiff::Timestamp::now())
+        .change(slot, intensity, from, exercise, assisted_by, jiff::Timestamp::now())
         .await
 }

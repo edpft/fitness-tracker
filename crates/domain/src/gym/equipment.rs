@@ -1,13 +1,14 @@
 //! The equipment the operator trains on, as facts about the world (issue #450).
 //!
-//! **A kind or a specific.** A kind is interchangeable — one barbell is
-//! another, a gym's plates and dumbbells and cable stacks step alike — so its
-//! increments belong to the kind. A specific is a particular product, the
-//! Technogym Kneeling Easy Chin Dip or a manufacturer's range of bands, and
-//! what it offers belongs to it and is assumed of nothing else: the operator,
-//! 2026-10-15, *"one assisted pull up / dip machine may or may not be
-//! interchangeable with another"*. The Bike+ is the same argument made for a
-//! bike.
+//! **A kind, a machine or a range of bands.** A kind is interchangeable —
+//! one barbell is another, a gym's plates and dumbbells and cable stacks step
+//! alike — so its increments belong to the kind. A machine is a particular
+//! product, by maker and model, and what it offers belongs to it and is
+//! assumed of nothing else: the operator, 2026-10-15, *"one assisted pull up /
+//! dip machine may or may not be interchangeable with another"*. The Bike+ is
+//! the same argument made for a bike. A range of bands is by maker and model
+//! too, but every range has one shape: bands, each giving a force at twice
+//! its length.
 //!
 //! **Facts are bitemporal.** Each is true over a period of real-world time from
 //! a date, apart from when it was entered. A change starts a new period; a
@@ -183,41 +184,63 @@ pub enum InvalidSettings {
     StepsOutOfOrder,
 }
 
-/// What a specific can be set to.
+/// A machine's stack: every load its steps reach, from the first step to its
+/// most. The Kneeling Easy Chin Dip is 7kg steps to 84kg.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Settings {
-    /// A stack: every load its steps reach, from the first step to its most.
-    /// The Kneeling Easy Chin Dip is 7kg steps to 84kg.
-    Stack { steps: LoadSteps, most: Kg },
-    /// A range of bands, and the combinations of them the operator steps
-    /// through, most assistance first. The steps are declared rather than
-    /// worked out from every combination, which would need to know how many of
-    /// each band there are (the operator, 2026-10-15: *"this chart looks
-    /// reasonable for now"*).
-    Bands {
-        bands: NonEmpty<Band>,
-        steps: NonEmpty<Combination>,
-    },
+pub struct Stack {
+    steps: LoadSteps,
+    most: Kg,
 }
 
-impl Settings {
+impl Stack {
     /// # Errors
     ///
     /// See [`InvalidSettings`].
-    pub fn stack(steps: LoadSteps, most: Kg) -> Result<Self, InvalidSettings> {
+    pub fn new(steps: LoadSteps, most: Kg) -> Result<Self, InvalidSettings> {
         if most.is_none() {
             return Err(InvalidSettings::EmptyStack);
         }
         if steps.quantise(most) != most {
             return Err(InvalidSettings::MostOffTheStack);
         }
-        Ok(Self::Stack { steps, most })
+        Ok(Self { steps, most })
     }
 
+    pub const fn steps(&self) -> &LoadSteps {
+        &self.steps
+    }
+
+    pub const fn most(&self) -> Kg {
+        self.most
+    }
+}
+
+impl fmt::Display for Stack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} to {}kg", self.steps, self.most)
+    }
+}
+
+/// A range of bands, and the combinations of them the operator steps through,
+/// most assistance first.
+///
+/// **Bands are their own category, not a kind of machine** (the operator,
+/// 2026-10-15): every range has the same shape, bands giving a force at twice
+/// their length, and what differs is the maker and model. The steps are
+/// declared rather than worked out from every combination, which would need
+/// to know how many of each band there are (*"this chart looks reasonable for
+/// now"*).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandRange {
+    bands: NonEmpty<Band>,
+    steps: NonEmpty<Combination>,
+}
+
+impl BandRange {
     /// # Errors
     ///
     /// See [`InvalidSettings`].
-    pub fn bands(bands: Vec<Band>, steps: Vec<Combination>) -> Result<Self, InvalidSettings> {
+    pub fn new(bands: Vec<Band>, steps: Vec<Combination>) -> Result<Self, InvalidSettings> {
         for (index, band) in bands.iter().enumerate() {
             if band.at_twice_length.is_none() {
                 return Err(InvalidSettings::SlackBand);
@@ -240,23 +263,27 @@ impl Settings {
             previous = Some(load);
         }
         let steps = NonEmpty::new(steps).map_err(|_| InvalidSettings::NoSteps)?;
-        Ok(Self::Bands { bands, steps })
+        Ok(Self { bands, steps })
+    }
+
+    pub const fn bands(&self) -> &NonEmpty<Band> {
+        &self.bands
+    }
+
+    pub const fn steps(&self) -> &NonEmpty<Combination> {
+        &self.steps
     }
 }
 
-impl fmt::Display for Settings {
+impl fmt::Display for BandRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Stack { steps, most } => write!(f, "{steps} to {most}kg"),
-            Self::Bands { bands, steps } => {
-                let bands: Vec<String> = bands
-                    .iter()
-                    .map(|band| format!("{} {}kg", band.name, band.at_twice_length))
-                    .collect();
-                let steps: Vec<String> = steps.iter().map(ToString::to_string).collect();
-                write!(f, "{}; steps {}", bands.join(", "), steps.join(" → "))
-            }
-        }
+        let bands: Vec<String> = self
+            .bands
+            .iter()
+            .map(|band| format!("{} {}kg", band.name, band.at_twice_length))
+            .collect();
+        let steps: Vec<String> = self.steps.iter().map(ToString::to_string).collect();
+        write!(f, "{}; steps {}", bands.join(", "), steps.join(" → "))
     }
 }
 
@@ -297,20 +324,18 @@ pub struct BandLadder {
 }
 
 impl BandLadder {
-    /// The ladder a specific's settings make, if they are bands.
+    /// The ladder a range of bands makes.
     #[must_use]
-    pub fn of(specific: &Specific, settings: &Settings) -> Option<Self> {
-        let Settings::Bands { bands, steps } = settings else {
-            return None;
-        };
-        let rungs = steps
+    pub fn of(specific: &Specific, range: &BandRange) -> Self {
+        let rungs = range
+            .steps
             .iter()
-            .filter_map(|step| nominal(bands, step).map(|load| (load, step.clone())))
+            .filter_map(|step| nominal(&range.bands, step).map(|load| (load, step.clone())))
             .collect();
-        Some(Self {
+        Self {
             specific: specific.clone(),
             rungs,
-        })
+        }
     }
 
     fn setting(&self, index: usize) -> Option<BandSetting> {
@@ -409,23 +434,26 @@ impl<T> Timeline<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Equipment {
     Kind(Implement),
-    Specific(Specific),
+    Machine(Specific),
+    Bands(Specific),
 }
 
 impl fmt::Display for Equipment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Kind(implement) => write!(f, "{implement}"),
-            Self::Specific(specific) => write!(f, "{specific}"),
+            Self::Machine(specific) | Self::Bands(specific) => write!(f, "{specific}"),
         }
     }
 }
 
-/// What a fact says: a kind's increments, or a specific's settings.
+/// What a fact says: a kind's increments, a machine's stack, or a range of
+/// bands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Kind(Implement, LoadSteps),
-    Specific(Specific, Settings),
+    Machine(Specific, Stack),
+    Bands(Specific, BandRange),
 }
 
 impl Statement {
@@ -433,7 +461,8 @@ impl Statement {
     pub fn equipment(&self) -> Equipment {
         match self {
             Self::Kind(implement, _) => Equipment::Kind(*implement),
-            Self::Specific(specific, _) => Equipment::Specific(specific.clone()),
+            Self::Machine(specific, _) => Equipment::Machine(specific.clone()),
+            Self::Bands(specific, _) => Equipment::Bands(specific.clone()),
         }
     }
 }
@@ -442,7 +471,26 @@ impl Statement {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EquipmentFacts {
     pub kinds: BTreeMap<Implement, Timeline<LoadSteps>>,
-    pub specifics: BTreeMap<Specific, Timeline<Settings>>,
+    pub machines: BTreeMap<Specific, Timeline<Stack>>,
+    pub bands: BTreeMap<Specific, Timeline<BandRange>>,
+}
+
+fn found<K: Clone, T>(
+    map: &BTreeMap<K, Timeline<T>>,
+    id: FactId,
+    equipment: impl Fn(K) -> Equipment,
+) -> Option<(Equipment, Option<Date>)> {
+    map.iter().find_map(|(key, timeline)| {
+        timeline
+            .iter()
+            .find(|fact| fact.id == id)
+            .map(|fact| (equipment(key.clone()), fact.from))
+    })
+}
+
+fn starts_in<K: Ord, T>(map: &BTreeMap<K, Timeline<T>>, key: &K, from: Option<Date>) -> bool {
+    map.get(key)
+        .is_some_and(|timeline| timeline.iter().any(|fact| fact.from == from))
 }
 
 impl EquipmentFacts {
@@ -465,34 +513,18 @@ impl EquipmentFacts {
     /// The fact a correction names, and the piece of equipment it is about.
     #[must_use]
     pub fn find(&self, id: FactId) -> Option<(Equipment, Option<Date>)> {
-        let kind = self.kinds.iter().find_map(|(implement, timeline)| {
-            timeline
-                .iter()
-                .find(|fact| fact.id == id)
-                .map(|fact| (Equipment::Kind(*implement), fact.from))
-        });
-        kind.or_else(|| {
-            self.specifics.iter().find_map(|(name, timeline)| {
-                timeline
-                    .iter()
-                    .find(|fact| fact.id == id)
-                    .map(|fact| (Equipment::Specific(name.clone()), fact.from))
-            })
-        })
+        found(&self.kinds, id, Equipment::Kind)
+            .or_else(|| found(&self.machines, id, Equipment::Machine))
+            .or_else(|| found(&self.bands, id, Equipment::Bands))
     }
 
     /// Whether a period already starts on this date for this equipment.
     #[must_use]
     pub fn starts(&self, equipment: &Equipment, from: Option<Date>) -> bool {
         match equipment {
-            Equipment::Kind(implement) => self
-                .kinds
-                .get(implement)
-                .is_some_and(|timeline| timeline.iter().any(|fact| fact.from == from)),
-            Equipment::Specific(name) => self
-                .specifics
-                .get(name)
-                .is_some_and(|timeline| timeline.iter().any(|fact| fact.from == from)),
+            Equipment::Kind(implement) => starts_in(&self.kinds, implement, from),
+            Equipment::Machine(specific) => starts_in(&self.machines, specific, from),
+            Equipment::Bands(specific) => starts_in(&self.bands, specific, from),
         }
     }
 }

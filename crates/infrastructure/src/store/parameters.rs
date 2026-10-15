@@ -154,14 +154,14 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         Ok(read_facts(&self.pool).await?.scales_on(date))
     }
 
-    async fn specific_on(
+    async fn bands_on(
         &self,
         specific: &domain::gym::equipment::Specific,
         date: jiff::civil::Date,
-    ) -> Result<Option<domain::gym::equipment::Settings>, StoreError> {
+    ) -> Result<Option<domain::gym::equipment::BandRange>, StoreError> {
         Ok(read_facts(&self.pool)
             .await?
-            .specifics
+            .bands
             .get(specific)
             .and_then(|timeline| timeline.on(date))
             .map(|fact| fact.value.clone()))

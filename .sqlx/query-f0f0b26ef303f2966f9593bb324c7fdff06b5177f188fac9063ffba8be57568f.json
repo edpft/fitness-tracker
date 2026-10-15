@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT slot AS \"slot!: String\",\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
+  "query": "\n        SELECT slot AS \"slot!: String\",\n               intensity,\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "valid_from!: String",
+        "name": "intensity",
         "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "intensity"
+          }
+        }
+      },
+      {
+        "name": "valid_from!: String",
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "recorded_at!: String",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "exercise!: String",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "assisted_maker",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "assisted_model",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -75,6 +86,7 @@
     },
     "nullable": [
       false,
+      true,
       false,
       false,
       false,
@@ -82,5 +94,5 @@
       true
     ]
   },
-  "hash": "dd5cf0247a030502f0c20f141ffc13d339543d5e92492da0d3f29aff3dc69f08"
+  "hash": "f0f0b26ef303f2966f9593bb324c7fdff06b5177f188fac9063ffba8be57568f"
 }

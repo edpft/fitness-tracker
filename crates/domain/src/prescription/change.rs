@@ -9,21 +9,30 @@
 //! **A change names the exercise and what assists it**, since a prescription
 //! names a specific exercise: a band-assisted dip and a machine-assisted dip
 //! are one exercise performed and two prescribed (the operator, 2026-10-15).
+//!
+//! **A change is for one session's intensity, or both.** A slot can alternate
+//! — back extension on the heavier session, lying leg curl on the lighter —
+//! and a change to one side must leave the other as it was.
 
 use jiff::{Timestamp, civil::Date};
 
-use crate::gym::{Exercise, equipment::Specific};
+use crate::{
+    gym::{Exercise, equipment::Specific},
+    schedule::{Relative, SessionRole},
+};
 
-use super::{Fill, SlotFills, SlotId};
+use super::{ByIntensity, Fill, SlotFills, SlotId};
 
 /// One slot's fill from a date.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FillChange {
     pub slot: SlotId,
+    /// The session it changes, by intensity; `None` for both.
+    pub intensity: Option<Relative>,
     pub from: Date,
     pub recorded_at: Timestamp,
     pub exercise: Exercise,
-    /// The specific that assists it, where one does.
+    /// The range of bands that assists it, where one does.
     pub assisted_by: Option<Specific>,
 }
 
@@ -39,34 +48,52 @@ impl FillChanges {
         Self(changes)
     }
 
-    /// The change in force for a slot on a date.
+    /// The change in force for a slot's session of one intensity on a date.
     #[must_use]
-    pub fn on(&self, slot: SlotId, date: Date) -> Option<&FillChange> {
-        self.0
-            .iter()
-            .rev()
-            .find(|change| change.slot == slot && change.from <= date)
+    pub fn on(&self, slot: SlotId, intensity: Relative, date: Date) -> Option<&FillChange> {
+        self.0.iter().rev().find(|change| {
+            change.slot == slot
+                && change.from <= date
+                && change.intensity.is_none_or(|changed| changed == intensity)
+        })
     }
 
-    /// The fills as they stood on a date: a changed slot holds its change for
-    /// both roles.
+    /// The fills as they stood on a date. A slot changed for both
+    /// intensities alike holds one exercise; otherwise each keeps its own.
     #[must_use]
     pub fn apply(&self, fills: &SlotFills, date: Date) -> SlotFills {
         let mut changed = fills.clone();
         for slot in SlotId::ALL {
-            if let Some(change) = self.on(*slot, date)
-                && let Some(fill) = changed.single_mut(*slot)
-            {
-                *fill = Fill::Same(change.exercise);
+            let lower = self.on(*slot, Relative::Lower, date);
+            let higher = self.on(*slot, Relative::Higher, date);
+            if lower.is_none() && higher.is_none() {
+                continue;
             }
+            let Some(fill) = changed.single_mut(*slot) else {
+                continue;
+            };
+            let held = |intensity: Relative| match &*fill {
+                Fill::Same(exercise) => *exercise,
+                Fill::Alternating(by) => match intensity {
+                    Relative::Lower => by.lower,
+                    Relative::Higher => by.higher,
+                },
+            };
+            let lower = lower.map_or_else(|| held(Relative::Lower), |change| change.exercise);
+            let higher = higher.map_or_else(|| held(Relative::Higher), |change| change.exercise);
+            *fill = if lower == higher {
+                Fill::Same(lower)
+            } else {
+                Fill::Alternating(ByIntensity { lower, higher })
+            };
         }
         changed
     }
 
-    /// What assists a slot on a date, if a change says.
+    /// What assists a slot in a session on a date, if a change says.
     #[must_use]
-    pub fn assisted_by(&self, slot: SlotId, date: Date) -> Option<&Specific> {
-        self.on(slot, date)
+    pub fn assisted_by(&self, slot: SlotId, role: SessionRole, date: Date) -> Option<&Specific> {
+        self.on(slot, role.intensity(), date)
             .and_then(|change| change.assisted_by.as_ref())
     }
 

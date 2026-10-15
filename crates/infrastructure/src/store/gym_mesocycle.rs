@@ -995,6 +995,7 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
     let rows = sqlx::query!(
         r#"
         SELECT slot AS "slot!: String",
+               intensity,
                valid_from AS "valid_from!: String",
                recorded_at AS "recorded_at!: String",
                exercise AS "exercise!: String",
@@ -1021,6 +1022,11 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
         };
         changes.push(FillChange {
             slot: SlotId::try_from(row.slot).map_err(|error| corrupt(&error))?,
+            intensity: row
+                .intensity
+                .map(Relative::try_from)
+                .transpose()
+                .map_err(|error| corrupt(&error))?,
             from: row
                 .valid_from
                 .parse()
@@ -1054,6 +1060,7 @@ async fn write_change(
 ) -> Result<(), StoreError> {
     let mesocycle = mesocycle.as_i64();
     let slot = change.slot.as_str();
+    let intensity = change.intensity.map(Relative::as_str);
     let from = change.from.to_string();
     let recorded_at = change.recorded_at.to_string();
     let exercise = change.exercise.as_str();
@@ -1068,11 +1075,13 @@ async fn write_change(
     sqlx::query!(
         r"
         INSERT INTO gym_slot_fill_change
-            (mesocycle, slot, valid_from, recorded_at, exercise, assisted_maker, assisted_model)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (mesocycle, slot, intensity, valid_from, recorded_at, exercise,
+             assisted_maker, assisted_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ",
         mesocycle,
         slot,
+        intensity,
         from,
         recorded_at,
         exercise,

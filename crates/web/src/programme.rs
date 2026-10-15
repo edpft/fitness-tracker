@@ -8,11 +8,11 @@
 use application::MesocycleInForce;
 use domain::{
     gym::{
-        equipment::{EquipmentFacts, Maker, Model, Settings, Specific},
+        equipment::{EquipmentFacts, Maker, Model, Specific},
         exercise::{Exercise, RepsExercise},
     },
     prescription::{SlotId, linear::SlotContent},
-    schedule::SessionRole,
+    schedule::{Relative, SessionRole},
 };
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
@@ -43,13 +43,9 @@ pub fn page(
     said: Option<&str>,
 ) -> Markup {
     let banded: Vec<&Specific> = facts
-        .specifics
+        .bands
         .iter()
-        .filter(|(_, timeline)| {
-            timeline
-                .on(today)
-                .is_some_and(|fact| matches!(fact.value, Settings::Bands { .. }))
-        })
+        .filter(|(_, timeline)| timeline.on(today).is_some())
         .map(|(specific, _)| specific)
         .collect();
     html! {
@@ -82,6 +78,12 @@ pub fn page(
     }
 }
 
+/// The two intensities, with the words the page uses for them.
+const SESSIONS: [(Relative, &str); 2] = [
+    (Relative::Higher, "Higher-intensity session"),
+    (Relative::Lower, "Lower-intensity session"),
+];
+
 fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup {
     let fills = found
         .mesocycle
@@ -90,42 +92,57 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
     html! {
         @for slot in SlotId::ALL.iter().copied().filter(|slot| changeable(*slot)) {
             h3 { (slot.as_str()) }
-            @let held: Vec<String> = SessionRole::ALL
-                .iter()
-                .map(|role| match fills.fills().content(slot, *role) {
-                    SlotContent::Single(exercise) => exercise.as_str().to_owned(),
-                    SlotContent::Static(fill) => fill.exercise.as_str().to_owned(),
-                })
-                .collect();
-            p {
-                (held.first().cloned().unwrap_or_default())
-                @if held.windows(2).any(|pair| pair.first() != pair.last()) {
-                    " / " (held.last().cloned().unwrap_or_default())
-                }
-                @if let Some(change) = found.changes.on(slot, today) {
-                    @if let Some(by) = &change.assisted_by {
-                        " assisted by " (by)
+            @let held = |intensity: Relative| {
+                SessionRole::ALL
+                    .iter()
+                    .find(|role| role.intensity() == intensity)
+                    .and_then(|role| match fills.fills().content(slot, *role) {
+                        SlotContent::Single(exercise) => Some(*exercise),
+                        SlotContent::Static(_) => None,
+                    })
+            };
+            @let alternates = held(Relative::Higher) != held(Relative::Lower);
+            @for (intensity, words) in SESSIONS {
+                @if alternates || intensity == Relative::Higher {
+                    @if let Some(exercise) = held(intensity) {
+                        p {
+                            @if alternates { (words) ": " }
+                            (exercise.as_str())
+                            @if let Some(change) = found.changes.on(slot, intensity, today) {
+                                @if let Some(by) = &change.assisted_by { " assisted by " (by) }
+                                " " span.change { "(from " (change.from) ")" }
+                            }
+                        }
+                        @if let Exercise::Reps(current) = exercise {
+                            (form(slot, alternates.then_some(intensity), current, banded, today))
+                        }
                     }
-                    " " span.change { "(from " (change.from) ")" }
                 }
             }
             @for change in found.changes.iter().filter(|change| change.slot == slot && change.from > today) {
                 p.change {
                     "From " (change.from) ": " (change.exercise.as_str())
                     @if let Some(by) = &change.assisted_by { " assisted by " (by) }
+                    @if let Some(intensity) = change.intensity { ", " (intensity.as_str()) "-intensity session" }
                 }
-            }
-            @if let Some(current) = held.first().and_then(|key| RepsExercise::try_from(key.clone()).ok()) {
-                (form(slot, current, banded, today))
             }
         }
     }
 }
 
-fn form(slot: SlotId, current: RepsExercise, banded: &[&Specific], today: Date) -> Markup {
+fn form(
+    slot: SlotId,
+    intensity: Option<Relative>,
+    current: RepsExercise,
+    banded: &[&Specific],
+    today: Date,
+) -> Markup {
     html! {
         form.fill method="post" action="/programme" {
             input type="hidden" name="slot" value=(slot.as_str());
+            @if let Some(intensity) = intensity {
+                input type="hidden" name="intensity" value=(intensity.as_str());
+            }
             div.row {
                 select name="exercise" aria-label="Exercise" {
                     @for exercise in RepsExercise::ALL {
@@ -150,6 +167,8 @@ fn form(slot: SlotId, current: RepsExercise, banded: &[&Specific], today: Date) 
 /// What a posted change asked for.
 pub struct Asked {
     pub slot: SlotId,
+    /// The session it changes, for a slot that alternates; both otherwise.
+    pub intensity: Option<Relative>,
     pub exercise: Exercise,
     pub assisted_by: Option<Specific>,
     pub from: Date,
@@ -168,6 +187,10 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
             .ok_or_else(|| format!("{name} is needed"))
     };
     let slot = SlotId::try_from(field("slot")?.to_owned()).map_err(|error| error.to_string())?;
+    let intensity = field("intensity")
+        .ok()
+        .map(|typed| Relative::try_from(typed.to_owned()).map_err(|error| error.to_string()))
+        .transpose()?;
     let exercise = RepsExercise::try_from(field("exercise")?.to_owned())
         .map(Exercise::Reps)
         .map_err(|error| error.to_string())?;
@@ -189,6 +212,7 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
         .map_err(|_| format!("{typed:?} is not a date"))?;
     Ok(Asked {
         slot,
+        intensity,
         exercise,
         assisted_by,
         from,

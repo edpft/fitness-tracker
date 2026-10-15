@@ -8,8 +8,8 @@
 
 use domain::gym::{
     equipment::{
-        Band, BandName, Combination, EquipmentFacts, Fact, FactId, Maker, Model, Settings,
-        Specific, Statement,
+        Band, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId, Maker, Model,
+        Specific, Stack, Statement,
     },
     exercise::Implement,
 };
@@ -40,8 +40,6 @@ form.fact fieldset { min-width: 0; }
 .rows .band > label { display: contents; }
 .rows input { width: 100%; min-width: 0; }
 .rows .remove { width: auto; padding: 6px 10px; }
-form:has(input[name=shape][value=bands]:checked) .stack,
-form:has(input[name=shape][value=stack]:checked) .bands { display: none; }
 ";
 
 /// Add a row by copying the last one emptied, remove one by taking it out.
@@ -93,15 +91,27 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
                         }
                     }
                     (new_kind(facts, today))
-                    h2 { "Specific equipment" }
-                    p.legend { "A particular product: another of its type may not offer the same settings." }
-                    @for (specific, timeline) in &facts.specifics {
+                    h2 { "Machines" }
+                    p.legend { "A particular machine: another of its type may not offer the same stack." }
+                    @for (specific, timeline) in &facts.machines {
                         h3 { (specific) }
                         @for fact in timeline.iter() {
-                            (specific_fact(specific, fact, today))
+                            (machine_fact(specific, fact, today))
                         }
                     }
-                    (new_specific(today))
+                    (new_machine(today))
+                    h2 { "Bands" }
+                    p.legend {
+                        "A range of bands by maker and model. Each band gives a force at twice its "
+                        "length, and the steps say which bands, together, come next."
+                    }
+                    @for (specific, timeline) in &facts.bands {
+                        h3 { (specific) }
+                        @for fact in timeline.iter() {
+                            (bands_fact(specific, fact, today))
+                        }
+                    }
+                    (new_bands(today))
                 }
             }
         }
@@ -176,28 +186,72 @@ fn new_kind(facts: &EquipmentFacts, today: Date) -> Markup {
     }
 }
 
-fn specific_fact(specific: &Specific, fact: &Fact<Settings>, today: Date) -> Markup {
+fn maker_and_model(specific: &Specific) -> Markup {
+    html! {
+        input type="hidden" name="maker" value=(specific.maker);
+        input type="hidden" name="model" value=(specific.model);
+    }
+}
+
+fn naming(maker: &str, model: &str) -> Markup {
+    html! {
+        div.row {
+            label { "Maker " input name="maker" placeholder=(maker) required; }
+            label { "Model " input name="model" placeholder=(model) required; }
+        }
+    }
+}
+
+fn machine_fact(specific: &Specific, fact: &Fact<Stack>, today: Date) -> Markup {
     html! {
         p { (fact.value) " " span.period { (period(fact)) } }
         form.fact method="post" action="/equipment" {
-            input type="hidden" name="maker" value=(specific.maker);
-            input type="hidden" name="model" value=(specific.model);
-            (settings_fields(Some(&fact.value)))
+            input type="hidden" name="category" value="machine";
+            (maker_and_model(specific))
+            (steps_rows(Some(fact.value.steps())))
+            (most_field(Some(fact.value.most())))
             (acts(fact.id, today))
         }
     }
 }
 
-fn new_specific(today: Date) -> Markup {
+fn new_machine(today: Date) -> Markup {
     html! {
         details {
-            summary { "Another specific piece of equipment" }
+            summary { "Another machine" }
             form.fact method="post" action="/equipment" {
-                div.row {
-                    label { "Maker " input name="maker" placeholder="Physical" required; }
-                    label { "Model " input name="model" placeholder="Supaflex" required; }
-                }
-                (settings_fields(None))
+                input type="hidden" name="category" value="machine";
+                (naming("Technogym", "Kneeling Easy Chin Dip"))
+                (steps_rows(None))
+                (most_field(None))
+                (declare_row(today))
+            }
+        }
+    }
+}
+
+fn bands_fact(specific: &Specific, fact: &Fact<BandRange>, today: Date) -> Markup {
+    html! {
+        p { (fact.value) " " span.period { (period(fact)) } }
+        form.fact method="post" action="/equipment" {
+            input type="hidden" name="category" value="bands";
+            (maker_and_model(specific))
+            (band_rows(Some(fact.value.bands())))
+            (step_rows(Some(fact.value.steps())))
+            (acts(fact.id, today))
+        }
+    }
+}
+
+fn new_bands(today: Date) -> Markup {
+    html! {
+        details {
+            summary { "Another range of bands" }
+            form.fact method="post" action="/equipment" {
+                input type="hidden" name="category" value="bands";
+                (naming("Physical", "Supaflex"))
+                (band_rows(None))
+                (step_rows(None))
                 (declare_row(today))
             }
         }
@@ -301,32 +355,6 @@ fn step_rows(current: Option<&NonEmpty<Combination>>) -> Markup {
 /// How many bands one step can name.
 const STEP_PARTS: usize = 3;
 
-/// A specific's settings. A known one keeps its shape, so only its own fields
-/// are offered; a new one chooses, and only the chosen fields are shown and
-/// read.
-fn settings_fields(current: Option<&Settings>) -> Markup {
-    match current {
-        Some(Settings::Stack { steps, most }) => html! {
-            input type="hidden" name="shape" value="stack";
-            (steps_rows(Some(steps)))
-            (most_field(Some(*most)))
-        },
-        Some(Settings::Bands { bands, steps }) => html! {
-            input type="hidden" name="shape" value="bands";
-            (band_rows(Some(bands)))
-            (step_rows(Some(steps)))
-        },
-        None => html! {
-            div.row {
-                label { input type="radio" name="shape" value="stack" checked; " a stack" }
-                label { input type="radio" name="shape" value="bands"; " bands" }
-            }
-            div.stack { (steps_rows(None)) (most_field(None)) }
-            div.bands { (band_rows(None)) (step_rows(None)) }
-        },
-    }
-}
-
 fn most_field(current: Option<Kg>) -> Markup {
     html! {
         label { "The most it holds, in kg "
@@ -407,13 +435,18 @@ fn statement(form: &Fields) -> Result<Statement, String> {
         maker: Maker::try_from(form.required("maker")?).map_err(|error| error.to_string())?,
         model: Model::try_from(form.required("model")?).map_err(|error| error.to_string())?,
     };
-    let settings = if form.field("shape") == Some("bands") {
-        Settings::bands(bands(form)?, band_steps(form)?)
-    } else {
-        Settings::stack(steps(form)?, kilograms(form.required("most")?)?)
+    match form.required("category")? {
+        "machine" => Ok(Statement::Machine(
+            specific,
+            Stack::new(steps(form)?, kilograms(form.required("most")?)?)
+                .map_err(|error| error.to_string())?,
+        )),
+        "bands" => Ok(Statement::Bands(
+            specific,
+            BandRange::new(bands(form)?, band_steps(form)?).map_err(|error| error.to_string())?,
+        )),
+        other => Err(format!("{other:?} is not a category of equipment")),
     }
-    .map_err(|error| error.to_string())?;
-    Ok(Statement::Specific(specific, settings))
 }
 
 /// The band rows, skipping any left wholly empty.

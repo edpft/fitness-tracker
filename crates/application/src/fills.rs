@@ -7,7 +7,7 @@
 use domain::{
     gym::{Exercise, equipment::Specific},
     prescription::{FillChange, SlotId, linear::SlotContent},
-    schedule::SessionRole,
+    schedule::{Relative, SessionRole},
 };
 use jiff::{Timestamp, civil::Date};
 
@@ -52,10 +52,12 @@ where
     /// # Errors
     ///
     /// [`FillChangeError`] if no mesocycle is in force then, the slot is
-    /// static or the primary, or the specific is not known on that date.
+    /// static or the primary, or the range of bands is not known on that
+    /// date.
     pub async fn change(
         &self,
         slot: SlotId,
+        intensity: Option<Relative>,
         from: Date,
         exercise: Exercise,
         assisted_by: Option<Specific>,
@@ -82,7 +84,7 @@ where
                 .equipment
                 .facts()
                 .await?
-                .specifics
+                .bands
                 .get(specific)
                 .is_some_and(|timeline| timeline.on(from).is_some());
             if !known {
@@ -94,6 +96,7 @@ where
         }
         let change = FillChange {
             slot,
+            intensity,
             from,
             recorded_at: at,
             exercise,

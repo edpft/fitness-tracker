@@ -391,17 +391,17 @@ where
             scales: self.ports.parameters.scales_on(date).await?,
             ..parameters
         };
+        let (week, role) = programme.calendar().place(date)?;
+        // A skipped essential session earlier in the week is prescribed here
+        // instead (#392).
+        let role = self.ports.programmes.role_on(date).await?.unwrap_or(role);
         let mut ladders = BTreeMap::new();
         for slot in SlotId::ALL {
-            let Some(specific) = changes.assisted_by(*slot, date) else {
+            let Some(specific) = changes.assisted_by(*slot, role, date) else {
                 continue;
             };
-            let settings = self.ports.parameters.specific_on(specific, date).await?;
-            if let Some(ladder) = settings
-                .as_ref()
-                .and_then(|settings| BandLadder::of(specific, settings))
-            {
-                ladders.insert(*slot, ladder);
+            if let Some(range) = self.ports.parameters.bands_on(specific, date).await? {
+                ladders.insert(*slot, BandLadder::of(specific, &range));
             }
         }
         let programming = programming()?;
@@ -410,11 +410,6 @@ where
             programming: &programming,
             ladders: &ladders,
         };
-
-        let (week, role) = programme.calendar().place(date)?;
-        // A skipped essential session earlier in the week is prescribed here
-        // instead (#392).
-        let role = self.ports.programmes.role_on(date).await?.unwrap_or(role);
 
         // Every exercise the programme can prescribe that progresses, in one
         // call. Both sides of every alternating fill, because this session
@@ -2391,7 +2386,7 @@ mod progression_tests {
     /// twice its length.
     fn supaflex() -> Result<domain::gym::equipment::BandLadder, Box<dyn std::error::Error>> {
         use domain::gym::equipment::{
-            Band, BandLadder, BandName, Combination, Maker, Model, Settings, Specific,
+            Band, BandLadder, BandName, BandRange, Combination, Maker, Model, Specific,
         };
         let band = |name: &str, kg: u64| -> Result<Band, Box<dyn std::error::Error>> {
             Ok(Band {
@@ -2408,7 +2403,7 @@ mod progression_tests {
                 domain::sequence::NonEmpty::new(names).map_err(|_| "no bands")?,
             ))
         };
-        let settings = Settings::bands(
+        let settings = BandRange::new(
             vec![
                 band("1/5 stars", 9)?,
                 band("2/5 stars", 11)?,
@@ -2428,7 +2423,7 @@ mod progression_tests {
             maker: Maker::try_from("Physical")?,
             model: Model::try_from("Supaflex")?,
         };
-        BandLadder::of(&specific, &settings).ok_or_else(|| "bands".into())
+        Ok(BandLadder::of(&specific, &settings))
     }
 
     fn assisted(kg: i64) -> Load {

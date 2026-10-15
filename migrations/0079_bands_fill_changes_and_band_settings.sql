@@ -1,5 +1,6 @@
 CREATE TABLE equipment_fact_rebuilt (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    category     TEXT    NOT NULL CHECK (category IN ('kind', 'machine', 'bands')),
     implement    TEXT
         CHECK (implement IN ('barbell', 'dumbbell', 'kettlebell', 'cable',
                              'machine', 'band', 'plate', 'sled', 'sandbag',
@@ -12,11 +13,12 @@ CREATE TABLE equipment_fact_rebuilt (
     most_grams   INTEGER CHECK (most_grams > 0),
     CHECK ((maker IS NULL) = (model IS NULL)),
     CHECK ((implement IS NULL) != (maker IS NULL)),
-    CHECK (implement IS NULL OR most_grams IS NULL)
+    CHECK ((category = 'kind') = (implement IS NOT NULL)),
+    CHECK ((category = 'machine') = (most_grams IS NOT NULL))
 ) STRICT;
 
-INSERT INTO equipment_fact_rebuilt (id, implement, valid_from, recorded_at, corrects)
-SELECT id, implement, valid_from, recorded_at, corrects
+INSERT INTO equipment_fact_rebuilt (id, category, implement, valid_from, recorded_at, corrects)
+SELECT id, 'kind', implement, valid_from, recorded_at, corrects
 FROM equipment_fact
 WHERE implement IS NOT NULL;
 
@@ -62,6 +64,7 @@ CREATE TABLE gym_slot_fill_change (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     mesocycle       INTEGER NOT NULL REFERENCES gym_mesocycle(id) ON DELETE CASCADE,
     slot            TEXT    NOT NULL,
+    intensity       TEXT    CHECK (intensity IS NULL OR intensity IN ('higher', 'lower')),
     valid_from      TEXT    NOT NULL,
     recorded_at     TEXT    NOT NULL,
     exercise        TEXT    NOT NULL,
