@@ -477,7 +477,7 @@ fn band_steps(form: &Fields) -> Result<Vec<Combination>, String> {
     for (key, value) in &form.0 {
         match key.as_str() {
             "step_band" if !value.trim().is_empty() => {
-                current.push(BandName::try_from(value.trim()).map_err(|error| error.to_string())?)
+                current.push(BandName::try_from(value.trim()).map_err(|error| error.to_string())?);
             }
             "step_end" => {
                 if let Ok(bands) = NonEmpty::new(std::mem::take(&mut current)) {
