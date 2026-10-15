@@ -688,6 +688,7 @@ pub fn a_workout_for(
             exercise: PrescribedExercise::ForReps {
                 exercise: RepsExercise::NeutralGripPullUp,
                 sets,
+                assisted: None,
             },
         }])
         .map_err(invalid)?,

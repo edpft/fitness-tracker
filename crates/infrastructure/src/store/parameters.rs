@@ -154,6 +154,19 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         Ok(read_facts(&self.pool).await?.scales_on(date))
     }
 
+    async fn specific_on(
+        &self,
+        specific: &domain::gym::equipment::Specific,
+        date: jiff::civil::Date,
+    ) -> Result<Option<domain::gym::equipment::Settings>, StoreError> {
+        Ok(read_facts(&self.pool)
+            .await?
+            .specifics
+            .get(specific)
+            .and_then(|timeline| timeline.on(date))
+            .map(|fact| fact.value.clone()))
+    }
+
     async fn current(&self) -> Result<Option<(Timestamp, GenerationParameters)>, StoreError> {
         let Some(row) = sqlx::query!(
             r#"

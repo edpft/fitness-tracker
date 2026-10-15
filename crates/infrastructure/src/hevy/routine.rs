@@ -205,7 +205,7 @@ fn render_exercise(
     unexpressed: &mut Vec<Unexpressed>,
 ) {
     let (exercise, rendered) = match prescribed {
-        PrescribedExercise::ForReps { exercise, sets } => (
+        PrescribedExercise::ForReps { exercise, sets, .. } => (
             Exercise::Reps(*exercise),
             sets.iter()
                 .map(|set| reps_set(Exercise::Reps(*exercise), set))
@@ -228,7 +228,15 @@ fn render_exercise(
     let mut refused = 0_usize;
     let mut reason = String::new();
     let mut groups: Vec<(String, Vec<RoutineSet>)> = Vec::new();
-    let mut annotations: Vec<String> = Vec::new();
+    // **Which bands, first.** Hevy has a number for assistance and nowhere to
+    // say what gives it, so the bands go in the note (#454).
+    let mut annotations: Vec<String> = match prescribed {
+        PrescribedExercise::ForReps {
+            assisted: Some(setting),
+            ..
+        } => vec![setting.to_string()],
+        _ => Vec::new(),
+    };
     let mut rest_seconds = None;
 
     for outcome in rendered {

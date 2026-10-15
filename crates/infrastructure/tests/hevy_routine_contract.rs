@@ -42,6 +42,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
             Load::Relative(SignedKg::from_grams(-7_000)),
             Target::spanning(RepCount::new(4)?, RepCount::new(2)?),
         )])?,
+        assisted: None,
     };
 
     let bodyweight_pull_up = PrescribedExercise::ForReps {
@@ -50,6 +51,7 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
             Load::BODYWEIGHT,
             Target::spanning(RepCount::new(4)?, RepCount::new(2)?),
         )])?,
+        assisted: None,
     };
 
     let shape = WorkoutShape::new(NonEmpty::new(vec![PrescribedItem::Superset(
@@ -872,6 +874,7 @@ fn ramped_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
                 Some(range),
             ),
         ])?,
+        assisted: None,
     };
 
     let mut session = session()?;
@@ -979,6 +982,7 @@ fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
                 Target::spanning(RepCount::new(5)?, RepCount::new(1)?),
             ),
         ])?,
+        assisted: None,
     };
 
     let mut session = session()?;

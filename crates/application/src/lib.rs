@@ -23,6 +23,7 @@ pub mod devices;
 pub mod equipment;
 pub mod error;
 pub mod extract;
+pub mod fills;
 pub mod heart_rate;
 pub mod holding;
 pub mod microcycle;
@@ -37,7 +38,8 @@ pub mod status;
 pub mod strength;
 
 pub use error::{
-    ComparisonError, DeliveryError, EquipmentError, ExtractionError, NormalisationError,
+    ComparisonError, DeliveryError, EquipmentError, ExtractionError, FillChangeError,
+    NormalisationError,
     PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
@@ -46,7 +48,7 @@ pub use ports::{
     CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
     DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
     DiaryStore, EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog,
-    ExtractionStatusReporter, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
+    ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
     HolidayCalendar, Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce,
     MesocycleStore, NextLock, NormalisationRunLog, NormalisationSummary,
     NormalisedCyclingSessionReader, NormalisedEntityStore, NormalisedGymSessionReader,

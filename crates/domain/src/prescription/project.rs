@@ -381,6 +381,7 @@ fn exercise(
             Some(PrescribedExercise::ForReps {
                 exercise,
                 sets: sets_of(sets, at, gaps)?,
+                assisted: None,
             })
         }
         CanonicalExercise::ForDuration { exercise, sets } => {

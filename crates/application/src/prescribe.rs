@@ -14,7 +14,8 @@ use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Load, SetKind,
+        Load, SetKind, SignedKg,
+        equipment::{BandLadder, BandSetting},
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     measure::{Kg, RepCount},
@@ -229,6 +230,7 @@ where
         let consulted = Consulted {
             parameters: &parameters,
             programming: &programming,
+            ladders: &NO_LADDERS,
         };
         let progress = self.progress_of(&plan, &programme, &consulted, on).await?;
         let target = self.inheritance(&programme, &consulted, on).await?.target;
@@ -377,7 +379,10 @@ where
         let Some(found) = self.ports.programmes.on(date).await? else {
             return Err(PrescriptionError::NoPlan { date });
         };
-        let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
+        // The fills as changed on the session's date, and what assists them
+        // (#454). A change after this date is not this session's.
+        let (programme_id, plan, changes) = (found.id, found.plan, found.changes);
+        let programme = found.mesocycle.changed_on(&changes, date);
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
@@ -386,10 +391,24 @@ where
             scales: self.ports.parameters.scales_on(date).await?,
             ..parameters
         };
+        let mut ladders = BTreeMap::new();
+        for slot in SlotId::ALL {
+            let Some(specific) = changes.assisted_by(*slot, date) else {
+                continue;
+            };
+            let settings = self.ports.parameters.specific_on(specific, date).await?;
+            if let Some(ladder) = settings
+                .as_ref()
+                .and_then(|settings| BandLadder::of(specific, settings))
+            {
+                ladders.insert(*slot, ladder);
+            }
+        }
         let programming = programming()?;
         let consulted = Consulted {
             parameters: &parameters,
             programming: &programming,
+            ladders: &ladders,
         };
 
         let (week, role) = programme.calendar().place(date)?;
@@ -1177,7 +1196,13 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
 struct Consulted<'a> {
     parameters: &'a GenerationParameters,
     programming: &'a Programming,
+    /// The bands that assist each slot a change says is band-assisted, as
+    /// they were on the session's date (#454).
+    ladders: &'a BTreeMap<SlotId, BandLadder>,
 }
+
+/// No slot is band-assisted.
+static NO_LADDERS: BTreeMap<SlotId, BandLadder> = BTreeMap::new();
 
 /// What the record says, gathered before any slot is derived.
 ///
@@ -1454,6 +1479,7 @@ fn primary_slot_item(
         exercise: PrescribedExercise::ForReps {
             exercise: *reps_exercise,
             sets,
+            assisted: None,
         },
     })
 }
@@ -1965,6 +1991,7 @@ fn static_exercise(
     Ok(PrescribedExercise::ForReps {
         exercise,
         sets: NonEmpty::new(sets).map_err(|_| UnderivableReason::NoWorkingSet)?,
+        assisted: None,
     })
 }
 
@@ -1997,7 +2024,17 @@ fn one_exercise(
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
     let scheme = scheme_for(consulted, slot.block());
-    let load = progressed_load(consulted, exercise, scheme, last).map_err(underivable)?;
+    let banded = consulted
+        .ladders
+        .get(&slot)
+        .and_then(|ladder| banded_load(ladder, scheme, last));
+    let (load, assisted) = match banded {
+        Some(banded) => banded,
+        None => (
+            progressed_load(consulted, exercise, scheme, last).map_err(underivable)?,
+            None,
+        ),
+    };
     let sets: Vec<_> = (0..scheme.sets.as_u32())
         .map(|_| PrescribedSet::fixed(load, scheme.reps))
         .collect();
@@ -2006,7 +2043,41 @@ fn one_exercise(
     Ok(PrescribedExercise::ForReps {
         exercise: reps_exercise,
         sets,
+        assisted,
     })
+}
+
+/// Double progression down a range of bands (#454): the step nearest the
+/// last session's least assisted load, and the next step down once the top of
+/// the range was reached at every prescribed set there. Past the last band is
+/// no band at all.
+///
+/// Nothing where the last session was not assisted, which leaves the slot to
+/// progress as it would unassisted: crossing zero onto the equipment that
+/// loads it is #451.
+fn banded_load(
+    ladder: &BandLadder,
+    scheme: &domain::prescription::AccessoryScheme,
+    last: &Performance,
+) -> Option<(Load, Option<Box<BandSetting>>)> {
+    let (heaviest, reached_top) = standing_at_heaviest(scheme, last).ok()?;
+    let Load::Relative(delta) = heaviest else {
+        return None;
+    };
+    if delta.as_grams() >= 0 {
+        return None;
+    }
+    let setting = ladder.nearest(Kg::from_grams(delta.as_grams().unsigned_abs()))?;
+    let setting = if reached_top {
+        match ladder.after(&setting) {
+            Some(next) => next,
+            None => return Some((Load::Relative(SignedKg::ZERO), None)),
+        }
+    } else {
+        setting
+    };
+    let load = Load::Relative(SignedKg::from(setting.nominal).negated());
+    Some((load, Some(Box::new(setting))))
 }
 
 /// The heaviest of a performed exercise's sets.
@@ -2065,26 +2136,9 @@ fn progressed_load(
     // ramp's three repetitions answer "no" every week and hold the load where it
     // is for good — a freeze rather than a week's delay, because next week's
     // ramp answers "no" again.
-    let working: Vec<_> = last
-        .sets
-        .iter()
-        .filter(|set| set.kind == SetKind::Working)
-        .collect();
-    let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
-    let at_heaviest: Vec<_> = working
-        .iter()
-        .filter(|set| set.load == heaviest.load)
-        .collect();
-    let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
-    let reached_top = enough
-        && at_heaviest.iter().all(|set| {
-            set.outcome
-                .completed()
-                .is_some_and(|reps| *reps >= scheme.reps.maximum())
-        });
-
+    let (heaviest, reached_top) = standing_at_heaviest(scheme, last)?;
     if !reached_top {
-        return Ok(heaviest.load);
+        return Ok(heaviest);
     }
 
     let steps = consulted
@@ -2092,7 +2146,7 @@ fn progressed_load(
         .scales
         .for_exercise(exercise)
         .ok_or(UnderivableReason::NoLoadScale)?;
-    match heaviest.load {
+    match heaviest {
         // The step is read at the load being left, so a dumbbell leaving 10kg
         // adds the 2kg that applies from 10kg rather than the 1kg that got it
         // there.
@@ -2110,6 +2164,32 @@ fn progressed_load(
             )))
         }
     }
+}
+
+/// The heaviest working load of a session, and whether the top of the range
+/// was reached at every set the scheme prescribes there.
+fn standing_at_heaviest(
+    scheme: &domain::prescription::AccessoryScheme,
+    last: &Performance,
+) -> Result<(Load, bool), UnderivableReason> {
+    let working: Vec<_> = last
+        .sets
+        .iter()
+        .filter(|set| set.kind == SetKind::Working)
+        .collect();
+    let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
+    let at_heaviest: Vec<_> = working
+        .iter()
+        .filter(|set| set.load == heaviest.load)
+        .collect();
+    let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
+    let reached_top = enough
+        && at_heaviest.iter().all(|set| {
+            set.outcome
+                .completed()
+                .is_some_and(|reps| *reps >= scheme.reps.maximum())
+        });
+    Ok((heaviest.load, reached_top))
 }
 
 /// Storing an authored plan and the consulted it was generated against.
@@ -2339,6 +2419,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2370,6 +2451,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2401,6 +2483,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-15_000)), 6).expect("a set"),
@@ -2435,6 +2518,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
@@ -2465,6 +2549,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2635,6 +2720,7 @@ mod ramp_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
         let sets = primary_sets(
@@ -2693,6 +2779,7 @@ mod ramp_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500)).expect("a barbell is one band");
         let shape: Vec<(bool, Option<u64>, Option<Rir>)> = primary_sets(

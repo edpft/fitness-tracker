@@ -142,9 +142,14 @@ fn exercise_rested(
     };
 
     match exercise {
-        PrescribedExercise::ForReps { exercise, sets } => PrescribedExercise::ForReps {
+        PrescribedExercise::ForReps {
+            exercise,
+            sets,
+            assisted,
+        } => PrescribedExercise::ForReps {
             exercise: *exercise,
             sets: sets_rested(sets, rest, block),
+            assisted: assisted.clone(),
         },
         PrescribedExercise::ForDuration { exercise, sets } => PrescribedExercise::ForDuration {
             exercise: *exercise,

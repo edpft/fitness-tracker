@@ -258,6 +258,29 @@ impl SlotFills {
         }
     }
 
+    /// A single slot's fill, to change; nothing for a static slot, whose fill
+    /// carries its own sets and reps.
+    pub const fn single_mut(&mut self, slot: SlotId) -> Option<&mut Fill<Exercise>> {
+        match slot {
+            SlotId::Plyometric | SlotId::Power => None,
+            SlotId::KneeDominant => Some(&mut self.knee_dominant),
+            SlotId::UpperPush => Some(&mut self.upper_push),
+            SlotId::UpperPull => Some(&mut self.upper_pull),
+            SlotId::HipDominant => Some(&mut self.hip_dominant),
+            SlotId::Biceps => Some(&mut self.biceps),
+            SlotId::Triceps => Some(&mut self.triceps),
+            SlotId::WristFlexion => Some(&mut self.wrist_flexion),
+            SlotId::WristExtension => Some(&mut self.wrist_extension),
+            SlotId::Core => Some(&mut self.core),
+            SlotId::HandstandHold => Some(&mut self.handstand_hold),
+            SlotId::DeadHang => Some(&mut self.dead_hang),
+            SlotId::HipFlexorStretch => Some(&mut self.hip_flexor_stretch),
+            SlotId::HipExternalRotatorStretch => Some(&mut self.hip_external_rotator_stretch),
+            SlotId::HamstringStretch => Some(&mut self.hamstring_stretch),
+            SlotId::GroinStretch => Some(&mut self.groin_stretch),
+        }
+    }
+
     /// What fills the primary slot.
     ///
     /// Separate from [`Self::content`] because the primary is always one of the
