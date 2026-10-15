@@ -6,14 +6,13 @@
 //! picked from a list. Reading the fields into domain values is this page's
 //! job; what a declaration or a correction means is `application`'s.
 
-use std::collections::HashMap;
-
 use domain::gym::{
     equipment::{EquipmentFacts, Fact, FactId, LevelName, Settings, SpecificName, Statement},
     exercise::Implement,
 };
 use domain::measure::Kg;
-use domain::prescription::LoadSteps;
+use domain::prescription::{LoadSteps, Step};
+use domain::sequence::NonEmpty;
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
@@ -21,12 +20,36 @@ const TITLE: &str = "Equipment";
 
 const STYLE: &str = "
 form.fact { display: grid; gap: 0.4rem; margin: 0.5rem 0 1.25rem; }
-form.fact input, form.fact select { font: inherit; padding: 6px; }
+form.fact input, form.fact select { font: inherit; padding: 6px; max-width: 100%; box-sizing: border-box; }
+form.fact fieldset { min-width: 0; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.row > * { flex: 1 1 8rem; }
+.row > * { flex: 1 1 8rem; min-width: 0; }
 .row button { width: auto; padding: 8px 12px; }
 .period { color: var(--muted); }
 .said { color: var(--failed); }
+.rows { display: grid; gap: 0.4rem; }
+.rows > .row:first-child .remove { visibility: hidden; }
+.rows .band, .rows .level { display: grid; gap: 0.3rem; align-items: center; }
+.rows .band { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+.rows .level { grid-template-columns: minmax(0, 1fr) auto; }
+.rows .band > label { display: contents; }
+.rows input { width: 100%; min-width: 0; }
+.rows .remove { width: auto; padding: 6px 10px; }
+form:has(input[name=shape][value=levels]:checked) .stack,
+form:has(input[name=shape][value=stack]:checked) .levels { display: none; }
+";
+
+/// Add a row by copying the last one emptied, remove one by taking it out.
+/// The first row of steps starts at nothing and is never removed, so the
+/// rule that a scale starts at 0kg cannot be broken from the page.
+const SCRIPT: &str = "
+function addRow(button) {
+  const rows = button.previousElementSibling;
+  const row = rows.lastElementChild.cloneNode(true);
+  row.querySelectorAll('input').forEach((input) => { input.value = ''; input.readOnly = false; });
+  rows.appendChild(row);
+}
+function removeRow(button) { button.closest('.row').remove(); }
 ";
 
 /// What one posted form asked for.
@@ -44,7 +67,8 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (TITLE) }
-                style { (crate::page::STYLE) (STYLE) }
+                style { (crate::page::STYLE) (maud::PreEscaped(STYLE)) }
+                script { (maud::PreEscaped(SCRIPT)) }
             }
             body {
                 main {
@@ -117,7 +141,7 @@ fn kind_fact(implement: Implement, fact: &Fact<LoadSteps>, today: Date) -> Marku
         p { (fact.value) " " span.period { (period(fact)) } }
         form.fact method="post" action="/equipment" {
             input type="hidden" name="kind" value=(implement.as_str());
-            label { "Increments " input name="steps" value=(fact.value) required; }
+            (steps_rows(Some(&fact.value)))
             (acts(fact.id, today))
         }
     }
@@ -139,7 +163,7 @@ fn new_kind(facts: &EquipmentFacts, today: Date) -> Markup {
                             option value=(implement.as_str()) { (implement) }
                         }
                     }
-                    label { "Increments " input name="steps" placeholder="2.5kg, or 1kg, 2kg from 10kg" required; }
+                    (steps_rows(None))
                     (declare_row(today))
                 }
             }
@@ -171,29 +195,97 @@ fn new_specific(today: Date) -> Markup {
     }
 }
 
-/// A stack or levels: both sets of fields, and a choice of which is meant.
-fn settings_fields(current: Option<&Settings>) -> Markup {
-    let (steps, most, levels) = match current {
-        Some(Settings::Stack { steps, most }) => {
-            (steps.to_string(), most.to_string(), String::new())
-        }
-        Some(Settings::Levels(levels)) => {
-            let names: Vec<&str> = levels.iter().map(LevelName::as_str).collect();
-            (String::new(), String::new(), names.join(", "))
-        }
-        None => (String::new(), String::new(), String::new()),
-    };
-    let levelled = matches!(current, Some(Settings::Levels(_)));
+/// A kind's increments, or a stack's: one row per band, each a load it starts
+/// at and the step from there, in kilograms. Typed as numbers, so nothing is
+/// parsed out of text.
+fn steps_rows(current: Option<&LoadSteps>) -> Markup {
+    let bands: Vec<(String, String)> = current.map_or_else(
+        || vec![("0".to_owned(), String::new())],
+        |steps| {
+            steps
+                .bands()
+                .iter()
+                .map(|band| (band.from.to_string(), band.size.to_string()))
+                .collect()
+        },
+    );
     html! {
-        div.row {
-            label { input type="radio" name="shape" value="stack" checked[!levelled]; " a stack" }
-            label { input type="radio" name="shape" value="levels" checked[levelled]; " levels" }
+        fieldset {
+            legend { "Increments, in kg" }
+            div.rows {
+                @for (index, (from, size)) in bands.iter().enumerate() {
+                    div.row.band {
+                        label { "from " input type="number" name="band_from" value=(from)
+                            min="0" step="0.001" inputmode="decimal" readonly[index == 0] required; }
+                        label { "step " input type="number" name="band_step" value=(size)
+                            min="0.001" step="0.001" inputmode="decimal" required; }
+                        button.remove type="button" onclick="removeRow(this)" { "Remove" }
+                    }
+                }
+            }
+            button type="button" onclick="addRow(this)" { "Add a band" }
         }
-        div.row {
-            label { "Steps " input name="steps" value=(steps) placeholder="7kg"; }
-            label { "To " input name="most" value=(most) placeholder="84"; }
+    }
+}
+
+/// A range's levels, one per row, in the maker's order.
+fn level_rows(current: Option<&NonEmpty<LevelName>>) -> Markup {
+    let levels: Vec<String> = current.map_or_else(
+        || vec![String::new()],
+        |levels| {
+            levels
+                .iter()
+                .map(|level| level.as_str().to_owned())
+                .collect()
+        },
+    );
+    html! {
+        fieldset {
+            legend { "Levels, in order" }
+            div.rows {
+                @for level in &levels {
+                    div.row.level {
+                        input name="level" value=(level) aria-label="Level";
+                        button.remove type="button" onclick="removeRow(this)" { "Remove" }
+                    }
+                }
+            }
+            button type="button" onclick="addRow(this)" { "Add a level" }
         }
-        label { "Levels, in order " input name="levels" value=(levels) placeholder="1, 2, 3, 4, 5"; }
+    }
+}
+
+/// A specific's settings. A known one keeps its shape, so only its own fields
+/// are offered; a new one chooses, and only the chosen fields are shown and
+/// read.
+fn settings_fields(current: Option<&Settings>) -> Markup {
+    match current {
+        Some(Settings::Stack { steps, most }) => html! {
+            input type="hidden" name="shape" value="stack";
+            (steps_rows(Some(steps)))
+            (most_field(Some(*most)))
+        },
+        Some(Settings::Levels(levels)) => html! {
+            input type="hidden" name="shape" value="levels";
+            (level_rows(Some(levels)))
+        },
+        None => html! {
+            div.row {
+                label { input type="radio" name="shape" value="stack" checked; " a stack" }
+                label { input type="radio" name="shape" value="levels"; " levels" }
+            }
+            div.stack { (steps_rows(None)) (most_field(None)) }
+            div.levels { (level_rows(None)) }
+        },
+    }
+}
+
+fn most_field(current: Option<Kg>) -> Markup {
+    html! {
+        label { "The most it holds, in kg "
+            input type="number" name="most" value=[current.map(|most| most.to_string())]
+                min="0.001" step="0.001" inputmode="decimal";
+        }
     }
 }
 
@@ -207,43 +299,83 @@ fn declare_row(today: Date) -> Markup {
     }
 }
 
-fn field<'a>(form: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
-    form.get(name)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
+/// A posted form, in the order its fields came: repeated names are the rows.
+pub struct Fields(Vec<(String, String)>);
+
+impl Fields {
+    pub const fn new(fields: Vec<(String, String)>) -> Self {
+        Self(fields)
+    }
+
+    /// The first non-empty value under a name.
+    fn field(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .filter(|(key, _)| key == name)
+            .map(|(_, value)| value.trim())
+            .find(|value| !value.is_empty())
+    }
+
+    fn required(&self, name: &str) -> Result<&str, String> {
+        self.field(name).ok_or_else(|| format!("{name} is needed"))
+    }
+
+    /// Every value under a name, in order, empty ones included so that rows
+    /// line up.
+    fn all(&self, name: &str) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|(key, _)| key == name)
+            .map(|(_, value)| value.trim())
+            .collect()
+    }
 }
 
-fn required<'a>(form: &'a HashMap<String, String>, name: &str) -> Result<&'a str, String> {
-    field(form, name).ok_or_else(|| format!("{name} is needed"))
+fn kilograms(typed: &str) -> Result<Kg, String> {
+    Kg::try_from(typed).map_err(|error| error.to_string())
 }
 
-fn statement(form: &HashMap<String, String>) -> Result<Statement, String> {
-    let steps = || LoadSteps::try_from(required(form, "steps")?).map_err(|error| error.to_string());
-    if let Some(kind) = field(form, "kind") {
+/// The band rows, skipping any left wholly empty.
+fn steps(form: &Fields) -> Result<LoadSteps, String> {
+    let mut bands = Vec::new();
+    for (from, size) in form.all("band_from").into_iter().zip(form.all("band_step")) {
+        match (from.is_empty(), size.is_empty()) {
+            (true, true) => {}
+            (false, false) => bands.push(Step {
+                from: kilograms(from)?,
+                size: kilograms(size)?,
+            }),
+            _ => return Err("each band needs both where it starts and its step".to_owned()),
+        }
+    }
+    LoadSteps::new(bands).map_err(|error| error.to_string())
+}
+
+fn statement(form: &Fields) -> Result<Statement, String> {
+    if let Some(kind) = form.field("kind") {
         let implement = Implement::try_from(kind).map_err(|error| error.to_string())?;
-        return Ok(Statement::Kind(implement, steps()?));
+        return Ok(Statement::Kind(implement, steps(form)?));
     }
     let name =
-        SpecificName::try_from(required(form, "specific")?).map_err(|error| error.to_string())?;
-    let settings = if field(form, "shape") == Some("levels") {
-        let levels = required(form, "levels")?
-            .split(',')
+        SpecificName::try_from(form.required("specific")?).map_err(|error| error.to_string())?;
+    let settings = if form.field("shape") == Some("levels") {
+        let levels = form
+            .all("level")
+            .into_iter()
+            .filter(|level| !level.is_empty())
             .map(LevelName::try_from)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         Settings::levels(levels)
     } else {
-        let typed = required(form, "most")?;
-        let most = Kg::try_from(typed.strip_suffix("kg").unwrap_or(typed).trim())
-            .map_err(|error| error.to_string())?;
-        Settings::stack(steps()?, most)
+        Settings::stack(steps(form)?, kilograms(form.required("most")?)?)
     }
     .map_err(|error| error.to_string())?;
     Ok(Statement::Specific(name, settings))
 }
 
-fn date(form: &HashMap<String, String>) -> Result<Date, String> {
-    let typed = required(form, "from")?;
+fn date(form: &Fields) -> Result<Date, String> {
+    let typed = form.required("from")?;
     typed
         .parse()
         .map_err(|_| format!("{typed:?} is not a date"))
@@ -254,16 +386,17 @@ fn date(form: &HashMap<String, String>) -> Result<Date, String> {
 /// # Errors
 ///
 /// What is missing or does not read, in words for the page.
-pub fn asked(form: &HashMap<String, String>) -> Result<Asked, String> {
+pub fn asked(form: &Fields) -> Result<Asked, String> {
     let statement = statement(form)?;
-    match field(form, "act") {
+    match form.field("act") {
         Some("correct") => {
-            let id = required(form, "fact")?
+            let id = form
+                .required("fact")?
                 .parse::<i64>()
                 .map_err(|_| "the fact to correct is not a number".to_owned())?;
             Ok(Asked::Correct(FactId::new(id), statement))
         }
-        Some("declare") if field(form, "always").is_some() => Ok(Asked::Declare(statement, None)),
+        Some("declare") if form.field("always").is_some() => Ok(Asked::Declare(statement, None)),
         Some("change" | "declare") => Ok(Asked::Declare(statement, Some(date(form)?))),
         _ => Err("nothing was asked".to_owned()),
     }

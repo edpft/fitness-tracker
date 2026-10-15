@@ -163,31 +163,3 @@ fn every_load_falls_inside_the_scale() {
         );
     }
 }
-
-/// A scale reads back as it prints, because the wizard takes it typed.
-#[test]
-fn a_scale_reads_as_it_prints() {
-    let rack = dumbbell().expect("the rack is two ascending bands");
-    let typed: LoadSteps = rack.to_string().parse().expect("its own rendering reads");
-    assert_eq!(typed, rack);
-
-    let bare: LoadSteps = "1, 2 from 10".parse().expect("kg is optional");
-    assert_eq!(bare, rack);
-
-    let machine: LoadSteps = "7".parse().expect("one band");
-    assert_eq!(machine, LoadSteps::uniform(kg(7_000)).expect("7kg"));
-}
-
-#[test]
-fn a_scale_that_does_not_read_says_so() {
-    assert!("seven".parse::<LoadSteps>().is_err());
-    assert!(
-        "1kg, 2kg".parse::<LoadSteps>().is_err(),
-        "a second band needs its start"
-    );
-    assert!("0".parse::<LoadSteps>().is_err(), "a step of nothing");
-    assert!(
-        "2 from 10".parse::<LoadSteps>().is_err(),
-        "the first band starts at nothing"
-    );
-}

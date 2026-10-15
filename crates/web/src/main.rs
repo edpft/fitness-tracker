@@ -213,9 +213,9 @@ async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
 /// a refusal, so what was typed is not the thing lost.
 async fn equipment_post(
     State(runs): State<Arc<Runs>>,
-    Form(form): Form<std::collections::HashMap<String, String>>,
+    Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let refused = match equipment::asked(&form) {
+    let refused = match equipment::asked(&equipment::Fields::new(form)) {
         Err(refused) => Some(refused),
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
             Err(error) => Some(error.to_string()),
