@@ -29,7 +29,9 @@ use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
     prescription::{GymMesocycle, NotScheduled, Skip, WeekKind},
-    schedule::{AbsenceKind, DayPart, Diary, Discipline, Relative, ScheduledSlot, SessionRole},
+    schedule::{
+        AbsenceKind, DayPart, Diary, Discipline, PartOfDay, Relative, ScheduledSlot, SessionRole,
+    },
 };
 
 /// What answers for one slot.
@@ -186,11 +188,14 @@ pub fn slots(diary: &Diary, containing: Date) -> Vec<ScheduledSlot> {
         .last()
         .and_then(|last| diary.first_ordinary_after(last.date))
         .map(|slot| DayPart::new(slot.date, slot.slot.part));
-    let closes: Vec<Option<DayPart>> = (0..slots.len())
-        .map(|at| {
-            slots
+    let closes: Vec<Option<DayPart>> = slots
+        .iter()
+        .enumerate()
+        .map(|(at, slot)| {
+            let next = slots
                 .get(at.saturating_add(1))
-                .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)))
+                .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)));
+            closes(DayPart::new(slot.date, slot.slot.part), next)
         })
         .collect();
     let skipped = |at: usize| {
@@ -322,15 +327,39 @@ pub enum Remaining {
     Spent,
 }
 
+/// Where a session's window closes: the end of its slot's day, or where the
+/// next slot begins if that comes first.
+///
+/// **The slot's own day, not up to the next slot** (#463). The operator,
+/// 2026-10-15: *"in theory, a session could slip into the next day, but, in
+/// practice, if it's not done in the session it's scheduled for, it probably
+/// won't be done."* Of his 83 sessions in 2026, the only ones performed on a
+/// later day were three of Monday's gym. Closing early costs nothing when he
+/// does train late: a state is derived on every read, and a session performed
+/// after its window still answers for its slot ([`crate::schedule::accounted`]).
+///
+/// `next` is where the next slot of either discipline begins, `None` where the
+/// diary describes nothing after this one. `None` back only at the end of the
+/// calendar.
+#[must_use]
+pub fn closes(slot: DayPart, next: Option<DayPart>) -> Option<DayPart> {
+    let day_ends = slot
+        .date
+        .tomorrow()
+        .ok()
+        .map(|tomorrow| DayPart::new(tomorrow, PartOfDay::Morning));
+    match (day_ends, next) {
+        (Some(day_ends), Some(next)) => Some(day_ends.min(next)),
+        (day_ends, next) => day_ends.or(next),
+    }
+}
+
 /// How much of a session's window is left.
 ///
-/// **From the later of its own slot and now, to the start of the next slot of
-/// any discipline.** Counted in parts of a day, and every part counts rather
-/// than only the training ones: a session may be performed at any point in its
-/// window. The part in progress counts until it ends, which is why the operator
-/// can say that on a Saturday evening there is *"in theory"* still time for
-/// Friday's gym test, and that running on the Sunday morning — the cycling slot
-/// having begun — leaves *"no time left for the second gym session"*.
+/// **From the later of its own slot and now, to where it [`closes`].** Counted
+/// in parts of a day, and every part counts rather than only the training
+/// ones: a session may be performed at any point in its window. The part in
+/// progress counts until it ends.
 ///
 /// `closes` is `None` where the diary describes nothing after this session, in
 /// which case the window is open: a week beyond everything the operator has

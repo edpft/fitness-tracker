@@ -44,8 +44,8 @@ pub struct Session {
     /// Whether the plan has a test in the slot: the 1RM test or the FTP test.
     pub test: bool,
     pub state: SessionState,
-    /// Where its window closes: the start of the next slot of either
-    /// discipline. `None` where the diary describes nothing after it.
+    /// Where its window closes: the end of its slot's day, or the start of
+    /// the next slot of either discipline if that comes first (#463).
     ///
     /// What a skip runs to (#391).
     pub closes: Option<DayPart>,
@@ -176,6 +176,15 @@ impl Session {
     #[must_use]
     pub const fn at(&self) -> DayPart {
         DayPart::new(self.slot.date, self.slot.slot.part)
+    }
+
+    /// Whether its window runs to the end of its slot's day, rather than to a
+    /// later slot that day (#463).
+    #[must_use]
+    pub fn closes_at_midnight(&self) -> bool {
+        self.closes.is_some_and(|closes| {
+            closes.part == PartOfDay::Morning && self.slot.date.tomorrow().ok() == Some(closes.date)
+        })
     }
 }
 
@@ -335,15 +344,18 @@ where
 
         let slots: Vec<ScheduledSlot> = week.iter().map(|planned| planned.slot).collect();
 
-        // **What closes the last session's window comes from the diary**, not
-        // from the end of the week: a Sunday session is still performable on
-        // the Monday morning if nothing is slotted before then.
+        // **The slot after the week comes from the diary**, not from the end
+        // of the week: it closes the last session's window where it begins
+        // before that session's day ends.
         let after = slots
             .last()
             .and_then(|last| diary.first_ordinary_after(last.date))
             .map(|slot| DayPart::new(slot.date, slot.slot.part));
 
-        let recorded = self.performed(&week, opens, after, now.date).await?;
+        let last_closes = slots
+            .last()
+            .and_then(|last| planner::closes(DayPart::new(last.date, last.slot.part), after));
+        let recorded = self.performed(&week, opens, last_closes, now.date).await?;
         let sessions_of = |upto: usize| -> Vec<RecordedSession> {
             recorded
                 .iter()
@@ -374,9 +386,12 @@ where
         for (at, planned) in week.iter().enumerate() {
             let slot = planned.slot;
             let begins = DayPart::new(slot.date, slot.slot.part);
-            let closes = slots
-                .get(at.saturating_add(1))
-                .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part)));
+            let closes = planner::closes(
+                begins,
+                slots
+                    .get(at.saturating_add(1))
+                    .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part))),
+            );
 
             let recorded = Recorded {
                 prescribed: self.prescribed(slot).await?,

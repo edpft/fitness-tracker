@@ -244,7 +244,7 @@ fn next_command() -> ClapCommand {
                 .value_parser(["morning", "afternoon", "evening"])
                 .help(
                     "How far into the day it is. A session may be performed \
-                     until the next one starts, so this decides whether a \
+                     until the end of its day, so this decides whether a \
                      session still has time left. Defaults to now",
                 ),
         )

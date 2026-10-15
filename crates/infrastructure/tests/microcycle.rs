@@ -510,7 +510,7 @@ fn a_second_delivery_for_a_date_replaces_the_first() {
     assert!(held.wrote("4d302bef"));
 }
 
-/// Every session of the week, read on the Saturday evening.
+/// Every session of the week, read on the Friday evening.
 #[test]
 fn the_microcycle_reports_a_state_for_every_session() {
     let sessions = corpus::block_on(async {
@@ -537,7 +537,7 @@ fn the_microcycle_reports_a_state_for_every_session() {
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 19),
+                    Date::constant(2026, 9, 18),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -570,9 +570,8 @@ fn the_microcycle_reports_a_state_for_every_session() {
 
 /// **#390: a prescribed session still in its window is the current one.**
 ///
-/// The same Saturday evening: the Friday's gym session was delivered and not
-/// trained, and nothing is slotted before the Sunday morning, so it can still
-/// be performed. The Sunday ride is the first session *to be prescribed*, and
+/// The same Friday evening: the Friday's gym session was delivered and not
+/// yet trained, so it can still be performed until the day ends (#463). The Sunday ride is the first session *to be prescribed*, and
 /// delivering it was the defect — the gym's second session in the operator's
 /// week of 5 October was prescribed that way, from the previous microcycle's.
 #[test]
@@ -599,7 +598,7 @@ fn a_prescribed_session_that_can_still_be_performed_is_the_current_one() {
                 peloton()?,
             )
             .standing(DayPart::new(
-                Date::constant(2026, 9, 19),
+                Date::constant(2026, 9, 18),
                 PartOfDay::Evening,
             ))
             .await?,
@@ -626,15 +625,14 @@ fn a_prescribed_session_that_can_still_be_performed_is_the_current_one() {
 /// **#391: a skip takes what is left of the current session's window**, and
 /// the session after it becomes current.
 ///
-/// The same Saturday evening as above, with the Friday's gym session delivered
-/// and not trained. Skipping takes the Saturday evening up to the Sunday ride's
-/// slot: the gym session reads *skipped (work dinner)* — through the store, so
+/// The same Friday evening as above, with the Friday's gym session delivered
+/// and not trained. Skipping takes what is left of the Friday: the gym session reads *skipped (work dinner)* — through the store, so
 /// the skip round-trips — and the ride is the one to deliver. Read again on the
 /// Sunday morning, the gym session is still skipped rather than *not
 /// performed*.
 #[test]
 fn a_skip_makes_the_session_after_it_current() {
-    let saturday = DayPart::new(Date::constant(2026, 9, 19), PartOfDay::Evening);
+    let friday_evening = DayPart::new(Date::constant(2026, 9, 18), PartOfDay::Evening);
     let sunday = DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Morning);
     let (skipped, later) = corpus::block_on(async {
         let (pool, _directory) = autumn().await?;
@@ -659,17 +657,17 @@ fn a_skip_makes_the_session_after_it_current() {
             ))
         };
 
-        let before = microcycle()?.standing(saturday).await?;
+        let before = microcycle()?.standing(friday_evening).await?;
         let until = before
             .current()
             .and_then(|session| session.closes)
             .ok_or("the Friday's window closes")?;
         SqliteDiaryStore::new(pool.clone())
-            .record_skip(&Skip::new(saturday, until, "work dinner")?)
+            .record_skip(&Skip::new(friday_evening, until, "work dinner")?)
             .await?;
 
         Ok::<_, Box<dyn std::error::Error>>((
-            microcycle()?.standing(saturday).await?,
+            microcycle()?.standing(friday_evening).await?,
             microcycle()?.standing(sunday).await?,
         ))
     })
@@ -831,7 +829,7 @@ fn an_illness_makes_a_prescribed_session_not_performed() {
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 19),
+                    Date::constant(2026, 9, 18),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -885,13 +883,13 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
             peloton()?,
         );
 
-        // The Saturday evening, while the Friday's gym session can still be
+        // The Friday evening, while the Friday's gym session can still be
         // done: by the Sunday nothing in the week is owed and it has ended
         // (#281).
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 19),
+                    Date::constant(2026, 9, 18),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -942,13 +940,13 @@ fn a_ride_the_record_cannot_name_answers_for_whose_turn_it_was() {
             peloton()?,
         );
 
-        // The Saturday evening, while the Friday's gym session can still be
+        // The Friday evening, while the Friday's gym session can still be
         // done: by the Sunday nothing in the week is owed and it has ended
         // (#281).
         Ok::<_, Box<dyn std::error::Error>>(
             standing
                 .standing(DayPart::new(
-                    Date::constant(2026, 9, 19),
+                    Date::constant(2026, 9, 18),
                     PartOfDay::Evening,
                 ))
                 .await?
@@ -1417,15 +1415,15 @@ fn performing_the_final_session_ends_the_microcycle() {
     );
 }
 
-/// **Until the window closes the microcycle is still current**, whatever the
-/// calendar says: on the Monday morning the Sunday ride can still be ridden,
-/// because nothing is slotted before the Monday evening.
+/// **Until the window closes the microcycle is still current**: on the Sunday
+/// evening the Sunday ride can still be ridden, because its window runs to the
+/// end of its day (#463).
 #[test]
 fn an_unperformed_final_session_holds_the_microcycle_until_its_window_closes() {
     let standing = corpus::block_on(standing_at(
         Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
         Ridden::nothing(),
-        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Morning),
+        DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Evening),
     ))
     .expect("a runtime is available")
     .expect("the store authors and answers");
@@ -1441,17 +1439,87 @@ fn an_unperformed_final_session_holds_the_microcycle_until_its_window_closes() {
     );
 }
 
-/// A final session ridden inside its window on the next morning is that
-/// microcycle's, and ends it.
+/// **And closes when its day ends** (#463): on the Monday morning the unridden
+/// Sunday ride is out of time, and the week of the 21st is current, though
+/// nothing is slotted before the Monday evening.
+#[test]
+fn an_unperformed_final_session_is_out_of_time_the_next_morning() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
+        Ridden::nothing(),
+        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_eq!(
+        standing
+            .weeks
+            .iter()
+            .map(|(monday, _)| *monday)
+            .collect::<Vec<_>>(),
+        vec![Date::constant(2026, 9, 14)],
+    );
+}
+
+/// **#463: the Monday gym is out of time on the Tuesday morning**, and the
+/// Wednesday ride is the one to deliver.
+#[test]
+fn an_untrained_monday_gym_gives_way_to_the_wednesday_ride_on_the_tuesday() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
+        both_rides(Date::constant(2026, 9, 20).at(9, 0, 0, 0)).expect("rides"),
+        DayPart::new(Date::constant(2026, 9, 22), PartOfDay::Morning),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_eq!(
+        standing
+            .current()
+            .map(|session| (session.slot.discipline, session.slot.date)),
+        Some((Discipline::Cycling, Date::constant(2026, 9, 23))),
+    );
+}
+
+/// **And trained on the Tuesday morning anyway, it is performed**: closing
+/// the window early costs nothing when he does train late.
+#[test]
+fn a_monday_gym_trained_on_the_tuesday_morning_is_performed() {
+    let standing = corpus::block_on(standing_at(
+        Trained::at(vec![
+            Date::constant(2026, 9, 18).at(19, 0, 0, 0),
+            Date::constant(2026, 9, 22).at(7, 0, 0, 0),
+        ]),
+        both_rides(Date::constant(2026, 9, 20).at(9, 0, 0, 0)).expect("rides"),
+        DayPart::new(Date::constant(2026, 9, 22), PartOfDay::Afternoon),
+    ))
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 9, 21)));
+    assert_eq!(
+        standing
+            .sessions
+            .first()
+            .map(|session| (session.slot.date, session.state.clone())),
+        Some((Date::constant(2026, 9, 21), SessionState::Performed)),
+    );
+}
+
+/// A final session ridden later on its own day is that microcycle's, and ends
+/// it: the operator rode Sunday's ride at 13:17 on 4 October.
 ///
 /// Nothing else settles it early: the Monday gym is covered by the holiday
 /// and the Friday's was done.
 #[test]
-fn a_final_session_performed_the_next_morning_is_its_own_microcycles() {
+fn a_final_session_performed_later_that_day_is_its_own_microcycles() {
     let standing = corpus::block_on(standing_at(
         Trained::at(vec![Date::constant(2026, 9, 18).at(19, 0, 0, 0)]),
-        both_rides(Date::constant(2026, 9, 21).at(7, 0, 0, 0)).expect("rides"),
-        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Afternoon),
+        both_rides(Date::constant(2026, 9, 20).at(13, 17, 0, 0)).expect("rides"),
+        DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Evening),
     ))
     .expect("a runtime is available")
     .expect("the store authors and answers");
@@ -1506,7 +1574,7 @@ fn a_session_dated_to_a_day_inside_the_window_accounts_for_its_slot() {
     let standing = corpus::block_on(standing_at(
         Trained::on(vec![Date::constant(2026, 9, 18)]),
         Ridden::nothing(),
-        DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Morning),
+        DayPart::new(Date::constant(2026, 9, 20), PartOfDay::Evening),
     ))
     .expect("a runtime is available")
     .expect("the store authors and answers");
@@ -1526,8 +1594,8 @@ fn a_session_dated_to_a_day_inside_the_window_accounts_for_its_slot() {
 /// **And accounts for nothing on the day a window closes**, because a day that
 /// contains the boundary contains moments on both sides of it.
 ///
-/// The gym on Monday the 21st: the week of the 14th closes at that Monday
-/// evening and the week of the 21st opens there, so a session the record places
+/// The gym on Monday the 21st: the week of the 14th closes as that Monday
+/// begins and the week of the 21st opens there, so a session the record places
 /// only on that day cannot be shown to be either microcycle's. Counting it would
 /// spend a week on a session that may have belonged to the week before; leaving
 /// it out leaves a session owed that the operator can see he performed, and that

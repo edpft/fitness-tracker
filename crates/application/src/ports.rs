@@ -1162,8 +1162,8 @@ pub trait PerformedGymSessions {
 ///
 /// **A moment, not a day** (#281). A microcycle ends when its final session is
 /// performed or that session's window closes, and the window closes at a part
-/// of a day: a Sunday ride ridden on the Monday morning is still the Sunday's,
-/// and the gym that Monday evening is the next microcycle's.
+/// of a day: a Sunday ride ridden that Sunday evening is still the Sunday's,
+/// and one on the Monday morning is the next microcycle's (#463).
 ///
 /// A session's moment is the wall-clock time it started, in the zone it was
 /// performed in.
