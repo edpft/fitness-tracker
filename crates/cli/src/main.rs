@@ -294,6 +294,10 @@ fn discipline_command() -> ClapCommand {
             .arg(timezone_argument()),
     );
     command = command.subcommand(corrections_command());
+    command = command.subcommand(ClapCommand::new("templates").about(
+        "Create on the Hevy account the templates for exercises Hevy does not have, \
+         and print their ids",
+    ));
 
     command
 }
@@ -1127,6 +1131,9 @@ async fn discipline_command_run(
     }
     if let Some(("corrections", corrections)) = sub.subcommand() {
         return corrections_run(corrections, stated_timezone, database).await;
+    }
+    if let Some(("templates", _)) = sub.subcommand() {
+        return gym::templates(discipline, credentials).await;
     }
     let Some(("next", next)) = sub.subcommand() else {
         return Err(Failure::message(

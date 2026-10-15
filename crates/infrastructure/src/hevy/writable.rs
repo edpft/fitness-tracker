@@ -712,7 +712,10 @@ const fn writable(exercise: Exercise) -> Writable {
             | RepsExercise::PulloverBarbell
             | RepsExercise::SingleLegDeadliftBarbell
             | RepsExercise::StraightLegDeadliftBarbell
-            | RepsExercise::WallBall => NOT_IN_HEVY,
+            | RepsExercise::WallBall
+            // Hevy has no template for it; `fitness gym templates` creates one
+            // (#455).
+            | RepsExercise::LyingOverheadTricepsExtensionBarbell => NOT_IN_HEVY,
         },
         Exercise::Duration(exercise) => match exercise {
             // An unspecified amount of warming up, which is Hevy's own

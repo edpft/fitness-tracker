@@ -191,3 +191,21 @@ pub fn report(stream: &domain::landing::LandingStream, outcome: wiring::Outcome)
         other => drop(crate::report(stream, true, other)),
     }
 }
+
+/// Create the Hevy templates for exercises Hevy does not have (#455).
+///
+/// Idempotent by title, because Hevy offers no way to delete one: a rerun
+/// reports what is already there rather than making a second.
+pub async fn templates(
+    discipline: &KnownDiscipline,
+    credentials: &configurator::Credentials,
+) -> Result<(), Failure> {
+    let made = configurator::templates::make_custom(discipline.delivers_to(), credentials)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), crate::exit::SOURCE))?;
+    for template in made {
+        let what = if template.created { "created" } else { "already there" };
+        println!("{}: {} ({what})", template.title, template.id);
+    }
+    Ok(())
+}

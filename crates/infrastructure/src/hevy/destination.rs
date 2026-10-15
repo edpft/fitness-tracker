@@ -132,7 +132,11 @@ impl HevyRoutines {
         })
     }
 
-    fn url(&self, endpoint: &str) -> String {
+    pub(super) fn api_key(&self) -> &str {
+        &self.api_key
+    }
+
+    pub(super) fn url(&self, endpoint: &str) -> String {
         format!("{}{endpoint}", self.base_url)
     }
 
@@ -307,7 +311,7 @@ impl HevyRoutines {
     /// is about is the answer to the *delivery*, and a folder lookup on the way
     /// past is not that. A folder call that goes wrong still fails the delivery,
     /// and still says what it said in the error it raises.
-    async fn read<T: serde::de::DeserializeOwned>(
+    pub(super) async fn read<T: serde::de::DeserializeOwned>(
         &self,
         build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
     ) -> Result<T, DeliveryError> {
@@ -335,7 +339,7 @@ impl HevyRoutines {
     /// [`DeliveryError::Unidentifiable`] if a request body will not serialise,
     /// which would be a defect in the rendering rather than anything the source
     /// did.
-    fn encode<T: Serialize>(body: &T) -> Result<Vec<u8>, DeliveryError> {
+    pub(super) fn encode<T: Serialize>(body: &T) -> Result<Vec<u8>, DeliveryError> {
         serde_json::to_vec(body).map_err(|error| DeliveryError::Unidentifiable {
             destination: NAME.to_owned(),
             message: error.to_string(),

@@ -593,6 +593,7 @@ vocabulary! {
         LowRowSuspension => "low-row-suspension", Bodyweight, Row,
         LungeDumbbell => "lunge-dumbbell", Dumbbell, Lunge,
         LyingLegCurlMachine => "lying-leg-curl-machine", Machine, LegCurl,
+        LyingOverheadTricepsExtensionBarbell => "lying-overhead-triceps-extension-barbell", Barbell, TricepsExtension,
         MuscleSnatchIntoOverheadSquat => "muscle-snatch-into-overhead-squat", Barbell, SnatchComplex,
         NeutralGripPullUp => "neutral-grip-pull-up", Bodyweight, PullUp,
         NordicHamstringsCurls => "nordic-hamstrings-curls", Bodyweight, LegCurl,

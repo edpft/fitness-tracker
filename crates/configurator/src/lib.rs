@@ -25,6 +25,7 @@ pub mod rescheduling;
 pub mod rides;
 pub mod setup;
 pub mod store;
+pub mod templates;
 pub mod wiring;
 
 /// What the operator stored, as a frontend passes it to a run.
