@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT fact AS \"fact!: i64\", name AS \"name!: String\"\n        FROM equipment_fact_level\n        ORDER BY fact, position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "fact!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_level",
+            "name": "fact"
+          }
+        }
+      },
+      {
+        "name": "name!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_level",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "375b18e8e6d4591aaef6973ef839dd7845f6c67f7a3fc74221eb0a0cc9702f35"
+}

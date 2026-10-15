@@ -207,6 +207,48 @@ impl LoadSteps {
     }
 }
 
+/// Why a written scale could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum UnreadableLoadSteps {
+    #[error("{value:?} is not a scale — try `2.5kg`, or `1kg, 2kg from 10kg`")]
+    Malformed { value: String },
+    #[error(transparent)]
+    Invalid(#[from] InvalidLoadSteps),
+}
+
+/// Read a scale as [`Display`](fmt::Display) writes it: `2.5kg`, or
+/// `1kg, 2kg from 10kg` for one that is banded. The `kg` is optional, because
+/// a scale is never in anything else.
+impl TryFrom<String> for LoadSteps {
+    type Error = UnreadableLoadSteps;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let malformed = || UnreadableLoadSteps::Malformed {
+            value: value.clone(),
+        };
+        let mass = |typed: &str| {
+            let typed = typed.trim();
+            Kg::try_from(typed.strip_suffix("kg").unwrap_or(typed).trim()).ok()
+        };
+
+        let mut bands = Vec::new();
+        for (index, band) in value.split(',').enumerate() {
+            let (size, from) = match band.split_once(" from ") {
+                Some((size, from)) => (size, mass(from).ok_or_else(malformed)?),
+                None if index == 0 => (band, Kg::NONE),
+                None => return Err(malformed()),
+            };
+            bands.push(Step {
+                from,
+                size: mass(size).ok_or_else(malformed)?,
+            });
+        }
+        Ok(Self::new(bands)?)
+    }
+}
+
+crate::newtype::from_str_via_string!(LoadSteps, UnreadableLoadSteps);
+
 impl fmt::Display for LoadSteps {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut bands = self.0.iter();

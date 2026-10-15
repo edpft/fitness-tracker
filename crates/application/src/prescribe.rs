@@ -221,6 +221,10 @@ where
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
+        let parameters = GenerationParameters {
+            scales: self.ports.parameters.scales_on(on).await?,
+            ..parameters
+        };
         let programming = programming()?;
         let consulted = Consulted {
             parameters: &parameters,
@@ -376,6 +380,11 @@ where
         let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
+        };
+        // The increments true on the session's date, not today's (issue #450).
+        let parameters = GenerationParameters {
+            scales: self.ports.parameters.scales_on(date).await?,
+            ..parameters
         };
         let programming = programming()?;
         let consulted = Consulted {

@@ -561,3 +561,149 @@ fn windows_report_one_entry_per_plan() {
         "three authorings of two plans are two windows"
     );
 }
+
+/// What equipment facts are opened onto, with the parameters authored so that
+/// kinds exist.
+async fn equipment_store() -> Result<
+    (
+        infrastructure::SqliteEquipmentStore,
+        SqliteGenerationParameterStore,
+        tempfile::TempDir,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let directory = tempfile::tempdir()?;
+    let pool = connect(&directory.path().join("test.db")).await?;
+    let parameters = SqliteGenerationParameterStore::new(pool.clone());
+    parameters
+        .author(jiff::Timestamp::now(), &programme::parameters()?)
+        .await?;
+    Ok((
+        infrastructure::SqliteEquipmentStore::new(pool),
+        parameters,
+        directory,
+    ))
+}
+
+macro_rules! equipped {
+    () => {
+        match corpus::block_on(equipment_store()) {
+            Ok(Ok(opened)) => opened,
+            Ok(Err(error)) => panic!("a store opens with parameters: {error}"),
+            Err(error) => panic!("a runtime is available: {error}"),
+        }
+    };
+}
+
+/// A version authored into a store that knows no kinds states its scales as
+/// them, undated; a second leaves them alone (issue #450).
+#[test]
+fn the_first_version_states_the_kinds_and_a_later_one_does_not() {
+    use application::EquipmentStore as _;
+    use domain::gym::exercise::Implement;
+
+    let (equipment, parameters, _directory) = equipped!();
+    let facts = run!(equipment.facts());
+    let Some(barbell) = facts.kinds.get(&Implement::Barbell) else {
+        panic!("the fixture's barbell is a kind")
+    };
+    assert_eq!(barbell.iter().count(), 1);
+    assert!(barbell.iter().all(|fact| fact.from.is_none()));
+
+    let Ok(again) = programme::parameters() else {
+        panic!("the fixture parameters are valid")
+    };
+    run!(parameters.author(jiff::Timestamp::now(), &again));
+    let facts = run!(equipment.facts());
+    let Some(barbell) = facts.kinds.get(&Implement::Barbell) else {
+        panic!("still a kind")
+    };
+    assert_eq!(barbell.iter().count(), 1, "a second version states nothing");
+}
+
+/// Declare, change and correct a specific; the corrected value is no longer
+/// believed, and a second correction of the same fact is refused.
+#[test]
+fn a_specific_is_declared_changed_and_corrected() {
+    use application::EquipmentStore as _;
+    use domain::{
+        gym::equipment::{Settings, SpecificName, Statement},
+        measure::Kg,
+        prescription::LoadSteps,
+    };
+
+    let (equipment, parameters, _directory) = equipped!();
+    let Ok(name) = SpecificName::try_from("Technogym Kneeling Easy Chin Dip") else {
+        panic!("a name")
+    };
+    let stack = |step: u64, most: u64| {
+        LoadSteps::uniform(Kg::from_grams(step))
+            .ok()
+            .and_then(|steps| Settings::stack(steps, Kg::from_grams(most)).ok())
+    };
+    let (Some(wrong), Some(right), Some(newer)) = (
+        stack(8_000, 80_000),
+        stack(7_000, 84_000),
+        stack(10_000, 100_000),
+    ) else {
+        panic!("the stacks build")
+    };
+    let arrived = jiff::civil::Date::constant(2026, 1, 12);
+    let replaced = jiff::civil::Date::constant(2026, 6, 1);
+    let now = jiff::Timestamp::now();
+
+    let first = run!(equipment.record(
+        &Statement::Specific(name.clone(), wrong),
+        Some(arrived),
+        now,
+        None
+    ));
+    run!(equipment.record(
+        &Statement::Specific(name.clone(), newer.clone()),
+        Some(replaced),
+        now,
+        None
+    ));
+    run!(equipment.record(
+        &Statement::Specific(name.clone(), right.clone()),
+        Some(arrived),
+        now,
+        Some(first)
+    ));
+
+    let facts = run!(equipment.facts());
+    let Some(timeline) = facts.specifics.get(&name) else {
+        panic!("the machine is known")
+    };
+    let values: Vec<&Settings> = timeline.iter().map(|fact| &fact.value).collect();
+    assert_eq!(
+        values,
+        vec![&right, &newer],
+        "the 8kg is no longer believed"
+    );
+    assert_eq!(
+        timeline
+            .on(jiff::civil::Date::constant(2026, 3, 1))
+            .map(|fact| &fact.value),
+        Some(&right)
+    );
+
+    let refused = corpus::block_on(equipment.record(
+        &Statement::Specific(name, right),
+        Some(arrived),
+        now,
+        Some(first),
+    ));
+    assert!(
+        matches!(refused, Ok(Err(_))),
+        "a superseded fact cannot be corrected again"
+    );
+
+    // And prescription's view of the kinds is the facts', on its date.
+    let scales = run!(parameters.scales_on(arrived));
+    assert!(
+        scales
+            .for_implement(domain::gym::exercise::Implement::Barbell)
+            .is_some()
+    );
+}

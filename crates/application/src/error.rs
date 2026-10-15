@@ -95,6 +95,22 @@ impl From<RunLockError> for ExtractionError {
     }
 }
 
+/// Declaring, changing or correcting a fact about the equipment (issue #450).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EquipmentError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// Two facts starting together would be two answers for one period. What
+    /// was meant is a correction of the one already there.
+    #[error("what {equipment} is {from} is already stated: correct it instead")]
+    AlreadyStated { equipment: String, from: String },
+    #[error("there is no fact {id} now believed to correct")]
+    NoSuchFact { id: i64 },
+    /// A correction says what one fact should have said, about the same thing.
+    #[error("fact {id} is about {was}, not {now}: a correction is about the same equipment")]
+    NotTheSameEquipment { id: i64, was: String, now: String },
+}
+
 /// Reading or resetting extraction state.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StatusError {

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use application::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
-    CyclingDeliveryStore, DiaryAuthor, DiaryStore, ExerciseHistory, FtpHistory,
+    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory, FtpHistory,
     GenerationParameterStore, MesocycleStore, NormalisedCyclingSessionReader,
     NormalisedGymSessionReader, NormalisedWeighInReader, PerformedGymSessions, PerformedSessionLog,
     PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle,
@@ -19,7 +19,7 @@ use domain::normalised::OperatorZone;
 use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
-    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore,
     SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
@@ -64,6 +64,12 @@ impl Store {
     #[must_use]
     pub fn parameters(&self) -> impl GenerationParameterStore + Clone + Send + Sync + use<> {
         SqliteGenerationParameterStore::new(self.pool.clone())
+    }
+
+    /// The equipment facts (#450).
+    #[must_use]
+    pub fn equipment(&self) -> impl EquipmentStore + Clone + Send + Sync + use<> {
+        SqliteEquipmentStore::new(self.pool.clone())
     }
 
     /// Every exercise the gym record holds, and what was lifted in it.

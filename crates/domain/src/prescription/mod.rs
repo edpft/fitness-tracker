@@ -91,7 +91,7 @@ pub use shape::{
     Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,
     UnknownSlot, WorkoutShape,
 };
-pub use steps::{InvalidLoadSteps, LoadSteps, Step};
+pub use steps::{InvalidLoadSteps, LoadSteps, Step, UnreadableLoadSteps};
 pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, Tested};
