@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT fact AS \"fact!: i64\", name AS \"name!: String\", twice_grams AS \"twice_grams!: i64\"\n        FROM equipment_fact_band\n        ORDER BY fact, position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "fact!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band",
+            "name": "fact"
+          }
+        }
+      },
+      {
+        "name": "name!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "twice_grams!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band",
+            "name": "twice_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "288618d11c6649bfa86aba2e627ddf300431c853313a789917130fdf17e656cd"
+}

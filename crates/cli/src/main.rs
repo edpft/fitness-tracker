@@ -327,6 +327,13 @@ fn corrections_command() -> ClapCommand {
                         .help("The exercise those records read as now, as a vocabulary key"),
                 )
                 .arg(
+                    Arg::new("assisted")
+                        .long("assisted")
+                        .action(ArgAction::SetTrue)
+                        .requires("recorded")
+                        .help("The mass in --actually was assistance, whatever the source records"),
+                )
+                .arg(
                     Arg::new("recorded")
                         .long("recorded")
                         .value_name("reps>x<kg")
@@ -1191,6 +1198,7 @@ async fn corrections_run(
                         on: text("on")?,
                         recorded: text("recorded")?,
                         actually: text("actually")?,
+                        assisted: add.get_flag("assisted"),
                         because: text("because")?,
                     },
                 )

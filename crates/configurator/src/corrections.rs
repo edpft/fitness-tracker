@@ -99,12 +99,20 @@ pub async fn recording(
     zone: &OperatorZone,
     on: Date,
 ) -> Result<Vec<FoundSet>, CorrectionError> {
-    Ok(GarminRecordedSets::new(store.pool().clone())
+    let mut found = GarminRecordedSets::new(store.pool().clone())
         .recording(recorded, zone, on)
-        .await?)
+        .await?;
+    found.extend(
+        infrastructure::hevy::HevyStandIns::new(store.pool().clone())
+            .recording(recorded, zone, on)
+            .await?,
+    );
+    Ok(found)
 }
 
-/// Assert that the sets found were performed with other figures.
+/// Assert that the sets found were performed with other figures: one
+/// assertion per source they were found in, since each source's overlay is
+/// its own.
 ///
 /// # Errors
 ///
@@ -114,13 +122,26 @@ pub async fn assert_figures(
     recorded: SetFigures,
     actually: SetFigures,
     reason: &CorrectionReason,
-    sets: &NonEmpty<CorrectedTerm>,
-) -> Result<CorrectionId, CorrectionError> {
-    Ok(
-        SqliteEditOverlayStore::new(store.pool().clone(), GarminExerciseSetLandingStore::STREAM)?
-            .assert_figures(recorded, actually, Timestamp::now(), reason, sets)
-            .await?,
-    )
+    found: &[FoundSet],
+) -> Result<Vec<CorrectionId>, CorrectionError> {
+    let at = Timestamp::now();
+    let mut ids = Vec::new();
+    for stream in CORRECTED {
+        let terms: Vec<CorrectedTerm> = found
+            .iter()
+            .filter(|set| set.stream == stream)
+            .map(|set| set.set.clone())
+            .collect();
+        let Ok(sets) = NonEmpty::new(terms) else {
+            continue;
+        };
+        ids.push(
+            SqliteEditOverlayStore::new(store.pool().clone(), stream)?
+                .assert_figures(recorded, actually, at, reason, &sets)
+                .await?,
+        );
+    }
+    Ok(ids)
 }
 
 /// Every correction in force, whichever source it was asserted against, in

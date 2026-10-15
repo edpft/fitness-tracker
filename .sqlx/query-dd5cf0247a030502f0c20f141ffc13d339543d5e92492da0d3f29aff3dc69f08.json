@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT slot AS \"slot!: String\",\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "slot"
+          }
+        }
+      },
+      {
+        "name": "valid_from!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "valid_from"
+          }
+        }
+      },
+      {
+        "name": "recorded_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "recorded_at"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "assisted_maker",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "assisted_maker"
+          }
+        }
+      },
+      {
+        "name": "assisted_model",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "assisted_model"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "dd5cf0247a030502f0c20f141ffc13d339543d5e92492da0d3f29aff3dc69f08"
+}

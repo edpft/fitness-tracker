@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO prescribed_exercise_band\n                    (workout, item_position, position, part, band)\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "41e16ad7036e687737b9b6c804eac2916c3f8225d4150dfafdb8fe1770165845"
+}

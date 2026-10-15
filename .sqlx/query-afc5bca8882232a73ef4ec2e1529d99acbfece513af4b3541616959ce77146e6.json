@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO equipment_fact_band_step (fact, step, part, band)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "afc5bca8882232a73ef4ec2e1529d99acbfece513af4b3541616959ce77146e6"
+}

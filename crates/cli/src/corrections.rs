@@ -74,6 +74,8 @@ pub struct FigureAssertion<'a> {
     pub recorded: &'a str,
     /// The figures the operator says it was, in the same form.
     pub actually: &'a str,
+    /// Whether the mass in `actually` was assistance (#453).
+    pub assisted: bool,
     /// Why, which § II.2 requires.
     pub because: &'a str,
 }
@@ -159,6 +161,16 @@ pub async fn add_figures(
 ) -> Result<(), Failure> {
     let recorded = figures(assertion.recorded, "--recorded")?;
     let actually = figures(assertion.actually, "--actually")?;
+    let actually = match (assertion.assisted, actually.load()) {
+        (false, _) => actually,
+        (true, Some(mass)) => SetFigures::assisted(actually.reps(), mass),
+        (true, None) => {
+            return Err(Failure::message(
+                "--assisted needs a mass in --actually, as 6x21",
+                exit::USAGE,
+            ));
+        }
+    };
     if recorded == actually {
         return Err(Failure::message(
             format!("--recorded and --actually are both {recorded}, which asserts nothing"),
@@ -178,23 +190,25 @@ pub async fn add_figures(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let Ok(sets) = NonEmpty::new(found.iter().map(|found| found.set.clone()).collect()) else {
+    if found.is_empty() {
         return Err(Failure::message(
             format!("no set on {on} was recorded as {recorded}"),
             exit::USAGE,
         ));
-    };
+    }
 
     report_figures(&found, on, recorded, actually);
 
-    let id = corrections::assert_figures(&store, recorded, actually, &reason, &sets)
+    let ids = corrections::assert_figures(&store, recorded, actually, &reason, &found)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
+    let ids: Vec<String> = ids.iter().map(ToString::to_string).collect();
     println!();
     println!(
-        "Recorded as correction {id}, over {}. It applies at the next derivation.",
-        counted(sets.count())
+        "Recorded as correction {}, over {}. It applies at the next derivation.",
+        ids.join(" and "),
+        counted(found.len())
     );
     Ok(())
 }
@@ -312,10 +326,11 @@ fn report_figures(found: &[FoundSet], on: Date, recorded: SetFigures, actually: 
     for set in found {
         let movement = set.movement.as_deref().unwrap_or("unclassified");
         println!(
-            "  {:02}:{:02}:{:02}  {movement}",
+            "  {:02}:{:02}:{:02}  {movement}  ({})",
             set.began.hour(),
             set.began.minute(),
-            set.began.second()
+            set.began.second(),
+            set.stream
         );
     }
     println!("Reading as {actually} instead.");

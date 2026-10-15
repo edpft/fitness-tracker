@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        INSERT INTO equipment_fact\n            (implement, specific, valid_from, recorded_at, corrects, most_grams)\n        VALUES (?, ?, ?, ?, ?, ?)\n        RETURNING id AS \"id!: i64\"\n        ",
+  "query": "\n        INSERT INTO equipment_fact\n            (implement, maker, model, valid_from, recorded_at, corrects, most_grams)\n        VALUES (?, ?, ?, ?, ?, ?, ?)\n        RETURNING id AS \"id!: i64\"\n        ",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 7
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c0f931f21b036c19d5dd9bc63e29bc13ec75c0919aeb96df6048e0fe7dbb14f7"
+  "hash": "020c8bfdf5c4943c2d0cb61742b308238b71d598fc1bc7f398cc6925e77c1301"
 }

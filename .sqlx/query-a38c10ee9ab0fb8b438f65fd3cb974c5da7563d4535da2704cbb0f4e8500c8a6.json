@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT source_record_id AS \"source_record_id!: String\",\n                   event_kind       AS \"event_kind!: String\",\n                   payload          AS \"payload!: Vec<u8>\"\n            FROM hevy_workout_landing\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_record_id!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "event_kind!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "event_kind"
+          }
+        }
+      },
+      {
+        "name": "payload!: Vec<u8>",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "hevy_workout_landing",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a38c10ee9ab0fb8b438f65fd3cb974c5da7563d4535da2704cbb0f4e8500c8a6"
+}

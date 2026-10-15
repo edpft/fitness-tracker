@@ -84,3 +84,6 @@ CREATE TABLE prescribed_exercise_band (
     FOREIGN KEY (workout, item_position, position)
         REFERENCES prescribed_exercise(workout, item_position, position)
 ) STRICT, WITHOUT ROWID;
+
+ALTER TABLE correction ADD COLUMN assisted INTEGER NOT NULL DEFAULT 0
+    CHECK (assisted IN (0, 1));

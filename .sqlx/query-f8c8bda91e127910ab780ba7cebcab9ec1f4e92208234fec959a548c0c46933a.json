@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT fact AS \"fact!: i64\", step AS \"step!: i64\", band AS \"band!: String\"\n        FROM equipment_fact_band_step\n        ORDER BY fact, step, part\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "fact!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band_step",
+            "name": "fact"
+          }
+        }
+      },
+      {
+        "name": "step!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band_step",
+            "name": "step"
+          }
+        }
+      },
+      {
+        "name": "band!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "equipment_fact_band_step",
+            "name": "band"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f8c8bda91e127910ab780ba7cebcab9ec1f4e92208234fec959a548c0c46933a"
+}
