@@ -268,6 +268,13 @@ pub struct GenerationParameters {
     pub static_hold: Duration,
     /// What each implement can hold. Consulted wherever a derived load has to
     /// land on something the gym owns.
+    ///
+    /// **Equipment facts, not part of the version** (issue #450). A store
+    /// fills this with the kinds' increments true today, and a prescription
+    /// with the ones true on its date; authoring a version writes them only to
+    /// a store that knows no kinds yet. Carried here rather than beside the
+    /// parameters because a mesocycle is rebuilt against this struct, and
+    /// separating them reaches every place that does.
     pub scales: Scales,
 }
 

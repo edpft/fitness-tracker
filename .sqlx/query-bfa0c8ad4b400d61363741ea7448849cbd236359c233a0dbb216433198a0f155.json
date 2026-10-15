@@ -1,16 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT implement AS \"implement!: String\",\n               from_grams AS \"from_grams!: i64\",\n               size_grams AS \"size_grams!: i64\"\n        FROM generation_load_scale\n        WHERE parameters_authored_at = ?\n        ORDER BY implement, band\n        ",
+  "query": "\n        SELECT fact AS \"fact!: i64\",\n               from_grams AS \"from_grams!: i64\",\n               size_grams AS \"size_grams!: i64\"\n        FROM equipment_fact_step\n        ORDER BY fact, band\n        ",
   "describe": {
     "columns": [
       {
-        "name": "implement!: String",
+        "name": "fact!: i64",
         "ordinal": 0,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_load_scale",
-            "name": "implement"
+            "table": "equipment_fact_step",
+            "name": "fact"
           }
         }
       },
@@ -20,7 +20,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_load_scale",
+            "table": "equipment_fact_step",
             "name": "from_grams"
           }
         }
@@ -31,14 +31,14 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_load_scale",
+            "table": "equipment_fact_step",
             "name": "size_grams"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "6ac94e224ea4a1ab2f93f4d3dca39d38972a3437d76307d37f276af3464d0d3f"
+  "hash": "bfa0c8ad4b400d61363741ea7448849cbd236359c233a0dbb216433198a0f155"
 }

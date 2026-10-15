@@ -20,6 +20,7 @@ pub mod compare;
 pub mod cycling;
 pub mod deliver;
 pub mod devices;
+pub mod equipment;
 pub mod error;
 pub mod extract;
 pub mod heart_rate;
@@ -36,21 +37,21 @@ pub mod status;
 pub mod strength;
 
 pub use error::{
-    ComparisonError, DeliveryError, ExtractionError, NormalisationError, PrescriptionError,
-    RunLockError, SourceError, StatusError, StoreError,
+    ComparisonError, DeliveryError, EquipmentError, ExtractionError, NormalisationError,
+    PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
     AccountReader, Authored, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
     CanonicalWeighInStore, ClassSource, ClassesListed, ClassesRead, Clock, CyclingDeliveryStore,
     CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
     DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
-    DiaryStore, EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter,
-    FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar,
-    Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce, MesocycleStore,
-    NextLock, NormalisationRunLog, NormalisationSummary, NormalisedCyclingSessionReader,
-    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, Occupant,
-    Performance, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog,
-    PerformedSetSummary, Placed, PlanAuthor, PlanStore, PrescribedWorkoutId,
+    DiaryStore, EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog,
+    ExtractionStatusReporter, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
+    HolidayCalendar, Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce,
+    MesocycleStore, NextLock, NormalisationRunLog, NormalisationSummary,
+    NormalisedCyclingSessionReader, NormalisedEntityStore, NormalisedGymSessionReader,
+    NormalisedWeighInReader, Occupant, Performance, PerformedCyclingSessions, PerformedGymSessions,
+    PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore, PrescribedWorkoutId,
     PrescribedWorkoutStore, Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore,
     PrescriptionDestination, PrescriptionLifecycle, PublishedCell, PublishedCycling,
     PublishedProgrammes, PublishedRead, RawExtent, RecordedDevices, RefusalReport, RefusalReporter,

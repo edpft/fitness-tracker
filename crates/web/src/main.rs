@@ -7,6 +7,7 @@
 //! adapter.
 
 mod chart;
+mod equipment;
 mod one_rep_max;
 mod page;
 mod report;
@@ -16,11 +17,11 @@ mod weight;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
-    Router,
+    Form, Router,
     extract::{Query, State},
     http::header,
     response::{
-        IntoResponse,
+        IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
     routing::{get, post},
@@ -115,6 +116,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/heart-rate", get(heart_rate))
         .route("/body-weight", get(body_weight))
         .route("/estimated-1rm", get(estimated_one_rep_max))
+        .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/run", post(start))
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
@@ -181,6 +183,59 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>) -> Markup {
     match view {
         Ok(view) => one_rep_max::page(&view),
         Err(error) => one_rep_max::unreadable(&error.to_string()),
+    }
+}
+
+/// The equipment, read afresh from the store, with what the last post came to.
+async fn equipment_shown(runs: &Runs, said: Option<&str>) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return equipment::unreadable(&error.to_string()),
+    };
+    let facts = configurator::equipment::facts(&store).await;
+    store.close().await;
+    match facts {
+        Ok(facts) => equipment::page(
+            &facts,
+            configurator::equipment::today(&runs.setting().zone),
+            said,
+        ),
+        Err(error) => equipment::unreadable(&error.to_string()),
+    }
+}
+
+async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
+    equipment_shown(&runs, None).await
+}
+
+/// Declare, change or correct a fact, then show the page again: redirected on
+/// success, so a reload does not post it twice, and rendered with the reason on
+/// a refusal, so what was typed is not the thing lost.
+async fn equipment_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let refused = match equipment::asked(&equipment::Fields::new(form)) {
+        Err(refused) => Some(refused),
+        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
+            Err(error) => Some(error.to_string()),
+            Ok(store) => {
+                let done = match asked {
+                    equipment::Asked::Declare(statement, from) => {
+                        configurator::equipment::declare(&store, &statement, from).await
+                    }
+                    equipment::Asked::Correct(fact, statement) => {
+                        configurator::equipment::correct(&store, fact, &statement).await
+                    }
+                };
+                store.close().await;
+                done.err().map(|error| error.to_string())
+            }
+        },
+    };
+    match refused {
+        None => Redirect::to("/equipment").into_response(),
+        Some(refused) => equipment_shown(&runs, Some(&refused)).await.into_response(),
     }
 }
 

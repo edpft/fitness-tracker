@@ -1308,6 +1308,50 @@ pub trait GenerationParameterStore {
         authored_at: Timestamp,
         parameters: &GenerationParameters,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Every kind's increments as now known to have been true on a date
+    /// (issue #450).
+    ///
+    /// **Not part of a parameter version.** The increments are equipment
+    /// facts, true over periods of real-world time, and a prescription is
+    /// generated against the ones true on its own date. [`Self::current`] fills
+    /// [`GenerationParameters::scales`] with today's.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn scales_on(
+        &self,
+        date: jiff::civil::Date,
+    ) -> impl Future<Output = Result<domain::prescription::Scales, StoreError>> + Send;
+}
+
+/// The equipment the operator trains on, as bitemporal facts (issue #450).
+///
+/// Every fact is kept. A correction is a fact naming the one it supersedes, and
+/// [`Self::facts`] answers with what no correction has superseded — what is
+/// *now* known.
+pub trait EquipmentStore {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn facts(
+        &self,
+    ) -> impl Future<Output = Result<domain::gym::equipment::EquipmentFacts, StoreError>> + Send;
+
+    /// Record a fact, true from a date, superseding `corrects` if it names one.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if `corrects` has already
+    /// been superseded.
+    fn record(
+        &self,
+        statement: &domain::gym::equipment::Statement,
+        from: Option<jiff::civil::Date>,
+        recorded_at: Timestamp,
+        corrects: Option<domain::gym::equipment::FactId>,
+    ) -> impl Future<Output = Result<domain::gym::equipment::FactId, StoreError>> + Send;
 }
 
 /// A gym mesocycle as the store answered for it: what it is, and where it sits.

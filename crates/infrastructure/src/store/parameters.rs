@@ -9,20 +9,20 @@
 //! clause rather than a mutable flag. Same reasoning as the normalised layer
 //! having no `is_current` column.
 
-use std::collections::BTreeMap;
-
 use application::{GenerationParameterStore, StoreError};
 use domain::{
-    gym::exercise::Implement,
+    gym::equipment::Statement,
     measure::{Duration, Kg},
-    prescription::{
-        BlockRest, GenerationParameters, LoadSteps, Percentage, RestScheme, Scales, Step, Target,
-    },
+    prescription::{BlockRest, GenerationParameters, Percentage, RestScheme, Scales, Target},
 };
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 
-use super::{corrupt, store_error};
+use super::{
+    corrupt,
+    equipment::{insert, knows_kinds, read_facts},
+    store_error,
+};
 
 /// A percentage on its way into the store.
 ///
@@ -137,81 +137,6 @@ fn rest_target(low: i64, high: Option<i64>) -> Result<Target<Duration>, StoreErr
 /// between them, and it is the one place the pair can fail to be a range — the
 /// column check should already have refused it, so reaching the error arm means
 /// the row is corrupt.
-/// The warm-up ramp for one parameter version.
-async fn read_scales(pool: &SqlitePool, authored_at: &str) -> Result<Scales, StoreError> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT implement AS "implement!: String",
-               from_grams AS "from_grams!: i64",
-               size_grams AS "size_grams!: i64"
-        FROM generation_load_scale
-        WHERE parameters_authored_at = ?
-        ORDER BY implement, band
-        "#,
-        authored_at
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error(&error))?;
-
-    let mut bands: BTreeMap<Implement, Vec<Step>> = BTreeMap::new();
-    for row in rows {
-        let implement =
-            Implement::try_from(row.implement.clone()).map_err(|error| corrupt(&error))?;
-        bands.entry(implement).or_default().push(Step {
-            from: grams_from_storage(row.from_grams)?,
-            size: grams_from_storage(row.size_grams)?,
-        });
-    }
-
-    let mut scales = BTreeMap::new();
-    for (implement, bands) in bands {
-        scales.insert(
-            implement,
-            LoadSteps::new(bands).map_err(|error| corrupt(&error))?,
-        );
-    }
-    Ok(Scales::new(scales))
-}
-
-/// One row per session role: its top set, and its back-off pattern.
-///
-/// Lifted out of `author` because the three writes it makes are three
-/// independent shapes and reading them interleaved is what pushed that function
-/// past the length the gate allows.
-async fn write_scales(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    stamp: &str,
-    parameters: &GenerationParameters,
-) -> Result<(), StoreError> {
-    for (implement, steps) in parameters.scales.iter() {
-        let key = implement.as_str();
-        for (band, step) in steps.bands().iter().enumerate() {
-            let band = i64::try_from(band)
-                .map_err(|_| corrupt(&"a scale with more bands than the store can hold"))?;
-            let from = grams_for_storage(step.from)?;
-            let size = grams_for_storage(step.size)?;
-            sqlx::query!(
-                r"
-                INSERT INTO generation_load_scale (
-                    parameters_authored_at, implement, band, from_grams, size_grams
-                )
-                VALUES (?, ?, ?, ?, ?)
-                ",
-                stamp,
-                key,
-                band,
-                from,
-                size
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
-    }
-
-    Ok(())
-}
 
 #[derive(Debug, Clone)]
 pub struct SqliteGenerationParameterStore {
@@ -225,6 +150,10 @@ impl SqliteGenerationParameterStore {
 }
 
 impl GenerationParameterStore for SqliteGenerationParameterStore {
+    async fn scales_on(&self, date: jiff::civil::Date) -> Result<Scales, StoreError> {
+        Ok(read_facts(&self.pool).await?.scales_on(date))
+    }
+
     async fn current(&self) -> Result<Option<(Timestamp, GenerationParameters)>, StoreError> {
         let Some(row) = sqlx::query!(
             r#"
@@ -270,7 +199,11 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             .parse()
             .map_err(|_| corrupt(&"an authoring date that is not an instant"))?;
 
-        let scales = read_scales(&self.pool, &row.authored_at).await?;
+        // Today's increments: they are equipment facts now, not part of the
+        // version (issue #450). A prescription asks `scales_on` for its own date.
+        let scales = read_facts(&self.pool)
+            .await?
+            .scales_on(jiff::Zoned::now().date());
 
         Ok(Some((
             authored_at,
@@ -387,7 +320,22 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         .await
         .map_err(|error| store_error(&error))?;
 
-        write_scales(&mut tx, &stamp, parameters).await?;
+        // **A store that knows no kinds takes this version's scales as them**
+        // (issue #450): what `init` does on a new store, and what the migration
+        // did for one that already held parameters. A store that knows any kind
+        // is left alone, because the operator may have corrected it.
+        if !knows_kinds(&mut tx).await? {
+            for (implement, steps) in parameters.scales.iter() {
+                insert(
+                    &mut tx,
+                    &Statement::Kind(*implement, steps.clone()),
+                    None,
+                    authored_at,
+                    None,
+                )
+                .await?;
+            }
+        }
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(())
