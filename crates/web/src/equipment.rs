@@ -28,6 +28,7 @@ form.fact fieldset { min-width: 0; }
 .period { color: var(--muted); }
 .said { color: var(--failed); }
 .rows { display: grid; gap: 0.4rem; }
+.rows + button { margin-top: 0.4rem; }
 .rows > .row:first-child .remove { visibility: hidden; }
 .rows .band, .rows .level { display: grid; gap: 0.3rem; align-items: center; }
 .rows .band { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
@@ -89,7 +90,7 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
                     }
                     (new_kind(facts, today))
                     h2 { "Specific equipment" }
-                    p.legend { "A particular product, assumed of nothing else." }
+                    p.legend { "A particular product: another of its type may not offer the same settings." }
                     @for (name, timeline) in &facts.specifics {
                         h3 { (name) }
                         @for fact in timeline.iter() {
