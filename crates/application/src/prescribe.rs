@@ -2026,7 +2026,12 @@ fn heaviest_of<'a>(sets: &[&'a PerformedSetSummary]) -> Option<&'a PerformedSetS
 }
 
 /// Double progression: work the range, and add an increment once the top of it
-/// was reached at every working set.
+/// was reached at every set the scheme prescribes, at the load being left.
+///
+/// **A set at a lighter load counts for nothing** (issue #447). `-15 x 6, -7 x
+/// 6, -7 x 6` is not three sixes at `-7`, and `40 x 6, 30 x 6, 30 x 6` is not
+/// three at 40kg: each re-issues its heaviest load. Reading every working set
+/// let a lighter set reaching the top vouch for a load it was not lifted at.
 ///
 /// A failed attempt is not the top of the range, so a session that failed
 /// re-issues rather than advancing — which is the same rule the primary's gate
@@ -2057,11 +2062,17 @@ fn progressed_load(
         .filter(|set| set.kind == SetKind::Working)
         .collect();
     let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
-    let reached_top = working.iter().all(|set| {
-        set.outcome
-            .completed()
-            .is_some_and(|reps| *reps >= scheme.reps.maximum())
-    });
+    let at_heaviest: Vec<_> = working
+        .iter()
+        .filter(|set| set.load == heaviest.load)
+        .collect();
+    let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
+    let reached_top = enough
+        && at_heaviest.iter().all(|set| {
+            set.outcome
+                .completed()
+                .is_some_and(|reps| *reps >= scheme.reps.maximum())
+        });
 
     if !reached_top {
         return Ok(heaviest.load);
@@ -2309,10 +2320,11 @@ mod progression_tests {
 
     /// The shape the primary template issues: a top set, then lighter back-offs.
     ///
-    /// Every set reached the top of the 4-6 range, so the load steps up — from
-    /// the 40kg top set, not from the 30kg back-off it ended on.
+    /// Every set reached the top of the 4-6 range, but only one of them at
+    /// 40kg, so this is not three sixes at 40kg and 40kg re-issues (issue #447)
+    /// — the top set, not the 30kg back-off it ended on.
     #[test]
-    fn a_session_progresses_from_its_top_set_not_its_back_offs() {
+    fn a_top_set_and_back_offs_re_issue_the_top_set() {
         let parameters = seed().expect("the seed builds");
         let shape = programming().expect("the shipped programming builds");
         let consulted = Consulted {
@@ -2335,9 +2347,67 @@ mod progression_tests {
 
         assert_eq!(
             progressed,
-            Load::absolute(Kg::from_grams(42_500)),
-            "the 40kg top set steps to 42.5, and the back-offs are not the load"
+            Load::absolute(Kg::from_grams(40_000)),
+            "one six at 40kg is not three, and the back-offs are not the load"
         );
+    }
+
+    /// Three sixes at one load is the top of the range at every prescribed set,
+    /// so the load steps up.
+    #[test]
+    fn three_sets_at_the_top_of_the_range_step_up() {
+        let parameters = seed().expect("the seed builds");
+        let shape = programming().expect("the shipped programming builds");
+        let consulted = Consulted {
+            parameters: &parameters,
+            programming: &shape,
+        };
+        let last = performance(vec![
+            set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
+            set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
+            set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
+        ]);
+
+        let progressed = progressed_load(
+            &consulted,
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            &consulted.programming.strength,
+            &last,
+        )
+        .expect("the slot derives");
+
+        assert_eq!(progressed, Load::absolute(Kg::from_grams(42_500)));
+    }
+
+    /// **The real shape, taken from 2026-10-12**: `-15 x 6`, `-7 x 6`, `-7 x 6`.
+    ///
+    /// Every set reached six, but two of them at `-7`, so it re-issues `-7`
+    /// rather than asking for a step — which, with no scale authored for a
+    /// bodyweight implement, withheld the slot and the pull-up supersetted with
+    /// it.
+    #[test]
+    fn a_more_assisted_set_does_not_count_toward_the_step() {
+        let parameters = seed().expect("the seed builds");
+        let shape = programming().expect("the shipped programming builds");
+        let consulted = Consulted {
+            parameters: &parameters,
+            programming: &shape,
+        };
+        let last = performance(vec![
+            set(Load::relative(SignedKg::from_grams(-15_000)), 6).expect("a set"),
+            set(Load::relative(SignedKg::from_grams(-7_000)), 6).expect("a set"),
+            set(Load::relative(SignedKg::from_grams(-7_000)), 6).expect("a set"),
+        ]);
+
+        let progressed = progressed_load(
+            &consulted,
+            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip),
+            &consulted.programming.strength,
+            &last,
+        )
+        .expect("the slot derives");
+
+        assert_eq!(progressed, Load::relative(SignedKg::from_grams(-7_000)));
     }
 
     /// How the dips and pull-ups in the record are logged: assistance increases
