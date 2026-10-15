@@ -627,15 +627,19 @@ fn the_first_version_states_the_kinds_and_a_later_one_does_not() {
 fn a_specific_is_declared_changed_and_corrected() {
     use application::EquipmentStore as _;
     use domain::{
-        gym::equipment::{Settings, SpecificName, Statement},
+        gym::equipment::{Maker, Model, Settings, Specific, Statement},
         measure::Kg,
         prescription::LoadSteps,
     };
 
     let (equipment, parameters, _directory) = equipped!();
-    let Ok(name) = SpecificName::try_from("Technogym Kneeling Easy Chin Dip") else {
+    let (Ok(maker), Ok(model)) = (
+        Maker::try_from("Technogym"),
+        Model::try_from("Kneeling Easy Chin Dip"),
+    ) else {
         panic!("a name")
     };
+    let name = Specific { maker, model };
     let stack = |step: u64, most: u64| {
         LoadSteps::uniform(Kg::from_grams(step))
             .ok()
@@ -706,4 +710,59 @@ fn a_specific_is_declared_changed_and_corrected() {
             .for_implement(domain::gym::exercise::Implement::Barbell)
             .is_some()
     );
+}
+
+/// A range of bands and its chart come back as they were declared, a band
+/// named twice in a step kept twice.
+#[test]
+fn a_range_of_bands_round_trips() {
+    use application::EquipmentStore as _;
+    use domain::{
+        gym::equipment::{
+            Band, BandName, Combination, Maker, Model, Settings, Specific, Statement,
+        },
+        measure::Kg,
+        sequence::NonEmpty,
+    };
+
+    let (equipment, _parameters, _directory) = equipped!();
+    let name = |name: &str| BandName::try_from(name).expect("a name");
+    let band = |stars: &str, kg: u64| Band {
+        name: name(stars),
+        at_twice_length: Kg::from_grams(kg * 1_000),
+    };
+    let step = |bands: &[&str]| {
+        Combination::new(
+            NonEmpty::new(bands.iter().map(|band| name(band)).collect()).expect("bands"),
+        )
+    };
+    let settings = Settings::bands(
+        vec![band("1/5 stars", 9), band("2/5 stars", 11), band("4/5 stars", 21)],
+        vec![
+            step(&["4/5 stars"]),
+            step(&["1/5 stars", "2/5 stars"]),
+            step(&["1/5 stars", "1/5 stars"]),
+            step(&["1/5 stars"]),
+        ],
+    )
+    .expect("a chart");
+    let specific = Specific {
+        maker: Maker::try_from("Physical").expect("a maker"),
+        model: Model::try_from("Supaflex").expect("a model"),
+    };
+
+    run!(equipment.record(
+        &Statement::Specific(specific.clone(), settings.clone()),
+        None,
+        jiff::Timestamp::now(),
+        None
+    ));
+
+    let facts = run!(equipment.facts());
+    let stated = facts
+        .specifics
+        .get(&specific)
+        .and_then(|timeline| timeline.on(jiff::civil::Date::constant(2026, 10, 16)))
+        .map(|fact| &fact.value);
+    assert_eq!(stated, Some(&settings));
 }

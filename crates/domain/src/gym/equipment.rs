@@ -53,11 +53,11 @@ fn name(value: &str) -> Result<String, InvalidEquipmentName> {
     Ok(trimmed.to_owned())
 }
 
-/// What a specific is called: *Technogym Kneeling Easy Chin Dip*.
+/// Who makes a specific: *Physical*, *Decathlon*, *Technogym*.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SpecificName(String);
+pub struct Maker(String);
 
-impl TryFrom<String> for SpecificName {
+impl TryFrom<String> for Maker {
     type Error = InvalidEquipmentName;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -65,13 +65,13 @@ impl TryFrom<String> for SpecificName {
     }
 }
 
-string_name!(SpecificName, InvalidEquipmentName);
+string_name!(Maker, InvalidEquipmentName);
 
-/// One setting of a range that is not counted in kilograms: *level 3*.
+/// What its maker calls it: *Supaflex*, *Corength*, *Kneeling Easy Chin Dip*.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LevelName(String);
+pub struct Model(String);
 
-impl TryFrom<String> for LevelName {
+impl TryFrom<String> for Model {
     type Error = InvalidEquipmentName;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -79,7 +79,89 @@ impl TryFrom<String> for LevelName {
     }
 }
 
-string_name!(LevelName, InvalidEquipmentName);
+string_name!(Model, InvalidEquipmentName);
+
+/// A particular product, by maker and model.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Specific {
+    pub maker: Maker,
+    pub model: Model,
+}
+
+impl fmt::Display for Specific {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.maker, self.model)
+    }
+}
+
+/// How one band of a range is told from the others, in its maker's terms.
+///
+/// *4/5 stars* on a Supaflex band, a colour on a Corength one. A colour is not
+/// the name where the maker marks something else, because a colour may change
+/// (the operator, 2026-10-15).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BandName(String);
+
+impl TryFrom<String> for BandName {
+    type Error = InvalidEquipmentName;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        name(&value).map(Self)
+    }
+}
+
+string_name!(BandName, InvalidEquipmentName);
+
+/// One band, and the force it takes to stretch it to twice its resting length.
+///
+/// **That force is its nominal load** (the operator, 2026-10-15): the one
+/// figure most makers publish, so bands of different ranges compare. Supaflex
+/// publishes it beside a figure at 1.15×, Decathlon publishes only it, and
+/// nobody publishes a midpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Band {
+    pub name: BandName,
+    pub at_twice_length: Kg,
+}
+
+/// Bands used together, each named as often as it is used: *1/5 stars + 1/5
+/// stars*. Their nominal loads add.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Combination(NonEmpty<BandName>);
+
+impl Combination {
+    #[must_use]
+    pub const fn new(bands: NonEmpty<BandName>) -> Self {
+        Self(bands)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BandName> {
+        self.0.iter()
+    }
+}
+
+impl fmt::Display for Combination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut counted: Vec<(&BandName, usize)> = Vec::new();
+        for band in self.0.iter() {
+            match counted.iter_mut().find(|(name, _)| *name == band) {
+                Some((_, count)) => *count = count.saturating_add(1),
+                None => counted.push((band, 1)),
+            }
+        }
+        let parts: Vec<String> = counted
+            .into_iter()
+            .map(|(name, count)| {
+                if count == 1 {
+                    name.to_string()
+                } else {
+                    format!("{count} × {name}")
+                }
+            })
+            .collect();
+        f.write_str(&parts.join(" + "))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSettings {
@@ -87,22 +169,35 @@ pub enum InvalidSettings {
     EmptyStack,
     #[error("a stack's most is one of the loads it steps through")]
     MostOffTheStack,
-    #[error("a range of levels has at least one")]
-    NoLevels,
-    #[error("two levels with one name are one level")]
-    RepeatedLevel,
+    #[error("a range of bands has at least one band")]
+    NoBands,
+    #[error("two bands with one name are one band")]
+    RepeatedBand,
+    #[error("a band takes some force to stretch")]
+    SlackBand,
+    #[error("a range of bands has at least one step")]
+    NoSteps,
+    #[error("a step uses a band the range does not have")]
+    UnknownBand,
+    #[error("each step gives less assistance than the one before it")]
+    StepsOutOfOrder,
 }
 
-/// What a specific can be set to, in order.
+/// What a specific can be set to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settings {
     /// A stack: every load its steps reach, from the first step to its most.
     /// The Kneeling Easy Chin Dip is 7kg steps to 84kg.
     Stack { steps: LoadSteps, most: Kg },
-    /// A range counted in levels and not kilograms, as its maker numbers them.
-    /// A band gives what it gives by how far it is stretched, so a level is
-    /// the honest unit and a kilogram figure is a guess.
-    Levels(NonEmpty<LevelName>),
+    /// A range of bands, and the combinations of them the operator steps
+    /// through, most assistance first. The steps are declared rather than
+    /// worked out from every combination, which would need to know how many of
+    /// each band there are (the operator, 2026-10-15: *"this chart looks
+    /// reasonable for now"*).
+    Bands {
+        bands: NonEmpty<Band>,
+        steps: NonEmpty<Combination>,
+    },
 }
 
 impl Settings {
@@ -122,19 +217,30 @@ impl Settings {
     /// # Errors
     ///
     /// See [`InvalidSettings`].
-    pub fn levels(levels: Vec<LevelName>) -> Result<Self, InvalidSettings> {
-        for (index, level) in levels.iter().enumerate() {
-            if levels
+    pub fn bands(bands: Vec<Band>, steps: Vec<Combination>) -> Result<Self, InvalidSettings> {
+        for (index, band) in bands.iter().enumerate() {
+            if band.at_twice_length.is_none() {
+                return Err(InvalidSettings::SlackBand);
+            }
+            if bands
                 .iter()
                 .skip(index.saturating_add(1))
-                .any(|other| other == level)
+                .any(|other| other.name == band.name)
             {
-                return Err(InvalidSettings::RepeatedLevel);
+                return Err(InvalidSettings::RepeatedBand);
             }
         }
-        NonEmpty::new(levels)
-            .map(Self::Levels)
-            .map_err(|_| InvalidSettings::NoLevels)
+        let bands = NonEmpty::new(bands).map_err(|_| InvalidSettings::NoBands)?;
+        let mut previous: Option<Kg> = None;
+        for step in &steps {
+            let load = nominal(&bands, step).ok_or(InvalidSettings::UnknownBand)?;
+            if previous.is_some_and(|previous| load >= previous) {
+                return Err(InvalidSettings::StepsOutOfOrder);
+            }
+            previous = Some(load);
+        }
+        let steps = NonEmpty::new(steps).map_err(|_| InvalidSettings::NoSteps)?;
+        Ok(Self::Bands { bands, steps })
     }
 }
 
@@ -142,11 +248,105 @@ impl fmt::Display for Settings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Stack { steps, most } => write!(f, "{steps} to {most}kg"),
-            Self::Levels(levels) => {
-                let names: Vec<&str> = levels.iter().map(LevelName::as_str).collect();
-                write!(f, "levels {}", names.join(", "))
+            Self::Bands { bands, steps } => {
+                let bands: Vec<String> = bands
+                    .iter()
+                    .map(|band| format!("{} {}kg", band.name, band.at_twice_length))
+                    .collect();
+                let steps: Vec<String> = steps.iter().map(ToString::to_string).collect();
+                write!(f, "{}; steps {}", bands.join(", "), steps.join(" → "))
             }
         }
+    }
+}
+
+/// The nominal load of bands used together, or nothing if one of them is not
+/// in the range.
+fn nominal(bands: &NonEmpty<Band>, step: &Combination) -> Option<Kg> {
+    step.iter().try_fold(Kg::NONE, |total, name| {
+        bands.iter().find(|band| band.name == *name).map(|band| {
+            Kg::from_grams(
+                total
+                    .as_grams()
+                    .saturating_add(band.at_twice_length.as_grams()),
+            )
+        })
+    })
+}
+
+/// One step of a range of bands, as a prescription names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandSetting {
+    pub specific: Specific,
+    pub bands: Combination,
+    pub nominal: Kg,
+}
+
+impl fmt::Display for BandSetting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.specific, self.bands)
+    }
+}
+
+/// A range of bands as a prescription steps through it: each declared step
+/// with its nominal load, most assistance first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandLadder {
+    specific: Specific,
+    rungs: Vec<(Kg, Combination)>,
+}
+
+impl BandLadder {
+    /// The ladder a specific's settings make, if they are bands.
+    #[must_use]
+    pub fn of(specific: &Specific, settings: &Settings) -> Option<Self> {
+        let Settings::Bands { bands, steps } = settings else {
+            return None;
+        };
+        let rungs = steps
+            .iter()
+            .filter_map(|step| nominal(bands, step).map(|load| (load, step.clone())))
+            .collect();
+        Some(Self {
+            specific: specific.clone(),
+            rungs,
+        })
+    }
+
+    fn setting(&self, index: usize) -> Option<BandSetting> {
+        self.rungs.get(index).map(|(nominal, bands)| BandSetting {
+            specific: self.specific.clone(),
+            bands: bands.clone(),
+            nominal: *nominal,
+        })
+    }
+
+    /// The step nearest an amount of assistance, the one giving more where two
+    /// are as near; nothing where no band at all is nearer.
+    #[must_use]
+    pub fn nearest(&self, assistance: Kg) -> Option<BandSetting> {
+        let grams = assistance.as_grams();
+        let distance = |load: Kg| load.as_grams().abs_diff(grams);
+        let (index, (load, _)) = self
+            .rungs
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, (load, _))| (distance(*load), *index))?;
+        if grams < distance(*load) {
+            return None;
+        }
+        self.setting(index)
+    }
+
+    /// The step after this one, giving less assistance; nothing after the
+    /// last, where the next is no band at all.
+    #[must_use]
+    pub fn after(&self, setting: &BandSetting) -> Option<BandSetting> {
+        let index = self
+            .rungs
+            .iter()
+            .position(|(_, bands)| *bands == setting.bands)?;
+        self.setting(index.saturating_add(1))
     }
 }
 
@@ -209,14 +409,14 @@ impl<T> Timeline<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Equipment {
     Kind(Implement),
-    Specific(SpecificName),
+    Specific(Specific),
 }
 
 impl fmt::Display for Equipment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Kind(implement) => write!(f, "{implement}"),
-            Self::Specific(name) => write!(f, "{name}"),
+            Self::Specific(specific) => write!(f, "{specific}"),
         }
     }
 }
@@ -225,7 +425,7 @@ impl fmt::Display for Equipment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Kind(Implement, LoadSteps),
-    Specific(SpecificName, Settings),
+    Specific(Specific, Settings),
 }
 
 impl Statement {
@@ -233,7 +433,7 @@ impl Statement {
     pub fn equipment(&self) -> Equipment {
         match self {
             Self::Kind(implement, _) => Equipment::Kind(*implement),
-            Self::Specific(name, _) => Equipment::Specific(name.clone()),
+            Self::Specific(specific, _) => Equipment::Specific(specific.clone()),
         }
     }
 }
@@ -242,7 +442,7 @@ impl Statement {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EquipmentFacts {
     pub kinds: BTreeMap<Implement, Timeline<LoadSteps>>,
-    pub specifics: BTreeMap<SpecificName, Timeline<Settings>>,
+    pub specifics: BTreeMap<Specific, Timeline<Settings>>,
 }
 
 impl EquipmentFacts {

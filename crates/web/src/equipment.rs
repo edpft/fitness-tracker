@@ -7,7 +7,10 @@
 //! job; what a declaration or a correction means is `application`'s.
 
 use domain::gym::{
-    equipment::{EquipmentFacts, Fact, FactId, LevelName, Settings, SpecificName, Statement},
+    equipment::{
+        Band, BandName, Combination, EquipmentFacts, Fact, FactId, Maker, Model, Settings,
+        Specific, Statement,
+    },
     exercise::Implement,
 };
 use domain::measure::Kg;
@@ -30,14 +33,15 @@ form.fact fieldset { min-width: 0; }
 .rows { display: grid; gap: 0.4rem; }
 .rows + button { margin-top: 0.4rem; }
 .rows > .row:first-child .remove { visibility: hidden; }
-.rows .band, .rows .level { display: grid; gap: 0.3rem; align-items: center; }
-.rows .band { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
-.rows .level { grid-template-columns: minmax(0, 1fr) auto; }
+.rows .band, .rows .ranged, .rows .step { display: grid; gap: 0.3rem; align-items: center; }
+.rows .band, .rows .ranged { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+.rows .step { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
+.rows .ranged > label { display: contents; }
 .rows .band > label { display: contents; }
 .rows input { width: 100%; min-width: 0; }
 .rows .remove { width: auto; padding: 6px 10px; }
-form:has(input[name=shape][value=levels]:checked) .stack,
-form:has(input[name=shape][value=stack]:checked) .levels { display: none; }
+form:has(input[name=shape][value=bands]:checked) .stack,
+form:has(input[name=shape][value=stack]:checked) .bands { display: none; }
 ";
 
 /// Add a row by copying the last one emptied, remove one by taking it out.
@@ -91,10 +95,10 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
                     (new_kind(facts, today))
                     h2 { "Specific equipment" }
                     p.legend { "A particular product: another of its type may not offer the same settings." }
-                    @for (name, timeline) in &facts.specifics {
-                        h3 { (name) }
+                    @for (specific, timeline) in &facts.specifics {
+                        h3 { (specific) }
                         @for fact in timeline.iter() {
-                            (specific_fact(name, fact, today))
+                            (specific_fact(specific, fact, today))
                         }
                     }
                     (new_specific(today))
@@ -172,11 +176,12 @@ fn new_kind(facts: &EquipmentFacts, today: Date) -> Markup {
     }
 }
 
-fn specific_fact(name: &SpecificName, fact: &Fact<Settings>, today: Date) -> Markup {
+fn specific_fact(specific: &Specific, fact: &Fact<Settings>, today: Date) -> Markup {
     html! {
         p { (fact.value) " " span.period { (period(fact)) } }
         form.fact method="post" action="/equipment" {
-            input type="hidden" name="specific" value=(name);
+            input type="hidden" name="maker" value=(specific.maker);
+            input type="hidden" name="model" value=(specific.model);
             (settings_fields(Some(&fact.value)))
             (acts(fact.id, today))
         }
@@ -188,7 +193,10 @@ fn new_specific(today: Date) -> Markup {
         details {
             summary { "Another specific piece of equipment" }
             form.fact method="post" action="/equipment" {
-                label { "Name " input name="specific" placeholder="Technogym Kneeling Easy Chin Dip" required; }
+                div.row {
+                    label { "Maker " input name="maker" placeholder="Physical" required; }
+                    label { "Model " input name="model" placeholder="Supaflex" required; }
+                }
                 (settings_fields(None))
                 (declare_row(today))
             }
@@ -229,32 +237,69 @@ fn steps_rows(current: Option<&LoadSteps>) -> Markup {
     }
 }
 
-/// A range's levels, one per row, in the maker's order.
-fn level_rows(current: Option<&NonEmpty<LevelName>>) -> Markup {
-    let levels: Vec<String> = current.map_or_else(
-        || vec![String::new()],
-        |levels| {
-            levels
+/// A range's bands, one per row: what the maker marks it with, and the force
+/// it takes to stretch it to twice its resting length.
+fn band_rows(current: Option<&NonEmpty<Band>>) -> Markup {
+    let bands: Vec<(String, String)> = current.map_or_else(
+        || vec![(String::new(), String::new())],
+        |bands| {
+            bands
                 .iter()
-                .map(|level| level.as_str().to_owned())
+                .map(|band| (band.name.to_string(), band.at_twice_length.to_string()))
                 .collect()
         },
     );
     html! {
         fieldset {
-            legend { "Levels, in order" }
+            legend { "Bands, and the force at twice their length, in kg" }
             div.rows {
-                @for level in &levels {
-                    div.row.level {
-                        input name="level" value=(level) aria-label="Level";
+                @for (name, force) in &bands {
+                    div.row.ranged {
+                        label { "band " input name="band_name" value=(name) placeholder="4/5 stars"; }
+                        label { "kg " input type="number" name="band_force" value=(force)
+                            min="0.001" step="0.001" inputmode="decimal"; }
                         button.remove type="button" onclick="removeRow(this)" { "Remove" }
                     }
                 }
             }
-            button type="button" onclick="addRow(this)" { "Add a level" }
+            button type="button" onclick="addRow(this)" { "Add a band" }
         }
     }
 }
+
+/// The steps, most assistance first: up to three bands each, a band named
+/// twice where two are used.
+fn step_rows(current: Option<&NonEmpty<Combination>>) -> Markup {
+    let steps: Vec<Vec<String>> = current.map_or_else(
+        || vec![Vec::new()],
+        |steps| {
+            steps
+                .iter()
+                .map(|step| step.iter().map(ToString::to_string).collect())
+                .collect()
+        },
+    );
+    html! {
+        fieldset {
+            legend { "Steps, most assistance first" }
+            div.rows {
+                @for step in &steps {
+                    div.row.step {
+                        @for part in 0..STEP_PARTS {
+                            input name="step_band" value=[step.get(part)] aria-label="Band";
+                        }
+                        input type="hidden" name="step_end" value="";
+                        button.remove type="button" onclick="removeRow(this)" { "Remove" }
+                    }
+                }
+            }
+            button type="button" onclick="addRow(this)" { "Add a step" }
+        }
+    }
+}
+
+/// How many bands one step can name.
+const STEP_PARTS: usize = 3;
 
 /// A specific's settings. A known one keeps its shape, so only its own fields
 /// are offered; a new one chooses, and only the chosen fields are shown and
@@ -266,17 +311,18 @@ fn settings_fields(current: Option<&Settings>) -> Markup {
             (steps_rows(Some(steps)))
             (most_field(Some(*most)))
         },
-        Some(Settings::Levels(levels)) => html! {
-            input type="hidden" name="shape" value="levels";
-            (level_rows(Some(levels)))
+        Some(Settings::Bands { bands, steps }) => html! {
+            input type="hidden" name="shape" value="bands";
+            (band_rows(Some(bands)))
+            (step_rows(Some(steps)))
         },
         None => html! {
             div.row {
                 label { input type="radio" name="shape" value="stack" checked; " a stack" }
-                label { input type="radio" name="shape" value="levels"; " levels" }
+                label { input type="radio" name="shape" value="bands"; " bands" }
             }
             div.stack { (steps_rows(None)) (most_field(None)) }
-            div.levels { (level_rows(None)) }
+            div.bands { (band_rows(None)) (step_rows(None)) }
         },
     }
 }
@@ -357,22 +403,54 @@ fn statement(form: &Fields) -> Result<Statement, String> {
         let implement = Implement::try_from(kind).map_err(|error| error.to_string())?;
         return Ok(Statement::Kind(implement, steps(form)?));
     }
-    let name =
-        SpecificName::try_from(form.required("specific")?).map_err(|error| error.to_string())?;
-    let settings = if form.field("shape") == Some("levels") {
-        let levels = form
-            .all("level")
-            .into_iter()
-            .filter(|level| !level.is_empty())
-            .map(LevelName::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        Settings::levels(levels)
+    let specific = Specific {
+        maker: Maker::try_from(form.required("maker")?).map_err(|error| error.to_string())?,
+        model: Model::try_from(form.required("model")?).map_err(|error| error.to_string())?,
+    };
+    let settings = if form.field("shape") == Some("bands") {
+        Settings::bands(bands(form)?, band_steps(form)?)
     } else {
         Settings::stack(steps(form)?, kilograms(form.required("most")?)?)
     }
     .map_err(|error| error.to_string())?;
-    Ok(Statement::Specific(name, settings))
+    Ok(Statement::Specific(specific, settings))
+}
+
+/// The band rows, skipping any left wholly empty.
+fn bands(form: &Fields) -> Result<Vec<Band>, String> {
+    let mut bands = Vec::new();
+    for (name, force) in form.all("band_name").into_iter().zip(form.all("band_force")) {
+        match (name.is_empty(), force.is_empty()) {
+            (true, true) => {}
+            (false, false) => bands.push(Band {
+                name: BandName::try_from(name).map_err(|error| error.to_string())?,
+                at_twice_length: kilograms(force)?,
+            }),
+            _ => return Err("each band needs both its name and its force".to_owned()),
+        }
+    }
+    Ok(bands)
+}
+
+/// The step rows in order, each the bands named before its end marker,
+/// skipping any left empty.
+fn band_steps(form: &Fields) -> Result<Vec<Combination>, String> {
+    let mut steps = Vec::new();
+    let mut current = Vec::new();
+    for (key, value) in &form.0 {
+        match key.as_str() {
+            "step_band" if !value.trim().is_empty() => current.push(
+                BandName::try_from(value.trim()).map_err(|error| error.to_string())?,
+            ),
+            "step_end" => {
+                if let Ok(bands) = NonEmpty::new(std::mem::take(&mut current)) {
+                    steps.push(Combination::new(bands));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(steps)
 }
 
 fn date(form: &Fields) -> Result<Date, String> {
