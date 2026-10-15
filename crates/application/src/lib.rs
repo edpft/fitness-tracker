@@ -27,6 +27,7 @@ pub mod holding;
 pub mod microcycle;
 pub mod next;
 pub mod normalise;
+pub mod one_rep_max;
 pub mod ports;
 pub mod prescribe;
 pub mod published;

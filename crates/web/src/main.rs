@@ -7,6 +7,7 @@
 //! adapter.
 
 mod chart;
+mod one_rep_max;
 mod page;
 mod report;
 mod run;
@@ -113,6 +114,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/", get(index))
         .route("/heart-rate", get(heart_rate))
         .route("/body-weight", get(body_weight))
+        .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/run", post(start))
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
@@ -165,6 +167,20 @@ async fn body_weight(
     match view {
         Ok(view) => weight::page(&view, over),
         Err(error) => weight::unreadable(&error.to_string()),
+    }
+}
+
+/// Estimated 1RM in each planned macrocycle, read afresh from the store.
+async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return one_rep_max::unreadable(&error.to_string()),
+    };
+    let view = configurator::one_rep_max::view(&store, &runs.setting().zone).await;
+    store.close().await;
+    match view {
+        Ok(view) => one_rep_max::page(&view),
+        Err(error) => one_rep_max::unreadable(&error.to_string()),
     }
 }
 
