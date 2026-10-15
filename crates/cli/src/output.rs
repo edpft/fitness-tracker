@@ -1225,9 +1225,11 @@ pub fn plan_standing(plan: &application::next::PlanStanding) {
 
 /// Which session is next, and how long it can still be performed.
 pub fn next_session(session: &application::microcycle::Session) {
-    let until = session
-        .closes
-        .map_or_else(String::new, |closes| format!(", until {}", when(closes)));
+    let until = match session.closes {
+        _ if session.closes_at_midnight() => ", until midnight".to_owned(),
+        Some(closes) => format!(", until {}", when(closes)),
+        None => String::new(),
+    };
     println!("Next: {}, {}{until}", named(session), when(session.at()));
 }
 

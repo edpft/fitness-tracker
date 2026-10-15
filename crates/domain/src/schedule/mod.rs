@@ -156,10 +156,9 @@ impl DayPart {
 
     /// Where a moment sits, for counting what is left of a window.
     ///
-    /// **A part in progress counts as still usable until it ends**, which is
-    /// the operator's own reading: at eight on a Saturday evening there is *"in
-    /// theory"* still time for Friday's gym test. So this answers with the part
-    /// the clock is in rather than the next one.
+    /// **A part in progress counts as still usable until it ends**: at eight in
+    /// the evening there is still time for that evening's session. So this
+    /// answers with the part the clock is in rather than the next one.
     ///
     /// **Before 06:00 the answer is that morning.** The day has not begun and
     /// none of it has been spent, so nothing is lost by saying so — where
@@ -810,10 +809,15 @@ impl Diary {
     /// **Keyed on where the window closes**, because that is where every skip
     /// ends: the session whose window it is reads *skipped* however much of the
     /// window had already gone, and the session before it — whose window closed
-    /// where this one's slot began — is untouched. The latest wins, so saying
-    /// it again with another reason corrects it.
+    /// before this skip began — is untouched. The latest wins, so saying it
+    /// again with another reason corrects it.
+    ///
+    /// **Running past the close still takes it.** A skip written while a window
+    /// ran to the next slot ends there, after the window now closes (#463).
     pub fn skipped_until(&self, closes: DayPart) -> Option<&Skip> {
-        self.skips.iter().rfind(|skip| skip.until == closes)
+        self.skips
+            .iter()
+            .rfind(|skip| skip.from < closes && closes <= skip.until)
     }
 
     /// What a date looks like: the pattern in force, as amended by any
@@ -1020,8 +1024,8 @@ impl Diary {
 
     /// The first slot the ordinary week gives a day after this one.
     ///
-    /// [`Self::first_after`]'s counterpart, and what closes a session's window:
-    /// a session may be performed until the next one starts, and an absence
+    /// [`Self::first_after`]'s counterpart, and one bound on a session's window:
+    /// no session may be performed after the next one starts, and an absence
     /// must not be able to *extend* that by deleting the slot that ends it.
     /// Bounded exactly as [`Self::first_after`] is.
     pub fn first_ordinary_after(&self, date: Date) -> Option<ScheduledSlot> {

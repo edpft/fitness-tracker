@@ -7,16 +7,15 @@
 //! 15th and delivered to Hevy; the Wednesday ride was ridden.
 //!
 //! **The states are read from a window, not from a calendar.** A session may be
-//! performed at any point between its own slot and the start of the next one,
-//! counted in parts of a day, and an absence takes those parts away. That is
-//! the whole of why the same week reports differently on a Saturday evening and
-//! on the Sunday morning, and both readings are the operator's own.
+//! performed at any point between its own slot and the end of its day, or the
+//! start of the next slot if that comes first (#463), counted in parts of a
+//! day, and an absence takes those parts away.
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     normalised::OperatorZone,
-    planner::{Recorded, SessionState, state_of},
+    planner::{Recorded, SessionState, closes, state_of},
     schedule::{
         Absence, AbsenceKind, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay,
         Relative, SessionRole, Skip, TrainingPattern, TrainingSlot,
@@ -571,5 +570,94 @@ fn the_session_after_a_skip_is_still_to_be_prescribed() {
             NEITHER
         ),
         SessionState::ToBePrescribed,
+    );
+}
+
+/// **#463: a window closes at the end of its slot's day.** Monday evening's gym
+/// is out of time on the Tuesday morning, though nothing is slotted before the
+/// Wednesday evening.
+#[test]
+fn a_window_closes_when_its_slots_day_ends() {
+    let diary = september().expect("the diary builds");
+    let monday = date(2026, 9, 21).expect("a date");
+    let tuesday = date(2026, 9, 22).expect("a date");
+    let slot = at(monday, PartOfDay::Evening);
+    let wednesday = at(date(2026, 9, 23).expect("a date"), PartOfDay::Evening);
+
+    let closes = closes(slot, Some(wednesday));
+    assert_eq!(closes, Some(at(tuesday, PartOfDay::Morning)));
+    assert_eq!(
+        state_of(
+            slot,
+            closes,
+            at(monday, PartOfDay::Evening),
+            &diary,
+            PRESCRIBED
+        ),
+        SessionState::Prescribed,
+    );
+    assert_eq!(
+        state_of(
+            slot,
+            closes,
+            at(tuesday, PartOfDay::Morning),
+            &diary,
+            PRESCRIBED
+        ),
+        SessionState::NotPerformed { absence: None },
+    );
+    assert_eq!(
+        state_of(
+            slot,
+            closes,
+            at(tuesday, PartOfDay::Morning),
+            &diary,
+            PERFORMED
+        ),
+        SessionState::Performed,
+        "a session performed after its window still answers for it"
+    );
+}
+
+/// **The next slot still closes it where that comes first**: a morning slot is
+/// out of time once the same day's evening slot begins.
+#[test]
+fn a_window_closes_at_the_next_slot_where_that_is_earlier() {
+    let monday = date(2026, 9, 21).expect("a date");
+    assert_eq!(
+        closes(
+            at(monday, PartOfDay::Morning),
+            Some(at(monday, PartOfDay::Evening))
+        ),
+        Some(at(monday, PartOfDay::Evening)),
+    );
+    assert_eq!(
+        closes(at(monday, PartOfDay::Evening), None),
+        Some(at(date(2026, 9, 22).expect("a date"), PartOfDay::Morning)),
+        "the end of the day closes it where the diary describes nothing after"
+    );
+}
+
+/// **A skip written to the next slot still skips** (#463). Skips written before
+/// the window shortened run to where the next slot begins, past the end of the
+/// day; the session reads skipped, and the next session's window is untouched.
+#[test]
+fn a_skip_running_past_the_close_still_takes_the_window() {
+    let diary = skipped_monday_afternoon().expect("the diary builds");
+    let monday = date(2026, 9, 21).expect("a date");
+    let slot = at(monday, PartOfDay::Evening);
+    let wednesday = at(date(2026, 9, 23).expect("a date"), PartOfDay::Evening);
+    let now = at(date(2026, 9, 22).expect("a date"), PartOfDay::Evening);
+
+    assert_eq!(
+        state_of(slot, closes(slot, Some(wednesday)), now, &diary, PRESCRIBED),
+        SessionState::Skipped {
+            absence: work_dinner()
+        },
+    );
+    assert_eq!(
+        diary.skipped_until(at(date(2026, 9, 24).expect("a date"), PartOfDay::Morning)),
+        None,
+        "the Wednesday ride's window closes after the skip ends"
     );
 }

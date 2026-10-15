@@ -205,9 +205,11 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
             return html! { p { "the schedule holds no slot on or after " (from) } };
         }
     };
-    let until = session
-        .closes
-        .map_or_else(String::new, |closes| format!(", until {}", when(closes)));
+    let until = match session.closes {
+        _ if session.closes_at_midnight() => ", until midnight".to_owned(),
+        Some(closes) => format!(", until {}", when(closes)),
+        None => String::new(),
+    };
     html! {
         p.session { "Next: " (named(session)) ", " (when(session.at())) (until) }
         @match prescribed {
