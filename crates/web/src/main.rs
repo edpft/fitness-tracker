@@ -8,6 +8,7 @@
 
 mod chart;
 mod equipment;
+mod programme;
 mod one_rep_max;
 mod page;
 mod report;
@@ -117,6 +118,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/body-weight", get(body_weight))
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
+        .route("/programme", get(programme_page).post(programme_post))
         .route("/run", post(start))
         .route("/run/events", get(events))
         .route("/htmx.min.js", get(htmx))
@@ -236,6 +238,58 @@ async fn equipment_post(
     match refused {
         None => Redirect::to("/equipment").into_response(),
         Some(refused) => equipment_shown(&runs, Some(&refused)).await.into_response(),
+    }
+}
+
+/// The programme in force today, read afresh, with what the last post came to.
+async fn programme_shown(runs: &Runs, said: Option<&str>) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return programme::unreadable(&error.to_string()),
+    };
+    let zone = &runs.setting().zone;
+    let today = configurator::equipment::today(zone);
+    let found = configurator::fills::on(&store, zone, today).await;
+    let facts = configurator::equipment::facts(&store).await;
+    store.close().await;
+    match (found, facts) {
+        (Ok(found), Ok(facts)) => programme::page(found.as_ref(), &facts, today, said),
+        (Err(error), _) => programme::unreadable(&error.to_string()),
+        (_, Err(error)) => programme::unreadable(&error.to_string()),
+    }
+}
+
+async fn programme_page(State(runs): State<Arc<Runs>>) -> Markup {
+    programme_shown(&runs, None).await
+}
+
+/// Change a fill, then show the page again, as the equipment page does.
+async fn programme_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let refused = match programme::asked(&form) {
+        Err(refused) => Some(refused),
+        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
+            Err(error) => Some(error.to_string()),
+            Ok(store) => {
+                let done = configurator::fills::change(
+                    &store,
+                    &runs.setting().zone,
+                    asked.slot,
+                    asked.from,
+                    asked.exercise,
+                    asked.assisted_by,
+                )
+                .await;
+                store.close().await;
+                done.err().map(|error| error.to_string())
+            }
+        },
+    };
+    match refused {
+        None => Redirect::to("/programme").into_response(),
+        Some(refused) => programme_shown(&runs, Some(&refused)).await.into_response(),
     }
 }
 

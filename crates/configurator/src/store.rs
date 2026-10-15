@@ -9,7 +9,7 @@ use std::path::Path;
 
 use application::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
-    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory, FtpHistory,
+    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, FillChangeStore, ExerciseHistory, FtpHistory,
     GenerationParameterStore, MesocycleStore, NormalisedCyclingSessionReader,
     NormalisedGymSessionReader, NormalisedWeighInReader, PerformedGymSessions, PerformedSessionLog,
     PlanStore, PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle,
@@ -81,6 +81,12 @@ impl Store {
     /// The gym's mesocycles, as they were committed.
     #[must_use]
     pub fn gym_mesocycles(&self, zone: &OperatorZone) -> impl MesocycleStore + Send + Sync + use<> {
+        SqliteGymMesocycleStore::new(self.pool.clone(), zone.clone())
+    }
+
+    /// Where changes to a mesocycle's fills are kept (#454).
+    #[must_use]
+    pub fn fill_changes(&self, zone: &OperatorZone) -> impl FillChangeStore + Send + Sync + use<> {
         SqliteGymMesocycleStore::new(self.pool.clone(), zone.clone())
     }
 
