@@ -1,7 +1,13 @@
 <!--
 Sync Impact Report
-- Version: 6.0.0, amended 2026-10-13. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 6.1.0, amended 2026-10-16. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 6.1.0 — § 4: a method-dependent reading that is the whole entity is read from the
+  normalised layer. MINOR: a rule materially widened. Raised building overnight HRV and resting
+  heart rate as charts (#254), which have normalised rows and no canonical layer; a canonical
+  layer for them would be a one-to-one copy, because a second instrument's figure is a second
+  series (§ 6) rather than a second account to merge. The operator, 2026-10-16: *"A, amend
+  § 4… for these, the canonical layer would just be the normalisation layer."*
 - 6.0.0 — § 10's genuine disagreements are settled by the merge rather than surfaced: an
   account stating when it was entered wins; copies of one entry are one account, the
   earliest-saved standing where they differ; then a majority of more than two independent
@@ -202,6 +208,8 @@ It models domain entities — a gym session of ordered exercises and sets; a cyc
 
 **4. Canonical layer.** A function of the normalised layer, deterministic matching, and the match overlay. Cross-source: one entry per real-world event, whatever number of sources recorded it, and whatever number of times each recorded it. This is the clean layer the analytical layer reads.
 
+**A method-dependent reading that is the whole entity is read from the normalised layer.** Where the observation is a figure only the instrument that produced it can state — a night's HRV, a day's resting heart rate — another source's figure is a different series (§ 6), never a second account of the same event, so there is nothing here to match or merge, and the analytical layer reads the normalised entity directly. An entity another source could also record — a session, a ride, a weigh-in's mass — passes through here even while only one source records it.
+
 Provenance survives reconciliation: a canonical entity always names the normalised entities it stands for. Identity, provenance and supersession apply at entity and observation level alike. Metrics are not stored here — e1RM, relative strength and their kind are analytical-layer functions over entities (§ 5).
 
 **5. Analytical layer.** Built from functions over the canonical layer. Nothing here is a system of record.
@@ -358,4 +366,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 6.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-13
+**Version**: 6.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-16
