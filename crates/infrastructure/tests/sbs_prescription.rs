@@ -247,7 +247,7 @@ fn working_sets(exercise: &PrescribedExercise) -> Option<Vec<(u64, String)>> {
     sets.iter()
         .filter(|set| !set.warmup)
         .map(|set| {
-            let Some(Load::Absolute(load)) = set.prescription.load() else {
+            let Load::Absolute(load) = set.prescription.load() else {
                 return None;
             };
             let Prescribed::Fixed { measure, .. } = &set.prescription else {

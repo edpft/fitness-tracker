@@ -2834,7 +2834,7 @@ mod ramp_tests {
                 domain::prescription::Prescribed::Fixed { measure, .. } => {
                     Some(measure.minimum().as_u32())
                 }
-                _ => None,
+                domain::prescription::Prescribed::ToEffort { .. } => None,
             })
             .collect())
     }
@@ -2889,8 +2889,8 @@ mod ramp_tests {
         .iter()
         .map(|set| {
             let grams = match set.prescription.load() {
-                Some(Load::Absolute(kg)) => Some(kg.as_grams()),
-                _ => None,
+                Load::Absolute(kg) => Some(kg.as_grams()),
+                Load::Relative(_) => None,
             };
             (set.warmup, grams, set.prescription.effort())
         })

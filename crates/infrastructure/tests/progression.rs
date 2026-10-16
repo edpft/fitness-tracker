@@ -222,11 +222,11 @@ fn the_block_opens_below_what_its_entry_test_failed() {
     };
     assert_eq!(
         load,
-        Some(opening),
+        opening,
         "the block opens at the failed load dropped by the entry drop"
     );
     assert_eq!(
-        load,
+        Some(load),
         ladder
             .heavy_top_set(WeekIndex::FIRST, steps)
             .map(domain::gym::Load::Absolute),
@@ -270,7 +270,7 @@ fn a_gating_session_performed_the_next_morning_still_gates() {
     };
     assert_eq!(
         light,
-        Some(gated),
+        gated,
         "the session was performed, so it gates — whatever day it landed on"
     );
 }
@@ -304,7 +304,7 @@ fn an_unpublished_session_performed_the_next_morning_is_lost() {
     };
     assert_eq!(
         light,
-        Some(ungated),
+        ungated,
         "nothing links the session to a prescription, so the calendar refuses it"
     );
 }
@@ -375,7 +375,7 @@ fn only_the_gating_role_gates() {
     assert_ne!(gated, ungated, "the two positions must be distinguishable");
     assert_eq!(
         light,
-        Some(gated),
+        gated,
         "one Friday has gone by, and the Monday before it does not advance the climb"
     );
 }

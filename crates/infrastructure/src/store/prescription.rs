@@ -250,13 +250,8 @@ fn set_columns<M>(
 where
     M: Copy + Spans,
 {
-    let (load_kind, load_grams) = match set.prescription.load() {
-        Some(load) => {
-            let (kind, grams) = load_for_storage(load)?;
-            (Some(kind), Some(grams))
-        }
-        None => (None, None),
-    };
+    let (kind, grams) = load_for_storage(set.prescription.load())?;
+    let (load_kind, load_grams) = (Some(kind), Some(grams));
     let target = match set.prescription.measure() {
         Some(measure) => Some(target_of(*measure)?),
         None => None,
@@ -991,14 +986,6 @@ fn rebuild<M: Spans>(
                 effort,
                 predicted: target,
             }
-        }
-        "autoregulated" => {
-            let (Some(measure), Some(effort)) = (target, effort) else {
-                return Err(corrupt(
-                    &"an autoregulated set with no measure or no effort",
-                ));
-            };
-            Prescribed::Autoregulated { measure, effort }
         }
         other => return Err(corrupt(&format!("{other:?} is not a prescription variant"))),
     };

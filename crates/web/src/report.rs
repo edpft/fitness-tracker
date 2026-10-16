@@ -354,9 +354,6 @@ fn set_line<M: std::fmt::Display + Spans>(set: &PrescribedSet<M>) -> String {
         Set::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }
-        Set::Autoregulated { measure, effort } => {
-            format!("{measure} — work up, {effort} in reserve")
-        }
     };
     if set.warmup {
         line.push_str(" (warm-up)");

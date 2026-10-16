@@ -727,21 +727,18 @@ fn compare_sets<M: fmt::Display + PartialEq + PartialOrd + Spans>(
     }
 
     for (set, (left, right)) in performed.iter().zip(prescribed.iter()).enumerate() {
-        // Where the prescription left an axis open there is nothing to satisfy.
-        if let Some(wanted) = right.prescription.load() {
-            match left.prescription.load() {
-                Some(lifted) if lifted == wanted => {}
-                lifted => found.push(Divergence::Load {
-                    at,
-                    member,
-                    set,
-                    performed: lifted
-                        .map_or_else(|| "no load recorded".to_owned(), |load| load.to_string()),
-                    prescribed: wanted.to_string(),
-                }),
-            }
+        let (lifted, wanted) = (left.prescription.load(), right.prescription.load());
+        if lifted != wanted {
+            found.push(Divergence::Load {
+                at,
+                member,
+                set,
+                performed: lifted.to_string(),
+                prescribed: wanted.to_string(),
+            });
         }
 
+        // Where the prescription left an axis open there is nothing to satisfy.
         if let Some(wanted) = right.prescription.measure() {
             let satisfied = match left.prescription.measure() {
                 Some(Target::Exactly(done)) => wanted.satisfied_by(done),

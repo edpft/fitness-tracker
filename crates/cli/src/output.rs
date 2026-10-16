@@ -1486,10 +1486,6 @@ fn set_line<M: std::fmt::Display + domain::measure::Spans>(
         Prescribed::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }
-        // A test: the load is what the day allows, so there is none to print.
-        Prescribed::Autoregulated { measure, effort } => {
-            format!("{measure} — work up, {effort} in reserve")
-        }
     };
     if set.warmup {
         line.push_str(" (warm-up)");
