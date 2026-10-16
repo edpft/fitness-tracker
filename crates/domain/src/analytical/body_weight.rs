@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use jiff::civil::Date;
 
 use super::Weighed;
-use crate::{macrocycle::Macrocycle, measure::Kg, plan::Span};
+use crate::{measure::Kg, plan::Span};
 
 /// What the trend is called, so a different method is never mistaken for it.
 pub const METHOD: &str = "mean of the 7 days ending on the day, at least 4 of them weighed";
@@ -110,12 +110,15 @@ pub struct Ranges {
     pub microcycle: Range,
     /// `None` on a day no mesocycle is planned for.
     pub mesocycle: Option<Range>,
-    /// `None` where the school calendar cannot say.
+    /// `None` on a day no plan is in force.
     pub macrocycle: Option<Range>,
 }
 
 impl Ranges {
-    pub fn on(today: Date, mesocycles: &[Span], macrocycle: Option<&Macrocycle>) -> Self {
+    /// **A macrocycle is a planned one** (operator, 2026-10-14, #443): it runs
+    /// from the first day of the plan in force, and a school term with no plan
+    /// in it is not a macrocycle.
+    pub fn on(today: Date, mesocycles: &[Span], plans: &[Span]) -> Self {
         let to = today;
         Self {
             microcycle: Range {
@@ -129,10 +132,13 @@ impl Ranges {
                     from: span.start(),
                     to,
                 }),
-            macrocycle: macrocycle.map(|macrocycle| Range {
-                from: macrocycle.start(),
-                to,
-            }),
+            macrocycle: plans
+                .iter()
+                .find(|span| span.covers(today))
+                .map(|span| Range {
+                    from: span.start(),
+                    to,
+                }),
         }
     }
 }
