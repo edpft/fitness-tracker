@@ -150,10 +150,12 @@ fn body(view: &View, over: Over) -> Markup {
         }
     };
     let Some(range) = range else {
-        return match over {
-            Over::Macrocycle => html! { p { "No macrocycle is planned for today." } },
-            _ => html! { p { "No mesocycle is planned for today." } },
+        let cycle = if over == Over::Macrocycle {
+            "macrocycle"
+        } else {
+            "mesocycle"
         };
+        return html! { p { "No " (cycle) " is planned for today." } };
     };
     let series = view.series.within(range);
     html! {
