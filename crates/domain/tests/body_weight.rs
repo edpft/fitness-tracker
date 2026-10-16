@@ -225,6 +225,12 @@ fn the_macrocycle_runs_from_the_plan_not_the_term() {
 #[test]
 fn a_day_no_plan_covers_has_no_macrocycle() {
     let autumn = Span::new(date(2026, 9, 14), 15);
-    assert_eq!(Ranges::on(date(2027, 1, 11), &[], &[autumn]).macrocycle, None);
-    assert_eq!(Ranges::on(date(2026, 9, 10), &[], &[autumn]).macrocycle, None);
+    assert_eq!(
+        Ranges::on(date(2027, 1, 11), &[], &[autumn]).macrocycle,
+        None
+    );
+    assert_eq!(
+        Ranges::on(date(2026, 9, 10), &[], &[autumn]).macrocycle,
+        None
+    );
 }

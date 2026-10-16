@@ -533,7 +533,10 @@ mod tests {
         let mut view = view(vec![day(1, 84_000)], date(2026, 9, 23));
         view.ranges.macrocycle = None;
         let page = page(&view, Over::Macrocycle).into_string();
-        assert!(page.contains("No macrocycle is planned for today."), "{page}");
+        assert!(
+            page.contains("No macrocycle is planned for today."),
+            "{page}"
+        );
         assert!(
             page.contains("this mesocycle"),
             "the other ranges are still offered"
