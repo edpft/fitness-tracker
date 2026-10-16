@@ -17,6 +17,7 @@ use domain::{
     analytical::{
         hrv::{self, Against, Trended},
         per_device::{DeviceSeries, SentBy},
+        resting,
     },
     measure::{BeatsPerMinute, HeartRateVariability},
 };
@@ -86,6 +87,15 @@ pub struct Trends {
 pub struct Overlay {
     pub runs: Vec<Vec<Drawn>>,
     pub latest: Option<String>,
+    /// Nights ringed, and listed beneath the chart.
+    pub flags: Vec<Marked>,
+}
+
+/// A night ringed on the chart.
+pub struct Marked {
+    pub on: Date,
+    pub value: u32,
+    pub title: String,
 }
 
 /// One day of a trend.
@@ -134,7 +144,82 @@ fn hrv_overlay(trended: &Trended) -> Overlay {
             hrv_reading(day)
         )
     });
-    Overlay { runs, latest }
+    Overlay {
+        runs,
+        latest,
+        flags: Vec::new(),
+    }
+}
+
+/// The resting heart rate page: each watch's days, the slow line through
+/// them, and the nights flagged.
+pub fn resting_heart_rate(trended: &[resting::Trended]) -> Markup {
+    let series: Vec<DeviceSeries<BeatsPerMinute>> =
+        trended.iter().map(|one| one.series.clone()).collect();
+    let trends = Trends {
+        overlays: trended.iter().map(resting_overlay).collect(),
+        method: format!(
+            "points: each day · line: the {} · ringed: flagged, {}",
+            resting::METHOD,
+            resting::FLAG
+        ),
+    };
+    page(RESTING_HEART_RATE, &series, Some(&trends))
+}
+
+fn resting_overlay(trended: &resting::Trended) -> Overlay {
+    let runs = trended
+        .line
+        .iter()
+        .map(|run| {
+            run.iter()
+                .map(|day| Drawn {
+                    on: day.on,
+                    value: day.bpm,
+                    band: None,
+                    title: format!("{} · 90-day average {:.1} bpm", day.on, day.bpm),
+                })
+                .collect()
+        })
+        .collect();
+    let flagged = |flag: &resting::Flag| {
+        format!(
+            "{} bpm against a normal of {:.0}",
+            flag.rate.as_u32(),
+            flag.normal
+        )
+    };
+    let latest = trended.line.iter().flatten().next_back().map(|day| {
+        let last_flag = trended.flags.last().map_or_else(
+            || "never flagged".to_owned(),
+            |flag| format!("last flagged {}, {}", flag.on, flagged(flag)),
+        );
+        format!(
+            "{}, {}: 90-day average {:.1} bpm · {last_flag}",
+            name(&trended.series.sent_by),
+            day.on,
+            day.bpm
+        )
+    });
+    let flags = trended
+        .flags
+        .iter()
+        .map(|flag| Marked {
+            on: flag.on,
+            value: flag.rate.as_u32(),
+            title: format!(
+                "{} · flagged · {} · {}",
+                flag.on,
+                flagged(flag),
+                name(&trended.series.sent_by)
+            ),
+        })
+        .collect();
+    Overlay {
+        runs,
+        latest,
+        flags,
+    }
 }
 
 /// A day's trend, where it sits against the band, and the week's scatter.
@@ -186,6 +271,16 @@ pub fn page<T: Figure>(
                     }
                     (chart(shown, series, overlays))
                     @if let Some(trends) = trends { p.method { (trends.method) } }
+                    @if overlays.iter().any(|overlay| !overlay.flags.is_empty()) {
+                        details {
+                            summary { "Every night flagged" }
+                            ul.flags {
+                                @for flag in overlays.iter().flat_map(|overlay| &overlay.flags) {
+                                    li { (flag.title) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -307,6 +402,11 @@ fn plot<T: Figure>(
                 }
             }
             @for overlay in overlays {
+                @for flag in &overlay.flags {
+                    circle.flag cx=(frame.x(seconds(flag.on))) cy=(frame.y(flag.value)) r=(RADIUS + 3.0) {
+                        title { (flag.title) }
+                    }
+                }
                 @for run in &overlay.runs {
                     polyline.trend points=(line_points(run, frame)) {}
                     @for day in run {
@@ -419,6 +519,7 @@ const STYLE: &str = "
 .point.d1, .point.d2, .point.d3, .point.d4 { stroke: none; }
 .trend { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 .band { fill: var(--ink); fill-opacity: 0.08; stroke: none; }
+.flag { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .hover { fill: transparent; }
 p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 ";
@@ -429,6 +530,7 @@ mod tests {
         analytical::{
             hrv::Trended,
             per_device::{DeviceSeries, Reading, SentBy},
+            resting,
         },
         measure::{BeatsPerMinute, HeartRateVariability},
     };
@@ -480,6 +582,31 @@ mod tests {
         assert_eq!(page.matches(r#"class="band""#).count(), 1);
         assert!(page.contains("device unknown, 2026-03-11: last 7 nights 53 ms, within the band"));
         assert!(page.contains("at least 26 of them recorded"));
+    }
+
+    #[test]
+    fn resting_heart_rate_is_a_line_and_a_ring_on_each_flagged_night() {
+        let rates = (0..40)
+            .map(|index| if index % 2 == 0 { 50 } else { 52 })
+            .chain([57, 58]);
+        let readings = rates
+            .enumerate()
+            .map(|(index, beats)| Reading {
+                on: jiff::civil::date(2026, 1, 1)
+                    .checked_add(jiff::Span::new().days(i64::try_from(index).expect("small")))
+                    .expect("a day"),
+                value: BeatsPerMinute::new(beats).expect("a rate"),
+            })
+            .collect();
+        let trended = [resting::Trended::of(DeviceSeries {
+            sent_by: SentBy::Unknown,
+            readings,
+        })];
+        let page = super::resting_heart_rate(&trended).into_string();
+
+        assert_eq!(page.matches(r#"class="trend""#).count(), 1);
+        assert_eq!(page.matches(r#"class="flag""#).count(), 1);
+        assert!(page.contains("last flagged 2026-02-11, 58 bpm against a normal of 51"));
     }
 
     #[test]

@@ -193,17 +193,19 @@ async fn overnight_hrv(State(runs): State<Arc<Runs>>) -> Markup {
     }
 }
 
-/// Resting heart rate, one series per watch, read afresh from the store.
+/// Resting heart rate, one series per watch with its slow line and the nights
+/// it flags, read afresh from the store.
 async fn resting_heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     let shown = daily::RESTING_HEART_RATE;
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let series = configurator::per_device::resting_heart_rate(&store, &runs.setting().zone).await;
+    let trended =
+        configurator::per_device::resting_heart_rate_trend(&store, &runs.setting().zone).await;
     store.close().await;
-    match series {
-        Ok(series) => daily::page(shown, &series, None),
+    match trended {
+        Ok(trended) => daily::resting_heart_rate(&trended),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }

@@ -8,6 +8,7 @@ use domain::{
     analytical::{
         hrv::Trended,
         per_device::{DeviceSeries, per_device},
+        resting,
     },
     device::Measurand,
     measure::{BeatsPerMinute, HeartRateVariability},
@@ -86,5 +87,20 @@ where
             Measurand::HeartRate,
             &register,
         ))
+    }
+
+    /// Each day's resting heart rate, one series per watch, with its slow line
+    /// and the nights it flags (#417).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if any store is unavailable.
+    pub async fn resting_heart_rate_trend(&self) -> Result<Vec<resting::Trended>, StoreError> {
+        Ok(self
+            .resting_heart_rate()
+            .await?
+            .into_iter()
+            .map(resting::Trended::of)
+            .collect())
     }
 }
