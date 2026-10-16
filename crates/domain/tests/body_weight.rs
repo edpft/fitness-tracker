@@ -3,11 +3,12 @@
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Direction, Range, Series, Trend, body_weight, changes, trend},
+        body_weight::{Direction, Range, Ranges, Series, Trend, body_weight, changes, trend},
     },
     canonical::Occurred,
     measure::Kg,
     normalised::{OperatorZone, StartedAt},
+    plan::Span,
 };
 use jiff::civil::{Date, date};
 
@@ -204,5 +205,32 @@ fn a_range_keeps_the_readings_of_its_own_days() {
             .summary()
             .map(|summary| (summary.average, summary.difference)),
         Some((Kg::from_grams(84_000), Some(0)))
+    );
+}
+
+/// The autumn's plan starts on Monday 2026-09-14, a week into the term (#443).
+#[test]
+fn the_macrocycle_runs_from_the_plan_not_the_term() {
+    let autumn = Span::new(date(2026, 9, 14), 15);
+    let ranges = Ranges::on(date(2026, 10, 16), &[], &[autumn]);
+    assert_eq!(
+        ranges.macrocycle,
+        Some(Range {
+            from: date(2026, 9, 14),
+            to: date(2026, 10, 16),
+        })
+    );
+}
+
+#[test]
+fn a_day_no_plan_covers_has_no_macrocycle() {
+    let autumn = Span::new(date(2026, 9, 14), 15);
+    assert_eq!(
+        Ranges::on(date(2027, 1, 11), &[], &[autumn]).macrocycle,
+        None
+    );
+    assert_eq!(
+        Ranges::on(date(2026, 9, 10), &[], &[autumn]).macrocycle,
+        None
     );
 }

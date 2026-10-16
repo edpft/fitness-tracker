@@ -6,7 +6,7 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 
-use crate::{holidays::Calendars, store::Store};
+use crate::store::Store;
 
 /// Every canonical weigh-in, the trend through them and which way it went,
 /// and the cycles today falls in.
@@ -16,7 +16,7 @@ use crate::{holidays::Calendars, store::Store};
 /// [`StoreError`] if the store cannot be read.
 pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError> {
     let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    BodyWeight::new(store.weigh_ins(), store.plans(zone), Calendars)
+    BodyWeight::new(store.weigh_ins(), store.plans(zone))
         .view(today)
         .await
 }

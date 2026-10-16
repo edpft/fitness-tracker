@@ -150,13 +150,12 @@ fn body(view: &View, over: Over) -> Markup {
         }
     };
     let Some(range) = range else {
-        return match (over, &view.calendar) {
-            (Over::Macrocycle, Some(error)) => {
-                html! { p.failed { "the school calendar could not be read: " (error) } }
-            }
-            (Over::Macrocycle, None) => html! { p { "The school calendar does not reach today." } },
-            _ => html! { p { "No mesocycle is planned for today." } },
+        let cycle = if over == Over::Macrocycle {
+            "macrocycle"
+        } else {
+            "mesocycle"
         };
+        return html! { p { "No " (cycle) " is planned for today." } };
     };
     let series = view.series.within(range);
     html! {
@@ -457,7 +456,6 @@ mod tests {
                 mesocycle: Some(range(date(2026, 9, 14))),
                 macrocycle: Some(range(date(2026, 9, 7))),
             },
-            calendar: None,
         }
     }
 
@@ -531,14 +529,14 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_calendar_costs_the_macrocycle_only() {
+    fn a_day_with_no_plan_has_no_macrocycle() {
         let mut view = view(vec![day(1, 84_000)], date(2026, 9, 23));
         view.ranges.macrocycle = None;
-        view.calendar = Some(application::SourceError::Unavailable {
-            detail: "offline".to_owned(),
-        });
         let page = page(&view, Over::Macrocycle).into_string();
-        assert!(page.contains("the school calendar could not be read"));
+        assert!(
+            page.contains("No macrocycle is planned for today."),
+            "{page}"
+        );
         assert!(
             page.contains("this mesocycle"),
             "the other ranges are still offered"
