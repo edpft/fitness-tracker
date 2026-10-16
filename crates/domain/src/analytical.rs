@@ -21,8 +21,10 @@
 
 pub mod body_weight;
 pub mod heart_rate;
+pub mod hrv;
 pub mod one_rep_max;
 pub mod per_device;
+pub mod resting;
 
 use std::fmt;
 
