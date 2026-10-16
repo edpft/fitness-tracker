@@ -7,6 +7,7 @@
 //! adapter.
 
 mod chart;
+mod daily;
 mod equipment;
 mod one_rep_max;
 mod page;
@@ -116,6 +117,8 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/", get(index))
         .route("/heart-rate", get(heart_rate))
         .route("/body-weight", get(body_weight))
+        .route("/hrv", get(overnight_hrv))
+        .route("/resting-heart-rate", get(resting_heart_rate))
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/programme", get(programme_page).post(programme_post))
@@ -171,6 +174,36 @@ async fn body_weight(
     match view {
         Ok(view) => weight::page(&view, over),
         Err(error) => weight::unreadable(&error.to_string()),
+    }
+}
+
+/// Overnight HRV, one series per watch, read afresh from the store.
+async fn overnight_hrv(State(runs): State<Arc<Runs>>) -> Markup {
+    let shown = daily::OVERNIGHT_HRV;
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return daily::unreadable(shown, &error.to_string()),
+    };
+    let series = configurator::per_device::overnight_hrv(&store, &runs.setting().zone).await;
+    store.close().await;
+    match series {
+        Ok(series) => daily::page(shown, &series),
+        Err(error) => daily::unreadable(shown, &error.to_string()),
+    }
+}
+
+/// Resting heart rate, one series per watch, read afresh from the store.
+async fn resting_heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
+    let shown = daily::RESTING_HEART_RATE;
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return daily::unreadable(shown, &error.to_string()),
+    };
+    let series = configurator::per_device::resting_heart_rate(&store, &runs.setting().zone).await;
+    store.close().await;
+    match series {
+        Ok(series) => daily::page(shown, &series),
+        Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }
 

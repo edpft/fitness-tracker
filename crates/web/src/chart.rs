@@ -396,7 +396,7 @@ fn beats_range(rides: &[RideHeartRate]) -> (u32, u32) {
 
 /// Each new year's first instant inside the span, by the operator's calendar
 /// as the first ride's zone has it.
-fn years(first: i64, last: i64) -> Vec<(i16, i64)> {
+pub fn years(first: i64, last: i64) -> Vec<(i16, i64)> {
     let Ok(start) = jiff::Timestamp::from_second(first) else {
         return Vec::new();
     };
@@ -419,7 +419,7 @@ fn years(first: i64, last: i64) -> Vec<(i16, i64)> {
 
 /// How far along the date axis an instant is, in minutes: fine enough for
 /// a chart, and small enough to hold exactly.
-fn along(part: i64, whole: i64) -> f64 {
+pub fn along(part: i64, whole: i64) -> f64 {
     let minutes = |seconds: i64| f64::from(i32::try_from(seconds / 60).unwrap_or(i32::MAX));
     if whole <= 0 {
         return 0.5;
@@ -430,7 +430,7 @@ fn along(part: i64, whole: i64) -> f64 {
 /// The zones' colours, validated as a set in both modes. The one pair that
 /// sits close in the dark is zone one and zone five, which are never near one
 /// another in heart rate.
-const STYLE: &str = "
+pub const STYLE: &str = "
 main.wide { max-width: 60rem; }
 :root {
   --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;

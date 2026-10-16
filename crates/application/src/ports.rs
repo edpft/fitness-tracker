@@ -1250,6 +1250,41 @@ pub trait WeighInHistory {
     fn weigh_ins(&self) -> impl Future<Output = Result<Vec<Weighed>, StoreError>> + Send;
 }
 
+/// Every night's overnight HRV: last night's average, by the morning it is
+/// reported under (#254).
+///
+/// **Normalised, not canonical** (§ 4): a night's HRV is a figure only the
+/// watch that took it can state, so there is no second account to merge.
+pub trait OvernightHrvHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn nights(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            Vec<domain::analytical::per_device::Reading<domain::measure::HeartRateVariability>>,
+            StoreError,
+        >,
+    > + Send;
+}
+
+/// Every day's resting heart rate (#254), normalised for
+/// [`OvernightHrvHistory`]'s reason.
+pub trait RestingHeartRateHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn days(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            Vec<domain::analytical::per_device::Reading<domain::measure::BeatsPerMinute>>,
+            StoreError,
+        >,
+    > + Send;
+}
+
 /// Every normalised weigh-in the store holds, whatever source recorded it
 /// (#409).
 ///

@@ -1,4 +1,4 @@
-//! Which of Garmin's records is the night that stands.
+//! Which of Garmin's records is the night, or the day, that stands.
 //!
 //! **One record is one night** — `hrv-service/hrv/{date}` answers with the whole
 //! of what Garmin says about it, so there is nothing to compose (§ II.3.1's
@@ -43,28 +43,71 @@ impl SourceAccount for NightAccount {
 /// append-only. Accounts come back oldest first by that same id, which is what
 /// [`application::ports::AccountReader`] promises.
 pub fn nights(records: Vec<LandedRecord>) -> Vec<NightAccount> {
-    let mut accounts: Vec<NightAccount> = Vec::with_capacity(records.len());
+    last_of_each(records)
+        .into_iter()
+        .map(|(night, superseded)| NightAccount { night, superseded })
+        .collect()
+}
+
+/// One day of the wrist's heart rate, and the servings of it that a later one
+/// replaced.
+///
+/// **Supersession for the reason a night has it**: the walk re-asks for the
+/// watermark's own day, because today's answer grows until the day is over.
+#[derive(Debug, Clone)]
+pub struct DayAccount {
+    day: LandedRecord,
+    superseded: Vec<LandedRecord>,
+}
+
+impl DayAccount {
+    /// The serving that stands.
+    pub const fn day(&self) -> &LandedRecord {
+        &self.day
+    }
+}
+
+impl SourceAccount for DayAccount {
+    fn records(&self) -> usize {
+        self.superseded.len().saturating_add(1)
+    }
+
+    fn superseded(&self) -> usize {
+        self.superseded.len()
+    }
+}
+
+/// Keep the last serving of each day and set the earlier ones aside, as
+/// [`nights`] does.
+pub fn days(records: Vec<LandedRecord>) -> Vec<DayAccount> {
+    last_of_each(records)
+        .into_iter()
+        .map(|(day, superseded)| DayAccount { day, superseded })
+        .collect()
+}
+
+/// The last serving of each source record and the ones it replaced, oldest
+/// first by the serving that stands.
+fn last_of_each(records: Vec<LandedRecord>) -> Vec<(LandedRecord, Vec<LandedRecord>)> {
+    let mut accounts: Vec<(LandedRecord, Vec<LandedRecord>)> = Vec::with_capacity(records.len());
 
     for record in records {
-        if let Some(held) = accounts
+        if let Some((held, superseded)) = accounts
             .iter_mut()
-            .find(|held| held.night.source_record_id() == record.source_record_id())
+            .find(|(held, _)| held.source_record_id() == record.source_record_id())
         {
-            if record.id() > held.night.id() {
-                let previous = std::mem::replace(&mut held.night, record);
-                held.superseded.push(previous);
+            if record.id() > held.id() {
+                let previous = std::mem::replace(held, record);
+                superseded.push(previous);
             } else {
-                held.superseded.push(record);
+                superseded.push(record);
             }
         } else {
-            accounts.push(NightAccount {
-                night: record,
-                superseded: Vec::new(),
-            });
+            accounts.push((record, Vec::new()));
         }
     }
 
-    accounts.sort_by_key(|account| account.night.id().as_i64());
+    accounts.sort_by_key(|(held, _)| held.id().as_i64());
     accounts
 }
 

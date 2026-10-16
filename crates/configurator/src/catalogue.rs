@@ -291,7 +291,7 @@ pub const SOURCES: [KnownSource; 4] = [
 /// **Beyond The White Board serves exports**: one record is the file it sent on
 /// request, whole. Only an export is served, so the export is the entity.
 /// **MyFitnessPal** likewise, sent once on a request under the UK GDPR.
-pub const KNOWN: [KnownStream; 8] = [
+pub const KNOWN: [KnownStream; 9] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[0]),
         entity: "workouts",
@@ -320,6 +320,14 @@ pub const KNOWN: [KnownStream; 8] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[3]),
         entity: "activities",
+    },
+    // **The wrist's day, worn or not** (#427): its resting heart rate, and
+    // since about 2026-05-15 its readings. Collected with the activities as
+    // well, because it says which days a watch was worn; nameable on its own
+    // because it derives something of its own (#254).
+    KnownStream {
+        served_by: ServedBy::System(&SOURCES[3]),
+        entity: "daily_heart_rate",
     },
     KnownStream {
         served_by: ServedBy::Folder {

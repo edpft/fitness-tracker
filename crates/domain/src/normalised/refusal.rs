@@ -181,6 +181,14 @@ pub enum RefusalReason {
     /// the nights are excluded because they say nothing comparable, not because
     /// an entity for them is still to be written.
     WithoutBaseline,
+    /// A day the source holds and nothing was worn on.
+    ///
+    /// Garmin answers for every date it is asked about, and on a day no watch
+    /// was on the wrist it answers with no resting heart rate and no readings —
+    /// 550 of the operator's 3,204 days, every one of them both. That answer is
+    /// the evidence the day is a gap (§ 37), so it is a declared limitation and
+    /// not wrong data: the source is telling the truth.
+    NothingWorn,
     /// A reading the instrument could not attribute to the operator.
     ///
     /// The Body Scan did not recognise who stepped on it, and someone assigned
@@ -250,6 +258,7 @@ impl RefusalReason {
             Self::NotTheInstrument { .. }
             | Self::Unattributed
             | Self::WithoutBaseline
+            | Self::NothingWorn
             | Self::OnlyTheWatchClassifying
             | Self::NothingHappened
             | Self::WithoutWeighIn { .. } => RefusalKind::DeclaredLimitation,
@@ -277,6 +286,7 @@ impl RefusalReason {
             Self::NotTheInstrument { .. } => "not-the-instrument",
             Self::Unattributed => "unattributed",
             Self::WithoutBaseline => "without-baseline",
+            Self::NothingWorn => "nothing-worn",
             Self::WithoutWeighIn { .. } => "without-weigh-in",
             Self::UnguessableMovement { .. } => "unguessable-movement",
             Self::OnlyTheWatchClassifying => "only-the-watch-classifying",
@@ -334,6 +344,7 @@ impl fmt::Display for RefusalReason {
             Self::WithoutBaseline => {
                 f.write_str("a night with no baseline, which is not a night with HRV")
             }
+            Self::NothingWorn => f.write_str("a day nothing was worn"),
             Self::WithoutWeighIn { part } => write!(f, "a {part} reading with no weigh-in"),
             Self::UnguessableMovement { term } => {
                 write!(f, "{term} names no movement in the vocabulary")

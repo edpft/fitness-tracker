@@ -21,6 +21,7 @@ pub mod holidays;
 pub mod next;
 pub mod one_rep_max;
 pub mod paths;
+pub mod per_device;
 pub mod prescribing;
 pub mod rescheduling;
 pub mod rides;

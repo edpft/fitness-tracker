@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT day AS \"day!: String\", rate_bpm AS \"rate!: i64\"\n            FROM resting_heart_rate\n            ORDER BY day ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "day!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "resting_heart_rate",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "name": "rate!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "resting_heart_rate",
+            "name": "rate_bpm"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "eaaed368f2297f52a49eb7afd85fc88b4a0f777d828a5737dbf9e845e77d8a37"
+}
