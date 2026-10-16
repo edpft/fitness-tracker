@@ -177,17 +177,18 @@ async fn body_weight(
     }
 }
 
-/// Overnight HRV, one series per watch, read afresh from the store.
+/// Overnight HRV, one series per watch and the trend through each, read
+/// afresh from the store.
 async fn overnight_hrv(State(runs): State<Arc<Runs>>) -> Markup {
     let shown = daily::OVERNIGHT_HRV;
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let series = configurator::per_device::overnight_hrv(&store, &runs.setting().zone).await;
+    let trended = configurator::per_device::overnight_hrv_trend(&store, &runs.setting().zone).await;
     store.close().await;
-    match series {
-        Ok(series) => daily::page(shown, &series),
+    match trended {
+        Ok(trended) => daily::overnight_hrv(&trended),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }
@@ -202,7 +203,7 @@ async fn resting_heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     let series = configurator::per_device::resting_heart_rate(&store, &runs.setting().zone).await;
     store.close().await;
     match series {
-        Ok(series) => daily::page(shown, &series),
+        Ok(series) => daily::page(shown, &series, None),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }

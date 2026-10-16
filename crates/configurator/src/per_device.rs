@@ -3,8 +3,8 @@
 
 use application::{StoreError, devices::DeviceRegister, per_device::PerDevice};
 use domain::{
-    analytical::per_device::DeviceSeries,
-    measure::{BeatsPerMinute, HeartRateVariability},
+    analytical::{hrv::Trended, per_device::DeviceSeries},
+    measure::BeatsPerMinute,
     normalised::OperatorZone,
 };
 use infrastructure::{
@@ -37,16 +37,16 @@ fn per_device(
     )
 }
 
-/// Last night's average HRV, by morning, one series per watch.
+/// Last night's average HRV, one series per watch, and the trend through each.
 ///
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn overnight_hrv(
+pub async fn overnight_hrv_trend(
     store: &Store,
     zone: &OperatorZone,
-) -> Result<Vec<DeviceSeries<HeartRateVariability>>, StoreError> {
-    per_device(store, zone).overnight_hrv().await
+) -> Result<Vec<Trended>, StoreError> {
+    per_device(store, zone).overnight_hrv_trend().await
 }
 
 /// Each day's resting heart rate, one series per watch.
