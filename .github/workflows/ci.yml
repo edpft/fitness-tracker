@@ -17,3 +17,21 @@ jobs:
     uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@main
     with:
       prebuild: .#cargoArtifacts
+
+  # The one status the `main` ruleset requires (#147). It passes only when
+  # every job under `checks` did, so a check added to flake.nix gates a merge by
+  # construction rather than by someone remembering to retype the ruleset's
+  # list. `always()` because GitHub counts a skipped required check as passing:
+  # this job must run, and fail, when `checks` failed or was cancelled.
+  gate:
+    name: gate
+    needs: [checks]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every check passed
+        run: |
+          echo "checks: ${RESULT}"
+          test "${RESULT}" = success
+        env:
+          RESULT: ${{ needs.checks.result }}
