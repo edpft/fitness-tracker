@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT c.id                  AS \"id!: i64\",\n                   c.recorded_reps       AS \"recorded_reps!: i64\",\n                   c.recorded_load_grams AS \"recorded_load_grams?: i64\",\n                   c.reps                AS \"reps!: i64\",\n                   c.load_grams          AS \"load_grams?: i64\",\n                   c.asserted_at         AS \"asserted_at!: String\",\n                   c.reason              AS \"reason!: String\",\n                   t.source_record_id    AS \"source_record_id!: String\",\n                   t.term                AS \"term!: String\"\n            FROM correction c\n            JOIN correction_term t ON t.correction = c.id\n            WHERE c.stream = ? AND c.reps IS NOT NULL\n            ORDER BY c.asserted_at, c.id, t.source_record_id, t.term\n            ",
+  "query": "\n            SELECT c.id                  AS \"id!: i64\",\n                   c.recorded_reps       AS \"recorded_reps!: i64\",\n                   c.recorded_load_grams AS \"recorded_load_grams?: i64\",\n                   c.reps                AS \"reps!: i64\",\n                   c.load_grams          AS \"load_grams?: i64\",\n                   c.assisted            AS \"assisted!: i64\",\n                   c.asserted_at         AS \"asserted_at!: String\",\n                   c.reason              AS \"reason!: String\",\n                   t.source_record_id    AS \"source_record_id!: String\",\n                   t.term                AS \"term!: String\"\n            FROM correction c\n            JOIN correction_term t ON t.correction = c.id\n            WHERE c.stream = ? AND c.reps IS NOT NULL\n            ORDER BY c.asserted_at, c.id, t.source_record_id, t.term\n            ",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,19 @@
         }
       },
       {
-        "name": "asserted_at!: String",
+        "name": "assisted!: i64",
         "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "correction",
+            "name": "assisted"
+          }
+        }
+      },
+      {
+        "name": "asserted_at!: String",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "reason!: String",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "source_record_id!: String",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "term!: String",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -115,8 +126,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "05e067eba701c9308ddbf4a69b09f3eac1507374a6b6b4b6f09b1f0754065955"
+  "hash": "60ef031a7a657d4c79017d713898acb7c8995ef48546b6315330d18f744f6b98"
 }

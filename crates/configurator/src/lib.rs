@@ -15,6 +15,7 @@ pub mod corrections;
 pub mod cycling;
 pub mod devices;
 pub mod equipment;
+pub mod fills;
 pub mod heart_rate;
 pub mod holidays;
 pub mod next;
@@ -25,6 +26,7 @@ pub mod rescheduling;
 pub mod rides;
 pub mod setup;
 pub mod store;
+pub mod templates;
 pub mod wiring;
 
 /// What the operator stored, as a frontend passes it to a run.

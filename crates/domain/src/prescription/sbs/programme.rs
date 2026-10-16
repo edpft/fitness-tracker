@@ -110,6 +110,10 @@ impl Sbs {
         &self.fills
     }
 
+    pub const fn fills_mut(&mut self) -> &mut SlotFills {
+        &mut self.fills
+    }
+
     pub const fn calendar(&self) -> &Calendar {
         &self.calendar
     }

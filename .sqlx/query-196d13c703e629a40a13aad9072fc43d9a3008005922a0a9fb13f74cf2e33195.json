@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT position AS \"position!: i64\", exercise AS \"exercise!: String\",\n               measure AS \"measure!: String\", assisted_maker, assisted_model,\n               assisted_grams\n        FROM prescribed_exercise\n        WHERE workout = ? AND item_position = ?\n        ORDER BY position ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "measure!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "measure"
+          }
+        }
+      },
+      {
+        "name": "assisted_maker",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "assisted_maker"
+          }
+        }
+      },
+      {
+        "name": "assisted_model",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "assisted_model"
+          }
+        }
+      },
+      {
+        "name": "assisted_grams",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise",
+            "name": "assisted_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "196d13c703e629a40a13aad9072fc43d9a3008005922a0a9fb13f74cf2e33195"
+}

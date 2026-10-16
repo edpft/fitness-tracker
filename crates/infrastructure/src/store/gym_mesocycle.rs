@@ -28,16 +28,20 @@
 
 use std::num::NonZeroU8;
 
-use application::{MesocycleInForce, MesocycleStore, StoreError};
+use application::{FillChangeStore, MesocycleInForce, MesocycleStore, StoreError};
 use domain::{
-    gym::exercise::Exercise,
+    gym::{
+        equipment::{Maker, Model, Specific},
+        exercise::Exercise,
+    },
     measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{MesocycleOrdinal, Occupies, PlanName},
     planner::RerunOrdinal,
     prescription::{
-        Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, GymMesocycle, Linear,
-        MesocycleId, Progression, Sbs, Skip, SlotId, Test, Tested,
+        Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, FillChange,
+        FillChanges, GymMesocycle, Linear, MesocycleId, Progression, Sbs, Skip, SlotId, Test,
+        Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -273,6 +277,7 @@ pub(super) async fn in_force(
             }
         };
 
+        let changes = read_changes(pool, row.id).await?;
         mesocycles.push((
             row.plan,
             MesocycleInForce {
@@ -280,6 +285,7 @@ pub(super) async fn in_force(
                 ordinal: ordinal_in_plan(row.ordinal)?,
                 plan,
                 mesocycle,
+                changes,
             },
         ));
     }
@@ -982,6 +988,110 @@ fn gating_of(
             &"a gating role that is half an intensity and half a volume",
         )),
     }
+}
+
+/// Every change to one mesocycle's fills (#454).
+async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT slot AS "slot!: String",
+               intensity,
+               valid_from AS "valid_from!: String",
+               recorded_at AS "recorded_at!: String",
+               exercise AS "exercise!: String",
+               assisted_maker,
+               assisted_model
+        FROM gym_slot_fill_change
+        WHERE mesocycle = ?
+        ORDER BY id
+        "#,
+        mesocycle
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut changes = Vec::new();
+    for row in rows {
+        let assisted_by = match (row.assisted_maker, row.assisted_model) {
+            (Some(maker), Some(model)) => Some(Specific {
+                maker: Maker::try_from(maker).map_err(|error| corrupt(&error))?,
+                model: Model::try_from(model).map_err(|error| corrupt(&error))?,
+            }),
+            (None, None) => None,
+            _ => return Err(corrupt(&"a specific with a maker or a model but not both")),
+        };
+        changes.push(FillChange {
+            slot: SlotId::try_from(row.slot).map_err(|error| corrupt(&error))?,
+            intensity: row
+                .intensity
+                .map(Relative::try_from)
+                .transpose()
+                .map_err(|error| corrupt(&error))?,
+            from: row
+                .valid_from
+                .parse()
+                .map_err(|_| corrupt(&"a change that does not start on a date"))?,
+            recorded_at: row
+                .recorded_at
+                .parse()
+                .map_err(|_| corrupt(&"a recording time that is not an instant"))?,
+            exercise: exercise_of(&row.exercise)?,
+            assisted_by,
+        });
+    }
+    Ok(FillChanges::new(changes))
+}
+
+impl FillChangeStore for SqliteGymMesocycleStore {
+    async fn record_change(
+        &self,
+        mesocycle: MesocycleId,
+        change: &FillChange,
+    ) -> Result<(), StoreError> {
+        write_change(&self.pool, mesocycle, change).await
+    }
+}
+
+/// Record a change to one mesocycle's fills (#454).
+async fn write_change(
+    pool: &SqlitePool,
+    mesocycle: MesocycleId,
+    change: &FillChange,
+) -> Result<(), StoreError> {
+    let mesocycle = mesocycle.as_i64();
+    let slot = change.slot.as_str();
+    let intensity = change.intensity.map(Relative::as_str);
+    let from = change.from.to_string();
+    let recorded_at = change.recorded_at.to_string();
+    let exercise = change.exercise.as_str();
+    let maker = change
+        .assisted_by
+        .as_ref()
+        .map(|specific| specific.maker.as_str());
+    let model = change
+        .assisted_by
+        .as_ref()
+        .map(|specific| specific.model.as_str());
+    sqlx::query!(
+        r"
+        INSERT INTO gym_slot_fill_change
+            (mesocycle, slot, intensity, valid_from, recorded_at, exercise,
+             assisted_maker, assisted_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ",
+        mesocycle,
+        slot,
+        intensity,
+        from,
+        recorded_at,
+        exercise,
+        maker,
+        model
+    )
+    .execute(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(())
 }
 
 fn exercise_of(key: &str) -> Result<Exercise, StoreError> {

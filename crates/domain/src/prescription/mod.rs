@@ -22,6 +22,7 @@ pub mod attempts;
 pub mod authored;
 pub mod block;
 pub mod candidates;
+pub mod change;
 pub mod delivery;
 pub mod ladder;
 pub mod linear;
@@ -56,6 +57,7 @@ pub use authored::{Authored, AuthoringError};
 // of items in one session, and a periodised plan. Reach the plan through
 // `prescription::block::Block`, which is what its own module doc calls it.
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
+pub use change::{FillChange, FillChanges};
 pub use delivery::{
     DeliveryReference, DestinationName, DestinationReply, InvalidDelivery, PrescriptionState,
     RenderingDigest, ReplyStatus, SessionOrdinal, WrongRenderingWidth,

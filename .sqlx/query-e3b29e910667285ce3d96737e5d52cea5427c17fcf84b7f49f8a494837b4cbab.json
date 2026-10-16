@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO correction\n                (stream, asserted_at, reason, recorded_reps, recorded_load_grams, reps, load_grams,\n                 assisted)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "correction",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e3b29e910667285ce3d96737e5d52cea5427c17fcf84b7f49f8a494837b4cbab"
+}

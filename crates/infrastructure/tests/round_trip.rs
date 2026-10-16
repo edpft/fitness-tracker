@@ -191,6 +191,7 @@ fn shape_of(measure: Target<RepCount>) -> Fallible<WorkoutShape> {
                     "front-squat-barbell".to_owned(),
                 )?,
                 sets: NonEmpty::of(set, Vec::new()),
+                assisted: None,
             },
         },
         Vec::new(),

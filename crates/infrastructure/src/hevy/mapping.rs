@@ -353,6 +353,14 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         ), // Banded Scapula Protraction (5)
         "37FCC2BB" => reps(RepsExercise::BicepCurlDumbbell, LoadReading::Absolute), // Bicep Curl (Dumbbell) (5)
         "30F03BF0" => reps(RepsExercise::FrontLeverRaise, LoadReading::Absolute), // Front Lever Raise (5)
+        // Created by `fitness gym templates` on 2026-10-15 (#455).
+        "926dc7b9-2de7-4117-8b8b-0c2899695178" => {
+            reps(RepsExercise::FrontLeverRaise, LoadReading::RelativeNegated)
+        } // Front Lever Raise (Band) (0)
+        "0ab321ac-3418-4c1d-b4f2-ec3d05bc7677" => reps(
+            RepsExercise::LyingOverheadTricepsExtensionBarbell,
+            LoadReading::Absolute,
+        ), // Lying Overhead Triceps Extension (EZ Bar) (0)
         "ca868acf-25c1-4537-b0f5-08850d79665d" => {
             reps(RepsExercise::PikePullThrough, LoadReading::Absolute)
         } // Pike Pull Through (5)

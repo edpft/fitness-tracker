@@ -161,6 +161,7 @@ impl SqliteEditOverlayStore {
                    c.recorded_load_grams AS "recorded_load_grams?: i64",
                    c.reps                AS "reps!: i64",
                    c.load_grams          AS "load_grams?: i64",
+                   c.assisted            AS "assisted!: i64",
                    c.asserted_at         AS "asserted_at!: String",
                    c.reason              AS "reason!: String",
                    t.source_record_id    AS "source_record_id!: String",
@@ -194,7 +195,10 @@ impl SqliteEditOverlayStore {
                             row.recorded_reps,
                             row.recorded_load_grams,
                         )?,
-                        figures: stored_figures(row.id, row.reps, row.load_grams)?,
+                        figures: assisted_if(
+                            stored_figures(row.id, row.reps, row.load_grams)?,
+                            row.assisted != 0,
+                        ),
                         asserted_at: row.asserted_at,
                         reason: row.reason,
                         sets: vec![set],
@@ -310,6 +314,7 @@ impl SqliteEditOverlayStore {
         let reason = reason.as_str().to_owned();
         let (recorded_reps, recorded_load) = columns(recorded);
         let (reps, load) = columns(figures);
+        let assisted = i64::from(figures.is_assisted());
 
         let mut transaction = self
             .pool
@@ -320,8 +325,9 @@ impl SqliteEditOverlayStore {
         let id = sqlx::query!(
             r#"
             INSERT INTO correction
-                (stream, asserted_at, reason, recorded_reps, recorded_load_grams, reps, load_grams)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (stream, asserted_at, reason, recorded_reps, recorded_load_grams, reps, load_grams,
+                 assisted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             stream,
@@ -330,7 +336,8 @@ impl SqliteEditOverlayStore {
             recorded_reps,
             recorded_load,
             reps,
-            load
+            load,
+            assisted
         )
         .fetch_one(&mut *transaction)
         .await
@@ -424,6 +431,15 @@ fn stored_figures(id: i64, reps: i64, load: Option<i64>) -> Result<SetFigures, O
         None => None,
     };
     Ok(SetFigures::new(reps, load))
+}
+
+/// The figures as stored, with the mass read as assistance where the
+/// correction said so (#453).
+const fn assisted_if(figures: SetFigures, assisted: bool) -> SetFigures {
+    match (assisted, figures.load()) {
+        (true, Some(mass)) => SetFigures::assisted(figures.reps(), mass),
+        _ => figures,
+    }
 }
 
 fn corrected_term(record: &str, term: &str) -> Result<CorrectedTerm, OverlayError> {

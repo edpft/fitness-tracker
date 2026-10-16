@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT band AS \"band!: String\"\n        FROM prescribed_exercise_band\n        WHERE workout = ? AND item_position = ? AND position = ?\n        ORDER BY part\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "band!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prescribed_exercise_band",
+            "name": "band"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a954df674f157f4006994ee4f632d20555256b3eddf6a96bb43408c071bef298"
+}

@@ -23,6 +23,7 @@ pub mod devices;
 pub mod equipment;
 pub mod error;
 pub mod extract;
+pub mod fills;
 pub mod heart_rate;
 pub mod holding;
 pub mod microcycle;
@@ -37,8 +38,8 @@ pub mod status;
 pub mod strength;
 
 pub use error::{
-    ComparisonError, DeliveryError, EquipmentError, ExtractionError, NormalisationError,
-    PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
+    ComparisonError, DeliveryError, EquipmentError, ExtractionError, FillChangeError,
+    NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
     AccountReader, Authored, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
@@ -46,18 +47,19 @@ pub use ports::{
     CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
     DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
     DiaryStore, EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog,
-    ExtractionStatusReporter, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
-    HolidayCalendar, Issuance, LadderStanding, LandingStore, LastPerformance, MesocycleInForce,
-    MesocycleStore, NextLock, NormalisationRunLog, NormalisationSummary,
-    NormalisedCyclingSessionReader, NormalisedEntityStore, NormalisedGymSessionReader,
-    NormalisedWeighInReader, Occupant, Performance, PerformedCyclingSessions, PerformedGymSessions,
-    PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore, PrescribedWorkoutId,
-    PrescribedWorkoutStore, Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore,
-    PrescriptionDestination, PrescriptionLifecycle, PublishedCell, PublishedCycling,
-    PublishedProgrammes, PublishedRead, RawExtent, RecordedDevices, RefusalReport, RefusalReporter,
-    RefusalStore, RenderingDigest, ReplyStatus, ResumptionPointResetter, ResumptionPointStore,
-    RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced, RunLock,
-    RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus, Translation, Translator,
-    UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
-    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
+    ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession,
+    GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance, LadderStanding,
+    LandingStore, LastPerformance, MesocycleInForce, MesocycleStore, NextLock, NormalisationRunLog,
+    NormalisationSummary, NormalisedCyclingSessionReader, NormalisedEntityStore,
+    NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Performance,
+    PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PerformedSetSummary,
+    Placed, PlanAuthor, PlanStore, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
+    PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
+    PrescriptionLifecycle, PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead,
+    RawExtent, RecordedDevices, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
+    ReplyStatus, ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog,
+    RiddenVenues, RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount,
+    SourceEvent, StreamStatus, Translation, Translator, UnderivableReason, UnderivableSlot,
+    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
+    WorkoutNormaliser, WorkoutPrescriber,
 };

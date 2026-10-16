@@ -366,7 +366,12 @@ impl HevySessionTranslator {
             return Ok(None);
         }
 
-        Ok(Self::sets(entry, mapped, scribe))
+        Ok(Self::sets(
+            entry,
+            mapped,
+            scribe,
+            &Corrections { overlay, record },
+        ))
     }
 
     /// The entry's sets, in the measure its exercise is counted in.
@@ -379,22 +384,32 @@ impl HevySessionTranslator {
         entry: &ExerciseEntry<'_>,
         mapped: Mapped,
         scribe: &mut Scribe,
+        corrections: &Corrections<'_>,
     ) -> Option<PerformedExercise> {
         match mapped.exercise {
             Exercise::Reps(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, reps_of);
+                let sets = Self::collect(entry, mapped, scribe, reps_of)
+                    .into_iter()
+                    .map(|(index, set)| corrections.apply(entry, index, mapped, set))
+                    .collect::<Vec<_>>();
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForReps { exercise, sets })
             }
             Exercise::Duration(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, duration_of);
+                let sets = Self::collect(entry, mapped, scribe, duration_of)
+                    .into_iter()
+                    .map(|(_, set)| set)
+                    .collect::<Vec<_>>();
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDuration { exercise, sets })
             }
             Exercise::Distance(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, distance_of);
+                let sets = Self::collect(entry, mapped, scribe, distance_of)
+                    .into_iter()
+                    .map(|(_, set)| set)
+                    .collect::<Vec<_>>();
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDistance { exercise, sets })
@@ -412,15 +427,15 @@ impl HevySessionTranslator {
         mapped: Mapped,
         scribe: &mut Scribe,
         measure_of: fn(&PerformedSet<'_>) -> Result<Performed<M>, RefusalReason>,
-    ) -> Vec<Set<M>> {
+    ) -> Vec<(usize, Set<M>)> {
         let mut translated = Vec::with_capacity(entry.sets.len());
-        for set in &entry.sets {
+        for (position, set) in entry.sets.iter().enumerate() {
             let locus = RefusalLocus::Set {
                 entry: entry.index,
                 set: set.index,
             };
             match Self::one_set(set, mapped, measure_of) {
-                Ok(set) => translated.push(set),
+                Ok(translated_set) => translated.push((position, translated_set)),
                 Err(reason) => scribe.note_for(locus, Some(mapped.exercise), reason),
             }
         }
@@ -448,6 +463,71 @@ impl HevySessionTranslator {
             rest_after: None,
         })
     }
+}
+
+/// The edit overlay, and the record a set's correction is anchored in.
+struct Corrections<'a> {
+    overlay: &'a EditOverlay,
+    record: &'a LandedRecord,
+}
+
+impl Corrections<'_> {
+    /// A set as the operator corrected it, where he has and the source still
+    /// records what he corrected (#453).
+    fn apply(
+        &self,
+        entry: &ExerciseEntry<'_>,
+        position: usize,
+        mapped: Mapped,
+        set: Set<RepCount>,
+    ) -> Set<RepCount> {
+        let Some(served) = entry.sets.get(position) else {
+            return set;
+        };
+        let Some(recorded) = recorded_figures(served) else {
+            return set;
+        };
+        let Some(figures) = self.overlay.figures_for(
+            self.record.source_record_id(),
+            &set_term(&entry.exercise_template_id, served.index),
+            recorded,
+        ) else {
+            return set;
+        };
+        let load = match (figures.load(), figures.is_assisted(), mapped.load) {
+            (None, _, LoadReading::Absolute) => Load::UNLOADED,
+            (None, _, _) => Load::BODYWEIGHT,
+            (Some(mass), true, _) | (Some(mass), false, LoadReading::RelativeNegated) => {
+                Load::relative(SignedKg::from(mass).negated())
+            }
+            (Some(mass), false, LoadReading::Absolute) => Load::absolute(mass),
+            (Some(mass), false, LoadReading::Relative) => Load::relative(SignedKg::from(mass)),
+        };
+        Set {
+            load,
+            outcome: Performed::Completed(figures.reps()),
+            ..set
+        }
+    }
+}
+
+/// What a figures correction anchors a Hevy set by: the template it was
+/// logged on and Hevy's own index for it. Hevy names a set by nothing else.
+#[must_use]
+pub fn set_term(template_id: &str, index: u32) -> String {
+    format!("{template_id}/{index}")
+}
+
+/// The figures a Hevy set records, as a correction names them: a completed
+/// count, and the mass typed against it if any.
+#[must_use]
+pub fn recorded_figures(set: &PerformedSet<'_>) -> Option<domain::normalised::SetFigures> {
+    let reps = RepCount::new(set.reps?).ok()?;
+    let load = match number(set.weight_kg) {
+        None => None,
+        Some(token) => Some(Kg::try_from(token).ok()?),
+    };
+    Some(domain::normalised::SetFigures::new(reps, load))
 }
 
 /// What a source called a set, in our two kinds.

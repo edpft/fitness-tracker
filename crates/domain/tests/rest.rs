@@ -90,6 +90,7 @@ fn ramp() -> Built<WorkoutShape> {
             working(80_000, 3)?,
             working(70_000, 6)?,
         ])?,
+        assisted: None,
     };
     Ok(WorkoutShape::new(NonEmpty::new(vec![
         PrescribedItem::Exercise {
@@ -107,6 +108,7 @@ fn arms() -> Built<WorkoutShape> {
             exercise: PrescribedExercise::ForReps {
                 exercise,
                 sets: NonEmpty::new(vec![working(20_000, 6)?])?,
+                assisted: None,
             },
         })
     };
@@ -157,6 +159,7 @@ fn pogos() -> Built<WorkoutShape> {
     let pogo = PrescribedExercise::ForReps {
         exercise: RepsExercise::Pogo,
         sets: NonEmpty::new(vec![working(0, 20)?, working(0, 20)?])?,
+        assisted: None,
     };
     Ok(WorkoutShape::new(NonEmpty::new(vec![
         PrescribedItem::Exercise {

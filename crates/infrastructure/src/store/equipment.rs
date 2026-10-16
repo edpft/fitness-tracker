@@ -11,12 +11,14 @@ use application::{EquipmentStore, StoreError};
 use domain::{
     gym::{
         equipment::{
-            EquipmentFacts, Fact, FactId, LevelName, Settings, SpecificName, Statement, Timeline,
+            Band, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId, Maker, Model,
+            Specific, Stack, Statement, Timeline,
         },
         exercise::Implement,
     },
     measure::Kg,
     prescription::{LoadSteps, Step},
+    sequence::NonEmpty,
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -57,35 +59,64 @@ async fn read_bands(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Step>>, Store
     Ok(bands)
 }
 
-/// Every range's levels, by fact, in order.
-async fn read_levels(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<LevelName>>, StoreError> {
-    let levels = sqlx::query!(
+/// Every range's bands, by fact, in order.
+async fn read_band_ranges(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Band>>, StoreError> {
+    let rows = sqlx::query!(
         r#"
-        SELECT fact AS "fact!: i64", name AS "name!: String"
-        FROM equipment_fact_level
+        SELECT fact AS "fact!: i64", name AS "name!: String", twice_grams AS "twice_grams!: i64"
+        FROM equipment_fact_band
         ORDER BY fact, position
         "#
     )
     .fetch_all(pool)
     .await
     .map_err(|error| store_error(&error))?;
-    let mut named: BTreeMap<i64, Vec<LevelName>> = BTreeMap::new();
-    for row in levels {
-        named
-            .entry(row.fact)
-            .or_default()
-            .push(LevelName::try_from(row.name).map_err(|error| corrupt(&error))?);
+    let mut ranges: BTreeMap<i64, Vec<Band>> = BTreeMap::new();
+    for row in rows {
+        ranges.entry(row.fact).or_default().push(Band {
+            name: BandName::try_from(row.name).map_err(|error| corrupt(&error))?,
+            at_twice_length: grams(row.twice_grams)?,
+        });
     }
-    Ok(named)
+    Ok(ranges)
 }
 
-/// Everything now known, read in three queries and assembled here.
+/// Every range's declared steps, by fact, in order.
+async fn read_band_steps(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Combination>>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT fact AS "fact!: i64", step AS "step!: i64", band AS "band!: String"
+        FROM equipment_fact_band_step
+        ORDER BY fact, step, part
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut parts: BTreeMap<(i64, i64), Vec<BandName>> = BTreeMap::new();
+    for row in rows {
+        parts
+            .entry((row.fact, row.step))
+            .or_default()
+            .push(BandName::try_from(row.band).map_err(|error| corrupt(&error))?);
+    }
+    let mut steps: BTreeMap<i64, Vec<Combination>> = BTreeMap::new();
+    for ((fact, _), bands) in parts {
+        let bands = NonEmpty::new(bands).map_err(|_| corrupt(&"a step of no bands"))?;
+        steps.entry(fact).or_default().push(Combination::new(bands));
+    }
+    Ok(steps)
+}
+
+/// Everything now known, read in four queries and assembled here.
 pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT id AS "id!: i64",
+               category AS "category!: String",
                implement,
-               specific,
+               maker,
+               model,
                valid_from,
                recorded_at AS "recorded_at!: String",
                most_grams
@@ -99,10 +130,12 @@ pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, Stor
     .map_err(|error| store_error(&error))?;
 
     let mut bands = read_bands(pool).await?;
-    let mut named = read_levels(pool).await?;
+    let mut ranges = read_band_ranges(pool).await?;
+    let mut charts = read_band_steps(pool).await?;
 
     let mut kinds: BTreeMap<Implement, Vec<Fact<LoadSteps>>> = BTreeMap::new();
-    let mut specifics: BTreeMap<SpecificName, Vec<Fact<Settings>>> = BTreeMap::new();
+    let mut machines: BTreeMap<Specific, Vec<Fact<Stack>>> = BTreeMap::new();
+    let mut ranges_of: BTreeMap<Specific, Vec<Fact<BandRange>>> = BTreeMap::new();
     for row in rows {
         let id = FactId::new(row.id);
         let from = row
@@ -115,10 +148,14 @@ pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, Stor
             .parse()
             .map_err(|_| corrupt(&"a recording time that is not an instant"))?;
         let steps = bands.remove(&row.id);
-        let levels = named.remove(&row.id);
+        let bands = ranges.remove(&row.id);
+        let chart = charts.remove(&row.id);
 
-        match (row.implement, row.specific) {
-            (Some(implement), None) => {
+        match row.category.as_str() {
+            "kind" => {
+                let implement = row
+                    .implement
+                    .ok_or_else(|| corrupt(&"a kind with no implement"))?;
                 let implement = Implement::try_from(implement).map_err(|error| corrupt(&error))?;
                 let value =
                     LoadSteps::new(steps.unwrap_or_default()).map_err(|error| corrupt(&error))?;
@@ -129,38 +166,70 @@ pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, Stor
                     value,
                 });
             }
-            (None, Some(specific)) => {
-                let name = SpecificName::try_from(specific).map_err(|error| corrupt(&error))?;
-                let value = match (steps, levels, row.most_grams) {
-                    (Some(steps), None, Some(most)) => Settings::stack(
-                        LoadSteps::new(steps).map_err(|error| corrupt(&error))?,
-                        grams(most)?,
-                    ),
-                    (None, Some(levels), None) => Settings::levels(levels),
-                    _ => return Err(corrupt(&"a specific that is neither a stack nor levels")),
-                }
+            "machine" => {
+                let most = row
+                    .most_grams
+                    .ok_or_else(|| corrupt(&"a machine with no most"))?;
+                let value = Stack::new(
+                    LoadSteps::new(steps.unwrap_or_default()).map_err(|error| corrupt(&error))?,
+                    grams(most)?,
+                )
                 .map_err(|error| corrupt(&error))?;
-                specifics.entry(name).or_default().push(Fact {
-                    id,
-                    from,
-                    recorded_at,
-                    value,
-                });
+                machines
+                    .entry(specific_of(row.maker, row.model)?)
+                    .or_default()
+                    .push(Fact {
+                        id,
+                        from,
+                        recorded_at,
+                        value,
+                    });
             }
-            _ => return Err(corrupt(&"a fact about neither a kind nor a specific")),
+            "bands" => {
+                let value = BandRange::new(bands.unwrap_or_default(), chart.unwrap_or_default())
+                    .map_err(|error| corrupt(&error))?;
+                ranges_of
+                    .entry(specific_of(row.maker, row.model)?)
+                    .or_default()
+                    .push(Fact {
+                        id,
+                        from,
+                        recorded_at,
+                        value,
+                    });
+            }
+            other => {
+                return Err(corrupt(&format!(
+                    "{other:?} is not a category of equipment"
+                )));
+            }
         }
     }
 
     Ok(EquipmentFacts {
-        kinds: kinds
-            .into_iter()
-            .map(|(implement, facts)| (implement, Timeline::new(facts)))
-            .collect(),
-        specifics: specifics
-            .into_iter()
-            .map(|(name, facts)| (name, Timeline::new(facts)))
-            .collect(),
+        kinds: timelines(kinds),
+        machines: timelines(machines),
+        bands: timelines(ranges_of),
     })
+}
+
+fn specific_of(maker: Option<String>, model: Option<String>) -> Result<Specific, StoreError> {
+    match (maker, model) {
+        (Some(maker), Some(model)) => Ok(Specific {
+            maker: Maker::try_from(maker).map_err(|error| corrupt(&error))?,
+            model: Model::try_from(model).map_err(|error| corrupt(&error))?,
+        }),
+        _ => Err(corrupt(
+            &"a machine or a range of bands with no maker and model",
+        )),
+    }
+}
+
+fn timelines<K: Ord, T>(facts: BTreeMap<K, Vec<Fact<T>>>) -> BTreeMap<K, Timeline<T>> {
+    facts
+        .into_iter()
+        .map(|(key, facts)| (key, Timeline::new(facts)))
+        .collect()
 }
 
 async fn write_steps(
@@ -190,6 +259,55 @@ async fn write_steps(
     Ok(())
 }
 
+async fn write_bands(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    fact: i64,
+    bands: &NonEmpty<Band>,
+    steps: &NonEmpty<Combination>,
+) -> Result<(), StoreError> {
+    let index =
+        |at: usize| i64::try_from(at).map_err(|_| corrupt(&"more bands than the store can hold"));
+    for (position, band) in bands.iter().enumerate() {
+        let position = index(position)?;
+        let name = band.name.as_str();
+        let twice = stored(band.at_twice_length)?;
+        sqlx::query!(
+            r"
+            INSERT INTO equipment_fact_band (fact, position, name, twice_grams)
+            VALUES (?, ?, ?, ?)
+            ",
+            fact,
+            position,
+            name,
+            twice
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    for (step, combination) in steps.iter().enumerate() {
+        let step = index(step)?;
+        for (part, band) in combination.iter().enumerate() {
+            let part = index(part)?;
+            let band = band.as_str();
+            sqlx::query!(
+                r"
+                INSERT INTO equipment_fact_band_step (fact, step, part, band)
+                VALUES (?, ?, ?, ?)
+                ",
+                fact,
+                step,
+                part,
+                band
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+    }
+    Ok(())
+}
+
 /// Write one fact inside a transaction the caller owns.
 ///
 /// Shared with the parameter store, which states a version's scales as the
@@ -201,13 +319,15 @@ pub(crate) async fn insert(
     recorded_at: Timestamp,
     corrects: Option<FactId>,
 ) -> Result<FactId, StoreError> {
-    let (implement, specific, most) = match statement {
-        Statement::Kind(implement, _) => (Some(implement.as_str()), None, None),
-        Statement::Specific(name, Settings::Stack { most, .. }) => {
-            (None, Some(name.as_str()), Some(stored(*most)?))
+    let (category, implement, specific, most) = match statement {
+        Statement::Kind(implement, _) => ("kind", Some(implement.as_str()), None, None),
+        Statement::Machine(specific, stack) => {
+            ("machine", None, Some(specific), Some(stored(stack.most())?))
         }
-        Statement::Specific(name, Settings::Levels(_)) => (None, Some(name.as_str()), None),
+        Statement::Bands(specific, _) => ("bands", None, Some(specific), None),
     };
+    let maker = specific.map(|specific| specific.maker.as_str());
+    let model = specific.map(|specific| specific.model.as_str());
     let valid_from = from.map(|date| date.to_string());
     let recorded_at = recorded_at.to_string();
     let corrects = corrects.map(FactId::get);
@@ -218,12 +338,14 @@ pub(crate) async fn insert(
     let fact = sqlx::query_scalar!(
         r#"
         INSERT INTO equipment_fact
-            (implement, specific, valid_from, recorded_at, corrects, most_grams)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (category, implement, maker, model, valid_from, recorded_at, corrects, most_grams)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id AS "id!: i64"
         "#,
+        category,
         implement,
-        specific,
+        maker,
+        model,
         valid_from,
         recorded_at,
         corrects,
@@ -234,27 +356,10 @@ pub(crate) async fn insert(
     .map_err(|error| store_error(&error))?;
 
     match statement {
-        Statement::Kind(_, steps) | Statement::Specific(_, Settings::Stack { steps, .. }) => {
-            write_steps(tx, fact, steps).await?;
-        }
-        Statement::Specific(_, Settings::Levels(levels)) => {
-            for (position, level) in levels.iter().enumerate() {
-                let position = i64::try_from(position)
-                    .map_err(|_| corrupt(&"more levels than the store can hold"))?;
-                let name = level.as_str();
-                sqlx::query!(
-                    r"
-                    INSERT INTO equipment_fact_level (fact, position, name)
-                    VALUES (?, ?, ?)
-                    ",
-                    fact,
-                    position,
-                    name
-                )
-                .execute(&mut **tx)
-                .await
-                .map_err(|error| store_error(&error))?;
-            }
+        Statement::Kind(_, steps) => write_steps(tx, fact, steps).await?,
+        Statement::Machine(_, stack) => write_steps(tx, fact, stack.steps()).await?,
+        Statement::Bands(_, range) => {
+            write_bands(tx, fact, range.bands(), range.steps()).await?;
         }
     }
     Ok(FactId::new(fact))
@@ -265,7 +370,7 @@ pub(crate) async fn knows_kinds(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
 ) -> Result<bool, StoreError> {
     let count = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "count!: i64" FROM equipment_fact WHERE implement IS NOT NULL"#
+        r#"SELECT count(*) AS "count!: i64" FROM equipment_fact WHERE category = 'kind'"#
     )
     .fetch_one(&mut **tx)
     .await

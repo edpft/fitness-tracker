@@ -1440,7 +1440,16 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    format!("{:<32} {sets}", exercise.exercise_key())
+    // The bands a band-assisted fill names, which the load alone does not
+    // say (#454).
+    let bands = match exercise {
+        PrescribedExercise::ForReps {
+            assisted: Some(setting),
+            ..
+        } => format!(" ({setting})"),
+        _ => String::new(),
+    };
+    format!("{:<32} {sets}{bands}", exercise.exercise_key())
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.

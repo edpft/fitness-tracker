@@ -294,6 +294,10 @@ fn discipline_command() -> ClapCommand {
             .arg(timezone_argument()),
     );
     command = command.subcommand(corrections_command());
+    command = command.subcommand(ClapCommand::new("templates").about(
+        "Create on the Hevy account the templates for exercises Hevy does not have, \
+         and print their ids",
+    ));
 
     command
 }
@@ -321,6 +325,13 @@ fn corrections_command() -> ClapCommand {
                         .value_name("exercise")
                         .conflicts_with_all(["recorded", "on"])
                         .help("The exercise those records read as now, as a vocabulary key"),
+                )
+                .arg(
+                    Arg::new("assisted")
+                        .long("assisted")
+                        .action(ArgAction::SetTrue)
+                        .requires("recorded")
+                        .help("The mass in --actually was assistance, whatever the source records"),
                 )
                 .arg(
                     Arg::new("recorded")
@@ -1128,6 +1139,9 @@ async fn discipline_command_run(
     if let Some(("corrections", corrections)) = sub.subcommand() {
         return corrections_run(corrections, stated_timezone, database).await;
     }
+    if let Some(("templates", _)) = sub.subcommand() {
+        return gym::templates(discipline, credentials).await;
+    }
     let Some(("next", next)) = sub.subcommand() else {
         return Err(Failure::message(
             format!("no {name} command given"),
@@ -1184,6 +1198,7 @@ async fn corrections_run(
                         on: text("on")?,
                         recorded: text("recorded")?,
                         actually: text("actually")?,
+                        assisted: add.get_flag("assisted"),
                         because: text("because")?,
                     },
                 )

@@ -219,6 +219,10 @@ impl Linear {
         &self.fills
     }
 
+    pub const fn fills_mut(&mut self) -> &mut SlotFills {
+        &mut self.fills
+    }
+
     pub const fn gating_role(&self) -> SessionRole {
         self.primary.gating_role
     }

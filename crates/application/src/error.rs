@@ -111,6 +111,26 @@ pub enum EquipmentError {
     NotTheSameEquipment { id: i64, was: String, now: String },
 }
 
+/// Changing a slot's fill (#454).
+#[derive(Debug, thiserror::Error)]
+pub enum FillChangeError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("no mesocycle is in force on {date}")]
+    NoMesocycle { date: jiff::civil::Date },
+    /// A static slot carries its own sets and reps, and the primary is what
+    /// the mesocycle progresses: neither is a fill to swap.
+    #[error("the {slot} slot cannot be changed partway through a mesocycle")]
+    NotChangeable { slot: &'static str },
+    #[error(
+        "{specific} is not a range of bands known on {date}: declare it on the equipment page first"
+    )]
+    UnknownSpecific {
+        specific: String,
+        date: jiff::civil::Date,
+    },
+}
+
 /// Reading or resetting extraction state.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StatusError {

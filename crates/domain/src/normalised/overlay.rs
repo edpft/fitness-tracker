@@ -178,15 +178,40 @@ impl CorrectedTerm {
 /// **No load is a real answer and not a missing one.** A set the operator typed
 /// no weight against carries [`None`] here, and asserting a count with no mass
 /// says the same thing about a set the source put a number on wrongly.
+///
+/// **Except where the operator says the mass was assistance** (#453). The
+/// operator, 2026-10-15: *"I should be able to change anything about an
+/// entry."* A band-assisted front lever raise logged on a template that
+/// records weight added had nowhere to put the band, so the correction says
+/// what the term could not: this mass was taken off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SetFigures {
     reps: RepCount,
     load: Option<Kg>,
+    assisted: bool,
 }
 
 impl SetFigures {
     pub const fn new(reps: RepCount, load: Option<Kg>) -> Self {
-        Self { reps, load }
+        Self {
+            reps,
+            load,
+            assisted: false,
+        }
+    }
+
+    /// A count, and a mass that was assistance whatever the term records.
+    pub const fn assisted(reps: RepCount, assistance: Kg) -> Self {
+        Self {
+            reps,
+            load: Some(assistance),
+            assisted: true,
+        }
+    }
+
+    /// Whether the mass was assistance rather than what the term records.
+    pub const fn is_assisted(self) -> bool {
+        self.assisted
     }
 
     pub const fn reps(self) -> RepCount {
@@ -200,9 +225,10 @@ impl SetFigures {
 
 impl std::fmt::Display for SetFigures {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.load {
-            Some(load) => write!(f, "{} × {load} kg", self.reps),
-            None => write!(f, "{} with no load recorded", self.reps),
+        match (self.load, self.assisted) {
+            (Some(load), true) => write!(f, "{} with {load} kg of assistance", self.reps),
+            (Some(load), false) => write!(f, "{} × {load} kg", self.reps),
+            (None, _) => write!(f, "{} with no load recorded", self.reps),
         }
     }
 }

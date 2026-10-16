@@ -1324,6 +1324,18 @@ pub trait GenerationParameterStore {
         &self,
         date: jiff::civil::Date,
     ) -> impl Future<Output = Result<domain::prescription::Scales, StoreError>> + Send;
+
+    /// A range of bands as now known to have been on a date: what a fill
+    /// assisted by it is prescribed against (#454).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn bands_on(
+        &self,
+        specific: &domain::gym::equipment::Specific,
+        date: jiff::civil::Date,
+    ) -> impl Future<Output = Result<Option<domain::gym::equipment::BandRange>, StoreError>> + Send;
 }
 
 /// The equipment the operator trains on, as bitemporal facts (issue #450).
@@ -1369,6 +1381,23 @@ pub struct MesocycleInForce {
     pub ordinal: MesocycleOrdinal,
     pub plan: PlanName,
     pub mesocycle: GymMesocycle,
+    /// Its fills as changed since it was written, each from a date (#454).
+    pub changes: domain::prescription::FillChanges,
+}
+
+/// Where a mesocycle's fill changes are kept (#454).
+pub trait FillChangeStore {
+    /// Record a change to one mesocycle's fills. Nothing is updated: a later
+    /// change from the same date stands over an earlier one.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_change(
+        &self,
+        mesocycle: domain::prescription::MesocycleId,
+        change: &domain::prescription::FillChange,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// A gym mesocycle, read out of the plan that holds it.

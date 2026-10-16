@@ -30,7 +30,7 @@ pub fn index(view: &View) -> Markup {
                     p { a href="/heart-rate" { "Heart rate per power zone" } }
                     p { a href="/body-weight" { "Body weight" } }
                     p { a href="/estimated-1rm" { "Estimated 1RM" } }
-                    p { a href="/equipment" { "Equipment" } }
+                    p { a href="/programme" { "Programme" } " · " a href="/equipment" { "Equipment" } }
                     div hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
                         (view.render())
                     }

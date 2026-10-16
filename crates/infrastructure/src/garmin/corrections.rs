@@ -45,8 +45,11 @@ pub struct FoundSet {
     pub movement: Option<String>,
     /// When it began on his own clock, for the report. The anchor holds the
     /// stamp as the source wrote it; this is the same instant in a form he
-    /// reads off a session.
+    /// reads off a session. Hevy times a session and not a set, so a Hevy set
+    /// gives its session's start.
     pub began: Time,
+    /// The stream whose overlay the correction goes in.
+    pub stream: &'static str,
 }
 
 /// Garmin's landed exercise sets, asked which of them record some figures.
@@ -138,6 +141,7 @@ impl GarminRecordedSets {
                     continue;
                 };
                 found.push(FoundSet {
+                    stream: crate::store::GarminExerciseSetLandingStore::STREAM,
                     set: CorrectedTerm::new(record.clone(), anchor),
                     began: at.wall_clock().time(),
                     movement: set.exercises.first().and_then(|candidate| {

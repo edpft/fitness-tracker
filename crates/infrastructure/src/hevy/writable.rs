@@ -319,8 +319,12 @@ const fn writable(exercise: Exercise) -> Writable {
             }, // Floor Press (Dumbbell)
             RepsExercise::FrontLeverRaise => Writable {
                 added: Some("30F03BF0"),
+                assisted: Some("926dc7b9-2de7-4117-8b8b-0c2899695178"),
+            }, // Front Lever Raise, assisted: Front Lever Raise (Band)
+            RepsExercise::LyingOverheadTricepsExtensionBarbell => Writable {
+                added: Some("0ab321ac-3418-4c1d-b4f2-ec3d05bc7677"),
                 assisted: None,
-            }, // Front Lever Raise
+            }, // Lying Overhead Triceps Extension (EZ Bar)
             RepsExercise::FrontRaiseBand => Writable {
                 added: Some("47B036EF"),
                 assisted: None,

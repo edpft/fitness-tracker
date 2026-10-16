@@ -109,6 +109,21 @@ impl GymMesocycle {
         }
     }
 
+    /// The same mesocycle with its fills as changed on a date (#454).
+    #[must_use]
+    pub fn changed_on(mut self, changes: &super::FillChanges, date: jiff::civil::Date) -> Self {
+        let fills = changes.apply(self.fills(), date);
+        *self.fills_mut() = fills;
+        self
+    }
+
+    const fn fills_mut(&mut self) -> &mut SlotFills {
+        match self {
+            Self::Test(test) => test.fills_mut(),
+            Self::Progression(periodisation) => periodisation.fills_mut(),
+        }
+    }
+
     pub const fn calendar(&self) -> &Calendar {
         match self {
             Self::Test(test) => test.calendar(),
@@ -244,6 +259,14 @@ impl Progression {
             Self::Linear(linear) => linear.fills(),
             Self::BlockPeriodisation(block) => block.fills(),
             Self::Provided { cycle: sbs, .. } => sbs.fills(),
+        }
+    }
+
+    const fn fills_mut(&mut self) -> &mut SlotFills {
+        match self {
+            Self::Linear(linear) => linear.fills_mut(),
+            Self::BlockPeriodisation(block) => block.fills_mut(),
+            Self::Provided { cycle: sbs, .. } => sbs.fills_mut(),
         }
     }
 

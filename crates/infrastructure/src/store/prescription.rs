@@ -16,6 +16,7 @@ use application::{PrescribedWorkoutId, PrescribedWorkoutStore, SessionOrdinal, S
 use domain::{
     gym::{
         Load, Rir, SignedKg,
+        equipment::{BandName, BandSetting, Combination, Maker, Model, Specific},
         exercise::{DistanceExercise, DurationExercise, RepsExercise},
     },
     measure::{Distance, Duration, Kg, Metres, RepCount, Spans},
@@ -348,20 +349,56 @@ async fn write_exercise(
 ) -> Result<(), StoreError> {
     let key = exercise.exercise_key();
     let measure = exercise.measure();
+    let assisted = match exercise {
+        PrescribedExercise::ForReps { assisted, .. } => assisted.as_ref(),
+        _ => None,
+    };
+    let maker = assisted.map(|setting| setting.specific.maker.as_str());
+    let model = assisted.map(|setting| setting.specific.model.as_str());
+    let nominal = assisted
+        .map(|setting| i64::try_from(setting.nominal.as_grams()))
+        .transpose()
+        .map_err(|_| corrupt(&"a nominal load larger than the store can hold"))?;
     sqlx::query!(
         r"
-        INSERT INTO prescribed_exercise (workout, item_position, position, exercise, measure)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO prescribed_exercise
+            (workout, item_position, position, exercise, measure,
+             assisted_maker, assisted_model, assisted_grams)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ",
         workout,
         item,
         position,
         key,
-        measure
+        measure,
+        maker,
+        model,
+        nominal
     )
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
+    if let Some(setting) = assisted {
+        for (part, band) in setting.bands.iter().enumerate() {
+            let part = ordinal_of(part)?;
+            let band = band.as_str();
+            sqlx::query!(
+                r"
+                INSERT INTO prescribed_exercise_band
+                    (workout, item_position, position, part, band)
+                VALUES (?, ?, ?, ?, ?)
+                ",
+                workout,
+                item,
+                position,
+                part,
+                band
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+    }
 
     match exercise {
         PrescribedExercise::ForReps { sets, .. } => {
@@ -714,7 +751,8 @@ async fn read_exercises(
     let rows = sqlx::query!(
         r#"
         SELECT position AS "position!: i64", exercise AS "exercise!: String",
-               measure AS "measure!: String"
+               measure AS "measure!: String", assisted_maker, assisted_model,
+               assisted_grams
         FROM prescribed_exercise
         WHERE workout = ? AND item_position = ?
         ORDER BY position ASC
@@ -763,9 +801,62 @@ async fn read_exercises(
             })
             .collect();
 
-        built.push(rebuild_exercise(&row.exercise, &row.measure, &sets)?);
+        let mut exercise = rebuild_exercise(&row.exercise, &row.measure, &sets)?;
+        if let PrescribedExercise::ForReps { assisted, .. } = &mut exercise {
+            *assisted = read_assisted(
+                pool,
+                (workout, item, row.position),
+                row.assisted_maker,
+                row.assisted_model,
+                row.assisted_grams,
+            )
+            .await?;
+        }
+        built.push(exercise);
     }
     Ok(built)
+}
+
+/// The bands a prescribed exercise named, if it named any (#454).
+async fn read_assisted(
+    pool: &SqlitePool,
+    (workout, item, position): (i64, i64, i64),
+    maker: Option<String>,
+    model: Option<String>,
+    nominal: Option<i64>,
+) -> Result<Option<Box<BandSetting>>, StoreError> {
+    let (Some(maker), Some(model), Some(nominal)) = (maker, model, nominal) else {
+        return Ok(None);
+    };
+    let bands = sqlx::query_scalar!(
+        r#"
+        SELECT band AS "band!: String"
+        FROM prescribed_exercise_band
+        WHERE workout = ? AND item_position = ? AND position = ?
+        ORDER BY part
+        "#,
+        workout,
+        item,
+        position
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?
+    .into_iter()
+    .map(|band| BandName::try_from(band).map_err(|error| corrupt(&error)))
+    .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(Box::new(BandSetting {
+        specific: Specific {
+            maker: Maker::try_from(maker).map_err(|error| corrupt(&error))?,
+            model: Model::try_from(model).map_err(|error| corrupt(&error))?,
+        },
+        bands: Combination::new(
+            NonEmpty::new(bands).map_err(|_| corrupt(&"an assisted exercise with no bands"))?,
+        ),
+        nominal: Kg::from_grams(
+            u64::try_from(nominal).map_err(|_| corrupt(&"a negative nominal load"))?,
+        ),
+    })))
 }
 
 /// One exercise, rebuilt in whichever measure its vocabulary fixes.
@@ -796,6 +887,7 @@ fn rebuild_exercise(
                 exercise: RepsExercise::try_from(key.to_owned())
                     .map_err(|error| corrupt(&error))?,
                 sets: NonEmpty::new(built).map_err(|_| empty())?,
+                assisted: None,
             })
         }
         "duration" => {

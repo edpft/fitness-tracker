@@ -16,6 +16,7 @@ pub mod retry;
 pub mod routine;
 pub mod sessions;
 pub mod standins;
+pub mod templates;
 mod translate;
 pub mod writable;
 

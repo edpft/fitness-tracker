@@ -195,6 +195,9 @@ pub enum PrescribedExercise {
     ForReps {
         exercise: RepsExercise,
         sets: NonEmpty<PrescribedSet<RepCount>>,
+        /// The bands that assist it, where a band-assisted fill prescribes it
+        /// (#454): the load is their nominal load, and this says which bands.
+        assisted: Option<Box<crate::gym::equipment::BandSetting>>,
     },
     ForDuration {
         exercise: DurationExercise,

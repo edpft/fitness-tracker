@@ -24,7 +24,7 @@ use application::StoreError;
 use domain::{
     gym::exercise::Exercise,
     landing::SourceRecordId,
-    normalised::{CorrectedTerm, OperatorZone, SourceTerm, StartedAt},
+    normalised::{CorrectedTerm, OperatorZone, SetFigures, SourceTerm, StartedAt},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -32,7 +32,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::store::store_error;
 
-use super::{mapping::lookup, payload::WorkoutEnvelope};
+use super::{
+    mapping::lookup,
+    payload::WorkoutEnvelope,
+    translate::{recorded_figures, set_term},
+};
+use crate::garmin::FoundSet;
 
 /// One entry a correction would reach.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +174,89 @@ impl HevyStandIns {
                 .then_with(|| left.term.term().as_str().cmp(right.term.term().as_str()))
         });
 
+        Ok(found)
+    }
+
+    /// Every set on `day` recording `recorded`, for a figures correction
+    /// (#453), in the order performed.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read or holds a payload that is
+    /// not a workout.
+    pub async fn recording(
+        &self,
+        recorded: SetFigures,
+        zone: &OperatorZone,
+        day: Date,
+    ) -> Result<Vec<FoundSet>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT source_record_id AS "source_record_id!: String",
+                   event_kind       AS "event_kind!: String",
+                   payload          AS "payload!: Vec<u8>"
+            FROM hevy_workout_landing
+            ORDER BY id ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        // The effective serving of each record, as above.
+        let mut withdrawn: BTreeSet<String> = BTreeSet::new();
+        let mut latest: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for row in rows {
+            if row.event_kind == "deleted" {
+                withdrawn.insert(row.source_record_id);
+                continue;
+            }
+            latest.insert(row.source_record_id, row.payload);
+        }
+
+        let mut found = Vec::new();
+        for (source_record_id, payload) in latest {
+            if withdrawn.contains(&source_record_id) {
+                continue;
+            }
+            let envelope =
+                WorkoutEnvelope::read(&payload).map_err(|error| StoreError::Corrupt {
+                    detail: format!("{source_record_id}: {}", error.detail),
+                })?;
+            let Some(workout) = envelope.workout else {
+                continue;
+            };
+            let Ok(instant) = workout.start_time.parse::<Timestamp>() else {
+                continue;
+            };
+            let started = StartedAt::new(instant, zone.clone()).wall_clock();
+            if started.date() != day {
+                continue;
+            }
+            let record = SourceRecordId::try_from(source_record_id.clone()).map_err(|error| {
+                StoreError::Corrupt {
+                    detail: error.to_string(),
+                }
+            })?;
+            for entry in &workout.exercises {
+                for set in &entry.sets {
+                    if recorded_figures(set) != Some(recorded) {
+                        continue;
+                    }
+                    let Ok(term) =
+                        SourceTerm::try_from(set_term(&entry.exercise_template_id, set.index))
+                    else {
+                        continue;
+                    };
+                    found.push(FoundSet {
+                        set: CorrectedTerm::new(record.clone(), term),
+                        movement: Some(entry.title.clone()),
+                        began: started.time(),
+                        stream: crate::store::HevyWorkoutLandingStore::STREAM,
+                    });
+                }
+            }
+        }
         Ok(found)
     }
 }

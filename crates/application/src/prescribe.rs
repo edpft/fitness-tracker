@@ -14,7 +14,8 @@ use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Load, SetKind,
+        Load, SetKind, SignedKg,
+        equipment::{BandLadder, BandSetting},
         exercise::{DurationExercise, Exercise, RepsExercise},
     },
     measure::{Kg, RepCount},
@@ -229,6 +230,7 @@ where
         let consulted = Consulted {
             parameters: &parameters,
             programming: &programming,
+            ladders: &NO_LADDERS,
         };
         let progress = self.progress_of(&plan, &programme, &consulted, on).await?;
         let target = self.inheritance(&programme, &consulted, on).await?.target;
@@ -377,7 +379,10 @@ where
         let Some(found) = self.ports.programmes.on(date).await? else {
             return Err(PrescriptionError::NoPlan { date });
         };
-        let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
+        // The fills as changed on the session's date, and what assists them
+        // (#454). A change after this date is not this session's.
+        let (programme_id, plan, changes) = (found.id, found.plan, found.changes);
+        let programme = found.mesocycle.changed_on(&changes, date);
         let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
@@ -386,16 +391,25 @@ where
             scales: self.ports.parameters.scales_on(date).await?,
             ..parameters
         };
-        let programming = programming()?;
-        let consulted = Consulted {
-            parameters: &parameters,
-            programming: &programming,
-        };
-
         let (week, role) = programme.calendar().place(date)?;
         // A skipped essential session earlier in the week is prescribed here
         // instead (#392).
         let role = self.ports.programmes.role_on(date).await?.unwrap_or(role);
+        let mut ladders = BTreeMap::new();
+        for slot in SlotId::ALL {
+            let Some(specific) = changes.assisted_by(*slot, role, date) else {
+                continue;
+            };
+            if let Some(range) = self.ports.parameters.bands_on(specific, date).await? {
+                ladders.insert(*slot, BandLadder::of(specific, &range));
+            }
+        }
+        let programming = programming()?;
+        let consulted = Consulted {
+            parameters: &parameters,
+            programming: &programming,
+            ladders: &ladders,
+        };
 
         // Every exercise the programme can prescribe that progresses, in one
         // call. Both sides of every alternating fill, because this session
@@ -1177,7 +1191,13 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
 struct Consulted<'a> {
     parameters: &'a GenerationParameters,
     programming: &'a Programming,
+    /// The bands that assist each slot a change says is band-assisted, as
+    /// they were on the session's date (#454).
+    ladders: &'a BTreeMap<SlotId, BandLadder>,
 }
+
+/// No slot is band-assisted.
+static NO_LADDERS: BTreeMap<SlotId, BandLadder> = BTreeMap::new();
 
 /// What the record says, gathered before any slot is derived.
 ///
@@ -1454,6 +1474,7 @@ fn primary_slot_item(
         exercise: PrescribedExercise::ForReps {
             exercise: *reps_exercise,
             sets,
+            assisted: None,
         },
     })
 }
@@ -1965,6 +1986,7 @@ fn static_exercise(
     Ok(PrescribedExercise::ForReps {
         exercise,
         sets: NonEmpty::new(sets).map_err(|_| UnderivableReason::NoWorkingSet)?,
+        assisted: None,
     })
 }
 
@@ -1997,7 +2019,17 @@ fn one_exercise(
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
     let scheme = scheme_for(consulted, slot.block());
-    let load = progressed_load(consulted, exercise, scheme, last).map_err(underivable)?;
+    let banded = consulted
+        .ladders
+        .get(&slot)
+        .and_then(|ladder| banded_load(ladder, scheme, last));
+    let (load, assisted) = match banded {
+        Some(banded) => banded,
+        None => (
+            progressed_load(consulted, exercise, scheme, last).map_err(underivable)?,
+            None,
+        ),
+    };
     let sets: Vec<_> = (0..scheme.sets.as_u32())
         .map(|_| PrescribedSet::fixed(load, scheme.reps))
         .collect();
@@ -2006,7 +2038,41 @@ fn one_exercise(
     Ok(PrescribedExercise::ForReps {
         exercise: reps_exercise,
         sets,
+        assisted,
     })
+}
+
+/// Double progression down a range of bands (#454): the step nearest the
+/// last session's least assisted load, and the next step down once the top of
+/// the range was reached at every prescribed set there. Past the last band is
+/// no band at all.
+///
+/// Nothing where the last session was not assisted, which leaves the slot to
+/// progress as it would unassisted: crossing zero onto the equipment that
+/// loads it is #451.
+fn banded_load(
+    ladder: &BandLadder,
+    scheme: &domain::prescription::AccessoryScheme,
+    last: &Performance,
+) -> Option<(Load, Option<Box<BandSetting>>)> {
+    let (heaviest, reached_top) = standing_at_heaviest(scheme, last).ok()?;
+    let Load::Relative(delta) = heaviest else {
+        return None;
+    };
+    if delta.as_grams() >= 0 {
+        return None;
+    }
+    let setting = ladder.nearest(Kg::from_grams(delta.as_grams().unsigned_abs()))?;
+    let setting = if reached_top {
+        match ladder.after(&setting) {
+            Some(next) => next,
+            None => return Some((Load::Relative(SignedKg::ZERO), None)),
+        }
+    } else {
+        setting
+    };
+    let load = Load::Relative(SignedKg::from(setting.nominal).negated());
+    Some((load, Some(Box::new(setting))))
 }
 
 /// The heaviest of a performed exercise's sets.
@@ -2065,26 +2131,9 @@ fn progressed_load(
     // ramp's three repetitions answer "no" every week and hold the load where it
     // is for good — a freeze rather than a week's delay, because next week's
     // ramp answers "no" again.
-    let working: Vec<_> = last
-        .sets
-        .iter()
-        .filter(|set| set.kind == SetKind::Working)
-        .collect();
-    let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
-    let at_heaviest: Vec<_> = working
-        .iter()
-        .filter(|set| set.load == heaviest.load)
-        .collect();
-    let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
-    let reached_top = enough
-        && at_heaviest.iter().all(|set| {
-            set.outcome
-                .completed()
-                .is_some_and(|reps| *reps >= scheme.reps.maximum())
-        });
-
+    let (heaviest, reached_top) = standing_at_heaviest(scheme, last)?;
     if !reached_top {
-        return Ok(heaviest.load);
+        return Ok(heaviest);
     }
 
     let steps = consulted
@@ -2092,7 +2141,7 @@ fn progressed_load(
         .scales
         .for_exercise(exercise)
         .ok_or(UnderivableReason::NoLoadScale)?;
-    match heaviest.load {
+    match heaviest {
         // The step is read at the load being left, so a dumbbell leaving 10kg
         // adds the 2kg that applies from 10kg rather than the 1kg that got it
         // there.
@@ -2110,6 +2159,32 @@ fn progressed_load(
             )))
         }
     }
+}
+
+/// The heaviest working load of a session, and whether the top of the range
+/// was reached at every set the scheme prescribes there.
+fn standing_at_heaviest(
+    scheme: &domain::prescription::AccessoryScheme,
+    last: &Performance,
+) -> Result<(Load, bool), UnderivableReason> {
+    let working: Vec<_> = last
+        .sets
+        .iter()
+        .filter(|set| set.kind == SetKind::Working)
+        .collect();
+    let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
+    let at_heaviest: Vec<_> = working
+        .iter()
+        .filter(|set| set.load == heaviest.load)
+        .collect();
+    let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
+    let reached_top = enough
+        && at_heaviest.iter().all(|set| {
+            set.outcome
+                .completed()
+                .is_some_and(|reps| *reps >= scheme.reps.maximum())
+        });
+    Ok((heaviest.load, reached_top))
 }
 
 /// Storing an authored plan and the consulted it was generated against.
@@ -2305,7 +2380,110 @@ mod progression_tests {
     use jiff::civil::Date;
 
     use super::{Consulted, programming};
-    use super::{Performance, PerformedSetSummary, progressed_load};
+    use super::{Performance, PerformedSetSummary, banded_load, progressed_load};
+
+    /// The operator's Supaflex chart of 2026-10-15, at each band's force at
+    /// twice its length.
+    fn supaflex() -> Result<domain::gym::equipment::BandLadder, Box<dyn std::error::Error>> {
+        use domain::gym::equipment::{
+            Band, BandLadder, BandName, BandRange, Combination, Maker, Model, Specific,
+        };
+        let band = |name: &str, kg: u64| -> Result<Band, Box<dyn std::error::Error>> {
+            Ok(Band {
+                name: BandName::try_from(name)?,
+                at_twice_length: Kg::from_grams(kg * 1_000),
+            })
+        };
+        let step = |bands: &[&str]| -> Result<Combination, Box<dyn std::error::Error>> {
+            let names = bands
+                .iter()
+                .map(|band| BandName::try_from(*band))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Combination::new(
+                domain::sequence::NonEmpty::new(names).map_err(|_| "no bands")?,
+            ))
+        };
+        let settings = BandRange::new(
+            vec![
+                band("1/5 stars", 9)?,
+                band("2/5 stars", 11)?,
+                band("3/5 stars", 13)?,
+                band("4/5 stars", 21)?,
+            ],
+            vec![
+                step(&["4/5 stars"])?,
+                step(&["1/5 stars", "2/5 stars"])?,
+                step(&["1/5 stars", "1/5 stars"])?,
+                step(&["3/5 stars"])?,
+                step(&["2/5 stars"])?,
+                step(&["1/5 stars"])?,
+            ],
+        )?;
+        let specific = Specific {
+            maker: Maker::try_from("Physical")?,
+            model: Model::try_from("Supaflex")?,
+        };
+        Ok(BandLadder::of(&specific, &settings))
+    }
+
+    fn assisted(kg: i64) -> Load {
+        Load::relative(SignedKg::from_grams(-kg * 1_000))
+    }
+
+    /// 2026-10-12's dips, re-issued on the bands: `-15, -7, -7` is not three
+    /// sixes at `-7`, and `-7` is nearest the 1/5 band.
+    #[test]
+    fn a_banded_slot_re_issues_the_band_nearest_its_last_load() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(15), 6).expect("a set"),
+            set(assisted(7), 6).expect("a set"),
+            set(assisted(7), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, assisted(9));
+        assert_eq!(
+            setting.map(|setting| setting.to_string()).as_deref(),
+            Some("Physical Supaflex 1/5 stars")
+        );
+    }
+
+    /// Three sixes on the 4/5 band step to the next on the chart.
+    #[test]
+    fn a_banded_slot_topped_steps_down_the_chart() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(21), 6).expect("a set"),
+            set(assisted(21), 6).expect("a set"),
+            set(assisted(21), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, assisted(20));
+        assert_eq!(
+            setting.map(|setting| setting.to_string()).as_deref(),
+            Some("Physical Supaflex 1/5 stars + 2/5 stars")
+        );
+    }
+
+    /// Past the last band is no band at all.
+    #[test]
+    fn the_last_band_topped_is_bodyweight() {
+        let shape = programming().expect("the shipped programming builds");
+        let ladder = supaflex().expect("the chart builds");
+        let last = performance(vec![
+            set(assisted(9), 6).expect("a set"),
+            set(assisted(9), 6).expect("a set"),
+            set(assisted(9), 6).expect("a set"),
+        ]);
+        let (load, setting) =
+            banded_load(&ladder, &shape.strength, &last).expect("an assisted session");
+        assert_eq!(load, Load::relative(SignedKg::ZERO));
+        assert!(setting.is_none());
+    }
 
     /// One completed set. Returns `Result`: the test exemptions do not reach a
     /// helper defined beside a `#[test]`.
@@ -2339,6 +2517,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2370,6 +2549,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2401,6 +2581,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-15_000)), 6).expect("a set"),
@@ -2435,6 +2616,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
@@ -2465,6 +2647,7 @@ mod progression_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2635,6 +2818,7 @@ mod ramp_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
         let sets = primary_sets(
@@ -2693,6 +2877,7 @@ mod ramp_tests {
         let consulted = Consulted {
             parameters: &parameters,
             programming: &shape,
+            ladders: &super::NO_LADDERS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500)).expect("a barbell is one band");
         let shape: Vec<(bool, Option<u64>, Option<Rir>)> = primary_sets(
