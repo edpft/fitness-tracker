@@ -12,6 +12,7 @@ pub mod canonical;
 pub mod hrv;
 pub mod manual;
 pub mod quantity;
+pub mod resting;
 pub mod weigh_in;
 
 pub use canonical::{
@@ -27,6 +28,7 @@ pub use manual::{
     ManualWeighIn, SheetName,
 };
 pub use quantity::{Age, KilocaloriesPerDay, PulseWaveVelocity, SkinConductance, VisceralFat};
+pub use resting::{RestingHeartRate, RestingHeartRateRecord};
 pub use weigh_in::{
     BodyScanWeighIn, Composition, HeartReading, MeasuredBy, NerveReading, Rhythm, Segment,
     Segments, VascularReading, WeighInRecord,

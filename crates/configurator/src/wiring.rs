@@ -29,9 +29,10 @@ use domain::{
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth, GarminCredentials,
-    GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
-    GarminGymRawExtent, GarminGymTranslator, GarminHrv, GarminHrvAccountReader,
-    GarminHrvLandingStore, GarminHrvTranslator, HevySessionAccountReader, HevySessionTranslator,
+    GarminDailyHeartRateAccountReader, GarminDailyHeartRateLandingStore,
+    GarminExerciseSetLandingStore, GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
+    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
+    GarminRestingHeartRateTranslator, HevySessionAccountReader, HevySessionTranslator,
     HevyWorkoutEvents, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
     MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator, PelotonAccountLandingStore,
     PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
@@ -40,9 +41,9 @@ use infrastructure::{
     SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
     SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
     SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore,
-    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
-    WithingsAuth, WithingsClient, WithingsMeasurementLandingStore, WithingsMeasurements,
-    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
+    SqliteRestingHeartRateStore, SqliteResumptionPointStore, SqliteSpreadsheetStore,
+    SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore,
+    WithingsMeasurements, WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -187,12 +188,111 @@ pub async fn run(
         WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
         GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
+        GarminDailyHeartRateLandingStore::STREAM => {
+            garmin_daily_heart_rate(command, database).await
+        }
         SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
         BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
         MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
+    }
+}
+
+/// Garmin's daily heart rate, of which the resting heart rate is derived (#254).
+///
+/// **Collected two ways**: with the activities, because it says which days a
+/// watch was worn (#427), and here on its own, signing in for itself as the HRV
+/// walk does. Both walks keep one resumption point, so whichever runs second
+/// asks only for the day the first left off at.
+async fn garmin_daily_heart_rate(
+    command: Command,
+    database: &Path,
+) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = GarminDailyHeartRateLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+    let stream = GarminDailyHeartRateLandingStore::STREAM;
+
+    match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
+        Command::Extract(access) => {
+            let SourceAccess::EmailPassword {
+                base_url,
+                auth_base_url,
+                email,
+                password,
+                ..
+            } = access
+            else {
+                return Err(WiringError::WrongCredential {
+                    stream: stream.to_owned(),
+                    wanted: "a login",
+                    given: "something else",
+                });
+            };
+
+            let auth = GarminAuth::new(
+                auth_base_url.clone(),
+                garmin::token_base_for(&auth_base_url),
+                GarminCredentials::new(email, password),
+                None,
+            );
+            let extraction = Extraction::new(ExtractionPorts {
+                source: garmin::daily::GarminDailyHeartRate::new(base_url, auth, today()),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+        }
+        Command::Normalise(zone) => {
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
+                    translator: GarminRestingHeartRateTranslator,
+                    workouts: SqliteRestingHeartRateStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(pool.clone(), stream)?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zone,
+            );
+            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), stream)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
+        Command::Status => {
+            let derivation = DerivationStanding::new(
+                GarminDailyHeartRateLandingStore::new(pool.clone())?,
+                SqliteRestingHeartRateStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), stream)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: Some(Box::new(derivation)),
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
     }
 }
 
@@ -1392,9 +1492,10 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
 mod tests {
     use super::{
         BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
-        GarminExerciseSetLandingStore, GarminHrvLandingStore, HevyWorkoutLandingStore,
-        MyFitnessPalExportLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-        SpreadsheetFileLandingStore, WithingsMeasurementLandingStore,
+        GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminHrvLandingStore,
+        HevyWorkoutLandingStore, MyFitnessPalExportLandingStore, PelotonRideLandingStore,
+        PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
+        WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
 
@@ -1419,6 +1520,7 @@ mod tests {
             GarminActivityLandingStore::STREAM,
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
+            GarminDailyHeartRateLandingStore::STREAM,
             SpreadsheetFileLandingStore::STREAM,
             BtwbExportLandingStore::STREAM,
             MyFitnessPalExportLandingStore::STREAM,

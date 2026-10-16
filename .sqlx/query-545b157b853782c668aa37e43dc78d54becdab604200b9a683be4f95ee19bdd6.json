@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM resting_heart_rate",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "545b157b853782c668aa37e43dc78d54becdab604200b9a683be4f95ee19bdd6"
+}

@@ -161,6 +161,12 @@ impl LandingStore for GarminDailyHeartRateLandingStore {
     }
 }
 
+impl application::RawExtent for GarminDailyHeartRateLandingStore {
+    async fn records(&self) -> Result<RecordCount, StoreError> {
+        LandingStore::count(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{GarminDailyHeartRateLandingStore, LandingStream};

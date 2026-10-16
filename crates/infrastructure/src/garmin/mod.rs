@@ -24,9 +24,10 @@ pub mod fit;
 pub mod gym;
 pub mod hrv;
 pub mod mapping;
+pub mod resting;
 pub mod translate;
 
-pub use account::{ActivityAccount, NightAccount, nights};
+pub use account::{ActivityAccount, DayAccount, NightAccount, days, nights};
 pub use activities::{ActivityPage, GarminActivities};
 pub use auth::{GarminAuth, GarminCredentials};
 pub use corrections::{FoundSet, GarminRecordedSets};
@@ -34,6 +35,7 @@ pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
 pub use files::{ActivityFilePage, GarminActivityFiles};
 pub use gym::GarminGymTranslator;
 pub use hrv::{GarminHrv, HrvWalk};
+pub use resting::GarminRestingHeartRateTranslator;
 pub use translate::GarminHrvTranslator;
 
 use application::SourceError;
