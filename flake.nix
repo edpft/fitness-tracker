@@ -141,7 +141,7 @@
           buildInputs = [
             # TODO: runtime/link-time deps
           ]
-          ++ lib.optionals pkgs.stdenv.isDarwin [
+          ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.libiconv
           ];
         };
