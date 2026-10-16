@@ -48,6 +48,27 @@ struct Line {
 }
 
 impl View {
+    /// One line for a page that shows the record rather than the run: the step
+    /// the run is on, or why it did not start (#466).
+    pub fn status(&self) -> Markup {
+        html! {
+            @if let Some(refused) = &self.refused {
+                span.failed { (refused) }
+            } @else if self.ending.is_none() {
+                @if let Some(line) = self.steps.iter().rev().find(|line| line.done.is_none()) {
+                    (report::step(&line.step)) "…"
+                } @else if !self.steps.is_empty() {
+                    "…"
+                }
+            }
+        }
+    }
+
+    /// Whether the run has ended, so what the record shows has changed.
+    pub const fn ended(&self) -> bool {
+        self.ending.is_some()
+    }
+
     pub fn render(&self) -> Markup {
         html! {
             @if let Some(refused) = &self.refused { p.failed { (refused) } }
@@ -247,6 +268,23 @@ mod tests {
 
     fn shown(view: &watch::Sender<View>) -> String {
         view.borrow().render().into_string()
+    }
+
+    /// **#466: a record page's line says which step the run is on**, and
+    /// nothing once it has ended, when the page is redrawn.
+    #[test]
+    fn the_status_is_the_step_going_and_nothing_once_ended() {
+        let view = watch::Sender::new(View::default());
+        let following = Following(&view);
+
+        following.started(&Step::RefreshingClasses);
+        let going = view.borrow().status().into_string();
+        assert_eq!(going, "Refreshing Peloton's classes…");
+        assert!(!view.borrow().ended());
+
+        view.send_modify(|view| view.ending = Some(maud::PreEscaped(String::new())));
+        assert!(view.borrow().ended());
+        assert_eq!(view.borrow().status().into_string(), "");
     }
 
     /// **A step is shown as it starts**, so a long one says what it is doing

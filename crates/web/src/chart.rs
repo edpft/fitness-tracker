@@ -58,7 +58,7 @@ struct Series<'a> {
 }
 
 /// The whole page.
-pub fn page(rides: &[RideHeartRate]) -> Markup {
+pub fn page(rides: &[RideHeartRate], run: &crate::run::View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -69,11 +69,14 @@ pub fn page(rides: &[RideHeartRate]) -> Markup {
                 style { (crate::page::STYLE) (STYLE) }
             }
             body {
-                main.wide {
-                    p { a href="/" { "Run next" } }
-                    h1 { "Heart rate per power zone" }
-                    (chart(rides))
-                }
+                (crate::page::opened(&html! {
+                    main.wide {
+                        (crate::page::redrawn(run, "/heart-rate"))
+                        p { a href="/" { "Run next" } }
+                        h1 { "Heart rate per power zone" }
+                        (chart(rides))
+                    }
+                }))
             }
         }
     }
@@ -510,7 +513,7 @@ mod tests {
             ),
             ride(7, ByZone::NoHeartRate),
         ];
-        let page = super::page(&rides).into_string();
+        let page = super::page(&rides, &crate::run::View::default()).into_string();
         assert_eq!(page.matches(r#"class="ring z2""#).count(), 1);
         assert_eq!(page.matches(r#"class="ring z3""#).count(), 1);
         assert_eq!(page.matches(r#"class="missing""#).count(), 1);
@@ -518,9 +521,23 @@ mod tests {
         assert!(page.contains("no heart rate recorded"));
     }
 
+    /// **#466: opening the page starts a run, and its end redraws `main`.** The
+    /// run is started outside `main`, so the redraw cannot start another.
+    #[test]
+    fn opening_the_page_starts_a_run_outside_what_its_end_redraws() {
+        let page = super::page(&[], &crate::run::View::default()).into_string();
+        let started = page
+            .find(r#"hx-post="/run" hx-trigger="load""#)
+            .expect("the page starts a run as it loads");
+        let main = page.find("<main").expect("the page has a main");
+        assert!(started < main, "{page}");
+        assert!(page[main..].contains(r#"hx-trigger="sse:ended""#), "{page}");
+        assert!(!page[main..].contains(r#"hx-trigger="load""#), "{page}");
+    }
+
     #[test]
     fn no_rides_is_said_rather_than_drawn() {
-        let page = super::page(&[]).into_string();
+        let page = super::page(&[], &crate::run::View::default()).into_string();
         assert!(page.contains("No main ride has been recorded."));
         assert!(!page.contains("<svg class=\"chart\""));
     }

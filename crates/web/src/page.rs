@@ -23,6 +23,9 @@ pub fn index(view: &View) -> Markup {
             }
             body {
                 main {
+                    // **Opening the page is the demand** (#466): a run starts
+                    // as it loads, or the one going is followed.
+                    div hx-post="/run" hx-trigger="load" hx-target="#notice" hx-swap="innerHTML" {}
                     form hx-post="/run" hx-target="#notice" hx-swap="innerHTML" {
                         button type="submit" { "Run next" }
                     }
@@ -37,6 +40,32 @@ pub fn index(view: &View) -> Markup {
                 }
             }
         }
+    }
+}
+
+/// A page that shows the record, around its `main`: a run started as it
+/// opens, a line saying where that run is, and the record redrawn when it
+/// ends (#466).
+///
+/// **The run is started outside `main`**, because a redraw swaps `main`: a
+/// trigger inside it would start a second run when the first one ended.
+pub fn opened(main: &Markup) -> Markup {
+    html! {
+        script src="/htmx.min.js" {}
+        script src="/sse.min.js" {}
+        div hx-ext="sse" sse-connect="/run/state" {
+            div hx-post="/run" hx-trigger="load" hx-swap="none" {}
+            (main)
+        }
+    }
+}
+
+/// At the top of a record page's `main`: where the run is, and the page drawn
+/// again from the store when it ends. `address` is the page as it is shown.
+pub fn redrawn(view: &View, address: &str) -> Markup {
+    html! {
+        div hx-get=(address) hx-trigger="sse:ended" hx-select="main" hx-target="closest main" hx-swap="outerHTML" {}
+        p.status sse-swap="status" { (view.status()) }
     }
 }
 
@@ -57,7 +86,7 @@ button { width: 100%; padding: 14px; font: inherit; font-weight: 600; }
 ol, ul { padding-left: 1.2rem; }
 li { margin: 0.25rem 0; }
 .step { font-weight: 600; }
-.outcome, .estimate { color: var(--muted); }
+.outcome, .estimate, .status { color: var(--muted); }
 .failed { color: var(--failed); }
 section { margin-top: 1.5rem; }
 table { border-collapse: collapse; }

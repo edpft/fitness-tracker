@@ -119,6 +119,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/run", post(start))
         .route("/run/events", get(events))
+        .route("/run/state", get(state))
         .route("/htmx.min.js", get(htmx))
         .route("/sse.min.js", get(sse))
         .with_state(runs);
@@ -149,7 +150,7 @@ async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     let rides = configurator::heart_rate::rides(&store, &setting.zone).await;
     store.close().await;
     match rides {
-        Ok(rides) => chart::page(&rides),
+        Ok(rides) => chart::page(&rides, &runs.view()),
         Err(error) => chart::unreadable(&error.to_string()),
     }
 }
@@ -167,7 +168,7 @@ async fn body_weight(
     let view = configurator::body_weight::view(&store, &runs.setting().zone).await;
     store.close().await;
     match view {
-        Ok(view) => weight::page(&view, over),
+        Ok(view) => weight::page(&view, over, &runs.view()),
         Err(error) => weight::unreadable(&error.to_string()),
     }
 }
@@ -181,7 +182,7 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>) -> Markup {
     let view = configurator::one_rep_max::view(&store, &runs.setting().zone).await;
     store.close().await;
     match view {
-        Ok(view) => one_rep_max::page(&view),
+        Ok(view) => one_rep_max::page(&view, &runs.view()),
         Err(error) => one_rep_max::unreadable(&error.to_string()),
     }
 }
@@ -253,6 +254,24 @@ async fn events(
         Ok(Event::default()
             .event("run")
             .data(view.render().into_string()))
+    });
+    Sse::new(changes).keep_alive(KeepAlive::default())
+}
+
+/// What a page showing the record follows of the run (#466): the step it is
+/// on, and then that it has ended, which redraws the page and the line with it.
+///
+/// **Changes only**, not how it stands on connecting: the page was rendered
+/// with the status already, and a run that ended before the page opened has
+/// nothing to redraw.
+async fn state(
+    State(runs): State<Arc<Runs>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let changes = WatchStream::from_changes(runs.watch()).map(|view| {
+        let event = if view.ended() { "ended" } else { "status" };
+        Ok(Event::default()
+            .event(event)
+            .data(view.status().into_string()))
     });
     Sse::new(changes).keep_alive(KeepAlive::default())
 }
