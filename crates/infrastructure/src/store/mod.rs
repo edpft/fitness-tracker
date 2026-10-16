@@ -100,7 +100,10 @@ pub use plan::SqlitePlanStore;
 pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;
 pub use refusals::SqliteRefusalStore;
-pub use resting_heart_rate::{GarminDailyHeartRateAccountReader, SqliteRestingHeartRateStore};
+pub use resting_heart_rate::{
+    GarminDailyHeartRateAccountReader, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
+    SqliteRestingHeartRateStore,
+};
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;
 pub use schedule::SqliteDiaryStore;

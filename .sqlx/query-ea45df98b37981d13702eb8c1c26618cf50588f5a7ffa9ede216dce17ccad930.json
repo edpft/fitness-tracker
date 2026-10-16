@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT morning_of AS \"morning_of!: String\",\n                   last_night_average_ms AS \"average!: i64\"\n            FROM overnight_hrv\n            ORDER BY morning_of ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "morning_of!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_hrv",
+            "name": "morning_of"
+          }
+        }
+      },
+      {
+        "name": "average!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_hrv",
+            "name": "last_night_average_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ea45df98b37981d13702eb8c1c26618cf50588f5a7ffa9ede216dce17ccad930"
+}

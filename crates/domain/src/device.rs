@@ -335,6 +335,30 @@ impl Register {
     pub fn sent_by(&self, what: Measurand, date: Date) -> InUse<'_> {
         sent_by(&self.devices, &self.wear, what, date)
     }
+
+    /// Which device on the wrist measured `what` on `date`, for a reading a
+    /// watch takes for itself and files without naming the watch: a night's
+    /// HRV, a day's resting heart rate (#254).
+    ///
+    /// **Only a worn device that measured it**, and only on a day it was worn
+    /// where the account says. **One, or it is not known**, for [`sent_by`]'s
+    /// reason: two watches on the go is two candidates, and choosing would be
+    /// a guess (§ 37).
+    #[must_use]
+    pub fn worn_on(&self, what: Measurand, date: Date) -> InUse<'_> {
+        let candidates: Vec<&Device> = self
+            .devices
+            .iter()
+            .filter(|device| {
+                device.worn && device.measures.contains(&what) && device.in_use_on(date, &self.wear)
+            })
+            .collect();
+        match candidates.as_slice() {
+            [] => InUse::Unknown,
+            [one] => InUse::One(one),
+            _ => InUse::Several(candidates),
+        }
+    }
 }
 
 fn devices(sightings: &[Sighting]) -> Vec<Device> {

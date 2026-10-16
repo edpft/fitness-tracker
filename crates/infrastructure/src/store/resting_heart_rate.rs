@@ -1,22 +1,27 @@
 //! The normalised layer for `garmin.daily_heart_rate`, and the days raw is
-//! derived from (#254).
+//! derived from (#254), and both daily figures read back (§ 4).
 //!
 //! Two adapters, for the reason [`super::garmin_normalised`] has them: the
 //! account reader has no `append`, and the store writes the derivation. Which
 //! serving of a day stands is Garmin knowledge, in [`crate::garmin::account`].
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{
+    AccountReader, NormalisedEntityStore, OvernightHrvHistory, RestingHeartRateHistory, StoreError,
+};
 use domain::{
+    analytical::per_device::Reading,
     body::RestingHeartRate,
     landing::{InvalidStream, LandingStream},
+    measure::{BeatsPerMinute, HeartRateVariability},
     normalised::{NormalisationRunId, WorkoutCount},
 };
+use jiff::civil::Date;
 use sqlx::SqlitePool;
 
 use crate::garmin::{DayAccount, days};
 
 use super::{
-    GarminDailyHeartRateLandingStore, count_from_storage, garmin_gym::Row,
+    GarminDailyHeartRateLandingStore, corrupt, count_from_storage, garmin_gym::Row,
     normalisation_run_for_storage, store_error,
 };
 
@@ -170,5 +175,78 @@ impl NormalisedEntityStore for SqliteRestingHeartRateStore {
             .await
             .map_err(|error| store_error(&error))?;
         count_from_storage(Some(row.total)).map(WorkoutCount::from)
+    }
+}
+
+/// Every day's resting heart rate, read back for the analytical layer.
+#[derive(Debug, Clone)]
+pub struct SqliteRestingHeartRateHistory {
+    pool: SqlitePool,
+}
+
+impl SqliteRestingHeartRateHistory {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl RestingHeartRateHistory for SqliteRestingHeartRateHistory {
+    async fn days(&self) -> Result<Vec<Reading<BeatsPerMinute>>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT day AS "day!: String", rate_bpm AS "rate!: i64"
+            FROM resting_heart_rate
+            ORDER BY day ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        rows.into_iter()
+            .map(|row| {
+                let on: Date = row.day.parse().map_err(|error| corrupt(&error))?;
+                let beats = u32::try_from(row.rate).map_err(|error| corrupt(&error))?;
+                let value = BeatsPerMinute::new(beats).map_err(|error| corrupt(&error))?;
+                Ok(Reading { on, value })
+            })
+            .collect()
+    }
+}
+
+/// Every night's overnight HRV, read back for the analytical layer: last
+/// night's average, by the morning it is reported under.
+#[derive(Debug, Clone)]
+pub struct SqliteOvernightHrvHistory {
+    pool: SqlitePool,
+}
+
+impl SqliteOvernightHrvHistory {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl OvernightHrvHistory for SqliteOvernightHrvHistory {
+    async fn nights(&self) -> Result<Vec<Reading<HeartRateVariability>>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT morning_of AS "morning_of!: String",
+                   last_night_average_ms AS "average!: i64"
+            FROM overnight_hrv
+            ORDER BY morning_of ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        rows.into_iter()
+            .map(|row| {
+                let on: Date = row.morning_of.parse().map_err(|error| corrupt(&error))?;
+                let milliseconds = u32::try_from(row.average).map_err(|error| corrupt(&error))?;
+                let value = HeartRateVariability::from_milliseconds(milliseconds)
+                    .map_err(|error| corrupt(&error))?;
+                Ok(Reading { on, value })
+            })
+            .collect()
     }
 }
