@@ -166,7 +166,7 @@ const NOT_IN_HEVY: Writable = Writable {
 ///
 /// The comment on each entry is the template's title, which informs this table
 /// and never keys it — the same rule [`super::mapping`] is written under.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "a phone book is long; the alternative is a shorter table that says less"
 )]

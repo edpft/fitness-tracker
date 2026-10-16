@@ -171,19 +171,19 @@ const fn distance(exercise: DistanceExercise, load: LoadReading) -> Mapped {
 /// matter most are the ones read first. The comment on each is the source's
 /// title and the number of sets it carried.
 ///
-/// `match_same_arms` is allowed because two arms agreeing is the mapping
-/// *working*: `Pull Up (Assisted)` and `Pull Up (Band)` reach one exercise on
-/// purpose, as do a weighted variant and its unweighted form, and merging them
-/// would delete the per-template comment saying which source template each
-/// covers. `too_many_lines` is allowed for the reason a phone book is long.
-/// Neither is a forbidden lint, and neither is hiding a defect.
-#[allow(clippy::too_many_lines, clippy::match_same_arms)]
+/// Templates that are one exercise read the same way share an arm, and the
+/// comment above it names each template in the order of its ids.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a phone book is long; the alternative is a shorter table that says less"
+)]
 pub fn lookup(template_id: &str) -> Option<Mapped> {
     let mapped = match template_id {
         "D04AC939" => reps(RepsExercise::BackSquatBarbell, LoadReading::Absolute), // Squat (Barbell) (377)
         "E9E4089F" => reps(RepsExercise::ChestDip, LoadReading::RelativeNegated), // Chest Dip (Assisted) (277)
         "C6272009" => reps(RepsExercise::DeadliftBarbell, LoadReading::Absolute), // Deadlift (Barbell) (196)
-        "2C37EC5E" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated), // Pull Up (Assisted) (159)
+        // Pull Up (Assisted) (159), Pull Up (Band) (3)
+        "2C37EC5E" | "56808FD2" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated),
         "5046D0A9" => reps(RepsExercise::FrontSquatBarbell, LoadReading::Absolute), // Front Squat (147)
         "4F942934" => reps(RepsExercise::PreacherCurlBarbell, LoadReading::Absolute), // Preacher Curl (Barbell) (121)
         "9202CC23" => reps(
@@ -235,10 +235,11 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         "e2182af0-2577-4603-8e70-18273be1d48b" => {
             duration(DurationExercise::CouchStretch, LoadReading::Absolute)
         } // Couch Stretch (28)
-        "091737FA" => reps(
+        // Back Extension (Weighted Hyperextension) (26), Back Extension (Hyperextension) (6)
+        "091737FA" | "4F5866F8" => reps(
             RepsExercise::BackExtensionHyperextension,
             LoadReading::Absolute,
-        ), // Back Extension (Weighted Hyperextension) (26)
+        ),
         "93472AC1" => reps(
             RepsExercise::SingleLegRomanianDeadliftBarbell,
             LoadReading::Absolute,
@@ -282,14 +283,15 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             RepsExercise::SingleArmOverheadTricepsExtensionDumbbell,
             LoadReading::Absolute,
         ), // Single Arm Tricep Extension (Dumbbell) (15)
-        "D928C232" => reps(RepsExercise::Crunch, LoadReading::Absolute), // Crunch (Weighted) (11)
+        // Crunch (Weighted) (11), Crunch (6)
+        "D928C232" | "DCF3B31B" => reps(RepsExercise::Crunch, LoadReading::Absolute),
         "914F3A96" => reps(
             RepsExercise::ChestSupportedInclineRowDumbbell,
             LoadReading::Absolute,
         ), // Chest Supported Incline Row (Dumbbell) (10)
         "F4E77594" => reps(RepsExercise::HangSnatch, LoadReading::Absolute), // Hang Snatch (10)
         "040BA2E3" => duration(DurationExercise::JumpRope, LoadReading::Absolute), // Jump Rope (10)
-        "D8911FC4" => reps(RepsExercise::DeadBug, LoadReading::Absolute), // Dead Bug (9)
+        "D8911FC4" => reps(RepsExercise::DeadBug, LoadReading::Absolute),    // Dead Bug (9)
         "B537D09F" => reps(RepsExercise::LungeDumbbell, LoadReading::Absolute), // Lunge (Dumbbell) (9)
         "1B89CA1B" => reps(RepsExercise::RenegadeRowDumbbell, LoadReading::Absolute), // Renegade Row (Dumbbell) (9)
         "937292AB" => reps(
@@ -326,16 +328,11 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
             RepsExercise::SeatedCableRowVGripCable,
             LoadReading::Absolute,
         ), // Seated Cable Row - V Grip (Cable) (7)
-        "4F5866F8" => reps(
-            RepsExercise::BackExtensionHyperextension,
-            LoadReading::Absolute,
-        ), // Back Extension (Hyperextension) (6)
         "A05C064D" => reps(RepsExercise::BackExtensionMachine, LoadReading::Absolute), // Back Extension (Machine) (6)
         "DDB29047" => reps(
             RepsExercise::BehindTheBackWristCurlBarbell,
             LoadReading::Absolute,
         ), // Behind the Back Wrist Curl (Barbell) (6)
-        "DCF3B31B" => reps(RepsExercise::Crunch, LoadReading::Absolute),               // Crunch (6)
         "BC10A922" => reps(RepsExercise::DeclineCrunch, LoadReading::Absolute), // Decline Crunch (6)
         "3D0C7C75" => reps(RepsExercise::GobletSquat, LoadReading::Absolute),   // Goblet Squat (6)
         "36E8F14E" => reps(RepsExercise::HammerCurlCable, LoadReading::Absolute), // Hammer Curl (Cable) (6)
@@ -418,7 +415,6 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         "DF200976" => reps(RepsExercise::LateralRaiseBand, LoadReading::Absolute), // Lateral Raise (Band) (3)
         "C7973E0E" => reps(RepsExercise::LegPressMachine, LoadReading::Absolute), // Leg Press (Machine) (3)
         "54E60954" => reps(RepsExercise::OverheadLateralRaise, LoadReading::Absolute), // Overhead Plate Raise (3)
-        "56808FD2" => reps(RepsExercise::PullUp, LoadReading::RelativeNegated), // Pull Up (Band) (3)
         "8BAB2735" => reps(
             RepsExercise::SeatedInclineCurlDumbbell,
             LoadReading::Absolute,

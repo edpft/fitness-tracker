@@ -59,13 +59,10 @@ const TWENTY_MINUTE_SHARE: u32 = 95;
 /// [`super::session::CyclingSession`] carries a warm-up *duration* rather than a
 /// ride. The FTP test is the case where the warm-up is a class of its own, and
 /// so the case where it is a ride here.
-// 576 bytes against 864: a test holds one more ride than a ride does, and the
-// rides themselves are where the memory is — a session's samples are a `Vec`
-// behind each of them. Boxing the larger variant would put an allocation
-// between a session and its parts to save 288 bytes on 6 of the operator's 150
-// sessions, and would make the two variants read differently for no reason a
-// reader of the model would recognise.
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a test holds one more ride than a ride does, and each ride's samples are already behind a `Vec`; boxing would save one ride's inline 288 bytes at the cost of an allocation between a session and its parts"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PerformedSession {
     /// A ride, and the cool-down it was ridden down from.
