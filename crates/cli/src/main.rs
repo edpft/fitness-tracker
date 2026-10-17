@@ -13,6 +13,7 @@ mod next;
 mod output;
 mod plan;
 mod prescribing;
+mod progress;
 mod scheduling;
 mod setup;
 mod wizard;
@@ -1468,7 +1469,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         Command::Extract(access) => Some(access.origin().to_string()),
         _ => None,
     };
-    let outcome = match wiring::run(command, known, &database).await {
+    let outcome = match carry_out(command, known, &database, &stream).await {
         Ok(outcome) => outcome,
         Err(error) => return Err(rejected_credential(error, origin.as_deref())),
     };
@@ -1625,16 +1626,16 @@ fn source_access(
 /// `resumes` is false for a stream read from a folder, which is read whole and
 /// has no resumption point to report.
 ///
-/// **Reporting and exiting are two decisions** (#367). Every walk behind an
-/// entry is printed here, and the first that failed is handed back rather than
-/// acted on, because what a part-collected entry costs is the caller's to say:
-/// `extract` must not exit zero on a walk that landed nothing, and `next`
-/// carries on from one (§ 36).
+/// **Reporting and exiting are two decisions** (#367). The first walk behind an
+/// entry that failed is handed back rather than acted on, because what a
+/// part-collected entry costs is the caller's to say: `extract` must not exit
+/// zero on a walk that landed nothing, and `next` carries on from one (§ 36).
+/// The walks themselves were printed as each ended (#437).
 fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) -> Option<WiringError> {
     match outcome {
         Outcome::Extracted(summary) if !resumes => output::folder_landed(&summary),
         Outcome::Extracted(summary) => output::run_succeeded(&summary),
-        Outcome::ExtractedEach(walks) => return walks_reported(walks),
+        Outcome::ExtractedEach(walks) => return first_refused(walks),
         Outcome::Derived(summary) => output::derivation_succeeded(&summary),
         Outcome::Refused(report) => output::refusals(stream, &report),
         Outcome::Reported {
@@ -1646,23 +1647,40 @@ fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) -> Option<Wir
     None
 }
 
-/// Every walk behind one entry, each naming the stream it ran against, and the
-/// first that failed.
+/// Carry out a command, saying while it collects that it is alive (#437).
+///
+/// Every command reaches the composition root through here, so a collection
+/// from a source always has its spinner and always has each walk printed as it
+/// ends — which is why [`report`] does not print the walks again. The spinner is
+/// stopped before this returns, so whatever is printed next has the line.
+async fn carry_out(
+    command: Command,
+    known: &KnownStream,
+    database: &Path,
+    stream: &LandingStream,
+) -> Result<Outcome, WiringError> {
+    let progress =
+        matches!(command, Command::Extract(_)).then(|| progress::Progress::start(stream));
+    let walks: &dyn wiring::WalkReporter = match &progress {
+        Some(progress) => progress,
+        None => &wiring::Unreported,
+    };
+    let ran = wiring::run(command, known, database, walks).await;
+    drop(progress);
+    ran
+}
+
+/// The first walk behind one entry that failed.
+///
+/// Not printed here: [`progress::Progress`] printed each walk as it ended.
 ///
 /// **The first, not the last**: it is the one whose exit code says what stopped
 /// this run. The error itself rather than its message, so that a rejected
 /// credential still reaches [`rejected_credential`] and names where the
 /// credential came from.
-fn walks_reported(walks: Vec<Walk>) -> Option<WiringError> {
-    let mut refused = None;
-    for walk in walks {
-        match walk.result {
-            Ok(summary) => output::walk_succeeded(&walk.stream, &summary),
-            Err(error) => {
-                output::not_collected(&walk.stream, &error.to_string());
-                refused = refused.or(Some(error));
-            }
-        }
-    }
-    refused.map(WiringError::Extraction)
+fn first_refused(walks: Vec<Walk>) -> Option<WiringError> {
+    walks
+        .into_iter()
+        .find_map(|walk| walk.result.err())
+        .map(WiringError::Extraction)
 }

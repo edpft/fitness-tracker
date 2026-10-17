@@ -60,12 +60,13 @@ pub async fn next(
     // 1. What has been done. Printed before the run begins, so a long first
     //    collection says what it is doing.
     output::run_started(&stream);
-    let collected = wiring::run(Command::Extract(access), known, database).await?;
+    let collected = crate::carry_out(Command::Extract(access), known, database, &stream).await?;
     report(&stream, collected);
 
     // 2. What it means. Contacts no source: everything it needs is now landed.
     output::derivation_started(&stream);
-    let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
+    let derived =
+        crate::carry_out(Command::Normalise(zone.clone()), known, database, &stream).await?;
     report(&stream, derived);
 
     // 3. What happened, however many sources recorded it. Everything below reads
@@ -138,7 +139,7 @@ pub async fn strength(
 
         output::run_started(&stream);
         let collected = match crate::source_access(known, None, credentials) {
-            Ok(access) => wiring::run(Command::Extract(access), known, database)
+            Ok(access) => crate::carry_out(Command::Extract(access), known, database, &stream)
                 .await
                 .map_err(Failure::from),
             Err(failure) => Err(failure),
@@ -149,7 +150,8 @@ pub async fn strength(
         }
 
         output::derivation_started(&stream);
-        let derived = wiring::run(Command::Normalise(zone.clone()), known, database).await?;
+        let derived =
+            crate::carry_out(Command::Normalise(zone.clone()), known, database, &stream).await?;
         report(&stream, derived);
     }
 

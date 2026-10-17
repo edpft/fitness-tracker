@@ -121,11 +121,42 @@ pub struct Walk {
 /// is the one place where a walk's error can swallow the walks either side of
 /// it, and the only way to keep that from coming back is for a walk's outcome to
 /// have nowhere else to go.
-async fn walk(stream: LandingStream, extraction: impl WorkoutExtractor) -> Walk {
-    Walk {
+async fn walk(
+    stream: LandingStream,
+    extraction: impl WorkoutExtractor,
+    walks: &dyn WalkReporter,
+) -> Walk {
+    walks.started(&stream);
+    let walk = Walk {
         stream,
         result: extraction.extract().await,
-    }
+    };
+    walks.finished(&walk);
+    walk
+}
+
+/// Told as each walk behind an entry starts and as it finishes (#437).
+///
+/// **So a long collection says what it is doing while it does it.** The walks
+/// behind one entry run in turn, and their outcomes used to reach the operator
+/// only once every one had finished: on 2026-10-14 `extract garmin.activities`
+/// had been silent for sixteen minutes, alive and waiting on Garmin, with
+/// nothing on screen to say so. A frontend implements this to show each walk as
+/// it starts and report it as soon as it ends.
+///
+/// The outcome still comes back in [`Outcome::ExtractedEach`], whole, so what a
+/// part-collected entry costs remains the caller's to decide.
+pub trait WalkReporter: Sync {
+    fn started(&self, stream: &LandingStream);
+    fn finished(&self, walk: &Walk);
+}
+
+/// Reports nothing: for a caller with no one to tell.
+pub struct Unreported;
+
+impl WalkReporter for Unreported {
+    fn started(&self, _stream: &LandingStream) {}
+    fn finished(&self, _walk: &Walk) {}
 }
 
 /// The wall clock, which is the only thing a real run should take its timings
@@ -181,13 +212,14 @@ pub async fn run(
     command: Command,
     known: &KnownStream,
     database: &Path,
+    walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
-        PelotonRideLandingStore::STREAM => peloton_rides(command, database).await,
+        PelotonRideLandingStore::STREAM => peloton_rides(command, database, walks).await,
         WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
-        GarminActivityLandingStore::STREAM => garmin_activities(command, database).await,
+        GarminActivityLandingStore::STREAM => garmin_activities(command, database, walks).await,
         GarminDailyHeartRateLandingStore::STREAM => {
             garmin_daily_heart_rate(command, database).await
         }
@@ -314,7 +346,11 @@ async fn garmin_daily_heart_rate(
 /// The list is walked first, and that is the one ordering that still matters:
 /// the graph walk enumerates rides itself, so running it second means the
 /// graphs it fetches are for rides this same command has just landed.
-async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+async fn peloton_rides(
+    command: Command,
+    database: &Path,
+    walks: &dyn WalkReporter,
+) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = PelotonRideLandingStore::new(pool.clone())?;
     let samples_landing = PelotonRideSampleLandingStore::new(pool.clone())?;
@@ -333,6 +369,7 @@ async fn peloton_rides(command: Command, database: &Path) -> Result<Outcome, Wir
                 resumption,
                 runs,
                 database,
+                walks,
             )
             .await
         }
@@ -425,11 +462,12 @@ async fn collect_rides(
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
     database: &Path,
+    walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     let ((rides, graphs), account) = peloton_walks(access, landings, resumption, runs, database)?;
-    let ridden = walk(rides.stream, rides.extraction).await;
-    let sampled = walk(graphs.stream, graphs.extraction).await;
-    let paired = walk(account.stream, account.extraction).await;
+    let ridden = walk(rides.stream, rides.extraction, walks).await;
+    let sampled = walk(graphs.stream, graphs.extraction, walks).await;
+    let paired = walk(account.stream, account.extraction, walks).await;
     Ok(Outcome::ExtractedEach(vec![ridden, sampled, paired]))
 }
 
@@ -710,7 +748,11 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
 /// marked as such — is read off payloads that have landed, the way the HRV
 /// entity was. So `normalise` and `refusals` refuse here rather than standing up
 /// a translator against a guess.
-async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+async fn garmin_activities(
+    command: Command,
+    database: &Path,
+    walks: &dyn WalkReporter,
+) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = GarminActivityLandingStore::new(pool.clone())?;
     let sets_landing = GarminExerciseSetLandingStore::new(pool.clone())?;
@@ -730,6 +772,7 @@ async fn garmin_activities(command: Command, database: &Path) -> Result<Outcome,
                 resumption,
                 runs,
                 database,
+                walks,
             )
             .await
         }
@@ -837,6 +880,7 @@ async fn collect_activities(
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
     database: &Path,
+    walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     let SourceAccess::EmailPassword {
         base_url,
@@ -873,6 +917,7 @@ async fn collect_activities(
             lock: FileRunLock::beside(database),
             clock: SystemClock,
         }),
+        walks,
     )
     .await;
 
@@ -887,6 +932,7 @@ async fn collect_activities(
             lock: FileRunLock::beside(database),
             clock: SystemClock,
         }),
+        walks,
     )
     .await;
 
@@ -904,6 +950,7 @@ async fn collect_activities(
             lock: FileRunLock::beside(database),
             clock: SystemClock,
         }),
+        walks,
     )
     .await;
 
@@ -920,6 +967,7 @@ async fn collect_activities(
             lock: FileRunLock::beside(database),
             clock: SystemClock,
         }),
+        walks,
     )
     .await;
 
@@ -1556,5 +1604,66 @@ mod tests {
                 "{hidden} lands behind another entry and must not be nameable"
             );
         }
+    }
+
+    /// A walk that cannot run: enough to see what is reported, and when.
+    struct Refused;
+
+    impl application::WorkoutExtractor for Refused {
+        async fn extract(&self) -> Result<application::RunSummary, application::ExtractionError> {
+            Err(application::ExtractionError::AlreadyRunning)
+        }
+    }
+
+    /// Writes down what it was told, in order.
+    #[derive(Default)]
+    struct Recorded(std::sync::Mutex<Vec<String>>);
+
+    impl super::WalkReporter for Recorded {
+        fn started(&self, stream: &domain::landing::LandingStream) {
+            if let Ok(mut told) = self.0.lock() {
+                told.push(format!("started {stream}"));
+            }
+        }
+
+        fn finished(&self, walk: &super::Walk) {
+            if let Ok(mut told) = self.0.lock() {
+                let how = if walk.result.is_ok() { "ok" } else { "refused" };
+                told.push(format!("finished {} {how}", walk.stream));
+            }
+        }
+    }
+
+    /// **Each walk is told as it starts and as it ends, before the next begins**
+    /// (#437), so a frontend can say which walk is under way and report each
+    /// as soon as it is done rather than all of them at the end.
+    #[test]
+    fn each_walk_is_reported_as_it_starts_and_as_it_ends() {
+        let stream = |name: &str| {
+            domain::landing::LandingStream::try_from(name).expect("a well-formed stream name")
+        };
+        let recorded = Recorded::default();
+        let both = async {
+            super::walk(stream("garmin.activities"), Refused, &recorded).await;
+            super::walk(stream("garmin.exercise_sets"), Refused, &recorded).await;
+        };
+        // Nothing here waits on anything, so one poll finishes it and no
+        // runtime is needed.
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            std::future::Future::poll(std::pin::pin!(both), &mut context).is_ready(),
+            "two walks that cannot run finish at once"
+        );
+
+        let told = recorded.0.lock().expect("the record is readable").clone();
+        assert_eq!(
+            told,
+            vec![
+                "started garmin.activities",
+                "finished garmin.activities refused",
+                "started garmin.exercise_sets",
+                "finished garmin.exercise_sets refused",
+            ]
+        );
     }
 }
