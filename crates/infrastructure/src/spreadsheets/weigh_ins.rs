@@ -121,7 +121,7 @@ const LAYOUTS: &[Layout] = &[
 /// What a composition column or row is headed, in a sheet laid out as
 /// weigh-ins. Each was typed in as a fraction, `0.247` for 24.7 %.
 const COMPOSITION: &[(Component, &[&str])] = &[
-    (Component::Fat, &["Fat %", "Fat", "Fat (%)"]),
+    (Component::Fat, &["Fat %", "Fat", "Fat (%)", "F%"]),
     (Component::Water, &["Water %", "Water", "Water (%)"]),
 ];
 
