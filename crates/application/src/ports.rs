@@ -38,7 +38,7 @@ use domain::landing::{
 use domain::measure::{PositiveDuration, RepCount};
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
-    RefusalCount, WorkoutCount,
+    RefusalCount, RefusalKind, RefusalReason, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::RerunOrdinal;
@@ -791,8 +791,76 @@ pub struct RefusalReport {
     /// stale rather than as current.
     pub derived_at: Option<FetchedAt>,
     /// In the order they were produced: record order, then position within a
-    /// record. Grouping by kind is the reader's job, not the store's.
+    /// record. Grouping is [`Self::by_reason`]'s job, not the store's.
     pub refusals: Vec<Refusal>,
+}
+
+impl RefusalReport {
+    /// The refusals, one entry per reason, so a reason given thousands of times
+    /// is read once (#296).
+    ///
+    /// Ordered by kind — wrong data, declared limitation, unmodelled — and
+    /// within a kind by how often the reason was given, most first; a tie keeps
+    /// the order the reasons were first given in. Every refusal is kept in its
+    /// entry, in the order it was produced: the operator, 2026-10-16, *"a
+    /// refusal carries enough information to debug it"*, so counting a reason
+    /// never drops the records that gave it.
+    ///
+    /// Reasons are compared whole, detail included: two movements the
+    /// vocabulary has no member for are two reasons, because what to add for
+    /// each is different.
+    pub fn by_reason(&self) -> Vec<ByReason<'_>> {
+        let mut grouped: Vec<ByReason<'_>> = Vec::new();
+        for refusal in &self.refusals {
+            match grouped
+                .iter_mut()
+                .find(|entry| *entry.reason() == refusal.reason)
+            {
+                Some(entry) => entry.rest.push(refusal),
+                None => grouped.push(ByReason {
+                    first: refusal,
+                    rest: Vec::new(),
+                }),
+            }
+        }
+        // Stable, so equal counts keep first-given order.
+        grouped.sort_by(|left, right| {
+            left.kind()
+                .cmp(&right.kind())
+                .then_with(|| right.count().cmp(&left.count()))
+        });
+        grouped
+    }
+}
+
+/// Every refusal in a [`RefusalReport`] that gave one reason.
+///
+/// The first is held apart so that an entry with no refusals cannot be built:
+/// it exists because a refusal gave its reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ByReason<'a> {
+    first: &'a Refusal,
+    rest: Vec<&'a Refusal>,
+}
+
+impl<'a> ByReason<'a> {
+    pub const fn reason(&self) -> &'a RefusalReason {
+        &self.first.reason
+    }
+
+    pub const fn kind(&self) -> RefusalKind {
+        self.first.reason.kind()
+    }
+
+    /// How many times the reason was given.
+    pub const fn count(&self) -> usize {
+        self.rest.len() + 1
+    }
+
+    /// Every refusal that gave it, in the order they were produced.
+    pub fn refusals(&self) -> impl Iterator<Item = &'a Refusal> + '_ {
+        std::iter::once(self.first).chain(self.rest.iter().copied())
+    }
 }
 
 // --- Driving ports ----------------------------------------------------------
@@ -2801,5 +2869,100 @@ where
         let mut sightings = self.0.sightings().await?;
         sightings.extend(self.1.sightings().await?);
         Ok(sightings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use domain::landing::{LandingRecordId, SourceRecordId};
+    use domain::normalised::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
+
+    use super::RefusalReport;
+
+    fn refused(record: &str, reason: RefusalReason) -> Refusal {
+        Refusal {
+            landed_as: LandingRecordId::FIRST,
+            source_record_id: SourceRecordId::try_from(record).expect("a source record id"),
+            locus: RefusalLocus::Record,
+            exercise: None,
+            reason,
+        }
+    }
+
+    fn cycling() -> RefusalReason {
+        RefusalReason::Unmodelled {
+            detail: "cycling".to_owned(),
+        }
+    }
+
+    fn movement(term: &str) -> RefusalReason {
+        RefusalReason::UnguessableMovement {
+            term: term.to_owned(),
+        }
+    }
+
+    /// A reason given many times is one entry, counted, and keeps every record
+    /// that gave it; kinds come in their order and, within one, the commonest
+    /// reason first (#296).
+    #[test]
+    fn refusals_are_counted_by_reason_and_keep_their_records() {
+        let report = RefusalReport {
+            derived_at: None,
+            refusals: vec![
+                refused("ride-1", cycling()),
+                refused("set-1", movement("EZ_BAR_PULLOVER")),
+                refused("ride-2", cycling()),
+                refused("gym-1", RefusalReason::NoSetsInEntry),
+                refused("set-2", movement("PLANK_WITH_OBLIQUE_CRUNCH")),
+                refused("ride-3", cycling()),
+                refused("set-3", movement("PLANK_WITH_OBLIQUE_CRUNCH")),
+            ],
+        };
+
+        let grouped: Vec<(RefusalKind, String, Vec<String>)> = report
+            .by_reason()
+            .iter()
+            .map(|entry| {
+                (
+                    entry.kind(),
+                    entry.reason().to_string(),
+                    entry
+                        .refusals()
+                        .map(|refusal| refusal.source_record_id.to_string())
+                        .collect(),
+                )
+            })
+            .collect();
+
+        let expected: Vec<(RefusalKind, String, Vec<String>)> = vec![
+            (
+                RefusalKind::WrongData,
+                RefusalReason::NoSetsInEntry.to_string(),
+                vec!["gym-1".to_owned()],
+            ),
+            (
+                RefusalKind::Unmodelled,
+                cycling().to_string(),
+                vec![
+                    "ride-1".to_owned(),
+                    "ride-2".to_owned(),
+                    "ride-3".to_owned(),
+                ],
+            ),
+            (
+                RefusalKind::Unmodelled,
+                movement("PLANK_WITH_OBLIQUE_CRUNCH").to_string(),
+                vec!["set-2".to_owned(), "set-3".to_owned()],
+            ),
+            (
+                RefusalKind::Unmodelled,
+                movement("EZ_BAR_PULLOVER").to_string(),
+                vec!["set-1".to_owned()],
+            ),
+        ];
+        assert_eq!(grouped, expected);
+
+        let counted: usize = report.by_reason().iter().map(super::ByReason::count).sum();
+        assert_eq!(counted, report.refusals.len(), "no refusal is dropped");
     }
 }

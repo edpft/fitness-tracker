@@ -43,7 +43,7 @@ pub use error::{
     NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
-    AccountReader, Authored, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
+    AccountReader, Authored, ByReason, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
     CanonicalWeighInStore, ClassSource, ClassesListed, ClassesRead, Clock, CyclingDeliveryStore,
     CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
     DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
