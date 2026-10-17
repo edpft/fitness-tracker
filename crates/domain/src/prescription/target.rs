@@ -112,9 +112,14 @@ impl<M: Spans + fmt::Display> fmt::Display for Target<M> {
 
 /// One instruction, with exactly one axis left open.
 ///
-/// The variants are not three styles of the same thing: each names which axis
+/// The variants are not two styles of the same thing: each names which axis
 /// the lifter is meant to resolve on the day, and a set with none of them open
 /// is a set with nothing to discover.
+///
+/// **Every prescription pins the load.** A third variant left the load open
+/// with effort binding; it issued a block's exit test until 2026-09-04, when
+/// every session came to state a load and an effort, and had no producer from
+/// then on. It went in #65.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Prescribed<M: Spans> {
     /// Load and measure pinned; effort is guidance. Warm-ups, back-offs, the
@@ -133,22 +138,13 @@ pub enum Prescribed<M: Spans> {
         effort: Rir,
         predicted: Option<Target<M>>,
     },
-    /// Load open; effort binds; measure pinned.
-    ///
-    /// Originally the RPE cap in the operator's own programme v1 — a version of
-    /// their document, never a template of ours — and recorded here as reachable
-    /// but unreached. It turned out to be exactly what a block's exit
-    /// **test** is: one repetition, nothing in reserve, and the load is whatever
-    /// the day allows. That is the only thing that issues one now.
-    Autoregulated { measure: Target<M>, effort: Rir },
 }
 
 impl<M: Spans> Prescribed<M> {
-    /// The load, where the prescription pins one.
-    pub const fn load(&self) -> Option<Load> {
+    /// The load, which every prescription pins.
+    pub const fn load(&self) -> Load {
         match self {
-            Self::Fixed { load, .. } | Self::ToEffort { load, .. } => Some(*load),
-            Self::Autoregulated { .. } => None,
+            Self::Fixed { load, .. } | Self::ToEffort { load, .. } => *load,
         }
     }
 
@@ -156,7 +152,7 @@ impl<M: Spans> Prescribed<M> {
     /// prescription and does not appear here.
     pub const fn measure(&self) -> Option<&Target<M>> {
         match self {
-            Self::Fixed { measure, .. } | Self::Autoregulated { measure, .. } => Some(measure),
+            Self::Fixed { measure, .. } => Some(measure),
             Self::ToEffort { .. } => None,
         }
     }
@@ -164,7 +160,7 @@ impl<M: Spans> Prescribed<M> {
     pub const fn effort(&self) -> Option<Rir> {
         match self {
             Self::Fixed { effort, .. } => *effort,
-            Self::ToEffort { effort, .. } | Self::Autoregulated { effort, .. } => Some(*effort),
+            Self::ToEffort { effort, .. } => Some(*effort),
         }
     }
 
@@ -173,7 +169,6 @@ impl<M: Spans> Prescribed<M> {
         match self {
             Self::Fixed { .. } => "fixed",
             Self::ToEffort { .. } => "to_effort",
-            Self::Autoregulated { .. } => "autoregulated",
         }
     }
 }
@@ -218,19 +213,6 @@ impl<M: Spans> PrescribedSet<M> {
         }
     }
 
-    /// Load open, measure pinned, effort binding. A test.
-    ///
-    /// The variant recorded as reachable-but-unreached turns out to be exactly
-    /// what a block's exit test is: work up to a single, nothing left in reserve,
-    /// and the load is whatever the day allows.
-    pub const fn autoregulated(measure: Target<M>, effort: Rir) -> Self {
-        Self {
-            prescription: Prescribed::Autoregulated { measure, effort },
-            rest_after: None,
-            warmup: false,
-        }
-    }
-
     #[must_use]
     pub const fn with_effort(mut self, effort: Rir) -> Self {
         if let Prescribed::Fixed {
@@ -268,9 +250,6 @@ impl<M: Spans + fmt::Display> fmt::Display for PrescribedSet<M> {
                     None => f.write_str("as many as")?,
                 }
                 write!(f, ", {effort} in reserve")?;
-            }
-            Prescribed::Autoregulated { measure, effort } => {
-                write!(f, "{measure} at {effort} in reserve")?;
             }
         }
         if self.warmup {
