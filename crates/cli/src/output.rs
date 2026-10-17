@@ -222,11 +222,11 @@ pub fn strength(report: &application::strength::StrengthReport) {
         for row in rows {
             let (maximum, from) = row.estimate.map_or_else(
                 || (dash(), "no set gives an estimate".to_owned()),
-                |estimate| (format!("{}kg", estimate.one_rep_max), estimate.to_string()),
+                |estimate| (to_a_tenth(estimate.one_rep_max), estimate.to_string()),
             );
             let body = row
                 .body_mass
-                .map_or_else(|| "no weigh-in".to_owned(), |mass| format!("{mass}kg"));
+                .map_or_else(|| "no weigh-in".to_owned(), to_a_tenth);
             let ratio = row.relative.map_or_else(dash, |ratio| ratio.to_string());
             println!(
                 "  {}  {ratio:>6}  {maximum:>10}  {body:>11}  {from}",
@@ -234,6 +234,18 @@ pub fn strength(report: &application::strength::StrengthReport) {
             );
         }
     }
+}
+
+/// A mass to the nearest 0.1 kg, for display (#159).
+///
+/// An estimate is not accurate to the gram and a weigh-in is not read to one,
+/// so printing grams states a confidence neither figure has. The operator,
+/// 2026-10-16: estimated 1RM and body weight print to the nearest 0.1 kg. The
+/// tenth is always printed, so every figure in a column states the same
+/// resolution. What is stored and compared stays in grams.
+fn to_a_tenth(mass: domain::measure::Kg) -> String {
+    let tenths = mass.as_grams().saturating_add(50) / 100;
+    format!("{}.{}kg", tenths / 10, tenths % 10)
 }
 
 pub fn reset(stream: &LandingStream, previous: Option<Watermark>) {
@@ -1921,7 +1933,7 @@ pub fn holidays(all: &domain::schedule::Holidays, from: jiff::civil::Date) {
 
 #[cfg(test)]
 mod tests {
-    use super::{derived_phrase, shares_of};
+    use super::{derived_phrase, shares_of, to_a_tenth};
     use domain::{
         measure::Kg,
         prescription::{Anchor, AnchorProvenance, DerivedFrom, WeekIndex, WeekKind},
@@ -2009,5 +2021,17 @@ mod tests {
             derived_phrase(DerivedFrom::Target(Kg::from_grams(95_000)), WeekKind::Test),
             "for 95kg"
         );
+    }
+
+    /// **Strength figures print to the nearest 0.1 kg** (#159), the tenth
+    /// always shown and half a tenth rounding up.
+    #[test]
+    fn a_strength_figure_prints_to_a_tenth_of_a_kilogramme() {
+        let shown = |grams| to_a_tenth(Kg::from_grams(grams));
+        assert_eq!(shown(113_333), "113.3kg");
+        assert_eq!(shown(87_916), "87.9kg");
+        assert_eq!(shown(87_950), "88.0kg");
+        assert_eq!(shown(85_000), "85.0kg");
+        assert_eq!(shown(49), "0.0kg");
     }
 }
