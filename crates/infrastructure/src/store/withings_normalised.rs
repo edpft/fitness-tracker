@@ -15,7 +15,7 @@
 
 use application::{AccountReader, NormalisedEntityStore, StoreError};
 use domain::{
-    body::{BodyScanWeighIn, Composition, MeasuredBy, Rhythm, Segment},
+    body::{BodyScanWeighIn, Component, Composition, MeasuredBy, Rhythm, Segment},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, RawPayload, SourceRecordId,
@@ -164,7 +164,6 @@ impl NormalisedEntityStore for SqliteWeighInStore {
             "DELETE FROM body_scan_vascular",
             "DELETE FROM body_scan_nerves",
             "DELETE FROM body_scan_heart",
-            "DELETE FROM body_scan_segment",
             "DELETE FROM body_scan_weigh_in",
         ] {
             sqlx::query(statement)
@@ -173,6 +172,7 @@ impl NormalisedEntityStore for SqliteWeighInStore {
                 .map_err(|error| store_error(&error))?;
         }
         let stream = self.stream.to_string();
+        super::weigh_in::clear_composition(&mut tx, &stream).await?;
         sqlx::query!("DELETE FROM weigh_in WHERE stream = ?", stream)
             .execute(&mut *tx)
             .await
@@ -204,18 +204,11 @@ async fn write_composition(
     stream: &str,
     measured_at: &StartedAt,
     composition: &Composition,
-) -> Result<(), StoreError> {
+) -> Result<i64, StoreError> {
     let id = composition.from.landed_as.as_i64();
     let zone = measured_at.zone().id().to_owned();
     let measured_at = measured_at.instant().to_string();
     let mass = grams(composition.mass)?;
-    let fat_free = grams(composition.fat_free_mass)?;
-    let fat = grams(composition.fat_mass)?;
-    let muscle = grams(composition.muscle_mass)?;
-    let water = grams(composition.body_water)?;
-    let extracellular = grams(composition.extracellular_water)?;
-    let intracellular = grams(composition.intracellular_water)?;
-    let bone = grams(composition.bone_mass)?;
     let visceral = i64::from(composition.visceral_fat.as_tenths());
     let metabolic_rate = i64::from(composition.basal_metabolic_rate.as_u32());
     let metabolic_age = i64::from(composition.metabolic_age.as_tenths_of_a_year());
@@ -239,22 +232,13 @@ async fn write_composition(
     sqlx::query!(
         r#"
         INSERT INTO body_scan_weigh_in (
-            landing_record_id, weigh_in, fat_free_mass_grams,
-            fat_mass_grams, muscle_mass_grams, body_water_grams, extracellular_water_grams,
-            intracellular_water_grams, bone_mass_grams, visceral_fat_tenths,
-            basal_metabolic_rate_kcal, metabolic_age_tenths, run_id
+            landing_record_id, weigh_in, visceral_fat_tenths, basal_metabolic_rate_kcal,
+            metabolic_age_tenths, run_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         "#,
         id,
         weigh_in.id,
-        fat_free,
-        fat,
-        muscle,
-        water,
-        extracellular,
-        intracellular,
-        bone,
         visceral,
         metabolic_rate,
         metabolic_age,
@@ -263,7 +247,39 @@ async fn write_composition(
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
-    Ok(())
+
+    for (component, mass) in [
+        (Component::FatFree, composition.fat_free_mass),
+        (Component::Fat, composition.fat_mass),
+        (Component::Muscle, composition.muscle_mass),
+        (Component::Water, composition.body_water),
+        (
+            Component::ExtracellularWater,
+            composition.extracellular_water,
+        ),
+        (
+            Component::IntracellularWater,
+            composition.intracellular_water,
+        ),
+        (Component::Bone, composition.bone_mass),
+    ] {
+        let component = component.as_str();
+        let mass = grams(mass)?;
+        sqlx::query!(
+            r#"
+            INSERT INTO body_composition (weigh_in, component, mass_grams, run_id)
+            VALUES (?, ?, ?, ?)
+            "#,
+            weigh_in.id,
+            component,
+            mass,
+            run_id,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(weigh_in.id)
 }
 
 async fn write_weigh_in(
@@ -274,7 +290,8 @@ async fn write_weigh_in(
 ) -> Result<(), StoreError> {
     let composition = weigh_in.composition();
     let id = composition.from.landed_as.as_i64();
-    write_composition(tx, run_id, stream, weigh_in.measured_at(), composition).await?;
+    let mass_row =
+        write_composition(tx, run_id, stream, weigh_in.measured_at(), composition).await?;
 
     let segments = &composition.segments;
     for (name, segment) in [
@@ -284,7 +301,7 @@ async fn write_weigh_in(
         ("right-leg", &segments.right_leg),
         ("torso", &segments.torso),
     ] {
-        write_segment(tx, id, name, segment).await?;
+        write_segment(tx, run_id, mass_row, name, segment).await?;
     }
     write_part(tx, id, "composition", &composition.from).await?;
 
@@ -355,29 +372,33 @@ async fn write_weigh_in(
 
 async fn write_segment(
     tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
     weigh_in: i64,
     name: &str,
     segment: &Segment,
 ) -> Result<(), StoreError> {
-    let fat_free = grams(segment.fat_free_mass)?;
-    let fat = grams(segment.fat_mass)?;
-    let muscle = grams(segment.muscle_mass)?;
-    sqlx::query!(
-        r#"
-        INSERT INTO body_scan_segment (
-            weigh_in, segment, fat_free_mass_grams, fat_mass_grams, muscle_mass_grams
+    for (component, mass) in [
+        (Component::FatFree, segment.fat_free_mass),
+        (Component::Fat, segment.fat_mass),
+        (Component::Muscle, segment.muscle_mass),
+    ] {
+        let component = component.as_str();
+        let mass = grams(mass)?;
+        sqlx::query!(
+            r#"
+            INSERT INTO segment_composition (weigh_in, segment, component, mass_grams, run_id)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+            weigh_in,
+            name,
+            component,
+            mass,
+            run_id,
         )
-        VALUES (?, ?, ?, ?, ?)
-        "#,
-        weigh_in,
-        name,
-        fat_free,
-        fat,
-        muscle,
-    )
-    .execute(&mut **tx)
-    .await
-    .map_err(|error| store_error(&error))?;
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
     Ok(())
 }
 

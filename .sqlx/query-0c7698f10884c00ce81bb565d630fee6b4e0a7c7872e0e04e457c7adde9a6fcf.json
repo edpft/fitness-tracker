@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO body_scan_weigh_in (\n            landing_record_id, weigh_in, visceral_fat_tenths, basal_metabolic_rate_kcal,\n            metabolic_age_tenths, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "0c7698f10884c00ce81bb565d630fee6b4e0a7c7872e0e04e457c7adde9a6fcf"
+}

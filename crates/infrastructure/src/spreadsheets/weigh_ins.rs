@@ -7,9 +7,10 @@
 //! matches the training logs, where `Weight` and `kg` are the load on the bar:
 //! `1RM`, `Strength` and `strength_training` all have one.
 //!
-//! **Only the typed-in mass is read.** The 7-day averages, % change, BMI, fat %
-//! and water % beside it are derived, or method-dependent (§ 6), or both, and
-//! none of them is a weigh-in.
+//! **The typed-in mass, and the fat and water percentages typed beside it.**
+//! The percentages are composition, linked to the mass on their row and never
+//! read without it (#275). The 7-day averages, % change, BMI, `Fat KG` and
+//! `Lean KG` beside them are formulas over those cells, and are not read.
 //!
 //! **A blank is a gap, not a zero** (§ 37), and so is `???`, which is what the
 //! operator wrote when he did not know. So is a zero: `2018 bodyweight only`
@@ -19,7 +20,9 @@
 
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
-    body::{Cell, CellRef, Entry, ManualWeighIn, SheetName},
+    body::{
+        Cell, CellRef, Component, Entry, ManualComposition, ManualWeighIn, Percentage, SheetName,
+    },
     landing::{FileProvenance, LandedRecord},
     measure::Kg,
     normalised::{OperatorZone, RefusalLocus, RefusalReason},
@@ -115,6 +118,13 @@ const LAYOUTS: &[Layout] = &[
     },
 ];
 
+/// What a composition column or row is headed, in a sheet laid out as
+/// weigh-ins. Each was typed in as a fraction, `0.247` for 24.7 %.
+const COMPOSITION: &[(Component, &[&str])] = &[
+    (Component::Fat, &["Fat %", "Fat", "Fat (%)", "F%"]),
+    (Component::Water, &["Water %", "Water", "Water (%)"]),
+];
+
 /// How far down a sheet its header may sit. `Body Weight 2018`'s is on the
 /// fourth row, below a summary.
 const HEADER_WITHIN: u32 = 6;
@@ -202,15 +212,34 @@ fn read_sheet(
                 ) else {
                     continue;
                 };
+                let columns: Vec<(Component, u32)> = COMPOSITION
+                    .iter()
+                    .filter_map(|(component, labels)| {
+                        (0..sheet.width())
+                            .find(|&column| {
+                                sheet
+                                    .get(header_row, column)
+                                    .text()
+                                    .is_some_and(|text| labels.contains(&text))
+                            })
+                            .map(|column| (*component, column))
+                    })
+                    .collect();
                 for row in header_row.saturating_add(1)..sheet.height() {
-                    weigh_in(
+                    let written = weigh_in(
                         sheet.get(row, date),
                         sheet.get(row, mass),
                         place(row, mass),
                         entry,
                         scribe,
-                        weigh_ins,
                     );
+                    let beside = columns
+                        .iter()
+                        .map(|&(component, column)| {
+                            (component, sheet.get(row, column), place(row, column))
+                        })
+                        .collect();
+                    with_composition(written, beside, scribe, weigh_ins);
                 }
                 return;
             }
@@ -221,20 +250,93 @@ fn read_sheet(
                 let (Some(date_row), Some(mass_row)) = (labelled(date), labelled(mass)) else {
                     continue;
                 };
+                let rows: Vec<(Component, u32)> = COMPOSITION
+                    .iter()
+                    .filter_map(|(component, labels)| {
+                        labels
+                            .iter()
+                            .find_map(|label| labelled(label))
+                            .map(|row| (*component, row))
+                    })
+                    .collect();
                 for column in 1..sheet.width() {
-                    weigh_in(
+                    let written = weigh_in(
                         sheet.get(date_row, column),
                         sheet.get(mass_row, column),
                         place(mass_row, column),
                         entry,
                         scribe,
-                        weigh_ins,
                     );
+                    let beside = rows
+                        .iter()
+                        .map(|&(component, row)| {
+                            (component, sheet.get(row, column), place(row, column))
+                        })
+                        .collect();
+                    with_composition(written, beside, scribe, weigh_ins);
                 }
                 return;
             }
         }
     }
+}
+
+/// Whether a cell holds nothing: a blank, or `???` for not known.
+fn is_gap(value: &Value) -> bool {
+    match value {
+        Value::Empty => true,
+        Value::Text(text) => matches!(text.trim(), "" | "???"),
+        Value::Number(_) | Value::Day(_) | Value::Time(_) | Value::Other(_) => false,
+    }
+}
+
+/// A weigh-in with the composition written beside it; or, where there is no
+/// weigh-in, a refusal for any composition that would have stood alone.
+fn with_composition(
+    weigh_in: Option<ManualWeighIn>,
+    beside: Vec<(Component, &Value, Cell)>,
+    scribe: &mut Scribe,
+    weigh_ins: &mut Vec<ManualWeighIn>,
+) {
+    let beside = beside.into_iter().filter(|(_, value, _)| !is_gap(value));
+    let Some(weigh_in) = weigh_in else {
+        for (component, _, cell) in beside {
+            let at = format!("{}!{}", cell.sheet, cell.cell);
+            refuse(
+                scribe,
+                &at,
+                component.as_str(),
+                "no weigh-in on its row to read it against",
+            );
+        }
+        return;
+    };
+    let mut composition = Vec::new();
+    for (component, value, cell) in beside {
+        let at = format!("{}!{}", cell.sheet, cell.cell);
+        let percentage = match value {
+            Value::Number(number) => Percentage::from_fraction(&number.to_string()),
+            Value::Text(text) => Percentage::from_fraction(text.trim()),
+            Value::Empty | Value::Day(_) | Value::Time(_) | Value::Other(_) => {
+                refuse(
+                    scribe,
+                    &at,
+                    component.as_str(),
+                    &format!("{value:?} is not a percentage"),
+                );
+                continue;
+            }
+        };
+        match percentage {
+            Ok(percentage) => composition.push(ManualComposition {
+                component,
+                percentage,
+                written_in: cell,
+            }),
+            Err(error) => refuse(scribe, &at, component.as_str(), &error.to_string()),
+        }
+    }
+    weigh_ins.push(weigh_in.with_composition(composition));
 }
 
 /// One weigh-in, a gap, or a refusal.
@@ -244,38 +346,50 @@ fn weigh_in(
     cell: Cell,
     entry: Entry,
     scribe: &mut Scribe,
-    weigh_ins: &mut Vec<ManualWeighIn>,
-) {
+) -> Option<ManualWeighIn> {
     let at = format!("{}!{}", cell.sheet, cell.cell);
+    if is_gap(mass) {
+        return None;
+    }
     let mass = match mass {
-        Value::Empty => return,
-        Value::Text(text) if matches!(text.trim(), "" | "???") => return,
+        Value::Empty => return None,
         Value::Number(number) => Kg::try_from(number.to_string()),
         Value::Text(text) => Kg::try_from(text.trim()),
         Value::Day(_) | Value::Time(_) | Value::Other(_) => {
-            return refuse(scribe, &at, "mass", &format!("{mass:?} is not a mass"));
+            refuse(scribe, &at, "mass", &format!("{mass:?} is not a mass"));
+            return None;
         }
     };
     let mass = match mass {
-        Ok(mass) if mass.is_none() => return,
+        Ok(mass) if mass.is_none() => return None,
         Ok(mass) => mass,
-        Err(error) => return refuse(scribe, &at, "mass", &error.to_string()),
+        Err(error) => {
+            refuse(scribe, &at, "mass", &error.to_string());
+            return None;
+        }
     };
 
     let on = match date {
         Value::Day(day) => *day,
         Value::Text(text) => match Date::strptime(CSV_DATE, text.trim()) {
             Ok(day) => day,
-            Err(error) => return refuse(scribe, &at, "date", &format!("{text:?}: {error}")),
+            Err(error) => {
+                refuse(scribe, &at, "date", &format!("{text:?}: {error}"));
+                return None;
+            }
         },
         Value::Empty | Value::Number(_) | Value::Time(_) | Value::Other(_) => {
-            return refuse(scribe, &at, "date", &format!("{date:?} is not a day"));
+            refuse(scribe, &at, "date", &format!("{date:?} is not a day"));
+            return None;
         }
     };
 
     match ManualWeighIn::new(on, mass, cell, entry) {
-        Ok(weigh_in) => weigh_ins.push(weigh_in),
-        Err(error) => refuse(scribe, &at, "mass", &error.to_string()),
+        Ok(weigh_in) => Some(weigh_in),
+        Err(error) => {
+            refuse(scribe, &at, "mass", &error.to_string());
+            None
+        }
     }
 }
 

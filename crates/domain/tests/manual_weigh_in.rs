@@ -1,7 +1,10 @@
 //! The address of a manual weigh-in, and what one may hold (#273).
 
 use domain::{
-    body::{Cell, CellRef, Entry, InvalidWeighIn, LastSaved, ManualWeighIn, SheetName},
+    body::{
+        Cell, CellRef, Entry, InvalidPercentage, InvalidWeighIn, LastSaved, ManualWeighIn,
+        Percentage, SheetName,
+    },
     landing::{FilePath, LandingRecordId, SourceRecordId},
     measure::Kg,
 };
@@ -48,4 +51,28 @@ fn a_weigh_in_of_no_mass_is_not_a_weigh_in() {
     let weigh_in = ManualWeighIn::new(date(2016, 1, 5), Kg::from_grams(66_300), cell, saved)
         .expect("a weigh-in");
     assert_eq!(weigh_in.mass().to_string(), "66.3");
+}
+
+#[test]
+fn a_percentage_is_the_fraction_a_cell_holds_in_tenths() {
+    let fat = Percentage::from_fraction("0.247").expect("a fraction");
+    assert_eq!(fat.as_tenths(), 247);
+    assert_eq!(fat.to_string(), "24.7%");
+    assert_eq!(
+        Percentage::from_fraction("0.57").map(|water| water.to_string()),
+        Ok("57%".to_owned())
+    );
+    assert!(matches!(
+        Percentage::from_fraction("1.5"),
+        Err(InvalidPercentage::MoreThanTheWhole { .. })
+    ));
+    for value in ["-0.1", "0.2471", "fat"] {
+        assert!(
+            matches!(
+                Percentage::from_fraction(value),
+                Err(InvalidPercentage::NotAFraction { .. })
+            ),
+            "{value}"
+        );
+    }
 }

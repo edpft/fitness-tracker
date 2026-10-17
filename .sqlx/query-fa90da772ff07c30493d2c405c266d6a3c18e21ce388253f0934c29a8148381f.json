@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM segment_composition WHERE weigh_in IN (SELECT id FROM weigh_in WHERE stream = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fa90da772ff07c30493d2c405c266d6a3c18e21ce388253f0934c29a8148381f"
+}

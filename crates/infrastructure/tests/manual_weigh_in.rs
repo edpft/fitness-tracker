@@ -16,6 +16,7 @@ type Failure = Box<dyn std::error::Error>;
 
 const WEIGH_INS: &[u8] = include_bytes!("fixtures/spreadsheets/weigh-ins.xlsx");
 const TRAINING_LOG: &[u8] = include_bytes!("fixtures/spreadsheets/training-log.xlsx");
+const COMPOSITION: &[u8] = include_bytes!("fixtures/spreadsheets/composition.xlsx");
 
 fn record(path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
     let provenance = FileProvenance::new(
@@ -89,6 +90,76 @@ fn every_filled_weight_cell_is_a_weigh_in_named_by_its_cell() {
     assert!(
         refusals.iter().all(|detail| detail.starts_with("2016!C6:")),
         "{refusals:?}"
+    );
+}
+
+/// Each composition figure as `sheet!cell component percentage`, beside the
+/// weigh-in it is read against.
+fn composition_of(weigh_ins: &[&ManualWeighIn]) -> Vec<String> {
+    weigh_ins
+        .iter()
+        .flat_map(|weigh_in| {
+            weigh_in.composition().iter().map(|written| {
+                format!(
+                    "{}!{} {} {} beside {}",
+                    written.written_in.sheet,
+                    written.written_in.cell,
+                    written.component.as_str(),
+                    written.percentage,
+                    weigh_in.written_in().cell,
+                )
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn fat_and_water_are_read_beside_the_mass_on_their_row() {
+    let translation =
+        translate("Dropbox/Random/Body Weight 2018.xlsx", COMPOSITION).expect("translates");
+    let Translation::Entities { entities, refusals } = translation else {
+        panic!("expected weigh-ins, got {translation:?}");
+    };
+    let weigh_ins: Vec<&ManualWeighIn> = entities.iter().collect();
+
+    assert_eq!(
+        described(&weigh_ins),
+        [
+            "2018!C2 2018-01-01 73.9",
+            "2018!C3 2018-01-02 73.9",
+            "2018!C4 2018-01-03 73.6",
+            "2018!C6 2018-01-05 73.4",
+            "Weight, BMI, Fat%!B2 2014-12-29 68.3",
+            "Weight, BMI, Fat%!C2 2014-12-30 68",
+        ]
+    );
+    assert_eq!(
+        composition_of(&weigh_ins),
+        [
+            "2018!E2 fat 24.7% beside C2",
+            "2018!F2 water 56.6% beside C2",
+            "2018!E3 fat 24.6% beside C3",
+            "2018!F6 water 57% beside C6",
+            "Weight, BMI, Fat%!B3 fat 20% beside B2",
+            "Weight, BMI, Fat%!B4 water 60.3% beside B2",
+            "Weight, BMI, Fat%!C3 fat 19.8% beside C2",
+        ],
+        "a blank is a gap, in a column or a row"
+    );
+
+    let refusals: Vec<String> = refusals.iter().map(refused_detail).collect();
+    assert_eq!(refusals.len(), 2, "{refusals:?}");
+    assert!(
+        refusals
+            .first()
+            .is_some_and(|detail| detail.starts_with("2018!E5:")),
+        "a fat percentage with no mass on its row stands alone: {refusals:?}"
+    );
+    assert!(
+        refusals
+            .get(1)
+            .is_some_and(|detail| detail.starts_with("2018!E6:")),
+        "150 % is more than the whole: {refusals:?}"
     );
 }
 
@@ -181,7 +252,7 @@ mod store {
     };
     use sqlx::SqlitePool;
 
-    use super::{Failure, TRAINING_LOG, WEIGH_INS, record};
+    use super::{COMPOSITION, Failure, TRAINING_LOG, WEIGH_INS, record};
 
     struct EpochClock;
 
@@ -206,6 +277,21 @@ mod store {
             landing_record("Dropbox/Random/Body Weight.xlsx", WEIGH_INS)?,
             landing_record("Dropbox/Random/1RM.xlsx", TRAINING_LOG)?,
         ];
+        landing.append(run, records).await?;
+        Ok((pool, directory))
+    }
+
+    async fn landed_with_composition() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
+        let directory = tempfile::tempdir()?;
+        let pool = connect(&directory.path().join("test.db")).await?;
+
+        let landing = SpreadsheetFileLandingStore::new(pool.clone())?;
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+        let records = vec![landing_record(
+            "Dropbox/Random/Body Weight 2018.xlsx",
+            COMPOSITION,
+        )?];
         landing.append(run, records).await?;
         Ok((pool, directory))
     }
@@ -309,6 +395,41 @@ mod store {
                 6,
                 "relative strength reads every weighing, the spreadsheets' included"
             );
+            Ok(())
+        })
+        .and_then(|result| result);
+        outcome.expect("the derivation round-trips");
+    }
+
+    #[test]
+    fn composition_is_written_against_its_weigh_in_and_replaced_with_it() {
+        let outcome: Result<(), Failure> = block_on(async {
+            let (pool, _directory) = landed_with_composition().await?;
+
+            derive(&pool).await?;
+            let second = derive(&pool).await?;
+            assert_eq!(second.workouts_written.as_usize(), 6);
+            assert_eq!(
+                count(&pool, "SELECT COUNT(*) FROM body_composition").await?,
+                7,
+                "the first derivation's rows were replaced, not added to"
+            );
+            assert_eq!(
+                count(&pool, "SELECT COUNT(*) FROM manual_composition").await?,
+                7,
+                "every figure names the cell it was typed into"
+            );
+
+            let fat: (i64, String, i64) = sqlx::query_as(
+                "SELECT c.percentage_tenths, m.cell, w.mass_grams
+                 FROM body_composition c
+                 JOIN manual_composition m USING (weigh_in, component)
+                 JOIN weigh_in w ON w.id = c.weigh_in
+                 WHERE w.on_day = '2018-01-01' AND c.component = 'fat'",
+            )
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(fat, (247, "E2".to_owned(), 73_900));
             Ok(())
         })
         .and_then(|result| result);
