@@ -238,12 +238,8 @@ fn the_heavy_session_is_the_test() {
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
     assert_eq!(warmups, 4, "the authored ramp is four steps");
     assert_eq!(working.len(), 3, "three attempts, and nothing after them");
-    // **Every attempt states its load**, and only the last asks for
-    // everything: the two below it are steps toward the target.
-    assert!(
-        working.iter().all(|set| set.prescription.load().is_some()),
-        "every attempt names its load"
-    );
+    // Only the last attempt asks for everything: the two below it are steps
+    // toward the target.
     let efforts: Vec<_> = working
         .iter()
         .map(|set| set.prescription.effort())
@@ -275,10 +271,6 @@ fn the_light_session_is_the_predecessors() {
         working.len() > 1,
         "a top set and its back-offs, not one attempt: got {} working sets",
         working.len()
-    );
-    assert!(
-        working.iter().all(|set| set.prescription.load().is_some()),
-        "every working set of an ordinary session carries a load"
     );
 }
 
@@ -417,10 +409,6 @@ fn a_blocks_entry_test_ramps_toward_what_it_expects() {
     };
     let working: Vec<_> = sets.iter().filter(|set| !set.warmup).collect();
     assert_eq!(working.len(), 3, "three attempts, and nothing after them");
-    assert!(
-        working.iter().all(|set| set.prescription.load().is_some()),
-        "every attempt names its load"
-    );
     assert_eq!(
         working.last().and_then(|set| set.prescription.effort()),
         Some(domain::gym::Rir::Zero),
@@ -451,9 +439,7 @@ fn the_entry_test_weeks_other_session_runs_the_authored_load() {
     };
     assert_eq!(
         first.prescription.load(),
-        Some(domain::gym::Load::Absolute(
-            domain::measure::Kg::from_grams(60_000)
-        )),
+        domain::gym::Load::Absolute(domain::measure::Kg::from_grams(60_000)),
         "the 60kg the block states, not a share of anything"
     );
 }
@@ -622,9 +608,7 @@ fn a_published_test_weeks_other_session_is_the_charts_taper() {
     for set in &working {
         assert_eq!(
             set.prescription.load(),
-            Some(domain::gym::Load::Absolute(
-                domain::measure::Kg::from_grams(TAPER_GRAMS)
-            )),
+            domain::gym::Load::Absolute(domain::measure::Kg::from_grams(TAPER_GRAMS)),
             "75% of the target, on the barbell's grid"
         );
     }
@@ -639,7 +623,7 @@ fn a_published_test_week_still_tests_on_the_heavy_session() {
     let working = primary_of!(issued);
     assert_eq!(working.len(), 3, "three attempts, and nothing after them");
     assert_eq!(
-        working.last().and_then(|set| set.prescription.load()),
+        working.last().map(|set| set.prescription.load()),
         Some(domain::gym::Load::Absolute(
             domain::measure::Kg::from_grams(TARGET_GRAMS)
         )),
@@ -662,9 +646,7 @@ fn the_published_taper_does_not_defer_to_a_predecessor() {
     assert_eq!(working.len(), 3, "µ4 day one is three sets");
     assert_eq!(
         working[0].prescription.load(),
-        Some(domain::gym::Load::Absolute(
-            domain::measure::Kg::from_grams(TAPER_GRAMS)
-        )),
+        domain::gym::Load::Absolute(domain::measure::Kg::from_grams(TAPER_GRAMS)),
         "the chart's share of the target, not where the ladder before it stands"
     );
 }
@@ -745,7 +727,7 @@ fn top_set(workout: &domain::prescription::PrescribedWorkout) -> Option<domain::
     };
     sets.iter()
         .find(|set| !set.warmup)
-        .and_then(|set| set.prescription.load())
+        .map(|set| set.prescription.load())
 }
 
 /// **The holding week is one week of the linear template, opened from the test

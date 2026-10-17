@@ -308,18 +308,13 @@ enum SetOutcome {
 ///
 /// A set that pins no load still needs a template, so it resolves one at zero —
 /// which is the same template any unloaded set of that exercise would take.
-fn resolve(exercise: Exercise, load: Option<Load>) -> Result<(String, Option<Kg>), String> {
-    let written = write_load(exercise, load.unwrap_or(Load::Absolute(Kg::NONE)))
-        .map_err(|error| error.to_string())?;
-
-    // A set that pins no load resolves a template and writes no weight, which is
-    // how "work up to a single" reaches the phone as an empty weight field
-    // rather than as a zero somebody might take literally.
-    Ok((written.template_id.to_owned(), load.map(|_| written.weight)))
+fn resolve(exercise: Exercise, load: Load) -> Result<(String, Kg), String> {
+    let written = write_load(exercise, load).map_err(|error| error.to_string())?;
+    Ok((written.template_id.to_owned(), written.weight))
 }
 
-fn weight(kg: Option<Kg>) -> Option<Box<RawValue>> {
-    kg.and_then(|kg| RawValue::from_string(kg.to_string()).ok())
+fn weight(kg: Kg) -> Option<Box<RawValue>> {
+    RawValue::from_string(kg.to_string()).ok()
 }
 
 const fn kind(warmup: bool) -> &'static str {
@@ -377,10 +372,6 @@ fn annotate<M: std::fmt::Display + Spans>(prescription: &Prescribed<M>) -> Optio
         } => Some(predicted.as_ref().map_or_else(
             || format!("as many as, {} in reserve", Rir::as_str(*effort)),
             |measure| format!("~{measure}, {} in reserve", Rir::as_str(*effort)),
-        )),
-        Prescribed::Autoregulated { measure, effort } => Some(format!(
-            "work up to {measure}, {} in reserve — the load is the day's",
-            Rir::as_str(*effort)
         )),
     }
 }
