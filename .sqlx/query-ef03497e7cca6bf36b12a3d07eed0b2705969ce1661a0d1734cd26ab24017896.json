@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO manual_composition (weigh_in, component, landing_record_id, sheet, cell)\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "ef03497e7cca6bf36b12a3d07eed0b2705969ce1661a0d1734cd26ab24017896"
+}

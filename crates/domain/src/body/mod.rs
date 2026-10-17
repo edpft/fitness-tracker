@@ -9,6 +9,7 @@
 //! same scale (operator, 2026-09-27, #273).
 
 pub mod canonical;
+pub mod composition;
 pub mod hrv;
 pub mod manual;
 pub mod quantity;
@@ -19,15 +20,19 @@ pub use canonical::{
     CanonicalWeighIn, LeftOut, NegativeNormalisedWeighInId, NormalisedWeighInId, Stated, Unsettled,
     WeighInAccount, WeighInCount, WeighIns, canonical_weigh_ins,
 };
+pub use composition::Component;
 pub use hrv::{
     HrvBaseline, HrvReading, HrvStatus, InvalidWindow, LastNight, MeasurementWindow, OvernightHrv,
     OvernightHrvRecord, WeeklyStatus,
 };
 pub use manual::{
     Cell, CellRef, Entry, InvalidCellRef, InvalidSheetName, InvalidWeighIn, LastSaved,
-    ManualWeighIn, SheetName,
+    ManualComposition, ManualWeighIn, SheetName,
 };
-pub use quantity::{Age, KilocaloriesPerDay, PulseWaveVelocity, SkinConductance, VisceralFat};
+pub use quantity::{
+    Age, InvalidPercentage, KilocaloriesPerDay, Percentage, PulseWaveVelocity, SkinConductance,
+    VisceralFat,
+};
 pub use resting::{RestingHeartRate, RestingHeartRateRecord};
 pub use weigh_in::{
     BodyScanWeighIn, Composition, HeartReading, MeasuredBy, NerveReading, Rhythm, Segment,
