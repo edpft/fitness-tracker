@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use crate::measure::mass::thousandths;
+
 /// Writes tenths as a decimal, dropping a trailing `.0`.
 fn tenths(f: &mut fmt::Formatter<'_>, value: u32) -> fmt::Result {
     let (whole, tenth) = (value / 10, value % 10);
@@ -14,6 +16,60 @@ fn tenths(f: &mut fmt::Formatter<'_>, value: u32) -> fmt::Result {
         write!(f, "{whole}")
     } else {
         write!(f, "{whole}.{tenth}")
+    }
+}
+
+/// Why a percentage could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidPercentage {
+    #[error("{value:?} is not a fraction to three decimal places")]
+    NotAFraction { value: String },
+    #[error("{value:?} is more than the whole")]
+    MoreThanTheWhole { value: String },
+}
+
+/// A percentage of the weigh-in's mass, in tenths of a percent.
+///
+/// **Tenths because that is what was written**: the spreadsheets hold fat and
+/// water as fractions to three decimal places, `0.247` for 24.7 %.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Percentage(u16);
+
+impl Percentage {
+    /// A percentage written as a fraction of the whole, as a spreadsheet cell
+    /// formatted as a percentage holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidPercentage`] for a value that is not a decimal fraction to three
+    /// places, is negative, or is more than one.
+    pub fn from_fraction(value: &str) -> Result<Self, InvalidPercentage> {
+        let not_a_fraction = || InvalidPercentage::NotAFraction {
+            value: value.to_owned(),
+        };
+        let tenths = thousandths(value).map_err(|_| not_a_fraction())?;
+        if tenths < 0 {
+            return Err(not_a_fraction());
+        }
+        if tenths > 1_000 {
+            return Err(InvalidPercentage::MoreThanTheWhole {
+                value: value.to_owned(),
+            });
+        }
+        u16::try_from(tenths)
+            .map(Self)
+            .map_err(|_| not_a_fraction())
+    }
+
+    pub const fn as_tenths(self) -> u16 {
+        self.0
+    }
+}
+
+impl fmt::Display for Percentage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        tenths(f, u32::from(self.0))?;
+        f.write_str("%")
     }
 }
 

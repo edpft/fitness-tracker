@@ -19,5 +19,6 @@ doc-valid-idents = [
   "HTTPie",
   "CrossFit",
   "MyFitnessPal",
+  "InBody",
   "..",
 ]

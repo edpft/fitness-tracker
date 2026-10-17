@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO body_composition (weigh_in, component, mass_grams, run_id)\n            VALUES (?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "3f6a4a6f8d5047d9c4f17b6ced63b38ede835272a7b0fd53c6753935078a0015"
+}
