@@ -19,6 +19,7 @@
 
 use jiff::{Timestamp, civil::Date};
 
+use super::{composition::Component, quantity::Percentage};
 pub use crate::landing::{Cell, CellRef, InvalidCellRef, InvalidSheetName, SheetName};
 use crate::{landing::SourceRecordId, measure::Kg, normalised::NormalisedEntity};
 
@@ -63,6 +64,17 @@ impl LastSaved {
     }
 }
 
+/// What the scale said the body was made of, written beside the mass.
+///
+/// **Its own cell**, because the figure was typed into one of its own: the
+/// cell is its method, as the mass's cell is the weigh-in's (#275).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualComposition {
+    pub component: Component,
+    pub percentage: Percentage,
+    pub written_in: Cell,
+}
+
 /// A body mass the operator read off the scale and wrote down.
 ///
 /// **A day and never a time**: no sheet records when in the day he stepped on.
@@ -72,6 +84,7 @@ pub struct ManualWeighIn {
     mass: Kg,
     written_in: Cell,
     entry: Entry,
+    composition: Vec<ManualComposition>,
 }
 
 impl ManualWeighIn {
@@ -87,7 +100,20 @@ impl ManualWeighIn {
             mass,
             written_in,
             entry,
+            composition: Vec::new(),
         })
+    }
+
+    /// The composition written beside the mass, read against it and never
+    /// without it.
+    #[must_use]
+    pub fn with_composition(mut self, composition: Vec<ManualComposition>) -> Self {
+        self.composition = composition;
+        self
+    }
+
+    pub fn composition(&self) -> &[ManualComposition] {
+        &self.composition
     }
 
     pub const fn on(&self) -> Date {

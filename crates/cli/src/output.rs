@@ -5,12 +5,12 @@
 //! finding nothing at all — and neither is a failure.
 
 use application::{
-    DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
+    ByReason, DerivationStatus, NormalisationSummary, RefusalReport, RunSummary, StreamStatus,
 };
 use domain::{
     canonical::SessionCount,
     landing::{LandingStream, RunOutcome, Watermark},
-    normalised::{Refusal, RefusalKind},
+    normalised::{Refusal, RefusalKind, RefusalLocus},
     prescription::{
         BlockPeriodisation, GenerationParameters, GymMesocycle, Linear, Progression, WeekIndex,
         WeekPlan,
@@ -222,11 +222,11 @@ pub fn strength(report: &application::strength::StrengthReport) {
         for row in rows {
             let (maximum, from) = row.estimate.map_or_else(
                 || (dash(), "no set gives an estimate".to_owned()),
-                |estimate| (format!("{}kg", estimate.one_rep_max), estimate.to_string()),
+                |estimate| (to_a_tenth(estimate.one_rep_max), estimate.to_string()),
             );
             let body = row
                 .body_mass
-                .map_or_else(|| "no weigh-in".to_owned(), |mass| format!("{mass}kg"));
+                .map_or_else(|| "no weigh-in".to_owned(), to_a_tenth);
             let ratio = row.relative.map_or_else(dash, |ratio| ratio.to_string());
             println!(
                 "  {}  {ratio:>6}  {maximum:>10}  {body:>11}  {from}",
@@ -234,6 +234,18 @@ pub fn strength(report: &application::strength::StrengthReport) {
             );
         }
     }
+}
+
+/// A mass to the nearest 0.1 kg, for display (#159).
+///
+/// An estimate is not accurate to the gram and a weigh-in is not read to one,
+/// so printing grams states a confidence neither figure has. The operator,
+/// 2026-10-16: estimated 1RM and body weight print to the nearest 0.1 kg. The
+/// tenth is always printed, so every figure in a column states the same
+/// resolution. What is stored and compared stays in grams.
+fn to_a_tenth(mass: domain::measure::Kg) -> String {
+    let tenths = mass.as_grams().saturating_add(50) / 100;
+    format!("{}.{}kg", tenths / 10, tenths % 10)
 }
 
 pub fn reset(stream: &LandingStream, previous: Option<Watermark>) {
@@ -345,11 +357,18 @@ pub fn derivation_succeeded(summary: &NormalisationSummary) {
     }
 }
 
-/// Grouped by what an operator should *do*, not by record.
+/// Grouped by what an operator should *do*, then by reason, not by record.
 ///
 /// Three different actions — fix it at source, live with it, or note it as
 /// evidence for a later feature — and the model of record says telling them
 /// apart is the point of recording them at all.
+///
+/// **The counts come first and the records after.** A stream with thousands of
+/// refusals gives a few reasons thousands of times — 1,723 of one Garmin
+/// account's 2,433 were the same sentence, once per ride — and listing them one
+/// by one buried the reasons worth acting on (#296). So every reason is
+/// counted at the top, and below it every record that gave it, so nothing
+/// needed to find a record is lost to the count.
 pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
     let when = report
         .derived_at
@@ -366,33 +385,76 @@ pub fn refusals(stream: &LandingStream, report: &RefusalReport) {
         report.refusals.len()
     );
 
-    for kind in [
+    let by_reason = report.by_reason();
+    let kinds = [
         RefusalKind::WrongData,
         RefusalKind::DeclaredLimitation,
         RefusalKind::Unmodelled,
-    ] {
-        let of_kind: Vec<&Refusal> = report
-            .refusals
+    ];
+
+    for kind in kinds {
+        let of_kind: Vec<&ByReason<'_>> = by_reason
             .iter()
-            .filter(|refusal| refusal.kind() == kind)
+            .filter(|entry| entry.kind() == kind)
             .collect();
         if of_kind.is_empty() {
             continue;
         }
-
-        println!("\n{kind} ({})", of_kind.len());
-        for refusal in of_kind {
-            let exercise = refusal
-                .exercise
-                .map_or_else(String::new, |exercise| format!("  {exercise}"));
-            println!(
-                "  {}  {:<22}{exercise}",
-                short(refusal.source_record_id.as_str()),
-                refusal.locus.to_string(),
-            );
-            println!("      {}", refusal.reason);
+        let total: usize = of_kind.iter().map(|entry| entry.count()).sum();
+        println!("\n{kind} ({total})");
+        for entry in of_kind {
+            println!("  {:>5}  {}", entry.count(), entry.reason());
         }
     }
+
+    // Already in kind order, so the records follow the counts above.
+    for entry in &by_reason {
+        println!("\n{} ({})", entry.reason(), entry.count());
+        for line in packed(entry.refusals().map(refused_at)) {
+            println!("  {line}");
+        }
+    }
+}
+
+/// Where one refusal sat: the record, and below it the place and exercise
+/// where those say more than the record does.
+fn refused_at(refusal: &Refusal) -> String {
+    let id = short(refusal.source_record_id.as_str());
+    let place = match refusal.locus {
+        RefusalLocus::Record => None,
+        locus => Some(locus.to_string()),
+    };
+    let exercise = refusal.exercise.map(|exercise| exercise.to_string());
+    match (place, exercise) {
+        (None, None) => id,
+        (Some(place), None) => format!("{id} ({place})"),
+        (None, Some(exercise)) => format!("{id} ({exercise})"),
+        (Some(place), Some(exercise)) => format!("{id} ({place}, {exercise})"),
+    }
+}
+
+/// As many to a line as fit a terminal, so a thousand records are a hundred
+/// lines rather than a thousand.
+fn packed(items: impl Iterator<Item = String>) -> Vec<String> {
+    /// Narrower than a terminal, after the indent.
+    const WIDTH: usize = 96;
+    const GAP: &str = "   ";
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for item in items {
+        if !line.is_empty() && line.chars().count() + GAP.len() + item.chars().count() > WIDTH {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push_str(GAP);
+        }
+        line.push_str(&item);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 /// Enough of an identifier to find the record, without a full UUID per line.
@@ -1486,10 +1548,6 @@ fn set_line<M: std::fmt::Display + domain::measure::Spans>(
         Prescribed::ToEffort { load, effort, .. } => {
             format!("as many as @ {}, {effort} in reserve", weight(*load))
         }
-        // A test: the load is what the day allows, so there is none to print.
-        Prescribed::Autoregulated { measure, effort } => {
-            format!("{measure} — work up, {effort} in reserve")
-        }
     };
     if set.warmup {
         line.push_str(" (warm-up)");
@@ -1925,7 +1983,7 @@ pub fn holidays(all: &domain::schedule::Holidays, from: jiff::civil::Date) {
 
 #[cfg(test)]
 mod tests {
-    use super::{derived_phrase, shares_of};
+    use super::{derived_phrase, shares_of, to_a_tenth};
     use domain::{
         measure::Kg,
         prescription::{Anchor, AnchorProvenance, DerivedFrom, WeekIndex, WeekKind},
@@ -2013,5 +2071,17 @@ mod tests {
             derived_phrase(DerivedFrom::Target(Kg::from_grams(95_000)), WeekKind::Test),
             "for 95kg"
         );
+    }
+
+    /// **Strength figures print to the nearest 0.1 kg** (#159), the tenth
+    /// always shown and half a tenth rounding up.
+    #[test]
+    fn a_strength_figure_prints_to_a_tenth_of_a_kilogramme() {
+        let shown = |grams| to_a_tenth(Kg::from_grams(grams));
+        assert_eq!(shown(113_333), "113.3kg");
+        assert_eq!(shown(87_916), "87.9kg");
+        assert_eq!(shown(87_950), "88.0kg");
+        assert_eq!(shown(85_000), "85.0kg");
+        assert_eq!(shown(49), "0.0kg");
     }
 }

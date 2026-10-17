@@ -4,9 +4,11 @@
 //! Body Scan step and a figure the operator typed into a spreadsheet are rows
 //! of the same shape: a day or an instant, a mass, and the source. Each
 //! source's derivation replaces only its own rows, which the `stream` column
-//! tells apart. What a source recorded beyond the mass hangs off its row: a
-//! Body Scan's composition in `body_scan_weigh_in`, and a spreadsheet's cell in
-//! `manual_weigh_in`.
+//! tells apart. What a source recorded beyond the mass hangs off its row: its
+//! composition in `body_composition` and `segment_composition`, which every
+//! source writes to as well (#275), a Body Scan's other readings in
+//! `body_scan_weigh_in`, and a spreadsheet's cells in `manual_weigh_in` and
+//! `manual_composition`.
 //!
 //! One adapter here and the writer's half of another: the spreadsheet reader
 //! has no `append`, and [`super::spreadsheet_normalised`] writes the
@@ -112,6 +114,7 @@ pub(super) async fn replace_manual_weigh_ins(
     weigh_ins: &[ManualWeighIn],
 ) -> Result<(), StoreError> {
     super::canonical_weigh_in::clear(tx).await?;
+    clear_composition(tx, stream).await?;
     sqlx::query!("DELETE FROM manual_weigh_in")
         .execute(&mut **tx)
         .await
@@ -166,7 +169,72 @@ pub(super) async fn replace_manual_weigh_ins(
         .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+
+        for written in weigh_in.composition() {
+            let component = written.component.as_str();
+            let percentage = i64::from(written.percentage.as_tenths());
+            let landed_as = written.written_in.landed_as.as_i64();
+            let sheet = written.written_in.sheet.as_str();
+            let reference = written.written_in.cell.as_str();
+            sqlx::query!(
+                r#"
+                INSERT INTO body_composition (weigh_in, component, percentage_tenths, run_id)
+                VALUES (?, ?, ?, ?)
+                "#,
+                row.id,
+                component,
+                percentage,
+                run_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+            sqlx::query!(
+                r#"
+                INSERT INTO manual_composition (weigh_in, component, landing_record_id, sheet, cell)
+                VALUES (?, ?, ?, ?, ?)
+                "#,
+                row.id,
+                component,
+                landed_as,
+                sheet,
+                reference,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
     }
+    Ok(())
+}
+
+/// Every composition row hanging off a stream's weigh-ins, before the
+/// weigh-ins themselves go.
+pub(super) async fn clear_composition(
+    tx: &mut Transaction<'_, Sqlite>,
+    stream: &str,
+) -> Result<(), StoreError> {
+    sqlx::query!(
+        "DELETE FROM manual_composition WHERE weigh_in IN (SELECT id FROM weigh_in WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM segment_composition WHERE weigh_in IN (SELECT id FROM weigh_in WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM body_composition WHERE weigh_in IN (SELECT id FROM weigh_in WHERE stream = ?)",
+        stream
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
     Ok(())
 }
 

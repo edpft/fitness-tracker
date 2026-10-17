@@ -214,14 +214,7 @@ fn the_primary_is_a_ramp_a_top_set_and_back_offs() {
     // The ramp ascends, and every step is below the top set.
     let loads: Vec<String> = sets
         .iter()
-        .map(|set| {
-            format!(
-                "{}",
-                set.prescription
-                    .load()
-                    .unwrap_or(domain::gym::Load::UNLOADED)
-            )
-        })
+        .map(|set| format!("{}", set.prescription.load()))
         .collect();
     assert!(loads.len() == 8, "eight sets in total, got {loads:?}");
 }
@@ -419,7 +412,7 @@ fn the_heavy_session_is_heavier_than_the_light_one() {
         };
         sets.iter()
             .filter(|set| !set.warmup)
-            .filter_map(|set| set.prescription.load())
+            .map(|set| set.prescription.load())
             .map(|load| match load {
                 domain::gym::Load::Absolute(mass) => mass.as_grams(),
                 domain::gym::Load::Relative(_) => 0,

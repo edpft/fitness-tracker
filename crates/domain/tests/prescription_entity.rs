@@ -72,8 +72,6 @@ fn prescription() -> impl Strategy<Value = Prescribed<RepCount>> {
                 predicted,
             }
         }),
-        (target(), effort())
-            .prop_map(|(measure, effort)| Prescribed::Autoregulated { measure, effort }),
     ]
 }
 
@@ -106,40 +104,20 @@ fn reps_exercise() -> impl Strategy<Value = PrescribedExercise> {
 }
 
 proptest! {
-    /// § 24: every prescription pins at least one axis, so "prescribes nothing"
-    /// is not a state any caller has to check for.
-    #[test]
-    fn an_arbitrary_prescription_pins_an_axis(prescription in prescription()) {
-        let pins_load = prescription.load().is_some();
-        let pins_measure = prescription.measure().is_some();
-        let binds_effort = prescription.effort().is_some();
-        prop_assert!(
-            pins_load || pins_measure || binds_effort,
-            "a prescription with no pinned axis instructs nothing"
-        );
-    }
-
     /// Each variant leaves exactly the axis it names open, which is what makes
-    /// them three instructions rather than three spellings of one.
+    /// them two instructions rather than two spellings of one. The load is
+    /// pinned by both, and the type says so.
     #[test]
     fn each_variant_leaves_its_own_axis_open(prescription in prescription()) {
         match prescription {
-            // Load and measure pinned; effort is guidance and may be absent.
+            // Measure pinned; effort is guidance and may be absent.
             Prescribed::Fixed { .. } => {
-                prop_assert!(prescription.load().is_some());
                 prop_assert!(prescription.measure().is_some());
             }
             // Measure open. A prediction is not a prescription and must not
             // surface as one.
             Prescribed::ToEffort { .. } => {
-                prop_assert!(prescription.load().is_some());
                 prop_assert!(prescription.measure().is_none());
-                prop_assert!(prescription.effort().is_some());
-            }
-            // Load open.
-            Prescribed::Autoregulated { .. } => {
-                prop_assert!(prescription.load().is_none());
-                prop_assert!(prescription.measure().is_some());
                 prop_assert!(prescription.effort().is_some());
             }
         }
@@ -246,7 +224,7 @@ fn a_mobility_slot_pins_its_duration() {
     let set: PrescribedSet<Duration> = PrescribedSet::fixed(Load::UNLOADED, Target::Exactly(sixty));
 
     assert!(set.prescription.measure().is_some());
-    assert_eq!(set.prescription.load(), Some(Load::UNLOADED));
+    assert_eq!(set.prescription.load(), Load::UNLOADED);
     assert!(set.prescription.effort().is_none());
 
     let Ok(sets) = NonEmpty::new(vec![set]) else {
