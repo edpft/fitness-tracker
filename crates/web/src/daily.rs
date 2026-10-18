@@ -514,7 +514,7 @@ fn seconds(on: Date) -> i64 {
 
 /// The watches' colours: the per-zone chart's palette, validated in both
 /// modes, taken in an order that keeps neighbours apart.
-const STYLE: &str = "
+pub const STYLE: &str = "
 .d1 { fill: var(--z1); } .d2 { fill: var(--z6); } .d3 { fill: var(--z5); } .d4 { fill: var(--z2); }
 .point.d1, .point.d2, .point.d3, .point.d4 { stroke: none; }
 .trend { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }

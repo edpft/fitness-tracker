@@ -61,6 +61,20 @@ impl Percentage {
             .map_err(|_| not_a_fraction())
     }
 
+    /// A percentage persisted in tenths.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidPercentage::MoreThanTheWhole`] above 1,000 tenths.
+    pub fn from_tenths(tenths: u16) -> Result<Self, InvalidPercentage> {
+        if tenths > 1_000 {
+            return Err(InvalidPercentage::MoreThanTheWhole {
+                value: format!("{tenths} tenths"),
+            });
+        }
+        Ok(Self(tenths))
+    }
+
     pub const fn as_tenths(self) -> u16 {
         self.0
     }

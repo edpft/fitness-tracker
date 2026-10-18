@@ -20,6 +20,7 @@
 //! (§ 6), so a caller says which it used, and the report prints it.
 
 pub mod body_weight;
+pub mod composition;
 pub mod heart_rate;
 pub mod hrv;
 pub mod one_rep_max;

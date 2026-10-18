@@ -235,6 +235,7 @@ fn a_file_that_is_not_a_spreadsheet_is_refused_as_such() {
 
 /// Through the store, beside another source's weigh-ins.
 mod store {
+    use application::CompositionHistory;
     use application::{
         ExtractionRunLog as _, LandingStore as _, NormalisationSummary, WeighInHistory as _,
         WorkoutNormaliser as _, canonicalise,
@@ -242,13 +243,15 @@ mod store {
         ports::Clock,
     };
     use domain::{
+        analytical::composition::Method,
         landing::{FetchedAt, LandingRecord},
         normalised::OperatorZone,
     };
     use infrastructure::{
         SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-        SqliteCanonicalWeighInStore, SqliteExtractionRunLog, SqliteNormalisationRunLog,
-        SqliteNormalisedWeighInReader, SqliteRefusalStore, SqliteSpreadsheetStore, connect,
+        SqliteCanonicalWeighInStore, SqliteCompositionHistory, SqliteExtractionRunLog,
+        SqliteNormalisationRunLog, SqliteNormalisedWeighInReader, SqliteRefusalStore,
+        SqliteSpreadsheetStore, connect,
     };
     use sqlx::SqlitePool;
 
@@ -430,6 +433,16 @@ mod store {
             .fetch_one(&pool)
             .await?;
             assert_eq!(fat, (247, "E2".to_owned(), 73_900));
+
+            let measured = SqliteCompositionHistory::new(pool.clone())
+                .measured()
+                .await?;
+            assert_eq!(measured.len(), 7, "every figure reads back");
+            assert!(
+                measured
+                    .iter()
+                    .all(|one| one.method == Method::Spreadsheets)
+            );
             Ok(())
         })
         .and_then(|result| result);

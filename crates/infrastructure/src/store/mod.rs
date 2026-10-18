@@ -11,6 +11,7 @@ pub mod btwb_normalised;
 pub mod canonical_cycling;
 pub mod canonical_gym;
 pub mod canonical_weigh_in;
+pub mod composition;
 pub mod cycling_delivery;
 pub mod cycling_mesocycle;
 pub mod delivery;
@@ -67,6 +68,7 @@ pub use canonical_cycling::{
 };
 pub use canonical_gym::SqliteCanonicalGymSessionStore;
 pub use canonical_weigh_in::{SqliteCanonicalWeighInStore, SqliteNormalisedWeighInReader};
+pub use composition::SqliteCompositionHistory;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;

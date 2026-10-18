@@ -37,6 +37,27 @@ pub enum Component {
 }
 
 impl Component {
+    pub const ALL: [Self; 11] = [
+        Self::Fat,
+        Self::FatFree,
+        Self::Muscle,
+        Self::SkeletalMuscle,
+        Self::Lean,
+        Self::Water,
+        Self::ExtracellularWater,
+        Self::IntracellularWater,
+        Self::Bone,
+        Self::Protein,
+        Self::Minerals,
+    ];
+
+    /// The component a persisted key names.
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|component| component.as_str() == key)
+    }
+
     /// The stable key. Persisted.
     pub const fn as_str(self) -> &'static str {
         match self {

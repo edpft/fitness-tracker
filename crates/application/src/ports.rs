@@ -1353,6 +1353,17 @@ pub trait RestingHeartRateHistory {
     > + Send;
 }
 
+/// Every body composition figure, beside the mass its weigh-in weighed (#256),
+/// normalised for [`OvernightHrvHistory`]'s reason.
+pub trait CompositionHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn measured(
+        &self,
+    ) -> impl Future<Output = Result<Vec<domain::analytical::composition::Measured>, StoreError>> + Send;
+}
+
 /// Every normalised weigh-in the store holds, whatever source recorded it
 /// (#409).
 ///
