@@ -669,9 +669,27 @@
             src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
           };
 
-          audit-deps = craneLib.cargoAudit {
-            inherit src advisory-db version;
-            pname = "workspace";
+          # cargo-deny rather than cargo-audit because it reports an ignore that
+          # no longer matches (#492), and denying that makes an ignore expire
+          # with its cause. It reads the database from a git checkout under
+          # CARGO_HOME, named for the default URL, and dates it by HEAD.
+          audit-deps = craneLib.cargoDeny {
+            inherit src version;
+            pname = "workspace-advisories";
+            cargoDenyExtraArgs = "--offline";
+            cargoDenyChecks = "--deny advisory-not-detected advisories";
+            nativeBuildInputs = [ pkgs.git ];
+            preBuild = ''
+              db="$CARGO_HOME/advisory-dbs/advisory-db-3157b0e258782691"
+              mkdir -p "$db"
+              cp -r ${advisory-db}/. "$db"
+              chmod -R u+w "$db"
+              export GIT_AUTHOR_DATE="@${toString advisory-db.lastModified} +0000"
+              export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+              git -C "$db" init -q
+              git -C "$db" add -A
+              git -C "$db" -c user.name=nix -c user.email=nix@localhost commit -qm advisory-db
+            '';
           };
 
           audit-licenses = craneLib.cargoDeny {
@@ -700,7 +718,6 @@
           checks = self.checks.${system};
           packages = with pkgs; [
             # The tools CI uses, so a failure can be reproduced locally.
-            cargo-audit
             cargo-deny
             cargo-nextest
             gitleaks
