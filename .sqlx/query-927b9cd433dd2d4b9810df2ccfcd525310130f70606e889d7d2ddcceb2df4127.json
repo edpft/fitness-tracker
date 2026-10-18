@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT DISTINCT stream AS \"stream!: String\", run_id AS \"run!: i64\"\n            FROM weigh_in\n            ORDER BY stream, run_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "run!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "run_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "927b9cd433dd2d4b9810df2ccfcd525310130f70606e889d7d2ddcceb2df4127"
+}

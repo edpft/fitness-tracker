@@ -9,18 +9,32 @@
 //! The operator, 2026-09-19: *"This command is all about what's next, based on
 //! what has happened and what should happen."* (#137)
 //!
-//! **Every source is collected first, and unconditionally.** Deciding what to
-//! collect from what the store already holds is how the bike went unasked: the
-//! store said nothing was outstanding because nothing had been prescribed. So
-//! each discipline's record is collected and derived before anything is judged.
-//! A source that cannot be reached is a failed step, and the run carries on
-//! with what is already landed (§ 36).
+//! **Every source is collected first, all at once.** Deciding what to collect
+//! from what the plan holds is how the bike went unasked: the store said
+//! nothing was outstanding because nothing had been prescribed. So whether to
+//! fetch is a question for each stream alone (#468) — the operator,
+//! 2026-10-16: *"Once a daily Withings weigh in has been collected, we don't
+//! need to collect another one until the next day."* Hevy and Peloton are
+//! always fetched, because a session could have been completed in the last
+//! hour. A source that cannot be reached is a failed step, and the run carries
+//! on with what is already landed (§ 36).
+//!
+//! **Then every derived layer is brought current, and only what moved is
+//! derived.** The layers are a graph: a normalised layer reads its stream's
+//! raw, its corrections and the zone, and a canonical layer reads the
+//! normalised layers. Each records what it was derived from, and one whose
+//! inputs read the same is left as it stands. The build is not a node in that
+//! graph: a build the store has not seen derives every layer once.
 //!
 //! **Then each session of the microcycle gets a state**, and the first one
 //! that can still be performed is the one delivered — again, if it already was
 //! (#390).
 
-use std::future::Future;
+use std::{
+    future::{Future, poll_fn},
+    pin::pin,
+    task::Poll,
+};
 
 use domain::{
     body::{LeftOut, WeighInCount},
@@ -43,13 +57,15 @@ use crate::{
     NormalisedWeighInReader, PlanStore, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, RideDestination, RidesPlaced, RunLockError,
-    RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutNormaliser,
-    WorkoutPrescriber as _,
+    RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutPrescriber as _,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
     microcycle::{Session, Standing},
+    ports::{
+        Build, CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
+    },
     prescribe::{NextSession, Prescribing, PrescriptionPorts},
     reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
 };
@@ -88,6 +104,46 @@ pub trait Walks {
         &self,
         at: usize,
     ) -> impl Future<Output = Option<Result<RunSummary, ExtractionError>>> + Send;
+
+    /// Whether to fetch at all on `today`. Always, unless the stream says
+    /// otherwise, as [`Daily`] does.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if what the stream holds cannot be read.
+    fn due(&self, today: Date) -> impl Future<Output = Result<bool, StoreError>> + Send {
+        let _ = today;
+        std::future::ready(Ok(true))
+    }
+}
+
+/// A stream fetched once a day: once it holds an observation for today, it is
+/// not fetched again until tomorrow (#468).
+pub struct Daily<W, N> {
+    pub walks: W,
+    pub newest: N,
+}
+
+impl<W: Walks + Sync, N: NewestObservation + Sync> Walks for Daily<W, N> {
+    fn count(&self) -> usize {
+        self.walks.count()
+    }
+
+    fn stream(&self, at: usize) -> Option<&LandingStream> {
+        self.walks.stream(at)
+    }
+
+    async fn walk(&self, at: usize) -> Option<Result<RunSummary, ExtractionError>> {
+        self.walks.walk(at).await
+    }
+
+    async fn due(&self, today: Date) -> Result<bool, StoreError> {
+        Ok(self
+            .newest
+            .newest_day()
+            .await?
+            .is_none_or(|newest| newest < today))
+    }
 }
 
 impl<E: WorkoutExtractor + Sync> Walks for Walk<E> {
@@ -131,14 +187,15 @@ impl<A: Walks + Sync, B: Walks + Sync> Walks for (A, B) {
     }
 }
 
-/// One discipline's record: the walks that collect it and the derivation over
-/// them.
-pub struct Records<W, N> {
-    /// The catalogue's name for what is collected, which the derivation is
-    /// reported under.
+/// The walks that collect one catalogue entry.
+///
+/// **Not its derivation**, which is a layer of the graph every run brings
+/// current whether or not this entry was fetched ([`NormalisedLayers`]).
+pub struct Records<W> {
+    /// The catalogue's name for what is collected, which a walk with no access
+    /// is reported under.
     pub entry: LandingStream,
     pub walks: Result<W, NoAccess>,
-    pub normaliser: N,
 }
 
 /// A step of the run, as it is reported.
@@ -164,12 +221,15 @@ pub enum Step {
 pub enum Found {
     /// Records landed by a walk.
     Landed(RecordCount),
-    /// Sessions the derivation wrote.
-    Sessions(WorkoutCount),
+    /// A stream that holds today's observation, so is not fetched until
+    /// tomorrow.
+    NotDue,
+    /// Entities a normalised layer's derivation wrote.
+    Written(WorkoutCount),
+    /// A layer nothing new reached, left as it stands.
+    Unchanged,
     /// Canonical sessions the record now holds.
     Canonical(SessionCount),
-    /// Weigh-ins the derivation wrote.
-    WeighIns(WeighInCount),
     /// Canonical weigh-ins the record now holds, and the weighings left out.
     CanonicalWeighIns {
         written: WeighInCount,
@@ -202,6 +262,10 @@ pub enum StepFailure {
     NoAccess(#[from] NoAccess),
     #[error(transparent)]
     Extraction(#[from] ExtractionError),
+    /// **A layer that will not derive is a failed step**, and the derivation
+    /// before it stands: it writes nothing when it fails.
+    #[error(transparent)]
+    Normalisation(#[from] NormalisationError),
     #[error(transparent)]
     Source(#[from] SourceError),
     #[error(transparent)]
@@ -229,10 +293,10 @@ pub trait Progress {
 
 /// Why `next` could not answer at all.
 ///
-/// **Only what leaves nothing to report.** A source that cannot be reached is
-/// a failed step, and a session that cannot be prescribed or delivered is in
-/// the report; this is the store failing, a derivation failing, or a skip that
-/// cannot be taken.
+/// **Only what leaves nothing to report.** A source that cannot be reached or
+/// a layer that will not derive is a failed step, and a session that cannot be
+/// prescribed or delivered is in the report; this is the store failing, or a
+/// skip that cannot be taken.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NextError {
     /// Another run of `next` is going, from this frontend or the other.
@@ -243,8 +307,6 @@ pub enum NextError {
     NoWeek,
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error(transparent)]
-    Normalisation(#[from] NormalisationError),
     #[error("{0}")]
     Skip(#[from] SkipRefused),
 }
@@ -594,6 +656,17 @@ pub trait Canonicalising {
     ///
     /// [`StoreError`] if either layer cannot be read or written.
     fn weigh_ins(&self) -> impl Future<Output = Result<WeighInsCanonicalised, StoreError>> + Send;
+
+    /// What the layer would be derived from now: the derivations that wrote
+    /// the normalised layers it reads.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the normalised layer cannot be read.
+    fn inputs(
+        &self,
+        layer: CanonicalLayer,
+    ) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
 }
 
 /// Each normalised layer, and the canonical layer built from it.
@@ -627,16 +700,31 @@ where
     async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
         crate::canonicalise::weigh_ins(&self.normalised_weigh_ins, &self.canonical_weigh_ins).await
     }
+
+    async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
+        match layer {
+            CanonicalLayer::Gym => self.normalised_gym.written_by().await,
+            CanonicalLayer::Cycling => self.normalised_cycling.written_by().await,
+            CanonicalLayer::WeighIns => self.normalised_weigh_ins.written_by().await,
+        }
+    }
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
-    pub gym_records: Records<GW, GN>,
-    pub cycling_records: Records<CW, CN>,
+pub struct NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
+    pub gym_records: Records<GW>,
+    pub cycling_records: Records<CW>,
     /// Body weight, which no discipline collects (#409, #357).
-    pub weigh_in_records: Records<BW, BN>,
-    /// Each canonical layer, rebuilt once its record is collected.
+    pub weigh_in_records: Records<BW>,
+    /// Every normalised layer, fetched this run or not.
+    pub normalised: NL,
+    /// Each canonical layer.
     pub canonical: CL,
+    /// What each layer standing was derived from.
+    pub ledger: DL,
+    /// This build of the derivation code. `None` for a build that cannot say
+    /// which commit it is, which therefore derives every layer every run.
+    pub build: Option<Build>,
     pub classes: Result<K, NoAccess>,
     pub holidays: HC,
     pub diary: D,
@@ -655,20 +743,19 @@ pub struct NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L> {
-    ports: NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>,
+pub struct Next<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
+    ports: NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
 }
 
-impl<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>
-    Next<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>
+impl<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
+    Next<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
 where
     GW: Walks + Sync,
-    GN: WorkoutNormaliser + Sync,
     CW: Walks + Sync,
-    CN: WorkoutNormaliser + Sync,
     BW: Walks + Sync,
-    BN: WorkoutNormaliser + Sync,
+    NL: NormalisedLayers + Sync,
     CL: Canonicalising + Sync,
+    DL: DerivationLedger + Sync,
     K: ClassSource + Sync,
     HC: HolidayCalendar + Sync,
     D: DiaryStore + DiaryAuthor + Sync,
@@ -684,7 +771,7 @@ where
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
     pub const fn new(
-        ports: NextPorts<GW, GN, CW, CN, BW, BN, CL, K, HC, D, P, M, C, GY, CY, L>,
+        ports: NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
     ) -> Self {
         Self { ports }
     }
@@ -718,57 +805,31 @@ where
         }
         let mut run = Vec::new();
 
-        // 1. Every source, before anything is judged.
-        self.collect(&self.ports.gym_records, Found::Sessions, progress, &mut run)
-            .await?;
-        // **Each canonical layer is rebuilt here, and for the gym that is the
-        // whole of #361.** Deriving a stream deletes its discipline's layer, and
-        // the standing read below inside that window once told the operator he
-        // had lost every week.
-        let step = Step::Canonicalising(Discipline::Gym);
-        progress.started(&step);
-        let canonicalised = self.ports.canonical.gym().await?;
-        finish(
-            progress,
-            &mut run,
-            step,
-            Ok(Found::Canonical(canonicalised.written)),
-        );
-        self.collect(
-            &self.ports.cycling_records,
-            Found::Sessions,
-            progress,
-            &mut run,
+        // 1. Every source at once, before anything is judged. The operator,
+        // 2026-10-18: *"We should pull the new data in parallel if we can."*
+        // Peloton's catalogue is refreshed after its rides, on the same login.
+        let (gym, cycling, weigh_ins) = all(
+            self.fetch(&self.ports.gym_records, now.date, progress),
+            async {
+                let mut done = self
+                    .fetch(&self.ports.cycling_records, now.date, progress)
+                    .await?;
+                let (step, outcome) = self.refresh(progress).await;
+                finish(progress, &mut done, step, outcome);
+                Ok::<_, NextError>(done)
+            },
+            self.fetch(&self.ports.weigh_in_records, now.date, progress),
         )
-        .await?;
-        let step = Step::Canonicalising(Discipline::Cycling);
-        progress.started(&step);
-        let canonicalised = self.ports.canonical.cycling().await?;
-        finish(
-            progress,
-            &mut run,
-            step,
-            Ok(Found::Canonical(canonicalised.written)),
-        );
-        // **Body weight is collected with everything else** (#357), so a
-        // weighing this morning is in the record the run reports on.
-        let weigh_ins = |count: WorkoutCount| Found::WeighIns(WeighInCount::from(count.as_usize()));
-        self.collect(&self.ports.weigh_in_records, weigh_ins, progress, &mut run)
-            .await?;
-        let step = Step::CanonicalisingWeighIns;
-        progress.started(&step);
-        let canonicalised = self.ports.canonical.weigh_ins().await?;
-        finish(
-            progress,
-            &mut run,
-            step,
-            Ok(Found::CanonicalWeighIns {
-                written: canonicalised.written,
-                left_out: canonicalised.left_out,
-            }),
-        );
-        let (step, outcome) = self.refresh(progress).await;
-        finish(progress, &mut run, step, outcome);
+        .await;
+        run.extend(gym?);
+        run.extend(cycling?);
+        run.extend(weigh_ins?);
+
+        // **Every layer is current before the standing is read**, and for the
+        // gym that is the whole of #361: deriving a stream deletes its rows,
+        // and a standing read inside that window once told the operator he had
+        // lost every week.
+        self.derive(progress, &mut run).await?;
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
         let holidays = self.ports.holidays.holidays().await;
@@ -799,44 +860,136 @@ where
         Ok(Report { run, plan, next })
     }
 
-    /// Collect and derive one discipline's record.
+    /// Fetch one catalogue entry, if it is due today.
     ///
-    /// **Each step is reported as it ends**, so a long walk says it is done
-    /// before the derivation after it starts.
-    async fn collect<W: Walks + Sync, N: WorkoutNormaliser + Sync>(
+    /// **Each walk is reported as it ends**, so a long one says it is done
+    /// while the others are still going.
+    async fn fetch<W: Walks + Sync>(
         &self,
-        records: &Records<W, N>,
-        found: impl FnOnce(WorkoutCount) -> Found,
+        records: &Records<W>,
+        today: Date,
+        progress: &(impl Progress + Sync),
+    ) -> Result<Vec<Done>, NextError> {
+        let mut run = Vec::new();
+        let step = Step::Fetching(records.entry.clone());
+        let walks = match &records.walks {
+            Err(why) => {
+                progress.started(&step);
+                finish(
+                    progress,
+                    &mut run,
+                    step,
+                    Err(StepFailure::NoAccess(why.clone())),
+                );
+                return Ok(run);
+            }
+            Ok(walks) => walks,
+        };
+        if !walks.due(today).await? {
+            progress.started(&step);
+            finish(progress, &mut run, step, Ok(Found::NotDue));
+            return Ok(run);
+        }
+        for at in 0..walks.count() {
+            let Some(stream) = walks.stream(at) else {
+                continue;
+            };
+            let step = Step::Fetching(stream.clone());
+            progress.started(&step);
+            let outcome = match walks.walk(at).await {
+                Some(Ok(summary)) => Ok(Found::Landed(summary.records_landed)),
+                Some(Err(error)) => Err(StepFailure::Extraction(error)),
+                None => continue,
+            };
+            finish(progress, &mut run, step, outcome);
+        }
+        Ok(run)
+    }
+
+    /// Bring every derived layer current, deriving only what something new
+    /// reached (#468).
+    ///
+    /// **Normalised layers first, then canonical**, because a canonical layer's
+    /// inputs are the derivations that wrote the normalised layers it reads.
+    ///
+    /// **The build is recorded only once every layer has derived under it**, so
+    /// a layer that failed is derived again by the next run rather than passed
+    /// over as current.
+    async fn derive(
+        &self,
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
-        match &records.walks {
-            Err(why) => {
-                let step = Step::Fetching(records.entry.clone());
-                progress.started(&step);
-                finish(progress, run, step, Err(StepFailure::NoAccess(why.clone())));
-            }
-            Ok(walks) => {
-                for at in 0..walks.count() {
-                    let Some(stream) = walks.stream(at) else {
-                        continue;
-                    };
-                    let step = Step::Fetching(stream.clone());
-                    progress.started(&step);
-                    let outcome = match walks.walk(at).await {
-                        Some(Ok(summary)) => Ok(Found::Landed(summary.records_landed)),
-                        Some(Err(error)) => Err(StepFailure::Extraction(error)),
-                        None => continue,
-                    };
-                    finish(progress, run, step, outcome);
+        let ledger = &self.ports.ledger;
+        let every = match &self.ports.build {
+            None => true,
+            Some(build) => ledger.build().await?.as_ref() != Some(build),
+        };
+        let mut failed = false;
+
+        for stream in self.ports.normalised.streams() {
+            let step = Step::Normalising(stream.clone());
+            progress.started(&step);
+            let inputs = self.ports.normalised.inputs(&stream).await?;
+            let outcome = if !every && ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
+                Ok(Found::Unchanged)
+            } else {
+                match self.ports.normalised.normalise(&stream).await {
+                    Ok(summary) => {
+                        ledger.record_normalised(summary.run_id, &inputs).await?;
+                        Ok(Found::Written(summary.workouts_written))
+                    }
+                    Err(error) => {
+                        failed = true;
+                        Err(StepFailure::Normalisation(error))
+                    }
                 }
-            }
+            };
+            finish(progress, run, step, outcome);
         }
 
-        let step = Step::Normalising(records.entry.clone());
-        progress.started(&step);
-        let derived = records.normaliser.normalise().await?;
-        finish(progress, run, step, Ok(found(derived.workouts_written)));
+        for layer in [
+            CanonicalLayer::Gym,
+            CanonicalLayer::Cycling,
+            CanonicalLayer::WeighIns,
+        ] {
+            let step = match layer {
+                CanonicalLayer::Gym => Step::Canonicalising(Discipline::Gym),
+                CanonicalLayer::Cycling => Step::Canonicalising(Discipline::Cycling),
+                CanonicalLayer::WeighIns => Step::CanonicalisingWeighIns,
+            };
+            progress.started(&step);
+            let inputs = self.ports.canonical.inputs(layer).await?;
+            let found = if !every && ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
+                Found::Unchanged
+            } else {
+                let found = match layer {
+                    CanonicalLayer::Gym => {
+                        Found::Canonical(self.ports.canonical.gym().await?.written)
+                    }
+                    CanonicalLayer::Cycling => {
+                        Found::Canonical(self.ports.canonical.cycling().await?.written)
+                    }
+                    CanonicalLayer::WeighIns => {
+                        let canonicalised = self.ports.canonical.weigh_ins().await?;
+                        Found::CanonicalWeighIns {
+                            written: canonicalised.written,
+                            left_out: canonicalised.left_out,
+                        }
+                    }
+                };
+                ledger.record_canonical(layer, &inputs).await?;
+                found
+            };
+            finish(progress, run, step, Ok(found));
+        }
+
+        if let Some(build) = &self.ports.build
+            && every
+            && !failed
+        {
+            ledger.record_build(build).await?;
+        }
         Ok(())
     }
 
@@ -1047,6 +1200,44 @@ fn finish(
     let done = Done { step, outcome };
     progress.finished(&done);
     run.push(done);
+}
+
+/// Three futures run at once on the caller's task, and all three outcomes.
+///
+/// **By hand, because the core depends on no runtime.** Each is polled until it
+/// is ready and never after, which is all a join is.
+async fn all<A: Future, B: Future, C: Future>(
+    a: A,
+    b: B,
+    c: C,
+) -> (A::Output, B::Output, C::Output) {
+    let (mut a, mut b, mut c) = (pin!(a), pin!(b), pin!(c));
+    let (mut first, mut second, mut third) = (None, None, None);
+    poll_fn(|context| {
+        if first.is_none()
+            && let Poll::Ready(output) = a.as_mut().poll(context)
+        {
+            first = Some(output);
+        }
+        if second.is_none()
+            && let Poll::Ready(output) = b.as_mut().poll(context)
+        {
+            second = Some(output);
+        }
+        if third.is_none()
+            && let Poll::Ready(output) = c.as_mut().poll(context)
+        {
+            third = Some(output);
+        }
+        match (first.take(), second.take(), third.take()) {
+            (Some(a), Some(b), Some(c)) => Poll::Ready((a, b, c)),
+            (a, b, c) => {
+                (first, second, third) = (a, b, c);
+                Poll::Pending
+            }
+        }
+    })
+    .await
 }
 
 /// The plan covering a date, as it now stands.

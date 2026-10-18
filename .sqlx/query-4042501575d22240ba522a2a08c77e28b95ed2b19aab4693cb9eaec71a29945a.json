@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO canonical_derivation (layer, derived_from) VALUES (?, ?)\n             ON CONFLICT (layer) DO UPDATE SET derived_from = excluded.derived_from",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "4042501575d22240ba522a2a08c77e28b95ed2b19aab4693cb9eaec71a29945a"
+}

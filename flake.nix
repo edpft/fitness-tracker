@@ -232,6 +232,11 @@
             cargoExtraArgs = "-p web";
             # Lets `nix run` find the binary without a hand-written app.
             meta.mainProgram = "web";
+
+            # Which build derived the store's layers, for the reason `cli`
+            # carries it (#468): a run the page starts is a build like any
+            # other, and one that cannot name its commit derives everything.
+            FITNESS_BUILD = "${revision} (${revisionDate})";
           }
         );
 

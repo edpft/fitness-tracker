@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT run_id AS \"run!: i64\" FROM cycling_session ORDER BY run_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "run!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "run_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7b8416b75b166abd919f0eb4f7d5356f8a591126e9eafb1ef37f9d9153d07bf0"
+}

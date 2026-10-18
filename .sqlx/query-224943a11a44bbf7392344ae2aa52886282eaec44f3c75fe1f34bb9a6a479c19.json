@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT DISTINCT stream AS \"stream!: String\", run_id AS \"run!: i64\"\n            FROM gym_session\n            ORDER BY stream, run_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_session",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "run!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_session",
+            "name": "run_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "224943a11a44bbf7392344ae2aa52886282eaec44f3c75fe1f34bb9a6a479c19"
+}

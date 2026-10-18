@@ -456,6 +456,7 @@ dependencies = [
  "jiff",
  "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

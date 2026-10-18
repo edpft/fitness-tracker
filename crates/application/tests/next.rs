@@ -5,29 +5,37 @@
 //! question is the run: which steps it reports, in what order, and that a
 //! source it cannot reach costs that step and nothing else (§ 36).
 
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    future::poll_fn,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    task::Poll,
+};
 
 use application::{
-    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
-    ClassesListed, ClassesRead, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar,
-    NextLock, NormalisationError, NormalisationSummary, NormalisedCyclingSessionReader,
-    NormalisedGymSessionReader, NormalisedWeighInReader, PlanStore, PrescriptionError,
-    RunLockError, RunSummary, SourceError, StoreError, WorkoutNormaliser,
+    Build, CanonicalLayer, ClassSource, ClassesListed, ClassesRead, DerivationLedger, DerivedFrom,
+    DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar, NewestObservation, NextLock,
+    NormalisationError, NormalisationSummary, NormalisedLayers, PlanStore, PrescriptionError,
+    RunLockError, RunSummary, SourceError, StoreError,
+    canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
-        CanonicalPorts, CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed,
+        Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Found, GymPrescribed,
         GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, Prescribed,
-        Progress, Records, SkipRefused, StandingReader, Step, StepFailure, Walks, WhatIsNext,
+        Progress, Records, Report, SkipRefused, StandingReader, Step, StepFailure, Walks,
+        WhatIsNext,
     },
     reschedule::Reschedule,
 };
 use domain::{
-    body::{CanonicalWeighIn, WeighInAccount, WeighInCount},
+    body::WeighInCount,
     canonical::SessionCount,
-    cycling::{CanonicalCyclingSession, CyclingMesocycle},
-    gym::{CanonicalGymSession, NormalisedGymSession},
+    cycling::CyclingMesocycle,
     landing::{LandingStream, RecordCount, RunId},
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
     plan::{Plan, PlanId, PlanName, PlanWindow},
@@ -47,7 +55,24 @@ fn stream(name: &str) -> Result<LandingStream, Box<dyn std::error::Error>> {
 }
 
 /// Walks that answer as they were told to, in order.
-struct Walking(Vec<(LandingStream, Result<RunSummary, ExtractionError>)>);
+///
+/// **A walk that is met waits for the others** behind the same meeting point,
+/// and fails if they never arrive: fetched one after another, the first would
+/// wait alone.
+struct Walking(
+    Vec<(LandingStream, Result<RunSummary, ExtractionError>)>,
+    Option<Arc<AtomicUsize>>,
+);
+
+impl Walking {
+    fn landing(stream: LandingStream, records: usize) -> Self {
+        Self(vec![(stream, Ok(landed(records)))], None)
+    }
+}
+
+/// How many walks meet, and how long one waits for the rest.
+const MEETING: usize = 3;
+const PATIENCE: usize = 100;
 
 impl Walks for Walking {
     fn count(&self) -> usize {
@@ -59,6 +84,27 @@ impl Walks for Walking {
     }
 
     async fn walk(&self, at: usize) -> Option<Result<RunSummary, ExtractionError>> {
+        if let Some(met) = &self.1 {
+            met.fetch_add(1, Ordering::SeqCst);
+            let mut waited = 0;
+            let together = poll_fn(|context| {
+                if met.load(Ordering::SeqCst) >= MEETING {
+                    Poll::Ready(true)
+                } else if waited >= PATIENCE {
+                    Poll::Ready(false)
+                } else {
+                    waited += 1;
+                    context.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+            if !together {
+                return Some(Err(ExtractionError::Source(SourceError::Unavailable {
+                    detail: "fetched alone".to_owned(),
+                })));
+            }
+        }
         self.0.get(at).map(|(_, result)| result.clone())
     }
 }
@@ -73,15 +119,123 @@ fn landed(records: usize) -> RunSummary {
     }
 }
 
-/// A derivation that writes this many sessions.
-struct Deriving(usize);
+/// The newest day a stream holds, as the test sets it.
+struct Newest(Option<Date>);
 
-impl WorkoutNormaliser for Deriving {
-    async fn normalise(&self) -> Result<NormalisationSummary, NormalisationError> {
+impl NewestObservation for Newest {
+    async fn newest_day(&self) -> Result<Option<Date>, StoreError> {
+        Ok(self.0)
+    }
+}
+
+/// The derived layers, in memory: how far each stream's inputs reach, which
+/// run last derived each, and what the ledger says each was derived from.
+///
+/// **One graph behind every port that touches it**, so a canonical layer's
+/// inputs move exactly when a normalisation it reads from runs, as the store's
+/// do.
+#[derive(Default)]
+struct Graph(Mutex<Layered>);
+
+#[derive(Default)]
+struct Layered {
+    /// What each stream's normalised layer would be derived from now.
+    inputs: BTreeMap<String, u32>,
+    /// The run that last derived each stream.
+    runs: BTreeMap<String, u64>,
+    last_run: u64,
+    /// Streams that will not derive.
+    failing: Vec<String>,
+    normalised: Vec<String>,
+    canonicalised: Vec<CanonicalLayer>,
+    derived_from: BTreeMap<u64, DerivedFrom>,
+    canonical: Vec<(CanonicalLayer, DerivedFrom)>,
+    build: Option<Build>,
+}
+
+const STREAMS: [&str; 4] = [
+    "hevy.workouts",
+    "peloton.rides",
+    "withings.measurements",
+    "garmin.activities",
+];
+
+impl Graph {
+    fn with<T>(&self, change: impl FnOnce(&mut Layered) -> T) -> Result<T, StoreError> {
+        let mut layered = self.0.lock().map_err(|_| StoreError::Unavailable {
+            detail: "poisoned".to_owned(),
+        })?;
+        Ok(change(&mut layered))
+    }
+
+    /// Something new reaches a stream: a record landed, or a correction.
+    fn reach(&self, stream: &str) {
+        let _ = self.with(|layered| *layered.inputs.entry(stream.to_owned()).or_default() += 1);
+    }
+
+    fn normalised(&self) -> Vec<String> {
+        self.with(|layered| layered.normalised.clone())
+            .unwrap_or_default()
+    }
+
+    fn canonicalised(&self) -> Vec<CanonicalLayer> {
+        self.with(|layered| layered.canonicalised.clone())
+            .unwrap_or_default()
+    }
+
+    const fn reads(layer: CanonicalLayer) -> &'static [&'static str] {
+        match layer {
+            CanonicalLayer::Gym => &["hevy.workouts", "garmin.activities"],
+            CanonicalLayer::Cycling => &["peloton.rides"],
+            CanonicalLayer::WeighIns => &["withings.measurements"],
+        }
+    }
+}
+
+/// The normalised layers over the graph.
+#[derive(Clone)]
+struct Layers(Arc<Graph>);
+
+impl NormalisedLayers for Layers {
+    fn streams(&self) -> Vec<LandingStream> {
+        STREAMS
+            .iter()
+            .filter_map(|name| LandingStream::try_from(*name).ok())
+            .collect()
+    }
+
+    async fn inputs(&self, stream: &LandingStream) -> Result<DerivedFrom, StoreError> {
+        self.0.with(|layered| {
+            let reach = layered
+                .inputs
+                .get(&stream.to_string())
+                .copied()
+                .unwrap_or(0);
+            DerivedFrom::from(format!("{stream} {reach}"))
+        })
+    }
+
+    async fn normalise(
+        &self,
+        stream: &LandingStream,
+    ) -> Result<NormalisationSummary, NormalisationError> {
+        let run = self
+            .0
+            .with(|layered| {
+                if layered.failing.contains(&stream.to_string()) {
+                    return None;
+                }
+                layered.last_run += 1;
+                layered.runs.insert(stream.to_string(), layered.last_run);
+                layered.normalised.push(stream.to_string());
+                Some(layered.last_run)
+            })
+            .map_err(NormalisationError::Store)?
+            .ok_or(NormalisationError::MissingTimeZone)?;
         Ok(NormalisationSummary {
-            run_id: NormalisationRunId::from(1),
+            run_id: NormalisationRunId::from(run),
             records_read: RecordCount::from(0),
-            workouts_written: WorkoutCount::from(self.0),
+            workouts_written: WorkoutCount::from(1),
             records_composed: RecordCount::from(0),
             records_superseded: RecordCount::from(0),
             workouts_retracted: WorkoutCount::from(0),
@@ -92,64 +246,104 @@ impl WorkoutNormaliser for Deriving {
     }
 }
 
-/// An empty record, canonicalised to nothing.
-struct Empty;
+/// The canonical layers over the graph, each derived from the runs of the
+/// streams it reads.
+struct Canonical(Arc<Graph>);
 
-impl NormalisedGymSessionReader for Empty {
-    async fn all(&self) -> Result<Vec<NormalisedGymSession>, StoreError> {
-        Ok(Vec::new())
+impl Canonical {
+    fn derive(&self, layer: CanonicalLayer) -> Result<(), StoreError> {
+        self.0.with(|layered| layered.canonicalised.push(layer))
     }
 }
 
-impl NormalisedCyclingSessionReader for Empty {
-    async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
-        Ok(Vec::new())
+impl Canonicalising for Canonical {
+    async fn gym(&self) -> Result<Canonicalised, StoreError> {
+        self.derive(CanonicalLayer::Gym)?;
+        Ok(Canonicalised {
+            read: SessionCount::from(0),
+            written: SessionCount::from(0),
+        })
+    }
+
+    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+        self.derive(CanonicalLayer::Cycling)?;
+        Ok(Canonicalised {
+            read: SessionCount::from(0),
+            written: SessionCount::from(0),
+        })
+    }
+
+    async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
+        self.derive(CanonicalLayer::WeighIns)?;
+        Ok(WeighInsCanonicalised {
+            read: WeighInCount::from(0),
+            written: WeighInCount::from(0),
+            left_out: Vec::new(),
+        })
+    }
+
+    async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
+        self.0.with(|layered| {
+            let runs: Vec<String> = Graph::reads(layer)
+                .iter()
+                .map(|stream| format!("{stream} {:?}", layered.runs.get(*stream)))
+                .collect();
+            DerivedFrom::from(runs.join(", "))
+        })
     }
 }
 
-impl CanonicalCyclingSessionStore for Empty {
-    async fn replace(
+/// The ledger over the graph.
+struct Ledger(Arc<Graph>);
+
+impl DerivationLedger for Ledger {
+    async fn build(&self) -> Result<Option<Build>, StoreError> {
+        self.0.with(|layered| layered.build.clone())
+    }
+
+    async fn record_build(&self, build: &Build) -> Result<(), StoreError> {
+        self.0.with(|layered| layered.build = Some(build.clone()))
+    }
+
+    async fn normalised(&self, stream: &LandingStream) -> Result<Option<DerivedFrom>, StoreError> {
+        self.0.with(|layered| {
+            layered
+                .runs
+                .get(&stream.to_string())
+                .and_then(|run| layered.derived_from.get(run))
+                .cloned()
+        })
+    }
+
+    async fn record_normalised(
         &self,
-        sessions: Vec<CanonicalCyclingSession>,
-    ) -> Result<SessionCount, StoreError> {
-        Ok(SessionCount::from(sessions.len()))
+        run: NormalisationRunId,
+        from: &DerivedFrom,
+    ) -> Result<(), StoreError> {
+        self.0.with(|layered| {
+            layered.derived_from.insert(run.as_u64(), from.clone());
+        })
     }
 
-    async fn count(&self) -> Result<SessionCount, StoreError> {
-        Ok(SessionCount::from(0))
-    }
-}
-
-impl NormalisedWeighInReader for Empty {
-    async fn all(&self) -> Result<Vec<WeighInAccount>, StoreError> {
-        Ok(Vec::new())
-    }
-}
-
-impl CanonicalWeighInStore for Empty {
-    async fn replace(&self, weigh_ins: Vec<CanonicalWeighIn>) -> Result<WeighInCount, StoreError> {
-        Ok(WeighInCount::from(weigh_ins.len()))
+    async fn canonical(&self, layer: CanonicalLayer) -> Result<Option<DerivedFrom>, StoreError> {
+        self.0.with(|layered| {
+            layered
+                .canonical
+                .iter()
+                .find(|(held, _)| *held == layer)
+                .map(|(_, from)| from.clone())
+        })
     }
 
-    async fn count(&self) -> Result<WeighInCount, StoreError> {
-        Ok(WeighInCount::from(0))
-    }
-}
-
-impl CanonicalGymSessionStore for Empty {
-    async fn replace(
+    async fn record_canonical(
         &self,
-        sessions: Vec<CanonicalGymSession>,
-    ) -> Result<SessionCount, StoreError> {
-        Ok(SessionCount::from(sessions.len()))
-    }
-
-    async fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn count(&self) -> Result<SessionCount, StoreError> {
-        Ok(SessionCount::from(0))
+        layer: CanonicalLayer,
+        from: &DerivedFrom,
+    ) -> Result<(), StoreError> {
+        self.0.with(|layered| {
+            layered.canonical.retain(|(held, _)| *held != layer);
+            layered.canonical.push((layer, from.clone()));
+        })
     }
 }
 
@@ -416,12 +610,11 @@ impl Progress for Heard {
 
 type Ports<H = Unreachable> = NextPorts<
     Walking,
-    Deriving,
     Walking,
-    Deriving,
-    Walking,
-    Deriving,
-    CanonicalPorts<Empty, Empty, Empty, Empty, Empty, Empty>,
+    Daily<Walking, Newest>,
+    Layers,
+    Canonical,
+    Ledger,
     Converged,
     H,
     Recorded,
@@ -467,35 +660,39 @@ fn calendar<H>(
     committer: Committer,
     holidays: H,
 ) -> Result<Ports<H>, Box<dyn std::error::Error>> {
+    over(Arc::default(), diary, week, committer, holidays)
+}
+
+/// As [`calendar`], over a graph the test keeps hold of.
+fn over<H>(
+    graph: Arc<Graph>,
+    diary: Recorded,
+    week: Week,
+    committer: Committer,
+    holidays: H,
+) -> Result<Ports<H>, Box<dyn std::error::Error>> {
     Ok(NextPorts {
         gym_records: Records {
             entry: stream("hevy.workouts")?,
-            walks: Ok(Walking(vec![(stream("hevy.workouts")?, Ok(landed(2)))])),
-            normaliser: Deriving(146),
+            walks: Ok(Walking::landing(stream("hevy.workouts")?, 2)),
         },
         cycling_records: Records {
             entry: stream("peloton.rides")?,
             walks: Err(NoAccess {
                 detail: "no peloton credential".to_owned(),
             }),
-            normaliser: Deriving(156),
         },
         weigh_in_records: Records {
             entry: stream("withings.measurements")?,
-            walks: Ok(Walking(vec![(
-                stream("withings.measurements")?,
-                Ok(landed(1)),
-            )])),
-            normaliser: Deriving(227),
+            walks: Ok(Daily {
+                walks: Walking::landing(stream("withings.measurements")?, 1),
+                newest: Newest(None),
+            }),
         },
-        canonical: CanonicalPorts {
-            normalised_gym: Empty,
-            canonical_gym: Empty,
-            normalised_cycling: Empty,
-            canonical_cycling: Empty,
-            normalised_weigh_ins: Empty,
-            canonical_weigh_ins: Empty,
-        },
+        normalised: Layers(Arc::clone(&graph)),
+        canonical: Canonical(Arc::clone(&graph)),
+        ledger: Ledger(graph),
+        build: Some(Build::from("a1b2c3d".to_owned())),
         classes: Ok(Converged),
         holidays,
         diary,
@@ -542,23 +739,25 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
     let hevy = stream("hevy.workouts").expect("a stream");
     let peloton = stream("peloton.rides").expect("a stream");
     let withings = stream("withings.measurements").expect("a stream");
+    let garmin = stream("garmin.activities").expect("a stream");
     assert_eq!(
         steps,
         vec![
             (&Step::Fetching(hevy.clone()), true),
-            (&Step::Normalising(hevy), true),
-            (&Step::Canonicalising(Discipline::Gym), true),
             (&Step::Fetching(peloton.clone()), false),
-            (&Step::Normalising(peloton), true),
-            (&Step::Canonicalising(Discipline::Cycling), true),
-            (&Step::Fetching(withings.clone()), true),
-            (&Step::Normalising(withings), true),
-            (&Step::CanonicalisingWeighIns, true),
             (&Step::RefreshingClasses, true),
+            (&Step::Fetching(withings.clone()), true),
+            (&Step::Normalising(hevy), true),
+            (&Step::Normalising(peloton), true),
+            (&Step::Normalising(withings), true),
+            (&Step::Normalising(garmin), true),
+            (&Step::Canonicalising(Discipline::Gym), true),
+            (&Step::Canonicalising(Discipline::Cycling), true),
+            (&Step::CanonicalisingWeighIns, true),
         ]
     );
     assert!(matches!(
-        report.run.get(3).map(|done| &done.outcome),
+        report.run.get(1).map(|done| &done.outcome),
         Some(Err(StepFailure::NoAccess(_)))
     ));
     assert!(matches!(
@@ -583,13 +782,16 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
         Committer(None),
     )
     .expect("the ports build");
-    ports.cycling_records.walks = Ok(Walking(vec![
-        (stream("peloton.rides").expect("a stream"), Ok(landed(50))),
-        (
-            stream("peloton.ride_samples").expect("a stream"),
-            Err(ExtractionError::Source(SourceError::Unauthorised)),
-        ),
-    ]));
+    ports.cycling_records.walks = Ok(Walking(
+        vec![
+            (stream("peloton.rides").expect("a stream"), Ok(landed(50))),
+            (
+                stream("peloton.ride_samples").expect("a stream"),
+                Err(ExtractionError::Source(SourceError::Unauthorised)),
+            ),
+        ],
+        None,
+    ));
     let report = runtime()
         .expect("a current-thread runtime builds")
         .block_on(Next::new(ports).run(now(), None, &Heard::default()))
@@ -784,4 +986,235 @@ fn a_run_while_another_is_going_is_refused_before_anything_runs() {
 
     assert_eq!(refused.err(), Some(NextError::AlreadyRunning));
     assert!(heard.events().is_empty());
+}
+
+// --- Deriving only what something new reached (#468) ------------------------
+
+/// A run over the graph, on the build given.
+fn run_over(graph: &Arc<Graph>, build: Option<&str>) -> Result<Report, Box<dyn std::error::Error>> {
+    let mut ports = over(
+        Arc::clone(graph),
+        Recorded::week()?,
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+        Unreachable,
+    )?;
+    ports.build = build.map(|build| Build::from(build.to_owned()));
+    Ok(runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?)
+}
+
+/// Each derivation step, named, and whether it said its layer was unchanged.
+fn derived(report: &Report) -> Vec<(String, bool)> {
+    report
+        .run
+        .iter()
+        .filter_map(|done| {
+            let name = match &done.step {
+                Step::Normalising(stream) => stream.to_string(),
+                Step::Canonicalising(discipline) => discipline.as_str().to_owned(),
+                Step::CanonicalisingWeighIns => "weigh-ins".to_owned(),
+                _ => return None,
+            };
+            Some((name, done.outcome == Ok(Found::Unchanged)))
+        })
+        .collect()
+}
+
+fn unchanged(names: &[&str], changed: &[&str]) -> Vec<(String, bool)> {
+    names
+        .iter()
+        .map(|name| ((*name).to_owned(), !changed.contains(name)))
+        .collect()
+}
+
+const LAYERS: [&str; 7] = [
+    "hevy.workouts",
+    "peloton.rides",
+    "withings.measurements",
+    "garmin.activities",
+    "gym",
+    "cycling",
+    "weigh-ins",
+];
+
+/// **A second run with nothing new derives nothing**, and says of each layer
+/// that it was unchanged.
+#[test]
+fn a_second_run_with_nothing_new_derives_nothing() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    let derived_before = (graph.normalised(), graph.canonicalised());
+
+    let second = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    assert_eq!(derived(&second), unchanged(&LAYERS, &[]));
+    assert_eq!((graph.normalised(), graph.canonicalised()), derived_before);
+}
+
+/// **Something new reaching Hevy derives the gym again, and nothing that does
+/// not read from it**: its normalised layer, then the canonical gym layer that
+/// reads it, while cycling and the weigh-ins stand.
+#[test]
+fn something_new_reaching_a_stream_derives_what_reads_from_it_and_nothing_else() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    graph.reach("hevy.workouts");
+    let report = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    assert_eq!(
+        derived(&report),
+        unchanged(&LAYERS, &["hevy.workouts", "gym"])
+    );
+}
+
+/// **A correction derives again what reads from it**: the overlay is one of a
+/// normalised layer's inputs, so a correction to a Garmin set derives Garmin's
+/// layer and the gym's, which reads it.
+#[test]
+fn a_correction_derives_again_what_reads_from_it() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    graph.reach("garmin.activities");
+    let report = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    assert_eq!(
+        derived(&report),
+        unchanged(&LAYERS, &["garmin.activities", "gym"])
+    );
+}
+
+/// **A new build derives every layer once**, by its own mechanism: nothing
+/// upstream has moved, and the run after it derives nothing again.
+#[test]
+fn a_new_build_derives_every_layer_once() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+
+    let upgraded = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
+    let after = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
+
+    assert_eq!(derived(&upgraded), unchanged(&LAYERS, &LAYERS));
+    assert_eq!(derived(&after), unchanged(&LAYERS, &[]));
+}
+
+/// **A build that cannot say which commit it is derives every layer every
+/// run**: it cannot tell whether the code that derived them has changed.
+#[test]
+fn a_build_that_cannot_name_its_commit_derives_every_run() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, None).expect("the run answers");
+
+    let again = run_over(&graph, None).expect("the run answers");
+
+    assert_eq!(derived(&again), unchanged(&LAYERS, &LAYERS));
+}
+
+/// **A layer that will not derive is a failed step**, the run carries on, and
+/// under a new build it is derived again next run rather than passed over.
+#[test]
+fn a_layer_that_will_not_derive_is_a_failed_step_and_tried_again() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    graph
+        .with(|layered| layered.failing.push("garmin.activities".to_owned()))
+        .expect("the graph");
+
+    let failed = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
+    let garmin = Step::Normalising(stream("garmin.activities").expect("a stream"));
+    assert!(
+        failed.run.iter().any(|done| done.step == garmin
+            && matches!(done.outcome, Err(StepFailure::Normalisation(_))))
+    );
+    assert!(matches!(failed.next, WhatIsNext::Session { .. }));
+
+    graph
+        .with(|layered| layered.failing.clear())
+        .expect("the graph");
+    let retried = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
+    assert_eq!(derived(&retried), unchanged(&LAYERS, &LAYERS));
+}
+
+/// The Withings step of a run whose newest weigh-in is on `newest`.
+type Fetched = Vec<(Step, Result<Found, StepFailure>)>;
+
+fn withings_on(newest: Option<Date>) -> Result<Fetched, Box<dyn std::error::Error>> {
+    let mut ports = ports(
+        Recorded::week()?,
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+    )?;
+    if let Ok(daily) = &mut ports.weigh_in_records.walks {
+        daily.newest = Newest(newest);
+    }
+    let report = runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?;
+    let withings = stream("withings.measurements")?;
+    Ok(report
+        .run
+        .into_iter()
+        .filter(|done| done.step == Step::Fetching(withings.clone()))
+        .map(|done| (done.step, done.outcome))
+        .collect())
+}
+
+/// **Once today's weigh-in has been collected, Withings is not fetched again
+/// until tomorrow**; a weigh-in from yesterday leaves it due.
+#[test]
+fn a_daily_stream_holding_today_is_not_fetched_until_tomorrow() {
+    let withings = Step::Fetching(stream("withings.measurements").expect("a stream"));
+
+    assert_eq!(
+        withings_on(Some(now().date)).expect("the run answers"),
+        vec![(withings.clone(), Ok(Found::NotDue))]
+    );
+    assert_eq!(
+        withings_on(now().date.yesterday().ok()).expect("the run answers"),
+        vec![(withings, Ok(Found::Landed(RecordCount::from(1))))]
+    );
+}
+
+/// **The streams are fetched at once**: each walk here waits for the other two
+/// to start, which they never would one after another.
+#[test]
+fn the_streams_are_fetched_at_once() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let met = Some(Arc::new(AtomicUsize::new(0)));
+    let walking = |name: &str| {
+        Walking(
+            vec![(stream(name).expect("a stream"), Ok(landed(1)))],
+            met.clone(),
+        )
+    };
+    ports.gym_records.walks = Ok(walking("hevy.workouts"));
+    ports.cycling_records.walks = Ok(walking("peloton.rides"));
+    if let Ok(daily) = &mut ports.weigh_in_records.walks {
+        daily.walks = walking("withings.measurements");
+    }
+    let report = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .expect("the run answers");
+
+    let fetched: Vec<bool> = report
+        .run
+        .iter()
+        .filter(|done| matches!(done.step, Step::Fetching(_)))
+        .map(|done| done.outcome == Ok(Found::Landed(RecordCount::from(1))))
+        .collect();
+    assert_eq!(fetched, vec![true, true, true]);
 }

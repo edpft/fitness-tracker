@@ -46,14 +46,16 @@ pub fn step(step: &Step) -> String {
 pub fn outcome(done: &Done) -> String {
     let found = match &done.outcome {
         Err(failure) => return format!("failed: {failure}"),
+        Ok(Found::NotDue) => return "not due until tomorrow".to_owned(),
+        Ok(Found::Unchanged) => return "unchanged".to_owned(),
         Ok(found) => found,
     };
     let what = match found {
+        Found::NotDue | Found::Unchanged => String::new(),
         Found::Landed(records) if records.as_usize() == 0 => "nothing new".to_owned(),
         Found::Landed(records) => format!("{records} new"),
-        Found::Sessions(sessions) => format!("{sessions} sessions"),
+        Found::Written(written) => format!("{written} written"),
         Found::Canonical(sessions) => format!("{sessions} sessions"),
-        Found::WeighIns(weigh_ins) => format!("{weigh_ins} weigh-ins"),
         Found::CanonicalWeighIns { written, left_out } => {
             let mut said = format!("{written} weigh-ins");
             for left_out in left_out {

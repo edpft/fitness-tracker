@@ -13,12 +13,12 @@
 use std::path::{Path, PathBuf};
 
 use application::{
-    DerivationStatus, DerivationStatusReporter, ExtractionError, ExtractionStatusReporter,
-    LandingStore, NormalisationError, NormalisationSummary, RefusalReport, RefusalReporter,
-    ResumptionPointResetter, ResumptionPointStore, RunSummary, StatusError, StreamStatus,
-    WorkoutExtractor, WorkoutNormaliser,
+    DerivationStatus, DerivationStatusReporter, DerivedFrom, ExtractionError,
+    ExtractionStatusReporter, LandingStore, NormalisationError, NormalisationSummary,
+    RefusalReport, RefusalReporter, ResumptionPointResetter, ResumptionPointStore, RunSummary,
+    StatusError, StreamStatus, WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
-    next::{NoAccess, Records},
+    next::{Daily, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
@@ -230,6 +230,108 @@ pub async fn run(
             stream: other.to_owned(),
         }),
     }
+}
+
+/// What `known`'s normalised layer would be derived from now (#468): how many
+/// landing records its derivation reads, the corrections it applies, and the
+/// zone.
+///
+/// **A count is the whole of raw's extent**, because raw is append-only
+/// (§ II.1): a record is never removed or rewritten, so the same count is the
+/// same records. Corrections are not, so they are named, and a correction
+/// retracted and another asserted reads differently. The landing tables and
+/// the overlay are the ones the stream's arm of [`run`] derives from.
+///
+/// # Errors
+///
+/// [`WiringError`] if the store is unavailable, or the stream has no
+/// derivation here.
+pub async fn inputs(
+    known: &KnownStream,
+    database: &Path,
+    zone: &OperatorZone,
+) -> Result<DerivedFrom, WiringError> {
+    use application::RawExtent as _;
+
+    let pool = connect(database).await?;
+    let (records, overlay) = match known.name().as_str() {
+        HevyWorkoutLandingStore::STREAM => (
+            HevyWorkoutLandingStore::new(pool.clone())?
+                .records()
+                .await?,
+            Some(HevyWorkoutLandingStore::STREAM),
+        ),
+        PelotonRideLandingStore::STREAM => (
+            PelotonRawExtent::new(
+                PelotonRideLandingStore::new(pool.clone())?,
+                PelotonRideSampleLandingStore::new(pool.clone())?,
+            )
+            .records()
+            .await?,
+            None,
+        ),
+        WithingsMeasurementLandingStore::STREAM => (
+            WithingsMeasurementLandingStore::new(pool.clone())?
+                .records()
+                .await?,
+            None,
+        ),
+        GarminHrvLandingStore::STREAM => (
+            GarminHrvLandingStore::new(pool.clone())?.records().await?,
+            None,
+        ),
+        GarminActivityLandingStore::STREAM => (
+            GarminGymRawExtent::new(
+                GarminActivityLandingStore::new(pool.clone())?,
+                GarminExerciseSetLandingStore::new(pool.clone())?,
+                GarminActivityFileLandingStore::new(pool.clone())?,
+            )
+            .records()
+            .await?,
+            Some(GarminExerciseSetLandingStore::STREAM),
+        ),
+        GarminDailyHeartRateLandingStore::STREAM => (
+            GarminDailyHeartRateLandingStore::new(pool.clone())?
+                .records()
+                .await?,
+            None,
+        ),
+        SpreadsheetFileLandingStore::STREAM => (
+            SpreadsheetFileLandingStore::new(pool.clone())?
+                .records()
+                .await?,
+            None,
+        ),
+        BtwbExportLandingStore::STREAM => (
+            BtwbExportLandingStore::new(pool.clone())?.records().await?,
+            None,
+        ),
+        MyFitnessPalExportLandingStore::STREAM => (
+            MyFitnessPalExportLandingStore::new(pool.clone())?
+                .records()
+                .await?,
+            None,
+        ),
+        other => {
+            return Err(WiringError::Unwired {
+                stream: other.to_owned(),
+            });
+        }
+    };
+    let corrections = match overlay {
+        None => Vec::new(),
+        Some(stream) => SqliteEditOverlayStore::new(pool, stream)?
+            .all()
+            .await?
+            .iter()
+            .map(|correction| correction.id().to_string())
+            .collect(),
+    };
+    Ok(DerivedFrom::from(format!(
+        "records {records}; corrections {}; zone {}",
+        corrections.join(","),
+        zone.id()
+    )))
 }
 
 /// Garmin's daily heart rate, of which the resting heart rate is derived (#254).
@@ -577,7 +679,7 @@ fn peloton_normalisation(
     ))
 }
 
-/// Peloton's rides as `next` collects them: both walks, then the derivation.
+/// Peloton's rides as `next` collects them: both walks, and the account.
 ///
 /// # Errors
 ///
@@ -586,18 +688,14 @@ fn peloton_normalisation(
 pub async fn peloton_records(
     access: Result<SourceAccess, NoAccess>,
     database: &Path,
-    zone: OperatorZone,
 ) -> Result<
-    Records<
+    Records<(
         (
-            (
-                application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-                application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-            ),
+            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
             application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
         ),
-        impl WorkoutNormaliser + Sync + use<>,
-    >,
+        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
+    )>,
     WiringError,
 > {
     let pool = connect(database).await?;
@@ -612,15 +710,11 @@ pub async fn peloton_records(
                 PelotonAccountLandingStore::new(pool.clone())?,
             ),
             SqliteResumptionPointStore::new(pool.clone()),
-            SqliteExtractionRunLog::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool),
             database,
         ))?,
     };
-    Ok(Records {
-        entry,
-        walks,
-        normaliser: peloton_normalisation(pool, zone)?,
-    })
+    Ok(Records { entry, walks })
 }
 
 /// Garmin's overnight HRV, landed and derived into nights.
@@ -1166,8 +1260,10 @@ fn withings_normalisation(
     ))
 }
 
-/// Withings' weigh-ins as `next` collects them: one walk, then the derivation
-/// (#409, #357).
+/// Withings' weigh-ins as `next` collects them (#409, #357): **once a day**.
+///
+/// The operator, 2026-10-16: *"Once a daily Withings weigh in has been
+/// collected, we don't need to collect another one until the next day."*
 ///
 /// # Errors
 ///
@@ -1176,34 +1272,30 @@ fn withings_normalisation(
 pub async fn withings_records(
     access: Result<SourceAccess, NoAccess>,
     database: &Path,
-    zone: OperatorZone,
 ) -> Result<
     Records<
-        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-        impl WorkoutNormaliser + Sync + use<>,
+        Daily<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, SqliteWeighInStore>,
     >,
     WiringError,
 > {
     let pool = connect(database).await?;
     let entry = LandingStream::try_from(WithingsMeasurementLandingStore::STREAM)?;
+    let newest = SqliteWeighInStore::new(pool.clone())?;
     let walks = match access {
         Err(why) => Err(why),
         Ok(access) => accessible(withings_walk(
             access,
             WithingsMeasurementLandingStore::new(pool.clone())?,
             SqliteResumptionPointStore::new(pool.clone()),
-            SqliteExtractionRunLog::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool),
             database,
-        ))?,
+        ))?
+        .map(|walks| Daily { walks, newest }),
     };
-    Ok(Records {
-        entry,
-        walks,
-        normaliser: withings_normalisation(pool, zone)?,
-    })
+    Ok(Records { entry, walks })
 }
 
-/// Hevy's workouts as `next` collects them: one walk, then the derivation.
+/// Hevy's workouts as `next` collects them: one walk.
 ///
 /// # Errors
 ///
@@ -1212,14 +1304,7 @@ pub async fn withings_records(
 pub async fn hevy_records(
     access: Result<SourceAccess, NoAccess>,
     database: &Path,
-    zone: OperatorZone,
-) -> Result<
-    Records<
-        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-        impl WorkoutNormaliser + Sync + use<>,
-    >,
-    WiringError,
-> {
+) -> Result<Records<application::next::Walk<impl WorkoutExtractor + Sync + use<>>>, WiringError> {
     let pool = connect(database).await?;
     let entry = LandingStream::try_from(HevyWorkoutLandingStore::STREAM)?;
     let walks = match access {
@@ -1228,15 +1313,11 @@ pub async fn hevy_records(
             access,
             HevyWorkoutLandingStore::new(pool.clone())?,
             SqliteResumptionPointStore::new(pool.clone()),
-            SqliteExtractionRunLog::new(pool.clone()),
+            SqliteExtractionRunLog::new(pool),
             database,
         ))?,
     };
-    Ok(Records {
-        entry,
-        walks,
-        normaliser: hevy_normalisation(pool, zone).await?,
-    })
+    Ok(Records { entry, walks })
 }
 
 /// A credential of the wrong kind is no access, like an absent one; anything

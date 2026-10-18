@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE normalisation_run SET derived_from = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "dff6ec15a50331a2434e6bda82e26733fc3c05eea96c1bc61725f90a3bee7ef2"
+}

@@ -601,6 +601,16 @@ pub trait NormalisedGymSessionReader {
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<NormalisedGymSession>, StoreError>> + Send;
+
+    /// Which derivations wrote what this reads: what a canonical layer built
+    /// from it is derived from (#468). Every row a derivation writes names its
+    /// run, and a derivation replaces its stream's rows whole, so the runs
+    /// change exactly when the rows do.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn written_by(&self) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
 }
 
 /// The canonical layer for gym sessions: one entry per visit to a gym, whatever
@@ -659,6 +669,16 @@ pub trait NormalisedCyclingSessionReader {
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+
+    /// Which derivations wrote what this reads: what a canonical layer built
+    /// from it is derived from (#468). Every row a derivation writes names its
+    /// run, and a derivation replaces its stream's rows whole, so the runs
+    /// change exactly when the rows do.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn written_by(&self) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
 }
 
 /// The canonical layer for cycling sessions: one entry per session ridden,
@@ -1376,6 +1396,16 @@ pub trait NormalisedWeighInReader {
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<WeighInAccount>, StoreError>> + Send;
+
+    /// Which derivations wrote what this reads: what a canonical layer built
+    /// from it is derived from (#468). Every row a derivation writes names its
+    /// run, and a derivation replaces its stream's rows whole, so the runs
+    /// change exactly when the rows do.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn written_by(&self) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
 }
 
 /// The canonical weigh-in layer (#409).
@@ -2881,6 +2911,158 @@ where
         sightings.extend(self.1.sightings().await?);
         Ok(sightings)
     }
+}
+// --- What each derived layer was derived from (#468) -----------------------
+
+/// What a derived layer was a function of, as the store states it cheaply: how
+/// far each input reaches, never the inputs themselves.
+///
+/// **Reconstructible state, which § II governs not at all.** Losing it costs a
+/// derivation of every layer, never a fact, so it is compared and nothing else:
+/// a layer whose inputs read the same as when it was derived is the layer a
+/// derivation would write again (§ II, "identical to a full re-derivation").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedFrom(String);
+
+impl From<String> for DerivedFrom {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl DerivedFrom {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A build of the derivation code: the commit it was built from.
+///
+/// **Not a node of the graph.** The operator, 2026-10-16: *"The build is not a
+/// node in it."* A new build derives every layer once, and the store records
+/// which build last did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Build(String);
+
+impl From<String> for Build {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl Build {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One of the canonical layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanonicalLayer {
+    Gym,
+    Cycling,
+    WeighIns,
+}
+
+impl CanonicalLayer {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gym => "gym",
+            Self::Cycling => "cycling",
+            Self::WeighIns => "weigh-ins",
+        }
+    }
+}
+
+/// What each layer standing in the store was derived from, and by which build.
+pub trait DerivationLedger {
+    /// The build that last derived every layer.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn build(&self) -> impl Future<Output = Result<Option<Build>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_build(&self, build: &Build) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// What the stream's normalised layer was derived from: the inputs of the
+    /// derivation that wrote it, which is its latest success. `None` where that
+    /// derivation recorded none, as one started by hand does.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn normalised(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<Option<DerivedFrom>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_normalised(
+        &self,
+        run: NormalisationRunId,
+        from: &DerivedFrom,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn canonical(
+        &self,
+        layer: CanonicalLayer,
+    ) -> impl Future<Output = Result<Option<DerivedFrom>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_canonical(
+        &self,
+        layer: CanonicalLayer,
+        from: &DerivedFrom,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// Every normalised layer this build derives, whichever streams a run fetches.
+///
+/// **All of them** (the operator, 2026-10-18: *"everything that's needed for
+/// the metrics and prescribing"*), so a stream landed from the command line is
+/// derived by the next run that sees it moved.
+pub trait NormalisedLayers {
+    /// Every stream with a normalised layer, in the order they are derived.
+    fn streams(&self) -> Vec<LandingStream>;
+
+    /// What the stream's layer would be derived from now: how far its raw
+    /// reaches, the corrections in force, and the declared zone.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn inputs(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`NormalisationError`] if the derivation fails.
+    fn normalise(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<NormalisationSummary, NormalisationError>> + Send;
+}
+
+/// The newest day a stream holds an observation for, in that observation's
+/// own zone.
+pub trait NewestObservation {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn newest_day(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
 #[cfg(test)]

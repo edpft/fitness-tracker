@@ -65,6 +65,20 @@ struct Series {
 }
 
 impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
+    /// **Peloton's alone**, so the stream is the one constant: nothing else
+    /// writes `cycling_session`.
+    async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
+        let runs = sqlx::query_scalar!(
+            r#"SELECT DISTINCT run_id AS "run!: i64" FROM cycling_session ORDER BY run_id"#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(super::derivation_ledger::written_by(runs.into_iter().map(
+            |run| (super::PelotonRideLandingStore::STREAM.to_owned(), run),
+        )))
+    }
+
     async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
         // A normalised session's id is its first ride's landing record, which
         // is what `cycling_session` is keyed on; a ride is keyed on its own.
