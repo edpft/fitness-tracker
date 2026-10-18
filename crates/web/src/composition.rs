@@ -5,11 +5,17 @@
 //! stretch it is (§ 37), and nothing joins two methods, since each one's
 //! figures are its own series (§ 6). A method keeps its colour on every chart.
 //!
+//! **The trend is a line over each method's points** (#419), broken where the
+//! record is too thin for one, and each method's last reading against 28 days
+//! before is said above its chart.
+//!
 //! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
 //! the table beneath each chart is the same figures.
 
 use domain::{
-    analytical::composition::{ComponentSeries, Method, Unit},
+    analytical::composition::{
+        AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
+    },
     body::Component,
 };
 use jiff::civil::Date;
@@ -61,6 +67,30 @@ fn figure(value: f64, unit: Unit) -> String {
     }
 }
 
+/// A change as it is printed, with its sign, to one place more than a figure
+/// so that a change just inside the noise does not read as one just outside.
+fn change(change: Change, unit: Unit) -> String {
+    let direction = match change.direction {
+        Direction::Rising => "rising",
+        Direction::Maintaining => "maintaining",
+        Direction::Falling => "falling",
+    };
+    let (by, noise) = match unit {
+        Unit::Percentage => (
+            format!("{:+.2}%", change.by),
+            format!("±{:.2}%", change.noise),
+        ),
+        Unit::Kilograms => (
+            format!("{:+.2} kg", change.by),
+            format!("±{:.2} kg", change.noise),
+        ),
+    };
+    format!(
+        "{} against {AGAINST_DAYS} days before, noise {noise}: {direction}",
+        by.replace('-', "−")
+    )
+}
+
 /// Every method on the page, in the order it first appears.
 fn methods(components: &[ComponentSeries]) -> Vec<Method> {
     let mut methods: Vec<(Date, Method)> = Vec::new();
@@ -101,7 +131,10 @@ pub fn page(components: &[ComponentSeries]) -> Markup {
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
-                    p.method { "One point per weigh-in, coloured by what measured it." }
+                    p.method {
+                        "points: each weigh-in, coloured by what measured it · line: trend, the " (TREND)
+                        " · against " (AGAINST_DAYS) " days before: rising or falling beyond 1.96 × the method's own scatter between consecutive days, maintaining within it"
+                    }
                     @if components.is_empty() {
                         p { "Nothing has been recorded." }
                     }
@@ -199,6 +232,11 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
     let unit = component.unit;
     html! {
         h2 { (name) " (" (unit.as_str()) ")" }
+        @for one in &component.series {
+            @if let Some(last) = one.changes.last() {
+                p.reading { (one.method) " · " (last.on) ": " (change(*last, unit)) }
+            }
+        }
         div.plot {
             svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
                 aria-label=(format!("{name}, one point per weigh-in, by date")) {
@@ -212,6 +250,19 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
                 }
                 line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
                 @for one in &component.series {
+                    @for run in &one.trend {
+                        polyline.trend points=(points(run, &frame)) {}
+                        @for day in run {
+                            circle.hover cx=(frame.x(seconds(day.on))) cy=(frame.y(day.value)) r=(RADIUS) {
+                                title {
+                                    (day.on) " · trend " (figure(day.value, unit)) " · " (one.method)
+                                    @if let Some(at) = one.changes.iter().find(|at| at.on == day.on) {
+                                        " · " (change(*at, unit))
+                                    }
+                                }
+                            }
+                        }
+                    }
                     @for reading in &one.readings {
                         circle class=(format!("point {}", class(methods, one.method)))
                             cx=(frame.x(seconds(reading.on))) cy=(frame.y(reading.value)) r=(RADIUS) {
@@ -233,6 +284,14 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
         }
         (table(component))
     }
+}
+
+/// A run of the trend as SVG polyline points.
+fn points(run: &[Trend], frame: &Frame) -> String {
+    run.iter()
+        .map(|day| format!("{:.1},{:.1}", frame.x(seconds(day.on)), frame.y(day.value)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Each new year inside the span, or the first one at the left edge where the
@@ -319,16 +378,16 @@ mod tests {
             component: Component::Fat,
             unit: Unit::Percentage,
             series: vec![
-                MethodSeries {
-                    method: Method::Spreadsheets,
-                    readings: vec![reading(2018, 1, 1, 24.7), reading(2018, 1, 2, 24.6)],
-                },
-                MethodSeries {
-                    method: Method::BodyScan {
+                MethodSeries::of(
+                    Method::Spreadsheets,
+                    vec![reading(2018, 1, 1, 24.7), reading(2018, 1, 2, 24.6)],
+                ),
+                MethodSeries::of(
+                    Method::BodyScan {
                         algorithm: 218_300_672,
                     },
-                    readings: vec![reading(2026, 10, 16, 17_610.0 / 83_648.0 * 100.0)],
-                },
+                    vec![reading(2026, 10, 16, 17_610.0 / 83_648.0 * 100.0)],
+                ),
             ],
         };
         let drawn = page(&[fat]).into_string();
@@ -339,6 +398,46 @@ mod tests {
         assert!(drawn.contains("2018-01-01 · 24.7% · spreadsheets"));
         assert!(drawn.contains("2026-10-16 · 21.1% · Body Scan, algorithm 218300672"));
         assert!(!drawn.contains("<polyline") && !drawn.contains("<path"));
+    }
+
+    #[test]
+    fn a_trend_is_a_line_and_its_last_reading_is_said() {
+        let readings: Vec<Reading<f64>> = jiff::civil::date(2026, 1, 1)
+            .series(jiff::Span::new().days(1))
+            .take(70)
+            .enumerate()
+            .map(|(day, on)| {
+                let level = if day < 35 { 62.0 } else { 63.0 };
+                let wobble = if day % 2 == 0 { 0.1 } else { -0.1 };
+                Reading {
+                    on,
+                    value: level + wobble,
+                }
+            })
+            .collect();
+        let muscle = ComponentSeries {
+            component: Component::Muscle,
+            unit: Unit::Kilograms,
+            series: vec![MethodSeries::of(
+                Method::BodyScan {
+                    algorithm: 218_300_672,
+                },
+                readings,
+            )],
+        };
+        let drawn = page(&[muscle]).into_string();
+
+        assert_eq!(drawn.matches("<polyline").count(), 1, "one unbroken run");
+        assert!(
+            drawn.contains(
+                "Body Scan, algorithm 218300672 · 2026-03-11: +0.00 kg against 28 days before, noise ±"
+            ),
+            "{drawn}"
+        );
+        assert!(
+            drawn.contains(": rising</title>"),
+            "the step up reads as rising"
+        );
     }
 
     #[test]
