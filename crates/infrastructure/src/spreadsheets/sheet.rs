@@ -187,8 +187,8 @@ fn document_saved(bytes: &[u8]) -> Option<Timestamp> {
     let mut inside = false;
     loop {
         match reader.read_event().ok()? {
-            Event::Start(start) => inside = start.name().as_ref() == b"dcterms:modified",
-            Event::Text(text) if inside => return text.decode().ok()?.trim().parse().ok(),
+            Event::Start(start) => inside = start.name().as_ref() == "dcterms:modified",
+            Event::Text(text) if inside => return text.xml10_content().trim().parse().ok(),
             Event::End(_) => inside = false,
             Event::Eof => return None,
             _ => {}

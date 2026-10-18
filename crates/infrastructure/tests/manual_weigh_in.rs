@@ -382,11 +382,13 @@ mod store {
             assert_eq!(
                 count(
                     &pool,
-                    "SELECT COUNT(*) FROM manual_weigh_in WHERE last_saved_at_utc IS NOT NULL"
+                    "SELECT COUNT(*) FROM manual_weigh_in
+                     WHERE last_saved_by = 'document'
+                       AND last_saved_at_utc = '2026-09-27T16:09:22Z'"
                 )
                 .await?,
                 5,
-                "every copy says when its workbook was last saved"
+                "every copy says when its workbook was last saved, by the workbook's own dcterms:modified"
             );
 
             let done = canonicalise::weigh_ins(&normalised, &canonical).await?;
