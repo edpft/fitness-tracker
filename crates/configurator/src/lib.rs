@@ -10,6 +10,7 @@
 pub mod access;
 pub mod body_weight;
 pub mod catalogue;
+pub mod composition;
 pub mod config;
 pub mod corrections;
 pub mod cycling;

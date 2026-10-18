@@ -7,6 +7,7 @@
 //! adapter.
 
 mod chart;
+mod composition;
 mod daily;
 mod equipment;
 mod one_rep_max;
@@ -117,6 +118,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/", get(index))
         .route("/heart-rate", get(heart_rate))
         .route("/body-weight", get(body_weight))
+        .route("/body-composition", get(body_composition))
         .route("/hrv", get(overnight_hrv))
         .route("/resting-heart-rate", get(resting_heart_rate))
         .route("/estimated-1rm", get(estimated_one_rep_max))
@@ -174,6 +176,20 @@ async fn body_weight(
     match view {
         Ok(view) => weight::page(&view, over),
         Err(error) => weight::unreadable(&error.to_string()),
+    }
+}
+
+/// Body composition, one series per method, read afresh from the store.
+async fn body_composition(State(runs): State<Arc<Runs>>) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return composition::unreadable(&error.to_string()),
+    };
+    let components = configurator::composition::by_method(&store).await;
+    store.close().await;
+    match components {
+        Ok(components) => composition::page(&components),
+        Err(error) => composition::unreadable(&error.to_string()),
     }
 }
 

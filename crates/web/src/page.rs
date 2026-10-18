@@ -28,7 +28,7 @@ pub fn index(view: &View) -> Markup {
                     }
                     div #notice {}
                     p { a href="/heart-rate" { "Heart rate per power zone" } }
-                    p { a href="/body-weight" { "Body weight" } }
+                    p { a href="/body-weight" { "Body weight" } " · " a href="/body-composition" { "Body composition" } }
                     p { a href="/resting-heart-rate" { "Resting heart rate" } " · " a href="/hrv" { "Overnight HRV" } }
                     p { a href="/estimated-1rm" { "Estimated 1RM" } }
                     p { a href="/programme" { "Programme" } " · " a href="/equipment" { "Equipment" } }

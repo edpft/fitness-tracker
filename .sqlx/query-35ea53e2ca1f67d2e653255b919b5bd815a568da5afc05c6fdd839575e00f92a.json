@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.stream AS \"stream!: String\",\n                   w.on_day AS \"on_day: String\",\n                   w.measured_at_utc AS \"measured_at_utc: String\",\n                   w.zone AS \"zone: String\",\n                   w.mass_grams AS \"weighed!: i64\",\n                   c.component AS \"component!: String\",\n                   c.mass_grams AS \"mass_grams: i64\",\n                   c.percentage_tenths AS \"percentage_tenths: i64\",\n                   p.algorithm AS \"algorithm?: i64\"\n            FROM body_composition c\n            JOIN weigh_in w ON w.id = c.weigh_in\n            LEFT JOIN body_scan_weigh_in b ON b.weigh_in = w.id\n            LEFT JOIN body_scan_part p\n                ON p.weigh_in = b.landing_record_id AND p.part = 'composition'\n            WHERE c.volume_millilitres IS NULL\n            ORDER BY COALESCE(w.measured_at_utc, w.on_day), w.id, c.component\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "weighed!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "mass_grams"
+          }
+        }
+      },
+      {
+        "name": "component!: String",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "body_composition",
+            "name": "component"
+          }
+        }
+      },
+      {
+        "name": "mass_grams: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_composition",
+            "name": "mass_grams"
+          }
+        }
+      },
+      {
+        "name": "percentage_tenths: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_composition",
+            "name": "percentage_tenths"
+          }
+        }
+      },
+      {
+        "name": "algorithm?: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_part",
+            "name": "algorithm"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "35ea53e2ca1f67d2e653255b919b5bd815a568da5afc05c6fdd839575e00f92a"
+}

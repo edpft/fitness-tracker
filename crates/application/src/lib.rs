@@ -17,6 +17,7 @@ pub mod body_weight;
 pub mod canonicalise;
 pub mod commit;
 pub mod compare;
+pub mod composition;
 pub mod cycling;
 pub mod deliver;
 pub mod devices;
@@ -44,11 +45,11 @@ pub use error::{
 };
 pub use ports::{
     AccountReader, Authored, ByReason, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
-    CanonicalWeighInStore, ClassSource, ClassesListed, ClassesRead, Clock, CyclingDeliveryStore,
-    CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
-    DerivationStatus, DerivationStatusReporter, DestinationName, DestinationReply, DiaryAuthor,
-    DiaryStore, EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog,
-    ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession,
+    CanonicalWeighInStore, ClassSource, ClassesListed, ClassesRead, Clock, CompositionHistory,
+    CyclingDeliveryStore, CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt,
+    DeliveryReference, DerivationStatus, DerivationStatusReporter, DestinationName,
+    DestinationReply, DiaryAuthor, DiaryStore, EquipmentStore, EventBatch, ExerciseHistory,
+    ExtractionRunLog, ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession,
     GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance, LadderStanding,
     LandingStore, LastPerformance, MesocycleInForce, MesocycleStore, NextLock, NormalisationRunLog,
     NormalisationSummary, NormalisedCyclingSessionReader, NormalisedEntityStore,
