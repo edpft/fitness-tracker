@@ -1099,7 +1099,7 @@ fn derived_phrase(
 // --- `fitness next` ---------------------------------------------------------
 
 /// How wide a step's name is, so the outcomes line up.
-const STEP_WIDTH: usize = 35;
+const STEP_WIDTH: usize = 37;
 
 /// A step of `next`'s run, named and padded for its outcome.
 pub fn step(step: &application::next::Step) -> String {
