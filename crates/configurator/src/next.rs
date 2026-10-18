@@ -185,7 +185,8 @@ pub async fn run(
         lock: FileRunLock::beside(database),
     });
 
-    Ok(next.run(now, skip, progress).await?)
+    // **Boxed, because it holds every source's fetch at once** (#468).
+    Ok(Box::pin(next.run(now, skip, progress)).await?)
 }
 
 /// The commit this build was made from, as the flake bakes it in.
