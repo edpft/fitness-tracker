@@ -128,6 +128,36 @@ impl SqliteWeighInStore {
     }
 }
 
+/// **The day of the newest weigh-in, in its own zone**, so a Withings weigh-in
+/// collected this morning is today's however the clock reads it (#468).
+impl application::NewestObservation for SqliteWeighInStore {
+    async fn newest_day(&self) -> Result<Option<jiff::civil::Date>, StoreError> {
+        let stream = self.stream.to_string();
+        let row = sqlx::query!(
+            r#"
+            SELECT measured_at_utc AS "measured_at_utc!: String", zone AS "zone!: String"
+            FROM weigh_in
+            WHERE stream = ? AND measured_at_utc IS NOT NULL
+            ORDER BY measured_at_utc DESC
+            LIMIT 1
+            "#,
+            stream
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let at: jiff::Timestamp = row
+            .measured_at_utc
+            .parse()
+            .map_err(|error| corrupt(&error))?;
+        let zone = jiff::tz::TimeZone::get(&row.zone).map_err(|error| corrupt(&error))?;
+        Ok(Some(at.to_zoned(zone).date()))
+    }
+}
+
 /// A non-negative quantity on its way into the store.
 fn stored(value: u64) -> Result<i64, StoreError> {
     i64::try_from(value).map_err(|_| StoreError::Corrupt {

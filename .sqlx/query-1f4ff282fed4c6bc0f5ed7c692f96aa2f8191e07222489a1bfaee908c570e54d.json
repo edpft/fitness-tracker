@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT derived_from AS \"derived_from: String\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC, id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "derived_from: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_run",
+            "name": "derived_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1f4ff282fed4c6bc0f5ed7c692f96aa2f8191e07222489a1bfaee908c570e54d"
+}

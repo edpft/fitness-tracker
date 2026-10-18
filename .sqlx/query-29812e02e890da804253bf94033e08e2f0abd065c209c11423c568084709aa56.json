@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT derived_from FROM canonical_derivation WHERE layer = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "derived_from",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_derivation",
+            "name": "derived_from"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "29812e02e890da804253bf94033e08e2f0abd065c209c11423c568084709aa56"
+}

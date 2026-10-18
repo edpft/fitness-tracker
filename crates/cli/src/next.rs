@@ -6,11 +6,7 @@
 //! (#398). What is left here is the transport's: reading the clock and the
 //! flags, printing progress as each step runs, and rendering the report.
 
-use std::{
-    io::Write as _,
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::{io::Write as _, path::Path, sync::Mutex};
 
 use application::next::{Done, NextError, Prescribed, Progress, Step, Undelivered, WhatIsNext};
 use configurator::next::NextFailure;
@@ -69,7 +65,6 @@ fn refused(failure: NextFailure) -> Failure {
         NextFailure::Next(NextError::Store(error)) | NextFailure::Store(error) => {
             Failure::from(error)
         }
-        NextFailure::Next(NextError::Normalisation(error)) => Failure::from(error),
         NextFailure::Next(error @ NextError::Skip(_)) => Failure::usage(&error),
         other => Failure::from(other),
     }
@@ -161,34 +156,82 @@ fn render(next: &WhatIsNext) -> Result<(), Failure> {
 /// **The step's name is printed when it starts**, so a long first walk or the
 /// first catalogue refresh says what it is doing rather than looking hung, and
 /// its outcome finishes the line.
+/// One line per step, its outcome beside its name.
+///
+/// **Steps run at once** (#468), and a line can only wait for one outcome. So
+/// the first step to start has its name printed and waits on it; a step that
+/// starts while it waits is printed whole when it ends, and one that ends
+/// first is held until the waiting line is finished.
 #[derive(Default)]
 struct Terminal {
-    /// Whether a step's name is on the current line, waiting for its outcome.
-    open: AtomicBool,
+    line: Mutex<Line>,
+}
+
+#[derive(Default)]
+struct Line {
+    /// The step whose name is on the current line, waiting for its outcome.
+    open: Option<Step>,
+    /// Steps that ended while another's line was open, in the order they did.
+    held: Vec<String>,
+}
+
+impl Terminal {
+    fn line(&self) -> std::sync::MutexGuard<'_, Line> {
+        self.line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 impl Progress for Terminal {
     fn started(&self, step: &Step) {
-        print!("{}", output::step(step));
-        let _ = std::io::stdout().flush();
-        self.open.store(true, Ordering::Relaxed);
+        let mut line = self.line();
+        if line.open.is_none() {
+            print!("{}", output::step(step));
+            let _ = std::io::stdout().flush();
+            line.open = Some(step.clone());
+        }
     }
 
-    fn estimated(&self, _step: &Step, outstanding: u64, takes: std::time::Duration) {
-        if output::worth_announcing(takes) {
+    fn estimated(&self, step: &Step, outstanding: u64, takes: std::time::Duration) {
+        let mut line = self.line();
+        if output::worth_announcing(takes) && line.open.as_ref() == Some(step) {
             println!(
                 "{outstanding} classes to read, about {}",
                 output::roughly(takes)
             );
-            self.open.store(false, Ordering::Relaxed);
+            line.open = None;
+            for held in std::mem::take(&mut line.held) {
+                println!("{held}");
+            }
         }
     }
 
     fn finished(&self, done: &Done) {
-        if !self.open.swap(false, Ordering::Relaxed) {
-            print!("{}", output::step(&done.step));
+        let printed = self.line().finished(done);
+        for text in printed {
+            println!("{text}");
         }
-        println!("{}", output::outcome(done));
+    }
+}
+
+impl Line {
+    /// What to print now that `done` has ended: its outcome and whatever was
+    /// held behind it, or the whole of it, or nothing yet.
+    fn finished(&mut self, done: &Done) -> Vec<String> {
+        if self.open.as_ref() == Some(&done.step) {
+            self.open = None;
+            let mut printed = vec![output::outcome(done)];
+            printed.append(&mut self.held);
+            return printed;
+        }
+        let whole = format!("{}{}", output::step(&done.step), output::outcome(done));
+        if self.open.is_some() {
+            self.held.push(whole);
+            Vec::new()
+        } else {
+            vec![whole]
+        }
     }
 }
 

@@ -794,9 +794,6 @@ impl From<configurator::next::NextFailure> for Failure {
             NextFailure::Store(error)
             | NextFailure::Next(application::next::NextError::Store(error)) => Self::from(error),
             NextFailure::Wiring(error) => Self::from(error),
-            NextFailure::Next(application::next::NextError::Normalisation(error)) => {
-                Self::from(error)
-            }
             NextFailure::Next(application::next::NextError::AlreadyRunning) => {
                 Self::message(error.to_string(), exit::ALREADY_RUNNING)
             }

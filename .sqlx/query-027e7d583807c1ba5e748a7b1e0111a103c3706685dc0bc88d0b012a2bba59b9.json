@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT measured_at_utc AS \"measured_at_utc!: String\", zone AS \"zone!: String\"\n            FROM weigh_in\n            WHERE stream = ? AND measured_at_utc IS NOT NULL\n            ORDER BY measured_at_utc DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "measured_at_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "027e7d583807c1ba5e748a7b1e0111a103c3706685dc0bc88d0b012a2bba59b9"
+}

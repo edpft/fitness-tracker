@@ -36,6 +36,22 @@ impl SqliteNormalisedWeighInReader {
 }
 
 impl NormalisedWeighInReader for SqliteNormalisedWeighInReader {
+    async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
+        let runs = sqlx::query!(
+            r#"
+            SELECT DISTINCT stream AS "stream!: String", run_id AS "run!: i64"
+            FROM weigh_in
+            ORDER BY stream, run_id
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(super::derivation_ledger::written_by(
+            runs.into_iter().map(|row| (row.stream, row.run)),
+        ))
+    }
+
     async fn all(&self) -> Result<Vec<WeighInAccount>, StoreError> {
         let rows = sqlx::query!(
             r#"

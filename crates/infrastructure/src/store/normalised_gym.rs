@@ -55,6 +55,22 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
         }
         Ok(sessions)
     }
+
+    async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
+        let runs = sqlx::query!(
+            r#"
+            SELECT DISTINCT stream AS "stream!: String", run_id AS "run!: i64"
+            FROM gym_session
+            ORDER BY stream, run_id
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(super::derivation_ledger::written_by(
+            runs.into_iter().map(|row| (row.stream, row.run)),
+        ))
+    }
 }
 
 /// One session's dating and the parts of it that do not need a second query.

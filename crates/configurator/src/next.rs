@@ -4,10 +4,10 @@
 //! adapters it runs over, so `cli` and `web` start the same run and neither
 //! composes it for itself (#398).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use application::{
-    StoreError,
+    Build, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
@@ -17,6 +17,7 @@ use application::{
     },
 };
 use domain::{
+    landing::LandingStream,
     normalised::OperatorZone,
     prescription::{DestinationName, InvalidDelivery},
     schedule::{DayPart, Discipline},
@@ -24,8 +25,8 @@ use domain::{
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
     SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
     peloton::{
@@ -38,7 +39,7 @@ use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
     holidays::Calendars,
-    wiring::{self, WiringError},
+    wiring::{self, Command, Outcome, Unreported, WiringError},
 };
 
 /// Why `next` could not be started, or could not answer.
@@ -93,12 +94,9 @@ pub async fn run(
             }),
         )
     };
-    let gym_records =
-        wiring::hevy_records(access(Discipline::Gym)?, database, zone.clone()).await?;
-    let cycling_records =
-        wiring::peloton_records(access(Discipline::Cycling)?, database, zone.clone()).await?;
-    let weigh_in_records =
-        wiring::withings_records(weigh_in_access(credentials), database, zone.clone()).await?;
+    let gym_records = wiring::hevy_records(access(Discipline::Gym)?, database).await?;
+    let cycling_records = wiring::peloton_records(access(Discipline::Cycling)?, database).await?;
+    let weigh_in_records = wiring::withings_records(weigh_in_access(credentials), database).await?;
 
     // **A credential that is absent costs what needs it, and nothing else.**
     // The catalogue answers choosing a class and building a mesocycle without
@@ -128,6 +126,10 @@ pub async fn run(
         gym_records,
         cycling_records,
         weigh_in_records,
+        normalised: Layers {
+            database: database.to_path_buf(),
+            zone: zone.clone(),
+        },
         canonical: CanonicalPorts {
             normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
             canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
@@ -136,6 +138,8 @@ pub async fn run(
             normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
             canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
         },
+        ledger: SqliteDerivationLedger::new(pool.clone()),
+        build: build(BUILD),
         classes: class_source,
         holidays: Calendars,
         diary: SqliteDiaryStore::new(pool.clone()),
@@ -181,7 +185,93 @@ pub async fn run(
         lock: FileRunLock::beside(database),
     });
 
-    Ok(next.run(now, skip, progress).await?)
+    // **Boxed, because it holds every source's fetch at once** (#468).
+    Ok(Box::pin(next.run(now, skip, progress)).await?)
+}
+
+/// The commit this build was made from, as the flake bakes it in.
+///
+/// **`None` outside nix**, where nothing says which commit is running: such a
+/// build derives every layer every run, since it cannot tell whether the code
+/// that derived them has changed (#468).
+pub const BUILD: Option<&str> = option_env!("FITNESS_BUILD");
+
+/// The build, where it names one commit.
+///
+/// **A dirty tree or one with no git names none**: the flake says
+/// `abc1234-dirty` for every uncommitted change on top of `abc1234`, and
+/// `unknown` for every build from outside git, so each stands for many
+/// versions of the code and would pass one off as another.
+fn build(baked: Option<&str>) -> Option<Build> {
+    let baked = baked?;
+    let revision = baked.split_whitespace().next()?;
+    (revision != "unknown" && !revision.ends_with("-dirty")).then(|| Build::from(baked.to_owned()))
+}
+
+/// Every stream this build derives, each through its own arm of
+/// [`wiring::run`], which is also how one is derived from the command line.
+struct Layers {
+    database: PathBuf,
+    zone: OperatorZone,
+}
+
+impl Layers {
+    fn known(stream: &LandingStream) -> Result<&'static catalogue::KnownStream, WiringError> {
+        catalogue::lookup(&stream.to_string()).ok_or_else(|| WiringError::Unwired {
+            stream: stream.to_string(),
+        })
+    }
+}
+
+/// A failure to read what a layer is derived from is the store's.
+fn unavailable(error: &WiringError) -> StoreError {
+    match error {
+        WiringError::Store(error) => error.clone(),
+        other => StoreError::Unavailable {
+            detail: other.to_string(),
+        },
+    }
+}
+
+impl NormalisedLayers for Layers {
+    fn streams(&self) -> Vec<LandingStream> {
+        catalogue::KNOWN
+            .iter()
+            .filter_map(|known| known.landing_stream().ok())
+            .collect()
+    }
+
+    async fn inputs(&self, stream: &LandingStream) -> Result<DerivedFrom, StoreError> {
+        let known = Self::known(stream).map_err(|error| unavailable(&error))?;
+        wiring::inputs(known, &self.database, &self.zone)
+            .await
+            .map_err(|error| unavailable(&error))
+    }
+
+    async fn normalise(
+        &self,
+        stream: &LandingStream,
+    ) -> Result<NormalisationSummary, NormalisationError> {
+        let failed = |error: &WiringError| match error {
+            WiringError::Normalisation(error) => error.clone(),
+            other => NormalisationError::Store(unavailable(other)),
+        };
+        let known = Self::known(stream).map_err(|error| failed(&error))?;
+        match wiring::run(
+            Command::Normalise(self.zone.clone()),
+            known,
+            &self.database,
+            &Unreported,
+        )
+        .await
+        {
+            Ok(Outcome::Derived(summary)) => Ok(*summary),
+            Ok(_) => Err(NormalisationError::Store(StoreError::Unavailable {
+                detail: format!("deriving {stream} answered something other than a derivation"),
+            })),
+            Err(error) => Err(failed(&error)),
+        }
+    }
 }
 
 /// Where body weight is collected from: `withings.measurements`, the one stream
@@ -246,4 +336,24 @@ pub fn destination(discipline: Discipline) -> Result<DestinationName, NextFailur
 
 fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, NextFailure> {
     catalogue::discipline(discipline.as_str()).ok_or(NextFailure::NoLoop { discipline })
+}
+
+#[cfg(test)]
+mod tests {
+    use application::Build;
+
+    use super::build;
+
+    /// **Only a clean commit is a build**, since `-dirty` and `unknown` each
+    /// name many versions of the code.
+    #[test]
+    fn only_a_clean_commit_names_a_build() {
+        assert_eq!(
+            build(Some("5734906 (2026-10-18)")),
+            Some(Build::from("5734906 (2026-10-18)".to_owned()))
+        );
+        assert_eq!(build(Some("5734906-dirty (2026-10-18)")), None);
+        assert_eq!(build(Some("unknown (0000-00-00)")), None);
+        assert_eq!(build(None), None);
+    }
 }
