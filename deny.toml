@@ -48,7 +48,15 @@ allow-wildcard-paths = true
 [advisories]
 # Advisories to ignore, with a reason. Prefer upgrading; reach for this only
 # when an advisory does not apply to how you use the crate.
-ignore = []
+ignore = [
+  # zip 8.6.0 under calamine 0.36.1, which requires `zip ^8.6`; all three are
+  # in `extract()`, which calamine never calls. Patched in zip 9, which
+  # calamine's next release takes. `advisory-not-detected` is denied, so these
+  # fail the audit once they match nothing (#492).
+  { id = "RUSTSEC-2026-0367", reason = "zip extract(), unreachable through calamine" },
+  { id = "RUSTSEC-2026-0368", reason = "zip extract(), unreachable through calamine" },
+  { id = "RUSTSEC-2026-0369", reason = "zip extract(), unreachable through calamine" },
+]
 
 [sources]
 unknown-registry = "deny"
