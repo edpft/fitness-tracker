@@ -105,6 +105,14 @@ jobs:
 
       # The laptop's position: a store holding nothing, building nothing, and
       # only the caches to substitute from. Evaluation runs on it too, so a
-      # manifest the cache does not serve fails here rather than there.
+      # manifest the cache does not serve fails here rather than there. The
+      # options are the ones the laptop's nix.conf carries, for the reasons
+      # given beside its upgrade in flake.nix; the negative cache matters here
+      # too, since the build above asked Cachix for the manifest before it
+      # was pushed.
       - name: Install as the laptop would
-        run: nix build --store "local?root=${RUNNER_TEMP}/laptop" --max-jobs 0 --no-link "$REF"
+        run: |
+          nix build --store "local?root=${RUNNER_TEMP}/laptop" --max-jobs 0 \
+            --option always-allow-substitutes true \
+            --option narinfo-cache-negative-ttl 0 \
+            --no-link "$REF"

@@ -353,6 +353,17 @@
         # makes its own. Until the push lands the upgrade fails, leaves the
         # profile alone, and the next tick tries again. One that finds
         # nothing new adds no generation, so the page is not restarted.
+        #
+        # Two settings `--max-jobs 0` needs from a cache, which are the
+        # daemon's and so live in the host's `/etc/nix/nix.conf`: passed here
+        # by a user it does not trust, it ignores them. Nixpkgs marks its
+        # trivial builders (the units here, the `symlinkJoin` holding them) as
+        # never worth substituting, so without `always-allow-substitutes =
+        # true` they are refused rather than fetched. And nix remembers a
+        # cache's "not here" for an hour, so without
+        # `narinfo-cache-negative-ttl = 0` a tick that looked before CI's push
+        # landed would wait that long after it.
+        #
         # `nix` is the host's, from the user manager's PATH, as `systemctl` is
         # above: a shell resolves it there, where systemd resolving a bare
         # `ExecStart` would search only its own compiled-in directories.
