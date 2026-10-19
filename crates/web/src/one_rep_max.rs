@@ -30,7 +30,7 @@ const FLOOR: f64 = 336.0;
 const RADIUS: f64 = 3.0;
 
 /// The whole page.
-pub fn page(view: &View) -> Markup {
+pub fn page(view: &View, run: &crate::run::View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -41,6 +41,7 @@ pub fn page(view: &View) -> Markup {
                 style { (crate::page::STYLE) (STYLE) }
             }
             body {
+                (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
@@ -513,7 +514,11 @@ mod tests {
 
     #[test]
     fn the_prediction_reads_as_a_mass_and_its_range() {
-        let page = page(&view(&autumn().expect("points"), Some(NEXT))).into_string();
+        let page = page(
+            &view(&autumn().expect("points"), Some(NEXT)),
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert!(
             page.contains(
                 "test on 2026-09-25 · tested: 92.5kg × 1, 95kg failed · 5 estimates since"
@@ -533,7 +538,7 @@ mod tests {
     fn a_performed_test_reads_beside_its_prediction() {
         let mut points = autumn().expect("points");
         points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
-        let page = page(&view(&points, None)).into_string();
+        let page = page(&view(&points, None), &crate::run::View::default()).into_string();
         assert!(
             page.contains("test on 2026-10-23, session 6: 97.5kg; predicted 95.6kg"),
             "{page}"
@@ -543,7 +548,7 @@ mod tests {
     #[test]
     fn two_estimates_are_points_without_a_line() {
         let points: Vec<Point> = autumn().expect("points").into_iter().take(3).collect();
-        let page = page(&view(&points, Some(NEXT))).into_string();
+        let page = page(&view(&points, Some(NEXT)), &crate::run::View::default()).into_string();
         assert!(
             page.contains("2 estimates since · a line needs at least 3"),
             "{page}"
@@ -554,7 +559,7 @@ mod tests {
     #[test]
     fn no_test_is_said_rather_than_drawn() {
         let points = vec![estimate_on(date(2026, 9, 29), 90_625).expect("a point")];
-        let page = page(&view(&points, Some(NEXT))).into_string();
+        let page = page(&view(&points, Some(NEXT)), &crate::run::View::default()).into_string();
         assert!(page.contains("No test has been recorded."));
         assert!(!page.contains("<svg"));
     }

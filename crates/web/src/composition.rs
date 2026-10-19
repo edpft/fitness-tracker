@@ -21,7 +21,10 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::chart::{along, years};
+use crate::{
+    chart::{along, years},
+    run::View,
+};
 
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 300.0;
@@ -116,7 +119,7 @@ fn class(methods: &[Method], method: Method) -> &'static str {
 }
 
 /// The whole page.
-pub fn page(components: &[ComponentSeries]) -> Markup {
+pub fn page(components: &[ComponentSeries], run: &View) -> Markup {
     let methods = methods(components);
     html! {
         (DOCTYPE)
@@ -128,6 +131,7 @@ pub fn page(components: &[ComponentSeries]) -> Markup {
                 style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) }
             }
             body {
+                (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
@@ -390,7 +394,7 @@ mod tests {
                 ),
             ],
         };
-        let drawn = page(&[fat]).into_string();
+        let drawn = page(&[fat], &crate::run::View::default()).into_string();
 
         assert!(drawn.contains("<h2>Fat (%)</h2>"));
         assert_eq!(drawn.matches(r#"<circle class="point d1""#).count(), 3);
@@ -425,7 +429,7 @@ mod tests {
                 readings,
             )],
         };
-        let drawn = page(&[muscle]).into_string();
+        let drawn = page(&[muscle], &crate::run::View::default()).into_string();
 
         assert_eq!(drawn.matches("<polyline").count(), 1, "one unbroken run");
         assert!(
@@ -443,7 +447,7 @@ mod tests {
     #[test]
     fn nothing_recorded_is_said_rather_than_drawn() {
         assert!(
-            page(&[])
+            page(&[], &crate::run::View::default())
                 .into_string()
                 .contains("Nothing has been recorded.")
         );

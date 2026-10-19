@@ -82,7 +82,7 @@ impl Over {
 }
 
 /// The whole page.
-pub fn page(view: &View, over: Over) -> Markup {
+pub fn page(view: &View, over: Over, run: &crate::run::View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -93,15 +93,20 @@ pub fn page(view: &View, over: Over) -> Markup {
                 style { (crate::page::STYLE) (STYLE) }
             }
             body {
+                (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
+                    // **Another range redraws `main` as htmx**, so choosing
+                    // one does not start another run.
                     p.choices {
                         @for each in Over::ALL {
                             @if each == over {
                                 strong { (each.label()) }
                             } @else {
-                                a href=(address(each)) { (each.label()) }
+                                a href=(address(each)) hx-get=(address(each)) hx-select="main"
+                                    hx-target="main" hx-swap="outerHTML" hx-push-url="true"
+                                    { (each.label()) }
                             }
                         }
                     }
@@ -474,7 +479,12 @@ mod tests {
                 mass: Kg::from_grams(84_100),
             },
         ];
-        let page = page(&view(weigh_ins, date(2026, 10, 1)), Over::All).into_string();
+        let page = page(
+            &view(weigh_ins, date(2026, 10, 1)),
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert_eq!(page.matches(r#"class="point""#).count(), 2);
         assert!(!page.contains("<polyline") && !page.contains("<path"));
         assert!(page.contains("2026-09-10 · 79kg"));
@@ -483,7 +493,12 @@ mod tests {
 
     #[test]
     fn no_weigh_ins_is_said_rather_than_drawn() {
-        let page = page(&view(Vec::new(), date(2026, 9, 23)), Over::All).into_string();
+        let page = page(
+            &view(Vec::new(), date(2026, 9, 23)),
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert!(page.contains("No weigh-in has been recorded."));
         assert!(!page.contains("<svg class=\"chart\""));
     }
@@ -492,7 +507,12 @@ mod tests {
     fn the_trend_is_one_line_per_unbroken_run() {
         // Weigh-ins on the 1st to 7th and the 22nd to 28th, none between.
         let weigh_ins = (1..=7).chain(22..=28).map(|d| day(d, 84_043)).collect();
-        let page = page(&view(weigh_ins, date(2026, 9, 28)), Over::All).into_string();
+        let page = page(
+            &view(weigh_ins, date(2026, 9, 28)),
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert_eq!(page.matches(r#"class="trend""#).count(), 2);
         assert_eq!(page.matches(r#"class="point""#).count(), 14);
         assert!(
@@ -508,7 +528,12 @@ mod tests {
             .map(|d| day(d, 84_000))
             .chain((14..=20).map(|d| day(d, 83_750)))
             .collect();
-        let page = page(&view(weigh_ins, date(2026, 9, 20)), Over::Macrocycle).into_string();
+        let page = page(
+            &view(weigh_ins, date(2026, 9, 20)),
+            Over::Macrocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert!(
             page.contains("7 days to 2026-09-20: −0.25 kg, falling"),
             "{page}"
@@ -520,7 +545,12 @@ mod tests {
     fn a_range_runs_from_the_start_of_its_cycle_to_today() {
         // Daily from 2026-09-01; this mesocycle began on Monday the 14th.
         let weigh_ins = (1..=23).map(|d| day(d, 84_000)).collect();
-        let page = page(&view(weigh_ins, date(2026, 9, 23)), Over::Mesocycle).into_string();
+        let page = page(
+            &view(weigh_ins, date(2026, 9, 23)),
+            Over::Mesocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert!(
             page.contains("2026-09-14 to 2026-09-23 · average 84kg · trend 0.00 kg"),
             "{page}"
@@ -532,7 +562,7 @@ mod tests {
     fn a_day_with_no_plan_has_no_macrocycle() {
         let mut view = view(vec![day(1, 84_000)], date(2026, 9, 23));
         view.ranges.macrocycle = None;
-        let page = page(&view, Over::Macrocycle).into_string();
+        let page = page(&view, Over::Macrocycle, &crate::run::View::default()).into_string();
         assert!(
             page.contains("No macrocycle is planned for today."),
             "{page}"

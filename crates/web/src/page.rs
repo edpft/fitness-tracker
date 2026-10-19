@@ -1,4 +1,4 @@
-//! The page: one action, and the run it follows.
+//! The page: the run its opening started, and what follows a run elsewhere.
 
 use maud::{DOCTYPE, Markup, html};
 
@@ -7,8 +7,8 @@ use crate::run::View;
 /// The page, showing the run as it stands when it is opened.
 ///
 /// **Connected to the run whether or not one is going**, so a run started
-/// elsewhere — the terminal's is refused, but one started from another tab is
-/// not — appears here without asking.
+/// elsewhere — the terminal's is refused, but one started by opening another
+/// page is not — appears here without asking.
 pub fn index(view: &View) -> Markup {
     html! {
         (DOCTYPE)
@@ -23,10 +23,6 @@ pub fn index(view: &View) -> Markup {
             }
             body {
                 main {
-                    form hx-post="/run" hx-target="#notice" hx-swap="innerHTML" {
-                        button type="submit" { "Run next" }
-                    }
-                    div #notice {}
                     p { a href="/heart-rate" { "Heart rate per power zone" } }
                     p { a href="/body-weight" { "Body weight" } " · " a href="/body-composition" { "Body composition" } }
                     p { a href="/resting-heart-rate" { "Resting heart rate" } " · " a href="/hrv" { "Overnight HRV" } }
@@ -41,10 +37,23 @@ pub fn index(view: &View) -> Markup {
     }
 }
 
-/// What starting a run came to: nothing to say, or why it was not started.
-pub fn notice(refused: Option<&str>) -> Markup {
+/// The step the run is on, above a page drawn from the store, and the page
+/// redrawn from the store when the run ends.
+///
+/// **Outside `main`**, which is what the redraw replaces, so the connection
+/// that asks for it outlives it. The redraw asks for the page's own address
+/// as htmx, which is how its handler knows not to start another run.
+///
+/// The scripts are here rather than in the head so that a page drawn from the
+/// store takes all of this in one line.
+pub fn following(run: &View) -> Markup {
     html! {
-        @if let Some(refused) = refused { p.failed { (refused) } }
+        script src="/htmx.min.js" {}
+        script src="/sse.min.js" {}
+        div.following hx-ext="sse" sse-connect=(format!("/run/step?since={}", run.ended())) {
+            div sse-swap="step,ended" { (run.step()) }
+            div hx-get="" hx-trigger="sse:ended" hx-target="main" hx-select="main" hx-swap="outerHTML" {}
+        }
     }
 }
 
@@ -55,6 +64,8 @@ pub const STYLE: &str = "
 body { margin: 0; font: 16px/1.45 system-ui, sans-serif; }
 main { max-width: 40rem; margin: 0 auto; padding: 16px; }
 button { width: 100%; padding: 14px; font: inherit; font-weight: 600; }
+.following { padding: 0 16px; }
+.following p { margin: 16px 0 0; }
 ol, ul { padding-left: 1.2rem; }
 li { margin: 0.25rem 0; }
 .step { font-weight: 600; }
