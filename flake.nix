@@ -345,8 +345,54 @@
           '';
         };
 
+        # A merge reached the laptop only when someone ran `nix profile
+        # upgrade` (#502), so the laptop polls for it. `--refresh` because
+        # `tarball-ttl` is an hour, and `main` would be up to that stale.
+        #
+        # `--max-jobs 0`: it installs the build CI pushed to Cachix and never
+        # makes its own. Until the push lands the upgrade fails, leaves the
+        # profile alone, and the next tick tries again. One that finds
+        # nothing new adds no generation, so the page is not restarted.
+        # `nix` is the host's, from the user manager's PATH, as `systemctl` is
+        # above: a shell resolves it there, where systemd resolving a bare
+        # `ExecStart` would search only its own compiled-in directories.
+        upgrade = pkgs.writeShellApplication {
+          name = "fitness-upgrade";
+          text = ''
+            exec nix profile upgrade --refresh --max-jobs 0 fitness-tracker
+          '';
+        };
+
+        upgradeService = pkgs.writeTextFile {
+          name = "fitness-upgrade-service";
+          destination = "/share/systemd/user/fitness-upgrade.service";
+          text = ''
+            [Unit]
+            Description=Install the fitness tracker's latest build from main
+
+            [Service]
+            Type=oneshot
+            ExecStart=${lib.getExe upgrade}
+          '';
+        };
+
+        upgradeTimer = pkgs.writeTextFile {
+          name = "fitness-upgrade-timer";
+          destination = "/share/systemd/user/fitness-upgrade.timer";
+          text = ''
+            [Unit]
+            Description=Install the fitness tracker's latest build from main
+
+            [Timer]
+            OnCalendar=*:0/5
+
+            [Install]
+            WantedBy=timers.target
+          '';
+        };
+
         # What `nix profile` installs: the `fitness` command and the units that
-        # serve the page, upgraded together.
+        # serve the page and keep it current, upgraded together.
         installed = pkgs.symlinkJoin {
           name = "fitness-tracker-${revision}";
           paths = [
@@ -354,6 +400,8 @@
             webService
             webUpgradePath
             webUpgradeService
+            upgradeService
+            upgradeTimer
           ];
           meta.mainProgram = "fitness";
         };
