@@ -84,27 +84,25 @@ jobs:
 
       # Evaluating the flake builds things too: fenix fetches the toolchain's
       # manifest at evaluation time, and without it in the cache the laptop
-      # cannot even evaluate. So evaluate as the laptop does, on a store
-      # holding nothing and building nothing, and push whatever it refuses to
-      # build until it stops refusing. The retry substitutes from Cachix, as
-      # the laptop will, so a push it cannot see fails here rather than there.
+      # cannot even evaluate. So evaluate on a store holding nothing, and push
+      # what that store built itself rather than substituted (`ultimate`). Not
+      # read from the error a build-less evaluation gives: its wording differs
+      # between versions of nix, and some do not name the derivation.
       - name: Push what evaluation builds
         run: |
-          laptop="local?root=${RUNNER_TEMP}/laptop"
-          pushed=""
-          while ! log=$(nix eval --store "$laptop" --max-jobs 0 --raw "${REF}.drvPath" 2>&1); do
-            drv=$(grep -ioP "cannot build '\K/nix/store/[^'^]+\.drv" <<<"$log" | head -1) \
-              || { echo "$log"; exit 1; }
-            if [ "$drv" = "$pushed" ]; then
-              echo "${drv} was pushed and is still not substituted"
-              echo "$log"
-              exit 1
-            fi
-            echo "Evaluation builds ${drv}"
-            mapfile -t outs < <(nix-store --realise "$drv")
-            cachix push "$CACHE" "${outs[@]}"
-            pushed="$drv"
-          done
+          evaluated="local?root=${RUNNER_TEMP}/evaluated"
+          nix eval --store "$evaluated" --raw "${REF}.drvPath" >/dev/null
+          mapfile -t built < <(nix path-info --store "$evaluated" --all --json \
+            | jq -r 'if type == "array" then .[] else to_entries[] | .value + {path: .key} end
+              | select(.ultimate and .deriver != null) | .path')
+          echo "Evaluation builds: ${built[*]:-nothing}"
+          if [ "${#built[@]}" -gt 0 ]; then
+            nix copy --no-check-sigs --from "$evaluated" "${built[@]}"
+            cachix push "$CACHE" "${built[@]}"
+          fi
 
+      # The laptop's position: a store holding nothing, building nothing, and
+      # only the caches to substitute from. Evaluation runs on it too, so a
+      # manifest the cache does not serve fails here rather than there.
       - name: Install as the laptop would
         run: nix build --store "local?root=${RUNNER_TEMP}/laptop" --max-jobs 0 --no-link "$REF"
