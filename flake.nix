@@ -351,8 +351,13 @@
         #
         # `--max-jobs 0`: it installs the build CI pushed to Cachix and never
         # makes its own. Until the push lands the upgrade fails, leaves the
-        # profile alone, and the next tick tries again. One that finds
-        # nothing new adds no generation, so the page is not restarted.
+        # profile alone, and the next tick tries again.
+        #
+        # **Only when `main` has moved.** An upgrade that finds nothing new
+        # adds no generation but still rewrites `profile` onto the same one,
+        # and `fitness-web-upgrade.path` restarted the page every tick for it.
+        # So it compares the locked reference installed with the one `main`
+        # resolves to now, and leaves the profile untouched when they agree.
         #
         # Two settings `--max-jobs 0` needs from a cache, which are the
         # daemon's and so live in the host's `/etc/nix/nix.conf`: passed here
@@ -369,8 +374,13 @@
         # `ExecStart` would search only its own compiled-in directories.
         upgrade = pkgs.writeShellApplication {
           name = "fitness-upgrade";
+          runtimeInputs = [ pkgs.jq ];
           text = ''
-            exec nix profile upgrade --refresh --max-jobs 0 fitness-tracker
+            element=fitness-tracker
+            installed="$(nix profile list --json | jq -er --arg e "$element" '.elements[$e]')"
+            latest="$(nix flake metadata --refresh --json "$(jq -er .originalUrl <<<"$installed")" | jq -er .url)"
+            [ "$(jq -er .url <<<"$installed")" = "$latest" ] && exit 0
+            exec nix profile upgrade --refresh --max-jobs 0 "$element"
           '';
         };
 
