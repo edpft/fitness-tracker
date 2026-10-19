@@ -79,6 +79,14 @@ pub struct RideHeartRate {
     pub by_zone: ByZone,
 }
 
+impl RideHeartRate {
+    /// The operator's day the ride started on.
+    #[must_use]
+    pub fn on(&self) -> jiff::civil::Date {
+        self.started_at.wall_clock().date()
+    }
+}
+
 /// A session's main ride's heart rate per power zone, or [`None`] for a test.
 ///
 /// **Main rides only.** A test's effort is one zone held as hard as can be,

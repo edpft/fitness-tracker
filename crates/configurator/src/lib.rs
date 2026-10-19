@@ -24,6 +24,7 @@ pub mod one_rep_max;
 pub mod paths;
 pub mod per_device;
 pub mod prescribing;
+pub mod ranges;
 pub mod rescheduling;
 pub mod rides;
 pub mod setup;

@@ -27,7 +27,10 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::per_device::{DeviceSeries, Reading};
+use super::{
+    per_device::{DeviceSeries, Reading},
+    range::{Range, runs_within},
+};
 use crate::measure::HeartRateVariability;
 
 /// What the trend is, so a different method is never mistaken for it.
@@ -166,5 +169,14 @@ impl Trended {
     pub fn of(series: DeviceSeries<HeartRateVariability>) -> Self {
         let trend = trend(&series.readings);
         Self { series, trend }
+    }
+
+    /// Only `range`'s days. The trend on each is the whole record's.
+    #[must_use]
+    pub fn within(&self, range: Range) -> Self {
+        Self {
+            series: self.series.within(range),
+            trend: runs_within(&self.trend, range, |day| day.on),
+        }
     }
 }

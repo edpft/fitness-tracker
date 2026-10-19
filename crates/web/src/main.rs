@@ -13,11 +13,12 @@ mod equipment;
 mod one_rep_max;
 mod page;
 mod programme;
+mod range;
 mod report;
 mod run;
 mod weight;
 
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     Form, Router,
@@ -159,8 +160,18 @@ fn opened(runs: &Arc<Runs>, headers: &HeaderMap) -> run::View {
     runs.view()
 }
 
-/// Every main ride's heart rate per power zone, read afresh from the store.
-async fn heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+/// The range `?over=` names.
+fn over(query: &Query<HashMap<String, String>>) -> domain::analytical::range::Over {
+    range::named(query.get("over").map(String::as_str))
+}
+
+/// Every main ride's heart rate per power zone over a range, read afresh from
+/// the store.
+async fn heart_rate(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
     let run = opened(&runs, &headers);
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
@@ -168,9 +179,10 @@ async fn heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup
         Err(error) => return chart::unreadable(&error.to_string()),
     };
     let rides = configurator::heart_rate::rides(&store, &setting.zone).await;
+    let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match rides {
-        Ok(rides) => chart::page(&rides, &run),
+    match rides.and_then(|rides| Ok((rides, ranges?))) {
+        Ok((rides, ranges)) => chart::page(&rides, &ranges, over(&query), &run),
         Err(error) => chart::unreadable(&error.to_string()),
     }
 }
@@ -178,69 +190,88 @@ async fn heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup
 /// Body weight over a range, read afresh from the store.
 async fn body_weight(
     State(runs): State<Arc<Runs>>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
+    query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
     let run = opened(&runs, &headers);
-    let over = weight::Over::named(query.get("over").map(String::as_str));
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
+    let setting = runs.setting();
+    let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
         Err(error) => return weight::unreadable(&error.to_string()),
     };
-    let view = configurator::body_weight::view(&store, &runs.setting().zone).await;
+    let series = configurator::body_weight::series(&store).await;
+    let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match view {
-        Ok(view) => weight::page(&view, over, &run),
+    match series.and_then(|series| Ok((series, ranges?))) {
+        Ok((series, ranges)) => weight::page(&series, &ranges, over(&query), &run),
         Err(error) => weight::unreadable(&error.to_string()),
     }
 }
 
-/// Body composition, one series per method, read afresh from the store.
-async fn body_composition(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+/// Body composition over a range, one series per method, read afresh from the
+/// store.
+async fn body_composition(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
     let run = opened(&runs, &headers);
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
+    let setting = runs.setting();
+    let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
         Err(error) => return composition::unreadable(&error.to_string()),
     };
     let components = configurator::composition::by_method(&store).await;
+    let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match components {
-        Ok(components) => composition::page(&components, &run),
+    match components.and_then(|components| Ok((components, ranges?))) {
+        Ok((components, ranges)) => composition::page(&components, &ranges, over(&query), &run),
         Err(error) => composition::unreadable(&error.to_string()),
     }
 }
 
-/// Overnight HRV, one series per watch and the trend through each, read
-/// afresh from the store.
-async fn overnight_hrv(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+/// Overnight HRV over a range, one series per watch and the trend through
+/// each, read afresh from the store.
+async fn overnight_hrv(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
     let run = opened(&runs, &headers);
     let shown = daily::OVERNIGHT_HRV;
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
+    let setting = runs.setting();
+    let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let trended = configurator::per_device::overnight_hrv_trend(&store, &runs.setting().zone).await;
+    let trended = configurator::per_device::overnight_hrv_trend(&store, &setting.zone).await;
+    let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match trended {
-        Ok(trended) => daily::overnight_hrv(&trended, &run),
+    match trended.and_then(|trended| Ok((trended, ranges?))) {
+        Ok((trended, ranges)) => daily::overnight_hrv(&trended, &ranges, over(&query), &run),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }
 
-/// Resting heart rate, one series per watch with its slow line and the nights
-/// it flags, read afresh from the store.
-async fn resting_heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+/// Resting heart rate over a range, one series per watch with its slow line
+/// and the nights it flags, read afresh from the store.
+async fn resting_heart_rate(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
     let run = opened(&runs, &headers);
     let shown = daily::RESTING_HEART_RATE;
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
+    let setting = runs.setting();
+    let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let trended =
-        configurator::per_device::resting_heart_rate_trend(&store, &runs.setting().zone).await;
+    let trended = configurator::per_device::resting_heart_rate_trend(&store, &setting.zone).await;
+    let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match trended {
-        Ok(trended) => daily::resting_heart_rate(&trended, &run),
+    match trended.and_then(|trended| Ok((trended, ranges?))) {
+        Ok((trended, ranges)) => daily::resting_heart_rate(&trended, &ranges, over(&query), &run),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }

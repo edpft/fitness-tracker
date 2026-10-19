@@ -25,6 +25,7 @@ pub mod heart_rate;
 pub mod hrv;
 pub mod one_rep_max;
 pub mod per_device;
+pub mod range;
 pub mod resting;
 
 use std::fmt;

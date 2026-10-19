@@ -13,8 +13,11 @@
 //! the table beneath each chart is the same figures.
 
 use domain::{
-    analytical::composition::{
-        AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
+    analytical::{
+        composition::{
+            AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
+        },
+        range::{Over, Range, Ranges},
     },
     body::Component,
 };
@@ -22,7 +25,8 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    chart::{along, years},
+    chart::along,
+    range::{seconds, ticks},
     run::View,
 };
 
@@ -118,9 +122,19 @@ fn class(methods: &[Method], method: Method) -> &'static str {
         .unwrap_or("ink")
 }
 
-/// The whole page.
-pub fn page(components: &[ComponentSeries], run: &View) -> Markup {
+/// The whole page, over the range chosen.
+///
+/// **A method keeps its colour over every range**, so the colours are the
+/// whole record's.
+pub fn page(components: &[ComponentSeries], ranges: &Ranges, over: Over, run: &View) -> Markup {
     let methods = methods(components);
+    let recorded = Range::spanning(
+        components
+            .iter()
+            .flat_map(|component| &component.series)
+            .flat_map(|one| one.readings.iter().map(|reading| reading.on)),
+    );
+    let range = crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.");
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -135,15 +149,14 @@ pub fn page(components: &[ComponentSeries], run: &View) -> Markup {
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
+                    (crate::range::choices("/body-composition", over))
                     p.method {
                         "points: each weigh-in, coloured by what measured it · line: trend, the " (TREND)
                         " · against " (AGAINST_DAYS) " days before: rising or falling beyond 1.96 × the method's own scatter between consecutive days, maintaining within it"
                     }
-                    @if components.is_empty() {
-                        p { "Nothing has been recorded." }
-                    }
-                    @for component in components {
-                        (chart(component, &methods))
+                    @match range {
+                        Err(said) => (said),
+                        Ok(range) => (charts(components, &methods, range)),
                     }
                 }
             }
@@ -208,15 +221,26 @@ fn value_axis(low: f64, high: f64) -> (f64, f64, f64) {
     (low, high, step)
 }
 
-/// One component's chart, its legend and its table.
-fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
+/// Every component measured in `range`, each over it.
+fn charts(components: &[ComponentSeries], methods: &[Method], range: Range) -> Markup {
+    let within: Vec<ComponentSeries> = components
+        .iter()
+        .map(|component| component.within(range))
+        .filter(|component| component.series.iter().any(|one| !one.readings.is_empty()))
+        .collect();
+    html! {
+        @if within.is_empty() {
+            p { "Nothing recorded in this range." }
+        }
+        @for component in &within {
+            (chart(component, methods, range))
+        }
+    }
+}
+
+/// One component's chart over `range`, its legend and its table.
+fn chart(component: &ComponentSeries, methods: &[Method], range: Range) -> Markup {
     let readings = component.series.iter().flat_map(|one| one.readings.iter());
-    let (Some(first), Some(last)) = (
-        readings.clone().map(|reading| reading.on).min(),
-        readings.clone().map(|reading| reading.on).max(),
-    ) else {
-        return html! {};
-    };
     let low = readings
         .clone()
         .map(|reading| reading.value)
@@ -226,8 +250,8 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
         .fold(f64::NEG_INFINITY, f64::max);
     let (low, high, step) = value_axis(low, high);
     let frame = Frame {
-        first: seconds(first),
-        last: seconds(last),
+        first: seconds(range.from),
+        last: seconds(range.to),
         low,
         high,
         step,
@@ -248,9 +272,10 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
                     line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(value)) y2=(frame.y(value)) {}
                     text.axis x=(LEFT - 6.0) y=(frame.y(value) + 4.0) text-anchor="end" { (gridline(value, step)) }
                 }
-                @for (year, at) in labelled_years(first, frame.first, frame.last) {
+                @for (tick, label) in ticks(range) {
+                    @let at = seconds(tick);
                     line.grid x1=(frame.x(at)) x2=(frame.x(at)) y1=(TOP) y2=(FLOOR) {}
-                    text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (year) }
+                    text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (label) }
                 }
                 line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
                 @for one in &component.series {
@@ -277,7 +302,7 @@ fn chart(component: &ComponentSeries, methods: &[Method]) -> Markup {
             }
         }
         ul.legend {
-            @for one in &component.series {
+            @for one in component.series.iter().filter(|one| !one.readings.is_empty()) {
                 li {
                     svg.key viewBox="0 0 12 12" {
                         circle class=(format!("point {}", class(methods, one.method))) cx="6" cy="6" r=(RADIUS) {}
@@ -296,17 +321,6 @@ fn points(run: &[Trend], frame: &Frame) -> String {
         .map(|day| format!("{:.1},{:.1}", frame.x(seconds(day.on)), frame.y(day.value)))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Each new year inside the span, or the first one at the left edge where the
-/// span holds no new year, so every chart says when it is.
-fn labelled_years(first: Date, from: i64, to: i64) -> Vec<(i16, i64)> {
-    let years = years(from, to);
-    if years.is_empty() {
-        vec![(first.year(), from)]
-    } else {
-        years
-    }
 }
 
 fn weigh_ins(count: usize) -> String {
@@ -353,21 +367,22 @@ fn table(component: &ComponentSeries) -> Markup {
     }
 }
 
-/// A day's place on the date axis: its start, in UTC, so every day is the
-/// same width.
-fn seconds(on: Date) -> i64 {
-    on.to_zoned(jiff::tz::TimeZone::UTC)
-        .map_or(0, |zoned| zoned.timestamp().as_second())
-}
-
 #[cfg(test)]
 mod tests {
     use domain::{
-        analytical::composition::{ComponentSeries, Method, MethodSeries, Reading, Unit},
+        analytical::{
+            composition::{ComponentSeries, Method, MethodSeries, Reading, Unit},
+            range::{Over, Range, Ranges},
+        },
         body::Component,
     };
 
     use super::page;
+
+    const NO_PLAN: Ranges = Ranges {
+        mesocycle: None,
+        macrocycle: None,
+    };
 
     fn reading(year: i16, month: i8, day: i8, value: f64) -> Reading<f64> {
         Reading {
@@ -394,7 +409,7 @@ mod tests {
                 ),
             ],
         };
-        let drawn = page(&[fat], &crate::run::View::default()).into_string();
+        let drawn = page(&[fat], &NO_PLAN, Over::All, &crate::run::View::default()).into_string();
 
         assert!(drawn.contains("<h2>Fat (%)</h2>"));
         assert_eq!(drawn.matches(r#"<circle class="point d1""#).count(), 3);
@@ -429,7 +444,8 @@ mod tests {
                 readings,
             )],
         };
-        let drawn = page(&[muscle], &crate::run::View::default()).into_string();
+        let drawn =
+            page(&[muscle], &NO_PLAN, Over::All, &crate::run::View::default()).into_string();
 
         assert_eq!(drawn.matches("<polyline").count(), 1, "one unbroken run");
         assert!(
@@ -447,9 +463,45 @@ mod tests {
     #[test]
     fn nothing_recorded_is_said_rather_than_drawn() {
         assert!(
-            page(&[], &crate::run::View::default())
+            page(&[], &NO_PLAN, Over::All, &crate::run::View::default())
                 .into_string()
                 .contains("Nothing has been recorded.")
         );
+    }
+
+    #[test]
+    fn a_range_shows_only_its_days_and_a_method_keeps_its_colour() {
+        let fat = ComponentSeries {
+            component: Component::Fat,
+            unit: Unit::Percentage,
+            series: vec![
+                MethodSeries::of(Method::Spreadsheets, vec![reading(2018, 1, 1, 24.7)]),
+                MethodSeries::of(
+                    Method::BodyScan {
+                        algorithm: 218_300_672,
+                    },
+                    vec![reading(2026, 10, 16, 21.1)],
+                ),
+            ],
+        };
+        let ranges = Ranges {
+            mesocycle: Some(Range {
+                from: jiff::civil::date(2026, 9, 28),
+                to: jiff::civil::date(2026, 10, 19),
+            }),
+            macrocycle: None,
+        };
+        let drawn = page(
+            &[fat],
+            &ranges,
+            Over::Mesocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
+
+        assert!(!drawn.contains("2018-01-01 ·"), "before this mesocycle");
+        assert!(!drawn.contains("spreadsheets ·"), "nor in the legend");
+        assert_eq!(drawn.matches(r#"<circle class="point d2""#).count(), 2);
+        assert!(drawn.contains(r#"href="/body-composition?over=all""#));
     }
 }
