@@ -346,17 +346,18 @@
         };
 
         # A merge reached the laptop only when someone ran `nix profile
-        # upgrade` (#502), so the laptop polls for it. `--refresh` because
-        # `tarball-ttl` is an hour, and `main` would be up to that stale.
+        # upgrade` (#502), so the laptop polls for it. It follows the
+        # `published` tag CI moves once a build is in the cache, not `main`,
+        # whose head may never be built. `--refresh` because `tarball-ttl` is
+        # an hour, and the tag would be up to that stale.
         #
         # `--max-jobs 0`: it installs the build CI pushed to Cachix and never
-        # makes its own. Until the push lands the upgrade fails, leaves the
-        # profile alone, and the next tick tries again.
+        # makes its own: anything it would have to build is refused.
         #
         # **Only when `main` has moved.** An upgrade that finds nothing new
         # adds no generation but still rewrites `profile` onto the same one,
         # and `fitness-web-upgrade.path` restarted the page every tick for it.
-        # So it compares the locked reference installed with the one `main`
+        # So it compares the locked reference installed with the one the tag
         # resolves to now, and leaves the profile untouched when they agree.
         #
         # Two settings `--max-jobs 0` needs from a cache, which are the

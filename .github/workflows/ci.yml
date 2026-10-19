@@ -46,6 +46,9 @@ jobs:
     needs: [gate]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    # To move the `published` tag.
+    permissions:
+      contents: write
     env:
       CACHE: edpft
       REF: github:${{ github.repository }}/${{ github.sha }}#packages.x86_64-linux.default
@@ -116,3 +119,11 @@ jobs:
             --option always-allow-substitutes true \
             --option narinfo-cache-negative-ttl 0 \
             --no-link "$REF"
+
+      # What the laptop installs: `main`'s head need not be, because a merge
+      # made with this workflow's token (Dependabot's auto-merge) starts no
+      # workflow, so its build is never pushed and a laptop following `main`
+      # waits on it for good. The tag moves only once the install above has
+      # passed, and a newer push cancels this run, so it never moves back.
+      - name: Mark it published
+        run: git push --force origin "${GITHUB_SHA}:refs/tags/published"
