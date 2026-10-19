@@ -19,6 +19,8 @@ use domain::{
 };
 use maud::{DOCTYPE, Markup, html};
 
+use crate::run::View;
+
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 400.0;
 const LEFT: f64 = 92.0;
@@ -58,7 +60,7 @@ struct Series<'a> {
 }
 
 /// The whole page.
-pub fn page(rides: &[RideHeartRate]) -> Markup {
+pub fn page(rides: &[RideHeartRate], run: &View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -69,6 +71,7 @@ pub fn page(rides: &[RideHeartRate]) -> Markup {
                 style { (crate::page::STYLE) (STYLE) }
             }
             body {
+                (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { "Heart rate per power zone" }
@@ -510,7 +513,7 @@ mod tests {
             ),
             ride(7, ByZone::NoHeartRate),
         ];
-        let page = super::page(&rides).into_string();
+        let page = super::page(&rides, &crate::run::View::default()).into_string();
         assert_eq!(page.matches(r#"class="ring z2""#).count(), 1);
         assert_eq!(page.matches(r#"class="ring z3""#).count(), 1);
         assert_eq!(page.matches(r#"class="missing""#).count(), 1);
@@ -520,7 +523,7 @@ mod tests {
 
     #[test]
     fn no_rides_is_said_rather_than_drawn() {
-        let page = super::page(&[]).into_string();
+        let page = super::page(&[], &crate::run::View::default()).into_string();
         assert!(page.contains("No main ride has been recorded."));
         assert!(!page.contains("<svg class=\"chart\""));
     }

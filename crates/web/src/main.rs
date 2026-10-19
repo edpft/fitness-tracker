@@ -1,8 +1,8 @@
 //! The HTTP driving adapter: `next` from a browser (#398).
 //!
-//! One page with one action. Pressing it starts a run of `next`; the page
-//! follows the run's steps as they end, pushed as server-sent events, and ends
-//! on the report the terminal prints. The use case comes from the
+//! Opening a page starts a run of `next` (#466); the front page follows the
+//! run's steps as they end, pushed as server-sent events, and ends on the
+//! report the terminal prints, and a chart redraws from the store when it ends. The use case comes from the
 //! configurator, so this crate requests, renders and interacts, and names no
 //! adapter.
 
@@ -22,12 +22,12 @@ use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 use axum::{
     Form, Router,
     extract::{Query, State},
-    http::header,
+    http::{HeaderMap, header},
     response::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, post},
+    routing::get,
 };
 use clap::{Arg, ArgMatches, Command, value_parser};
 use maud::Markup;
@@ -124,8 +124,8 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/programme", get(programme_page).post(programme_post))
-        .route("/run", post(start))
         .route("/run/events", get(events))
+        .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
         .route("/sse.min.js", get(sse))
         .with_state(runs);
@@ -142,12 +142,26 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-async fn index(State(runs): State<Arc<Runs>>) -> Markup {
-    page::index(&runs.view())
+async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    page::index(&opened(&runs, &headers))
+}
+
+/// Start a run as a page is opened, or join the one going, and say where it
+/// has got to.
+///
+/// **Not when htmx asks**, which is a page redrawing itself because a run
+/// ended: starting another would redraw it again when that one ended, for
+/// ever.
+fn opened(runs: &Arc<Runs>, headers: &HeaderMap) -> run::View {
+    if !headers.contains_key("hx-request") {
+        runs.start();
+    }
+    runs.view()
 }
 
 /// Every main ride's heart rate per power zone, read afresh from the store.
-async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
+async fn heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let run = opened(&runs, &headers);
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
@@ -156,7 +170,7 @@ async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
     let rides = configurator::heart_rate::rides(&store, &setting.zone).await;
     store.close().await;
     match rides {
-        Ok(rides) => chart::page(&rides),
+        Ok(rides) => chart::page(&rides, &run),
         Err(error) => chart::unreadable(&error.to_string()),
     }
 }
@@ -165,7 +179,9 @@ async fn heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
 async fn body_weight(
     State(runs): State<Arc<Runs>>,
     Query(query): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Markup {
+    let run = opened(&runs, &headers);
     let over = weight::Over::named(query.get("over").map(String::as_str));
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
@@ -174,13 +190,14 @@ async fn body_weight(
     let view = configurator::body_weight::view(&store, &runs.setting().zone).await;
     store.close().await;
     match view {
-        Ok(view) => weight::page(&view, over),
+        Ok(view) => weight::page(&view, over, &run),
         Err(error) => weight::unreadable(&error.to_string()),
     }
 }
 
 /// Body composition, one series per method, read afresh from the store.
-async fn body_composition(State(runs): State<Arc<Runs>>) -> Markup {
+async fn body_composition(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let run = opened(&runs, &headers);
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return composition::unreadable(&error.to_string()),
@@ -188,14 +205,15 @@ async fn body_composition(State(runs): State<Arc<Runs>>) -> Markup {
     let components = configurator::composition::by_method(&store).await;
     store.close().await;
     match components {
-        Ok(components) => composition::page(&components),
+        Ok(components) => composition::page(&components, &run),
         Err(error) => composition::unreadable(&error.to_string()),
     }
 }
 
 /// Overnight HRV, one series per watch and the trend through each, read
 /// afresh from the store.
-async fn overnight_hrv(State(runs): State<Arc<Runs>>) -> Markup {
+async fn overnight_hrv(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let run = opened(&runs, &headers);
     let shown = daily::OVERNIGHT_HRV;
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
@@ -204,14 +222,15 @@ async fn overnight_hrv(State(runs): State<Arc<Runs>>) -> Markup {
     let trended = configurator::per_device::overnight_hrv_trend(&store, &runs.setting().zone).await;
     store.close().await;
     match trended {
-        Ok(trended) => daily::overnight_hrv(&trended),
+        Ok(trended) => daily::overnight_hrv(&trended, &run),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }
 
 /// Resting heart rate, one series per watch with its slow line and the nights
 /// it flags, read afresh from the store.
-async fn resting_heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
+async fn resting_heart_rate(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let run = opened(&runs, &headers);
     let shown = daily::RESTING_HEART_RATE;
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
@@ -221,13 +240,14 @@ async fn resting_heart_rate(State(runs): State<Arc<Runs>>) -> Markup {
         configurator::per_device::resting_heart_rate_trend(&store, &runs.setting().zone).await;
     store.close().await;
     match trended {
-        Ok(trended) => daily::resting_heart_rate(&trended),
+        Ok(trended) => daily::resting_heart_rate(&trended, &run),
         Err(error) => daily::unreadable(shown, &error.to_string()),
     }
 }
 
 /// Estimated 1RM in each planned macrocycle, read afresh from the store.
-async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>) -> Markup {
+async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let run = opened(&runs, &headers);
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return one_rep_max::unreadable(&error.to_string()),
@@ -235,7 +255,7 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>) -> Markup {
     let view = configurator::one_rep_max::view(&store, &runs.setting().zone).await;
     store.close().await;
     match view {
-        Ok(view) => one_rep_max::page(&view),
+        Ok(view) => one_rep_max::page(&view, &run),
         Err(error) => one_rep_max::unreadable(&error.to_string()),
     }
 }
@@ -346,12 +366,6 @@ async fn programme_post(
     }
 }
 
-/// Start a run, answering with what the page should say about starting it:
-/// nothing, or why not.
-async fn start(State(runs): State<Arc<Runs>>) -> Markup {
-    page::notice(runs.start().err().as_deref())
-}
-
 /// Every change to the run, starting with how it stands now.
 async fn events(
     State(runs): State<Arc<Runs>>,
@@ -360,6 +374,23 @@ async fn events(
         Ok(Event::default()
             .event("run")
             .data(view.render().into_string()))
+    });
+    Sse::new(changes).keep_alive(KeepAlive::default())
+}
+
+/// The step the run is on, for a page drawn from the store, as `ended` once a
+/// run has ended since `since` and as `step` otherwise.
+async fn step(
+    State(runs): State<Arc<Runs>>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut since = query
+        .get("since")
+        .and_then(|since| since.parse().ok())
+        .unwrap_or_else(|| runs.view().ended());
+    let changes = WatchStream::new(runs.watch()).map(move |view| {
+        let (name, shown) = run::step_event(&mut since, &view);
+        Ok(Event::default().event(name).data(shown.into_string()))
     });
     Sse::new(changes).keep_alive(KeepAlive::default())
 }

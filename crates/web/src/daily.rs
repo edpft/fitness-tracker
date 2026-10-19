@@ -24,7 +24,10 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::chart::{along, years};
+use crate::{
+    chart::{along, years},
+    run::View,
+};
 
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 360.0;
@@ -107,7 +110,7 @@ pub struct Drawn {
 }
 
 /// The HRV page: each watch's nights and the trend through them.
-pub fn overnight_hrv(trended: &[Trended]) -> Markup {
+pub fn overnight_hrv(trended: &[Trended], run: &View) -> Markup {
     let series: Vec<DeviceSeries<HeartRateVariability>> =
         trended.iter().map(|one| one.series.clone()).collect();
     let trends = Trends {
@@ -118,7 +121,7 @@ pub fn overnight_hrv(trended: &[Trended]) -> Markup {
             hrv::BAND
         ),
     };
-    page(OVERNIGHT_HRV, &series, Some(&trends))
+    page(OVERNIGHT_HRV, &series, Some(&trends), run)
 }
 
 fn hrv_overlay(trended: &Trended) -> Overlay {
@@ -153,7 +156,7 @@ fn hrv_overlay(trended: &Trended) -> Overlay {
 
 /// The resting heart rate page: each watch's days, the slow line through
 /// them, and the nights flagged.
-pub fn resting_heart_rate(trended: &[resting::Trended]) -> Markup {
+pub fn resting_heart_rate(trended: &[resting::Trended], run: &View) -> Markup {
     let series: Vec<DeviceSeries<BeatsPerMinute>> =
         trended.iter().map(|one| one.series.clone()).collect();
     let trends = Trends {
@@ -164,7 +167,7 @@ pub fn resting_heart_rate(trended: &[resting::Trended]) -> Markup {
             resting::FLAG
         ),
     };
-    page(RESTING_HEART_RATE, &series, Some(&trends))
+    page(RESTING_HEART_RATE, &series, Some(&trends), run)
 }
 
 fn resting_overlay(trended: &resting::Trended) -> Overlay {
@@ -250,6 +253,7 @@ pub fn page<T: Figure>(
     shown: Shown,
     series: &[DeviceSeries<T>],
     trends: Option<&Trends>,
+    run: &View,
 ) -> Markup {
     let overlays = trends.map_or(&[][..], |trends| trends.overlays.as_slice());
     html! {
@@ -262,6 +266,7 @@ pub fn page<T: Figure>(
                 style { (crate::page::STYLE) (crate::chart::STYLE) (STYLE) }
             }
             body {
+                (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (shown.title) }
@@ -576,7 +581,7 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings: nights,
         })];
-        let page = super::overnight_hrv(&trended).into_string();
+        let page = super::overnight_hrv(&trended, &crate::run::View::default()).into_string();
 
         assert_eq!(page.matches(r#"class="trend""#).count(), 1);
         assert_eq!(page.matches(r#"class="band""#).count(), 1);
@@ -602,7 +607,7 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings,
         })];
-        let page = super::resting_heart_rate(&trended).into_string();
+        let page = super::resting_heart_rate(&trended, &crate::run::View::default()).into_string();
 
         assert_eq!(page.matches(r#"class="trend""#).count(), 1);
         assert_eq!(page.matches(r#"class="flag""#).count(), 1);
