@@ -47,7 +47,7 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     env:
-      CACHE: edpft-fitness-tracker
+      CACHE: edpft
       REF: github:${{ github.repository }}/${{ github.sha }}#packages.x86_64-linux.default
     steps:
       - name: Checkout repo
