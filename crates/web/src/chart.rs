@@ -12,7 +12,10 @@
 use std::{collections::BTreeSet, fmt::Write as _};
 
 use domain::{
-    analytical::heart_rate::{ByZone, METHOD, RideHeartRate, SentBy, ZoneHeartRate},
+    analytical::{
+        heart_rate::{ByZone, METHOD, RideHeartRate, SentBy, ZoneHeartRate},
+        range::{Over, Range, Ranges},
+    },
     cycling::{PowerZone, clock},
     device::DeviceIdentifier,
     measure::PositiveDuration,
@@ -60,7 +63,7 @@ struct Series<'a> {
 }
 
 /// The whole page.
-pub fn page(rides: &[RideHeartRate], run: &View) -> Markup {
+pub fn page(rides: &[RideHeartRate], ranges: &Ranges, over: Over, run: &View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -75,7 +78,8 @@ pub fn page(rides: &[RideHeartRate], run: &View) -> Markup {
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { "Heart rate per power zone" }
-                    (chart(rides))
+                    (crate::range::choices("/heart-rate", over))
+                    (chart(rides, ranges, over))
                 }
             }
         }
@@ -100,6 +104,7 @@ pub fn unreadable(error: &str) -> Markup {
 
 /// Where a date and a heart rate fall on the chart.
 struct Frame {
+    range: Range,
     first: i64,
     last: i64,
     low: u32,
@@ -119,19 +124,43 @@ impl Frame {
     }
 }
 
-/// The chart, its legend and its table.
-pub fn chart(rides: &[RideHeartRate]) -> Markup {
-    let Some((first, last)) = span(rides) else {
-        return html! { p { "No main ride has been recorded." } };
-    };
+/// The chart over the range chosen, its legend and its table.
+///
+/// **A device keeps its shape over every range**, so the shapes are the whole
+/// record's and the legend names only the devices the range holds.
+fn chart(rides: &[RideHeartRate], ranges: &Ranges, over: Over) -> Markup {
+    let recorded = Range::spanning(rides.iter().map(RideHeartRate::on));
+    let range =
+        match crate::range::chosen(ranges, over, recorded, "No main ride has been recorded.") {
+            Ok(range) => range,
+            Err(said) => return said,
+        };
+    let every = series(rides);
+    let rides: Vec<RideHeartRate> = rides
+        .iter()
+        .filter(|ride| range.covers(ride.on()))
+        .cloned()
+        .collect();
+    if rides.is_empty() {
+        return html! { p { "No main ride in this range." } };
+    }
+    let series: Vec<Series<'_>> = every
+        .into_iter()
+        .filter(|one| {
+            rides
+                .iter()
+                .any(|ride| keyed(&ride.sent_by) == one.identifier)
+        })
+        .collect();
+    let rides = rides.as_slice();
     let (low, high) = beats_range(rides);
     let frame = Frame {
-        first,
-        last,
+        range,
+        first: crate::range::seconds(range.from) - DAY,
+        last: crate::range::seconds(range.to) + DAY * 2,
         low,
         high,
     };
-    let series = series(rides);
     let zones = zones_held(rides);
     html! {
         p.method { (METHOD) }
@@ -149,9 +178,10 @@ fn plot(rides: &[RideHeartRate], series: &[Series<'_>], frame: &Frame) -> Markup
                 line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(beats)) y2=(frame.y(beats)) {}
                 text.axis x=(LEFT - 6.0) y=(frame.y(beats) + 4.0) text-anchor="end" { (beats) }
             }
-            @for (year, at) in years(frame.first, frame.last) {
+            @for (tick, label) in crate::range::ticks(frame.range) {
+                @let at = crate::range::seconds(tick);
                 line.grid x1=(frame.x(at)) x2=(frame.x(at)) y1=(TOP) y2=(FLOOR) {}
-                text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (year) }
+                text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (label) }
             }
             line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
             text.axis x=(LEFT - 6.0) y=(NO_HEART_RATE_ROW + 4.0) text-anchor="end" { "no heart rate" }
@@ -306,11 +336,16 @@ fn device_name(series: &[Series<'_>], sent_by: &SentBy) -> String {
 }
 
 fn find<'s, 'a>(series: &'s [Series<'a>], sent_by: &SentBy) -> Option<&'s Series<'a>> {
-    let identifier = match sent_by {
+    let identifier = keyed(sent_by);
+    series.iter().find(|one| one.identifier == identifier)
+}
+
+/// What a series is keyed on: a device's first identifier, or nothing.
+fn keyed(sent_by: &SentBy) -> Option<&DeviceIdentifier> {
+    match sent_by {
         SentBy::Device(device) => device.identifiers().first(),
         SentBy::Unknown => None,
-    };
-    series.iter().find(|one| one.identifier == identifier)
+    }
 }
 
 /// What a mark's tooltip says.
@@ -365,14 +400,6 @@ fn seconds(ride: &RideHeartRate) -> i64 {
     ride.started_at.instant().as_second()
 }
 
-/// The first and last ride's instants, a day either side so no mark sits on
-/// an edge.
-fn span(rides: &[RideHeartRate]) -> Option<(i64, i64)> {
-    let first = rides.iter().map(seconds).min()?;
-    let last = rides.iter().map(seconds).max()?;
-    Some((first - DAY * 7, last + DAY * 7))
-}
-
 const DAY: i64 = 86_400;
 
 /// The heart rates the axis runs between, to the tens either side.
@@ -395,29 +422,6 @@ fn beats_range(rides: &[RideHeartRate]) -> (u32, u32) {
     let low = low / 10 * 10;
     let high = (high / 10 + 1) * 10;
     (low, high.max(low + 10))
-}
-
-/// Each new year's first instant inside the span, by the operator's calendar
-/// as the first ride's zone has it.
-pub fn years(first: i64, last: i64) -> Vec<(i16, i64)> {
-    let Ok(start) = jiff::Timestamp::from_second(first) else {
-        return Vec::new();
-    };
-    let zone = jiff::tz::TimeZone::UTC;
-    let mut year = start.to_zoned(zone.clone()).year();
-    let mut years = Vec::new();
-    loop {
-        year = year.saturating_add(1);
-        let Ok(at) = jiff::civil::date(year, 1, 1).to_zoned(zone.clone()) else {
-            break;
-        };
-        let at = at.timestamp().as_second();
-        if at > last {
-            break;
-        }
-        years.push((year, at));
-    }
-    years
 }
 
 /// How far along the date axis an instant is, in minutes: fine enough for
@@ -470,7 +474,10 @@ table.figures th { text-align: left; padding-right: 0.75rem; }
 #[cfg(test)]
 mod tests {
     use domain::{
-        analytical::heart_rate::{ByZone, RideHeartRate, SentBy, ZoneHeartRate},
+        analytical::{
+            heart_rate::{ByZone, RideHeartRate, SentBy, ZoneHeartRate},
+            range::{Over, Range, Ranges},
+        },
         cycling::{PowerZone, RideVenue},
         measure::{BeatsPerMinute, Duration},
         normalised::{OperatorZone, StartedAt},
@@ -490,6 +497,21 @@ mod tests {
             ftp: None,
             sent_by: SentBy::Unknown,
             by_zone,
+        }
+    }
+
+    /// This mesocycle from Monday 2026-10-05, in a macrocycle from 2026-09-14.
+    fn ranges() -> Ranges {
+        let to = jiff::civil::date(2026, 10, 19);
+        Ranges {
+            mesocycle: Some(Range {
+                from: jiff::civil::date(2026, 10, 5),
+                to,
+            }),
+            macrocycle: Some(Range {
+                from: jiff::civil::date(2026, 9, 14),
+                to,
+            }),
         }
     }
 
@@ -513,7 +535,8 @@ mod tests {
             ),
             ride(7, ByZone::NoHeartRate),
         ];
-        let page = super::page(&rides, &crate::run::View::default()).into_string();
+        let page =
+            super::page(&rides, &ranges(), Over::All, &crate::run::View::default()).into_string();
         assert_eq!(page.matches(r#"class="ring z2""#).count(), 1);
         assert_eq!(page.matches(r#"class="ring z3""#).count(), 1);
         assert_eq!(page.matches(r#"class="missing""#).count(), 1);
@@ -523,8 +546,26 @@ mod tests {
 
     #[test]
     fn no_rides_is_said_rather_than_drawn() {
-        let page = super::page(&[], &crate::run::View::default()).into_string();
+        let page =
+            super::page(&[], &ranges(), Over::All, &crate::run::View::default()).into_string();
         assert!(page.contains("No main ride has been recorded."));
         assert!(!page.contains("<svg class=\"chart\""));
+    }
+
+    #[test]
+    fn a_range_shows_only_its_rides() {
+        let zones = || ByZone::Zones(NonEmpty::of(held(PowerZone::Two, 125), vec![]));
+        let rides = [ride(4, zones()), ride(7, zones())];
+        let page = super::page(
+            &rides,
+            &ranges(),
+            Over::Mesocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
+        assert!(page.contains("2026-10-07 ·"));
+        assert!(!page.contains("2026-10-04 ·"), "before this mesocycle");
+        assert!(page.contains("<strong>this mesocycle</strong>"));
+        assert!(page.contains(r#"href="/heart-rate?over=all""#));
     }
 }

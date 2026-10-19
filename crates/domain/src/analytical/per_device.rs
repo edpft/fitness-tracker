@@ -16,6 +16,7 @@
 
 use jiff::civil::Date;
 
+use super::range::Range;
 use crate::device::{InUse, Measurand, Register};
 
 pub use super::heart_rate::SentBy;
@@ -32,6 +33,23 @@ pub struct Reading<T> {
 pub struct DeviceSeries<T> {
     pub sent_by: SentBy,
     pub readings: Vec<Reading<T>>,
+}
+
+impl<T: Copy> DeviceSeries<T> {
+    /// Only the readings on `range`'s days; a device with none keeps its
+    /// place, so it keeps its colour.
+    #[must_use]
+    pub fn within(&self, range: Range) -> Self {
+        Self {
+            sent_by: self.sent_by.clone(),
+            readings: self
+                .readings
+                .iter()
+                .filter(|reading| range.covers(reading.on))
+                .copied()
+                .collect(),
+        }
+    }
 }
 
 /// The readings, one series per device, the device that took the earliest

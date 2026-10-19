@@ -8,19 +8,20 @@
 //! as one line per unbroken run `domain` gives, so where it has no trend the
 //! line breaks.
 //!
-//! **The range is the one choice** (#252): `?over=` the current microcycle,
-//! mesocycle or macrocycle from its start to today, or everything. It only
+//! **The range is the one choice** (#252, #497): `?over=` the current
+//! mesocycle or macrocycle from its start to today, or everything, as on every
+//! chart. It only
 //! chooses which days are shown: the trend, and each day's reading of it as
 //! rising, falling or maintaining, are `domain`'s and the same over any range.
 //!
 //! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
 //! the table beneath is the same figures.
 
-use application::body_weight::View;
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Change, Direction, METHOD, Range, Series, Trend},
+        body_weight::{Change, Direction, METHOD, Series, Trend},
+        range::{Over, Range, Ranges},
     },
     canonical::Occurred,
     measure::Kg,
@@ -37,52 +38,8 @@ const TOP: f64 = 12.0;
 const FLOOR: f64 = 336.0;
 const RADIUS: f64 = 2.5;
 
-/// Which days the page shows: a current cycle so far, or everything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Over {
-    Microcycle,
-    Mesocycle,
-    Macrocycle,
-    All,
-}
-
-impl Over {
-    const ALL: [Self; 4] = [
-        Self::Microcycle,
-        Self::Mesocycle,
-        Self::Macrocycle,
-        Self::All,
-    ];
-
-    /// The range `?over=` names; the macrocycle for anything else.
-    pub fn named(over: Option<&str>) -> Self {
-        Self::ALL
-            .into_iter()
-            .find(|each| Some(each.name()) == over)
-            .unwrap_or(Self::Macrocycle)
-    }
-
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Microcycle => "microcycle",
-            Self::Mesocycle => "mesocycle",
-            Self::Macrocycle => "macrocycle",
-            Self::All => "all",
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Microcycle => "this microcycle",
-            Self::Mesocycle => "this mesocycle",
-            Self::Macrocycle => "this macrocycle",
-            Self::All => "all",
-        }
-    }
-}
-
 /// The whole page.
-pub fn page(view: &View, over: Over, run: &crate::run::View) -> Markup {
+pub fn page(series: &Series, ranges: &Ranges, over: Over, run: &crate::run::View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -97,28 +54,12 @@ pub fn page(view: &View, over: Over, run: &crate::run::View) -> Markup {
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
-                    // **Another range redraws `main` as htmx**, so choosing
-                    // one does not start another run.
-                    p.choices {
-                        @for each in Over::ALL {
-                            @if each == over {
-                                strong { (each.label()) }
-                            } @else {
-                                a href=(address(each)) hx-get=(address(each)) hx-select="main"
-                                    hx-target="main" hx-swap="outerHTML" hx-push-url="true"
-                                    { (each.label()) }
-                            }
-                        }
-                    }
-                    (body(view, over))
+                    (crate::range::choices("/body-weight", over))
+                    (body(series, ranges, over))
                 }
             }
         }
     }
-}
-
-fn address(over: Over) -> String {
-    format!("/body-weight?over={}", over.name())
 }
 
 /// The page when the store could not be read.
@@ -138,31 +79,14 @@ pub fn unreadable(error: &str) -> Markup {
 }
 
 /// The range chosen, or why there is none.
-fn body(view: &View, over: Over) -> Markup {
-    let range = match over {
-        Over::Microcycle => Some(view.ranges.microcycle),
-        Over::Mesocycle => view.ranges.mesocycle,
-        Over::Macrocycle => view.ranges.macrocycle,
-        Over::All => {
-            let weigh_ins = &view.series.weigh_ins;
-            match (weigh_ins.first(), weigh_ins.last()) {
-                (Some(first), Some(last)) => Some(Range {
-                    from: first.at.day(),
-                    to: last.at.day(),
-                }),
-                _ => return html! { p { "No weigh-in has been recorded." } },
-            }
-        }
+fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
+    let recorded = Range::spanning(series.weigh_ins.iter().map(|weighed| weighed.at.day()));
+    let range = match crate::range::chosen(ranges, over, recorded, "No weigh-in has been recorded.")
+    {
+        Ok(range) => range,
+        Err(said) => return said,
     };
-    let Some(range) = range else {
-        let cycle = if over == Over::Macrocycle {
-            "macrocycle"
-        } else {
-            "mesocycle"
-        };
-        return html! { p { "No " (cycle) " is planned for today." } };
-    };
-    let series = view.series.within(range);
+    let series = series.within(range);
     html! {
         p.reading {
             (range.from) " to " (range.to)
@@ -263,7 +187,7 @@ fn plot(frame: &Frame, marks: &Markup) -> Markup {
                     (Kg::from_grams(u64::from(grams))) "kg"
                 }
             }
-            @for (tick, label) in ticks(frame.range) {
+            @for (tick, label) in crate::range::ticks(frame.range) {
                 line.grid x1=(frame.x(tick)) x2=(frame.x(tick)) y1=(TOP) y2=(FLOOR) {}
                 text.axis x=(frame.x(tick) + 3.0) y=(FLOOR + 14.0) { (label) }
             }
@@ -271,51 +195,6 @@ fn plot(frame: &Frame, marks: &Markup) -> Markup {
             (marks)
         }
     }
-}
-
-/// Where the date axis is marked: every day across a microcycle, every Monday
-/// across a few months, every month across a year or two, and every year
-/// beyond.
-fn ticks(range: Range) -> Vec<(Date, String)> {
-    let days = days_between(range.from, range.to);
-    let (start, step, format) = if days <= 7 {
-        (range.from, jiff::Span::new().days(1), "%a %-d")
-    } else if days <= 120 {
-        (
-            monday_on_or_after(range.from),
-            jiff::Span::new().weeks(1),
-            "%-d %b",
-        )
-    } else if days <= 730 {
-        (
-            first_of_month_after(range.from),
-            jiff::Span::new().months(1),
-            "%b %y",
-        )
-    } else {
-        (
-            Date::new(range.from.year().saturating_add(1), 1, 1).unwrap_or(range.from),
-            jiff::Span::new().years(1),
-            "%Y",
-        )
-    };
-    start
-        .series(step)
-        .take_while(|tick| *tick <= range.to)
-        .map(|tick| (tick, tick.strftime(format).to_string()))
-        .collect()
-}
-
-fn monday_on_or_after(day: Date) -> Date {
-    let ahead = (7 - i64::from(day.weekday().to_monday_zero_offset())) % 7;
-    day.checked_add(jiff::Span::new().days(ahead))
-        .unwrap_or(day)
-}
-
-fn first_of_month_after(day: Date) -> Date {
-    day.first_of_month()
-        .checked_add(jiff::Span::new().months(1))
-        .unwrap_or(day)
 }
 
 /// A change in grams to the nearest 0.01 kg, with its sign.
@@ -420,7 +299,6 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 .point { fill: var(--mark); }
 .trend { fill: none; stroke: var(--trend); stroke-width: 2; stroke-linejoin: round; }
 .hover { fill: transparent; }
-p.choices a, p.choices strong { margin-right: 0.75rem; }
 p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 p.legend { color: var(--muted); font-size: 0.9rem; }
 table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
@@ -429,11 +307,11 @@ table.figures th { text-align: left; padding-right: 0.75rem; }
 
 #[cfg(test)]
 mod tests {
-    use application::body_weight::View;
     use domain::{
         analytical::{
             Weighed,
-            body_weight::{Range, Ranges, Series},
+            body_weight::Series,
+            range::{Over, Range, Ranges},
         },
         canonical::Occurred,
         measure::Kg,
@@ -441,7 +319,7 @@ mod tests {
     };
     use jiff::civil::{Date, date};
 
-    use super::{Over, page};
+    use super::page;
 
     fn day(d: i8, grams: u64) -> Weighed {
         Weighed {
@@ -450,17 +328,13 @@ mod tests {
         }
     }
 
-    /// The view on `today`, in a macrocycle from Monday 2026-09-07 and a
+    /// The ranges on `today`, in a macrocycle from Monday 2026-09-07 and a
     /// mesocycle from Monday 2026-09-14.
-    fn view(weigh_ins: Vec<Weighed>, today: Date) -> View {
+    fn ranges(today: Date) -> Ranges {
         let range = |from| Range { from, to: today };
-        View {
-            series: Series::of(weigh_ins),
-            ranges: Ranges {
-                microcycle: range(date(2026, 9, 21)),
-                mesocycle: Some(range(date(2026, 9, 14))),
-                macrocycle: Some(range(date(2026, 9, 7))),
-            },
+        Ranges {
+            mesocycle: Some(range(date(2026, 9, 14))),
+            macrocycle: Some(range(date(2026, 9, 7))),
         }
     }
 
@@ -480,7 +354,8 @@ mod tests {
             },
         ];
         let page = page(
-            &view(weigh_ins, date(2026, 10, 1)),
+            &Series::of(weigh_ins),
+            &ranges(date(2026, 10, 1)),
             Over::All,
             &crate::run::View::default(),
         )
@@ -494,7 +369,8 @@ mod tests {
     #[test]
     fn no_weigh_ins_is_said_rather_than_drawn() {
         let page = page(
-            &view(Vec::new(), date(2026, 9, 23)),
+            &Series::of(Vec::new()),
+            &ranges(date(2026, 9, 23)),
             Over::All,
             &crate::run::View::default(),
         )
@@ -508,7 +384,8 @@ mod tests {
         // Weigh-ins on the 1st to 7th and the 22nd to 28th, none between.
         let weigh_ins = (1..=7).chain(22..=28).map(|d| day(d, 84_043)).collect();
         let page = page(
-            &view(weigh_ins, date(2026, 9, 28)),
+            &Series::of(weigh_ins),
+            &ranges(date(2026, 9, 28)),
             Over::All,
             &crate::run::View::default(),
         )
@@ -529,7 +406,8 @@ mod tests {
             .chain((14..=20).map(|d| day(d, 83_750)))
             .collect();
         let page = page(
-            &view(weigh_ins, date(2026, 9, 20)),
+            &Series::of(weigh_ins),
+            &ranges(date(2026, 9, 20)),
             Over::Macrocycle,
             &crate::run::View::default(),
         )
@@ -546,7 +424,8 @@ mod tests {
         // Daily from 2026-09-01; this mesocycle began on Monday the 14th.
         let weigh_ins = (1..=23).map(|d| day(d, 84_000)).collect();
         let page = page(
-            &view(weigh_ins, date(2026, 9, 23)),
+            &Series::of(weigh_ins),
+            &ranges(date(2026, 9, 23)),
             Over::Mesocycle,
             &crate::run::View::default(),
         )
@@ -560,9 +439,15 @@ mod tests {
 
     #[test]
     fn a_day_with_no_plan_has_no_macrocycle() {
-        let mut view = view(vec![day(1, 84_000)], date(2026, 9, 23));
-        view.ranges.macrocycle = None;
-        let page = page(&view, Over::Macrocycle, &crate::run::View::default()).into_string();
+        let mut ranges = ranges(date(2026, 9, 23));
+        ranges.macrocycle = None;
+        let page = page(
+            &Series::of(vec![day(1, 84_000)]),
+            &ranges,
+            Over::Macrocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
         assert!(
             page.contains("No macrocycle is planned for today."),
             "{page}"
@@ -571,12 +456,5 @@ mod tests {
             page.contains("this mesocycle"),
             "the other ranges are still offered"
         );
-    }
-
-    #[test]
-    fn an_unknown_range_is_this_macrocycle() {
-        assert_eq!(Over::named(Some("fortnight")), Over::Macrocycle);
-        assert_eq!(Over::named(None), Over::Macrocycle);
-        assert_eq!(Over::named(Some("all")), Over::All);
     }
 }

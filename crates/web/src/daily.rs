@@ -17,6 +17,7 @@ use domain::{
     analytical::{
         hrv::{self, Against, Trended},
         per_device::{DeviceSeries, SentBy},
+        range::{Over, Range, Ranges},
         resting,
     },
     measure::{BeatsPerMinute, HeartRateVariability},
@@ -25,7 +26,8 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    chart::{along, years},
+    chart::along,
+    range::{seconds, ticks},
     run::View,
 };
 
@@ -65,17 +67,21 @@ impl Figure for HeartRateVariability {
 #[derive(Debug, Clone, Copy)]
 pub struct Shown {
     pub title: &'static str,
+    /// Where the page is served.
+    pub path: &'static str,
     /// What one point is, said under the title.
     pub point: &'static str,
 }
 
 pub const OVERNIGHT_HRV: Shown = Shown {
     title: "Overnight HRV",
+    path: "/hrv",
     point: "Last night's average, on the morning Garmin reports it under.",
 };
 
 pub const RESTING_HEART_RATE: Shown = Shown {
     title: "Resting heart rate",
+    path: "/resting-heart-rate",
     point: "Garmin's resting heart rate for the day.",
 };
 
@@ -109,8 +115,15 @@ pub struct Drawn {
     pub title: String,
 }
 
-/// The HRV page: each watch's nights and the trend through them.
-pub fn overnight_hrv(trended: &[Trended], run: &View) -> Markup {
+/// The HRV page: each watch's nights and the trend through them, over the
+/// range chosen.
+pub fn overnight_hrv(trended: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
+    let recorded = recorded(trended.iter().map(|one| &one.series));
+    let range = crate::range::chosen(ranges, over, recorded, NOTHING);
+    let trended: Vec<Trended> = range.as_ref().map_or_else(
+        |_| Vec::new(),
+        |range| trended.iter().map(|one| one.within(*range)).collect(),
+    );
     let series: Vec<DeviceSeries<HeartRateVariability>> =
         trended.iter().map(|one| one.series.clone()).collect();
     let trends = Trends {
@@ -121,7 +134,7 @@ pub fn overnight_hrv(trended: &[Trended], run: &View) -> Markup {
             hrv::BAND
         ),
     };
-    page(OVERNIGHT_HRV, &series, Some(&trends), run)
+    page(OVERNIGHT_HRV, &series, Some(&trends), over, range, run)
 }
 
 fn hrv_overlay(trended: &Trended) -> Overlay {
@@ -155,8 +168,19 @@ fn hrv_overlay(trended: &Trended) -> Overlay {
 }
 
 /// The resting heart rate page: each watch's days, the slow line through
-/// them, and the nights flagged.
-pub fn resting_heart_rate(trended: &[resting::Trended], run: &View) -> Markup {
+/// them, and the nights flagged, over the range chosen.
+pub fn resting_heart_rate(
+    trended: &[resting::Trended],
+    ranges: &Ranges,
+    over: Over,
+    run: &View,
+) -> Markup {
+    let recorded = recorded(trended.iter().map(|one| &one.series));
+    let range = crate::range::chosen(ranges, over, recorded, NOTHING);
+    let trended: Vec<resting::Trended> = range.as_ref().map_or_else(
+        |_| Vec::new(),
+        |range| trended.iter().map(|one| one.within(*range)).collect(),
+    );
     let series: Vec<DeviceSeries<BeatsPerMinute>> =
         trended.iter().map(|one| one.series.clone()).collect();
     let trends = Trends {
@@ -167,7 +191,7 @@ pub fn resting_heart_rate(trended: &[resting::Trended], run: &View) -> Markup {
             resting::FLAG
         ),
     };
-    page(RESTING_HEART_RATE, &series, Some(&trends), run)
+    page(RESTING_HEART_RATE, &series, Some(&trends), over, range, run)
 }
 
 fn resting_overlay(trended: &resting::Trended) -> Overlay {
@@ -246,13 +270,22 @@ fn hrv_reading(day: &hrv::Day) -> String {
     )
 }
 
-/// The whole page.
+const NOTHING: &str = "Nothing has been recorded.";
+
+/// Every day any of the series has a figure on.
+fn recorded<'a, T: 'a>(series: impl Iterator<Item = &'a DeviceSeries<T>>) -> Option<Range> {
+    Range::spanning(series.flat_map(|one| one.readings.iter().map(|reading| reading.on)))
+}
+
+/// The whole page, over `range` or saying why there is none.
 ///
 /// `trends` is drawn over `series` where the page has one.
-pub fn page<T: Figure>(
+fn page<T: Figure>(
     shown: Shown,
     series: &[DeviceSeries<T>],
     trends: Option<&Trends>,
+    over: Over,
+    range: Result<Range, Markup>,
     run: &View,
 ) -> Markup {
     let overlays = trends.map_or(&[][..], |trends| trends.overlays.as_slice());
@@ -271,11 +304,17 @@ pub fn page<T: Figure>(
                     p { a href="/" { "Run next" } }
                     h1 { (shown.title) }
                     p.method { (shown.point) }
-                    @for overlay in overlays {
-                        @if let Some(latest) = &overlay.latest { p.reading { (latest) } }
+                    (crate::range::choices(shown.path, over))
+                    @match range {
+                        Err(said) => (said),
+                        Ok(range) => {
+                            @for overlay in overlays {
+                                @if let Some(latest) = &overlay.latest { p.reading { (latest) } }
+                            }
+                            (chart(shown, series, overlays, range))
+                            @if let Some(trends) = trends { p.method { (trends.method) } }
+                        }
                     }
-                    (chart(shown, series, overlays))
-                    @if let Some(trends) = trends { p.method { (trends.method) } }
                     @if overlays.iter().any(|overlay| !overlay.flags.is_empty()) {
                         details {
                             summary { "Every night flagged" }
@@ -310,6 +349,7 @@ pub fn unreadable(shown: Shown, error: &str) -> Markup {
 
 /// Where a day and a figure fall on the chart.
 struct Frame {
+    range: Range,
     first: i64,
     last: i64,
     low: u32,
@@ -333,15 +373,20 @@ impl Frame {
     }
 }
 
-/// The chart, its legend and its table.
-fn chart<T: Figure>(shown: Shown, series: &[DeviceSeries<T>], overlays: &[Overlay]) -> Markup {
+/// The chart over `range`, its legend and its table.
+///
+/// **A watch with nothing in the range keeps its place**, so it keeps its
+/// colour, and is left out of the legend.
+fn chart<T: Figure>(
+    shown: Shown,
+    series: &[DeviceSeries<T>],
+    overlays: &[Overlay],
+    range: Range,
+) -> Markup {
     let days = series.iter().flat_map(|one| one.readings.iter());
-    let (Some(first), Some(last)) = (
-        days.clone().map(|reading| reading.on).min(),
-        days.clone().map(|reading| reading.on).max(),
-    ) else {
-        return html! { p { "Nothing has been recorded." } };
-    };
+    if days.clone().next().is_none() {
+        return html! { p { "Nothing recorded in this range." } };
+    }
     let low = days
         .clone()
         .map(|reading| reading.value.number())
@@ -353,15 +398,16 @@ fn chart<T: Figure>(shown: Shown, series: &[DeviceSeries<T>], overlays: &[Overla
         .unwrap_or(0);
     // Whole tens either side, so the gridlines fall on round figures.
     let frame = Frame {
-        first: seconds(first),
-        last: seconds(last),
+        range,
+        first: seconds(range.from),
+        last: seconds(range.to),
         low: low / 10 * 10,
         high: (high / 10).saturating_add(1).saturating_mul(10),
     };
     html! {
         div.plot { (plot(shown, series, overlays, &frame)) }
         ul.legend {
-            @for (index, one) in series.iter().enumerate() {
+            @for (index, one) in series.iter().enumerate().filter(|(_, one)| !one.readings.is_empty()) {
                 li {
                     svg.key viewBox="0 0 12 12" { (mark(class(index, &one.sent_by), &one.sent_by, 6.0, 6.0, "")) }
                     (name(&one.sent_by)) " · " (one.readings.len()) " days"
@@ -385,9 +431,10 @@ fn plot<T: Figure>(
                 line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(value)) y2=(frame.y(value)) {}
                 text.axis x=(LEFT - 6.0) y=(frame.y(value) + 4.0) text-anchor="end" { (value) }
             }
-            @for (year, at) in years(frame.first, frame.last) {
+            @for (tick, label) in ticks(frame.range) {
+                @let at = seconds(tick);
                 line.grid x1=(frame.x(at)) x2=(frame.x(at)) y1=(TOP) y2=(FLOOR) {}
-                text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (year) }
+                text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (label) }
             }
             line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
             @for overlay in overlays {
@@ -510,13 +557,6 @@ fn name(sent_by: &SentBy) -> String {
     }
 }
 
-/// A day's place on the date axis: its start, in UTC, so every day is the
-/// same width.
-fn seconds(on: Date) -> i64 {
-    on.to_zoned(jiff::tz::TimeZone::UTC)
-        .map_or(0, |zoned| zoned.timestamp().as_second())
-}
-
 /// The watches' colours: the per-zone chart's palette, validated in both
 /// modes, taken in an order that keeps neighbours apart.
 pub const STYLE: &str = "
@@ -535,12 +575,25 @@ mod tests {
         analytical::{
             hrv::Trended,
             per_device::{DeviceSeries, Reading, SentBy},
+            range::{Over, Range, Ranges},
             resting,
         },
         measure::{BeatsPerMinute, HeartRateVariability},
     };
 
     use super::{RESTING_HEART_RATE, chart};
+
+    const NO_PLAN: Ranges = Ranges {
+        mesocycle: None,
+        macrocycle: None,
+    };
+
+    fn december() -> Range {
+        Range {
+            from: jiff::civil::date(2024, 12, 1),
+            to: jiff::civil::date(2024, 12, 31),
+        }
+    }
 
     fn reading(day: i8, beats: u32) -> Reading<BeatsPerMinute> {
         Reading {
@@ -555,7 +608,7 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings: vec![reading(21, 63), reading(22, 53)],
         }];
-        let drawn = chart(RESTING_HEART_RATE, &series, &[]).into_string();
+        let drawn = chart(RESTING_HEART_RATE, &series, &[], december()).into_string();
 
         assert_eq!(drawn.matches("<circle class=\"ring ink\"").count(), 3);
         assert!(drawn.contains("2024-12-21 · 63bpm · device unknown"));
@@ -581,7 +634,9 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings: nights,
         })];
-        let page = super::overnight_hrv(&trended, &crate::run::View::default()).into_string();
+        let page =
+            super::overnight_hrv(&trended, &NO_PLAN, Over::All, &crate::run::View::default())
+                .into_string();
 
         assert_eq!(page.matches(r#"class="trend""#).count(), 1);
         assert_eq!(page.matches(r#"class="band""#).count(), 1);
@@ -607,7 +662,9 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings,
         })];
-        let page = super::resting_heart_rate(&trended, &crate::run::View::default()).into_string();
+        let page =
+            super::resting_heart_rate(&trended, &NO_PLAN, Over::All, &crate::run::View::default())
+                .into_string();
 
         assert_eq!(page.matches(r#"class="trend""#).count(), 1);
         assert_eq!(page.matches(r#"class="flag""#).count(), 1);
@@ -616,11 +673,39 @@ mod tests {
 
     #[test]
     fn nothing_recorded_is_said_rather_than_drawn() {
-        let series: [DeviceSeries<BeatsPerMinute>; 0] = [];
+        let trended: [resting::Trended; 0] = [];
+        let page =
+            super::resting_heart_rate(&trended, &NO_PLAN, Over::All, &crate::run::View::default())
+                .into_string();
+        assert!(page.contains("Nothing has been recorded."));
+        assert!(!page.contains("<svg class=\"chart\""));
+    }
+
+    #[test]
+    fn a_range_shows_only_its_days_and_a_day_with_no_plan_says_so() {
+        let trended = [resting::Trended::of(DeviceSeries {
+            sent_by: SentBy::Unknown,
+            readings: vec![reading(2, 50), reading(21, 63), reading(22, 53)],
+        })];
+        let ranges = Ranges {
+            mesocycle: Some(Range {
+                from: jiff::civil::date(2024, 12, 16),
+                to: jiff::civil::date(2024, 12, 22),
+            }),
+            macrocycle: None,
+        };
+        let run = crate::run::View::default();
+        let page =
+            super::resting_heart_rate(&trended, &ranges, Over::Mesocycle, &run).into_string();
+        assert!(page.contains("2024-12-21 · 63bpm"));
         assert!(
-            chart(RESTING_HEART_RATE, &series, &[])
-                .into_string()
-                .contains("Nothing has been recorded.")
+            !page.contains("2024-12-02 · 50bpm"),
+            "before this mesocycle"
         );
+        assert!(page.contains(r#"href="/resting-heart-rate?over=all""#));
+
+        let page =
+            super::resting_heart_rate(&trended, &ranges, Over::Macrocycle, &run).into_string();
+        assert!(page.contains("No macrocycle is planned for today."));
     }
 }

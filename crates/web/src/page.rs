@@ -76,4 +76,5 @@ table { border-collapse: collapse; }
 td { padding: 0.15rem 0.75rem 0.15rem 0; vertical-align: top; }
 li.paired { border-left: 2px solid var(--muted); padding-left: 0.5rem; list-style: none; }
 a { overflow-wrap: anywhere; }
+p.choices a, p.choices strong { margin-right: 0.75rem; }
 ";

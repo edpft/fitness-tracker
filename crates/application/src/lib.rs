@@ -35,6 +35,7 @@ pub mod per_device;
 pub mod ports;
 pub mod prescribe;
 pub mod published;
+pub mod ranges;
 pub mod reschedule;
 pub mod status;
 pub mod strength;

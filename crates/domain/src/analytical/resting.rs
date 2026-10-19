@@ -27,7 +27,10 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::per_device::{DeviceSeries, Reading};
+use super::{
+    per_device::{DeviceSeries, Reading},
+    range::{Range, runs_within},
+};
 use crate::measure::BeatsPerMinute;
 
 /// What the slow line is.
@@ -77,6 +80,22 @@ impl Trended {
             series,
             line,
             flags,
+        }
+    }
+
+    /// Only `range`'s days. The line and the flags on each are the whole
+    /// record's.
+    #[must_use]
+    pub fn within(&self, range: Range) -> Self {
+        Self {
+            series: self.series.within(range),
+            line: runs_within(&self.line, range, |day| day.on),
+            flags: self
+                .flags
+                .iter()
+                .filter(|flag| range.covers(flag.on))
+                .copied()
+                .collect(),
         }
     }
 }

@@ -31,8 +31,8 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::Weighed;
-use crate::{measure::Kg, plan::Span};
+use super::{Weighed, range::Range};
+use crate::measure::Kg;
 
 /// What the trend is called, so a different method is never mistaken for it.
 pub const METHOD: &str = "mean of the 7 days ending on the day, at least 4 of them weighed";
@@ -95,54 +95,6 @@ impl Series {
     }
 }
 
-/// The days a range runs over: from the start of a cycle to today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Range {
-    pub from: Date,
-    pub to: Date,
-}
-
-/// The current microcycle, mesocycle and macrocycle on a day, each from its
-/// start to that day (operator, 2026-10-14, #252): what has happened within
-/// each so far, not a look-back of its length.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ranges {
-    pub microcycle: Range,
-    /// `None` on a day no mesocycle is planned for.
-    pub mesocycle: Option<Range>,
-    /// `None` on a day no plan is in force.
-    pub macrocycle: Option<Range>,
-}
-
-impl Ranges {
-    /// **A macrocycle is a planned one** (operator, 2026-10-14, #443): it runs
-    /// from the first day of the plan in force, and a school term with no plan
-    /// in it is not a macrocycle.
-    pub fn on(today: Date, mesocycles: &[Span], plans: &[Span]) -> Self {
-        let to = today;
-        Self {
-            microcycle: Range {
-                from: monday_of(today),
-                to,
-            },
-            mesocycle: mesocycles
-                .iter()
-                .find(|span| span.covers(today))
-                .map(|span| Range {
-                    from: span.start(),
-                    to,
-                }),
-            macrocycle: plans
-                .iter()
-                .find(|span| span.covers(today))
-                .map(|span| Range {
-                    from: span.start(),
-                    to,
-                }),
-        }
-    }
-}
-
 /// What a range comes to: the mean of its
 /// weigh-ins and how far the trend moved across it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,7 +109,7 @@ impl Series {
     /// cycles that start in it.
     #[must_use]
     pub fn within(&self, range: Range) -> Self {
-        let inside = |day: Date| day >= range.from && day <= range.to;
+        let inside = |day: Date| range.covers(day);
         Self {
             weigh_ins: self
                 .weigh_ins
@@ -293,12 +245,6 @@ pub fn changes(trend: &[Vec<Trend>]) -> Vec<Change> {
             })
         })
         .collect()
-}
-
-/// The Monday of the microcycle a day falls in.
-fn monday_of(day: Date) -> Date {
-    day.checked_sub(jiff::Span::new().days(i64::from(day.weekday().to_monday_zero_offset())))
-        .unwrap_or(day)
 }
 
 fn by_day(series: &[Weighed]) -> BTreeMap<Date, Vec<u64>> {

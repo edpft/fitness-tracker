@@ -35,6 +35,7 @@ use std::{collections::BTreeMap, fmt};
 
 use jiff::civil::Date;
 
+use super::range::{Range, runs_within};
 use crate::{
     body::{Component, Percentage},
     measure::Kg,
@@ -172,6 +173,28 @@ impl MethodSeries {
             changes,
         }
     }
+
+    /// Only `range`'s days. The trend and each change on them are the whole
+    /// record's.
+    #[must_use]
+    pub fn within(&self, range: Range) -> Self {
+        Self {
+            method: self.method,
+            readings: self
+                .readings
+                .iter()
+                .filter(|reading| range.covers(reading.on))
+                .copied()
+                .collect(),
+            trend: runs_within(&self.trend, range, |day| day.on),
+            changes: self
+                .changes
+                .iter()
+                .filter(|change| range.covers(change.on))
+                .copied()
+                .collect(),
+        }
+    }
 }
 
 /// One component, one series per method.
@@ -180,6 +203,18 @@ pub struct ComponentSeries {
     pub component: Component,
     pub unit: Unit,
     pub series: Vec<MethodSeries>,
+}
+
+impl ComponentSeries {
+    /// Only `range`'s days, every method kept.
+    #[must_use]
+    pub fn within(&self, range: Range) -> Self {
+        Self {
+            component: self.component,
+            unit: self.unit,
+            series: self.series.iter().map(|one| one.within(range)).collect(),
+        }
+    }
 }
 
 /// The order components are shown in: what more than one source states first.

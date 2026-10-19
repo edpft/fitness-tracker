@@ -3,7 +3,8 @@
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Direction, Range, Ranges, Series, Trend, body_weight, changes, trend},
+        body_weight::{Direction, Series, Trend, body_weight, changes, trend},
+        range::{Over, Range, Ranges},
     },
     canonical::Occurred,
     measure::Kg,
@@ -233,4 +234,28 @@ fn a_day_no_plan_covers_has_no_macrocycle() {
         Ranges::on(date(2026, 9, 10), &[], &[autumn]).macrocycle,
         None
     );
+}
+
+/// The mesocycle that began on Monday 2026-09-28, inside the autumn's plan.
+#[test]
+fn a_range_is_the_cycle_named_or_everything_recorded() {
+    let autumn = Span::new(date(2026, 9, 14), 15);
+    let october = Span::new(date(2026, 9, 28), 4);
+    let ranges = Ranges::on(date(2026, 10, 19), &[october], &[autumn]);
+    let recorded = Range::spanning([date(2026, 10, 1), date(2016, 3, 2), date(2026, 10, 18)]);
+    assert_eq!(
+        ranges.over(Over::Mesocycle, recorded),
+        Some(Range {
+            from: date(2026, 9, 28),
+            to: date(2026, 10, 19),
+        })
+    );
+    assert_eq!(
+        ranges.over(Over::All, recorded),
+        Some(Range {
+            from: date(2016, 3, 2),
+            to: date(2026, 10, 18),
+        })
+    );
+    assert_eq!(ranges.over(Over::All, Range::spanning([])), None);
 }
