@@ -53,9 +53,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v5
 
+      # 2.31 rather than the action's default for the import trace below.
       - name: Install nix
         uses: nixbuild/nix-quick-install-action@v34
         with:
+          nix_version: 2.31.2
           nix_conf: |
             access-tokens = github.com=${{ github.token }}
 
@@ -84,21 +86,21 @@ jobs:
 
       # Evaluating the flake builds things too: fenix fetches the toolchain's
       # manifest at evaluation time, and without it in the cache the laptop
-      # cannot even evaluate. So evaluate on a store holding nothing, and push
-      # what that store built itself rather than substituted (`ultimate`). Not
-      # read from the error a build-less evaluation gives: its wording differs
-      # between versions of nix, and some do not name the derivation.
+      # cannot even evaluate. Nix names each such build when asked to trace
+      # them (2.30 and later), whether or not its output is already here. Not
+      # found by building on an empty store: a store under another root needs
+      # a sandbox to build into, and this runner builds without one.
       - name: Push what evaluation builds
         run: |
-          evaluated="local?root=${RUNNER_TEMP}/evaluated"
-          nix eval --store "$evaluated" --raw "${REF}.drvPath" >/dev/null
-          mapfile -t built < <(nix path-info --store "$evaluated" --all --json \
-            | jq -r 'if type == "array" then .[] else to_entries[] | .value + {path: .key} end
-              | select(.ultimate and .deriver != null) | .path')
-          echo "Evaluation builds: ${built[*]:-nothing}"
-          if [ "${#built[@]}" -gt 0 ]; then
-            nix copy --no-check-sigs --from "$evaluated" "${built[@]}"
-            cachix push "$CACHE" "${built[@]}"
+          if ! log=$(nix eval --no-eval-cache --option trace-import-from-derivation true --raw "${REF}.drvPath" 2>&1 >/dev/null); then
+            echo "$log"
+            exit 1
+          fi
+          mapfile -t drvs < <(grep -oP "built '\K/nix/store/[^'^]+\.drv(?=\^[^']*' during evaluation)" <<<"$log" | sort -u)
+          echo "Evaluation builds: ${drvs[*]:-nothing}"
+          if [ "${#drvs[@]}" -gt 0 ]; then
+            mapfile -t outs < <(nix-store --realise "${drvs[@]}")
+            cachix push "$CACHE" "${outs[@]}"
           fi
 
       # The laptop's position: a store holding nothing, building nothing, and
