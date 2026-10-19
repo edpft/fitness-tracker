@@ -9,15 +9,21 @@
 //! record is too thin for one, and each method's last reading against 28 days
 //! before is said above its chart.
 //!
+//! **The page leads with the current macrocycle against its nutrition
+//! phases** (#489): each period's cell, per method, and whether that cell is a
+//! success in the phase.
+//!
 //! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
 //! the table beneath each chart is the same figures.
 
+use application::composition::AgainstPhase;
 use domain::{
     analytical::{
         composition::{
             AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
         },
         range::{Over, Range, Ranges},
+        recomposition::{Cell, Moved, NutritionPhase, Period, PeriodReading, Standing},
     },
     body::Component,
 };
@@ -126,7 +132,13 @@ fn class(methods: &[Method], method: Method) -> &'static str {
 ///
 /// **A method keeps its colour over every range**, so the colours are the
 /// whole record's.
-pub fn page(components: &[ComponentSeries], ranges: &Ranges, over: Over, run: &View) -> Markup {
+pub fn page(
+    components: &[ComponentSeries],
+    against: &AgainstPhase,
+    ranges: &Ranges,
+    over: Over,
+    run: &View,
+) -> Markup {
     let methods = methods(components);
     let recorded = Range::spanning(
         components
@@ -149,6 +161,7 @@ pub fn page(components: &[ComponentSeries], ranges: &Ranges, over: Over, run: &V
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
+                    (against_phase(against))
                     (crate::range::choices("/body-composition", over))
                     p.method {
                         "points: each weigh-in, coloured by what measured it · line: trend, the " (TREND)
@@ -161,6 +174,104 @@ pub fn page(components: &[ComponentSeries], ranges: &Ranges, over: Over, run: &V
                 }
             }
         }
+    }
+}
+
+/// The current macrocycle, each period against its nutrition phase.
+fn against_phase(against: &AgainstPhase) -> Markup {
+    html! {
+        @match against {
+            AgainstPhase::Unreadable(error) => {
+                p.failed { "the school calendar could not be read, so there is no macrocycle: " (error) }
+            }
+            AgainstPhase::NoMacrocycle => p { "Today is past the school calendar's reach, so there is no macrocycle." },
+            AgainstPhase::Read(read) => {
+                h2 { (capitalised(&read.macrocycle.to_string())) }
+                p.method {
+                    "fat mass against fat-free mass (weigh-in less fat), each the trend on the first day whose 7 days all fall in the period against the trend on the last · "
+                    "a cut succeeds losing fat while gaining fat-free mass, holding it, or losing it more slowly than fat · "
+                    "maintenance succeeds without gaining fat or losing fat-free mass · "
+                    "the phase is assumed from the macrocycle: a cut in the preparatory phase, maintenance in the competitive and transition phases"
+                }
+                @for one in &read.periods {
+                    (period(one))
+                }
+            }
+        }
+    }
+}
+
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// A period's name and days: an end the plan does not yet say is named for
+/// what decides it.
+fn named(period: Period, running: bool) -> String {
+    let phase = capitalised(&period.phase.to_string());
+    let from = period.from.map_or_else(
+        || "from the competitive mesocycle".to_owned(),
+        |from| format!("{from}"),
+    );
+    let to = match (period.to, running) {
+        (_, true) => "today".to_owned(),
+        (Some(to), false) => format!("{to}"),
+        (None, false) => "the competitive mesocycle".to_owned(),
+    };
+    format!("{phase}, {from} to {to}")
+}
+
+fn moved(name: &str, moved: Moved) -> String {
+    let direction = match moved.direction {
+        Direction::Rising => "rising",
+        Direction::Maintaining => "maintaining",
+        Direction::Falling => "falling",
+    };
+    format!(
+        "{name} {} (noise ±{:.2} kg): {direction}",
+        format!("{:+.2} kg", moved.by).replace('-', "−"),
+        moved.noise
+    )
+}
+
+fn period(reading: &PeriodReading) -> Markup {
+    let period = reading.period;
+    html! {
+        @match &reading.standing {
+            Standing::NotStarted => p.reading { (named(period, false)) ": not started" },
+            Standing::Read(methods) => {
+                p.reading { (named(period, reading.running)) }
+                @if methods.is_empty() {
+                    p { "Nothing measured in this period." }
+                }
+                ul {
+                    @for one in methods {
+                        li {
+                            (one.method) " · "
+                            @match one.cell {
+                                None => "too few weigh-ins for two trends a week apart",
+                                Some(cell) => {
+                                    (cell.from) " to " (cell.to) ": "
+                                    (moved("fat", cell.fat)) " · " (moved("fat-free", cell.fat_free)) " · "
+                                    strong { (verdict(period.phase, &cell)) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn verdict(phase: NutritionPhase, cell: &Cell) -> &'static str {
+    if phase.succeeds(cell) {
+        "success"
+    } else {
+        "failure"
     }
 }
 
@@ -377,7 +488,22 @@ mod tests {
         body::Component,
     };
 
+    use std::num::NonZeroU8;
+
+    use application::composition::AgainstPhase;
+    use domain::{
+        analytical::{
+            composition::{Measured, Stated},
+            recomposition::read,
+        },
+        macrocycle::Macrocycle,
+        measure::Kg,
+        schedule::{Holidays, SchoolHoliday},
+    };
+
     use super::page;
+
+    const NONE: AgainstPhase = AgainstPhase::NoMacrocycle;
 
     const NO_PLAN: Ranges = Ranges {
         mesocycle: None,
@@ -409,7 +535,14 @@ mod tests {
                 ),
             ],
         };
-        let drawn = page(&[fat], &NO_PLAN, Over::All, &crate::run::View::default()).into_string();
+        let drawn = page(
+            &[fat],
+            &NONE,
+            &NO_PLAN,
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
 
         assert!(drawn.contains("<h2>Fat (%)</h2>"));
         assert_eq!(drawn.matches(r#"<circle class="point d1""#).count(), 3);
@@ -444,8 +577,14 @@ mod tests {
                 readings,
             )],
         };
-        let drawn =
-            page(&[muscle], &NO_PLAN, Over::All, &crate::run::View::default()).into_string();
+        let drawn = page(
+            &[muscle],
+            &NONE,
+            &NO_PLAN,
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
 
         assert_eq!(drawn.matches("<polyline").count(), 1, "one unbroken run");
         assert!(
@@ -463,9 +602,15 @@ mod tests {
     #[test]
     fn nothing_recorded_is_said_rather_than_drawn() {
         assert!(
-            page(&[], &NO_PLAN, Over::All, &crate::run::View::default())
-                .into_string()
-                .contains("Nothing has been recorded.")
+            page(
+                &[],
+                &NONE,
+                &NO_PLAN,
+                Over::All,
+                &crate::run::View::default()
+            )
+            .into_string()
+            .contains("Nothing has been recorded.")
         );
     }
 
@@ -493,6 +638,7 @@ mod tests {
         };
         let drawn = page(
             &[fat],
+            &NONE,
             &ranges,
             Over::Mesocycle,
             &crate::run::View::default(),
@@ -503,5 +649,82 @@ mod tests {
         assert!(!drawn.contains("spreadsheets ·"), "nor in the legend");
         assert_eq!(drawn.matches(r#"<circle class="point d2""#).count(), 2);
         assert!(drawn.contains(r#"href="/body-composition?over=all""#));
+    }
+
+    /// Autumn 2026, from the school's feed.
+    fn autumn() -> Option<Macrocycle> {
+        let holiday = |first, days| Some(SchoolHoliday::new(first, NonZeroU8::new(days)?));
+        let school = Holidays::from_school(
+            vec![
+                holiday(jiff::civil::date(2026, 7, 21), 47)?,
+                holiday(jiff::civil::date(2026, 12, 21), 14)?,
+            ],
+            Some(jiff::civil::date(2027, 1, 3)),
+        );
+        let public = Holidays::from_public(
+            vec![
+                domain::schedule::PublicHoliday::new(
+                    jiff::civil::date(2026, 8, 31),
+                    "Summer bank holiday".to_owned(),
+                )
+                .naming(domain::schedule::SchoolHolidayKind::Summer),
+                domain::schedule::PublicHoliday::new(
+                    jiff::civil::date(2026, 12, 25),
+                    "Christmas Day".to_owned(),
+                ),
+            ],
+            Some(jiff::civil::date(2027, 12, 31)),
+        );
+        Macrocycle::on(jiff::civil::date(2026, 10, 19), &school.and(public))
+    }
+
+    #[test]
+    fn each_period_says_its_cell_and_whether_it_succeeds() {
+        let measured: Vec<Measured> = jiff::civil::date(2026, 9, 7)
+            .series(jiff::Span::new().days(1))
+            .take(43)
+            .zip(0_u64..)
+            .map(|(on, day)| {
+                let wobble = if day % 2 == 0 { 100 } else { 0 };
+                let fat = 19_100 - day * 25 - wobble;
+                Measured {
+                    on,
+                    method: Method::BodyScan {
+                        algorithm: 218_300_672,
+                    },
+                    component: Component::Fat,
+                    stated: Stated::Mass(Kg::from_grams(fat)),
+                    weighed: Kg::from_grams(fat + 66_000 + wobble),
+                }
+            })
+            .collect();
+        let against = AgainstPhase::Read(read(
+            &measured,
+            autumn().expect("a macrocycle"),
+            &[],
+            jiff::civil::date(2026, 10, 19),
+        ));
+        let drawn = page(
+            &[],
+            &against,
+            &NO_PLAN,
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
+
+        assert!(drawn.contains("<h2>Autumn 2026</h2>"), "{drawn}");
+        assert!(drawn.contains("Cut, 2026-09-07 to today"), "{drawn}");
+        assert!(drawn.contains("2026-09-13 to 2026-10-19: fat −"), "{drawn}");
+        assert!(drawn.contains(": falling · fat-free"), "{drawn}");
+        assert!(
+            drawn.contains(": maintaining · <strong>success</strong>"),
+            "{drawn}"
+        );
+        assert!(
+            drawn
+                .contains("Maintenance, from the competitive mesocycle to 2027-01-03: not started"),
+            "{drawn}"
+        );
     }
 }

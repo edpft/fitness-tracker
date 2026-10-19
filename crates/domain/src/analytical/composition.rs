@@ -47,7 +47,7 @@ pub use super::{body_weight::Direction, per_device::Reading};
 pub const TREND: &str = "mean of the 7 days ending on the day, at least 4 of them measured";
 
 /// How many days the trend is the mean of, the day itself included.
-const WINDOW_DAYS: i64 = 7;
+pub(super) const WINDOW_DAYS: i64 = 7;
 
 /// How many of them must have a figure for there to be a trend.
 const MEASURED_DAYS: usize = 4;
@@ -56,7 +56,7 @@ const MEASURED_DAYS: usize = 4;
 pub const AGAINST_DAYS: i64 = 28;
 
 /// The two-sided 95% point of the normal distribution.
-const CONFIDENCE: f64 = 1.96;
+pub(super) const CONFIDENCE: f64 = 1.96;
 
 /// What measured a composition figure, and how.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -295,7 +295,7 @@ fn by_day(readings: &[Reading<f64>]) -> BTreeMap<Date, Vec<f64>> {
     by_day
 }
 
-fn mean(values: &[f64]) -> Option<f64> {
+pub(super) fn mean(values: &[f64]) -> Option<f64> {
     let count = u32::try_from(values.len())
         .ok()
         .filter(|count| *count > 0)?;
@@ -304,7 +304,7 @@ fn mean(values: &[f64]) -> Option<f64> {
 
 /// The trend as unbroken runs of consecutive days, from the first figure to
 /// the last and never past.
-fn trend(by_day: &BTreeMap<Date, Vec<f64>>) -> Vec<Vec<Trend>> {
+pub(super) fn trend(by_day: &BTreeMap<Date, Vec<f64>>) -> Vec<Vec<Trend>> {
     let (Some(&first), Some(&last)) = (by_day.keys().next(), by_day.keys().next_back()) else {
         return Vec::new();
     };
@@ -345,7 +345,7 @@ fn mean_of_week(by_day: &BTreeMap<Date, Vec<f64>>, on: Date) -> Option<Trend> {
 /// The scatter of one figure: the standard deviation of the differences
 /// between consecutive days, over √2 since each difference holds two figures'
 /// error. `None` with fewer than two such pairs.
-fn scatter(by_day: &BTreeMap<Date, Vec<f64>>) -> Option<f64> {
+pub(super) fn scatter(by_day: &BTreeMap<Date, Vec<f64>>) -> Option<f64> {
     let days: Vec<(Date, f64)> = by_day
         .iter()
         .filter_map(|(&on, values)| mean(values).map(|value| (on, value)))

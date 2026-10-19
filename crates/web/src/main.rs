@@ -222,10 +222,13 @@ async fn body_composition(
         Err(error) => return composition::unreadable(&error.to_string()),
     };
     let components = configurator::composition::by_method(&store).await;
+    let against = configurator::composition::against_phase(&store, &setting.zone).await;
     let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
-    match components.and_then(|components| Ok((components, ranges?))) {
-        Ok((components, ranges)) => composition::page(&components, &ranges, over(&query), &run),
+    match components.and_then(|components| Ok((components, against?, ranges?))) {
+        Ok((components, against, ranges)) => {
+            composition::page(&components, &against, &ranges, over(&query), &run)
+        }
         Err(error) => composition::unreadable(&error.to_string()),
     }
 }
