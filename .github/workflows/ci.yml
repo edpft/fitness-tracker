@@ -35,3 +35,76 @@ jobs:
           test "${RESULT}" = success
         env:
           RESULT: ${{ needs.checks.result }}
+
+  # The laptop installs what this pushes and builds nothing itself (#502): its
+  # upgrade runs with `--max-jobs 0`. The checks never build the package, and
+  # the flake bakes the commit into it, so a pull request's build is never
+  # `main`'s. Built from the same `github:` reference the laptop resolves, so
+  # the derivation is the one it will ask the cache for.
+  publish:
+    name: publish
+    needs: [gate]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    env:
+      CACHE: edpft
+      REF: github:${{ github.repository }}/${{ github.sha }}#packages.x86_64-linux.default
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Install nix
+        uses: nixbuild/nix-quick-install-action@v34
+        with:
+          nix_conf: |
+            access-tokens = github.com=${{ github.token }}
+
+      # The checks' dependencies, so the package does not rebuild them. Never
+      # saved: the checks own the cache.
+      - name: Restore cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      # Pushes only what is named below: by default it would push everything
+      # the job built, toolchain and dependencies included.
+      - name: Use Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: ${{ env.CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+
+      - name: Build and push the package
+        run: |
+          out=$(nix build -L --no-link --print-out-paths "$REF")
+          cachix push "$CACHE" "$out"
+
+      # Evaluating the flake builds things too: fenix fetches the toolchain's
+      # manifest at evaluation time, and without it in the cache the laptop
+      # cannot even evaluate. So evaluate as the laptop does, on a store
+      # holding nothing and building nothing, and push whatever it refuses to
+      # build until it stops refusing. The retry substitutes from Cachix, as
+      # the laptop will, so a push it cannot see fails here rather than there.
+      - name: Push what evaluation builds
+        run: |
+          laptop="local?root=${RUNNER_TEMP}/laptop"
+          pushed=""
+          while ! log=$(nix eval --store "$laptop" --max-jobs 0 --raw "${REF}.drvPath" 2>&1); do
+            drv=$(grep -ioP "cannot build '\K/nix/store/[^'^]+\.drv" <<<"$log" | head -1) \
+              || { echo "$log"; exit 1; }
+            if [ "$drv" = "$pushed" ]; then
+              echo "${drv} was pushed and is still not substituted"
+              echo "$log"
+              exit 1
+            fi
+            echo "Evaluation builds ${drv}"
+            mapfile -t outs < <(nix-store --realise "$drv")
+            cachix push "$CACHE" "${outs[@]}"
+            pushed="$drv"
+          done
+
+      - name: Install as the laptop would
+        run: nix build --store "local?root=${RUNNER_TEMP}/laptop" --max-jobs 0 --no-link "$REF"
