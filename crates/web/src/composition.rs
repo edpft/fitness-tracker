@@ -1,7 +1,9 @@
 //! Body composition, as charts (#256).
 //!
 //! **One chart per component, date across, the figure up, one colour per
-//! method.** Nothing joins two points, so a gap in the record is the empty
+//! method** (#499). A component charted in more than one unit is one chart
+//! with a choice between them, the first the default (operator, 2026-10-20),
+//! switched in the page so no round trip is made. Nothing joins two points, so a gap in the record is the empty
 //! stretch it is (§ 37), and nothing joins two methods, since each one's
 //! figures are its own series (§ 6). A method keeps its colour on every chart.
 //!
@@ -154,7 +156,7 @@ pub fn page(
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (TITLE) }
-                style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) (MATRIX) }
+                style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) (MATRIX) (UNITS) }
             }
             body {
                 (crate::page::following(run))
@@ -408,6 +410,13 @@ svg.matrix { width: 100%; height: auto; display: block; }
 .label { fill: var(--ink); font-size: 11px; }
 ";
 
+/// Only the chosen unit's chart is shown.
+const UNITS: &str = "
+div.units label { margin: 0 0.75rem 0 0.25rem; }
+div.units input.kilograms:checked ~ div.unit:not(.kilograms),
+div.units input.percentage:checked ~ div.unit:not(.percentage) { display: none; }
+";
+
 /// The page when the store could not be read.
 pub fn unreadable(error: &str) -> Markup {
     html! {
@@ -465,24 +474,75 @@ fn value_axis(low: f64, high: f64) -> (f64, f64, f64) {
     (low, high, step)
 }
 
-/// Every component measured in `range`, each over it.
+/// Every component measured in `range`, each over it, one chart per
+/// component whatever its units.
 fn charts(components: &[ComponentSeries], methods: &[Method], range: Range) -> Markup {
     let within: Vec<ComponentSeries> = components
         .iter()
         .map(|component| component.within(range))
         .filter(|component| component.series.iter().any(|one| !one.readings.is_empty()))
         .collect();
+    let mut grouped: Vec<Vec<&ComponentSeries>> = Vec::new();
+    for one in &within {
+        match grouped.iter_mut().find(|group| {
+            group
+                .first()
+                .is_some_and(|first| first.component == one.component)
+        }) {
+            Some(group) => group.push(one),
+            None => grouped.push(vec![one]),
+        }
+    }
     html! {
         @if within.is_empty() {
             p { "Nothing recorded in this range." }
         }
-        @for component in &within {
-            (chart(component, methods, range))
+        @for group in &grouped {
+            @match group.as_slice() {
+                [one] => {
+                    h2 { (heading(one.component)) " (" (one.unit.as_str()) ")" }
+                    (chart(one, methods, range))
+                }
+                units => (choice(units, methods, range)),
+            }
         }
     }
 }
 
-/// One component's chart over `range`, its legend and its table.
+/// What a unit is called in a page's markup.
+const fn key(unit: Unit) -> &'static str {
+    match unit {
+        Unit::Percentage => "percentage",
+        Unit::Kilograms => "kilograms",
+    }
+}
+
+/// One component in each of its units, the first shown and the rest a choice
+/// away.
+fn choice(units: &[&ComponentSeries], methods: &[Method], range: Range) -> Markup {
+    let Some(first) = units.first() else {
+        return html! {};
+    };
+    let name = heading(first.component);
+    let group = format!("unit-{}", name.to_lowercase().replace(' ', "-"));
+    html! {
+        h2 { (name) }
+        div.units {
+            @for (index, one) in units.iter().enumerate() {
+                @let id = format!("{group}-{}", key(one.unit));
+                input type="radio" name=(group) id=(id) class=(key(one.unit)) checked[index == 0];
+                label for=(id) { (one.unit.as_str()) }
+            }
+            @for one in units {
+                div class=(format!("unit {}", key(one.unit))) {
+                    (chart(one, methods, range))
+                }
+            }
+        }
+    }
+}
+
+/// A component's chart over `range`, its legend and its table.
 fn chart(component: &ComponentSeries, methods: &[Method], range: Range) -> Markup {
     let readings = component.series.iter().flat_map(|one| one.readings.iter());
     let low = readings
@@ -503,7 +563,6 @@ fn chart(component: &ComponentSeries, methods: &[Method], range: Range) -> Marku
     let name = heading(component.component);
     let unit = component.unit;
     html! {
-        h2 { (name) " (" (unit.as_str()) ")" }
         @for one in &component.series {
             @if let Some(last) = one.changes.last() {
                 p.reading { (one.method) " · " (last.on) ": " (change(*last, unit)) }
@@ -686,6 +745,36 @@ mod tests {
     }
 
     #[test]
+    fn a_component_in_two_units_is_one_chart_with_a_choice() {
+        let scan = Method::BodyScan {
+            algorithm: 218_300_672,
+        };
+        let fat = |unit, value| ComponentSeries {
+            component: Component::Fat,
+            unit,
+            series: vec![MethodSeries::of(scan, vec![reading(2026, 10, 16, value)])],
+        };
+        let drawn = page(
+            &[fat(Unit::Kilograms, 17.61), fat(Unit::Percentage, 21.05)],
+            &NONE,
+            &NO_PLAN,
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
+
+        assert_eq!(drawn.matches("<h2>").count(), 1, "{drawn}");
+        assert!(drawn.contains("<h2>Fat</h2>"), "{drawn}");
+        assert!(
+            drawn.contains(r#"id="unit-fat-kilograms" class="kilograms" checked>"#),
+            "kg first and chosen: {drawn}"
+        );
+        assert!(drawn.contains(r#"id="unit-fat-percentage" class="percentage">"#));
+        assert!(drawn.contains("2026-10-16 · 17.61 kg ·"));
+        assert!(drawn.contains("2026-10-16 · 21.1% ·"));
+    }
+
+    #[test]
     fn a_trend_is_a_line_and_its_last_reading_is_said() {
         let readings: Vec<Reading<f64>> = jiff::civil::date(2026, 1, 1)
             .series(jiff::Span::new().days(1))
@@ -700,8 +789,8 @@ mod tests {
                 }
             })
             .collect();
-        let muscle = ComponentSeries {
-            component: Component::Muscle,
+        let fat_free = ComponentSeries {
+            component: Component::FatFree,
             unit: Unit::Kilograms,
             series: vec![MethodSeries::of(
                 Method::BodyScan {
@@ -711,7 +800,7 @@ mod tests {
             )],
         };
         let drawn = page(
-            &[muscle],
+            &[fat_free],
             &NONE,
             &NO_PLAN,
             Over::All,

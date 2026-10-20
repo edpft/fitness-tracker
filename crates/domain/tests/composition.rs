@@ -2,7 +2,8 @@
 
 use domain::{
     analytical::composition::{
-        Direction, Measured, Method, MethodSeries, Reading, Stated, Unit, by_method,
+        ComponentSeries, Direction, Measured, Method, MethodSeries, Reading, Stated, Unit,
+        by_method,
     },
     body::{Component, InvalidPercentage, Percentage},
     measure::Kg,
@@ -33,46 +34,94 @@ const fn scan(method: Method, day: i8, component: Component, grams: u64) -> Meas
     }
 }
 
-#[test]
-fn fat_is_a_percentage_whatever_its_source_stated() {
-    let components = by_method(&[
-        scan(SCAN, 16, Component::Fat, 17_610),
-        sheet(1, Component::Fat, "0.247").expect("a fraction"),
-    ]);
-    let [fat] = components.as_slice() else {
-        panic!("one component: {components:?}");
-    };
-
-    assert_eq!(fat.unit, Unit::Percentage);
-    let methods: Vec<Method> = fat.series.iter().map(|one| one.method).collect();
-    assert_eq!(
-        methods,
-        [Method::Spreadsheets, SCAN],
-        "the earliest method first"
-    );
-    let values: Vec<String> = fat
-        .series
+/// Each chart's heading and its figures, as `date value method`.
+fn drawn(components: &[ComponentSeries]) -> Vec<(Component, Unit, Vec<String>)> {
+    components
         .iter()
-        .flat_map(|one| &one.readings)
-        .map(|reading| format!("{} {:.1}", reading.on, reading.value))
-        .collect();
-    assert_eq!(values, ["2018-01-01 24.7", "2026-10-16 21.1"]);
+        .map(|chart| {
+            let figures = chart
+                .series
+                .iter()
+                .flat_map(|one| {
+                    one.readings.iter().map(|reading| {
+                        format!("{} {:.2} {}", reading.on, reading.value, one.method)
+                    })
+                })
+                .collect();
+            (chart.component, chart.unit, figures)
+        })
+        .collect()
 }
 
 #[test]
-fn what_only_a_scale_measures_is_its_mass() {
-    let components = by_method(&[scan(SCAN, 16, Component::Bone, 3_290)]);
-    let [bone] = components.as_slice() else {
-        panic!("one component: {components:?}");
-    };
-    assert_eq!(bone.unit, Unit::Kilograms);
+fn fat_is_charted_in_kilograms_and_as_a_percentage_whatever_its_source_stated() {
+    let components = by_method(&[
+        scan(SCAN, 16, Component::Fat, 17_610),
+        scan(SCAN, 16, Component::FatFree, 66_038),
+        sheet(1, Component::Fat, "0.247").expect("a fraction"),
+    ]);
+
     assert_eq!(
-        bone.series
-            .first()
-            .and_then(|one| one.readings.first())
-            .map(|reading| reading.value),
-        Some(3.29)
+        drawn(&components),
+        [
+            (
+                Component::Fat,
+                Unit::Kilograms,
+                vec![
+                    "2018-01-01 18.25 spreadsheets".to_owned(),
+                    "2026-10-16 17.61 Body Scan, algorithm 218300672".to_owned(),
+                ]
+            ),
+            (
+                Component::FatFree,
+                Unit::Kilograms,
+                vec![
+                    "2018-01-01 55.65 spreadsheets".to_owned(),
+                    "2026-10-16 66.04 Body Scan, algorithm 218300672".to_owned(),
+                ]
+            ),
+            (
+                Component::Fat,
+                Unit::Percentage,
+                vec![
+                    "2018-01-01 24.70 spreadsheets".to_owned(),
+                    "2026-10-16 21.05 Body Scan, algorithm 218300672".to_owned(),
+                ]
+            ),
+        ],
+        "the earliest method first; fat-free mass as stated, or weighed less fat"
     );
+}
+
+#[test]
+fn a_method_that_states_fat_free_mass_is_never_also_given_weighed_less_fat() {
+    let components = by_method(&[
+        scan(SCAN, 16, Component::Fat, 17_610),
+        scan(SCAN, 16, Component::FatFree, 66_000),
+    ]);
+    let fat_free = components
+        .iter()
+        .find(|chart| chart.component == Component::FatFree)
+        .expect("a fat-free chart");
+    let values: Vec<f64> = fat_free
+        .series
+        .iter()
+        .flat_map(|one| &one.readings)
+        .map(|reading| reading.value)
+        .collect();
+    assert_eq!(values, [66.0]);
+}
+
+#[test]
+fn nothing_but_fat_and_fat_free_mass_is_charted() {
+    let components = by_method(&[
+        scan(SCAN, 16, Component::Bone, 3_290),
+        scan(SCAN, 16, Component::Muscle, 62_740),
+        scan(SCAN, 16, Component::Water, 48_200),
+        scan(SCAN, 16, Component::ExtracellularWater, 19_300),
+        sheet(1, Component::Water, "0.566").expect("a fraction"),
+    ]);
+    assert!(components.is_empty(), "{components:?}");
 }
 
 #[test]
@@ -87,26 +136,15 @@ fn copies_of_a_day_are_one_reading_and_two_algorithms_are_two_series() {
         scan(first, 11, Component::Fat, 18_000),
         scan(SCAN, 12, Component::Fat, 17_900),
     ]);
-    let [fat] = components.as_slice() else {
-        panic!("one component: {components:?}");
-    };
-    let counts: Vec<(Method, usize)> = fat
-        .series
-        .iter()
-        .map(|one| (one.method, one.readings.len()))
-        .collect();
-    assert_eq!(counts, [(Method::Spreadsheets, 2), (first, 1), (SCAN, 1)]);
-}
-
-#[test]
-fn components_come_in_a_fixed_order_and_only_where_measured() {
-    let components = by_method(&[
-        scan(SCAN, 16, Component::Bone, 3_290),
-        sheet(1, Component::Water, "0.566").expect("a fraction"),
-        scan(SCAN, 16, Component::Fat, 17_610),
-    ]);
-    let order: Vec<Component> = components.iter().map(|one| one.component).collect();
-    assert_eq!(order, [Component::Fat, Component::Water, Component::Bone]);
+    for chart in &components {
+        let counts: Vec<(Method, usize)> = chart
+            .series
+            .iter()
+            .map(|one| (one.method, one.readings.len()))
+            .collect();
+        assert_eq!(counts, [(Method::Spreadsheets, 2), (first, 1), (SCAN, 1)]);
+    }
+    assert_eq!(components.len(), 3);
 }
 
 /// One figure a day from 1 January 2026, for as many values as are given.
