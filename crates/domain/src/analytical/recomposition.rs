@@ -1,22 +1,25 @@
 //! Body composition against the nutrition phase in force (#489).
 //!
-//! **Fat mass against fat-free mass, each falling, maintaining or rising**
-//! (operator, 2026-10-16): a 3×3 matrix, and every period falls in one cell.
+//! **Fat mass against fat-free mass** (operator, 2026-10-16): each falling,
+//! maintaining or rising makes a 3×3 matrix, and each phase a region of it.
 //! Fat-free mass is the weigh-in's mass less its fat, so the spreadsheets'
 //! percentage reads on the same axes as the Body Scan's mass; the scale's
 //! muscle is 0.95 of it on every reading, so it is the same axis.
 //!
-//! **A period is one nutrition phase within the macrocycle** (operator,
-//! 2026-10-19), read from its first day to its last or to today. Success
-//! depends on the phase, so it is never judged over the whole macrocycle.
+//! **A point is a mesocycle, and a chart a nutrition phase** (operator,
+//! 2026-10-19): success depends on the phase, so each phase's mesocycles are
+//! judged on its own region. A mesocycle's change is drawn per week so that
+//! a two-week entry test and a four-week mesocycle are comparable; every edge
+//! of either region runs through the origin, so the rate never moves a point
+//! across one.
 //!
 //! **The phase is assumed from the macrocycle** until one is planned (#258): a
 //! cut in the preparatory phase, maintenance in the competitive and transition
 //! phases (operator, 2026-10-19).
 //!
-//! **A period's change is its last trend against its first**, each the 7-day
-//! trend of [`super::composition`], the first whose 7 days all fall in the
-//! period, so nothing of the phase before is read into it. The two weeks never
+//! **A mesocycle's change is its last trend against its first**, each the
+//! 7-day trend of [`super::composition`], the first whose 7 days all fall in
+//! the mesocycle, so nothing of the one before is read into it. The two weeks never
 //! overlap, and a change is beyond the noise on the same test as #419's.
 
 use std::{collections::BTreeMap, fmt};
@@ -24,7 +27,7 @@ use std::{collections::BTreeMap, fmt};
 use jiff::civil::Date;
 
 use super::composition::{
-    CONFIDENCE, Direction, Measured, Method, Stated, Trend, WINDOW_DAYS, scatter, trend,
+    CONFIDENCE, Measured, Method, Stated, Trend, WINDOW_DAYS, scatter, trend,
 };
 use crate::{
     body::Component,
@@ -49,24 +52,20 @@ impl NutritionPhase {
         }
     }
 
-    /// Whether a cell is a success in this phase (operator, 2026-10-19).
+    /// The phase's success region (operator, 2026-10-19), corner by corner,
+    /// fat across and fat-free mass up, each from −1 to 1.
     ///
     /// **A cut** loses fat, and gains fat-free mass, holds it, or loses it
-    /// more slowly than fat. **Maintenance** does not gain fat, and does not
-    /// lose fat-free mass.
-    pub fn succeeds(self, cell: &Cell) -> bool {
+    /// more slowly than fat: left of the fat-free axis and above the diagonal.
+    /// **Maintenance** does not gain fat, and does not lose fat-free mass.
+    ///
+    /// **A region, never a verdict** (operator, 2026-10-19): a point's noise
+    /// is drawn beside it, and calling it a success or a failure would take
+    /// one value within that noise as the real one.
+    pub const fn region(self) -> [(f64, f64); 4] {
         match self {
-            Self::Cut => {
-                cell.fat.direction == Direction::Falling
-                    && match cell.fat_free.direction {
-                        Direction::Rising | Direction::Maintaining => true,
-                        Direction::Falling => cell.fat_free.by.abs() < cell.fat.by.abs(),
-                    }
-            }
-            Self::Maintenance => {
-                cell.fat.direction != Direction::Rising
-                    && cell.fat_free.direction != Direction::Falling
-            }
+            Self::Cut => [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)],
+            Self::Maintenance => [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)],
         }
     }
 }
@@ -80,57 +79,16 @@ impl fmt::Display for NutritionPhase {
     }
 }
 
-/// One nutrition phase within a macrocycle, both ends included.
-///
-/// An end is `None` where the plan does not yet say: the competitive
-/// mesocycle starts maintenance, and it is not realised until the one before
-/// it ends (#222).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Period {
-    pub phase: NutritionPhase,
-    pub from: Option<Date>,
-    pub to: Option<Date>,
-}
-
-/// The macrocycle's periods, in the order they run.
-///
-/// **Maintenance starts with the competitive mesocycle**, the one ending on
-/// the last day of term ([`Macrocycle::phase`]). Until it is planned it starts
-/// on no known day, unless the transition has already begun, which no
-/// competitive mesocycle came before.
-#[must_use]
-pub fn periods(macrocycle: &Macrocycle, mesocycles: &[Span], today: Date) -> [Period; 2] {
-    let transition = macrocycle.transition();
-    let maintenance = mesocycles
-        .iter()
-        .find(|span| span.end() == transition && span.start() >= macrocycle.start())
-        .map(|span| span.start())
-        .or_else(|| (today >= transition).then_some(transition));
-    [
-        Period {
-            phase: NutritionPhase::Cut,
-            from: Some(macrocycle.start()),
-            to: maintenance.and_then(|day| day.yesterday().ok()),
-        },
-        Period {
-            phase: NutritionPhase::Maintenance,
-            from: maintenance,
-            to: Some(macrocycle.last()),
-        },
-    ]
-}
-
-/// One axis's change over a period.
+/// One axis's change over a mesocycle.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Moved {
     /// In kilograms, positive when the trend rose.
     pub by: f64,
     /// How far either way is within the noise.
     pub noise: f64,
-    pub direction: Direction,
 }
 
-/// Where a period falls in the matrix, read between two trends.
+/// Where a mesocycle falls in the matrix, read between two trends.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cell {
     /// The day of the first trend.
@@ -141,36 +99,38 @@ pub struct Cell {
     pub fat_free: Moved,
 }
 
-/// What one method gave over a period: its cell, or `None` where it has too
-/// few weigh-ins for a trend a week apart.
+/// What one method gave over a mesocycle: its cell, or `None` where it has
+/// too few weigh-ins for two trends a week apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ByMethod {
     pub method: Method,
     pub cell: Option<Cell>,
 }
 
-/// A period as far as it has run.
+/// A mesocycle as far as it has run, and its nutrition phase.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Standing {
-    NotStarted,
-    /// One per method with a figure in the period so far, the earliest first.
-    Read(Vec<ByMethod>),
-}
-
-/// A period and how it stands.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PeriodReading {
-    pub period: Period,
+pub struct MesocycleReading {
+    pub span: Span,
+    pub phase: NutritionPhase,
     /// Whether today falls in it.
     pub running: bool,
-    pub standing: Standing,
+    /// One per method with a figure in it so far, the earliest first.
+    pub by_method: Vec<ByMethod>,
 }
 
-/// The macrocycle and each of its periods, read on `today`.
+/// The macrocycle and each mesocycle in it that has started, read on `today`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recomposition {
     pub macrocycle: Macrocycle,
-    pub periods: Vec<PeriodReading>,
+    pub mesocycles: Vec<MesocycleReading>,
+}
+
+impl Cell {
+    /// How many weeks apart its two trends are.
+    pub fn weeks(&self) -> f64 {
+        let days = (self.to - self.from).get_days();
+        f64::from(days) / 7.0
+    }
 }
 
 /// Fat and fat-free mass by day, in kilograms, for one method.
@@ -231,18 +191,9 @@ fn moved(first: Trend, last: Trend, sigma: f64) -> Option<Moved> {
     let now = f64::from(u32::try_from(last.figures).ok()?);
     let then = f64::from(u32::try_from(first.figures).ok()?);
     let noise = CONFIDENCE * sigma * (1.0 / now + 1.0 / then).sqrt();
-    let by = last.value - first.value;
-    let direction = if by > noise {
-        Direction::Rising
-    } else if by < -noise {
-        Direction::Falling
-    } else {
-        Direction::Maintaining
-    };
     Some(Moved {
-        by,
+        by: last.value - first.value,
         noise,
-        direction,
     })
 }
 
@@ -306,7 +257,11 @@ fn by_method(masses: &BTreeMap<Method, Masses>, from: Date, to: Date) -> Vec<ByM
     methods.into_iter().map(|(_, one)| one).collect()
 }
 
-/// The macrocycle's periods as they stand on `today`.
+/// The macrocycle's mesocycles as they stand on `today`, oldest first.
+///
+/// **A mesocycle's phase is the macrocycle's on its first day**, assumed into
+/// a nutrition phase. One not yet started has nothing to read, and a week no
+/// mesocycle covers belongs to none.
 #[must_use]
 pub fn read(
     measured: &[Measured],
@@ -315,31 +270,28 @@ pub fn read(
     today: Date,
 ) -> Recomposition {
     let masses = masses(measured);
-    let periods = periods(&macrocycle, mesocycles, today)
+    let started = macrocycle.start()..=macrocycle.last().min(today);
+    let mut spans: Vec<Span> = mesocycles
+        .iter()
+        .copied()
+        .filter(|span| started.contains(&span.start()))
+        .collect();
+    spans.sort_by_key(|span| (span.start(), span.end()));
+    spans.dedup();
+    let mesocycles = spans
         .into_iter()
-        .map(|period| {
-            let standing =
-                period
-                    .from
-                    .filter(|from| *from <= today)
-                    .map_or(Standing::NotStarted, |from| {
-                        Standing::Read(by_method(
-                            &masses,
-                            from,
-                            period.to.map_or(today, |to| to.min(today)),
-                        ))
-                    });
-            let running = period.from.is_some_and(|from| from <= today)
-                && period.to.is_none_or(|to| today <= to);
-            PeriodReading {
-                period,
-                running,
-                standing,
+        .map(|span| {
+            let last = span.end().yesterday().unwrap_or_else(|_| span.start());
+            MesocycleReading {
+                span,
+                phase: NutritionPhase::assumed(macrocycle.phase(span.start(), Some(span))),
+                running: today <= last,
+                by_method: by_method(&masses, span.start(), last.min(today)),
             }
         })
         .collect();
     Recomposition {
         macrocycle,
-        periods,
+        mesocycles,
     }
 }

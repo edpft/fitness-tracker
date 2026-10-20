@@ -23,7 +23,7 @@ use domain::{
             AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
         },
         range::{Over, Range, Ranges},
-        recomposition::{Cell, Moved, NutritionPhase, Period, PeriodReading, Standing},
+        recomposition::{Cell, MesocycleReading, NutritionPhase},
     },
     body::Component,
 };
@@ -154,14 +154,14 @@ pub fn page(
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (TITLE) }
-                style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) }
+                style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) (MATRIX) }
             }
             body {
                 (crate::page::following(run))
                 main.wide {
                     p { a href="/" { "Run next" } }
                     h1 { (TITLE) }
-                    (against_phase(against))
+                    (against_phase(against, &methods))
                     (crate::range::choices("/body-composition", over))
                     p.method {
                         "points: each weigh-in, coloured by what measured it · line: trend, the " (TREND)
@@ -177,24 +177,28 @@ pub fn page(
     }
 }
 
-/// The current macrocycle, each period against its nutrition phase.
-fn against_phase(against: &AgainstPhase) -> Markup {
+/// The current macrocycle, one chart per nutrition phase and a point per
+/// mesocycle.
+fn against_phase(against: &AgainstPhase, methods: &[Method]) -> Markup {
     html! {
         @match against {
             AgainstPhase::Unreadable(error) => {
-                p.failed { "the school calendar could not be read, so there is no macrocycle: " (error) }
+                p.failed { "the school calendar could not be read: " (error) }
             }
-            AgainstPhase::NoMacrocycle => p { "Today is past the school calendar's reach, so there is no macrocycle." },
+            AgainstPhase::NoMacrocycle => {}
             AgainstPhase::Read(read) => {
                 h2 { (capitalised(&read.macrocycle.to_string())) }
-                p.method {
-                    "fat mass against fat-free mass (weigh-in less fat), each the trend on the first day whose 7 days all fall in the period against the trend on the last · "
-                    "a cut succeeds losing fat while gaining fat-free mass, holding it, or losing it more slowly than fat · "
-                    "maintenance succeeds without gaining fat or losing fat-free mass · "
-                    "the phase is assumed from the macrocycle: a cut in the preparatory phase, maintenance in the competitive and transition phases"
-                }
-                @for one in &read.periods {
-                    (period(one))
+                @for phase in [NutritionPhase::Cut, NutritionPhase::Maintenance] {
+                    @let mesocycles: Vec<&MesocycleReading> = read
+                        .mesocycles
+                        .iter()
+                        .filter(|one| one.phase == phase)
+                        .collect();
+                    @if mesocycles.is_empty() {
+                        p.method { (capitalised(&phase.to_string())) ": no mesocycle yet" }
+                    } @else {
+                        (matrix(phase, &mesocycles, methods))
+                    }
                 }
             }
         }
@@ -208,56 +212,170 @@ fn capitalised(text: &str) -> String {
     })
 }
 
-/// A period's name and days: an end the plan does not yet say is named for
-/// what decides it.
-fn named(period: Period, running: bool) -> String {
-    let phase = capitalised(&period.phase.to_string());
-    let from = period.from.map_or_else(
-        || "from the competitive mesocycle".to_owned(),
-        |from| format!("{from}"),
-    );
-    let to = match (period.to, running) {
-        (_, true) => "today".to_owned(),
-        (Some(to), false) => format!("{to}"),
-        (None, false) => "the competitive mesocycle".to_owned(),
-    };
-    format!("{phase}, {from} to {to}")
+const SIDE: f64 = 360.0;
+const MARGIN: f64 = 40.0;
+/// Room for the value axis's labels and its name beside them.
+const MATRIX_LEFT: f64 = 56.0;
+
+/// One mesocycle by one method, per week.
+struct Plotted<'a> {
+    mesocycle: &'a MesocycleReading,
+    method: Method,
+    cell: Cell,
+    fat: f64,
+    fat_free: f64,
+    fat_noise: f64,
+    fat_free_noise: f64,
 }
 
-fn moved(name: &str, moved: Moved) -> String {
-    let direction = match moved.direction {
-        Direction::Rising => "rising",
-        Direction::Maintaining => "maintaining",
-        Direction::Falling => "falling",
-    };
-    format!(
-        "{name} {} (noise ±{:.2} kg): {direction}",
-        format!("{:+.2} kg", moved.by).replace('-', "−"),
-        moved.noise
-    )
+impl<'a> Plotted<'a> {
+    fn of(mesocycle: &'a MesocycleReading, method: Method, cell: Cell) -> Option<Self> {
+        let weeks = cell.weeks();
+        (weeks > 0.0).then(|| Self {
+            mesocycle,
+            method,
+            cell,
+            fat: cell.fat.by / weeks,
+            fat_free: cell.fat_free.by / weeks,
+            fat_noise: cell.fat.noise / weeks,
+            fat_free_noise: cell.fat_free.noise / weeks,
+        })
+    }
+
+    /// What the point is called on the chart: the day its mesocycle starts.
+    fn label(&self) -> String {
+        let start = self.mesocycle.span.start().strftime("%-d %b");
+        let so_far = if self.mesocycle.running {
+            ", so far"
+        } else {
+            ""
+        };
+        format!("{start}{so_far}")
+    }
+
+    fn detail(&self) -> String {
+        format!(
+            "{} · mesocycle from {} · trend on {} against {} · fat {} · fat-free {}",
+            self.method,
+            self.mesocycle.span.start(),
+            self.cell.to,
+            self.cell.from,
+            per_week(self.fat, self.fat_noise),
+            per_week(self.fat_free, self.fat_free_noise),
+        )
+    }
 }
 
-fn period(reading: &PeriodReading) -> Markup {
-    let period = reading.period;
+fn per_week(value: f64, noise: f64) -> String {
+    format!("{value:+.2} ±{noise:.2} kg a week").replace('-', "−")
+}
+
+/// Half the side of the square the points fall in: whole steps past the
+/// furthest end of any point's noise.
+fn extent(plotted: &[Plotted<'_>]) -> (f64, f64) {
+    let furthest = plotted
+        .iter()
+        .map(|one| (one.fat.abs() + one.fat_noise).max(one.fat_free.abs() + one.fat_free_noise))
+        .fold(0.25, f64::max);
+    let step = [0.1, 0.25, 0.5, 1.0, 2.0]
+        .into_iter()
+        .find(|step| furthest / step <= 4.0)
+        .unwrap_or(5.0);
+    ((furthest / step).ceil() * step, step)
+}
+
+/// A nutrition phase's mesocycles as points, fat across and fat-free mass up,
+/// each in kilograms a week with its noise either way.
+fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Method]) -> Markup {
+    let plotted: Vec<Plotted<'_>> = mesocycles
+        .iter()
+        .flat_map(|mesocycle| {
+            mesocycle.by_method.iter().filter_map(|one| {
+                one.cell
+                    .and_then(|cell| Plotted::of(mesocycle, one.method, cell))
+            })
+        })
+        .collect();
+    let unread: Vec<&MesocycleReading> = mesocycles
+        .iter()
+        .copied()
+        .filter(|one| one.by_method.iter().all(|by| by.cell.is_none()))
+        .collect();
+    let (extent, step) = extent(&plotted);
+    let scale = (SIDE - MATRIX_LEFT - MARGIN) / (2.0 * extent);
+    let x = |value: f64| (value + extent).mul_add(scale, MATRIX_LEFT);
+    let y = |value: f64| (extent - value).mul_add(scale, MARGIN / 2.0);
+    let lines: Vec<f64> = (0_u32..=40)
+        .map(|line| f64::from(line).mul_add(step, -extent))
+        .take_while(|value| *value <= extent + step / 2.0)
+        .collect();
+    let region = phase
+        .region()
+        .into_iter()
+        .map(|(across, up)| format!("{:.1},{:.1}", x(across * extent), y(up * extent)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let name = capitalised(&phase.to_string());
+    let named_methods = plotted
+        .iter()
+        .map(|one| one.method)
+        .collect::<std::collections::BTreeSet<_>>();
     html! {
-        @match &reading.standing {
-            Standing::NotStarted => p.reading { (named(period, false)) ": not started" },
-            Standing::Read(methods) => {
-                p.reading { (named(period, reading.running)) }
-                @if methods.is_empty() {
-                    p { "Nothing measured in this period." }
+        h3 { (name) }
+        div.matrix {
+            svg.matrix viewBox=(format!("0 0 {SIDE} {:.0}", y(-extent) + 38.0)) role="img"
+                aria-label=(format!("{name}: each mesocycle's change in fat against fat-free mass, in kilograms a week")) {
+                polygon.success points=(region) {}
+                text.region x=(x(-extent) + 6.0) y=(y(extent) + 16.0) { "success" }
+                @for value in &lines {
+                    line.grid x1=(x(*value)) x2=(x(*value)) y1=(y(extent)) y2=(y(-extent)) {}
+                    line.grid x1=(x(-extent)) x2=(x(extent)) y1=(y(*value)) y2=(y(*value)) {}
                 }
-                ul {
-                    @for one in methods {
-                        li {
-                            (one.method) " · "
-                            @match one.cell {
-                                None => "too few weigh-ins for two trends a week apart",
-                                Some(cell) => {
-                                    (cell.from) " to " (cell.to) ": "
-                                    (moved("fat", cell.fat)) " · " (moved("fat-free", cell.fat_free)) " · "
-                                    strong { (verdict(period.phase, &cell)) }
-                                }
+                line.baseline x1=(x(0.0)) x2=(x(0.0)) y1=(y(extent)) y2=(y(-extent)) {}
+                line.baseline x1=(x(-extent)) x2=(x(extent)) y1=(y(0.0)) y2=(y(0.0)) {}
+                @for value in &lines {
+                    text.axis x=(x(*value)) y=(y(-extent) + 14.0) text-anchor="middle" { (tick(*value, step)) }
+                    text.axis x=(x(-extent) - 4.0) y=(y(*value) + 4.0) text-anchor="end" { (tick(*value, step)) }
+                }
+                text.axis x=(x(0.0)) y=(y(-extent) + 30.0) text-anchor="middle" { "fat, kg a week" }
+                text.axis transform=(format!("translate(10 {}) rotate(-90)", y(0.0))) text-anchor="middle" { "fat-free mass, kg a week" }
+                @for one in &plotted {
+                    g {
+                        title { (one.detail()) }
+                        line.spread x1=(x(one.fat - one.fat_noise)) x2=(x(one.fat + one.fat_noise)) y1=(y(one.fat_free)) y2=(y(one.fat_free)) {}
+                        line.spread x1=(x(one.fat)) x2=(x(one.fat)) y1=(y(one.fat_free - one.fat_free_noise)) y2=(y(one.fat_free + one.fat_free_noise)) {}
+                        circle class=(format!("point {}", class(methods, one.method))) cx=(x(one.fat)) cy=(y(one.fat_free)) r="5" {}
+                        text.label x=(x(one.fat) + 8.0) y=(y(one.fat_free) - 8.0) { (one.label()) }
+                    }
+                }
+            }
+        }
+        @if named_methods.len() > 1 {
+            ul.legend {
+                @for method in &named_methods {
+                    li {
+                        svg.key viewBox="0 0 12 12" {
+                            circle class=(format!("point {}", class(methods, *method))) cx="6" cy="6" r="5" {}
+                        }
+                        (method)
+                    }
+                }
+            }
+        }
+        @for one in unread {
+            p.method { (one.span.start().strftime("%-d %b")) ": too few weigh-ins yet" }
+        }
+        @if !plotted.is_empty() {
+            details {
+                summary { "Every mesocycle as a table" }
+                table.figures {
+                    thead { tr { th { "mesocycle from" } th { "fat" } th { "fat-free mass" } } }
+                    tbody {
+                        @for one in &plotted {
+                            tr {
+                                td { (one.mesocycle.span.start()) }
+                                td { (per_week(one.fat, one.fat_noise)) }
+                                td { (per_week(one.fat_free, one.fat_free_noise)) }
                             }
                         }
                     }
@@ -267,13 +385,28 @@ fn period(reading: &PeriodReading) -> Markup {
     }
 }
 
-fn verdict(phase: NutritionPhase, cell: &Cell) -> &'static str {
-    if phase.succeeds(cell) {
-        "success"
+fn tick(value: f64, step: f64) -> String {
+    let text = if step < 0.25 {
+        format!("{value:.1}")
+    } else if step < 1.0 {
+        format!("{value:.2}")
     } else {
-        "failure"
-    }
+        format!("{value:.0}")
+    };
+    text.replace('-', "−")
 }
+
+/// How the matrix is drawn: the success region in the status colour for good,
+/// never a series colour, and named in the chart so it is not colour alone.
+const MATRIX: &str = "
+:root { --good: #0ca30c; }
+div.matrix { max-width: 28rem; }
+svg.matrix { width: 100%; height: auto; display: block; }
+.success { fill: var(--good); fill-opacity: 0.16; }
+.region { fill: var(--muted); font-size: 11px; }
+.spread { stroke: var(--ink); stroke-opacity: 0.55; stroke-width: 1.5; }
+.label { fill: var(--ink); font-size: 11px; }
+";
 
 /// The page when the store could not be read.
 pub fn unreadable(error: &str) -> Markup {
@@ -679,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn each_period_says_its_cell_and_whether_it_succeeds() {
+    fn each_mesocycle_is_a_point_on_its_phases_chart() {
         let measured: Vec<Measured> = jiff::civil::date(2026, 9, 7)
             .series(jiff::Span::new().days(1))
             .take(43)
@@ -701,7 +834,10 @@ mod tests {
         let against = AgainstPhase::Read(read(
             &measured,
             autumn().expect("a macrocycle"),
-            &[],
+            &[
+                domain::plan::Span::new(jiff::civil::date(2026, 9, 14), 2),
+                domain::plan::Span::new(jiff::civil::date(2026, 9, 28), 4),
+            ],
             jiff::civil::date(2026, 10, 19),
         ));
         let drawn = page(
@@ -714,17 +850,12 @@ mod tests {
         .into_string();
 
         assert!(drawn.contains("<h2>Autumn 2026</h2>"), "{drawn}");
-        assert!(drawn.contains("Cut, 2026-09-07 to today"), "{drawn}");
-        assert!(drawn.contains("2026-09-13 to 2026-10-19: fat −"), "{drawn}");
-        assert!(drawn.contains(": falling · fat-free"), "{drawn}");
-        assert!(
-            drawn.contains(": maintaining · <strong>success</strong>"),
-            "{drawn}"
-        );
-        assert!(
-            drawn
-                .contains("Maintenance, from the competitive mesocycle to 2027-01-03: not started"),
-            "{drawn}"
-        );
+        assert!(drawn.contains("<h3>Cut</h3>"), "{drawn}");
+        assert_eq!(drawn.matches(r#"<polygon class="success""#).count(), 1);
+        assert!(drawn.contains(">14 Sep</text>"), "{drawn}");
+        assert!(!drawn.contains("failure"), "no verdict");
+        assert!(drawn.contains(">28 Sep, so far</text>"), "{drawn}");
+        assert!(drawn.contains("Maintenance: no mesocycle yet"), "{drawn}");
+        assert!(!drawn.contains(r#"<ul class="legend"><li><svg class="key" viewBox="0 0 12 12"><circle class="point d1" cx="6" cy="6" r="5">"#), "one method needs no legend");
     }
 }

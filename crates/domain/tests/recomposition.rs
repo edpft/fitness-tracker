@@ -5,8 +5,8 @@ use std::num::NonZeroU8;
 
 use domain::{
     analytical::{
-        composition::{Direction, Measured, Method, Stated},
-        recomposition::{Cell, Moved, NutritionPhase, Period, Standing, periods, read},
+        composition::{Measured, Method, Stated},
+        recomposition::{NutritionPhase, read},
     },
     body::{Component, Percentage},
     macrocycle::{Macrocycle, Phase},
@@ -65,93 +65,18 @@ fn preparatory_is_a_cut_and_the_rest_maintenance() {
     );
 }
 
-/// **Until the competitive mesocycle is planned, maintenance starts on no
-/// known day**, and the cut runs on.
-#[test]
-fn maintenance_waits_for_the_competitive_mesocycle() {
-    let autumn = autumn().expect("a macrocycle");
-    let preparatory = [Span::new(date(2026, 9, 28), 4)];
-
-    assert_eq!(
-        periods(&autumn, &preparatory, date(2026, 10, 19)),
-        [
-            Period {
-                phase: NutritionPhase::Cut,
-                from: Some(date(2026, 9, 7)),
-                to: None,
-            },
-            Period {
-                phase: NutritionPhase::Maintenance,
-                from: None,
-                to: Some(date(2027, 1, 3)),
-            },
-        ]
-    );
-}
-
-#[test]
-fn the_competitive_mesocycle_starts_maintenance() {
-    let autumn = autumn().expect("a macrocycle");
-    let planned = [
-        Span::new(date(2026, 9, 28), 4),
-        Span::new(date(2026, 11, 23), 4),
-    ];
-
-    let [cut, maintenance] = periods(&autumn, &planned, date(2026, 10, 19));
-    assert_eq!(cut.to, Some(date(2026, 11, 22)));
-    assert_eq!(maintenance.from, Some(date(2026, 11, 23)));
-}
-
-/// **A term whose plan stopped short has no competitive phase**, so
-/// maintenance is the holiday.
-#[test]
-fn without_a_competitive_mesocycle_the_transition_is_maintenance() {
-    let autumn = autumn().expect("a macrocycle");
-
-    let [cut, maintenance] = periods(&autumn, &[], date(2026, 12, 22));
-    assert_eq!(cut.to, Some(date(2026, 12, 20)));
-    assert_eq!(maintenance.from, Some(date(2026, 12, 21)));
-}
-
-const fn moved(by: f64, direction: Direction) -> Moved {
-    Moved {
-        by,
-        noise: 0.2,
-        direction,
-    }
-}
-
-const fn cell(fat: Moved, fat_free: Moved) -> Cell {
-    Cell {
-        from: date(2026, 9, 13),
-        to: date(2026, 10, 19),
-        fat,
-        fat_free,
-    }
-}
-
-/// The operator's regions, 2026-10-16 and 2026-10-19.
+/// The operator's regions, 2026-10-16 and 2026-10-19: a cut keeps the
+/// diagonal, below which fat-free mass falls faster than fat.
 #[test]
 fn each_phase_has_its_own_region() {
-    use Direction::{Falling, Maintaining, Rising};
-    let falling = |by: f64| moved(-by, Falling);
-    let holding = moved(0.0, Maintaining);
-    let rising = |by: f64| moved(by, Rising);
-
-    let cut = |fat, fat_free| NutritionPhase::Cut.succeeds(&cell(fat, fat_free));
-    assert!(cut(falling(1.5), rising(0.5)));
-    assert!(cut(falling(1.5), holding));
-    assert!(cut(falling(1.5), falling(0.4)), "losing it more slowly");
-    assert!(!cut(falling(0.4), falling(1.5)));
-    assert!(!cut(holding, rising(0.5)));
-    assert!(!cut(rising(0.5), rising(1.5)));
-
-    let maintenance = |fat, fat_free| NutritionPhase::Maintenance.succeeds(&cell(fat, fat_free));
-    assert!(maintenance(falling(1.0), holding));
-    assert!(maintenance(holding, holding));
-    assert!(maintenance(holding, rising(0.5)));
-    assert!(!maintenance(falling(1.5), falling(0.4)));
-    assert!(!maintenance(rising(0.3), rising(1.5)), "never fat rising");
+    assert_eq!(
+        NutritionPhase::Cut.region(),
+        [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)]
+    );
+    assert_eq!(
+        NutritionPhase::Maintenance.region(),
+        [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)]
+    );
 }
 
 /// A Body Scan every day from term's start, fat falling a kilogram and
@@ -176,32 +101,85 @@ fn cutting() -> Vec<Measured> {
         .collect()
 }
 
-#[test]
-fn this_cut_falls_in_a_successful_cell() {
-    let autumn = autumn().expect("a macrocycle");
-    let read = read(&cutting(), autumn, &[], date(2026, 10, 19));
+/// A two-week entry test and the four-week mesocycle after it.
+const fn planned() -> [Span; 2] {
+    [
+        Span::new(date(2026, 9, 14), 2),
+        Span::new(date(2026, 9, 28), 4),
+    ]
+}
 
-    let [cut, maintenance] = read.periods.as_slice() else {
-        panic!("two periods");
+/// **A point per mesocycle**, each read only on its own days.
+#[test]
+fn each_mesocycle_is_a_point_in_the_cut() {
+    let autumn = autumn().expect("a macrocycle");
+    let read = read(&cutting(), autumn, &planned(), date(2026, 10, 19));
+
+    let [test, current] = read.mesocycles.as_slice() else {
+        panic!("two mesocycles have started");
     };
-    let Standing::Read(methods) = &cut.standing else {
-        panic!("the cut has started");
-    };
-    let [scan] = methods.as_slice() else {
+    assert_eq!(test.phase, NutritionPhase::Cut);
+    assert!(!test.running);
+    let cell = test
+        .by_method
+        .first()
+        .and_then(|one| one.cell)
+        .expect("a cell");
+    assert_eq!((cell.from, cell.to), (date(2026, 9, 20), date(2026, 9, 27)));
+    assert!((cell.weeks() - 1.0).abs() < f64::EPSILON);
+
+    assert!(current.running);
+    let [scan] = current.by_method.as_slice() else {
         panic!("one method");
     };
     let cell = scan.cell.expect("a cell");
     assert_eq!(scan.method, SCAN);
     assert_eq!(
-        cell.from,
-        date(2026, 9, 13),
-        "the first week wholly in the cut"
+        (cell.from, cell.to),
+        (date(2026, 10, 4), date(2026, 10, 19))
     );
-    assert_eq!(cell.to, date(2026, 10, 19));
-    assert_eq!(cell.fat.direction, Direction::Falling);
-    assert_eq!(cell.fat_free.direction, Direction::Maintaining);
-    assert!(NutritionPhase::Cut.succeeds(&cell));
-    assert_eq!(maintenance.standing, Standing::NotStarted);
+    assert!(
+        cell.fat.by < -cell.fat.noise,
+        "fat falling beyond the noise"
+    );
+    assert!(
+        cell.fat_free.by.abs() < cell.fat_free.noise,
+        "fat-free within it"
+    );
+}
+
+/// **The competitive mesocycle and the transition are maintenance.**
+#[test]
+fn the_competitive_mesocycle_is_maintenance() {
+    let autumn = autumn().expect("a macrocycle");
+    let mut planned = planned().to_vec();
+    planned.push(Span::new(date(2026, 10, 26), 4));
+    planned.push(Span::new(date(2026, 11, 23), 4));
+    planned.push(Span::new(date(2026, 12, 21), 2));
+    let read = read(&[], autumn, &planned, date(2027, 1, 1));
+
+    let phases: Vec<NutritionPhase> = read.mesocycles.iter().map(|one| one.phase).collect();
+    assert_eq!(
+        phases,
+        [
+            NutritionPhase::Cut,
+            NutritionPhase::Cut,
+            NutritionPhase::Cut,
+            NutritionPhase::Maintenance,
+            NutritionPhase::Maintenance,
+        ]
+    );
+}
+
+/// **A mesocycle not yet started is not a point.**
+#[test]
+fn a_mesocycle_not_yet_started_is_not_read() {
+    let autumn = autumn().expect("a macrocycle");
+    let mut planned = planned().to_vec();
+    planned.push(Span::new(date(2026, 10, 26), 4));
+    let read = read(&cutting(), autumn, &planned, date(2026, 10, 19));
+
+    assert_eq!(read.mesocycles.len(), 2);
 }
 
 /// **Fat-free mass is the weigh-in less its fat**, however the fat was stated.
@@ -224,12 +202,17 @@ fn a_percentage_reads_on_the_same_axes() {
             }
         })
         .collect();
-    let read = read(&measured, autumn, &[], date(2026, 10, 19));
-    let Some(Standing::Read(methods)) = read.periods.first().map(|one| &one.standing) else {
-        panic!("the cut has started");
-    };
-    let cell = methods.first().and_then(|one| one.cell).expect("a cell");
-    assert_eq!(cell.fat.direction, Direction::Falling);
+    let read = read(&measured, autumn, &planned(), date(2026, 10, 19));
+    let cell = read
+        .mesocycles
+        .last()
+        .and_then(|one| one.by_method.first())
+        .and_then(|one| one.cell)
+        .expect("a cell");
+    assert!(
+        cell.fat.by < -cell.fat.noise,
+        "fat falling beyond the noise"
+    );
     assert!(
         (cell.fat.by + cell.fat_free.by).abs() < 1.0,
         "the mass moved little"
@@ -240,10 +223,8 @@ fn a_percentage_reads_on_the_same_axes() {
 fn too_few_weigh_ins_give_no_cell() {
     let autumn = autumn().expect("a macrocycle");
     let early: Vec<Measured> = cutting().into_iter().take(10).collect();
-    let read = read(&early, autumn, &[], date(2026, 10, 19));
+    let read = read(&early, autumn, &planned(), date(2026, 10, 19));
 
-    let Some(Standing::Read(methods)) = read.periods.first().map(|one| &one.standing) else {
-        panic!("the cut has started");
-    };
-    assert_eq!(methods.first().map(|one| one.cell), Some(None));
+    let test = read.mesocycles.first().expect("the entry test");
+    assert_eq!(test.by_method.first().map(|one| one.cell), Some(None));
 }
