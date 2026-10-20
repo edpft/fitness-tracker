@@ -1,7 +1,7 @@
 //! Body composition, as charts (#256).
 //!
-//! **One chart per component, date across, the figure up, one colour per
-//! method.** Nothing joins two points, so a gap in the record is the empty
+//! **One chart per component and unit (#499), date across, the figure up,
+//! one colour per method.** Nothing joins two points, so a gap in the record is the empty
 //! stretch it is (§ 37), and nothing joins two methods, since each one's
 //! figures are its own series (§ 6). A method keeps its colour on every chart.
 //!
@@ -700,8 +700,8 @@ mod tests {
                 }
             })
             .collect();
-        let muscle = ComponentSeries {
-            component: Component::Muscle,
+        let fat_free = ComponentSeries {
+            component: Component::FatFree,
             unit: Unit::Kilograms,
             series: vec![MethodSeries::of(
                 Method::BodyScan {
@@ -711,7 +711,7 @@ mod tests {
             )],
         };
         let drawn = page(
-            &[muscle],
+            &[fat_free],
             &NONE,
             &NO_PLAN,
             Over::All,
