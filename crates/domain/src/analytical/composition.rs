@@ -8,8 +8,8 @@
 //! weigh-in was made by a different algorithm from every one after it, so it is
 //! a series of its own.
 //!
-//! **Three charts: fat and fat-free mass in kilograms, and fat as a
-//! percentage** (operator, 2026-10-20, #499). A series is charted only if it
+//! **Fat in kilograms and as a percentage, and fat-free mass in kilograms**
+//! (operator, 2026-10-20, #499). A series is charted only if it
 //! tells something by itself: the Body Scan's bone is 5% of fat-free mass on
 //! every reading, its muscle is fat-free mass less bone, and its water is the
 //! lean tissue hydration constant times fat-free mass. They stay in the store.
