@@ -13,6 +13,7 @@ pub mod account;
 pub mod auth;
 pub mod catalogue;
 pub mod class;
+pub mod details;
 pub mod holding;
 pub mod mapping;
 pub mod paired;
@@ -32,6 +33,7 @@ pub use class::{
     CataloguePage, ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from,
     power_zone_from,
 };
+pub use details::PelotonWorkoutDetails;
 pub use holding::PelotonHoldingRides;
 pub use mapping::{
     MappedSession, PEAK_YOUR_POWER_ZONES, PelotonClass, is_known_unavailable, url_for,

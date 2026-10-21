@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO peloton_ride_detail_landing (\n                    endpoint, fetched_at, source_record_id, event_kind,\n                    event_time, payload, payload_digest, revision_digest,\n                    run_id, serve_ordinal\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "f790ed8f8bb5c739723b29dd46b663b1aa0237fdcd6489f5772e4f584c9db552"
+}

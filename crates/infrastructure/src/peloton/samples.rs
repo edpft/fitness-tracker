@@ -61,7 +61,7 @@ fn graph_path(workout: &str) -> String {
 /// A workout the source gave no time for is always wanted. Guessing that an
 /// undated record is old would be inventing the fact that decides whether it is
 /// ever collected.
-fn wanted(occurred_at: Option<EventTime>, since: Option<Watermark>) -> bool {
+pub(super) fn wanted(occurred_at: Option<EventTime>, since: Option<Watermark>) -> bool {
     match (occurred_at, since) {
         (Some(at), Some(mark)) => at.as_timestamp() >= mark.as_timestamp(),
         _ => true,
