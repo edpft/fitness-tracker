@@ -171,9 +171,26 @@ impl application::RawExtent for WithingsMeasurementLandingStore {
     }
 }
 
+super::garmin_metric_landing::metric_landing_store!(
+    /// Every ECG the Body Scan took, as the list served it: when, on which
+    /// device, its heart rate and its classification (#270).
+    WithingsEcgLandingStore,
+    "withings.ecgs",
+    "withings_ecg_landing"
+);
+super::garmin_metric_landing::metric_landing_store!(
+    /// Each ECG's signal, which the list only names.
+    WithingsEcgSignalLandingStore,
+    "withings.ecg_signals",
+    "withings_ecg_signal_landing"
+);
+
 #[cfg(test)]
 mod tests {
-    use super::{LandingStream, WithingsMeasurementLandingStore};
+    use super::{
+        LandingStream, WithingsEcgLandingStore, WithingsEcgSignalLandingStore,
+        WithingsMeasurementLandingStore,
+    };
 
     /// The constant every run's identity is derived from must name a stream.
     #[test]
@@ -181,5 +198,16 @@ mod tests {
         let stream = LandingStream::try_from(WithingsMeasurementLandingStore::STREAM)
             .expect("a stream name");
         assert_eq!(stream.to_string(), "withings.measurements");
+    }
+
+    #[test]
+    fn the_ecg_streams_are_streams() {
+        for stream in [
+            WithingsEcgLandingStore::STREAM,
+            WithingsEcgSignalLandingStore::STREAM,
+        ] {
+            let parsed = LandingStream::try_from(stream).expect("a stream name");
+            assert_eq!(parsed.to_string(), stream);
+        }
     }
 }

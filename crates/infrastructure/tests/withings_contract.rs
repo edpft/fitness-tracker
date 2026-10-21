@@ -1,14 +1,16 @@
 //! The contract with Withings, pinned against a local stub.
 //!
-//! What is pinned is our reading of the documentation, since no real payload
-//! has been seen yet: the token exchange and its rotation, `getmeas` paging by
-//! `offset` under one `lastupdate`, a group landed as the bytes served, and a
-//! failure reported inside a 200.
+//! What is pinned is our reading of the documentation: the token exchange and
+//! its rotation, `getmeas` paging by `offset` under one `lastupdate`, a group
+//! landed as the bytes served, a failure reported inside a 200, and Heart v2's
+//! ECG list and the signals it names.
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use application::{SourceError, WorkoutEventSource as _};
-use infrastructure::{TokenFile, WithingsAuth, WithingsClient, WithingsMeasurements};
+use infrastructure::{
+    TokenFile, WithingsAuth, WithingsClient, WithingsEcgSignals, WithingsEcgs, WithingsMeasurements,
+};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{body_string_contains, header, method, path},
@@ -223,6 +225,123 @@ fn signed_in(
         server.uri(),
         WithingsAuth::new(server.uri(), server.uri(), client(), cache),
     ))
+}
+
+/// A sign-in holding a live token, for the ECG sources.
+fn live_auth(server: &MockServer, directory: &std::path::Path) -> Result<WithingsAuth, String> {
+    let cache = TokenFile::new(directory.join("withings.token.json"), client().digest());
+    let tomorrow = jiff::Timestamp::now()
+        .checked_add(jiff::SignedDuration::from_hours(24))
+        .map_err(|error| error.to_string())?;
+    cache
+        .write(&infrastructure::Token::new(
+            "live-access".to_owned(),
+            Some("a-refresh".to_owned()),
+            tomorrow,
+            client().digest(),
+        ))
+        .map_err(|error| error.to_string())?;
+    Ok(WithingsAuth::new(
+        server.uri(),
+        server.uri(),
+        client(),
+        cache,
+    ))
+}
+
+/// An ECG as the Body Scan's list entry is documented, and one blood pressure
+/// reading with no signal.
+const AN_ECG: &str = r#"{"deviceid": "scale", "model": 0, "ecg": {"signalid": 42, "afib": 0}, "heart_rate": 61, "timestamp": 1757923200}"#;
+const A_BLOOD_PRESSURE: &str = r#"{"deviceid":"cuff","bloodpressure":{"diastole":80,"systole":120},"heart_rate":70,"timestamp":1758009600}"#;
+const A_SIGNAL: &str = r#"{"signal": [1, -2, 3], "sampling_frequency": 300, "wearposition": 2}"#;
+
+fn heart_list() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_string(format!(
+        r#"{{"status":0,"body":{{"series":[{AN_ECG},{A_BLOOD_PRESSURE}],"more":false,"offset":0}}}}"#
+    ))
+}
+
+/// **The list lands each entry as served**, known by its signal, and asked
+/// for from the beginning of time to now.
+#[test]
+fn the_ecg_list_lands_each_entry_as_served() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/heart"))
+            .and(header("authorization", "Bearer live-access"))
+            .and(body_string_contains("action=list"))
+            .and(body_string_contains("startdate=0"))
+            .and(body_string_contains("enddate="))
+            .respond_with(heart_list())
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let source = WithingsEcgs::new(
+            server.uri(),
+            live_auth(&server, directory.path()).expect("a sign-in"),
+        );
+
+        let batch = source.fetch(None, None).await.expect("the list");
+        assert!(batch.resume.is_none(), "that was everything");
+        let ids: Vec<_> = batch
+            .events
+            .iter()
+            .map(|event| event.source_record_id.as_str().to_owned())
+            .collect();
+        assert_eq!(ids, ["42", "cuff@1758009600"]);
+        let first = batch.events.first().expect("an ECG");
+        assert_eq!(first.payload.as_bytes(), AN_ECG.as_bytes(), "as served");
+        assert_eq!(
+            first
+                .provenance
+                .occurred_at()
+                .map(|at| at.as_timestamp().as_second()),
+            Some(1_757_923_200)
+        );
+    });
+}
+
+/// **A signal is fetched for each entry that names one**, and lands as the
+/// body served; the blood pressure reading has none to fetch.
+#[test]
+fn each_ecg_named_has_its_signal_landed() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/heart"))
+            .and(body_string_contains("action=get"))
+            .and(body_string_contains("signalid=42"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(format!(r#"{{"status":0,"body":{A_SIGNAL}}}"#)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v2/heart"))
+            .and(body_string_contains("action=list"))
+            .respond_with(heart_list())
+            .mount(&server)
+            .await;
+
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let source = WithingsEcgSignals::new(
+            server.uri(),
+            live_auth(&server, directory.path()).expect("a sign-in"),
+        );
+
+        let batch = source.fetch(None, None).await.expect("the signals");
+        assert_eq!(batch.events.len(), 1, "one entry names a signal");
+        let signal = batch.events.first().expect("a signal");
+        assert_eq!(signal.source_record_id.as_str(), "42");
+        assert_eq!(signal.payload.as_bytes(), A_SIGNAL.as_bytes(), "as served");
+    });
 }
 
 /// **Two pages under one `lastupdate`, each group landed as served.** The

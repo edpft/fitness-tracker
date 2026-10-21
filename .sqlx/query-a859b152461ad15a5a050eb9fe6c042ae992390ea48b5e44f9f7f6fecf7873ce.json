@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(MAX(serve_ordinal), -1) AS \"highest!: i64\" FROM withings_ecg_signal_landing WHERE run_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "highest!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a859b152461ad15a5a050eb9fe6c042ae992390ea48b5e44f9f7f6fecf7873ce"
+}

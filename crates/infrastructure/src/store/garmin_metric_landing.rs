@@ -168,6 +168,9 @@ macro_rules! metric_landing_store {
     };
 }
 
+/// Withings' ECGs land in tables of exactly this shape too.
+pub(super) use metric_landing_store;
+
 metric_landing_store!(
     /// A night's sleep: its stages, and since about 2026-05 the readings taken
     /// through it.
