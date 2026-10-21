@@ -15,15 +15,18 @@
 pub mod account;
 pub mod activities;
 pub mod auth;
+mod connect;
 pub mod corrections;
-pub mod daily;
+pub mod days;
 pub mod devices;
 pub mod exercise_sets;
 pub mod files;
 pub mod fit;
 pub mod gym;
 pub mod hrv;
+pub mod latest;
 pub mod mapping;
+pub mod months;
 pub mod resting;
 pub mod translate;
 

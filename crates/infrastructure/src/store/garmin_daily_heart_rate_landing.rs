@@ -1,5 +1,5 @@
 //! Raw landing for `garmin.daily_heart_rate`: every day's all-day heart rate,
-//! empty days included (#427). See [`crate::garmin::daily`] for why.
+//! empty days included (#427). See [`crate::garmin::days`] for why.
 //!
 //! **A copy of [`super::landing`] rather than a generalisation of it**, for the
 //! reason given there: the table name cannot be a parameter of `query!`.
