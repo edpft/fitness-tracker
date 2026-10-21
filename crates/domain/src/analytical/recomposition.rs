@@ -13,6 +13,12 @@
 //! of either region runs through the origin, so the rate never moves a point
 //! across one.
 //!
+//! **The goal is recomposition, and a phase is the goal restricted by its
+//! intent** (operator, 2026-10-20): fat-free mass changing by more kilograms
+//! than fat, the half-plane above the diagonal, whatever the phase. A point in
+//! the goal but outside its phase's region is progress made by the wrong
+//! means, as a cut that gains fat more slowly than fat-free mass.
+//!
 //! **The phase is assumed from the macrocycle** until one is planned (#258): a
 //! cut in the preparatory phase, maintenance in the competitive and transition
 //! phases (operator, 2026-10-19).
@@ -41,7 +47,15 @@ use crate::{
 pub enum NutritionPhase {
     Cut,
     Maintenance,
+    Bulk,
 }
+
+/// The goal's half-plane, on the same axes as [`NutritionPhase::region`].
+///
+/// Fat-free mass changing by more than fat (operator, 2026-10-20). Body fat %
+/// was rejected, since as one number it counts losing 2 kg of fat-free mass
+/// for 1 kg of fat as progress.
+pub const GOAL: [(f64, f64); 3] = [(-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
 
 impl NutritionPhase {
     /// The phase assumed for a macrocycle's phase, until one is planned.
@@ -52,12 +66,16 @@ impl NutritionPhase {
         }
     }
 
-    /// The phase's success region (operator, 2026-10-19), corner by corner,
-    /// fat across and fat-free mass up, each from −1 to 1.
+    /// The phase's region (operator, 2026-10-19 and 2026-10-20), corner by
+    /// corner, fat across and fat-free mass up, each from −1 to 1. Each is
+    /// the goal restricted by the phase's intent, so lies within [`GOAL`].
     ///
-    /// **A cut** loses fat, and gains fat-free mass, holds it, or loses it
-    /// more slowly than fat: left of the fat-free axis and above the diagonal.
-    /// **Maintenance** does not gain fat, and does not lose fat-free mass.
+    /// **Maintenance** does not gain fat, and does not lose fat-free mass:
+    /// the quadrant. **A cut** has fat falling: the quadrant, and the wedge
+    /// below it where fat-free mass falls more slowly than fat. **A bulk** has
+    /// fat-free mass rising: the quadrant, and the wedge beside it where fat
+    /// rises more slowly than fat-free mass. Either wedge means weight was
+    /// moving, so the intake was not maintenance.
     ///
     /// **A region, never a verdict** (operator, 2026-10-19): a point's noise
     /// is drawn beside it, and calling it a success or a failure would take
@@ -66,6 +84,7 @@ impl NutritionPhase {
         match self {
             Self::Cut => [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)],
             Self::Maintenance => [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)],
+            Self::Bulk => [(0.0, 0.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)],
         }
     }
 }
@@ -75,6 +94,7 @@ impl fmt::Display for NutritionPhase {
         f.write_str(match self {
             Self::Cut => "cut",
             Self::Maintenance => "maintenance",
+            Self::Bulk => "bulk",
         })
     }
 }

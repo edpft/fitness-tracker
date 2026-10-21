@@ -6,7 +6,7 @@ use std::num::NonZeroU8;
 use domain::{
     analytical::{
         composition::{Measured, Method, Stated},
-        recomposition::{NutritionPhase, read},
+        recomposition::{GOAL, NutritionPhase, read},
     },
     body::{Component, Percentage},
     macrocycle::{Macrocycle, Phase},
@@ -77,6 +77,27 @@ fn each_phase_has_its_own_region() {
         NutritionPhase::Maintenance.region(),
         [(0.0, 0.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)]
     );
+    assert_eq!(
+        NutritionPhase::Bulk.region(),
+        [(0.0, 0.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)]
+    );
+}
+
+/// The operator, 2026-10-20: the goal is fat-free mass changing by more than
+/// fat, whatever the phase, and each phase's region is the goal restricted by
+/// its intent.
+#[test]
+fn every_region_lies_within_the_goal() {
+    assert_eq!(GOAL, [(-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]);
+    for phase in [
+        NutritionPhase::Cut,
+        NutritionPhase::Maintenance,
+        NutritionPhase::Bulk,
+    ] {
+        for (fat, fat_free) in phase.region() {
+            assert!(fat_free >= fat, "{phase} at ({fat}, {fat_free})");
+        }
+    }
 }
 
 /// A Body Scan every day from term's start, fat falling a kilogram and

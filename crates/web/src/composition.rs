@@ -12,8 +12,8 @@
 //! before is said above its chart.
 //!
 //! **The page leads with the current macrocycle against its nutrition
-//! phases** (#489): each period's cell, per method, and whether that cell is a
-//! success in the phase.
+//! phases** (#489): each period's cell, per method, against its phase's
+//! region and, beneath it, the goal's half-plane, whatever the phase (#519).
 //!
 //! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
 //! the table beneath each chart is the same figures.
@@ -25,7 +25,7 @@ use domain::{
             AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
         },
         range::{Over, Range, Ranges},
-        recomposition::{Cell, MesocycleReading, NutritionPhase},
+        recomposition::{Cell, GOAL, MesocycleReading, NutritionPhase},
     },
     body::Component,
 };
@@ -190,14 +190,17 @@ fn against_phase(against: &AgainstPhase, methods: &[Method]) -> Markup {
             AgainstPhase::NoMacrocycle => {}
             AgainstPhase::Read(read) => {
                 h2 { (capitalised(&read.macrocycle.to_string())) }
-                @for phase in [NutritionPhase::Cut, NutritionPhase::Maintenance] {
+                @for phase in [NutritionPhase::Cut, NutritionPhase::Maintenance, NutritionPhase::Bulk] {
                     @let mesocycles: Vec<&MesocycleReading> = read
                         .mesocycles
                         .iter()
                         .filter(|one| one.phase == phase)
                         .collect();
                     @if mesocycles.is_empty() {
-                        p.method { (capitalised(&phase.to_string())) ": no mesocycle yet" }
+                        // No macrocycle phase assumes a bulk, so none is due.
+                        @if phase != NutritionPhase::Bulk {
+                            p.method { (capitalised(&phase.to_string())) ": no mesocycle yet" }
+                        }
                     } @else {
                         (matrix(phase, &mesocycles, methods))
                     }
@@ -311,12 +314,6 @@ fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Me
         .map(|line| f64::from(line).mul_add(step, -extent))
         .take_while(|value| *value <= extent + step / 2.0)
         .collect();
-    let region = phase
-        .region()
-        .into_iter()
-        .map(|(across, up)| format!("{:.1},{:.1}", x(across * extent), y(up * extent)))
-        .collect::<Vec<_>>()
-        .join(" ");
     let name = capitalised(&phase.to_string());
     let named_methods = plotted
         .iter()
@@ -327,8 +324,7 @@ fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Me
         div.matrix {
             svg.matrix viewBox=(format!("0 0 {SIDE} {:.0}", y(-extent) + 38.0)) role="img"
                 aria-label=(format!("{name}: each mesocycle's change in fat against fat-free mass, in kilograms a week")) {
-                polygon.success points=(region) {}
-                text.region x=(x(-extent) + 6.0) y=(y(extent) + 16.0) { "success" }
+                (regions(phase, extent, &x, &y))
                 @for value in &lines {
                     line.grid x1=(x(*value)) x2=(x(*value)) y1=(y(extent)) y2=(y(-extent)) {}
                     line.grid x1=(x(-extent)) x2=(x(extent)) y1=(y(*value)) y2=(y(*value)) {}
@@ -387,6 +383,33 @@ fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Me
     }
 }
 
+/// The goal's half-plane and, over it, the phase's region, each named.
+fn regions(
+    phase: NutritionPhase,
+    extent: f64,
+    x: &impl Fn(f64) -> f64,
+    y: &impl Fn(f64) -> f64,
+) -> Markup {
+    let corners = |corners: &[(f64, f64)]| {
+        corners
+            .iter()
+            .map(|(across, up)| format!("{:.1},{:.1}", x(across * extent), y(up * extent)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    // The goal's own name sits in a wedge outside the phase's region.
+    let (goal_x, goal_y) = match phase {
+        NutritionPhase::Cut | NutritionPhase::Maintenance => (x(0.0) + 6.0, y(extent) + 16.0),
+        NutritionPhase::Bulk => (x(-extent) + 6.0, y(-extent / 2.0) + 4.0),
+    };
+    html! {
+        polygon.goal points=(corners(&GOAL)) {}
+        polygon.phase points=(corners(&phase.region())) {}
+        text.region x=(x(-extent) + 6.0) y=(y(extent) + 16.0) { (phase) }
+        text.region x=(goal_x) y=(goal_y) { "goal" }
+    }
+}
+
 fn tick(value: f64, step: f64) -> String {
     let text = if step < 0.25 {
         format!("{value:.1}")
@@ -398,13 +421,15 @@ fn tick(value: f64, step: f64) -> String {
     text.replace('-', "−")
 }
 
-/// How the matrix is drawn: the success region in the status colour for good,
-/// never a series colour, and named in the chart so it is not colour alone.
+/// How the matrix is drawn: the goal and, over it, the phase's region in the
+/// status colour for good, never a series colour, each named in the chart so
+/// it is not colour alone.
 const MATRIX: &str = "
 :root { --good: #0ca30c; }
 div.matrix { max-width: 28rem; }
 svg.matrix { width: 100%; height: auto; display: block; }
-.success { fill: var(--good); fill-opacity: 0.16; }
+.goal { fill: var(--good); fill-opacity: 0.08; }
+.phase { fill: var(--good); fill-opacity: 0.16; }
 .region { fill: var(--muted); font-size: 11px; }
 .spread { stroke: var(--ink); stroke-opacity: 0.55; stroke-width: 1.5; }
 .label { fill: var(--ink); font-size: 11px; }
@@ -940,7 +965,15 @@ mod tests {
 
         assert!(drawn.contains("<h2>Autumn 2026</h2>"), "{drawn}");
         assert!(drawn.contains("<h3>Cut</h3>"), "{drawn}");
-        assert_eq!(drawn.matches(r#"<polygon class="success""#).count(), 1);
+        assert_eq!(drawn.matches(r#"<polygon class="phase""#).count(), 1);
+        assert_eq!(
+            drawn.matches(r#"<polygon class="goal""#).count(),
+            1,
+            "the goal is drawn whatever the phase"
+        );
+        assert!(drawn.contains(">cut</text>"), "{drawn}");
+        assert!(drawn.contains(">goal</text>"), "{drawn}");
+        assert!(!drawn.contains("Bulk"), "no bulk is due: {drawn}");
         assert!(drawn.contains(">14 Sep</text>"), "{drawn}");
         assert!(!drawn.contains("failure"), "no verdict");
         assert!(drawn.contains(">28 Sep, so far</text>"), "{drawn}");
