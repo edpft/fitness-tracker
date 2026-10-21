@@ -20,7 +20,10 @@
 //! **Deletions are not seen.** Nothing in `getmeas` reports a group that has
 //! gone, which is the same position Peloton's list is in.
 
-use std::{sync::OnceLock, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
@@ -75,15 +78,15 @@ struct Identity {
 /// Withings' measurements.
 #[derive(Debug)]
 pub struct WithingsMeasurements {
-    auth: WithingsAuth,
+    auth: Arc<WithingsAuth>,
     api_base: String,
     client: OnceLock<Result<reqwest::Client, String>>,
 }
 
 impl WithingsMeasurements {
-    pub fn new(api_base: impl Into<String>, auth: WithingsAuth) -> Self {
+    pub fn new(api_base: impl Into<String>, auth: impl Into<Arc<WithingsAuth>>) -> Self {
         Self {
-            auth,
+            auth: auth.into(),
             api_base: api_base.into().trim_end_matches('/').to_owned(),
             client: OnceLock::new(),
         }
@@ -112,7 +115,7 @@ fn last_update_for(since: Option<Watermark>) -> i64 {
 }
 
 /// Whether the page says there is another.
-fn is_more(value: &serde_json::Value) -> bool {
+pub(super) fn is_more(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Bool(more) => *more,
         serde_json::Value::Number(more) => more.as_i64().is_some_and(|more| more != 0),

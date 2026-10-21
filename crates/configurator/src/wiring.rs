@@ -49,6 +49,7 @@ use infrastructure::{
     SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
     SqliteRefusalStore, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
     SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
+    WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, connect, garmin,
     garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
@@ -225,7 +226,9 @@ pub async fn run(
     match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
         PelotonRideLandingStore::STREAM => peloton_rides(command, database, walks).await,
-        WithingsMeasurementLandingStore::STREAM => withings_measurements(command, database).await,
+        WithingsMeasurementLandingStore::STREAM => {
+            withings_measurements(command, database, walks).await
+        }
         GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
         GarminActivityLandingStore::STREAM => garmin_activities(command, database, walks).await,
         GarminDailyHeartRateLandingStore::STREAM => {
@@ -1253,8 +1256,13 @@ fn today() -> jiff::civil::Date {
         .date()
 }
 
-/// Withings' measure groups, landed and derived into Body Scan weigh-ins.
-async fn withings_measurements(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+/// Withings' measure groups, landed and derived into Body Scan weigh-ins, and
+/// the Body Scan's ECGs landed beside them (#270).
+async fn withings_measurements(
+    command: Command,
+    database: &Path,
+    walks: &dyn WalkReporter,
+) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = WithingsMeasurementLandingStore::new(pool.clone())?;
     let resumption = SqliteResumptionPointStore::new(pool.clone());
@@ -1265,11 +1273,7 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
             stream: WithingsMeasurementLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let summary = withings_walk(access, landing, resumption, runs, database)?
-                .extraction
-                .extract()
-                .await?;
-            Ok(Outcome::Extracted(Box::new(summary)))
+            collect_withings(access, landing, resumption, runs, (pool, database), walks).await
         }
         Command::Normalise(zone) => {
             let summary = withings_normalisation(pool, zone)?.normalise().await?;
@@ -1299,12 +1303,93 @@ async fn withings_measurements(command: Command, database: &Path) -> Result<Outc
             })
         }
         Command::Reset => {
+            // The ECGs too, for the reason Garmin's walks give: resetting one
+            // and not the others leaves them at different points in history.
             let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(
+                WithingsEcgLandingStore::new(pool.clone())?,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool.clone()),
+            )
+            .reset()
+            .await?;
+            ExtractionStatus::new(
+                WithingsEcgSignalLandingStore::new(pool.clone())?,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool),
+            )
+            .reset()
+            .await?;
             let reader = ExtractionStatus::new(landing, resumption, runs);
             reader.reset().await?;
             Ok(Outcome::Reset { previous })
         }
     }
+}
+
+/// Every Withings walk, in the one order that matters: the measurements, then
+/// the ECG list, then the signals the list names.
+///
+/// **One `WithingsAuth`, shared.** The refresh token rotates on every use, so
+/// three walks each refreshing for itself would each spend the one before's.
+///
+/// **Nothing derives the ECGs yet**, so they land behind the entry that already
+/// walks Withings, as Garmin's metrics do behind its activities (#269).
+async fn collect_withings(
+    access: SourceAccess,
+    landing: WithingsMeasurementLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    (pool, database): (SqlitePool, &Path),
+    walks: &dyn WalkReporter,
+) -> Result<Outcome, WiringError> {
+    let (base_url, auth) = withings_auth(access)?;
+
+    let measured = walk(
+        landing.stream().clone(),
+        Extraction::new(ExtractionPorts {
+            source: WithingsMeasurements::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+        walks,
+    )
+    .await;
+
+    let ecgs_landing = WithingsEcgLandingStore::new(pool.clone())?;
+    let ecgs = walk(
+        ecgs_landing.stream().clone(),
+        Extraction::new(ExtractionPorts {
+            source: WithingsEcgs::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            landing: ecgs_landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+        walks,
+    )
+    .await;
+
+    let signals_landing = WithingsEcgSignalLandingStore::new(pool)?;
+    let signals = walk(
+        signals_landing.stream().clone(),
+        Extraction::new(ExtractionPorts {
+            source: WithingsEcgSignals::new(base_url, auth),
+            landing: signals_landing,
+            resumption,
+            runs,
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+        walks,
+    )
+    .await;
+
+    Ok(Outcome::ExtractedEach(vec![measured, ecgs, signals]))
 }
 
 /// Hevy's workout events, as one walk.
@@ -1368,14 +1453,10 @@ async fn hevy_normalisation(
     ))
 }
 
-/// Withings' measure groups, walked with the application's own credential.
-fn withings_walk(
+/// The API root and a sign-in for it, from the application's own credential.
+fn withings_auth(
     access: SourceAccess,
-    landing: WithingsMeasurementLandingStore,
-    resumption: SqliteResumptionPointStore,
-    runs: SqliteExtractionRunLog,
-    database: &Path,
-) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
+) -> Result<(String, std::sync::Arc<WithingsAuth>), WiringError> {
     let SourceAccess::OAuthClient {
         base_url,
         auth_base_url,
@@ -1399,6 +1480,18 @@ fn withings_walk(
         registration.clone(),
         TokenFile::new(token, registration.digest()),
     );
+    Ok((base_url, std::sync::Arc::new(auth)))
+}
+
+/// Withings' measure groups, walked with the application's own credential.
+fn withings_walk(
+    access: SourceAccess,
+    landing: WithingsMeasurementLandingStore,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
+    database: &Path,
+) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
+    let (base_url, auth) = withings_auth(access)?;
     Ok(application::next::Walk {
         stream: landing.stream().clone(),
         extraction: Extraction::new(ExtractionPorts {

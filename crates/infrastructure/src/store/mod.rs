@@ -124,7 +124,9 @@ pub use settings::SqliteOperatorSettingsStore;
 pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
 pub use spreadsheet_normalised::SqliteSpreadsheetStore;
 pub use weigh_in::SpreadsheetFileAccountReader;
-pub use withings_landing::WithingsMeasurementLandingStore;
+pub use withings_landing::{
+    WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsMeasurementLandingStore,
+};
 pub use withings_normalised::{SqliteWeighInStore, WithingsWeighInAccountReader};
 
 /// Translate a store failure into the application's view of one.

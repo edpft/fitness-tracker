@@ -3,15 +3,18 @@
 //! Everything specific to Withings lives behind this module: its hosts, its
 //! envelope, its status codes and its names for things. What lands is the
 //! measure group exactly as served, and a Body Scan weigh-in is every group
-//! stamped with one second (#153).
+//! stamped with one second (#153). Its ECGs are served apart, by Heart v2
+//! (#270).
 
 pub mod account;
 pub mod auth;
+pub mod heart;
 pub mod measurements;
 pub mod translate;
 
 pub use account::{WeighInAccount, group};
 pub use auth::{WithingsAuth, WithingsClient};
+pub use heart::{EcgPage, WithingsEcgSignals, WithingsEcgs};
 pub use measurements::{MeasurementPage, WithingsMeasurements};
 pub use translate::WithingsWeighInTranslator;
 

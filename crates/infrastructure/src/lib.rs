@@ -73,8 +73,12 @@ pub use store::{
     GarminRespirationLandingStore, GarminSleepLandingStore, GarminSpo2LandingStore,
     GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
 };
+pub use store::{WithingsEcgLandingStore, WithingsEcgSignalLandingStore};
 pub use token::{CredentialDigest, Token, TokenFile};
-pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};
+pub use withings::{
+    WithingsAuth, WithingsClient, WithingsEcgSignals, WithingsEcgs, WithingsMeasurements,
+    WithingsWeighInTranslator,
+};
 
 /// The pool every store is built on, so a composition root can open one and
 /// hand it to several without depending on `sqlx` itself.

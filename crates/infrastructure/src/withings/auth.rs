@@ -39,7 +39,8 @@ use reqwest::{Client, Url};
 
 use crate::token::{CredentialDigest, Token, TokenFile};
 
-/// What the application is allowed to read: measurements, and nothing else.
+/// What the application is allowed to read: measurements and ECGs, and nothing
+/// else.
 pub const SCOPE: &str = "user.metrics";
 
 /// Where the operator is sent to grant access. On the account host, not the API.
