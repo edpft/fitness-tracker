@@ -241,7 +241,12 @@ fn live_auth(server: &MockServer, directory: &std::path::Path) -> Result<Withing
             client().digest(),
         ))
         .map_err(|error| error.to_string())?;
-    Ok(WithingsAuth::new(server.uri(), server.uri(), client(), cache))
+    Ok(WithingsAuth::new(
+        server.uri(),
+        server.uri(),
+        client(),
+        cache,
+    ))
 }
 
 /// An ECG as the Body Scan's list entry is documented, and one blood pressure
@@ -311,9 +316,10 @@ fn each_ecg_named_has_its_signal_landed() {
             .and(path("/v2/heart"))
             .and(body_string_contains("action=get"))
             .and(body_string_contains("signalid=42"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
-                r#"{{"status":0,"body":{A_SIGNAL}}}"#
-            )))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(format!(r#"{{"status":0,"body":{A_SIGNAL}}}"#)),
+            )
             .expect(1)
             .mount(&server)
             .await;

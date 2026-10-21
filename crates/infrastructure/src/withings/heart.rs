@@ -277,9 +277,11 @@ impl WorkoutEventSource for WithingsEcgSignals {
 
         let mut events = Vec::new();
         for entry in listed.events {
-            let identity: Identity = serde_json::from_slice(entry.payload.as_bytes())
-                .map_err(|error| SourceError::Malformed {
-                    detail: format!("an ECG has no readable identity: {error}"),
+            let identity: Identity =
+                serde_json::from_slice(entry.payload.as_bytes()).map_err(|error| {
+                    SourceError::Malformed {
+                        detail: format!("an ECG has no readable identity: {error}"),
+                    }
                 })?;
             let Some(ecg) = identity.ecg else {
                 continue;
