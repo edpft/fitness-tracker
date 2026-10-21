@@ -19,7 +19,9 @@ use infrastructure::{
         token_base_for,
     },
 };
-use jiff::civil::date;
+use std::sync::{Arc, Mutex};
+
+use jiff::civil::{Date, date};
 use wiremock::{
     Mock, MockServer, Request, Respond, ResponseTemplate,
     matchers::{method, path},
@@ -42,8 +44,17 @@ impl Clock for FixedClock {
 /// The account's name, which is not the email it signs in with.
 const NAME: &str = "someone";
 
-/// A night, as served for whichever date was asked.
-struct Night;
+/// When the watch last synced, as Garmin would state it: changed by a test
+/// between runs.
+type Synced = Arc<Mutex<String>>;
+
+fn synced_at(synced: &Synced) -> String {
+    synced.lock().map(|at| at.clone()).unwrap_or_default()
+}
+
+/// A night, as served for whichever date was asked: what Garmin holds of it
+/// grows with each sync.
+struct Night(Synced);
 
 impl Respond for Night {
     fn respond(&self, request: &Request) -> ResponseTemplate {
@@ -54,12 +65,24 @@ impl Respond for Night {
             .map(|(_, value)| value.into_owned())
             .unwrap_or_default();
         ResponseTemplate::new(200).set_body_string(format!(
-            r#"{{"dailySleepDTO":{{"calendarDate":"{asked}","sleepTimeSeconds":27000}}}}"#
+            r#"{{"dailySleepDTO":{{"calendarDate":"{asked}","sleepTimeSeconds":27000}},"synced":"{}"}}"#,
+            synced_at(&self.0)
         ))
     }
 }
 
-async fn stub() -> MockServer {
+/// The day's summary, which is where the sync is stated.
+struct Summary(Synced);
+
+impl Respond for Summary {
+    fn respond(&self, _: &Request) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "lastSyncTimestampGMT": synced_at(&self.0),
+        }))
+    }
+}
+
+async fn stub(synced: &Synced) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/sso/embed"))
@@ -103,7 +126,14 @@ async fn stub() -> MockServer {
         .and(path(format!(
             "/wellness-service/wellness/dailySleepData/{NAME}"
         )))
-        .respond_with(Night)
+        .respond_with(Night(Arc::clone(synced)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/usersummary-service/usersummary/daily/{NAME}"
+        )))
+        .respond_with(Summary(Arc::clone(synced)))
         .mount(&server)
         .await;
     server
@@ -131,45 +161,57 @@ async fn asked(server: &MockServer) -> (Vec<String>, usize) {
     (nights, profiles)
 }
 
+/// A run of the sleep walk against the stub, as of `today`.
+fn extraction(
+    server: &MockServer,
+    pool: &sqlx::SqlitePool,
+    database: &std::path::Path,
+    today: Date,
+) -> Result<impl application::WorkoutExtractor, Box<dyn std::error::Error>> {
+    let base = server.uri();
+    Ok(Extraction::new(ExtractionPorts {
+        source: GarminDays::new(
+            GarminDay::Sleep,
+            base.clone(),
+            GarminAuth::new(
+                base.clone(),
+                token_base_for(&base),
+                GarminCredentials::new("sleeper@example.com", "not-a-real-password"),
+                None,
+            )
+            .without_pause(),
+            today,
+        ),
+        landing: GarminSleepLandingStore::new(pool.clone())?,
+        resumption: SqliteResumptionPointStore::new(pool.clone()),
+        runs: SqliteExtractionRunLog::new(pool.clone()),
+        lock: FileRunLock::beside(database),
+        clock: FixedClock,
+    }))
+}
+
 /// **Every day from the first wrist sensor to today, under the account's name,
 /// and a second run lands nothing it already had.**
 ///
-/// The first run asks for each of the three days and lands each. The second
-/// asks again only for the last, because a day's answer grows until it is
-/// over, and the same answer lands nothing.
+/// The first run asks for each of the three days and lands each. The watch
+/// synced on the morning of the last, so the second asks again only for that
+/// one, and the same answer lands nothing.
 #[test]
-fn every_day_is_asked_for_once_and_today_again() {
+fn every_day_is_asked_for_once_and_the_synced_day_again() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
-        let server = stub().await;
+        let synced: Synced = Arc::new(Mutex::new("2018-01-08T08:00:00.0".to_owned()));
+        let server = stub(&synced).await;
         let directory = tempfile::tempdir().expect("a directory");
         let database = directory.path().join("test.db");
         let pool = connect(&database).await.expect("a store");
+        let today = date(2018, 1, 8);
 
-        let extraction = || {
-            let base = server.uri();
-            Extraction::new(ExtractionPorts {
-                source: GarminDays::new(
-                    GarminDay::Sleep,
-                    base.clone(),
-                    GarminAuth::new(
-                        base.clone(),
-                        token_base_for(&base),
-                        GarminCredentials::new("sleeper@example.com", "not-a-real-password"),
-                        None,
-                    )
-                    .without_pause(),
-                    date(2018, 1, 8),
-                ),
-                landing: GarminSleepLandingStore::new(pool.clone()).expect("a landing store"),
-                resumption: SqliteResumptionPointStore::new(pool.clone()),
-                runs: SqliteExtractionRunLog::new(pool.clone()),
-                lock: FileRunLock::beside(&database),
-                clock: FixedClock,
-            })
-        };
-
-        let first = extraction().extract().await.expect("a first run");
+        let first = extraction(&server, &pool, &database, today)
+            .expect("a run")
+            .extract()
+            .await
+            .expect("a first run");
         assert_eq!(first.records_landed.as_usize(), 3);
         assert_eq!(
             asked(&server).await,
@@ -184,7 +226,11 @@ fn every_day_is_asked_for_once_and_today_again() {
             "each day once, and the account's name once for the walk"
         );
 
-        let second = extraction().extract().await.expect("a second run");
+        let second = extraction(&server, &pool, &database, today)
+            .expect("a run")
+            .extract()
+            .await
+            .expect("a second run");
         assert_eq!(
             second.records_landed.as_usize(),
             0,
@@ -193,10 +239,72 @@ fn every_day_is_asked_for_once_and_today_again() {
         assert_eq!(
             asked(&server).await.0,
             ["2018-01-06", "2018-01-07", "2018-01-08", "2018-01-08"],
-            "only today again"
+            "only the day of the sync again"
         );
 
         let landing = GarminSleepLandingStore::new(pool.clone()).expect("a landing store");
         assert_eq!(landing.count().await.expect("a count").as_usize(), 3);
+    });
+}
+
+/// **A day landed before the watch synced it is asked for again, and lands
+/// whole** (#528).
+///
+/// The first run is on the 8th, but the watch last synced on the morning of
+/// the 7th, so the 7th and the 8th land part-done. By the second run, on the
+/// 9th, it has synced again: the walk starts from the 7th rather than the 8th,
+/// and both land as Garmin now holds them.
+#[test]
+fn a_day_landed_before_the_sync_is_landed_again_whole() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let synced: Synced = Arc::new(Mutex::new("2018-01-07T10:00:00.0".to_owned()));
+        let server = stub(&synced).await;
+        let directory = tempfile::tempdir().expect("a directory");
+        let database = directory.path().join("test.db");
+        let pool = connect(&database).await.expect("a store");
+
+        let first = extraction(&server, &pool, &database, date(2018, 1, 8))
+            .expect("a run")
+            .extract()
+            .await
+            .expect("a first run");
+        assert_eq!(first.records_landed.as_usize(), 3);
+
+        *synced.lock().expect("the sync") = "2018-01-09T07:00:00.0".to_owned();
+        let second = extraction(&server, &pool, &database, date(2018, 1, 9))
+            .expect("a run")
+            .extract()
+            .await
+            .expect("a second run");
+        assert_eq!(
+            asked(&server).await.0,
+            [
+                "2018-01-06",
+                "2018-01-07",
+                "2018-01-08",
+                "2018-01-07",
+                "2018-01-08",
+                "2018-01-09"
+            ],
+            "from the day of the last sync the first run saw"
+        );
+        assert_eq!(
+            second.records_landed.as_usize(),
+            3,
+            "the 7th and 8th whole, and the 9th"
+        );
+
+        let third = extraction(&server, &pool, &database, date(2018, 1, 9))
+            .expect("a run")
+            .extract()
+            .await
+            .expect("a third run");
+        assert_eq!(third.records_landed.as_usize(), 0);
+        assert_eq!(
+            asked(&server).await.0.last().map(String::as_str),
+            Some("2018-01-09"),
+            "the days before the sync are not asked for again"
+        );
     });
 }

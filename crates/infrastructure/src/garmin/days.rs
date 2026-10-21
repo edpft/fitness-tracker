@@ -19,6 +19,14 @@
 //! respiration, floors and a night's sleep stages showed the same horizon, the
 //! readings present on 2026-06-01 and only the day's summary on 2026-05-01.
 //! Landing every day as it stands keeps the readings that are still there.
+//!
+//! **A day is whole only once the watch has synced past it** (#528). The day
+//! ends at midnight, but Garmin holds what the watch recorded only up to its
+//! last sync, so a day landed before then is landed part-done. Each run asks
+//! when the watch last synced, and each day's record is timed by how far it
+//! reaches: the end of the day, or the sync if that came first. The resumption
+//! point is the furthest of those, so the next run starts on the day of the
+//! last sync it saw, and asks again for every day it had not yet seen whole.
 
 use std::{sync::Arc, time::Duration};
 
@@ -26,7 +34,7 @@ use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
 };
-use jiff::civil::Date;
+use jiff::{Timestamp, civil::Date};
 
 use super::{auth::GarminAuth, connect::Connect};
 
@@ -145,10 +153,12 @@ impl GarminDay {
     }
 }
 
-/// Where a walk has got to: the next day to ask for.
+/// Where a walk has got to: the next day to ask for, and when the watch had
+/// last synced as the walk began.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DayWalk {
     next: Date,
+    synced: Timestamp,
 }
 
 /// One of Garmin's daily metrics, a day at a time.
@@ -175,8 +185,21 @@ impl GarminDays {
         }
     }
 
+    /// When the watch last synced, as the day's summary states it.
+    async fn synced(&self) -> Result<Timestamp, SourceError> {
+        let name = self.connect.name().await?;
+        let (path, query) = GarminDay::DailySummary.request(self.today, Some(&name));
+        let bytes = self.connect.get(&path, &query).await?;
+        last_sync(&bytes)
+    }
+
     /// One day, as served.
-    async fn day(&self, date: Date, endpoint: &Endpoint) -> Result<SourceEvent, SourceError> {
+    async fn day(
+        &self,
+        date: Date,
+        synced: Timestamp,
+        endpoint: &Endpoint,
+    ) -> Result<SourceEvent, SourceError> {
         let name = if self.day.named() {
             Some(self.connect.name().await?)
         } else {
@@ -199,7 +222,7 @@ impl GarminDays {
             EventProvenance::new(
                 endpoint.clone(),
                 EventKind::Updated,
-                Some(EventTime::from(midnight(date)?)),
+                Some(EventTime::from(reaches(date, synced)?)),
             )
             .into(),
             payload,
@@ -208,13 +231,46 @@ impl GarminDays {
 }
 
 /// Where a walk begins: the watermark's own day, which is asked for again
-/// because today's answer grows until the day is over, or the earliest.
+/// because the watch had not synced past it, or the earliest.
 fn start_from(since: Option<Watermark>) -> Date {
     let Some(mark) = since else {
         return EARLIEST;
     };
     let at = mark.as_timestamp().to_zoned(jiff::tz::TimeZone::UTC).date();
     if at < EARLIEST { EARLIEST } else { at }
+}
+
+/// When the watch last synced, from the day's summary.
+///
+/// **Garmin's clock, without a zone**, which its name says is GMT.
+fn last_sync(bytes: &[u8]) -> Result<Timestamp, SourceError> {
+    #[derive(serde::Deserialize)]
+    struct Summary {
+        #[serde(rename = "lastSyncTimestampGMT")]
+        last_sync: Option<String>,
+    }
+    let malformed = |detail: String| SourceError::Malformed { detail };
+    let summary: Summary = serde_json::from_slice(bytes)
+        .map_err(|error| malformed(format!("the day's summary did not parse: {error}")))?;
+    let at = summary.last_sync.ok_or_else(|| {
+        malformed("the day's summary does not say when the watch last synced".to_owned())
+    })?;
+    at.parse::<jiff::civil::DateTime>()
+        .and_then(|at| at.to_zoned(jiff::tz::TimeZone::UTC))
+        .map(|at| at.timestamp())
+        .map_err(|error| malformed(format!("{at} is not a time this clock can place: {error}")))
+}
+
+/// How far a day's record reaches: the end of the day, or the last sync if
+/// that came first.
+///
+/// **UTC, as the walk's days are.** In a zone ahead of UTC, the operator's,
+/// that only ever asks again for a day that was already whole.
+fn reaches(date: Date, synced: Timestamp) -> Result<Timestamp, SourceError> {
+    let end = midnight(date.tomorrow().map_err(|error| SourceError::Malformed {
+        detail: format!("there is no day after {date}: {error}"),
+    })?)?;
+    Ok(end.min(synced))
 }
 
 fn midnight(date: Date) -> Result<jiff::Timestamp, SourceError> {
@@ -233,7 +289,10 @@ impl WorkoutEventSource for GarminDays {
         since: Option<Watermark>,
         resume: Option<DayWalk>,
     ) -> Result<EventBatch<DayWalk>, SourceError> {
-        let mut date = resume.map_or_else(|| start_from(since), |walk| walk.next);
+        let (mut date, synced) = match resume {
+            Some(walk) => (walk.next, walk.synced),
+            None => (start_from(since), self.synced().await?),
+        };
         let endpoint =
             Endpoint::try_from(self.day.endpoint()).map_err(|error| SourceError::Malformed {
                 detail: error.to_string(),
@@ -244,19 +303,19 @@ impl WorkoutEventSource for GarminDays {
             if !events.is_empty() {
                 tokio::time::sleep(BETWEEN_REQUESTS).await;
             }
-            events.push(self.day(date, &endpoint).await?);
+            events.push(self.day(date, synced, &endpoint).await?);
             date = date.tomorrow().map_err(|error| SourceError::Malformed {
                 detail: format!("there is no day after {date}: {error}"),
             })?;
         }
-        let resume = (date <= self.today).then_some(DayWalk { next: date });
+        let resume = (date <= self.today).then_some(DayWalk { next: date, synced });
         Ok(EventBatch { events, resume })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{EARLIEST, GarminDay, start_from};
+    use super::{EARLIEST, GarminDay, last_sync, reaches, start_from};
     use domain::landing::{Endpoint, EventTime, Watermark};
     use jiff::civil::date;
 
@@ -338,7 +397,29 @@ mod tests {
         assert_eq!(EARLIEST, date(2018, 1, 6));
     }
 
-    /// The watermark's own day is asked for again: today grows until it ends.
+    /// The sync as Garmin states it, on 2026-10-21.
+    #[test]
+    fn the_last_sync_is_read_as_gmt() {
+        let at =
+            last_sync(br#"{"source":"GARMIN","lastSyncTimestampGMT":"2026-10-21T08:16:00.351"}"#)
+                .expect("a sync");
+        assert_eq!(at.to_string(), "2026-10-21T08:16:00.351Z");
+        assert!(last_sync(br#"{"lastSyncTimestampGMT":null}"#).is_err());
+    }
+
+    /// A day synced past reaches its end; one landed before the sync reaches
+    /// the sync, and so does every day after it.
+    #[test]
+    fn a_day_reaches_its_end_or_the_sync() {
+        let synced = "2026-10-14T10:25:00Z".parse().expect("a time");
+        let reach = |day| reaches(day, synced).expect("a reach").to_string();
+        assert_eq!(reach(date(2026, 10, 13)), "2026-10-14T00:00:00Z");
+        assert_eq!(reach(date(2026, 10, 14)), "2026-10-14T10:25:00Z");
+        assert_eq!(reach(date(2026, 10, 15)), "2026-10-14T10:25:00Z");
+    }
+
+    /// The watermark's own day is asked for again: the watch has not synced
+    /// past it.
     #[test]
     fn a_later_walk_re_asks_the_watermark_s_day() {
         let at = date(2026, 10, 13)
