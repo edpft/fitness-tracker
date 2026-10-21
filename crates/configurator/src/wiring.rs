@@ -41,20 +41,20 @@ use infrastructure::{
     GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
     MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
-    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
-    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
-    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore,
-    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
-    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
-    SqliteRefusalStore, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
-    SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
-    WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
-    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
-    WithingsWeighInTranslator, connect, garmin,
+    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
+    PelotonWorkoutSamples, PelotonWorkouts, SpreadsheetFileAccountReader,
+    SpreadsheetFileLandingStore, SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore,
+    SqliteEditOverlayStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore, SqliteNormalisationRunLog,
+    SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore, SqliteRestingHeartRateStore,
+    SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
+    WithingsAuth, WithingsClient, WithingsEcgLandingStore, WithingsEcgSignalLandingStore,
+    WithingsEcgSignals, WithingsEcgs, WithingsMeasurementLandingStore, WithingsMeasurements,
+    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
     garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
     peloton::{
-        PelotonSessionTranslator,
+        PelotonSessionTranslator, PelotonWorkoutDetails,
         auth::{PelotonAuth, PelotonCredentials},
         paired::PelotonAccount,
     },
@@ -480,10 +480,14 @@ async fn peloton_rides(
             stream: PelotonRideLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let account_landing = PelotonAccountLandingStore::new(pool.clone())?;
             collect_rides(
                 access,
-                (landing, samples_landing, account_landing),
+                PelotonLandings {
+                    rides: landing,
+                    samples: samples_landing,
+                    details: PelotonRideDetailLandingStore::new(pool.clone())?,
+                    account: PelotonAccountLandingStore::new(pool.clone())?,
+                },
                 resumption,
                 runs,
                 database,
@@ -522,12 +526,20 @@ async fn peloton_rides(
             })
         }
         Command::Reset => {
-            // Both, because both are behind one entry: resetting one and not
-            // the other would leave the two walks at different points in
-            // history, which is the state this entry exists to prevent.
+            // Every walk that resumes, because all are behind one entry:
+            // resetting one and not the others would leave them at different
+            // points in history, which is the state this entry exists to
+            // prevent. The account has no resumption point.
             let previous = resumption.read(landing.stream()).await?;
             ExtractionStatus::new(
                 samples_landing,
+                SqliteResumptionPointStore::new(pool.clone()),
+                SqliteExtractionRunLog::new(pool.clone()),
+            )
+            .reset()
+            .await?;
+            ExtractionStatus::new(
+                PelotonRideDetailLandingStore::new(pool.clone())?,
                 SqliteResumptionPointStore::new(pool.clone()),
                 SqliteExtractionRunLog::new(pool),
             )
@@ -582,40 +594,59 @@ async fn collect_rides(
     database: &Path,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let ((rides, graphs), account) = peloton_walks(access, landings, resumption, runs, database)?;
+    let (((rides, graphs), details), account) =
+        peloton_walks(access, landings, resumption, runs, database)?;
     let ridden = walk(rides.stream, rides.extraction, walks).await;
     let sampled = walk(graphs.stream, graphs.extraction, walks).await;
+    let detailed = walk(details.stream, details.extraction, walks).await;
     let paired = walk(account.stream, account.extraction, walks).await;
-    Ok(Outcome::ExtractedEach(vec![ridden, sampled, paired]))
+    Ok(Outcome::ExtractedEach(vec![
+        ridden, sampled, detailed, paired,
+    ]))
 }
 
-/// Peloton's three landing tables: the rides, their graphs, and the account
-/// that says what the bike is paired with (#427).
-type PelotonLandings = (
-    PelotonRideLandingStore,
-    PelotonRideSampleLandingStore,
-    PelotonAccountLandingStore,
+/// Peloton's landing tables: the rides, their graphs and their detail, the
+/// and the account that says what the bike is paired with (#427).
+struct PelotonLandings {
+    rides: PelotonRideLandingStore,
+    samples: PelotonRideSampleLandingStore,
+    details: PelotonRideDetailLandingStore,
+    account: PelotonAccountLandingStore,
+}
+
+/// The walks over the rides, each resuming, and the account, which does not.
+type PelotonWalks<A, B, C, D> = (
+    (
+        (application::next::Walk<A>, application::next::Walk<B>),
+        application::next::Walk<C>,
+    ),
+    application::next::Walk<D>,
 );
 
-/// Peloton's walks, the list first: the graph walk enumerates rides itself,
-/// so running it second means the graphs it fetches are for rides this same
-/// run has just landed. The account is third, and depends on neither.
+/// Peloton's walks, the list first: the graph and detail walks enumerate
+/// rides themselves, so running them after it means what they fetch is for
+/// rides this same run has just landed. The account depends on none of them.
 fn peloton_walks(
     access: SourceAccess,
-    (landing, samples_landing, account_landing): PelotonLandings,
+    landings: PelotonLandings,
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
     database: &Path,
 ) -> Result<
-    (
-        (
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-        ),
-        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-    ),
+    PelotonWalks<
+        impl WorkoutExtractor + Sync + use<>,
+        impl WorkoutExtractor + Sync + use<>,
+        impl WorkoutExtractor + Sync + use<>,
+        impl WorkoutExtractor + Sync + use<>,
+    >,
     WiringError,
 > {
+    let PelotonLandings {
+        rides: landing,
+        samples: samples_landing,
+        details: details_landing,
+        account: account_landing,
+    } = landings;
     let SourceAccess::EmailPassword {
         base_url,
         auth_base_url,
@@ -660,6 +691,20 @@ fn peloton_walks(
             clock: SystemClock,
         }),
     };
+    let details = application::next::Walk {
+        stream: details_landing.stream().clone(),
+        extraction: Extraction::new(ExtractionPorts {
+            source: PelotonWorkoutDetails::new(
+                base_url.clone(),
+                peloton_auth(auth_base_url.clone(), credentials.clone()),
+            ),
+            landing: details_landing,
+            resumption: resumption.clone(),
+            runs: runs.clone(),
+            lock: FileRunLock::beside(database),
+            clock: SystemClock,
+        }),
+    };
     let account = application::next::Walk {
         stream: account_landing.stream().clone(),
         extraction: Extraction::new(ExtractionPorts {
@@ -671,7 +716,7 @@ fn peloton_walks(
             clock: SystemClock,
         }),
     };
-    Ok(((rides, graphs), account))
+    Ok((((rides, graphs), details), account))
 }
 
 /// Peloton's sessions, derived from both walks.
@@ -695,7 +740,7 @@ fn peloton_normalisation(
     ))
 }
 
-/// Peloton's rides as `next` collects them: both walks, and the account.
+/// Peloton's rides as `next` collects them: every walk behind the entry.
 ///
 /// # Errors
 ///
@@ -705,13 +750,14 @@ pub async fn peloton_records(
     access: Result<SourceAccess, NoAccess>,
     database: &Path,
 ) -> Result<
-    Records<(
-        (
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-        ),
-        application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-    )>,
+    Records<
+        PelotonWalks<
+            impl WorkoutExtractor + Sync + use<>,
+            impl WorkoutExtractor + Sync + use<>,
+            impl WorkoutExtractor + Sync + use<>,
+            impl WorkoutExtractor + Sync + use<>,
+        >,
+    >,
     WiringError,
 > {
     let pool = connect(database).await?;
@@ -720,11 +766,12 @@ pub async fn peloton_records(
         Err(why) => Err(why),
         Ok(access) => accessible(peloton_walks(
             access,
-            (
-                PelotonRideLandingStore::new(pool.clone())?,
-                PelotonRideSampleLandingStore::new(pool.clone())?,
-                PelotonAccountLandingStore::new(pool.clone())?,
-            ),
+            PelotonLandings {
+                rides: PelotonRideLandingStore::new(pool.clone())?,
+                samples: PelotonRideSampleLandingStore::new(pool.clone())?,
+                details: PelotonRideDetailLandingStore::new(pool.clone())?,
+                account: PelotonAccountLandingStore::new(pool.clone())?,
+            },
             SqliteResumptionPointStore::new(pool.clone()),
             SqliteExtractionRunLog::new(pool),
             database,

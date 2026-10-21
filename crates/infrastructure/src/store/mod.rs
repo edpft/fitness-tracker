@@ -39,6 +39,7 @@ pub mod normalised_gym;
 pub mod parameters;
 pub mod peloton_account_landing;
 pub mod peloton_class;
+pub mod peloton_detail_landing;
 pub mod peloton_landing;
 pub mod peloton_normalised;
 pub mod peloton_samples_landing;
@@ -104,6 +105,7 @@ pub use normalised_gym::SqliteNormalisedGymSessionReader;
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_account_landing::PelotonAccountLandingStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
+pub use peloton_detail_landing::PelotonRideDetailLandingStore;
 pub use peloton_landing::PelotonRideLandingStore;
 pub use peloton_normalised::{
     PelotonRawExtent, PelotonSessionAccountReader, SqliteCyclingSessionStore, SqliteFtpHistory,

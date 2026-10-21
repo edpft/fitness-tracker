@@ -1,4 +1,5 @@
-//! The contract with Peloton's account, pinned against a local stub (#427).
+//! The contract with Peloton's account, pinned against a local stub (#427),
+//! and with each workout's detail (#271).
 //!
 //! **What is kept is the account as served**, and what the register reads from
 //! it is the heart rate monitors the Bike+ is paired with, each by its ANT+
@@ -13,11 +14,12 @@ use domain::{
     device::{DeviceIdentifier, Measurand},
     landing::{
         Endpoint, EventKind, EventProvenance, FetchedAt, LandedRecord, LandingRecord,
-        LandingRecordId, LandingStream, RawPayload, SourceRecordId,
+        LandingRecordId, LandingStream, RawPayload, SourceRecordId, Watermark,
     },
     normalised::OperatorZone,
 };
 use infrastructure::peloton::{
+    PelotonWorkoutDetails,
     auth::{PelotonAuth, PelotonCredentials},
     paired::{PelotonAccount, sightings},
 };
@@ -164,4 +166,93 @@ fn a_paired_monitor_is_the_device_with_that_number() {
         monitor.at.wall_clock().date(),
         jiff::civil::date(2026, 10, 13)
     );
+}
+
+fn authenticator(server: &MockServer) -> PelotonAuth {
+    PelotonAuth::new(
+        server.uri(),
+        PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+        None,
+    )
+}
+
+/// **A detail from before the resumption point is not asked for**, as with a
+/// graph; the boundary is, because the port's `since` is inclusive. Each
+/// detail is filed under its workout's id with the workout's time.
+#[test]
+fn a_detail_is_fetched_only_for_a_workout_the_run_reaches() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/api/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(account()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/user/{USER}/workouts")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "id": "new", "created_at": 2_000 },
+                    { "id": "boundary", "created_at": 1_000 },
+                    { "id": "old", "created_at": 999 },
+                ],
+                "show_next": true,
+            })))
+            .mount(&server)
+            .await;
+        for (id, ftp) in [("new", 177), ("boundary", 173)] {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/workout/{id}")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "id": id, "ftp_info": { "ftp": ftp } })),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path("/api/workout/old"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let source = PelotonWorkoutDetails::new(server.uri(), authenticator(&server));
+        let since = jiff::Timestamp::from_second(1_000)
+            .ok()
+            .map(Watermark::from);
+        let batch = source.fetch(since, None).await.expect("the details");
+
+        assert!(
+            batch.resume.is_none(),
+            "the walk stops at the resumption point"
+        );
+        let landed: Vec<(&str, Option<i64>)> = batch
+            .events
+            .iter()
+            .map(|event| {
+                (
+                    event.source_record_id.as_str(),
+                    event
+                        .provenance
+                        .occurred_at()
+                        .map(|at| at.as_timestamp().as_second()),
+                )
+            })
+            .collect();
+        assert_eq!(landed, [("new", Some(2_000)), ("boundary", Some(1_000))]);
+        let [new, _] = batch.events.as_slice() else {
+            panic!("two details");
+        };
+        assert_eq!(
+            new.provenance
+                .as_event()
+                .map(|event| event.endpoint().as_str()),
+            Some("/api/workout/new"),
+            "the detail's own path, not the list's"
+        );
+    });
 }

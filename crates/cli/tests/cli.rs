@@ -1182,6 +1182,15 @@ async fn peloton_stub(server: &MockServer, api: u16, graph: u16) {
             "application/json",
         ))
         .mount(server)
+        .await; // The ride's detail, which a third walk asks for (#271). It answers
+    // whatever the graph does not, so the cases above stay the graph's.
+    Mock::given(method("GET"))
+        .and(path("/api/workout/the-ride"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            br#"{"id":"the-ride","ftp_info":{"ftp":177}}"#.to_vec(),
+            "application/json",
+        ))
+        .mount(server)
         .await;
 }
 

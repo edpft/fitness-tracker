@@ -258,7 +258,7 @@ impl PelotonWorkouts {
     }
 
     /// Who we are, which the list endpoint is addressed by.
-    async fn user(&self) -> Result<String, SourceError> {
+    pub(super) async fn user(&self) -> Result<String, SourceError> {
         let body = self.get(ME_ENDPOINT, &[]).await?;
         let me: serde_json::Value =
             serde_json::from_slice(&body).map_err(|error| SourceError::Malformed {
