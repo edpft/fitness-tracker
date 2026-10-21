@@ -25,6 +25,7 @@ pub mod garmin_daily_heart_rate_landing;
 pub mod garmin_exercise_set_landing;
 pub mod garmin_gym;
 pub mod garmin_landing;
+pub mod garmin_metric_landing;
 pub mod garmin_normalised;
 pub mod gym_mesocycle;
 pub mod history;
@@ -83,6 +84,14 @@ pub use garmin_daily_heart_rate_landing::GarminDailyHeartRateLandingStore;
 pub use garmin_exercise_set_landing::GarminExerciseSetLandingStore;
 pub use garmin_gym::{GarminGymAccountReader, GarminGymRawExtent, SqliteMeasuredGymSessionStore};
 pub use garmin_landing::GarminHrvLandingStore;
+pub use garmin_metric_landing::{
+    GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
+    GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminFitnessAgeLandingStore,
+    GarminFloorsLandingStore, GarminHealthSnapshotLandingStore, GarminIntensityMinutesLandingStore,
+    GarminPersonalRecordLandingStore, GarminRacePredictionLandingStore,
+    GarminRespirationLandingStore, GarminSleepLandingStore, GarminSpo2LandingStore,
+    GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
+};
 pub use garmin_normalised::{GarminHrvAccountReader, SqliteOvernightHrvStore};
 pub use gym_mesocycle::SqliteGymMesocycleStore;
 pub use history::SqliteExerciseHistory;

@@ -16,7 +16,7 @@ use application::{
     DerivationStatus, DerivationStatusReporter, DerivedFrom, ExtractionError,
     ExtractionStatusReporter, LandingStore, NormalisationError, NormalisationSummary,
     RefusalReport, RefusalReporter, ResumptionPointResetter, ResumptionPointStore, RunSummary,
-    StatusError, StreamStatus, WorkoutExtractor, WorkoutNormaliser,
+    StatusError, StreamStatus, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
     next::{Daily, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
@@ -28,22 +28,30 @@ use domain::{
 };
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
-    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth, GarminCredentials,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminAuth,
+    GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore, GarminCredentials,
     GarminDailyHeartRateAccountReader, GarminDailyHeartRateLandingStore,
-    GarminExerciseSetLandingStore, GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
-    GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
-    GarminRestingHeartRateTranslator, HevySessionAccountReader, HevySessionTranslator,
-    HevyWorkoutEvents, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
-    MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator, PelotonAccountLandingStore,
-    PelotonRawExtent, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
-    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
-    SqliteGymSessionStore, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
-    SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore,
-    SqliteRestingHeartRateStore, SqliteResumptionPointStore, SqliteSpreadsheetStore,
-    SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient, WithingsMeasurementLandingStore,
-    WithingsMeasurements, WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
+    GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminExerciseSetLandingStore,
+    GarminFitnessAgeLandingStore, GarminFloorsLandingStore, GarminGymAccountReader,
+    GarminGymRawExtent, GarminGymTranslator, GarminHealthSnapshotLandingStore, GarminHrv,
+    GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
+    GarminIntensityMinutesLandingStore, GarminPersonalRecordLandingStore,
+    GarminRacePredictionLandingStore, GarminRespirationLandingStore,
+    GarminRestingHeartRateTranslator, GarminSleepLandingStore, GarminSpo2LandingStore,
+    GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
+    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
+    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
+    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideLandingStore,
+    PelotonRideSampleLandingStore, PelotonSessionAccountReader, PelotonWorkoutSamples,
+    PelotonWorkouts, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
+    SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore, SqliteEditOverlayStore,
+    SqliteExtractionRunLog, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
+    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
+    SqliteRefusalStore, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
+    SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WithingsAuth, WithingsClient,
+    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
+    WithingsWeighInTranslator, connect, garmin,
+    garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
     peloton::{
         PelotonSessionTranslator,
         auth::{PelotonAuth, PelotonCredentials},
@@ -375,7 +383,12 @@ async fn garmin_daily_heart_rate(
                 None,
             );
             let extraction = Extraction::new(ExtractionPorts {
-                source: garmin::daily::GarminDailyHeartRate::new(base_url, auth, today()),
+                source: garmin::days::GarminDays::new(
+                    GarminDay::HeartRate,
+                    base_url,
+                    auth,
+                    today(),
+                ),
                 landing,
                 resumption,
                 runs,
@@ -865,7 +878,7 @@ async fn garmin_activities(
                 (landing, sets_landing, files_landing, daily_landing),
                 resumption,
                 runs,
-                database,
+                (pool.clone(), database),
                 walks,
             )
             .await
@@ -973,7 +986,7 @@ async fn collect_activities(
     ),
     resumption: SqliteResumptionPointStore,
     runs: SqliteExtractionRunLog,
-    database: &Path,
+    (pool, database): (SqlitePool, &Path),
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     let SourceAccess::EmailPassword {
@@ -1048,26 +1061,186 @@ async fn collect_activities(
     )
     .await;
 
+    let days = Days {
+        base_url: &base_url,
+        auth: &auth,
+        resumption: &resumption,
+        runs: &runs,
+        database,
+        walks,
+    };
     // The wrist's all-day heart rate, which says which days a watch was worn
     // and, for about four months, what it read during a ride (#427).
-    let daily_stream = daily_landing.stream().clone();
-    let daily = walk(
-        daily_stream,
-        Extraction::new(ExtractionPorts {
-            source: garmin::daily::GarminDailyHeartRate::new(base_url, auth, today()),
-            landing: daily_landing,
-            resumption,
-            runs,
-            lock: FileRunLock::beside(database),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
+    let mut each = vec![
+        listed,
+        sets,
+        recordings,
+        days.walk(GarminDay::HeartRate, daily_landing).await,
+    ];
+    each.extend(days.every(pool).await?);
 
-    Ok(Outcome::ExtractedEach(vec![
-        listed, sets, recordings, daily,
-    ]))
+    Ok(Outcome::ExtractedEach(each))
+}
+
+/// What every one of Garmin's metric walks shares: the account, the books and
+/// the reporter.
+struct Days<'a> {
+    base_url: &'a str,
+    auth: &'a std::sync::Arc<GarminAuth>,
+    resumption: &'a SqliteResumptionPointStore,
+    runs: &'a SqliteExtractionRunLog,
+    database: &'a Path,
+    walks: &'a dyn WalkReporter,
+}
+
+impl Days<'_> {
+    /// **Everything else the watch records** (#269), each its own stream: a
+    /// day at a time, a month at a time, or as it stands. Nothing derives them yet, so they land behind the entry
+    /// that already walks Garmin day by day, as daily heart rate did until
+    /// #474 gave it something to derive.
+    async fn every(&self, pool: SqlitePool) -> Result<Vec<Walk>, WiringError> {
+        Ok(vec![
+            self.walk(
+                GarminDay::Sleep,
+                GarminSleepLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::Stress,
+                GarminStressLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::BodyBattery,
+                GarminBodyBatteryLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::BodyBatteryEvents,
+                GarminBodyBatteryEventLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::Respiration,
+                GarminRespirationLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(GarminDay::Spo2, GarminSpo2LandingStore::new(pool.clone())?)
+                .await,
+            self.walk(
+                GarminDay::IntensityMinutes,
+                GarminIntensityMinutesLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::Floors,
+                GarminFloorsLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::DailySummary,
+                GarminDailySummaryLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::Steps,
+                GarminStepsLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.walk(
+                GarminDay::DetectedMoves,
+                GarminDetectedMoveLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.month(
+                GarminMonth::Vo2Max,
+                GarminVo2MaxLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.month(
+                GarminMonth::HealthSnapshots,
+                GarminHealthSnapshotLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.latest(
+                GarminLatest::FitnessAge,
+                GarminFitnessAgeLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.latest(
+                GarminLatest::RacePredictions,
+                GarminRacePredictionLandingStore::new(pool.clone())?,
+            )
+            .await,
+            self.latest(
+                GarminLatest::PersonalRecords,
+                GarminPersonalRecordLandingStore::new(pool)?,
+            )
+            .await,
+        ])
+    }
+
+    /// One daily metric, walked into its own table.
+    async fn walk(&self, day: GarminDay, landing: impl LandingStore + Send + Sync) -> Walk {
+        self.into(
+            garmin::days::GarminDays::new(
+                day,
+                self.base_url,
+                std::sync::Arc::clone(self.auth),
+                today(),
+            ),
+            landing,
+        )
+        .await
+    }
+
+    /// One metric served over a span of dates, a month to a record.
+    async fn month(&self, month: GarminMonth, landing: impl LandingStore + Send + Sync) -> Walk {
+        self.into(
+            garmin::months::GarminMonths::new(
+                month,
+                self.base_url,
+                std::sync::Arc::clone(self.auth),
+                today(),
+            ),
+            landing,
+        )
+        .await
+    }
+
+    /// One metric served only as it stands now.
+    async fn latest(&self, latest: GarminLatest, landing: impl LandingStore + Send + Sync) -> Walk {
+        self.into(
+            garmin::latest::GarminLatestOf::new(
+                latest,
+                self.base_url,
+                std::sync::Arc::clone(self.auth),
+                today(),
+            ),
+            landing,
+        )
+        .await
+    }
+
+    async fn into<S>(&self, source: S, landing: impl LandingStore + Send + Sync) -> Walk
+    where
+        S: WorkoutEventSource + Send + Sync,
+        S::Resume: Send + Sync,
+    {
+        walk(
+            landing.stream().clone(),
+            Extraction::new(ExtractionPorts {
+                source,
+                landing,
+                resumption: self.resumption.clone(),
+                runs: self.runs.clone(),
+                lock: FileRunLock::beside(self.database),
+                clock: SystemClock,
+            }),
+            self.walks,
+        )
+        .await
+    }
 }
 
 /// The last night worth asking Garmin about.
@@ -1621,7 +1794,14 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
 mod tests {
     use super::{
         BtwbExportLandingStore, GarminActivityFileLandingStore, GarminActivityLandingStore,
-        GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminHrvLandingStore,
+        GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
+        GarminDailyHeartRateLandingStore, GarminDailySummaryLandingStore,
+        GarminDetectedMoveLandingStore, GarminExerciseSetLandingStore,
+        GarminFitnessAgeLandingStore, GarminFloorsLandingStore, GarminHealthSnapshotLandingStore,
+        GarminHrvLandingStore, GarminIntensityMinutesLandingStore,
+        GarminPersonalRecordLandingStore, GarminRacePredictionLandingStore,
+        GarminRespirationLandingStore, GarminSleepLandingStore, GarminSpo2LandingStore,
+        GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
         HevyWorkoutLandingStore, MyFitnessPalExportLandingStore, PelotonRideLandingStore,
         PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
         WithingsMeasurementLandingStore,
@@ -1650,6 +1830,22 @@ mod tests {
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
             GarminDailyHeartRateLandingStore::STREAM,
+            GarminSleepLandingStore::STREAM,
+            GarminStressLandingStore::STREAM,
+            GarminBodyBatteryLandingStore::STREAM,
+            GarminBodyBatteryEventLandingStore::STREAM,
+            GarminRespirationLandingStore::STREAM,
+            GarminSpo2LandingStore::STREAM,
+            GarminIntensityMinutesLandingStore::STREAM,
+            GarminFloorsLandingStore::STREAM,
+            GarminDailySummaryLandingStore::STREAM,
+            GarminStepsLandingStore::STREAM,
+            GarminDetectedMoveLandingStore::STREAM,
+            GarminVo2MaxLandingStore::STREAM,
+            GarminHealthSnapshotLandingStore::STREAM,
+            GarminFitnessAgeLandingStore::STREAM,
+            GarminRacePredictionLandingStore::STREAM,
+            GarminPersonalRecordLandingStore::STREAM,
             SpreadsheetFileLandingStore::STREAM,
             BtwbExportLandingStore::STREAM,
             MyFitnessPalExportLandingStore::STREAM,
@@ -1673,6 +1869,22 @@ mod tests {
             PelotonRideSampleLandingStore::STREAM,
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
+            GarminSleepLandingStore::STREAM,
+            GarminStressLandingStore::STREAM,
+            GarminBodyBatteryLandingStore::STREAM,
+            GarminBodyBatteryEventLandingStore::STREAM,
+            GarminRespirationLandingStore::STREAM,
+            GarminSpo2LandingStore::STREAM,
+            GarminIntensityMinutesLandingStore::STREAM,
+            GarminFloorsLandingStore::STREAM,
+            GarminDailySummaryLandingStore::STREAM,
+            GarminStepsLandingStore::STREAM,
+            GarminDetectedMoveLandingStore::STREAM,
+            GarminVo2MaxLandingStore::STREAM,
+            GarminHealthSnapshotLandingStore::STREAM,
+            GarminFitnessAgeLandingStore::STREAM,
+            GarminRacePredictionLandingStore::STREAM,
+            GarminPersonalRecordLandingStore::STREAM,
         ];
         assert_eq!(
             wired.len(),

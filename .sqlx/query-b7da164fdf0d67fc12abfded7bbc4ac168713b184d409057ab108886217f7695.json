@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO garmin_spo2_landing (endpoint, fetched_at, source_record_id, event_kind, event_time, payload, payload_digest, revision_digest, run_id, serve_ordinal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "b7da164fdf0d67fc12abfded7bbc4ac168713b184d409057ab108886217f7695"
+}

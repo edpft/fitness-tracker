@@ -65,6 +65,14 @@ pub use store::{
     SqliteSpreadsheetStore, SqliteWeighInStore, WithingsMeasurementLandingStore,
     WithingsWeighInAccountReader, connect,
 };
+pub use store::{
+    GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
+    GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminFitnessAgeLandingStore,
+    GarminFloorsLandingStore, GarminHealthSnapshotLandingStore, GarminIntensityMinutesLandingStore,
+    GarminPersonalRecordLandingStore, GarminRacePredictionLandingStore,
+    GarminRespirationLandingStore, GarminSleepLandingStore, GarminSpo2LandingStore,
+    GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
+};
 pub use token::{CredentialDigest, Token, TokenFile};
 pub use withings::{WithingsAuth, WithingsClient, WithingsMeasurements, WithingsWeighInTranslator};
 

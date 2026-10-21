@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(revision_digest, payload_digest) AS \"payload_digest!: Vec<u8>\" FROM garmin_daily_summary_landing WHERE source_record_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "payload_digest!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e55dde8e5f375eb9d836e6edfb1ec7b94d2ff21be1517338f517b7e8b088ae80"
+}
