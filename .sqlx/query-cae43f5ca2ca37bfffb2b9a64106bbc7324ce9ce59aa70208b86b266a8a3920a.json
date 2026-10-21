@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO wahoo_file_landing (\n                    fetched_at, source_record_id, path, modified_at,\n                    payload, payload_digest, revision_digest,\n                    run_id, serve_ordinal\n                )\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "cae43f5ca2ca37bfffb2b9a64106bbc7324ce9ce59aa70208b86b266a8a3920a"
+}
