@@ -1,7 +1,17 @@
 <!--
 Sync Impact Report
-- Version: 6.1.0, amended 2026-10-16. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 7.0.0, amended 2026-10-22. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 7.0.0 — § 14.1: a non-primary slot's repetitions (a range, or a static slot's fixed count)
+  are the operator's to change, from a date, for a block, a superset within it or an exercise
+  within that, the narrowest standing; the primary lift's exercise and prescription stay fixed.
+  MAJOR: part of a rule removed, since they were one fixed decision and not a knob. The
+  operator, 2026-10-22, moving the wrist pair from 4–6 to 8–12: *"I should be able to change
+  the rep range for a block, for a superset within a block, or for an exercise within a
+  superset within a block"*; *"exercises with fixed reps should work the same way"*; and on
+  what the rule was for: *"the idea was to prevent changes to the primary lift because if you
+  change that, you are really changing the programme."* No decision record: he stated the
+  rule.
 - 6.1.0 — § 4: a method-dependent reading that is the whole entity is read from the
   normalised layer. MINOR: a rule materially widened. Raised building overnight HRV and resting
   heart rate as charts (#254), which have normalised rows and no canonical layer; a canonical
@@ -278,6 +288,8 @@ The state is **derived from the relations and never stored**: a status column wo
 
 **14.1.** **How a program prescribes is not a parameter.** Warm-up set percentages, back-off schemes, top-set repetitions and reset protocols are not generation parameters, whatever they have in common with one. Where the published program states them they are the program's, and one set held in common would be a shared model of training across programs that do not share one. Where the published program is silent they are one fixed decision, not a knob: this system programs a set workout shape and a set warm-up ramp, and is not a builder of arbitrary workouts. Making them configurable is the error, independently of where the configuration is kept. The test is whether the value would still be true if no program were being authored: an available plate increment and an unavailable Monday would; a back-off percentage would not.
 
+**The primary lift is the program; the other slots are the operator's.** A non-primary slot's repetitions — the range it progresses through, or the fixed count a static slot holds — may be changed from a date, for a block, for a superset within a block, or for an exercise within a superset, and where more than one applies the narrowest stands. Such a change is authored data (§ 12), not a parameter, and the fixed decision above is only its default. The primary lift's exercise and its prescription (the ramp, the back-offs, the top sets and the resets) stay fixed. The operator, 2026-10-22: *"the idea was to prevent changes to the primary lift because if you change that, you are really changing the programme."*
+
 ## IV. Architecture
 
 **15.** Hexagonal. Domain logic has no knowledge of adapters, transports, storage engines or vendors.
@@ -366,4 +378,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 6.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-16
+**Version**: 7.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-22
