@@ -54,6 +54,7 @@ pub mod schedule;
 pub mod settings;
 pub mod spreadsheet_file_landing;
 pub mod spreadsheet_normalised;
+pub mod wahoo_file_landing;
 pub mod weigh_in;
 pub mod withings_landing;
 pub mod withings_normalised;
@@ -125,6 +126,7 @@ pub use schedule::SqliteDiaryStore;
 pub use settings::SqliteOperatorSettingsStore;
 pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
 pub use spreadsheet_normalised::SqliteSpreadsheetStore;
+pub use wahoo_file_landing::WahooFileLandingStore;
 pub use weigh_in::SpreadsheetFileAccountReader;
 pub use withings_landing::{
     WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsMeasurementLandingStore,

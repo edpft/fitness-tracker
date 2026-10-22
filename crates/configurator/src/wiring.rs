@@ -49,9 +49,10 @@ use infrastructure::{
     SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore, SqliteNormalisationRunLog,
     SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore, SqliteRestingHeartRateStore,
     SqliteResumptionPointStore, SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile,
-    WithingsAuth, WithingsClient, WithingsEcgLandingStore, WithingsEcgSignalLandingStore,
-    WithingsEcgSignals, WithingsEcgs, WithingsMeasurementLandingStore, WithingsMeasurements,
-    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
+    WahooFileLandingStore, WithingsAuth, WithingsClient, WithingsEcgLandingStore,
+    WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
+    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
+    WithingsWeighInTranslator, connect, garmin,
     garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
     peloton::{
         PelotonSessionTranslator, PelotonWorkoutDetails,
@@ -201,6 +202,8 @@ pub enum WiringError {
     Stream(#[from] domain::landing::InvalidStream),
     #[error("{stream} is collected from its source, not a folder")]
     NotAFolder { stream: &'static str },
+    #[error("{stream} lands, and nothing derives it yet")]
+    NothingDerives { stream: &'static str },
     #[error(transparent)]
     Overlay(#[from] infrastructure::OverlayError),
 }
@@ -237,10 +240,17 @@ pub async fn run(
         SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
         BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
         MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, database).await,
+        WahooFileLandingStore::STREAM => wahoo_files(command, database).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
     }
+}
+
+/// Whether `known` has a normalised layer. A stream that only lands is
+/// collected and reported like any other, and left out of every derivation.
+pub fn derives(known: &KnownStream) -> bool {
+    known.name() != WahooFileLandingStore::STREAM
 }
 
 /// What `known`'s normalised layer would be derived from now (#468): how many
@@ -323,6 +333,11 @@ pub async fn inputs(
                 .await?,
             None,
         ),
+        WahooFileLandingStore::STREAM => {
+            return Err(WiringError::NothingDerives {
+                stream: WahooFileLandingStore::STREAM,
+            });
+        }
         other => {
             return Err(WiringError::Unwired {
                 stream: other.to_owned(),
@@ -1930,6 +1945,51 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
     }
 }
 
+/// The Wahoo app's recordings: every FIT file it shared to Dropbox, landed
+/// whole (#421). Nothing derives them yet.
+async fn wahoo_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = WahooFileLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool);
+
+    match command {
+        Command::ExtractFolder(folder) => {
+            let extraction = Extraction::new(ExtractionPorts {
+                source: FolderFiles::new(folder),
+                landing,
+                resumption,
+                runs,
+                lock: FileRunLock::beside(database),
+                clock: SystemClock,
+            });
+            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+        }
+        Command::Extract(_) => Err(WiringError::WrongCredential {
+            stream: WahooFileLandingStore::STREAM.to_owned(),
+            wanted: "a folder",
+            given: "a credential",
+        }),
+        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
+            stream: WahooFileLandingStore::STREAM,
+        }),
+        Command::Status => {
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: None,
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            ExtractionStatus::new(landing, resumption, runs)
+                .reset()
+                .await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1943,7 +2003,7 @@ mod tests {
         GarminRespirationLandingStore, GarminSleepLandingStore, GarminSpo2LandingStore,
         GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
         HevyWorkoutLandingStore, MyFitnessPalExportLandingStore, PelotonRideLandingStore,
-        PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
+        PelotonRideSampleLandingStore, SpreadsheetFileLandingStore, WahooFileLandingStore,
         WithingsMeasurementLandingStore,
     };
     use crate::catalogue::{KNOWN, lookup};
@@ -1989,6 +2049,7 @@ mod tests {
             SpreadsheetFileLandingStore::STREAM,
             BtwbExportLandingStore::STREAM,
             MyFitnessPalExportLandingStore::STREAM,
+            WahooFileLandingStore::STREAM,
         ];
 
         for known in &KNOWN {
@@ -2037,6 +2098,18 @@ mod tests {
                 "{hidden} lands behind another entry and must not be nameable"
             );
         }
+    }
+
+    /// `next` derives every stream but the one that only lands, so a stream
+    /// added without a derivation is a decision here rather than a failed run.
+    #[test]
+    fn only_the_wahoo_files_land_without_deriving() {
+        let landed_only: Vec<String> = KNOWN
+            .iter()
+            .filter(|known| !super::derives(known))
+            .map(crate::catalogue::KnownStream::name)
+            .collect();
+        assert_eq!(landed_only, vec![WahooFileLandingStore::STREAM.to_owned()]);
     }
 
     /// A walk that cannot run: enough to see what is reported, and when.

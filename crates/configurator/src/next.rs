@@ -237,6 +237,7 @@ impl NormalisedLayers for Layers {
     fn streams(&self) -> Vec<LandingStream> {
         catalogue::KNOWN
             .iter()
+            .filter(|known| wiring::derives(known))
             .filter_map(|known| known.landing_stream().ok())
             .collect()
     }

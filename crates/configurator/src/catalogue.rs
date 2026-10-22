@@ -291,7 +291,10 @@ pub const SOURCES: [KnownSource; 4] = [
 /// **Beyond The White Board serves exports**: one record is the file it sent on
 /// request, whole. Only an export is served, so the export is the entity.
 /// **MyFitnessPal** likewise, sent once on a request under the UK GDPR.
-pub const KNOWN: [KnownStream; 9] = [
+///
+/// **Wahoo serves files**, as the spreadsheets do: one record is one FIT file
+/// the app shared to Dropbox, whatever its sport (#421).
+pub const KNOWN: [KnownStream; 10] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[0]),
         entity: "workouts",
@@ -344,6 +347,10 @@ pub const KNOWN: [KnownStream; 9] = [
             name: "myfitnesspal",
         },
         entity: "exports",
+    },
+    KnownStream {
+        served_by: ServedBy::Folder { name: "wahoo" },
+        entity: "files",
     },
 ];
 

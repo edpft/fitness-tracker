@@ -63,8 +63,8 @@ pub use store::{
     SqliteOvernightHrvStore, SqlitePelotonClassStore, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
     SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
-    SqliteSpreadsheetStore, SqliteWeighInStore, WithingsMeasurementLandingStore,
-    WithingsWeighInAccountReader, connect,
+    SqliteSpreadsheetStore, SqliteWeighInStore, WahooFileLandingStore,
+    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
