@@ -830,6 +830,104 @@ fn a_date_with_nothing_issued_delivers_nothing() {
     assert_eq!(destination.calls(), 0);
 }
 
+/// The fixture's plan authored again a week later, as an illness that cost the
+/// entry test's week would have it: nothing now covers 29 June to 5 July.
+async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
+    Authoring::new(
+        SqlitePlanStore::new(ready.pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(ready.pool.clone()),
+    )
+    .author(
+        &programme::plan(vec![
+            programme::entry_test_from(Date::constant(2026, 7, 6))?,
+            programme::as_programme(programme::programme_from(Date::constant(2026, 7, 13))?),
+        ])?,
+        &programme::parameters()?,
+    )
+    .await?;
+    Ok(())
+}
+
+/// The entry test's day, which [`a_week_lost`] takes out of the plan.
+const fn entry_test_day() -> Date {
+    Date::constant(2026, 7, 3)
+}
+
+/// **A session in a week the plan no longer runs says which week, and does
+/// not call the store corrupt** (#316). Asked to deliver 2026-09-18, the
+/// operator's store answered that the prescription "names a mesocycle that is
+/// not in the store". It did not: the mesocycle was there, and the plan as
+/// authored after an illness no longer ran that week.
+#[test]
+fn a_session_in_a_week_the_plan_lost_says_which_week() {
+    let ready = run!(ready());
+    run!(ready.prescriber.prescribe(entry_test_day()));
+    run!(a_week_lost(&ready));
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let refused =
+        match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day())) {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("a runtime is available: {error}"),
+        };
+
+    match refused {
+        Err(DeliveryError::WeekNotRun { date, week_of }) => {
+            assert_eq!(date, entry_test_day());
+            assert_eq!(week_of, Date::constant(2026, 6, 29), "the week, by its Monday");
+        }
+        Err(other) => panic!("the wrong refusal: {other}"),
+        Ok(_) => panic!("a session in a week the plan no longer runs was delivered"),
+    }
+    assert_eq!(destination.calls(), 0);
+}
+
+/// **A prescription naming a mesocycle the store does not hold is still the
+/// corrupt one** (#316). Nothing this program does removes one, so the row is
+/// taken out here by hand, past the foreign key that would refuse it.
+#[test]
+fn a_prescription_whose_mesocycle_is_gone_is_a_corrupt_store() {
+    let ready = run!(ready());
+    run!(ready.prescriber.prescribe(entry_test_day()));
+    run!(async {
+        let mut connection = ready.pool.acquire().await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query(
+            "DELETE FROM gym_mesocycle \
+             WHERE id = (SELECT mesocycle FROM prescribed_workout WHERE issued_for = ?)",
+        )
+        .bind(entry_test_day().to_string())
+        .execute(&mut *connection)
+        .await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *connection)
+            .await?;
+        Ok::<_, sqlx::Error>(())
+    });
+    let destination = match Counting::new() {
+        Ok(destination) => destination,
+        Err(error) => panic!("the fake destination builds: {error}"),
+    };
+
+    let refused =
+        match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day())) {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("a runtime is available: {error}"),
+        };
+
+    match refused {
+        Err(DeliveryError::NoMesocycle { date }) => assert_eq!(date, entry_test_day()),
+        Err(other) => panic!("the wrong refusal: {other}"),
+        Ok(_) => panic!("a session whose mesocycle is gone was delivered"),
+    }
+    assert_eq!(destination.calls(), 0);
+}
+
 /// The identity a delivery is recorded against outlives the process: a second
 /// invocation reads it back rather than sending again.
 #[test]

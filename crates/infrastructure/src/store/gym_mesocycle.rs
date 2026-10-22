@@ -650,6 +650,19 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn role_on(&self, _date: Date) -> Result<Option<SessionRole>, StoreError> {
         Ok(None)
     }
+
+    /// Any authoring's row, since a prescription keeps naming the one it was
+    /// issued from after its plan is authored again.
+    async fn holds(&self, id: MesocycleId) -> Result<bool, StoreError> {
+        let id = id.as_i64();
+        sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM gym_mesocycle WHERE id = ?) AS "held!: bool""#,
+            id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))
+    }
 }
 
 /// Write one gym mesocycle of a plan, inside the plan's own transaction.

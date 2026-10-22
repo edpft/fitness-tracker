@@ -1644,6 +1644,19 @@ pub trait MesocycleStore {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<SessionRole>, StoreError>> + Send;
+
+    /// Whether the store holds the mesocycle of this identity, in any
+    /// authoring of its plan.
+    ///
+    /// **What tells a lost week from a corrupt store** (#316). A prescription
+    /// whose date no mesocycle covers names one the store still holds when its
+    /// week was lost or moved, which is ordinary; one it does not hold could
+    /// only have been removed by something this program did not do.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn holds(&self, id: MesocycleId) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }
 
 /// The authored plan: what is written, and what the overlap rule reads.
