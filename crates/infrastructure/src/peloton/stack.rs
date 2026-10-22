@@ -32,9 +32,32 @@ use super::auth::PelotonAuth;
 
 /// Peloton's GraphQL gateway.
 ///
-/// Its own constant rather than the API base: they are different services, and
-/// a stack pointed at the REST host fails with a 404 that looks like an outage.
+/// Its own host rather than the API base's: they are different services, and a
+/// stack pointed at the REST host fails with a 404 that looks like an outage.
 pub const GATEWAY: &str = "https://gql-graphql-gateway.prod.k8s.onepeloton.com/graphql";
+
+/// The REST host whose gateway [`GATEWAY`] is.
+const API_HOST: &str = "api.onepeloton.com";
+
+/// Where the gateway answers on a root that is not Peloton's.
+const GATEWAY_PATH: &str = "/graphql";
+
+/// The gateway that goes with an API root (#196).
+///
+/// **Derived, as Garmin's token host is from its sign-in host**, rather than a
+/// third root every other source would carry empty. Peloton's own API host has
+/// its gateway on a host of its own; any other root — a stub — answers the
+/// gateway's path itself. So pointing `PELOTON_API_BASE_URL` somewhere points
+/// delivery there too, and a run aimed at a stub can no longer write to the
+/// real stack, which is what it did on 2026-09-20 and four times since.
+#[must_use]
+pub fn gateway_for(api_base: &str) -> String {
+    let trimmed = api_base.trim_end_matches('/');
+    match trimmed.split_once("://") {
+        Some((_, host)) if host == API_HOST => GATEWAY.to_owned(),
+        _ => format!("{trimmed}{GATEWAY_PATH}"),
+    }
+}
 
 /// What a class is called when it is stacked.
 ///
