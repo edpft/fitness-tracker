@@ -859,6 +859,12 @@ fn an_illness_makes_a_prescribed_session_not_performed() {
 /// Before this, the Wednesday read *performed* on nothing more than the day it
 /// fell on, the FTP test went unridden into the first Build mesocycle, and that
 /// mesocycle opened against an FTP estimated on 2026-07-22.
+///
+/// **Since 2026-10-22 the missed test moves to the Sunday.** The Wednesday's
+/// window closed with the FTP test not ridden, so the Sunday rides it, and the
+/// endurance ride answers for the Wednesday, which now holds its role. The test
+/// is still owed and the ride is still done; what changed is that the week has
+/// a slot left for the test.
 #[test]
 fn a_ride_answers_for_the_slot_holding_its_class() {
     let sessions = corpus::block_on(async {
@@ -910,8 +916,8 @@ fn a_ride_answers_for_the_slot_holding_its_class() {
 
     assert_eq!(
         read,
-        vec!["2026-09-16 — not prescribed", "2026-09-20 — performed"],
-        "the FTP test is still owed and the endurance ride is done"
+        vec!["2026-09-16 — performed", "2026-09-20 — to be prescribed"],
+        "the FTP test is still owed, on the Sunday, and the endurance ride is done"
     );
 }
 
@@ -1007,7 +1013,7 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         .await?;
 
         let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-        let reschedule = Reschedule::new(standing.reruns.clone(), diary);
+        let reschedule = Reschedule::new(standing.reruns.clone(), diary, standing.missed.clone());
         let gym = Rescheduled::new(
             SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             SqlitePlanStore::new(pool.clone(), corpus::zone()?),
@@ -1171,7 +1177,11 @@ async fn after(
     .await?;
 
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    let reschedule = Reschedule::new(standing.reruns.clone(), diary.clone());
+    let reschedule = Reschedule::new(
+        standing.reruns.clone(),
+        diary.clone(),
+        standing.missed.clone(),
+    );
     let gym = Rescheduled::new(
         SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         SqlitePlanStore::new(pool.clone(), zone.clone()),
@@ -1210,7 +1220,9 @@ async fn after(
     let riding_week = diary
         .training_week(monday, Discipline::Cycling)
         .ok_or("cycling has a week")?;
-    let (_, due) = application::cycling::next_ride(&bike, monday, &riding_week, &diary).await?;
+    let (_, due) =
+        application::cycling::next_ride(&bike, monday, &riding_week, &diary, &standing.missed)
+            .await?;
 
     Ok(After {
         standing,
@@ -1704,6 +1716,105 @@ fn a_skipped_essential_ride_is_ridden_on_the_sunday_instead() {
             SessionState::ToBePrescribed
         )),
         "the Sunday rides the FTP test"
+    );
+    assert!(
+        after.reruns.is_empty(),
+        "the test was ridden that week, so nothing runs again: {:?}",
+        after.weeks
+    );
+}
+
+/// **A missed essential ride takes the Sunday too** (2026-10-22). The operator
+/// did not ride the Wednesday's FTP test and recorded no skip: *"if we get to
+/// cycle 2's window and cycle 1 hasn't been done, we should re-prescribe cycling
+/// 1."* Read on the Thursday, the Sunday rides the test and `cycling next`
+/// prescribes it there; riding it on the Sunday completes the microcycle.
+#[test]
+fn a_missed_essential_ride_is_ridden_on_the_sunday_instead() {
+    let thursday = DayPart::new(Date::constant(2026, 9, 17), PartOfDay::Morning);
+    let monday = DayPart::new(Date::constant(2026, 9, 21), PartOfDay::Evening);
+    let (on_thursday, due, after) = corpus::block_on(async {
+        let (pool, _directory) = autumn_on_the_bike().await?;
+        let microcycle = |ridden: Ridden| -> Fallible<_> {
+            Ok(Microcycle::new(
+                MicrocyclePorts {
+                    diary: SqliteDiaryStore::new(pool.clone()),
+                    plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                    gym_performed: Trained::nothing(),
+                    cycling_performed: ridden,
+                },
+                hevy()?,
+                peloton()?,
+            ))
+        };
+
+        let on_thursday = microcycle(Ridden::of(Vec::new()))?
+            .standing(thursday)
+            .await?;
+
+        let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
+        let bike = Rescheduled::new(
+            SqliteCyclingMesocycleStore::new(pool.clone()),
+            SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            Reschedule::new(
+                on_thursday.reruns.clone(),
+                diary.clone(),
+                on_thursday.missed.clone(),
+            ),
+        );
+        let riding_week = diary
+            .training_week(thursday.date, Discipline::Cycling)
+            .ok_or("cycling has a week")?;
+        let (_, due) = application::cycling::next_ride(
+            &bike,
+            thursday.date,
+            &riding_week,
+            &diary,
+            &on_thursday.missed,
+        )
+        .await?;
+
+        let ftp_on_the_sunday = Ridden::of(vec![(
+            Date::constant(2026, 9, 20).at(9, 0, 0, 0),
+            vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+        )]);
+        let after = microcycle(ftp_on_the_sunday)?.standing(monday).await?;
+        Ok::<_, Box<dyn std::error::Error>>((on_thursday, due, after))
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    let sunday = on_thursday
+        .sessions
+        .iter()
+        .find(|session| session.slot.discipline == Discipline::Cycling && session.number == 2);
+    assert_eq!(
+        sunday.map(|session| (
+            session.slot.date,
+            session.slot.role,
+            session.test,
+            session.state.clone()
+        )),
+        Some((
+            Date::constant(2026, 9, 20),
+            SessionRole::new(Relative::Higher, Relative::Lower),
+            true,
+            SessionState::ToBePrescribed
+        )),
+        "the Sunday rides the FTP test"
+    );
+    let ride = due
+        .ride()
+        .map(|next| (next.date, next.ride.at().first().called().to_owned()));
+    assert!(
+        matches!(
+            ride,
+            Some((date, ref called))
+                if date == Date::constant(2026, 9, 20) && called.contains("FTP")
+        ),
+        "the prescriber rides the test on the Sunday: {ride:?}"
     );
     assert!(
         after.reruns.is_empty(),

@@ -22,7 +22,7 @@
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
-    planner::{self, Rerun, RerunOrdinal},
+    planner::{self, Missed, Rerun, RerunOrdinal},
     prescription::GymMesocycle,
     schedule::{Diary, Discipline, SessionRole},
 };
@@ -30,19 +30,32 @@ use jiff::civil::Date;
 
 use crate::{CyclingMesocycleStore, MesocycleInForce, MesocycleStore, PlanStore, StoreError};
 
-/// Which weeks run again, and the diary a moved mesocycle is read against.
+/// Which weeks run again, the diary a moved mesocycle is read against, and
+/// which essential sessions were missed.
 ///
 /// What [`crate::microcycle::Standing`] hands every other reader.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reschedule {
     reruns: Vec<Rerun>,
     diary: Diary,
+    missed: Missed,
 }
 
 impl Reschedule {
     #[must_use]
-    pub const fn new(reruns: Vec<Rerun>, diary: Diary) -> Self {
-        Self { reruns, diary }
+    pub const fn new(reruns: Vec<Rerun>, diary: Diary, missed: Missed) -> Self {
+        Self {
+            reruns,
+            diary,
+            missed,
+        }
+    }
+
+    /// The essential sessions missed, which ride a later slot of their
+    /// discipline where the week has one ([`planner::slots`]).
+    #[must_use]
+    pub const fn missed(&self) -> &Missed {
+        &self.missed
     }
 
     /// Nothing lost: every plan reads exactly as authored.
@@ -200,7 +213,12 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
             .diary
             .training_week(date, Discipline::Gym)
             .and_then(|week| week.role_on(date.weekday()));
-        let rides = planner::role_on(&self.reschedule.diary, date, Discipline::Gym);
+        let rides = planner::role_on(
+            &self.reschedule.diary,
+            date,
+            Discipline::Gym,
+            &self.reschedule.missed,
+        );
         Ok(rides.filter(|rides| Some(*rides) != ordinary))
     }
 }

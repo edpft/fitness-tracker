@@ -19,7 +19,7 @@ use domain::{
     gym::exercise::{DurationExercise, Exercise, RepsExercise},
     measure::{PositiveDuration, RepCount},
     plan::{Plan, PlanName, Programme},
-    planner::{self, Filled, Planned, week},
+    planner::{self, Filled, Missed, Planned, week},
     prescription::{
         BlockPeriodisation, EntryTest, Fill, GymMesocycle, Primary, PrimaryPattern, Progression,
         Skip, SlotFills, StaticFill,
@@ -247,7 +247,7 @@ fn the_planner_produces_the_operators_week() {
     };
 
     // Week two of the block: Monday 28 September to Sunday 4 October.
-    let planned = week(&plan, &diary, date(2026, 9, 30));
+    let planned = week(&plan, &diary, date(2026, 9, 30), &Missed::none());
     let read: Vec<String> = planned.iter().map(line).collect();
 
     assert_eq!(
@@ -271,7 +271,7 @@ fn a_test_week_puts_the_ftp_test_on_the_wednesday() {
         panic!("the fixture plan and diary are valid")
     };
 
-    let planned = week(&plan, &diary, date(2026, 9, 23));
+    let planned = week(&plan, &diary, date(2026, 9, 23), &Missed::none());
     let read: Vec<String> = planned.iter().map(line).collect();
 
     assert_eq!(
@@ -308,7 +308,7 @@ fn a_week_no_mesocycle_covers_is_reported_as_unfilled() {
         panic!("the fixture plan and diary are valid")
     };
 
-    let planned = week(&plan, &diary, date(2026, 6, 1));
+    let planned = week(&plan, &diary, date(2026, 6, 1), &Missed::none());
     assert_eq!(planned.len(), 4, "the week still holds four slots");
     assert!(
         planned.iter().all(|slot| slot.session.is_err()),
@@ -339,7 +339,7 @@ fn a_week_keeps_the_sessions_an_absence_covered() {
     let ill = Alteration::new(date(2026, 9, 17), over, Absence::Illness);
     let diary = Diary::new(diary.patterns().to_vec(), vec![ill]);
 
-    let planned = week(&plan, &diary, date(2026, 9, 16));
+    let planned = week(&plan, &diary, date(2026, 9, 16), &Missed::none());
     let read: Vec<String> = planned
         .iter()
         .map(|one| format!("{} {}", one.slot.discipline, one.number))
@@ -456,7 +456,16 @@ fn skipping(
 
 /// The role each slot of a discipline rides in the week of Monday 21 September.
 fn roles(diary: &Diary, discipline: Discipline) -> Vec<(jiff::civil::Date, SessionRole)> {
-    planner::slots(diary, date(2026, 9, 21))
+    roles_missing(diary, discipline, &Missed::none())
+}
+
+/// The same, with the `missed` essential sessions moved.
+fn roles_missing(
+    diary: &Diary,
+    discipline: Discipline,
+    missed: &Missed,
+) -> Vec<(jiff::civil::Date, SessionRole)> {
+    planner::slots(diary, date(2026, 9, 21), missed)
         .into_iter()
         .filter(|slot| slot.discipline == discipline)
         .map(|slot| (slot.date, slot.role))
@@ -484,7 +493,12 @@ fn a_skipped_essential_session_takes_the_next_slot_of_its_discipline() {
         vec![(date(2026, 9, 23), easier()), (date(2026, 9, 27), harder())],
     );
     assert_eq!(
-        planner::role_on(&diary, date(2026, 9, 27), Discipline::Cycling),
+        planner::role_on(
+            &diary,
+            date(2026, 9, 27),
+            Discipline::Cycling,
+            &Missed::none()
+        ),
         Some(harder()),
     );
     assert_eq!(
@@ -530,8 +544,8 @@ fn a_skipped_session_that_is_not_essential_moves_nothing() {
     };
 
     assert_eq!(
-        planner::slots(&skipped, date(2026, 9, 21)),
-        planner::slots(&ordinary, date(2026, 9, 21)),
+        planner::slots(&skipped, date(2026, 9, 21), &Missed::none()),
+        planner::slots(&ordinary, date(2026, 9, 21), &Missed::none()),
     );
 }
 
@@ -552,6 +566,61 @@ fn a_later_slot_taken_by_an_absence_does_not_take_the_essential_session() {
     assert_eq!(
         roles(&diary, Discipline::Cycling),
         vec![(date(2026, 9, 23), harder()), (date(2026, 9, 27), easier())],
+    );
+}
+
+/// **A missed essential ride takes the Sunday too** (2026-10-22). The
+/// Wednesday's window closed with the harder ride not ridden and no skip, so
+/// the Sunday rides it, as it would have after a skip.
+#[test]
+fn a_missed_essential_session_takes_the_next_slot_of_its_discipline() {
+    let Ok(diary) = diary() else {
+        panic!("the fixture diary is valid")
+    };
+    let missed: Missed = std::iter::once((Discipline::Cycling, date(2026, 9, 23))).collect();
+
+    assert_eq!(
+        roles_missing(&diary, Discipline::Cycling, &missed),
+        vec![(date(2026, 9, 23), easier()), (date(2026, 9, 27), harder())],
+    );
+    assert_eq!(
+        planner::role_on(&diary, date(2026, 9, 27), Discipline::Cycling, &missed),
+        Some(harder()),
+    );
+    assert_eq!(
+        roles_missing(&diary, Discipline::Gym, &missed),
+        vec![(date(2026, 9, 21), easier()), (date(2026, 9, 25), harder())],
+        "the gym's week is not touched by a missed ride"
+    );
+}
+
+/// **No later slot of the discipline, nothing moves**, missed as skipped: the
+/// Friday is the gym's last slot.
+#[test]
+fn a_missed_essential_session_with_no_later_slot_stays_put() {
+    let Ok(diary) = diary() else {
+        panic!("the fixture diary is valid")
+    };
+    let missed: Missed = std::iter::once((Discipline::Gym, date(2026, 9, 25))).collect();
+
+    assert_eq!(
+        roles_missing(&diary, Discipline::Gym, &missed),
+        vec![(date(2026, 9, 21), easier()), (date(2026, 9, 25), harder())],
+    );
+}
+
+/// **Only the essential session moves.** The Sunday's ride is the easier one,
+/// so missing it leaves the week as the diary holds it.
+#[test]
+fn a_missed_session_that_is_not_essential_moves_nothing() {
+    let Ok(diary) = diary() else {
+        panic!("the fixture diary is valid")
+    };
+    let missed: Missed = std::iter::once((Discipline::Cycling, date(2026, 9, 27))).collect();
+
+    assert_eq!(
+        planner::slots(&diary, date(2026, 9, 21), &missed),
+        planner::slots(&diary, date(2026, 9, 21), &Missed::none()),
     );
 }
 

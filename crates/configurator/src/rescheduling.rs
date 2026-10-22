@@ -58,7 +58,7 @@ pub async fn reschedule(store: &Store, zone: &OperatorZone) -> Result<Reschedule
     let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
     let standing = standing(store, zone, DayPart::containing(here.datetime())).await?;
     let diary = store.diary().diary().await?;
-    Ok(Reschedule::new(standing.reruns, diary))
+    Ok(Reschedule::new(standing.reruns, diary, standing.missed))
 }
 
 /// The gym's mesocycles, as the plan now stands.
