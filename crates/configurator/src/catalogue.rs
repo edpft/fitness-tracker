@@ -222,6 +222,10 @@ const SEPARATOR: char = domain::landing::STREAM_SEPARATOR;
 /// variable that overrides its roots.
 pub const PELOTON: &str = "peloton";
 
+/// Garmin's name here, which is also the stem of its token file (#377) and of
+/// every variable that overrides its roots.
+pub const GARMIN: &str = "garmin";
+
 /// Every system this build can talk to.
 pub const SOURCES: [KnownSource; 4] = [
     KnownSource {
@@ -255,7 +259,7 @@ pub const SOURCES: [KnownSource; 4] = [
     // **The auth root is the sign-in host**; the token host beside it is
     // derived by the adapter, so pointing this at a stub points both there.
     KnownSource {
-        name: "garmin",
+        name: GARMIN,
         default_base_url: "https://connectapi.garmin.com",
         credential_url: "https://connect.garmin.com",
         credential: Credential::EmailPassword {
