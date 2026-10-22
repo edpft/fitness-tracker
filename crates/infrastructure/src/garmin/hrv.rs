@@ -26,7 +26,10 @@
 //! whatever it happened to return. It is the first thing a live run should
 //! establish.
 
-use std::{sync::OnceLock, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
@@ -83,7 +86,9 @@ impl HrvWalk {
 /// Garmin's overnight HRV.
 #[derive(Debug)]
 pub struct GarminHrv {
-    auth: GarminAuth,
+    /// Shared, as every other Garmin walk's is: a run that collects the nights
+    /// beside the activities signs in once for both (#432).
+    auth: Arc<GarminAuth>,
     api_base: String,
     client: OnceLock<Result<reqwest::Client, String>>,
     /// What "today" means to this walk. Injected so a test is not at the mercy
@@ -92,9 +97,9 @@ pub struct GarminHrv {
 }
 
 impl GarminHrv {
-    pub fn new(api_base: impl Into<String>, auth: GarminAuth, today: Date) -> Self {
+    pub fn new(api_base: impl Into<String>, auth: impl Into<Arc<GarminAuth>>, today: Date) -> Self {
         Self {
-            auth,
+            auth: auth.into(),
             api_base: api_base.into().trim_end_matches('/').to_owned(),
             client: OnceLock::new(),
             today,

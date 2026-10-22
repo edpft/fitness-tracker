@@ -25,10 +25,10 @@ use application::{
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
-        Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Found, GymPrescribed,
-        GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, Prescribed,
-        Progress, Records, Report, SkipRefused, StandingReader, Step, StepFailure, Walks,
-        WhatIsNext,
+        Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Found,
+        GymPrescribed, GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess,
+        Prescribed, Progress, Records, Report, SkipRefused, StandingReader, Step, StepFailure,
+        Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -71,7 +71,7 @@ impl Walking {
 }
 
 /// How many walks meet, and how long one waits for the rest.
-const MEETING: usize = 3;
+const MEETING: usize = 4;
 const PATIENCE: usize = 100;
 
 impl Walks for Walking {
@@ -612,6 +612,8 @@ type Ports<H = Unreachable> = NextPorts<
     Walking,
     Walking,
     Daily<Walking, Newest>,
+    Walking,
+    Daily<Walking, Newest>,
     Layers,
     Canonical,
     Ledger,
@@ -643,8 +645,9 @@ impl NextLock for Lock {
     }
 }
 
-/// The gym walked and landed two; Peloton has no credential; the school
-/// calendar does not answer.
+/// The gym walked and landed two; Peloton has no credential; the watch's
+/// activities landed three and its days four; the school calendar does not
+/// answer.
 fn ports(
     diary: Recorded,
     week: Week,
@@ -687,6 +690,19 @@ fn over<H>(
             walks: Ok(Daily {
                 walks: Walking::landing(stream("withings.measurements")?, 1),
                 newest: Newest(None),
+                awaits: Awaits::Today,
+            }),
+        },
+        watch_records: Records {
+            entry: stream("garmin.activities")?,
+            walks: Ok(Walking::landing(stream("garmin.activities")?, 3)),
+        },
+        watch_days: Records {
+            entry: stream("garmin.daily_heart_rate")?,
+            walks: Ok(Daily {
+                walks: Walking::landing(stream("garmin.daily_heart_rate")?, 4),
+                newest: Newest(None),
+                awaits: Awaits::Yesterday,
             }),
         },
         normalised: Layers(Arc::clone(&graph)),
@@ -740,6 +756,7 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
     let peloton = stream("peloton.rides").expect("a stream");
     let withings = stream("withings.measurements").expect("a stream");
     let garmin = stream("garmin.activities").expect("a stream");
+    let garmin_days = stream("garmin.daily_heart_rate").expect("a stream");
     assert_eq!(
         steps,
         vec![
@@ -747,6 +764,8 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
             (&Step::Fetching(peloton.clone()), false),
             (&Step::RefreshingClasses, true),
             (&Step::Fetching(withings.clone()), true),
+            (&Step::Fetching(garmin.clone()), true),
+            (&Step::Fetching(garmin_days), true),
             (&Step::Normalising(hevy), true),
             (&Step::Normalising(peloton), true),
             (&Step::Normalising(withings), true),
@@ -821,8 +840,70 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
                 "withings.measurements".to_owned(),
                 Some(Found::Landed(RecordCount::from(1)))
             ),
+            (
+                "garmin.activities".to_owned(),
+                Some(Found::Landed(RecordCount::from(3)))
+            ),
+            (
+                "garmin.daily_heart_rate".to_owned(),
+                Some(Found::Landed(RecordCount::from(4)))
+            ),
         ]
     );
+}
+
+/// **With no Garmin credential, the run says the watch was not collected and
+/// carries on** (#432): every other stream is fetched, every layer derived,
+/// and the next session prescribed (§ 36).
+#[test]
+fn with_no_garmin_credential_the_watch_is_not_collected_and_the_run_carries_on() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let no_garmin = NoAccess {
+        detail: "no garmin credential".to_owned(),
+    };
+    ports.watch_records.walks = Err(no_garmin.clone());
+    ports.watch_days.walks = Err(no_garmin.clone());
+    let report = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .expect("the run answers");
+
+    let garmin = stream("garmin.activities").expect("a stream");
+    for entry in [
+        garmin.clone(),
+        stream("garmin.daily_heart_rate").expect("a stream"),
+    ] {
+        let watch = report
+            .run
+            .iter()
+            .find(|done| done.step == Step::Fetching(entry.clone()))
+            .expect("the watch is reported");
+        assert_eq!(watch.outcome, Err(StepFailure::NoAccess(no_garmin.clone())));
+    }
+    let landed = |name: &str| {
+        report.run.iter().any(|done| {
+            done.step == Step::Fetching(stream(name).expect("a stream"))
+                && matches!(done.outcome, Ok(Found::Landed(_)))
+        })
+    };
+    assert!(landed("hevy.workouts"));
+    assert!(landed("withings.measurements"));
+    assert!(
+        report
+            .run
+            .iter()
+            .any(|done| done.step == Step::Normalising(garmin.clone()) && done.outcome.is_ok()),
+        "what is already landed is still derived"
+    );
+    assert!(matches!(report.next, WhatIsNext::Session { .. }));
 }
 
 /// **Every step is reported as it runs**, started then finished, in the order
@@ -1180,8 +1261,8 @@ fn a_daily_stream_holding_today_is_not_fetched_until_tomorrow() {
     );
 }
 
-/// **The streams are fetched at once**: each walk here waits for the other two
-/// to start, which they never would one after another.
+/// **The streams are fetched at once**: each walk here waits for the other
+/// three to start, which they never would one after another.
 #[test]
 fn the_streams_are_fetched_at_once() {
     let mut ports = ports(
@@ -1205,6 +1286,11 @@ fn the_streams_are_fetched_at_once() {
     if let Ok(daily) = &mut ports.weigh_in_records.walks {
         daily.walks = walking("withings.measurements");
     }
+    ports.watch_records.walks = Ok(walking("garmin.activities"));
+    // After the watch's activities, on the same sign-in, so it meets nobody.
+    if let Ok(daily) = &mut ports.watch_days.walks {
+        daily.walks = Walking::landing(stream("garmin.daily_heart_rate").expect("a stream"), 1);
+    }
     let report = runtime()
         .expect("a current-thread runtime builds")
         .block_on(Next::new(ports).run(now(), None, &Heard::default()))
@@ -1216,5 +1302,63 @@ fn the_streams_are_fetched_at_once() {
         .filter(|done| matches!(done.step, Step::Fetching(_)))
         .map(|done| done.outcome == Ok(Found::Landed(RecordCount::from(1))))
         .collect();
-    assert_eq!(fetched, vec![true, true, true]);
+    assert_eq!(fetched, vec![true, true, true, true, true]);
+}
+
+/// The watch's steps of a run whose day walks are whole through `whole`.
+fn watch_on(whole: Option<Date>) -> Result<Fetched, Box<dyn std::error::Error>> {
+    let mut ports = ports(
+        Recorded::week()?,
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+    )?;
+    if let Ok(daily) = &mut ports.watch_days.walks {
+        daily.newest = Newest(whole);
+    }
+    let report = runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?;
+    let watch = [
+        stream("garmin.activities")?,
+        stream("garmin.daily_heart_rate")?,
+    ];
+    Ok(report
+        .run
+        .into_iter()
+        .filter(|done| {
+            watch
+                .iter()
+                .any(|entry| done.step == Step::Fetching(entry.clone()))
+        })
+        .map(|done| (done.step, done.outcome))
+        .collect())
+}
+
+/// **Once yesterday is whole, the watch's days are not fetched again until
+/// tomorrow; its activities are fetched every run** (#432). The operator,
+/// 2026-10-22: *"we don't need to fetch daily data if we've already got data
+/// for today, in the case of Withings, or yesterday, in the case of daily
+/// Garmin metrics."*
+#[test]
+fn the_watch_s_days_wait_for_yesterday_and_its_activities_do_not() {
+    let activities = Step::Fetching(stream("garmin.activities").expect("a stream"));
+    let days = Step::Fetching(stream("garmin.daily_heart_rate").expect("a stream"));
+    let yesterday = now().date.yesterday().ok();
+    let day_before = yesterday.and_then(|day| day.yesterday().ok());
+
+    assert_eq!(
+        watch_on(yesterday).expect("the run answers"),
+        vec![
+            (activities.clone(), Ok(Found::Landed(RecordCount::from(3)))),
+            (days.clone(), Ok(Found::NotDue)),
+        ]
+    );
+    assert_eq!(
+        watch_on(day_before).expect("the run answers"),
+        vec![
+            (activities, Ok(Found::Landed(RecordCount::from(3)))),
+            (days, Ok(Found::Landed(RecordCount::from(4)))),
+        ]
+    );
 }

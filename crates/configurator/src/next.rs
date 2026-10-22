@@ -81,22 +81,14 @@ pub async fn run(
     // **This build collects the gym from Hevy and cycling from Peloton**, and
     // the catalogue says so: a second source for either is an entry there and
     // an arm in `wiring`.
-    let access = |discipline| -> Result<Result<SourceAccess, NoAccess>, NextFailure> {
-        let stream = known(discipline)?.collects();
-        let Some(system) = stream.system() else {
-            return Ok(Err(NoAccess {
-                detail: format!("{} is read from a folder, not a system", stream.name()),
-            }));
-        };
-        Ok(
-            source_access_for(system, None, credentials).map_err(|error| NoAccess {
-                detail: error.to_string(),
-            }),
-        )
-    };
-    let gym_records = wiring::hevy_records(access(Discipline::Gym)?, database).await?;
-    let cycling_records = wiring::peloton_records(access(Discipline::Cycling)?, database).await?;
-    let weigh_in_records = wiring::withings_records(weigh_in_access(credentials), database).await?;
+    let gym = access_to(known(Discipline::Gym)?.collects(), credentials);
+    let gym_records = wiring::hevy_records(gym, database).await?;
+    let cycling = access_to(known(Discipline::Cycling)?.collects(), credentials);
+    let cycling_records = wiring::peloton_records(cycling, database).await?;
+    let weigh_in_records =
+        wiring::withings_records(stream_access(WEIGH_INS, credentials), database).await?;
+    let (watch_records, watch_days) =
+        wiring::garmin_records(stream_access(WATCH, credentials), database).await?;
 
     // **A credential that is absent costs what needs it, and nothing else.**
     // The catalogue answers choosing a class and building a mesocycle without
@@ -126,6 +118,8 @@ pub async fn run(
         gym_records,
         cycling_records,
         weigh_in_records,
+        watch_records,
+        watch_days,
         normalised: Layers {
             database: database.to_path_buf(),
             zone: zone.clone(),
@@ -275,20 +269,40 @@ impl NormalisedLayers for Layers {
     }
 }
 
-/// Where body weight is collected from: `withings.measurements`, the one stream
-/// `next` collects that no discipline does.
-fn weigh_in_access(credentials: &infrastructure::Credentials) -> Result<SourceAccess, NoAccess> {
-    let no_access = |detail: String| NoAccess { detail };
-    let stream = catalogue::lookup(WEIGH_INS)
-        .ok_or_else(|| no_access(format!("this build does not collect {WEIGH_INS}")))?;
-    let system = stream
-        .system()
-        .ok_or_else(|| no_access(format!("{WEIGH_INS} is read from a folder, not a system")))?;
-    source_access_for(system, None, credentials).map_err(|error| no_access(error.to_string()))
+/// How a stream `next` collects is reached: its system's credential and root.
+///
+/// **No access is a step that fails, not a run that does** (§ 36): a stream
+/// read from a folder, or a source with no credential, is reported and passed.
+fn access_to(
+    stream: &catalogue::KnownStream,
+    credentials: &infrastructure::Credentials,
+) -> Result<SourceAccess, NoAccess> {
+    let system = stream.system().ok_or_else(|| NoAccess {
+        detail: format!("{} is read from a folder, not a system", stream.name()),
+    })?;
+    source_access_for(system, None, credentials).map_err(|error| NoAccess {
+        detail: error.to_string(),
+    })
+}
+
+/// How an entry `next` collects that no discipline does is reached, by its
+/// name: body weight, and what the watch records.
+fn stream_access(
+    name: &str,
+    credentials: &infrastructure::Credentials,
+) -> Result<SourceAccess, NoAccess> {
+    let stream = catalogue::lookup(name).ok_or_else(|| NoAccess {
+        detail: format!("this build does not collect {name}"),
+    })?;
+    access_to(stream, credentials)
 }
 
 /// Where body weight comes from.
 pub const WEIGH_INS: &str = "withings.measurements";
+
+/// What the watch records is collected under (#432): its activities every run,
+/// and its days and nights until yesterday is whole.
+pub const WATCH: &str = "garmin.activities";
 
 /// The cycling use case, over this build's stores and catalogue.
 ///

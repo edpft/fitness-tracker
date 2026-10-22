@@ -18,7 +18,7 @@ use application::{
     RefusalReport, RefusalReporter, ResumptionPointResetter, ResumptionPointStore, RunSummary,
     StatusError, StreamStatus, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
-    next::{Daily, NoAccess, Records},
+    next::{Awaits, Daily, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
@@ -379,36 +379,11 @@ async fn garmin_daily_heart_rate(
     match command {
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
         Command::Extract(access) => {
-            let SourceAccess::EmailPassword {
-                base_url,
-                auth_base_url,
-                email,
-                password,
-                ..
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: stream.to_owned(),
-                    wanted: "a login",
-                    given: "something else",
-                });
-            };
-
-            let auth = garmin_auth(&auth_base_url, GarminCredentials::new(email, password));
-            let extraction = Extraction::new(ExtractionPorts {
-                source: garmin::days::GarminDays::new(
-                    GarminDay::HeartRate,
-                    base_url,
-                    auth,
-                    today(),
-                ),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-            Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
+            let walk = Garmin::signed_in(access, stream, &pool, database)?
+                .day(GarminDay::HeartRate, landing);
+            Ok(Outcome::Extracted(Box::new(
+                walk.extraction.extract().await?,
+            )))
         }
         Command::Normalise(zone) => {
             let normalisation = Normalisation::new(
@@ -825,7 +800,8 @@ pub async fn peloton_records(
 /// actually a classification of — is in [`domain::body::hrv`].
 ///
 /// **On the token every Garmin entry caches** (#377), so a run that collects
-/// this and the activities signs in once rather than once each.
+/// this and the activities signs in once rather than once each. `next`
+/// collects it behind the activities, on their authenticator (#432).
 async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = GarminHrvLandingStore::new(pool.clone())?;
@@ -837,32 +813,9 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
             stream: GarminHrvLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let SourceAccess::EmailPassword {
-                base_url,
-                auth_base_url,
-                email,
-                password,
-                ..
-            } = access
-            else {
-                return Err(WiringError::WrongCredential {
-                    stream: GarminHrvLandingStore::STREAM.to_owned(),
-                    wanted: "a login",
-                    given: "something else",
-                });
-            };
-
-            let auth = garmin_auth(&auth_base_url, GarminCredentials::new(email, password));
-            let extraction = Extraction::new(ExtractionPorts {
-                source: GarminHrv::new(base_url, auth, today()),
-                landing,
-                resumption,
-                runs,
-                lock: FileRunLock::beside(database),
-                clock: SystemClock,
-            });
-
-            let summary = extraction.extract().await?;
+            let nights = Garmin::signed_in(access, GarminHrvLandingStore::STREAM, &pool, database)?
+                .nights()?;
+            let summary = nights.extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
         Command::Normalise(zone) => {
@@ -951,18 +904,7 @@ async fn garmin_activities(
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
             stream: GarminActivityLandingStore::STREAM,
         }),
-        Command::Extract(access) => {
-            let daily_landing = GarminDailyHeartRateLandingStore::new(pool.clone())?;
-            collect_activities(
-                access,
-                (landing, sets_landing, files_landing, daily_landing),
-                resumption,
-                runs,
-                (pool.clone(), database),
-                walks,
-            )
-            .await
-        }
+        Command::Extract(access) => collect_activities(access, (&pool, database), walks).await,
         Command::Normalise(zone) => {
             // The overlay is read here, as it is for Hevy and for the same
             // reason: § II.2 applies a correction while the layer is rebuilt,
@@ -1042,281 +984,458 @@ async fn garmin_activities(
     }
 }
 
-/// All three Garmin walks, in the one order that matters.
+/// Every walk behind `garmin.activities`, run one after another.
 ///
-/// The list first: the other two enumerate it themselves, so running them
-/// after it means what they ask for is for activities this same command has
-/// just listed.
-///
-/// **One `GarminAuth`, shared**, unlike Peloton's two: Garmin rate-limits its
-/// sign-in page, and a run that signed in once per walk was refused by it on
-/// the operator's account. The token is held behind a lock, so the walks share
-/// it without sharing anything else, and it is cached for the other Garmin
-/// entries to read (#377).
-///
-/// **Each walk reports its own outcome**, as Peloton's two do (#367): the three
-/// all run, and one that could not is named rather than standing in for the
+/// **Each walk reports its own outcome**, as Peloton's do (#367): they all
+/// run, and one that could not is named rather than standing in for the
 /// entry.
 async fn collect_activities(
     access: SourceAccess,
-    (landing, sets_landing, files_landing, daily_landing): (
-        GarminActivityLandingStore,
-        GarminExerciseSetLandingStore,
-        GarminActivityFileLandingStore,
-        GarminDailyHeartRateLandingStore,
-    ),
-    resumption: SqliteResumptionPointStore,
-    runs: SqliteExtractionRunLog,
-    (pool, database): (SqlitePool, &Path),
+    (pool, database): (&SqlitePool, &Path),
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let SourceAccess::EmailPassword {
-        base_url,
-        auth_base_url,
-        email,
-        password,
-        ..
-    } = access
-    else {
-        return Err(WiringError::WrongCredential {
-            stream: GarminActivityLandingStore::STREAM.to_owned(),
-            wanted: "a login",
-            given: "something else",
-        });
-    };
-
-    let auth = std::sync::Arc::new(garmin_auth(
-        &auth_base_url,
-        GarminCredentials::new(email, password),
-    ));
-
-    let activities_stream = landing.stream().clone();
-    let listed = walk(
-        activities_stream,
-        Extraction::new(ExtractionPorts {
-            source: garmin::GarminActivities::new(base_url.clone(), std::sync::Arc::clone(&auth)),
-            landing,
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock: FileRunLock::beside(database),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    let sets_stream = sets_landing.stream().clone();
-    let sets = walk(
-        sets_stream,
-        Extraction::new(ExtractionPorts {
-            source: garmin::GarminExerciseSets::new(base_url.clone(), std::sync::Arc::clone(&auth)),
-            landing: sets_landing,
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock: FileRunLock::beside(database),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    let files_stream = files_landing.stream().clone();
-    let recordings = walk(
-        files_stream,
-        Extraction::new(ExtractionPorts {
-            source: garmin::GarminActivityFiles::new(
-                base_url.clone(),
-                std::sync::Arc::clone(&auth),
-            ),
-            landing: files_landing,
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock: FileRunLock::beside(database),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    let days = Days {
-        base_url: &base_url,
-        auth: &auth,
-        resumption: &resumption,
-        runs: &runs,
-        database,
-        walks,
-    };
-    // The wrist's all-day heart rate, which says which days a watch was worn
-    // and, for about four months, what it read during a ride (#427).
-    let mut each = vec![
-        listed,
-        sets,
-        recordings,
-        days.walk(GarminDay::HeartRate, daily_landing).await,
-    ];
-    each.extend(days.every(pool).await?);
-
+    let listed = Garmin::signed_in(access, GarminActivityLandingStore::STREAM, pool, database)?
+        .activities()?;
+    let mut each = Vec::with_capacity(listed.len());
+    for application::next::Walk { stream, extraction } in listed {
+        each.push(walk(stream, extraction, walks).await);
+    }
     Ok(Outcome::ExtractedEach(each))
 }
 
-/// What every one of Garmin's metric walks shares: the account, the books and
-/// the reporter.
-struct Days<'a> {
-    base_url: &'a str,
-    auth: &'a std::sync::Arc<GarminAuth>,
-    resumption: &'a SqliteResumptionPointStore,
-    runs: &'a SqliteExtractionRunLog,
+/// What every Garmin walk shares: the API root, one authenticator, and the
+/// books each keeps.
+///
+/// **One place builds Garmin's walks**, so `extract` and `next` (#432) run the
+/// same ones in the same order and cannot drift apart.
+///
+/// **One `GarminAuth`, shared**, unlike Peloton's: Garmin rate-limits its
+/// sign-in page, and a run that signed in once per walk was refused by it on
+/// the operator's account. The token is held behind a lock, so the walks share
+/// it without sharing anything else, and it is cached for the next entry and
+/// the next run to read (#377).
+struct Garmin<'a> {
+    base_url: String,
+    auth: std::sync::Arc<GarminAuth>,
+    pool: &'a SqlitePool,
+    resumption: SqliteResumptionPointStore,
+    runs: SqliteExtractionRunLog,
     database: &'a Path,
-    walks: &'a dyn WalkReporter,
 }
 
-impl Days<'_> {
-    /// **Everything else the watch records** (#269), each its own stream: a
-    /// day at a time, a month at a time, or as it stands. Nothing derives them yet, so they land behind the entry
-    /// that already walks Garmin day by day, as daily heart rate did until
-    /// #474 gave it something to derive.
-    async fn every(&self, pool: SqlitePool) -> Result<Vec<Walk>, WiringError> {
+impl<'a> Garmin<'a> {
+    /// Signed in as the login `access` resolved, for walks keeping their books
+    /// in `pool`.
+    ///
+    /// # Errors
+    ///
+    /// [`WiringError::WrongCredential`] if `access` is not a login.
+    fn signed_in(
+        access: SourceAccess,
+        stream: &str,
+        pool: &'a SqlitePool,
+        database: &'a Path,
+    ) -> Result<Self, WiringError> {
+        let SourceAccess::EmailPassword {
+            base_url,
+            auth_base_url,
+            email,
+            password,
+            ..
+        } = access
+        else {
+            return Err(WiringError::WrongCredential {
+                stream: stream.to_owned(),
+                wanted: "a login",
+                given: "something else",
+            });
+        };
+        Ok(Self {
+            base_url,
+            auth: std::sync::Arc::new(garmin_auth(
+                &auth_base_url,
+                GarminCredentials::new(email, password),
+            )),
+            pool,
+            resumption: SqliteResumptionPointStore::new(pool.clone()),
+            runs: SqliteExtractionRunLog::new(pool.clone()),
+            database,
+        })
+    }
+
+    /// Every walk behind `garmin.activities`, in the one order that matters:
+    /// the recordings, then the days, then the summaries.
+    fn activities(&self) -> Result<Vec<application::next::Walk<Erased>>, WiringError> {
+        let mut walks = self.recordings()?;
+        walks.extend(self.days()?);
+        walks.extend(self.summaries()?);
+        Ok(walks)
+    }
+
+    /// The activities and what was recorded in each: the list, then each
+    /// activity's sets and its FIT file.
+    ///
+    /// The list first: the sets and the files enumerate it themselves, so
+    /// running them after it means what they ask for is for activities this
+    /// same run has just listed.
+    fn recordings(&self) -> Result<Vec<application::next::Walk<Erased>>, WiringError> {
+        let pool = self.pool;
         Ok(vec![
             self.walk(
-                GarminDay::Sleep,
-                GarminSleepLandingStore::new(pool.clone())?,
-            )
-            .await,
+                garmin::GarminActivities::new(
+                    self.base_url.clone(),
+                    std::sync::Arc::clone(&self.auth),
+                ),
+                GarminActivityLandingStore::new(pool.clone())?,
+            ),
             self.walk(
-                GarminDay::Stress,
-                GarminStressLandingStore::new(pool.clone())?,
-            )
-            .await,
+                garmin::GarminExerciseSets::new(
+                    self.base_url.clone(),
+                    std::sync::Arc::clone(&self.auth),
+                ),
+                GarminExerciseSetLandingStore::new(pool.clone())?,
+            ),
+            // **And a third, for the recordings** (#175): each activity's FIT
+            // file, which holds the samples the list only summarises.
             self.walk(
-                GarminDay::BodyBattery,
-                GarminBodyBatteryLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::BodyBatteryEvents,
-                GarminBodyBatteryEventLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::Respiration,
-                GarminRespirationLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(GarminDay::Spo2, GarminSpo2LandingStore::new(pool.clone())?)
-                .await,
-            self.walk(
-                GarminDay::IntensityMinutes,
-                GarminIntensityMinutesLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::Floors,
-                GarminFloorsLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::DailySummary,
-                GarminDailySummaryLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::Steps,
-                GarminStepsLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.walk(
-                GarminDay::DetectedMoves,
-                GarminDetectedMoveLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.month(
-                GarminMonth::Vo2Max,
-                GarminVo2MaxLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.month(
-                GarminMonth::HealthSnapshots,
-                GarminHealthSnapshotLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.latest(
-                GarminLatest::FitnessAge,
-                GarminFitnessAgeLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.latest(
-                GarminLatest::RacePredictions,
-                GarminRacePredictionLandingStore::new(pool.clone())?,
-            )
-            .await,
-            self.latest(
-                GarminLatest::PersonalRecords,
-                GarminPersonalRecordLandingStore::new(pool)?,
-            )
-            .await,
+                garmin::GarminActivityFiles::new(
+                    self.base_url.clone(),
+                    std::sync::Arc::clone(&self.auth),
+                ),
+                GarminActivityFileLandingStore::new(pool.clone())?,
+            ),
         ])
     }
 
+    /// **Everything the watch records of a day** (#269), each its own stream
+    /// walked a day at a time. Most derive nothing yet, so they land behind
+    /// the entry that already walks Garmin day by day.
+    fn days(&self) -> Result<Vec<application::next::Walk<Erased>>, WiringError> {
+        let pool = self.pool;
+        Ok(vec![
+            // The wrist's all-day heart rate, which says which days a watch
+            // was worn and, for about four months, what it read during a ride
+            // (#427).
+            self.day(
+                GarminDay::HeartRate,
+                GarminDailyHeartRateLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::Sleep,
+                GarminSleepLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::Stress,
+                GarminStressLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::BodyBattery,
+                GarminBodyBatteryLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::BodyBatteryEvents,
+                GarminBodyBatteryEventLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::Respiration,
+                GarminRespirationLandingStore::new(pool.clone())?,
+            ),
+            self.day(GarminDay::Spo2, GarminSpo2LandingStore::new(pool.clone())?),
+            self.day(
+                GarminDay::IntensityMinutes,
+                GarminIntensityMinutesLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::Floors,
+                GarminFloorsLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::DailySummary,
+                GarminDailySummaryLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::Steps,
+                GarminStepsLandingStore::new(pool.clone())?,
+            ),
+            self.day(
+                GarminDay::DetectedMoves,
+                GarminDetectedMoveLandingStore::new(pool.clone())?,
+            ),
+        ])
+    }
+
+    /// The figures Garmin keeps of the record: VO2 max and health snapshots
+    /// a month at a time, and fitness age, race predictions and personal
+    /// records as they stand.
+    fn summaries(&self) -> Result<Vec<application::next::Walk<Erased>>, WiringError> {
+        let pool = self.pool;
+        Ok(vec![
+            self.month(
+                GarminMonth::Vo2Max,
+                GarminVo2MaxLandingStore::new(pool.clone())?,
+            ),
+            self.month(
+                GarminMonth::HealthSnapshots,
+                GarminHealthSnapshotLandingStore::new(pool.clone())?,
+            ),
+            self.latest(
+                GarminLatest::FitnessAge,
+                GarminFitnessAgeLandingStore::new(pool.clone())?,
+            ),
+            self.latest(
+                GarminLatest::RacePredictions,
+                GarminRacePredictionLandingStore::new(pool.clone())?,
+            ),
+            self.latest(
+                GarminLatest::PersonalRecords,
+                GarminPersonalRecordLandingStore::new(pool.clone())?,
+            ),
+        ])
+    }
+
+    /// The nights' HRV, its own entry, on the same authenticator.
+    fn nights(&self) -> Result<application::next::Walk<Erased>, WiringError> {
+        Ok(self.walk(
+            GarminHrv::new(
+                self.base_url.clone(),
+                std::sync::Arc::clone(&self.auth),
+                today(),
+            ),
+            GarminHrvLandingStore::new(self.pool.clone())?,
+        ))
+    }
+
     /// One daily metric, walked into its own table.
-    async fn walk(&self, day: GarminDay, landing: impl LandingStore + Send + Sync) -> Walk {
-        self.into(
+    fn day(
+        &self,
+        day: GarminDay,
+        landing: impl LandingStore + Send + Sync + 'static,
+    ) -> application::next::Walk<Erased> {
+        self.walk(
             garmin::days::GarminDays::new(
                 day,
-                self.base_url,
-                std::sync::Arc::clone(self.auth),
+                self.base_url.clone(),
+                std::sync::Arc::clone(&self.auth),
                 today(),
             ),
             landing,
         )
-        .await
     }
 
     /// One metric served over a span of dates, a month to a record.
-    async fn month(&self, month: GarminMonth, landing: impl LandingStore + Send + Sync) -> Walk {
-        self.into(
+    fn month(
+        &self,
+        month: GarminMonth,
+        landing: impl LandingStore + Send + Sync + 'static,
+    ) -> application::next::Walk<Erased> {
+        self.walk(
             garmin::months::GarminMonths::new(
                 month,
-                self.base_url,
-                std::sync::Arc::clone(self.auth),
+                self.base_url.clone(),
+                std::sync::Arc::clone(&self.auth),
                 today(),
             ),
             landing,
         )
-        .await
     }
 
     /// One metric served only as it stands now.
-    async fn latest(&self, latest: GarminLatest, landing: impl LandingStore + Send + Sync) -> Walk {
-        self.into(
+    fn latest(
+        &self,
+        latest: GarminLatest,
+        landing: impl LandingStore + Send + Sync + 'static,
+    ) -> application::next::Walk<Erased> {
+        self.walk(
             garmin::latest::GarminLatestOf::new(
                 latest,
-                self.base_url,
-                std::sync::Arc::clone(self.auth),
+                self.base_url.clone(),
+                std::sync::Arc::clone(&self.auth),
                 today(),
             ),
             landing,
         )
-        .await
     }
 
-    async fn into<S>(&self, source: S, landing: impl LandingStore + Send + Sync) -> Walk
+    fn walk<S>(
+        &self,
+        source: S,
+        landing: impl LandingStore + Send + Sync + 'static,
+    ) -> application::next::Walk<Erased>
     where
-        S: WorkoutEventSource + Send + Sync,
+        S: WorkoutEventSource + Send + Sync + 'static,
         S::Resume: Send + Sync,
     {
-        walk(
-            landing.stream().clone(),
-            Extraction::new(ExtractionPorts {
+        application::next::Walk {
+            stream: landing.stream().clone(),
+            extraction: Erased::new(Extraction::new(ExtractionPorts {
                 source,
                 landing,
                 resumption: self.resumption.clone(),
                 runs: self.runs.clone(),
                 lock: FileRunLock::beside(self.database),
                 clock: SystemClock,
+            })),
+        }
+    }
+}
+
+/// What the watch records, as `next` collects it (#432): its activities, and
+/// its days and nights, on one sign-in.
+///
+/// **The activities every run**, as Hevy and Peloton are: the activity list is
+/// where a ride or a gym session the watch recorded first appears, and one
+/// could have finished in the last hour.
+///
+/// **The days until yesterday is whole, then not until tomorrow.** The
+/// operator, 2026-10-22: *"we don't need to fetch daily data if we've already
+/// got data for today, in the case of Withings, or yesterday, in the case of
+/// daily Garmin metrics."* A day is whole once the watch has synced past it
+/// (#528), so until then the days are still due, and every walk that keeps a
+/// day at a time has to have reached it. The nights' HRV and the figures
+/// Garmin keeps of the record go with the days: none of them is lost by
+/// waiting a day, and fetching them every run would make every run wait for
+/// them.
+///
+/// # Errors
+///
+/// [`WiringError`] if the store is unavailable. A login that is absent or of
+/// the wrong kind is [`NoAccess`] for both, which `next` reports and steps
+/// past.
+pub async fn garmin_records(
+    access: Result<SourceAccess, NoAccess>,
+    database: &Path,
+) -> Result<
+    (
+        Records<impl application::next::Walks + Sync + use<>>,
+        Records<impl application::next::Walks + Sync + use<>>,
+    ),
+    WiringError,
+> {
+    let pool = connect(database).await?;
+    let activities = LandingStream::try_from(GarminActivityLandingStore::STREAM)?;
+    let days = LandingStream::try_from(GarminDailyHeartRateLandingStore::STREAM)?;
+    let built = match access {
+        Err(why) => Err(why),
+        Ok(access) => accessible(
+            Garmin::signed_in(access, GarminActivityLandingStore::STREAM, &pool, database)
+                .and_then(|garmin| {
+                    let recordings = garmin.recordings()?;
+                    let mut days = garmin.days()?;
+                    let whole = WholeDays {
+                        resumption: SqliteResumptionPointStore::new(pool.clone()),
+                        streams: days.iter().map(|walk| walk.stream.clone()).collect(),
+                    };
+                    days.extend(garmin.summaries()?);
+                    days.push(garmin.nights()?);
+                    Ok((recordings, days, whole))
+                }),
+        )?,
+    };
+    let (recorded, daily) = match built {
+        Err(why) => (Err(why.clone()), Err(why)),
+        Ok((recordings, days, whole)) => (
+            Ok(WalkList(recordings)),
+            Ok(Daily {
+                walks: WalkList(days),
+                newest: whole,
+                awaits: Awaits::Yesterday,
             }),
-            self.walks,
-        )
-        .await
+        ),
+    };
+    Ok((
+        Records {
+            entry: activities,
+            walks: recorded,
+        },
+        Records {
+            entry: days,
+            walks: daily,
+        },
+    ))
+}
+
+/// The newest day every one of Garmin's day walks has landed whole (#432).
+///
+/// **The least of them**, because a walk that fell behind — a failed request,
+/// a stream added since — is owed its days, and the days stay due until it has
+/// them. Each walk's own reach says how far it is whole
+/// ([`garmin::days::whole_through`]), and one that has never run has none.
+struct WholeDays {
+    resumption: SqliteResumptionPointStore,
+    streams: Vec<LandingStream>,
+}
+
+impl application::NewestObservation for WholeDays {
+    async fn newest_day(&self) -> Result<Option<jiff::civil::Date>, application::StoreError> {
+        let mut newest: Option<jiff::civil::Date> = None;
+        for stream in &self.streams {
+            let Some(whole) = self
+                .resumption
+                .read(stream)
+                .await?
+                .and_then(garmin::days::whole_through)
+            else {
+                return Ok(None);
+            };
+            newest = Some(newest.map_or(whole, |so_far| so_far.min(whole)));
+        }
+        Ok(newest)
+    }
+}
+
+/// One walk, its extraction's type erased so that walks over different
+/// endpoints and tables can stand in one list (#432).
+///
+/// **Boxed, because Garmin has twenty of them.** Peloton's four are a nested
+/// tuple of their concrete types, which is cheaper and was bearable at four;
+/// at twenty, each with its own source and table, the type would be the
+/// longest thing in the file and say nothing.
+struct Erased(Box<dyn Extracting>);
+
+/// An extraction running, as [`Erased`] hands it back.
+type Running<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<RunSummary, ExtractionError>> + Send + 'a>,
+>;
+
+/// What [`Erased`] keeps of an extraction: the one thing a walk does.
+trait Extracting: Send + Sync {
+    fn run(&self) -> Running<'_>;
+}
+
+impl<E: WorkoutExtractor + Send + Sync> Extracting for E {
+    fn run(&self) -> Running<'_> {
+        Box::pin(self.extract())
+    }
+}
+
+impl Erased {
+    fn new(extraction: impl WorkoutExtractor + Send + Sync + 'static) -> Self {
+        Self(Box::new(extraction))
+    }
+}
+
+impl WorkoutExtractor for Erased {
+    fn extract(
+        &self,
+    ) -> impl std::future::Future<Output = Result<RunSummary, ExtractionError>> + Send {
+        self.0.run()
+    }
+}
+
+/// The walks behind one entry, in the order they run.
+struct WalkList(Vec<application::next::Walk<Erased>>);
+
+impl application::next::Walks for WalkList {
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn stream(&self, at: usize) -> Option<&LandingStream> {
+        self.0.get(at).map(|walk| &walk.stream)
+    }
+
+    async fn walk(&self, at: usize) -> Option<Result<RunSummary, ExtractionError>> {
+        Some(self.0.get(at)?.extraction.extract().await)
     }
 }
 
@@ -1630,7 +1749,11 @@ pub async fn withings_records(
             SqliteExtractionRunLog::new(pool),
             database,
         ))?
-        .map(|walks| Daily { walks, newest }),
+        .map(|walks| Daily {
+            walks,
+            newest,
+            awaits: Awaits::Today,
+        }),
     };
     Ok(Records { entry, walks })
 }
@@ -2110,6 +2233,169 @@ mod tests {
                 "{hidden} lands behind another entry and must not be nameable"
             );
         }
+    }
+
+    /// A store, and Garmin signed in over it with a login that reaches
+    /// nothing: building walks does no I/O.
+    fn with_garmin<T>(
+        test: impl AsyncFnOnce(&super::Garmin<'_>, &infrastructure::SqlitePool) -> T,
+    ) -> T {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = directory.path().join("store.db");
+        runtime.block_on(async {
+            let pool = infrastructure::connect(&database).await.expect("a store");
+            let garmin = super::Garmin::signed_in(
+                crate::config::SourceAccess::EmailPassword {
+                    base_url: "http://127.0.0.1:9".to_owned(),
+                    auth_base_url: "http://127.0.0.1:9".to_owned(),
+                    email: "rider@example.com".to_owned(),
+                    password: "not-a-real-password".to_owned(),
+                    origin: crate::config::Origin::Stored,
+                },
+                GarminActivityLandingStore::STREAM,
+                &pool,
+                &database,
+            )
+            .expect("a login");
+            test(&garmin, &pool).await
+        })
+    }
+
+    fn streams(walks: &[application::next::Walk<super::Erased>]) -> Vec<String> {
+        walks.iter().map(|walk| walk.stream.to_string()).collect()
+    }
+
+    /// Every stream a day walk keeps.
+    const DAYS: [&str; 12] = [
+        GarminDailyHeartRateLandingStore::STREAM,
+        GarminSleepLandingStore::STREAM,
+        GarminStressLandingStore::STREAM,
+        GarminBodyBatteryLandingStore::STREAM,
+        GarminBodyBatteryEventLandingStore::STREAM,
+        GarminRespirationLandingStore::STREAM,
+        GarminSpo2LandingStore::STREAM,
+        GarminIntensityMinutesLandingStore::STREAM,
+        GarminFloorsLandingStore::STREAM,
+        GarminDailySummaryLandingStore::STREAM,
+        GarminStepsLandingStore::STREAM,
+        GarminDetectedMoveLandingStore::STREAM,
+    ];
+
+    /// The figures Garmin keeps of the record.
+    const SUMMARIES: [&str; 5] = [
+        GarminVo2MaxLandingStore::STREAM,
+        GarminHealthSnapshotLandingStore::STREAM,
+        GarminFitnessAgeLandingStore::STREAM,
+        GarminRacePredictionLandingStore::STREAM,
+        GarminPersonalRecordLandingStore::STREAM,
+    ];
+
+    /// **The list first, then each activity's sets and file**: the walks
+    /// `next` runs every run (#432).
+    const RECORDINGS: [&str; 3] = [
+        GarminActivityLandingStore::STREAM,
+        GarminExerciseSetLandingStore::STREAM,
+        GarminActivityFileLandingStore::STREAM,
+    ];
+
+    /// **`extract garmin.activities` walks every Garmin stream behind the
+    /// entry, the list first**, as it did before `next` collected any of them.
+    #[test]
+    fn extract_walks_every_stream_behind_the_entry_the_list_first() {
+        let walked =
+            with_garmin(async |garmin, _| streams(&garmin.activities().expect("the walks build")));
+        let expected: Vec<&str> = RECORDINGS
+            .iter()
+            .chain(DAYS.iter())
+            .chain(SUMMARIES.iter())
+            .copied()
+            .collect();
+        assert_eq!(walked, expected);
+    }
+
+    /// **`next` walks the recordings every run, and every day walk, summary
+    /// and night once yesterday is due** (#432), all on one authenticator.
+    #[test]
+    fn next_walks_the_recordings_apart_from_the_days() {
+        let (recordings, days) = with_garmin(async |garmin, _| {
+            let mut days = garmin.days().expect("the days build");
+            days.extend(garmin.summaries().expect("the summaries build"));
+            days.push(garmin.nights().expect("the nights build"));
+            (
+                streams(&garmin.recordings().expect("the recordings build")),
+                streams(&days),
+            )
+        });
+        assert_eq!(recordings, RECORDINGS);
+        let expected: Vec<&str> = DAYS
+            .iter()
+            .chain(SUMMARIES.iter())
+            .chain(std::iter::once(&GarminHrvLandingStore::STREAM))
+            .copied()
+            .collect();
+        assert_eq!(days, expected);
+    }
+
+    /// **The days are whole through the day before the least of their walks'
+    /// resumption points** (#432): one walk behind holds them all back, and a
+    /// walk that has never run leaves none whole.
+    #[test]
+    fn the_days_are_whole_only_as_far_as_every_walk_has_reached() {
+        use application::{NewestObservation as _, ResumptionPointStore as _};
+        use domain::landing::{EventTime, FetchedAt, LandingStream, Watermark};
+
+        let newest = |reached: &[(&str, &str)]| {
+            with_garmin(async |_, pool| {
+                let resumption = super::SqliteResumptionPointStore::new(pool.clone());
+                for (stream, at) in reached {
+                    let stream = LandingStream::try_from(*stream).expect("a stream");
+                    let at = at.parse::<jiff::Timestamp>().expect("a time");
+                    resumption
+                        .advance(
+                            &stream,
+                            Watermark::from(EventTime::from(at)),
+                            FetchedAt::from(at),
+                        )
+                        .await
+                        .expect("a resumption point");
+                }
+                super::WholeDays {
+                    resumption,
+                    streams: DAYS
+                        .iter()
+                        .map(|stream| LandingStream::try_from(*stream).expect("a stream"))
+                        .collect(),
+                }
+                .newest_day()
+                .await
+                .expect("a read")
+            })
+        };
+        let synced = |at: &'static str| DAYS.map(|stream| (stream, at));
+
+        assert_eq!(
+            newest(&synced("2026-10-22T08:16:00Z")),
+            Some(jiff::civil::date(2026, 10, 21)),
+            "synced this morning: yesterday is whole"
+        );
+
+        let mut one_behind = synced("2026-10-22T08:16:00Z");
+        one_behind[3].1 = "2026-10-21T22:40:00Z";
+        assert_eq!(
+            newest(&one_behind),
+            Some(jiff::civil::date(2026, 10, 20)),
+            "a walk last synced before midnight holds the days back"
+        );
+
+        assert_eq!(
+            newest(&synced("2026-10-22T08:16:00Z")[1..]),
+            None,
+            "a walk that has never run leaves no day whole"
+        );
     }
 
     /// `next` derives every stream but the one that only lands, so a stream
