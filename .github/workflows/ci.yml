@@ -19,39 +19,51 @@ jobs:
       prebuild: .#cargoArtifacts
 
   # The one status the `main` ruleset requires (#147). It passes only when
-  # every job under `checks` did, so a check added to flake.nix gates a merge by
-  # construction rather than by someone remembering to retype the ruleset's
-  # list. `always()` because GitHub counts a skipped required check as passing:
-  # this job must run, and fail, when `checks` failed or was cancelled.
+  # every job under `checks` did, and the package built (#534), so a check added
+  # to flake.nix gates a merge by construction rather than by someone
+  # remembering to retype the ruleset's list. `always()` because GitHub counts a
+  # skipped required check as passing: this job must run, and fail, when a job
+  # it needs failed or was cancelled.
   gate:
     name: gate
-    needs: [checks]
+    needs: [checks, publish]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Every check passed
+      - name: Every check passed and the package built
         run: |
-          echo "checks: ${RESULT}"
-          test "${RESULT}" = success
+          echo "checks: ${CHECKS}, publish: ${PUBLISH}"
+          test "${CHECKS}" = success
+          test "${PUBLISH}" = success
         env:
-          RESULT: ${{ needs.checks.result }}
+          CHECKS: ${{ needs.checks.result }}
+          PUBLISH: ${{ needs.publish.result }}
 
   # The laptop installs what this pushes and builds nothing itself (#502): its
   # upgrade runs with `--max-jobs 0`. The checks never build the package, and
   # the flake bakes the commit into it, so a pull request's build is never
   # `main`'s. Built from the same `github:` reference the laptop resolves, so
   # the derivation is the one it will ask the cache for.
+  #
+  # **A pull request runs it as a dry run** (#534): every step up to the
+  # pushes, so a bump to one of the actions below is tried before it reaches
+  # `main`. It builds the pull request's head, reads Cachix without writing to
+  # it, pushes nothing and moves no tag (the operator, 2026-10-21). The install
+  # from the cache waits for `main` too, since nothing was pushed for it to
+  # find. Dependabot's pull requests carry no secrets, so the push itself is
+  # still first tried on `main`.
   publish:
     name: publish
-    needs: [gate]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [checks]
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # To move the `published` tag.
     permissions:
       contents: write
     env:
       CACHE: edpft
-      REF: github:${{ github.repository }}/${{ github.sha }}#packages.x86_64-linux.default
+      PUBLISHING: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      REF: github:${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}#packages.x86_64-linux.default
     steps:
       - name: Checkout repo
         uses: actions/checkout@v5
@@ -82,10 +94,12 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           skipPush: true
 
-      - name: Build and push the package
+      - name: Build the package, and push it from main
         run: |
           out=$(nix build -L --no-link --print-out-paths "$REF")
-          cachix push "$CACHE" "$out"
+          if [ "$PUBLISHING" = true ]; then
+            cachix push "$CACHE" "$out"
+          fi
 
       # Evaluating the flake builds things too: fenix fetches the toolchain's
       # manifest at evaluation time, and without it in the cache the laptop
@@ -93,7 +107,7 @@ jobs:
       # them (2.30 and later), whether or not its output is already here. Not
       # found by building on an empty store: a store under another root needs
       # a sandbox to build into, and this runner builds without one.
-      - name: Push what evaluation builds
+      - name: Evaluate, and push what evaluation builds from main
         run: |
           if ! log=$(nix eval --no-eval-cache --option trace-import-from-derivation true --raw "${REF}.drvPath" 2>&1 >/dev/null); then
             echo "$log"
@@ -101,7 +115,7 @@ jobs:
           fi
           mapfile -t drvs < <(grep -oP "built '\K/nix/store/[^'^]+\.drv(?=\^[^']*' during evaluation)" <<<"$log" | sort -u)
           echo "Evaluation builds: ${drvs[*]:-nothing}"
-          if [ "${#drvs[@]}" -gt 0 ]; then
+          if [ "$PUBLISHING" = true ] && [ "${#drvs[@]}" -gt 0 ]; then
             mapfile -t outs < <(nix-store --realise "${drvs[@]}")
             cachix push "$CACHE" "${outs[@]}"
           fi
@@ -114,6 +128,7 @@ jobs:
       # too, since the build above asked Cachix for the manifest before it
       # was pushed.
       - name: Install as the laptop would
+        if: ${{ env.PUBLISHING == 'true' }}
         run: |
           nix build --store "local?root=${RUNNER_TEMP}/laptop" --max-jobs 0 \
             --option always-allow-substitutes true \
@@ -126,4 +141,5 @@ jobs:
       # waits on it for good. The tag moves only once the install above has
       # passed, and a newer push cancels this run, so it never moves back.
       - name: Mark it published
+        if: ${{ env.PUBLISHING == 'true' }}
         run: git push --force origin "${GITHUB_SHA}:refs/tags/published"
