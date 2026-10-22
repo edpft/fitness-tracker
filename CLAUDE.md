@@ -29,13 +29,18 @@ issues, the place for recording open questions is the GitHub discussions."*
   rather than at the end, and close it when its own "done when" is met.
 
   **Every open issue is one of three things, and its labels say which.** A
-  `bug` is something broken: it needs no milestone and carries no priority,
-  because a real bug is always fixed. A `chore` is maintenance that makes the
-  system better without a new capability: no milestone, and `should` or `could`
-  relative to other chores — a chore that must be done is not a chore. Anything
-  else is a step towards a capability (`enhancement` or `documentation`): it is
-  in that capability's milestone, and `must`, `should` or `could` relative to
-  it. A follow-up inherits its parent's milestone.
+  `bug` is something broken: it needs no milestone and carries no priority.
+  Whether one is fixed is weighed on how likely it is to happen, how much of a
+  problem it would be if it did, and how easy it is to fix: likely, costly and
+  easy is fixed, and unlikely, minor and a lot of work is closed (operator,
+  2026-10-22). A `chore` is maintenance that makes the system better without a
+  new capability: no milestone, and `should` or `could` relative to other
+  chores — a chore that must be done is not a chore. Anything else is a step
+  towards a capability (`enhancement` or `documentation`): it is in that
+  capability's milestone, and `must`, `should` or `could` relative to it. A
+  follow-up inherits its parent's milestone. **Effort is the other axis for
+  anything low priority**: cheap, and it is done; expensive, and it is a
+  candidate for closing.
 - **GitHub discussions** — open questions. A question does not go in the
   milestone, in a decision record or in a comment in the code; it goes here, where
   the operator can answer it and where the answer is findable afterwards.
