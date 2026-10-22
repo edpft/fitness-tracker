@@ -320,15 +320,18 @@ fn a_form_without_a_csrf_says_which_piece_was_missing() {
 /// The adapter with a token file, as the composition root builds it (#377).
 fn cached(server: &MockServer, cache: TokenFile) -> GarminAuth {
     let base = server.uri();
-    GarminAuth::new(base.clone(), token_base_for(&base), credentials(), Some(cache)).without_pause()
+    GarminAuth::new(
+        base.clone(),
+        token_base_for(&base),
+        credentials(),
+        Some(cache),
+    )
+    .without_pause()
 }
 
 /// The token file for [`credentials`], in `directory`.
 fn cache_in(directory: &std::path::Path) -> TokenFile {
-    TokenFile::new(
-        directory.join("garmin.token.json"),
-        credentials().digest(),
-    )
+    TokenFile::new(directory.join("garmin.token.json"), credentials().digest())
 }
 
 /// How many times the credentials were posted, which is one per sign-in.
