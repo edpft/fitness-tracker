@@ -46,7 +46,7 @@ use domain::{
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use super::{corrupt, count_for_storage, count_from_storage, store_error};
 
@@ -82,25 +82,7 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
     }
 
     async fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError> {
-        let rows = sqlx::query_as!(
-            SessionRow,
-            r#"
-            SELECT id AS "id!", started_at_utc, zone, on_day,
-                   duration_seconds, duration_normalised_session,
-                   average_bpm, highest_bpm, heart_rate_normalised_session
-            FROM canonical_gym_session
-            ORDER BY COALESCE(started_at_utc, on_day), id
-            "#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| store_error(&e))?;
-
-        let mut sessions = Vec::with_capacity(rows.len());
-        for row in rows {
-            sessions.push(self.session_of(&row).await?);
-        }
-        Ok(sessions)
+        self.reading().await?.all().await
     }
 
     async fn count(&self) -> Result<SessionCount, StoreError> {
@@ -128,54 +110,142 @@ struct SessionRow {
 }
 
 impl SqliteCanonicalGymSessionStore {
-    /// One whole session, its items and its heart rate.
-    async fn session_of(&self, row: &SessionRow) -> Result<CanonicalGymSession, StoreError> {
-        let occurred = occurred(
-            row.started_at_utc.as_deref(),
-            row.zone.as_deref(),
-            row.on_day.as_deref(),
-        )?;
-        let duration = match (row.duration_seconds, row.duration_normalised_session) {
-            (Some(seconds), Some(session)) => Some(Attributed::new(
-                PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
-                    .map_err(|e| corrupt(&e))?,
-                normalised_session_from_storage(session)?,
-            )),
-            _ => None,
-        };
-        let heart_rate = match (
-            row.average_bpm,
-            row.highest_bpm,
-            row.heart_rate_normalised_session,
-        ) {
-            (Some(average), Some(highest), Some(session)) => {
-                let summary = HeartRateSummary::new(beats(average)?, beats(highest)?);
-                let series = read_series(&self.pool, row.id).await?;
-                Some(Attributed::new(
-                    MeasuredHeartRate::new(summary, series),
-                    normalised_session_from_storage(session)?,
-                ))
-            }
-            _ => None,
-        };
-        let items = read_items(&self.pool, row.id).await?;
-        Ok(CanonicalGymSession::new(
-            occurred, items, heart_rate, duration,
-        ))
-    }
-
-    /// Every spine row that could fall in the window, widest reading.
+    /// One read of the layer, whole (#467).
     ///
-    /// **Widened in SQL and narrowed in Rust.** Which day a session happened on
-    /// depends on the zone on its own row, so the exact comparison cannot be a
-    /// `WHERE` clause without assuming every session shares one offset. A day
-    /// either side covers every zone there is, and the precise filter runs
-    /// through [`Occurred::day`] — the same reading everything else uses.
-    async fn spine_between(&self, from: Date, to: Date) -> Result<Vec<SessionRow>, StoreError> {
-        let (lower, upper) = widened(from, to)?;
-        sqlx::query_as!(
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn reading(&self) -> Result<CanonicalGymReading, StoreError> {
+        Ok(CanonicalGymReading {
+            snapshot: self.pool.begin().await.map_err(|e| store_error(&e))?,
+        })
+    }
+}
+
+/// One read of the canonical gym layer, every query in it seeing the layer as
+/// it stood at the first (#467), whatever [`CanonicalGymSessionStore::replace`]
+/// commits meanwhile.
+///
+/// **Why a read needs one.** `replace` rebuilds the layer in a transaction,
+/// under fresh row ids, and a session is read in several queries: its row,
+/// then its items, exercises, sets and heart rate. Outside a transaction a
+/// session's row could come from before a rebuild and its sets from after,
+/// and it would read as corrupt. Opening a page starts a run (#466), so a page
+/// read while the layer is rebuilt is the ordinary case rather than a race.
+///
+/// A transaction that only reads, rolled back when this is dropped: SQLite's
+/// write-ahead log lets `replace` commit while it is open.
+pub struct CanonicalGymReading {
+    snapshot: Transaction<'static, Sqlite>,
+}
+
+impl CanonicalGymReading {
+    /// Every session, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read or holds something that is
+    /// not a session.
+    pub async fn all(&mut self) -> Result<Vec<CanonicalGymSession>, StoreError> {
+        let rows = sqlx::query_as!(
             SessionRow,
             r#"
+            SELECT id AS "id!", started_at_utc, zone, on_day,
+                   duration_seconds, duration_normalised_session,
+                   average_bpm, highest_bpm, heart_rate_normalised_session
+            FROM canonical_gym_session
+            ORDER BY COALESCE(started_at_utc, on_day), id
+            "#
+        )
+        .fetch_all(&mut *self.snapshot)
+        .await
+        .map_err(|e| store_error(&e))?;
+
+        let mut sessions = Vec::with_capacity(rows.len());
+        for row in rows {
+            sessions.push(session_of(&mut self.snapshot, &row).await?);
+        }
+        Ok(sessions)
+    }
+
+    /// Every session on a day from `from` to `to`, both included.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read or holds something that is
+    /// not a session.
+    pub async fn between(
+        &mut self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<CanonicalGymSession>, StoreError> {
+        let mut sessions = Vec::new();
+        for row in spine_between(&mut self.snapshot, from, to).await? {
+            let session = session_of(&mut self.snapshot, &row).await?;
+            let day = session.occurred().day();
+            if day >= from && day <= to {
+                sessions.push(session);
+            }
+        }
+        Ok(sessions)
+    }
+}
+
+/// One whole session, its items and its heart rate.
+async fn session_of(
+    connection: &mut SqliteConnection,
+    row: &SessionRow,
+) -> Result<CanonicalGymSession, StoreError> {
+    let occurred = occurred(
+        row.started_at_utc.as_deref(),
+        row.zone.as_deref(),
+        row.on_day.as_deref(),
+    )?;
+    let duration = match (row.duration_seconds, row.duration_normalised_session) {
+        (Some(seconds), Some(session)) => Some(Attributed::new(
+            PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
+                .map_err(|e| corrupt(&e))?,
+            normalised_session_from_storage(session)?,
+        )),
+        _ => None,
+    };
+    let heart_rate = match (
+        row.average_bpm,
+        row.highest_bpm,
+        row.heart_rate_normalised_session,
+    ) {
+        (Some(average), Some(highest), Some(session)) => {
+            let summary = HeartRateSummary::new(beats(average)?, beats(highest)?);
+            let series = read_series(connection, row.id).await?;
+            Some(Attributed::new(
+                MeasuredHeartRate::new(summary, series),
+                normalised_session_from_storage(session)?,
+            ))
+        }
+        _ => None,
+    };
+    let items = read_items(connection, row.id).await?;
+    Ok(CanonicalGymSession::new(
+        occurred, items, heart_rate, duration,
+    ))
+}
+
+/// Every spine row that could fall in the window, widest reading.
+///
+/// **Widened in SQL and narrowed in Rust.** Which day a session happened on
+/// depends on the zone on its own row, so the exact comparison cannot be a
+/// `WHERE` clause without assuming every session shares one offset. A day
+/// either side covers every zone there is, and the precise filter runs through
+/// [`Occurred::day`] — the same reading everything else uses.
+async fn spine_between(
+    connection: &mut SqliteConnection,
+    from: Date,
+    to: Date,
+) -> Result<Vec<SessionRow>, StoreError> {
+    let (lower, upper) = widened(from, to)?;
+    sqlx::query_as!(
+        SessionRow,
+        r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
                    duration_seconds, duration_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
@@ -184,13 +254,12 @@ impl SqliteCanonicalGymSessionStore {
               AND COALESCE(started_at_utc, on_day) < ?
             ORDER BY COALESCE(started_at_utc, on_day), id
             "#,
-            lower,
-            upper
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| store_error(&e))
-    }
+        lower,
+        upper
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|e| store_error(&e))
 }
 
 /// A day either side of the window, as the strings the columns hold.
@@ -214,22 +283,26 @@ fn widened(from: Date, to: Date) -> Result<(String, String), StoreError> {
     Ok((lower, upper))
 }
 
-/// Whole canonical sessions, and the one that answered a prescription.
+/// Whole canonical sessions, and the one that answered a prescription, each
+/// read as one snapshot of the layer (#467).
 impl PerformedGymSessions for SqliteCanonicalGymSessionStore {
     async fn between(&self, from: Date, to: Date) -> Result<Vec<CanonicalGymSession>, StoreError> {
-        let mut sessions = Vec::new();
-        for row in self.spine_between(from, to).await? {
-            let session = self.session_of(&row).await?;
-            let day = session.occurred().day();
-            if day >= from && day <= to {
-                sessions.push(session);
-            }
-        }
-        Ok(sessions)
+        self.reading().await?.between(from, to).await
     }
 
     async fn fulfilling(
         &self,
+        prescription: PrescribedWorkoutId,
+    ) -> Result<Option<(DeliveryReference, CanonicalGymSession)>, StoreError> {
+        self.reading().await?.fulfilling(prescription).await
+    }
+}
+
+impl CanonicalGymReading {
+    /// The session that answered a prescription, and the reference it was
+    /// performed against.
+    async fn fulfilling(
+        &mut self,
         prescription: PrescribedWorkoutId,
     ) -> Result<Option<(DeliveryReference, CanonicalGymSession)>, StoreError> {
         let id = prescription.as_i64();
@@ -256,7 +329,7 @@ impl PerformedGymSessions for SqliteCanonicalGymSessionStore {
             "#,
             id
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.snapshot)
         .await
         .map_err(|e| store_error(&e))?;
 
@@ -266,32 +339,37 @@ impl PerformedGymSessions for SqliteCanonicalGymSessionStore {
         let reference =
             DeliveryReference::try_from(named.performed_against).map_err(|e| corrupt(&e))?;
 
-        let Some(row) = self.standing_on(named.normalised_session).await? else {
+        let Some(row) = standing_on(&mut self.snapshot, named.normalised_session).await? else {
             // A normalised session with no canonical one: the visit held no
             // exercise at all, or the layer has not been rebuilt since the
             // session landed. Neither is a fault here (§ 37), and reporting it
             // as "not performed" is what the caller already handles.
             return Ok(None);
         };
-        Ok(Some((reference, self.session_of(&row).await?)))
+        Ok(Some((
+            reference,
+            session_of(&mut self.snapshot, &row).await?,
+        )))
     }
 }
 
-impl SqliteCanonicalGymSessionStore {
-    /// The canonical session standing on one normalised session, where the layer
-    /// holds one.
-    ///
-    /// **Every column that can attribute a field**, because any one of them may
-    /// be the only place a given normalised session is named: a sheet that
-    /// contributed nothing but one set's reps is named by that set's outcome and
-    /// nowhere else. The lowest id where two somehow matched — a normalised
-    /// session belongs to one visit, so that is a corrupt layer rather than a
-    /// choice, and settling it the same way every rebuild does beats picking
-    /// whichever row SQLite offered first.
-    async fn standing_on(&self, normalised: i64) -> Result<Option<SessionRow>, StoreError> {
-        sqlx::query_as!(
-            SessionRow,
-            r#"
+/// The canonical session standing on one normalised session, where the layer
+/// holds one.
+///
+/// **Every column that can attribute a field**, because any one of them may be
+/// the only place a given normalised session is named: a sheet that contributed
+/// nothing but one set's reps is named by that set's outcome and nowhere else.
+/// The lowest id where two somehow matched — a normalised session belongs to
+/// one visit, so that is a corrupt layer rather than a choice, and settling it
+/// the same way every rebuild does beats picking whichever row SQLite offered
+/// first.
+async fn standing_on(
+    connection: &mut SqliteConnection,
+    normalised: i64,
+) -> Result<Option<SessionRow>, StoreError> {
+    sqlx::query_as!(
+        SessionRow,
+        r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
                    duration_seconds, duration_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
@@ -315,20 +393,19 @@ impl SqliteCanonicalGymSessionStore {
             ORDER BY id
             LIMIT 1
             "#,
-            normalised,
-            normalised,
-            normalised,
-            normalised,
-            normalised,
-            normalised,
-            normalised,
-            normalised,
-            normalised
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| store_error(&e))
-    }
+        normalised,
+        normalised,
+        normalised,
+        normalised,
+        normalised,
+        normalised,
+        normalised,
+        normalised,
+        normalised
+    )
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(|e| store_error(&e))
 }
 
 /// When the gym's sessions happened, at the grain the record knows.
@@ -827,7 +904,7 @@ pub(super) fn occurred(
 }
 
 async fn read_series(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     session: i64,
 ) -> Result<Option<HeartRateSeries>, StoreError> {
     let rows = sqlx::query!(
@@ -839,7 +916,7 @@ async fn read_series(
         "#,
         session
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|e| store_error(&e))?;
 
@@ -854,7 +931,7 @@ async fn read_series(
 }
 
 async fn read_items(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     session: i64,
 ) -> Result<NonEmpty<CanonicalItem>, StoreError> {
     let items = sqlx::query!(
@@ -864,13 +941,13 @@ async fn read_items(
         "#,
         session
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|e| store_error(&e))?;
 
     let mut built = Vec::with_capacity(items.len());
     for item in items {
-        let exercises = read_exercises(pool, session, item.position).await?;
+        let exercises = read_exercises(connection, session, item.position).await?;
         built.push(if item.is_superset == 1 {
             CanonicalItem::Superset(Box::new(
                 AtLeastTwo::new(exercises).map_err(|e| corrupt(&e))?,
@@ -889,7 +966,7 @@ async fn read_items(
 }
 
 async fn read_exercises(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     session: i64,
     item_position: i64,
 ) -> Result<Vec<CanonicalExercise>, StoreError> {
@@ -904,14 +981,14 @@ async fn read_exercises(
         session,
         item_position
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|e| store_error(&e))?;
 
     let mut built = Vec::with_capacity(rows.len());
     for row in rows {
         let identified_by = normalised_session_from_storage(row.identified_normalised_session)?;
-        let sets = read_sets(pool, session, item_position, row.position).await?;
+        let sets = read_sets(connection, session, item_position, row.position).await?;
         built.push(match row.measure.as_str() {
             "reps" => {
                 let identified = identified_from_storage(
@@ -1029,7 +1106,7 @@ pub(super) struct StoredSet {
 }
 
 async fn read_sets(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     session: i64,
     item_position: i64,
     exercise_position: i64,
@@ -1050,7 +1127,7 @@ async fn read_sets(
         item_position,
         exercise_position
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|e| store_error(&e))?;
 

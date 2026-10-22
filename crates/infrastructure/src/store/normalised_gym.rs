@@ -24,7 +24,7 @@ use domain::{
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::Timestamp;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{
     canonical_gym::{
@@ -48,10 +48,18 @@ impl SqliteNormalisedGymSessionReader {
 
 impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
     async fn all(&self) -> Result<Vec<NormalisedGymSession>, StoreError> {
-        let spine = self.spine().await?;
+        // **One snapshot** (#467): re-deriving a stream rewrites its rows under
+        // fresh ids, so a spine read before that commit and parts read after
+        // it would not be one session.
+        let mut snapshot = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        let spine = Self::spine(&mut snapshot).await?;
         let mut sessions = Vec::with_capacity(spine.len());
         for row in spine {
-            sessions.push(self.read_one(&row).await?);
+            sessions.push(Self::read_one(&mut snapshot, &row).await?);
         }
         Ok(sessions)
     }
@@ -108,7 +116,7 @@ impl SqliteNormalisedGymSessionReader {
     /// by their first ten characters, and the instant comes second. That is the
     /// order a reader wants and the determinism § 9 needs; it is not a claim
     /// that a day happened at midnight.
-    async fn spine(&self) -> Result<Vec<SpineRow>, StoreError> {
+    async fn spine(connection: &mut SqliteConnection) -> Result<Vec<SpineRow>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT s.id AS "id!: i64",
@@ -130,7 +138,7 @@ impl SqliteNormalisedGymSessionReader {
             ORDER BY COALESCE(MIN(w.started_at_utc), MIN(w.on_day)) ASC, s.id ASC
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -150,7 +158,10 @@ impl SqliteNormalisedGymSessionReader {
             .collect())
     }
 
-    async fn read_one(&self, row: &SpineRow) -> Result<NormalisedGymSession, StoreError> {
+    async fn read_one(
+        connection: &mut SqliteConnection,
+        row: &SpineRow,
+    ) -> Result<NormalisedGymSession, StoreError> {
         let id = normalised_session_from_storage(row.id)?;
         let when = occurred(
             row.started_at_utc.as_deref(),
@@ -170,7 +181,7 @@ impl SqliteNormalisedGymSessionReader {
         };
 
         let Some(workout) = row.measured_workout else {
-            let items = self.items(row.id, id).await?;
+            let items = Self::items(connection, row.id, id).await?;
             return Ok(NormalisedGymSession::from_log(id, when, duration, items));
         };
 
@@ -178,12 +189,12 @@ impl SqliteNormalisedGymSessionReader {
             (Some(average), Some(highest)) => {
                 let summary =
                     domain::measure::HeartRateSummary::new(beats(average)?, beats(highest)?);
-                let series = self.series(workout).await?;
+                let series = Self::series(connection, workout).await?;
                 Some(Attributed::new(MeasuredHeartRate::new(summary, series), id))
             }
             _ => None,
         };
-        let sets = self.measured_sets(workout).await?;
+        let sets = Self::measured_sets(connection, workout).await?;
         Ok(NormalisedGymSession::from_watch(
             id, when, duration, heart_rate, &sets,
         ))
@@ -191,7 +202,7 @@ impl SqliteNormalisedGymSessionReader {
 
     /// The watch's own recording, where one landed.
     async fn series(
-        &self,
+        connection: &mut SqliteConnection,
         workout: i64,
     ) -> Result<Option<domain::measure::HeartRateSeries>, StoreError> {
         let rows = sqlx::query!(
@@ -203,7 +214,7 @@ impl SqliteNormalisedGymSessionReader {
             "#,
             workout
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -222,7 +233,10 @@ impl SqliteNormalisedGymSessionReader {
     }
 
     /// The sets a watch classified, in the order it recorded them.
-    async fn measured_sets(&self, workout: i64) -> Result<Vec<MeasuredSet>, StoreError> {
+    async fn measured_sets(
+        connection: &mut SqliteConnection,
+        workout: i64,
+    ) -> Result<Vec<MeasuredSet>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT started_at_utc AS "started_at_utc!: String", zone AS "zone!: String",
@@ -238,7 +252,7 @@ impl SqliteNormalisedGymSessionReader {
             "#,
             workout
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -269,7 +283,7 @@ impl SqliteNormalisedGymSessionReader {
     /// which routine each came from is the normalised layer's provenance
     /// rather than this layer's shape.
     async fn items(
-        &self,
+        connection: &mut SqliteConnection,
         session: i64,
         id: NormalisedSessionId,
     ) -> Result<Vec<CanonicalItem>, StoreError> {
@@ -289,7 +303,7 @@ impl SqliteNormalisedGymSessionReader {
             "#,
             session
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -305,9 +319,14 @@ impl SqliteNormalisedGymSessionReader {
                 }
                 at = Some(here);
             }
-            let sets = self
-                .sets(row.workout, row.item_position, row.exercise_position, id)
-                .await?;
+            let sets = Self::sets(
+                connection,
+                row.workout,
+                row.item_position,
+                row.exercise_position,
+                id,
+            )
+            .await?;
             pending.push(exercise_of(&row.exercise, &row.measure, sets, id)?);
         }
         if let Some((_, _, superset)) = at {
@@ -318,7 +337,7 @@ impl SqliteNormalisedGymSessionReader {
 
     /// One exercise's sets, every field of them named for `id`.
     async fn sets(
-        &self,
+        connection: &mut SqliteConnection,
         workout: i64,
         item_position: i64,
         exercise_position: i64,
@@ -337,7 +356,7 @@ impl SqliteNormalisedGymSessionReader {
             item_position,
             exercise_position
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 

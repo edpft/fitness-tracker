@@ -80,6 +80,10 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
     }
 
     async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        // **Three queries, one snapshot** (#467): a ride and its series read
+        // either side of a re-derivation's commit would not be one ride.
+        let mut snapshot = self.pool.begin().await.map_err(|e| store_error(&e))?;
+
         // A normalised session's id is its first ride's landing record, which
         // is what `cycling_session` is keyed on; a ride is keyed on its own.
         let rides = sqlx::query_as!(
@@ -98,7 +102,7 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
              ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
 
@@ -117,7 +121,7 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
              GROUP BY ride
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
         let mut series = Series {
@@ -144,7 +148,7 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
              GROUP BY ride
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
         for row in heart_rate {
@@ -226,6 +230,11 @@ struct CanonicalRideRow {
 
 impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
     async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        // **Three queries, one snapshot** (#467). `replace` rebuilds the layer
+        // under fresh session ids, so rides read before its commit and series
+        // read after it would name sessions the other no longer holds, and a
+        // page would report a ride with no samples.
+        let mut snapshot = self.pool.begin().await.map_err(|e| store_error(&e))?;
         let rides = sqlx::query_as!(
             CanonicalRideRow,
             r#"
@@ -251,7 +260,7 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
              ORDER BY s.id, r.position
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
 
@@ -268,7 +277,7 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
              GROUP BY session, ride_position
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
         let mut series: BTreeMap<(i64, i64), Vec<RideSample>> = BTreeMap::new();
@@ -292,7 +301,7 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
              GROUP BY session, ride_position
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *snapshot)
         .await
         .map_err(|e| store_error(&e))?;
         let mut hearts: BTreeMap<(i64, i64), Vec<HeartRateSample>> = BTreeMap::new();

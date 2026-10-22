@@ -70,7 +70,7 @@ pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
 pub use canonical_cycling::{
     SqliteCanonicalCyclingSessionStore, SqliteNormalisedCyclingSessionReader,
 };
-pub use canonical_gym::SqliteCanonicalGymSessionStore;
+pub use canonical_gym::{CanonicalGymReading, SqliteCanonicalGymSessionStore};
 pub use canonical_weigh_in::{SqliteCanonicalWeighInStore, SqliteNormalisedWeighInReader};
 pub use composition::SqliteCompositionHistory;
 pub use cycling_delivery::SqliteCyclingDeliveryStore;
