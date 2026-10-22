@@ -363,9 +363,9 @@ pub async fn inputs(
 /// Garmin's daily heart rate, of which the resting heart rate is derived (#254).
 ///
 /// **Collected two ways**: with the activities, because it says which days a
-/// watch was worn (#427), and here on its own, signing in for itself as the HRV
-/// walk does. Both walks keep one resumption point, so whichever runs second
-/// asks only for the day the first left off at.
+/// watch was worn (#427), and here on its own, on the token every Garmin entry
+/// caches (#377). Both walks keep one resumption point, so whichever runs
+/// second asks only for the day the first left off at.
 async fn garmin_daily_heart_rate(
     command: Command,
     database: &Path,
@@ -394,12 +394,7 @@ async fn garmin_daily_heart_rate(
                 });
             };
 
-            let auth = GarminAuth::new(
-                auth_base_url.clone(),
-                garmin::token_base_for(&auth_base_url),
-                GarminCredentials::new(email, password),
-                None,
-            );
+            let auth = garmin_auth(&auth_base_url, GarminCredentials::new(email, password));
             let extraction = Extraction::new(ExtractionPorts {
                 source: garmin::days::GarminDays::new(
                     GarminDay::HeartRate,
@@ -585,6 +580,33 @@ pub fn peloton_auth(auth_base_url: String, credentials: PelotonCredentials) -> P
         .ok()
         .map(|path| TokenFile::new(path, credentials.digest()));
     PelotonAuth::new(auth_base_url, credentials, cache)
+}
+
+/// The one way a resolved Garmin login becomes an authenticator (#377).
+///
+/// **The token is cached, for Peloton's reason** (#366). Each entry built its
+/// own authenticator with no cache, so a run collecting `garmin.hrv` and
+/// `garmin.activities` signed in twice through the SSO widget — and Garmin's
+/// sign-in sits behind Cloudflare, which a client signing in over and over is
+/// the thing most likely to make it decide we are not a browser. Within an
+/// entry the walks still share one authenticator; across entries, and across
+/// runs, they share the file.
+///
+/// **Bound to the credential that obtained it** (#197), as Peloton's is: a
+/// token another password earned reads as absent.
+///
+/// **A machine with neither `XDG_STATE_HOME` nor `HOME` gets no cache** rather
+/// than an error, for the reason Peloton's does.
+pub fn garmin_auth(auth_base_url: &str, credentials: GarminCredentials) -> GarminAuth {
+    let cache = crate::paths::token(&crate::paths::SystemEnvironment, crate::catalogue::GARMIN)
+        .ok()
+        .map(|path| TokenFile::new(path, credentials.digest()));
+    GarminAuth::new(
+        auth_base_url,
+        garmin::token_base_for(auth_base_url),
+        credentials,
+        cache,
+    )
 }
 
 /// Both Peloton walks, in the one order that matters.
@@ -802,10 +824,8 @@ pub async fn peloton_records(
 /// say — which figures Garmin states, which it omits, and what its status is
 /// actually a classification of — is in [`domain::body::hrv`].
 ///
-/// **No token cache**, and this walk signs in for itself: the adapter holds a
-/// password, so it can do that unattended, and Garmin's other three walks share
-/// one `Arc<GarminAuth>` rather than a file. Peloton's cache is kept because
-/// its two walks and a cycling delivery cannot share an instance (#366).
+/// **On the token every Garmin entry caches** (#377), so a run that collects
+/// this and the activities signs in once rather than once each.
 async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, WiringError> {
     let pool = connect(database).await?;
     let landing = GarminHrvLandingStore::new(pool.clone())?;
@@ -832,12 +852,7 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
                 });
             };
 
-            let auth = GarminAuth::new(
-                auth_base_url.clone(),
-                garmin::token_base_for(&auth_base_url),
-                GarminCredentials::new(email, password),
-                None,
-            );
+            let auth = garmin_auth(&auth_base_url, GarminCredentials::new(email, password));
             let extraction = Extraction::new(ExtractionPorts {
                 source: GarminHrv::new(base_url, auth, today()),
                 landing,
@@ -1036,7 +1051,8 @@ async fn garmin_activities(
 /// **One `GarminAuth`, shared**, unlike Peloton's two: Garmin rate-limits its
 /// sign-in page, and a run that signed in once per walk was refused by it on
 /// the operator's account. The token is held behind a lock, so the walks share
-/// it without sharing anything else.
+/// it without sharing anything else, and it is cached for the other Garmin
+/// entries to read (#377).
 ///
 /// **Each walk reports its own outcome**, as Peloton's two do (#367): the three
 /// all run, and one that could not is named rather than standing in for the
@@ -1069,13 +1085,9 @@ async fn collect_activities(
         });
     };
 
-    let credentials = GarminCredentials::new(email, password);
-    let token_base = garmin::token_base_for(&auth_base_url);
-    let auth = std::sync::Arc::new(GarminAuth::new(
-        auth_base_url.clone(),
-        token_base,
-        credentials,
-        None,
+    let auth = std::sync::Arc::new(garmin_auth(
+        &auth_base_url,
+        GarminCredentials::new(email, password),
     ));
 
     let activities_stream = landing.stream().clone();

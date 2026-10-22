@@ -9,8 +9,8 @@
 //! frontend's.
 
 use infrastructure::{
-    CredentialDigest, Credentials, GarminAuth, GarminCredentials, HevyWorkoutEvents, TokenFile,
-    WithingsAuth, WithingsClient, garmin::token_base_for, peloton::auth::PelotonCredentials,
+    CredentialDigest, Credentials, GarminCredentials, HevyWorkoutEvents, TokenFile, WithingsAuth,
+    WithingsClient, peloton::auth::PelotonCredentials,
 };
 
 use crate::{
@@ -131,25 +131,24 @@ pub async fn verify(
         // two both take an email and a password and neither can check the
         // other's. Garmin also needs two hosts rather than one, and the second
         // is derived from the first so that a stub reaches both.
+        //
+        // **Through the one constructor every Garmin run uses** (#377), so
+        // the token a successful check earns is the one the next run reads,
+        // rather than a sign-in thrown away.
         (
             "garmin",
             Credential::Login { email, password },
             Kind::EmailPassword {
                 default_auth_base_url,
             },
-        ) => {
-            let sso = auth_base_url(default_auth_base_url);
-            GarminAuth::new(
-                sso.clone(),
-                token_base_for(&sso),
-                GarminCredentials::new(email.clone(), password.clone()),
-                None,
-            )
-            .bearer()
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-        }
+        ) => crate::wiring::garmin_auth(
+            &auth_base_url(default_auth_base_url),
+            GarminCredentials::new(email.clone(), password.clone()),
+        )
+        .bearer()
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
         (
             "withings",
             Credential::OAuthClient {

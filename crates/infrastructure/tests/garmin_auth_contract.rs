@@ -16,7 +16,7 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use application::SourceError;
-use infrastructure::{GarminAuth, GarminCredentials, garmin::token_base_for};
+use infrastructure::{GarminAuth, GarminCredentials, Token, TokenFile, garmin::token_base_for};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -314,6 +314,142 @@ fn a_form_without_a_csrf_says_which_piece_was_missing() {
             panic!("a form with no token is malformed")
         };
         assert!(detail.contains("_csrf"), "{detail}");
+    });
+}
+
+/// The adapter with a token file, as the composition root builds it (#377).
+fn cached(server: &MockServer, cache: TokenFile) -> GarminAuth {
+    let base = server.uri();
+    GarminAuth::new(base.clone(), token_base_for(&base), credentials(), Some(cache)).without_pause()
+}
+
+/// The token file for [`credentials`], in `directory`.
+fn cache_in(directory: &std::path::Path) -> TokenFile {
+    TokenFile::new(
+        directory.join("garmin.token.json"),
+        credentials().digest(),
+    )
+}
+
+/// How many times the credentials were posted, which is one per sign-in.
+async fn sign_ins(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| {
+            request.method == wiremock::http::Method::POST && request.url.path() == "/sso/signin"
+        })
+        .count()
+}
+
+/// The whole flow, answered: the pages, a credential POST that succeeds, and
+/// the token endpoint.
+async fn signs_in(server: &MockServer) {
+    sso_pages(server).await;
+    Mock::given(method("POST"))
+        .and(path("/sso/signin"))
+        .respond_with(success_page(server))
+        .mount(server)
+        .await;
+    token_endpoint(server).await;
+}
+
+/// **One sign-in for two authenticators** (#377). `garmin.hrv` and
+/// `garmin.activities` each build their own, and each signed in through the
+/// widget; with the token written down, the second reads what the first earned.
+#[test]
+fn a_second_authenticator_reads_the_token_the_first_earned() {
+    let runtime = runtime().expect("a runtime");
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+        signs_in(&server).await;
+
+        let first = cached(&server, cache_in(directory.path()));
+        assert_eq!(first.bearer().await.expect("a bearer token"), "the-bearer");
+        assert_eq!(sign_ins(&server).await, 1);
+
+        let second = cached(&server, cache_in(directory.path()));
+        assert_eq!(
+            second.bearer().await.expect("the cached token"),
+            "the-bearer"
+        );
+        assert_eq!(sign_ins(&server).await, 1, "the second did not sign in");
+    });
+}
+
+/// **A token another password earned is not used** (#197): it is access the
+/// operator believes he revoked when he changed the password.
+#[test]
+fn a_token_another_password_earned_is_not_used() {
+    let runtime = runtime().expect("a runtime");
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let before = GarminCredentials::new("rider@example.com", "the-old-password").digest();
+    let tomorrow = jiff::Timestamp::now()
+        .checked_add(jiff::SignedDuration::from_hours(24))
+        .expect("tomorrow is a time");
+    TokenFile::new(directory.path().join("garmin.token.json"), before)
+        .write(&Token::new(
+            "the-old-password's-bearer".to_owned(),
+            Some("the-old-refresh".to_owned()),
+            tomorrow,
+            before,
+        ))
+        .expect("the cache is writable");
+
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+        signs_in(&server).await;
+
+        let auth = cached(&server, cache_in(directory.path()));
+        assert_eq!(auth.bearer().await.expect("a bearer token"), "the-bearer");
+        assert_eq!(sign_ins(&server).await, 1, "it signed in as this password");
+    });
+}
+
+/// **A spent token is refreshed, not signed in again**: a refresh is one
+/// request and sends no password.
+#[test]
+fn a_spent_cached_token_is_refreshed_rather_than_signed_in_again() {
+    let runtime = runtime().expect("a runtime");
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let cache = cache_in(directory.path());
+    let yesterday = jiff::Timestamp::now()
+        .checked_sub(jiff::SignedDuration::from_hours(24))
+        .expect("yesterday is a time");
+    cache
+        .write(&Token::new(
+            "a-spent-bearer".to_owned(),
+            Some("the-refresh".to_owned()),
+            yesterday,
+            credentials().digest(),
+        ))
+        .expect("the cache is writable");
+
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+        signs_in(&server).await;
+
+        let auth = cached(&server, cache.clone());
+        assert_eq!(auth.bearer().await.expect("a bearer token"), "the-bearer");
+        assert_eq!(sign_ins(&server).await, 0, "a refresh needs no sign-in");
+
+        let requests = server.received_requests().await.unwrap_or_default();
+        let refreshed = requests
+            .iter()
+            .find(|request| request.url.path() == "/di-oauth2-service/oauth/token")
+            .expect("the token was refreshed");
+        let body = String::from_utf8_lossy(&refreshed.body);
+        assert_eq!(
+            form_value(&body, "grant_type").as_deref(),
+            Some("refresh_token")
+        );
+        assert_eq!(
+            form_value(&body, "refresh_token").as_deref(),
+            Some("the-refresh")
+        );
     });
 }
 
