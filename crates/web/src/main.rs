@@ -108,7 +108,10 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         stated.as_deref(),
     )
     .map_err(|error| error.to_string())?;
-    let credentials = configurator::config::credentials().map_err(|error| error.to_string())?;
+    // **Where they are kept, not what was in them** (#438): each run reads
+    // them, so `fitness credentials` takes effect without a restart.
+    let credentials =
+        configurator::paths::credentials(&configurator::paths::SystemEnvironment).ok();
 
     let runs = Arc::new(Runs::new(Setting {
         database,
