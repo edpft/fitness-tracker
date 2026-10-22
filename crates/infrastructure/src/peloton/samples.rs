@@ -142,7 +142,7 @@ impl WorkoutEventSource for PelotonWorkoutSamples {
             // source said. Read before the id is moved out of the event.
             let occurred_at = workout.provenance.occurred_at();
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 workout.source_record_id,
                 EventProvenance::new(endpoint, EventKind::Updated, occurred_at).into(),
                 payload,

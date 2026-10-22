@@ -194,7 +194,7 @@ impl WorkoutEventSource for WithingsMeasurements {
                 }
             })?;
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 source_record_id,
                 // **Always `Updated`**: `getmeas` serves a group as it now
                 // stands and has no event kinds.

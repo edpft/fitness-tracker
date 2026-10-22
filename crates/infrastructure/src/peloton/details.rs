@@ -71,7 +71,7 @@ impl WorkoutEventSource for PelotonWorkoutDetails {
                     detail: format!("{path} answered nothing: {error}"),
                 })?;
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 workout.source_record_id,
                 EventProvenance::new(endpoint, EventKind::Updated, occurred_at).into(),
                 payload,

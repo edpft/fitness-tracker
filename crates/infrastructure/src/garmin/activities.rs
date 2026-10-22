@@ -141,40 +141,6 @@ impl Identity {
     }
 }
 
-/// What the next serving of this activity is compared against.
-///
-/// **Garmin does not state its keys in a stable order.** Two extractions minutes
-/// apart landed all fifty activities of the first page again, and the payloads
-/// were identical in every value: the second serving of one unchanged activity
-/// simply ordered its keys differently — diverging at the seventy-third — so the
-/// bytes hashed differently and every one of them read as changed. A walk that
-/// re-lands its whole first page on every run makes "0 records landed" stop
-/// meaning "nothing changed", and grows the table without adding a fact.
-///
-/// So the comparison is the payload re-serialised rather than the bytes as
-/// served. **Canonical because `serde_json::Map` is a `BTreeMap`** — this build
-/// does not enable `preserve_order` — so keys come out in one order whatever
-/// order they arrived in. This is [`crate::peloton::workouts`]'s remedy applied
-/// to a different disease: there, fields belonging to strangers had to be
-/// removed; here nothing is removed and only the ordering is settled.
-///
-/// The bytes are still landed exactly as served (§ II.1). This changes what
-/// "changed" means, not what is stored.
-///
-/// Falls back to the payload's own digest when the bytes will not parse or will
-/// not re-serialise, which is the safe direction: an unreadable payload compares
-/// on everything and so lands again rather than being wrongly judged unchanged.
-pub(super) fn revision_of(payload: &RawPayload) -> PayloadDigest {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload.as_bytes()) else {
-        return payload.digest();
-    };
-
-    serde_json::to_vec(&value)
-        .ok()
-        .and_then(|bytes| RawPayload::try_from(bytes.as_slice()).ok())
-        .map_or_else(|| payload.digest(), |stable| stable.digest())
-}
-
 /// `2026-09-18 07:21:02` as an instant.
 ///
 /// Garmin separates the date and the time with a space and states no offset;
@@ -384,7 +350,7 @@ impl WorkoutEventSource for GarminActivities {
                 // an absence rather than an event.
                 provenance: EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
                     .into(),
-                revision: revision_of(&payload),
+                revision: crate::revision::of_json(&payload),
                 payload,
             });
         }
@@ -399,51 +365,8 @@ impl WorkoutEventSource for GarminActivities {
 mod tests {
     use super::{
         ACTIVITIES_PATH, ActivityPage, Identity, PAGE_SIZE, RawPayload, parse_garmin_datetime,
-        revision_of,
     };
     use domain::landing::Endpoint;
-
-    /// **The live failure this exists for.** A first run landed 2,271
-    /// activities; a second, minutes later, landed the first fifty again with
-    /// every value identical and only the key order changed. Comparing the
-    /// bytes as served makes an unchanged activity look new on every run.
-    #[test]
-    fn two_key_orders_of_one_activity_are_one_revision() {
-        let served = RawPayload::try_from(
-            br#"{"activityId":123,"duration":42.0,"activityName":"Strength"}"#.as_slice(),
-        )
-        .expect("a payload");
-        let served_again = RawPayload::try_from(
-            br#"{"activityName":"Strength","activityId":123,"duration":42.0}"#.as_slice(),
-        )
-        .expect("a payload");
-
-        assert_ne!(
-            served.digest(),
-            served_again.digest(),
-            "the bytes differ, which is what made this necessary"
-        );
-        assert_eq!(revision_of(&served), revision_of(&served_again));
-    }
-
-    /// A value that really changed is still a new serving.
-    #[test]
-    fn a_changed_value_is_a_new_revision() {
-        let before = RawPayload::try_from(br#"{"activityId":123,"duration":42.0}"#.as_slice())
-            .expect("a payload");
-        let after = RawPayload::try_from(br#"{"activityId":123,"duration":43.0}"#.as_slice())
-            .expect("a payload");
-
-        assert_ne!(revision_of(&before), revision_of(&after));
-    }
-
-    /// A payload that will not parse compares on everything, so it lands again
-    /// rather than being wrongly judged unchanged.
-    #[test]
-    fn an_unreadable_payload_falls_back_to_its_own_digest() {
-        let payload = RawPayload::try_from(b"not json at all".as_slice()).expect("a payload");
-        assert_eq!(revision_of(&payload), payload.digest());
-    }
 
     #[test]
     fn the_path_is_an_endpoint() {

@@ -16,6 +16,7 @@ pub mod lock;
 pub mod myfitnesspal;
 pub mod peloton;
 pub mod private_file;
+mod revision;
 pub mod scribe;
 pub mod spreadsheets;
 pub mod store;

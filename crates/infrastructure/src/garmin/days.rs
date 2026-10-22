@@ -217,7 +217,7 @@ impl GarminDays {
         let payload = RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
             detail: error.to_string(),
         })?;
-        Ok(SourceEvent::new(
+        Ok(crate::revision::json_event(
             source_record_id,
             EventProvenance::new(
                 endpoint.clone(),

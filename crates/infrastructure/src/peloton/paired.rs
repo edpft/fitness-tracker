@@ -64,7 +64,7 @@ impl WorkoutEventSource for PelotonAccount {
             .map_err(|error| malformed(format!("{ME_ENDPOINT} answered without an id: {error}")))?;
         let endpoint =
             Endpoint::try_from(ME_ENDPOINT).map_err(|error| malformed(error.to_string()))?;
-        let event = SourceEvent::new(
+        let event = crate::revision::json_event(
             SourceRecordId::try_from(identity.id).map_err(|error| malformed(error.to_string()))?,
             // The account as it stands: no event, and no time it happened.
             EventProvenance::new(endpoint, EventKind::Updated, None).into(),

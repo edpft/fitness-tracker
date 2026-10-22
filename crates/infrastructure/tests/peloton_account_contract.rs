@@ -130,6 +130,54 @@ fn the_account_is_one_record_under_the_users_id() {
     });
 }
 
+/// **The account lands again only when what it says changes** (#532). Peloton
+/// serves `/api/me` with its keys in a different order from one request to the
+/// next: the operator's store held 40 copies, and 35 of the 39 repeats were
+/// key order alone. A newly paired monitor is still a new serving.
+#[test]
+fn the_account_in_another_key_order_is_the_same_serving() {
+    let first = r#"{"id":"f051be7977044fd39797c05a854a6f59","username":"rider","paired_devices":[{"name":"Device: 3629","paired_device_type":"heart_rate_monitor","serial_number":"3629"}]}"#;
+    let reordered = r#"{"paired_devices":[{"serial_number":"3629","paired_device_type":"heart_rate_monitor","name":"Device: 3629"}],"username":"rider","id":"f051be7977044fd39797c05a854a6f59"}"#;
+    let repaired = r#"{"id":"f051be7977044fd39797c05a854a6f59","username":"rider","paired_devices":[{"name":"Device: 4100","paired_device_type":"heart_rate_monitor","serial_number":"4100"}]}"#;
+
+    let runtime = runtime().expect("a runtime");
+    let revisions: Vec<_> = runtime.block_on(async {
+        let mut revisions = Vec::new();
+        for body in [first, reordered, repaired] {
+            let server = MockServer::start().await;
+            authenticated(&server).await;
+            Mock::given(method("GET"))
+                .and(path("/api/me"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+                .mount(&server)
+                .await;
+            let source = PelotonAccount::new(
+                server.uri(),
+                PelotonAuth::new(
+                    server.uri(),
+                    PelotonCredentials::new("rider@example.com", "not-a-real-password"),
+                    None,
+                ),
+            );
+            let batch = source.fetch(None, None).await.expect("the account");
+            let [event] = batch.events.as_slice() else {
+                panic!("one record");
+            };
+            revisions.push(event.revision);
+        }
+        revisions
+    });
+
+    assert_eq!(
+        revisions[0], revisions[1],
+        "the same account in another key order is the same serving"
+    );
+    assert_ne!(
+        revisions[1], revisions[2],
+        "a newly paired monitor is a new serving"
+    );
+}
+
 /// The monitor is read as the device that broadcasts by that number, sending
 /// heart rate, in use when the account was fetched; a speaker is no monitor.
 #[test]
