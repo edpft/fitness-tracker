@@ -426,3 +426,47 @@ fn the_heavy_session_is_heavier_than_the_light_one() {
         "the heavy session's top set is heavier"
     );
 }
+
+/// A second plan after the fixture's: its own entry test from 4 January 2027,
+/// then its own block.
+async fn a_second_plan(directory: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = connect(&directory.join("test.db")).await?;
+    let spring = Date::constant(2027, 1, 4);
+    Authoring::new(
+        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+        SqliteGenerationParameterStore::new(pool),
+    )
+    .author(
+        &programme::named_plan(
+            "2027-spring",
+            vec![
+                programme::entry_test_from(spring)?,
+                programme::as_programme(programme::programme_from(Date::constant(2027, 1, 11))?),
+            ],
+        )?,
+        &programme::parameters()?,
+    )
+    .await?;
+    Ok(())
+}
+
+/// **A standing names its mesocycle by its place in its plan, not by its
+/// row** (#314). The store numbers mesocycles across every plan, so the first
+/// of a second plan is its third row; with one plan in the store the two agree
+/// by accident, which is why this authors a second.
+#[test]
+fn a_standing_names_the_mesocycle_by_its_place_in_its_plan() {
+    let (prescriber, directory) = prescriber!();
+    run!(a_second_plan(directory.path()));
+
+    let standing = run!(prescriber.standing(Date::constant(2027, 1, 6)));
+    assert_eq!(standing.plan.to_string(), "2027-spring");
+    assert_eq!(
+        standing.ordinal.to_string(),
+        "1",
+        "the plan's first mesocycle, not the store's third"
+    );
+
+    let standing = run!(prescriber.standing(Date::constant(2027, 1, 13)));
+    assert_eq!(standing.ordinal.to_string(), "2");
+}

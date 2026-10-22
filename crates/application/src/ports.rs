@@ -2207,7 +2207,10 @@ pub struct Prescription {
 #[derive(Debug, Clone)]
 pub struct LadderStanding {
     pub plan: PlanName,
-    pub programme_id: MesocycleId,
+    /// Which mesocycle of the plan this is, as the plan numbers them (#314):
+    /// the number the operator reads. The store's row id counts across every
+    /// plan, so the first mesocycle of a second plan would print as the third.
+    pub ordinal: MesocycleOrdinal,
     pub programme: GymMesocycle,
     pub parameters: GenerationParameters,
     /// Derived from the gating sessions before the date asked about.

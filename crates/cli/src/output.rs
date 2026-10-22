@@ -774,7 +774,7 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     println!(
         "plan \"{}\" — mesocycle {} ({}) — {}, {} primary, {} {} from {}",
         standing.plan,
-        standing.programme_id,
+        standing.ordinal,
         programme.template(),
         programme.primary_exercise(),
         programme.primary(),
