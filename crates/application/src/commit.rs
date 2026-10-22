@@ -136,7 +136,11 @@ where
         };
         let plans = ReschedulingPlans::new(
             self.ports.plans.clone(),
-            Reschedule::new(standing.reruns.clone(), diary.clone()),
+            Reschedule::new(
+                standing.reruns.clone(),
+                diary.clone(),
+                standing.missed.clone(),
+            ),
         );
         let Some(plan) = in_force(&plans, &macrocycle).await? else {
             return Ok(None);

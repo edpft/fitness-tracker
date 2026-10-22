@@ -694,6 +694,7 @@ async fn held_after_the_test()
             holding: Some(domain::schedule::Discipline::Gym),
         }],
         diary,
+        domain::planner::Missed::none(),
     );
 
     Ok((

@@ -391,7 +391,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
         &opened.cycling,
         date(2026, 10, 19),
         &riding_week().expect("the fixture week is valid"),
-        &quiet_diary()
+        &quiet_diary(),
+        &domain::planner::Missed::none()
     ));
     let next = next.ride().expect("a ride of the programme is due");
     assert_eq!(next.date, date(2026, 10, 21));
@@ -402,7 +403,8 @@ fn the_next_ride_crosses_a_mesocycle_boundary() {
         &opened.cycling,
         date(2026, 10, 12),
         &riding_week().expect("the fixture week is valid"),
-        &quiet_diary()
+        &quiet_diary(),
+        &domain::planner::Missed::none()
     ));
     let next = next.ride().expect("a ride of the programme is due");
     assert_eq!(next.date, date(2026, 10, 14));
@@ -535,7 +537,8 @@ fn a_holding_week_puts_the_power_zone_ride_on_the_wednesday() {
         &opened.cycling,
         date(2026, 9, 21),
         &week,
-        &quiet_diary()
+        &quiet_diary(),
+        &domain::planner::Missed::none()
     ));
     let wednesday = wednesday.ride().expect("a ride of the programme is due");
     assert_eq!(wednesday.date, date(2026, 9, 23));
@@ -548,7 +551,8 @@ fn a_holding_week_puts_the_power_zone_ride_on_the_wednesday() {
         &opened.cycling,
         date(2026, 9, 24),
         &week,
-        &quiet_diary()
+        &quiet_diary(),
+        &domain::planner::Missed::none()
     ));
     let sunday = sunday.ride().expect("a ride of the programme is due");
     assert_eq!(sunday.date, date(2026, 9, 27));
@@ -619,7 +623,8 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
         &opened.cycling,
         date(2026, 9, 21),
         &riding_week().expect("the fixture week is valid"),
-        &diary
+        &diary,
+        &domain::planner::Missed::none()
     ));
     let wednesday = wednesday.ride().expect("a ride of the programme is due");
     assert_eq!(wednesday.date, date(2026, 9, 23));

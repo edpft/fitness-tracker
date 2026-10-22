@@ -21,7 +21,10 @@
 //! why nothing does where nothing does; rescheduling a lost session is #177's,
 //! and the span across a whole plan is #64's.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use jiff::civil::Date;
 
@@ -138,9 +141,14 @@ pub fn commencing(date: Date) -> Date {
 /// the microcycle, and #185 exists to say *why* it did not happen; the
 /// alteration is read for that rather than to decide what is here.
 #[must_use]
-pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<'a>> {
+pub fn week<'a>(
+    plan: &'a Plan,
+    diary: &Diary,
+    containing: Date,
+    missed: &Missed,
+) -> Vec<Planned<'a>> {
     let mut counted: BTreeMap<Discipline, u8> = BTreeMap::new();
-    slots(diary, containing)
+    slots(diary, containing, missed)
         .into_iter()
         .map(|slot| {
             let number = counted
@@ -156,8 +164,59 @@ pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<
         .collect()
 }
 
+/// The essential sessions whose window closed with nothing performed and
+/// nothing to explain it, each by its discipline and the day of its slot.
+///
+/// **Read off the week's states and handed back**, never stored: the
+/// application reads a week once as ordinary, finds the essential session it
+/// missed ([`state_of`]), and reads the week again with it, so a session
+/// performed late stops being missed on the next read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Missed(BTreeSet<(Discipline, Date)>);
+
+impl Missed {
+    /// Nothing missed: every week reads as the diary holds it.
+    #[must_use]
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Whether the essential session of `discipline` whose slot falls on
+    /// `date` was missed.
+    #[must_use]
+    pub fn contains(&self, discipline: Discipline, date: Date) -> bool {
+        self.0.contains(&(discipline, date))
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl FromIterator<(Discipline, Date)> for Missed {
+    fn from_iter<I: IntoIterator<Item = (Discipline, Date)>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl Extend<(Discipline, Date)> for Missed {
+    fn extend<I: IntoIterator<Item = (Discipline, Date)>>(&mut self, iter: I) {
+        self.0.extend(iter);
+    }
+}
+
+impl IntoIterator for Missed {
+    type Item = (Discipline, Date);
+    type IntoIter = std::collections::btree_set::IntoIter<(Discipline, Date)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 /// Every slot of the calendar week containing a date, with the role each one
-/// rides once a skipped essential session has moved.
+/// rides once a skipped or missed essential session has moved.
 ///
 /// **A skipped essential session takes the next slot of its discipline that
 /// week** (#392). The operator, 2026-10-11: *"If there is another slot for this
@@ -167,17 +226,24 @@ pub fn week<'a>(plan: &'a Plan, diary: &Diary, containing: Date) -> Vec<Planned<
 /// one the week loses. Where no later slot of the discipline is left, nothing
 /// moves, the essential session reads skipped, and the microcycle re-runs.
 ///
+/// **A missed one moves the same way.** The operator, 2026-10-22, on an FTP
+/// test not ridden on the Wednesday: *"because cycling 1 is the essential
+/// session of the microcycle, if we get to cycle 2's window and cycle 1 hasn't
+/// been done, we should re-prescribe cycling 1."* Missed means its window
+/// closed with nothing performed, no skip and no absence on its slot
+/// ([`Missed`]).
+///
 /// **Slots, never weekdays.** The rule reads the diary's slots and their roles,
 /// so it is the same rule whatever days the operator trains.
 ///
-/// **Only a skip moves it.** An illness eases what survives it instead
+/// **An illness does not move it.** An illness eases what survives it instead
 /// ([`eased_by_illness`]), because illness costs fitness and a skip does not.
 ///
 /// A slot is skipped where a skip runs to the close of its window, as
 /// [`state_of`] reads it, and a later slot is left where nothing has taken it:
 /// not skipped itself, and not covered by an absence.
 #[must_use]
-pub fn slots(diary: &Diary, containing: Date) -> Vec<ScheduledSlot> {
+pub fn slots(diary: &Diary, containing: Date, missed: &Missed) -> Vec<ScheduledSlot> {
     let monday = commencing(containing);
     let mut slots: Vec<ScheduledSlot> = (0..7)
         .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
@@ -208,7 +274,9 @@ pub fn slots(diary: &Diary, containing: Date) -> Vec<ScheduledSlot> {
 
     for discipline in Discipline::ALL {
         let Some(essential) = slots.iter().enumerate().position(|(at, slot)| {
-            slot.discipline == *discipline && slot.role == ESSENTIAL && skipped(at)
+            slot.discipline == *discipline
+                && slot.role == ESSENTIAL
+                && (skipped(at) || missed.contains(slot.discipline, slot.date))
         }) else {
             continue;
         };
@@ -238,12 +306,17 @@ pub fn slots(diary: &Diary, containing: Date) -> Vec<ScheduledSlot> {
     slots
 }
 
-/// The role a discipline's slot rides on a date, once a skipped essential
-/// session has moved ([`slots`]). `None` where the diary gives that discipline
-/// no slot on the date.
+/// The role a discipline's slot rides on a date, once a skipped or missed
+/// essential session has moved ([`slots`]). `None` where the diary gives that
+/// discipline no slot on the date.
 #[must_use]
-pub fn role_on(diary: &Diary, date: Date, discipline: Discipline) -> Option<SessionRole> {
-    slots(diary, date)
+pub fn role_on(
+    diary: &Diary,
+    date: Date,
+    discipline: Discipline,
+    missed: &Missed,
+) -> Option<SessionRole> {
+    slots(diary, date, missed)
         .into_iter()
         .find(|slot| slot.date == date && slot.discipline == discipline)
         .map(|slot| slot.role)

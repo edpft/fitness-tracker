@@ -15,7 +15,8 @@
 use domain::{
     plan::{Plan, Span},
     planner::{
-        self, Filled, MicrocycleState, Placed, Recorded, Rerun, SessionState, Unreschedulable,
+        self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
+        Unreschedulable,
     },
     schedule::{
         DayPart, Diary, Discipline, PartOfDay, RecordedSession, ScheduledSlot, SessionRole,
@@ -67,6 +68,10 @@ pub struct Standing {
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
     pub reruns: Vec<Rerun>,
+    /// The essential sessions missed so far, each moved to a later slot of its
+    /// discipline where the week had one. Hand it on beside `reruns`, so that
+    /// prescribing reads each slot's role as this does.
+    pub missed: Missed,
     /// The days of the current microcycle's mesocycle, both disciplines' halves
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
@@ -102,6 +107,8 @@ struct Week {
     /// Where the next microcycle's record starts: `None` while this one is
     /// still current.
     ended: Option<Boundary>,
+    /// The essential sessions it missed, already moved in `sessions`.
+    missed: Missed,
 }
 
 /// One session the record holds, in the grain the record holds it.
@@ -279,9 +286,11 @@ where
         let mut opens: Option<Boundary> = None;
         let mut reruns: Vec<Rerun> = Vec::new();
         let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
+        let mut missed = Missed::none();
         loop {
             let plan = rescheduled(&authored, &reruns, &diary)?;
             let week = self.week_of(&plan, &diary, monday, opens, now).await?;
+            missed.extend(week.missed);
             let Some(ended) = week.ended else {
                 let mesocycle = plan
                     .mesocycle_on(monday)
@@ -292,6 +301,7 @@ where
                     sessions: week.sessions,
                     weeks,
                     reruns,
+                    missed,
                     mesocycle,
                 });
             };
@@ -320,6 +330,10 @@ where
     ///
     /// `opens` is where the microcycle before it ended, and so where this one's
     /// record starts; `None` for the first week of the plan.
+    ///
+    /// **Read twice where an essential session was missed** (2026-10-22): once
+    /// as the diary holds it, which is what shows it missed, and once with it
+    /// moved to the next slot of its discipline ([`planner::slots`]).
     async fn week_of(
         &self,
         plan: &Plan,
@@ -328,7 +342,30 @@ where
         opens: Option<Boundary>,
         now: DayPart,
     ) -> Result<Week, StoreError> {
-        let week = planner::week(plan, diary, monday);
+        let ordinary = self
+            .read_week(plan, diary, monday, opens, now, &Missed::none())
+            .await?;
+        let missed = missed_in(&ordinary.sessions, diary);
+        if missed.is_empty() {
+            return Ok(ordinary);
+        }
+        let moved = self
+            .read_week(plan, diary, monday, opens, now, &missed)
+            .await?;
+        Ok(Week { missed, ..moved })
+    }
+
+    /// One reading of the week, with the `missed` essential sessions moved.
+    async fn read_week(
+        &self,
+        plan: &Plan,
+        diary: &Diary,
+        monday: Date,
+        opens: Option<Boundary>,
+        now: DayPart,
+        missed: &Missed,
+    ) -> Result<Week, StoreError> {
+        let week = planner::week(plan, diary, monday, missed);
         if week.is_empty() {
             let next = monday
                 .checked_add(jiff::Span::new().weeks(1))
@@ -339,6 +376,7 @@ where
             return Ok(Week {
                 sessions: Vec::new(),
                 ended: (next <= now).then_some(Boundary::From(next)),
+                missed: Missed::none(),
             });
         }
 
@@ -441,7 +479,11 @@ where
         // with the Wednesday's own session still owed.
         let ended = if outstanding { None } else { settled };
 
-        Ok(Week { sessions, ended })
+        Ok(Week {
+            sessions,
+            ended,
+            missed: Missed::none(),
+        })
     }
 
     /// The plan that has begun by a date: the latest whose authored start is
@@ -610,6 +652,32 @@ fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, Sto
             detail: format!("{} will not reschedule: {error}", plan.name()),
         }
     })
+}
+
+/// The essential sessions of a week, read as the diary holds it, that were
+/// missed: the window closed with nothing performed, and no skip and no
+/// absence on the slot to explain it.
+///
+/// **A skip is not a miss**, because it already moves the session
+/// ([`planner::slots`]). **Nor is an absence**: an illness eases what survives
+/// it instead, and the diary's own rules answer for a known one.
+fn missed_in(sessions: &[Session], diary: &Diary) -> Missed {
+    sessions
+        .iter()
+        .filter(|session| session.programmed && session.slot.role == planner::ESSENTIAL)
+        .filter(|session| {
+            matches!(
+                session.state,
+                SessionState::NotPrescribed | SessionState::NotPerformed { absence: None }
+            )
+        })
+        .filter(|session| {
+            diary
+                .taken(DayPart::new(session.slot.date, session.slot.slot.part))
+                .is_none()
+        })
+        .map(|session| (session.slot.discipline, session.slot.date))
+        .collect()
 }
 
 /// The sessions the microcycle machine reads: the ones the plan programmes.
