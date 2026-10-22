@@ -76,7 +76,7 @@ pub fn page(rides: &[RideHeartRate], ranges: &Ranges, over: Over, run: &View) ->
             body {
                 (crate::page::following(run))
                 main.wide {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu("/heart-rate"))
                     h1 { "Heart rate per power zone" }
                     (crate::range::choices("/heart-rate", over))
                     (chart(rides, ranges, over))
@@ -97,7 +97,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { "Heart rate per power zone" }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/heart-rate"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

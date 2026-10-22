@@ -75,7 +75,7 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
             }
             body {
                 main {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu("/equipment"))
                     h1 { (TITLE) }
                     @if let Some(said) = said { p.said { (said) } }
                     p.legend {
@@ -129,7 +129,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { (TITLE) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/equipment"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

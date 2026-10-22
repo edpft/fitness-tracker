@@ -59,7 +59,7 @@ pub fn page(
             }
             body {
                 main {
-                    p { a href="/" { "Run next" } " · " a href="/equipment" { "Equipment" } }
+                    (crate::page::menu("/programme"))
                     h1 { (TITLE) }
                     @if let Some(said) = said { p.said { (said) } }
                     @match found {
@@ -233,7 +233,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { (TITLE) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/programme"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

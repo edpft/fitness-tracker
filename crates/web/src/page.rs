@@ -23,14 +23,47 @@ pub fn index(view: &View) -> Markup {
             }
             body {
                 main {
-                    p { a href="/heart-rate" { "Heart rate per power zone" } }
-                    p { a href="/body-weight" { "Body weight" } " · " a href="/body-composition" { "Body composition" } }
-                    p { a href="/resting-heart-rate" { "Resting heart rate" } " · " a href="/hrv" { "Overnight HRV" } }
-                    p { a href="/estimated-1rm" { "Estimated 1RM" } }
-                    p { a href="/programme" { "Programme" } " · " a href="/equipment" { "Equipment" } }
+                    (menu("/"))
                     div hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
                         (view.render())
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Every page, in the order the menu lists them: the home page, then the rest
+/// as the home page used to list them.
+pub const PAGES: [(&str, &str); 9] = [
+    ("/", "Home"),
+    ("/heart-rate", "Heart rate per power zone"),
+    ("/body-weight", "Body weight"),
+    ("/body-composition", "Body composition"),
+    ("/resting-heart-rate", "Resting heart rate"),
+    ("/hrv", "Overnight HRV"),
+    ("/estimated-1rm", "Estimated 1RM"),
+    ("/programme", "Programme"),
+    ("/equipment", "Equipment"),
+];
+
+/// The menu every page carries (#500), the page it is on marked.
+///
+/// **One list, so every page links to every other.** The operator,
+/// 2026-10-19: *"the menu is only available on the main page, all other pages
+/// have to go back to the menu to navigate"*. And on the page the menu used to
+/// live on, *"the main page is called run next, which is confusing"*, so here
+/// it is the home page.
+///
+/// **It wraps rather than scrolls**, so it fits a phone held upright.
+pub fn menu(here: &str) -> Markup {
+    html! {
+        nav.menu aria-label="Pages" {
+            @for (path, name) in PAGES {
+                @if path == here {
+                    a href=(path) aria-current="page" { (name) }
+                } @else {
+                    a href=(path) { (name) }
                 }
             }
         }
@@ -77,4 +110,27 @@ td { padding: 0.15rem 0.75rem 0.15rem 0; vertical-align: top; }
 li.paired { border-left: 2px solid var(--muted); padding-left: 0.5rem; list-style: none; }
 a { overflow-wrap: anywhere; }
 p.choices a, p.choices strong { margin-right: 0.75rem; }
+nav.menu { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.25rem; }
+nav.menu a[aria-current] { color: inherit; font-weight: 600; text-decoration: none; }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::{PAGES, menu};
+
+    /// **Every page is in the menu, the one it is on marked, and the main
+    /// page is the home page** (#500).
+    #[test]
+    fn the_menu_lists_every_page_and_marks_the_one_it_is_on() {
+        let shown = menu("/hrv").into_string();
+
+        assert_eq!(shown.matches("<a ").count(), PAGES.len(), "{shown}");
+        assert!(
+            shown.contains(r#"<a href="/hrv" aria-current="page">Overnight HRV</a>"#),
+            "{shown}"
+        );
+        assert_eq!(shown.matches("aria-current").count(), 1, "{shown}");
+        assert!(shown.contains(r#"<a href="/">Home</a>"#), "{shown}");
+        assert!(!shown.contains("Run next"), "{shown}");
+    }
+}
