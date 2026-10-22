@@ -20,8 +20,27 @@ pub enum SourceError {
 
     /// Terminal, and never retried. A rejected credential will not un-reject
     /// itself, and retrying looks like an attack.
+    ///
+    /// **Only for a source that said no to what we sent** (#439, #368). A
+    /// token we no longer hold is [`Self::SignInNeeded`], and a source that is
+    /// throttling or blocking us is [`Self::Refusing`]: neither is a verdict
+    /// on the credential, and saying so sends the operator to fix the wrong
+    /// thing.
     #[error("the source rejected our credential")]
     Unauthorised,
+
+    /// No token is held that this credential can use, so nothing was sent and
+    /// the source has to be signed in to again (#439). Not a rejection: the
+    /// source has refused nothing.
+    #[error("{source_name} needs signing in again: run `fitness credentials {source_name}`")]
+    SignInNeeded { source_name: &'static str },
+
+    /// The source answered and will not talk to us for now — throttling, or
+    /// blocking what it takes for an attack — whatever the credential (#368).
+    /// Stepped past like an unreachable source, and never retried in the same
+    /// run.
+    #[error("the source is refusing to talk: {detail}")]
+    Refusing { detail: String },
 
     /// A response we could not read, or one missing the provenance a landing
     /// record requires.
@@ -79,6 +98,8 @@ impl ExtractionError {
             Self::AlreadyRunning => FailureReason::AlreadyRunning,
             Self::Source(SourceError::Unavailable { .. }) => FailureReason::SourceUnavailable,
             Self::Source(SourceError::Unauthorised) => FailureReason::Unauthorised,
+            Self::Source(SourceError::SignInNeeded { .. }) => FailureReason::SignInNeeded,
+            Self::Source(SourceError::Refusing { .. }) => FailureReason::SourceRefusing,
             Self::Source(SourceError::Malformed { .. }) => FailureReason::MalformedResponse,
             Self::Store(_) => FailureReason::StoreFailure,
             Self::MissingProvenance => FailureReason::MissingProvenance,

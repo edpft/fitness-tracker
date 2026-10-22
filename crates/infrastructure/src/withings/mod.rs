@@ -28,8 +28,15 @@ const INVALID_TOKEN: i64 = 401;
 /// The text of a Withings answer, once the transport has said it arrived.
 async fn answer(response: reqwest::Response, path: &str) -> Result<String, SourceError> {
     let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(SourceError::Unauthorised);
+    }
+    // **A 403 is not the token refused** (#368): a token Withings refuses
+    // comes back as 401, or as status 401 inside a 200.
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err(SourceError::Refusing {
+            detail: format!("{path} answered {status}"),
+        });
     }
     let text = response
         .text()

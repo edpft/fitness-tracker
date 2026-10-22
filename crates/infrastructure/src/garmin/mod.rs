@@ -76,8 +76,15 @@ pub(super) async fn answer_bytes(
     path: &str,
 ) -> Result<Vec<u8>, SourceError> {
     let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(SourceError::Unauthorised);
+    }
+    // **A 403 is not the token refused** (#368): behind Cloudflare it is as
+    // likely a challenge to a client that does not look like a browser.
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err(SourceError::Refusing {
+            detail: format!("{path} answered {status}"),
+        });
     }
     let bytes = response
         .bytes()
@@ -86,7 +93,7 @@ pub(super) async fn answer_bytes(
             detail: error.to_string(),
         })?;
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(SourceError::Unavailable {
+        return Err(SourceError::Refusing {
             detail: format!("{path} is rate-limiting this address; wait rather than retrying"),
         });
     }

@@ -53,7 +53,7 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
     async fn finish(&self, run: RunId, outcome: RunOutcome) -> Result<(), StoreError> {
         let id = run_id_for_storage(run)?;
 
-        let (finished_at, label, events_seen, records_landed, reason) = match &outcome {
+        let (finished_at, label, events_seen, records_landed, reason, detail) = match &outcome {
             // Nothing to write: the row is already in flight, which is exactly
             // "no outcome yet".
             RunOutcome::InFlight => return Ok(()),
@@ -67,16 +67,19 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
                 Some(i64::try_from(events_seen.as_usize()).unwrap_or(i64::MAX)),
                 Some(i64::try_from(records_landed.as_usize()).unwrap_or(i64::MAX)),
                 None,
+                None,
             ),
             RunOutcome::Failed {
                 finished_at,
                 reason,
+                detail,
             } => (
                 finished_at.to_string(),
                 "failed",
                 Some(0),
                 Some(0),
                 Some(reason.as_str()),
+                Some(detail.as_str()),
             ),
         };
 
@@ -84,7 +87,7 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
             r#"
             UPDATE extraction_run
             SET finished_at = ?, outcome = ?, events_seen = ?,
-                records_landed = ?, failure_reason = ?
+                records_landed = ?, failure_reason = ?, failure_detail = ?
             WHERE id = ?
             "#,
             finished_at,
@@ -92,6 +95,7 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
             events_seen,
             records_landed,
             reason,
+            detail,
             id
         )
         .execute(&self.pool)

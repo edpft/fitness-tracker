@@ -126,10 +126,23 @@ fn a_spent_token_is_renewed_and_the_rotation_is_kept() {
     });
 }
 
+/// The failure a run with no token it can use reports, and whether it says
+/// what the operator does about it (#439): sign in again, and nothing about a
+/// rejection, since nothing was sent.
+fn says_sign_in_again(failure: &Result<String, SourceError>) -> bool {
+    let Err(failure @ SourceError::SignInNeeded { .. }) = failure else {
+        return false;
+    };
+    let said = failure.to_string();
+    said.contains("needs signing in again")
+        && said.contains("fitness credentials withings")
+        && !said.contains("rejected")
+}
+
 /// With no token at all there is nothing to renew: that is a sign-in, not a
-/// network call.
+/// network call, and not a rejection (#439).
 #[test]
-fn no_token_is_unauthorised_without_asking_withings() {
+fn no_token_needs_signing_in_without_asking_withings() {
     let rt = runtime().expect("a current-thread runtime builds");
     rt.block_on(async {
         let server = MockServer::start().await;
@@ -140,10 +153,7 @@ fn no_token_is_unauthorised_without_asking_withings() {
             client(),
             TokenFile::new(directory.path().join("absent.json"), client().digest()),
         );
-        assert!(matches!(
-            auth.bearer().await,
-            Err(SourceError::Unauthorised)
-        ));
+        assert!(says_sign_in_again(&auth.bearer().await));
         assert!(
             server
                 .received_requests()
@@ -188,10 +198,7 @@ fn a_token_another_registration_obtained_is_a_sign_in() {
             reissued.clone(),
             TokenFile::new(path, reissued.digest()),
         );
-        assert!(matches!(
-            auth.bearer().await,
-            Err(SourceError::Unauthorised)
-        ));
+        assert!(says_sign_in_again(&auth.bearer().await));
         assert!(
             server
                 .received_requests()

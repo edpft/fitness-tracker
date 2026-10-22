@@ -244,7 +244,7 @@ impl PelotonAuth {
     async fn refresh(&self, refresh: &str) -> Result<Token, SourceError> {
         let response = self
             .client()?
-            .post(format!("{}/oauth/token", self.auth_base))
+            .post(format!("{}{TOKEN_PATH}", self.auth_base))
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("client_id", CLIENT_ID),
@@ -324,7 +324,7 @@ impl PelotonAuth {
     fn csrf(&self) -> Result<String, SourceError> {
         // The jar answers with the `Cookie` header it would send to that path,
         // which is the only way back to a value it holds.
-        let url = format!("{}/usernamepassword/login", self.auth_base)
+        let url = format!("{}{LOGIN_PATH}", self.auth_base)
             .parse()
             .map_err(|_| SourceError::Malformed {
                 detail: "the configured auth base is not a URL".to_owned(),
@@ -370,7 +370,7 @@ impl PelotonAuth {
         });
         let response = self
             .client()?
-            .post(format!("{}/usernamepassword/login", self.auth_base))
+            .post(format!("{}{LOGIN_PATH}", self.auth_base))
             .header("Origin", &self.auth_base)
             .header("Referer", login_url)
             .header("Auth0-Client", AUTH0_CLIENT)
@@ -379,14 +379,14 @@ impl PelotonAuth {
             .await
             .map_err(|ref error| unreachable(error))?;
 
-        // **Wrong credentials are terminal.** Auth0 answers 401 or 403, and
-        // retrying a rejected password is what a credential-stuffing attempt
-        // looks like from the far end.
-        if matches!(
-            response.status(),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-        ) {
-            return Err(SourceError::Unauthorised);
+        // **Wrong credentials are terminal**, and so is everything else Auth0
+        // refuses with: retrying a rejected password is what a
+        // credential-stuffing attempt looks like from the far end. Which of
+        // the two it was is read off the body (#368).
+        let status = response.status();
+        if refuses(status) {
+            let body = response.text().await.unwrap_or_default();
+            return Err(refusal(LOGIN_PATH, status, &body, Judges::Credential));
         }
         if let Some(location) = location_of(&response) {
             return Ok(Next::Redirect(self.absolute(&location)));
@@ -448,7 +448,7 @@ impl PelotonAuth {
     async fn exchange(&self, code: &str, verifier: &str) -> Result<Token, SourceError> {
         let response = self
             .client()?
-            .post(format!("{}/oauth/token", self.auth_base))
+            .post(format!("{}{TOKEN_PATH}", self.auth_base))
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("client_id", CLIENT_ID),
@@ -465,8 +465,9 @@ impl PelotonAuth {
     /// What the token endpoint served, bound to the credential that asked.
     async fn token_from(&self, response: reqwest::Response) -> Result<Token, SourceError> {
         let status = response.status();
-        if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-            return Err(SourceError::Unauthorised);
+        if refuses(status) {
+            let body = response.text().await.unwrap_or_default();
+            return Err(refusal(TOKEN_PATH, status, &body, Judges::Grant));
         }
         if !status.is_success() {
             return Err(SourceError::Unavailable {
@@ -605,6 +606,88 @@ fn unreachable(error: &reqwest::Error) -> SourceError {
     SourceError::Unavailable {
         detail: error.to_string(),
     }
+}
+
+/// Where the password is posted.
+const LOGIN_PATH: &str = "/usernamepassword/login";
+
+/// Where a code or a refresh token is exchanged for a token.
+const TOKEN_PATH: &str = "/oauth/token";
+
+/// Whether Auth0 said no, to the credential or to the client.
+fn refuses(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+    )
+}
+
+/// What an endpoint that refused could have been judging.
+#[derive(Clone, Copy)]
+enum Judges {
+    /// The email and password: a refusal of them is a rejected credential.
+    Credential,
+    /// A code or a refresh token Auth0 issued itself: refusing one says
+    /// nothing about the password.
+    Grant,
+}
+
+/// What a refusal means, read off its status and its body (#368).
+///
+/// **The body decides, not the status alone.** Auth0 answers 403 for its
+/// anomaly detection and for too many logins from one address, and 429 when it
+/// throttles. None of those says anything about the password, and reading them
+/// as a rejection sends the operator to re-enter one that works. So:
+///
+/// - a 401 at the login is the credential rejected, unless Auth0's code says it
+///   is blocking the client;
+/// - a 403 is the credential rejected only where the body says the email or
+///   password is wrong;
+/// - a 429 never is, nor is a refused code or refresh token, which Auth0
+///   issued itself.
+///
+/// Everything else is the source refusing to talk, stepped past like any
+/// unreachable source and said with the status and Auth0's own code, so the
+/// next one can be read rather than guessed at.
+fn refusal(path: &str, status: StatusCode, body: &str, judges: Judges) -> SourceError {
+    let code = auth0_code(body);
+    let blocking = code.as_deref().is_some_and(|code| {
+        let code = code.to_ascii_lowercase();
+        ["anomal", "block", "too_many"]
+            .iter()
+            .any(|word| code.contains(word))
+    });
+    let wrong_password = code.as_deref() == Some("invalid_user_password")
+        || body.to_lowercase().contains("wrong email or password");
+    let rejected = matches!(judges, Judges::Credential)
+        && match status {
+            StatusCode::UNAUTHORIZED => !blocking,
+            StatusCode::FORBIDDEN => wrong_password,
+            _ => false,
+        };
+    if rejected {
+        return SourceError::Unauthorised;
+    }
+    SourceError::Refusing {
+        detail: match code {
+            Some(code) => format!("{path} answered {status}, {code}"),
+            None => format!("{path} answered {status}"),
+        },
+    }
+}
+
+/// Auth0's code for a refusal: the JSON body's `code`, `error` or `name`, or
+/// the word a plain-text body opens with (`AnomalyDetected: Invalid state`).
+fn auth0_code(body: &str) -> Option<String> {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        return ["code", "error", "name"]
+            .iter()
+            .find_map(|key| json.get(key).and_then(serde_json::Value::as_str))
+            .map(str::to_owned);
+    }
+    body.split(|character: char| character == ':' || character.is_whitespace())
+        .find(|word| !word.is_empty())
+        .map(str::to_owned)
 }
 
 #[derive(serde::Deserialize)]

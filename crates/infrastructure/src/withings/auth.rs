@@ -49,6 +49,12 @@ const AUTHORIZE_PATH: &str = "/oauth2_user/authorize2";
 /// Where codes and refresh tokens are exchanged. On the API host.
 const TOKEN_PATH: &str = "/v2/oauth2";
 
+/// What a run says when it holds no token it can use: sign in again, under
+/// the name `fitness credentials` takes (#439).
+const SIGN_IN_NEEDED: SourceError = SourceError::SignInNeeded {
+    source_name: "withings",
+};
+
 /// The operator's registered application, as the dashboard issued it.
 #[derive(Clone)]
 pub struct WithingsClient {
@@ -192,8 +198,11 @@ impl WithingsAuth {
     ///
     /// # Errors
     ///
-    /// [`SourceError::Unauthorised`] if there is no token to renew or Withings
-    /// refuses to renew it — both mean signing in again.
+    /// [`SourceError::SignInNeeded`] if no token is held that this
+    /// application obtained, or the one held has expired with nothing to renew
+    /// it — nothing is sent, so nothing is rejected (#439).
+    /// [`SourceError::Unauthorised`] if Withings refuses to renew it, which is
+    /// a rejection.
     pub async fn bearer(&self) -> Result<String, SourceError> {
         let held = self
             .token
@@ -204,14 +213,17 @@ impl WithingsAuth {
             .clone()
             .or_else(|| self.cache.read());
 
+        // **No token this application obtained is no token** (#197): a file
+        // from before #376, or from an application since replaced, reads as
+        // absent, and either way the fix is a sign-in, not a new credential.
         let Some(token) = held else {
-            return Err(SourceError::Unauthorised);
+            return Err(SIGN_IN_NEEDED);
         };
         if token.usable() {
             return Ok(self.hold(token));
         }
         let Some(refresh) = token.refresh().map(str::to_owned) else {
-            return Err(SourceError::Unauthorised);
+            return Err(SIGN_IN_NEEDED);
         };
         let fresh = self
             .request_token(&[
