@@ -218,7 +218,11 @@ pub fn strength(report: &application::strength::StrengthReport) {
             continue;
         }
         let with = rows.iter().filter(|row| row.relative.is_some()).count();
-        println!("\n{lift} — {with} of {} sessions have a figure", rows.len());
+        println!(
+            "\n{} — {with} of {} sessions have a figure",
+            lift.name(),
+            rows.len()
+        );
         for row in rows {
             let (maximum, from) = row.estimate.map_or_else(
                 || (dash(), "no set gives an estimate".to_owned()),
@@ -424,7 +428,7 @@ fn refused_at(refusal: &Refusal) -> String {
         RefusalLocus::Record => None,
         locus => Some(locus.to_string()),
     };
-    let exercise = refusal.exercise.map(|exercise| exercise.to_string());
+    let exercise = refusal.exercise.map(domain::gym::Exercise::name);
     match (place, exercise) {
         (None, None) => id,
         (Some(place), None) => format!("{id} ({place})"),
@@ -1467,7 +1471,9 @@ pub fn prescribed_session(issued: &application::Prescription) {
         for slot in &issued.underivable {
             println!(
                 "  {} ({}) — not derivable: {}",
-                slot.slot, slot.exercise, slot.reason
+                slot.slot,
+                slot.exercise.name(),
+                slot.reason
             );
         }
     }
@@ -1516,7 +1522,7 @@ fn describe(exercise: &domain::prescription::PrescribedExercise) -> String {
         } => format!(" ({setting})"),
         _ => String::new(),
     };
-    format!("{:<32} {sets}{bands}", exercise.exercise_key())
+    format!("{:<32} {sets}{bands}", exercise.exercise().name())
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
@@ -1642,7 +1648,7 @@ fn unexpressed(unexpressed: &[application::Unexpressed]) {
     println!();
     println!("what would not go:");
     for item in unexpressed {
-        println!("  {} — {}", item.exercise, item.reason);
+        println!("  {} — {}", item.exercise.name(), item.reason);
     }
 }
 

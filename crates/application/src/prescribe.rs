@@ -1423,7 +1423,7 @@ fn primary_slot_item(
     let Exercise::Reps(reps_exercise) = exercise else {
         return Derived::underivable(UnderivableSlot {
             slot,
-            exercise: exercise.as_str(),
+            exercise: *exercise,
             reason: UnderivableReason::NotCountedInReps,
         });
     };
@@ -1431,7 +1431,7 @@ fn primary_slot_item(
     let Some(steps) = consulted.parameters.scales.for_exercise(*exercise) else {
         return Derived::underivable(UnderivableSlot {
             slot,
-            exercise: exercise.as_str(),
+            exercise: *exercise,
             reason: UnderivableReason::NoLoadScale,
         });
     };
@@ -1454,7 +1454,7 @@ fn primary_slot_item(
         Err(reason) => {
             return Derived::underivable(UnderivableSlot {
                 slot,
-                exercise: exercise.as_str(),
+                exercise: *exercise,
                 reason,
             });
         }
@@ -1465,7 +1465,7 @@ fn primary_slot_item(
     let Ok(sets) = NonEmpty::new(sets) else {
         return Derived::underivable(UnderivableSlot {
             slot,
-            exercise: exercise.as_str(),
+            exercise: *exercise,
             reason: UnderivableReason::NoWorkingSet,
         });
     };
@@ -1856,7 +1856,7 @@ fn group(
                     Err(reason) => reason,
                     Ok(exercise) => UnderivableSlot {
                         slot,
-                        exercise: exercise.exercise_key(),
+                        exercise: exercise.exercise(),
                         reason: UnderivableReason::GroupWithheld,
                     },
                 })
@@ -1907,7 +1907,7 @@ fn accessory_exercise(
         // Authored outright: no history is read and none is needed.
         SlotContent::Static(fill) => static_exercise(fill).map_err(|reason| UnderivableSlot {
             slot,
-            exercise: fill.exercise.as_str(),
+            exercise: fill.exercise,
             reason,
         }),
         SlotContent::Single(exercise) => one_exercise(consulted, history, *exercise, slot),
@@ -1988,7 +1988,7 @@ fn one_exercise(
 ) -> Result<PrescribedExercise, UnderivableSlot> {
     let underivable = |reason| UnderivableSlot {
         slot,
-        exercise: exercise.as_str(),
+        exercise,
         reason,
     };
 

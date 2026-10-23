@@ -237,7 +237,7 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
         let reaches = correction.reaches();
         let what = match correction.corrected() {
             Corrected::Exercise { exercise, .. } => {
-                format!("{reaches} entries read as {}", exercise.as_str())
+                format!("{reaches} entries read as {}", exercise.name())
             }
             Corrected::Figures {
                 recorded,

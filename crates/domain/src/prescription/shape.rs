@@ -22,7 +22,7 @@
 
 use std::fmt;
 
-use crate::gym::exercise::{DistanceExercise, DurationExercise, RepsExercise};
+use crate::gym::exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise};
 use crate::measure::{Distance, Duration, RepCount};
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
@@ -210,6 +210,15 @@ pub enum PrescribedExercise {
 }
 
 impl PrescribedExercise {
+    /// The exercise prescribed, whichever vocabulary it came from.
+    pub const fn exercise(&self) -> Exercise {
+        match self {
+            Self::ForReps { exercise, .. } => Exercise::Reps(*exercise),
+            Self::ForDuration { exercise, .. } => Exercise::Duration(*exercise),
+            Self::ForDistance { exercise, .. } => Exercise::Distance(*exercise),
+        }
+    }
+
     pub const fn exercise_key(&self) -> &'static str {
         match self {
             Self::ForReps { exercise, .. } => exercise.as_str(),

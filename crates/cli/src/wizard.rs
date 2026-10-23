@@ -146,6 +146,16 @@ async fn offered(
     Ok(offers)
 }
 
+/// What the operator reads for an offered key: its name where the vocabulary
+/// has it, and the key itself where it does not.
+///
+/// **The fallback is not a second rendering.** Every key a candidate list
+/// offers names an exercise, and `ask_exercise` refuses one that does not; this
+/// only declines to hide a key behind a blank while the list is printed.
+fn named(key: &str) -> &str {
+    Exercise::named(key).map_or(key, |exercise| exercise.name())
+}
+
 /// Ask which exercise fills a slot.
 ///
 /// A number picks from the list; anything else is read as a vocabulary key, so
@@ -159,10 +169,13 @@ fn ask_exercise(slot: SlotId, offers: &[(String, Option<usize>)]) -> Result<Exer
             Some(1) => "1 session".to_owned(),
             Some(many) => format!("{many} sessions"),
         };
-        println!("  {:>2}. {key:<40} {seen}", at + 1);
+        println!("  {:>2}. {:<48} {seen}", at + 1, named(key));
     }
 
-    let question = format!("  which? [{}] ", offers.first().map_or("", |(key, _)| key));
+    let question = format!(
+        "  which? [{}] ",
+        offers.first().map_or("", |(key, _)| named(key))
+    );
     ask_until(&question, |typed| {
         // **The offer is a vocabulary key either way.** A number picks one off
         // the list and a word is looked up, and both end at the same
@@ -261,7 +274,7 @@ async fn ask_single(
         println!("\n{slot}");
         println!(
             "  {} — the primary, so it fills its own slot",
-            primary.as_str()
+            primary.name()
         );
         return Ok(Fill::Same(primary));
     }
@@ -766,13 +779,10 @@ pub fn ask_lift(template: &str, pattern: PrimaryPattern) -> Result<RepsExercise,
     let offers = domain::prescription::candidates::for_primary(pattern);
     println!("\nthe lift this {template} is about");
     for (at, key) in offers.iter().enumerate() {
-        println!("  {:>2}. {key}", at.saturating_add(1));
+        println!("  {:>2}. {}", at.saturating_add(1), named(key));
     }
 
-    let question = format!(
-        "  which? [{}] ",
-        offers.first().copied().unwrap_or_default()
-    );
+    let question = format!("  which? [{}] ", offers.first().copied().map_or("", named));
     ask_until(&question, move |typed| {
         let key = if typed.is_empty() {
             (*offers
@@ -825,7 +835,7 @@ async fn ask_test(
     println!("A test: one week, measuring.\n");
     let common = ask_common(diary, "test")?;
     let lift = ask_lift("test", common.pattern)?;
-    let primary = lift.as_str();
+    let primary = lift.name();
 
     let scale = parameters.scales.for_exercise(Exercise::Reps(lift));
     let best = best_of(history, lift, scale).await?;
@@ -1181,7 +1191,7 @@ fn ask_entry_test(
     // after it — this test's own result included — is read from the record.
     let asserted = match best {
         Some(best) => {
-            println!("  {}", best.describe(lift.as_str()));
+            println!("  {}", best.describe(lift.name()));
             println!(
                 "   1. what the record stands at{:>13}",
                 format!("{}kg", best.maximum)

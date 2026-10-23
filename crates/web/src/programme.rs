@@ -104,7 +104,7 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
                     @if let Some(exercise) = held(intensity) {
                         p {
                             @if alternates { (words) ": " }
-                            (exercise.as_str())
+                            (exercise.name())
                             @if let Some(change) = found.changes.on(slot, intensity, today) {
                                 @if let Some(by) = &change.assisted_by { " assisted by " (by) }
                                 " " span.change { "(from " (change.from) ")" }
@@ -123,7 +123,7 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
             }
             @for change in found.changes.iter().filter(|change| change.slot == slot && change.from > today) {
                 p.change {
-                    "From " (change.from) ": " (change.exercise.as_str())
+                    "From " (change.from) ": " (change.exercise.name())
                     @if let Some(by) = &change.assisted_by { " assisted by " (by) }
                     @if let Some(intensity) = change.intensity { ", " (intensity.as_str()) "-intensity session" }
                 }
@@ -149,7 +149,7 @@ fn form(
             div.row {
                 select name="exercise" aria-label="Exercise" {
                     @for exercise in RepsExercise::ALL {
-                        option value=(exercise.as_str()) selected[*exercise == current] { (exercise.as_str()) }
+                        option value=(exercise.as_str()) selected[*exercise == current] { (exercise.name()) }
                     }
                 }
                 select name="assisted" aria-label="Assisted by" {
