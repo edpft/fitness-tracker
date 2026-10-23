@@ -11,7 +11,7 @@ use infrastructure::{
         PelotonStack,
         auth::{PelotonAuth, PelotonCredentials},
         class::PelotonClasses,
-        stack::GATEWAY,
+        stack::gateway_for,
     },
 };
 
@@ -57,7 +57,9 @@ pub enum AccessError {
 pub fn peloton(credentials: &infrastructure::Credentials) -> Result<Peloton, AccessError> {
     let access = access(credentials)?;
     let classes = PelotonClasses::new(access.base_url.clone(), access.auth());
-    let stack = PelotonStack::new(GATEWAY.to_owned(), access.auth());
+    // **The stack's root follows the API's** (#196), so a run pointed at a
+    // stub delivers to the stub rather than to the operator's account.
+    let stack = PelotonStack::new(gateway_for(&access.base_url), access.auth());
     Ok(Peloton { classes, stack })
 }
 
@@ -157,7 +159,33 @@ pub fn hevy_routines(
 
 #[cfg(test)]
 mod tests {
+    use infrastructure::peloton::stack::{GATEWAY, gateway_for};
+
     use crate::catalogue::{Credential, PELOTON, source};
+
+    /// **The stack's composed default is Peloton's gateway, and any other
+    /// root is where the stack goes** (#196). A stub cannot catch a wrong
+    /// default, so the default is pinned here; and a run with
+    /// `PELOTON_API_BASE_URL` pointed at a stub delivers to that stub.
+    #[test]
+    fn the_stack_follows_the_api_root() {
+        let known = source(PELOTON).expect("peloton is a known source");
+        assert_eq!(
+            gateway_for(known.default_base_url()),
+            "https://gql-graphql-gateway.prod.k8s.onepeloton.com/graphql"
+        );
+        assert_eq!(gateway_for(known.default_base_url()), GATEWAY);
+        assert_eq!(
+            gateway_for("http://127.0.0.1:9/"),
+            "http://127.0.0.1:9/graphql",
+            "a stub's root answers the stack itself"
+        );
+        assert_ne!(
+            gateway_for("http://127.0.0.1:9"),
+            GATEWAY,
+            "never the real account"
+        );
+    }
 
     /// **The roots `plan` used to compile in are the catalogue's.**
     ///
