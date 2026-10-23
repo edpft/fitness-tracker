@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS (SELECT 1 FROM gym_mesocycle WHERE id = ?) AS \"held!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "held!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "777282ae3beeab3af624c874d7b026b2f0730e4a9e86b1a126129f84c8aa3283"
+}

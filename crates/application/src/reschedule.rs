@@ -23,7 +23,7 @@ use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
     planner::{self, Missed, Rerun, RerunOrdinal},
-    prescription::GymMesocycle,
+    prescription::{GymMesocycle, MesocycleId},
     schedule::{Diary, Discipline, SessionRole},
 };
 use jiff::civil::Date;
@@ -195,6 +195,11 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
 
     async fn following(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         self.gym(Pick::Following(date)).await
+    }
+
+    /// What the store holds, which rescheduling does not change.
+    async fn holds(&self, id: MesocycleId) -> Result<bool, StoreError> {
+        self.store.holds(id).await
     }
 
     /// **Answered from the reruns rather than from a moved calendar**, because

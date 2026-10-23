@@ -94,10 +94,19 @@ where
     // microcycle of that. All three are facts about the plan rather than about
     // what was issued, which is why they are derived here and not stored on the
     // prescription.
-    let found = programmes
-        .on(date)
-        .await?
-        .ok_or(DeliveryError::NoMesocycle { date })?;
+    // **A date no mesocycle covers is usually a week the plan stopped
+    // running** (#316): lost to illness or moved, which is ordinary. Only a
+    // prescription naming a mesocycle the store no longer holds is corrupt.
+    let Some(found) = programmes.on(date).await? else {
+        return Err(if programmes.holds(workout.programme()).await? {
+            DeliveryError::WeekNotRun {
+                date,
+                week_of: domain::planner::commencing(date),
+            }
+        } else {
+            DeliveryError::NoMesocycle { date }
+        });
+    };
     let microcycle = found.mesocycle.calendar().microcycle(workout.week());
     let rerun = programmes.rerun_on(date).await?;
 

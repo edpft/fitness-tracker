@@ -377,9 +377,19 @@ pub enum DeliveryError {
     NothingIssued { date: Date },
 
     /// The prescription is issued but its mesocycle is gone, so the session
-    /// cannot be placed in a block. Corrupt rather than ordinary.
+    /// cannot be placed in a block. Corrupt rather than ordinary: a prescription
+    /// keeps naming the mesocycle it was issued from, and nothing this program
+    /// does removes one.
     #[error("the prescription for {date} names a mesocycle that is not in the store")]
     NoMesocycle { date: Date },
+
+    /// The session was prescribed for a week the plan no longer runs: it was
+    /// lost or moved after the prescription was issued (#316). Ordinary, and
+    /// nothing is wrong with the store.
+    #[error(
+        "the plan no longer runs the week of {week_of}, so the session issued for {date} is not in it"
+    )]
+    WeekNotRun { date: Date, week_of: Date },
 
     /// The destination is unreachable, refused our credential, or rejected what
     /// we sent it.
