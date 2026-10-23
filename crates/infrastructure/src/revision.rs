@@ -25,7 +25,7 @@ use domain::landing::{PayloadDigest, Provenance, RawPayload, SourceRecordId};
 
 /// An event whose payload is JSON: a new serving only when what it says has
 /// changed.
-pub(crate) fn json_event(
+pub fn json_event(
     source_record_id: SourceRecordId,
     provenance: Provenance,
     payload: RawPayload,
@@ -43,7 +43,7 @@ pub(crate) fn json_event(
 /// Falls back to the payload's own digest when it will not parse or will not
 /// re-serialise, which is the safe direction: an unreadable payload compares on
 /// everything, so it lands again rather than being wrongly judged unchanged.
-pub(crate) fn of_json(payload: &RawPayload) -> PayloadDigest {
+pub fn of_json(payload: &RawPayload) -> PayloadDigest {
     serde_json::from_slice::<serde_json::Value>(payload.as_bytes())
         .ok()
         .and_then(|value| of_value(&value))
@@ -53,7 +53,7 @@ pub(crate) fn of_json(payload: &RawPayload) -> PayloadDigest {
 /// A parsed JSON value's revision: re-serialised in one key order and hashed.
 ///
 /// `None` if it will not re-serialise, for the caller to fall back on the bytes.
-pub(crate) fn of_value(value: &serde_json::Value) -> Option<PayloadDigest> {
+pub fn of_value(value: &serde_json::Value) -> Option<PayloadDigest> {
     let bytes = serde_json::to_vec(value).ok()?;
     RawPayload::try_from(bytes.as_slice())
         .ok()
@@ -88,7 +88,8 @@ mod tests {
     /// pairings a level down.
     #[test]
     fn nested_key_orders_are_one_revision() {
-        let served = payload(br#"{"id":"u","paired_devices":[{"name":"HRM","serial_number":"1"}]}"#);
+        let served =
+            payload(br#"{"id":"u","paired_devices":[{"name":"HRM","serial_number":"1"}]}"#);
         let again = payload(br#"{"paired_devices":[{"serial_number":"1","name":"HRM"}],"id":"u"}"#);
         assert_eq!(of_json(&served), of_json(&again));
     }

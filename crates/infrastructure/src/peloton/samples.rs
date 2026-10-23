@@ -41,7 +41,7 @@
 //! would save that request and make this the one adapter that reads `since`
 //! differently from the way the port defines it.
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, EventTime, RawPayload, Watermark};
 
 use super::{auth::PelotonAuth, workouts::PelotonWorkouts};

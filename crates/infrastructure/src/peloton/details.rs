@@ -14,7 +14,7 @@
 //! graph: two fetches of the same workouts a day apart answered byte-for-byte
 //! the same, rank included.
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, RawPayload, Watermark};
 
 use super::{auth::PelotonAuth, samples::wanted, workouts::PelotonWorkouts};

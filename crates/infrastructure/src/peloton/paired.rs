@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::{
     device::{AntDeviceNumber, DeviceIdentifier, DeviceName, Measurand, Role, Sighting},
     landing::{

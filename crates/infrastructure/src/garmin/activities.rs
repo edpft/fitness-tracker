@@ -39,8 +39,7 @@ use std::{
 
 use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
 use domain::landing::{
-    Endpoint, EventKind, EventProvenance, EventTime, PayloadDigest, RawPayload, SourceRecordId,
-    Watermark,
+    Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -363,9 +362,7 @@ impl WorkoutEventSource for GarminActivities {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ACTIVITIES_PATH, ActivityPage, Identity, PAGE_SIZE, RawPayload, parse_garmin_datetime,
-    };
+    use super::{ACTIVITIES_PATH, ActivityPage, Identity, PAGE_SIZE, parse_garmin_datetime};
     use domain::landing::Endpoint;
 
     #[test]

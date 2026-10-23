@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
 };

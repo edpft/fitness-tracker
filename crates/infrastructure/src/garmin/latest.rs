@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, RawPayload, SourceRecordId, Watermark,
 };
