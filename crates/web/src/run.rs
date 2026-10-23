@@ -14,7 +14,7 @@ use std::{
 };
 
 use application::next::{Done, NextError, Progress, Step};
-use configurator::{Credentials, next::NextFailure};
+use configurator::next::NextFailure;
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use maud::{Markup, PreEscaped, html};
 use tokio::sync::watch;
@@ -25,7 +25,12 @@ use crate::report;
 pub struct Setting {
     pub database: PathBuf,
     pub zone: OperatorZone,
-    pub credentials: Credentials,
+    /// Where the credentials are kept, `None` where nothing says.
+    ///
+    /// **A place, not what was in it** (#438): each run reads the file as it
+    /// stands, so a credential stored while the server runs is the one the
+    /// next run uses.
+    pub credentials: Option<PathBuf>,
 }
 
 /// The latest run, as the page shows it.
@@ -187,11 +192,19 @@ impl Runs {
             Err(error) => refused(&format!("the run could not be started: {error}")),
             Ok(runtime) => {
                 let setting = &self.setting;
+                let credentials =
+                    match configurator::config::credentials_at(setting.credentials.as_deref()) {
+                        Ok(credentials) => credentials,
+                        Err(error) => {
+                            return self
+                                .end(refused(&format!("the run could not be started: {error}")));
+                        }
+                    };
                 let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
                 let outcome = runtime.block_on(configurator::next::run(
                     &setting.database,
                     &setting.zone,
-                    &setting.credentials,
+                    &credentials,
                     DayPart::containing(here.datetime()),
                     None,
                     &Following(&self.view),
@@ -210,6 +223,11 @@ impl Runs {
                 }
             }
         };
+        self.end(ending);
+    }
+
+    /// The run is over: every page is shown how it ended.
+    fn end(&self, ending: Markup) {
         self.view.send_modify(|view| {
             view.ending = Some(ending);
             view.going = false;
@@ -371,7 +389,7 @@ mod tests {
         let runs = Arc::new(Runs::new(Setting {
             database: std::path::PathBuf::from("unused.db"),
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
-            credentials: configurator::Credentials::default(),
+            credentials: None,
         }));
         runs.going.store(true, Ordering::SeqCst);
         runs.view.send_modify(|view| view.going = true);

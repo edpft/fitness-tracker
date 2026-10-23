@@ -468,9 +468,32 @@ fn from_environment(
 ///
 /// [`ConfigError`] if the file exists but will not parse.
 pub fn credentials() -> Result<infrastructure::Credentials, ConfigError> {
-    match crate::paths::credentials(&crate::paths::SystemEnvironment) {
-        Ok(path) => Ok(infrastructure::Credentials::read(&path)?),
-        Err(_) => Ok(infrastructure::Credentials::default()),
+    credentials_at(
+        crate::paths::credentials(&crate::paths::SystemEnvironment)
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// The credentials kept at `path` as the file stands now, or none where there
+/// is nowhere to keep them.
+///
+/// **For a process that outlives a credential** (#438). The web server read
+/// them once, at start, so a credential stored with `fitness credentials`
+/// while it ran went unseen until a restart — and a Withings sign-in in the
+/// meantime earned a token the server took for somebody else's. Holding where
+/// they are kept, and reading them for every run, is what lets the next run
+/// use the new one.
+///
+/// # Errors
+///
+/// [`ConfigError`] if the file exists but will not parse.
+pub fn credentials_at(
+    path: Option<&std::path::Path>,
+) -> Result<infrastructure::Credentials, ConfigError> {
+    match path {
+        Some(path) => Ok(infrastructure::Credentials::read(path)?),
+        None => Ok(infrastructure::Credentials::default()),
     }
 }
 
@@ -867,6 +890,31 @@ mod tests {
                 && message.contains("WITHINGS_CLIENT_SECRET")
                 && message.contains("WITHINGS_REDIRECT_URI"),
             "{message}"
+        );
+    }
+
+    /// **A credential stored after the first read is there at the next**
+    /// (#438): what a long-running process reads for each run is the file as
+    /// it stands, not as it stood when the process started.
+    #[test]
+    fn credentials_are_read_as_the_file_stands_now() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let path = directory.path().join("credentials.json");
+
+        let before = super::credentials_at(Some(&path)).expect("no file is no credentials");
+        assert!(before.credential("hevy").is_none());
+
+        let mut stored = infrastructure::Credentials::default();
+        stored.set("hevy", key("stored-while-running"));
+        stored.write(&path).expect("the file is writable");
+
+        let after = super::credentials_at(Some(&path)).expect("the file reads");
+        assert_eq!(after.credential("hevy"), Some(&key("stored-while-running")));
+
+        assert!(
+            super::credentials_at(None)
+                .expect("nowhere to keep them is none")
+                .is_empty()
         );
     }
 
