@@ -16,7 +16,7 @@ pub fn index(view: &View) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "fitness next" }
+                title { "Home" }
                 style { (STYLE) }
                 script src="/htmx.min.js" {}
                 script src="/sse.min.js" {}
