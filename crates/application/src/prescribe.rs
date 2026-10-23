@@ -218,7 +218,7 @@ where
         let Some(found) = self.ports.programmes.on(on).await? else {
             return Err(PrescriptionError::NoPlan { date: on });
         };
-        let (programme_id, plan, programme) = (found.id, found.plan, found.mesocycle);
+        let (ordinal, plan, programme) = (found.ordinal, found.plan, found.mesocycle);
         let Some((_, parameters)) = self.ports.parameters.current().await? else {
             return Err(PrescriptionError::NoParameters);
         };
@@ -242,7 +242,7 @@ where
         Ok(LadderStanding {
             target,
             plan,
-            programme_id,
+            ordinal,
             programme,
             parameters,
             anchor,
