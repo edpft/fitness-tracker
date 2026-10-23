@@ -196,9 +196,8 @@ impl Runs {
                     match configurator::config::credentials_at(setting.credentials.as_deref()) {
                         Ok(credentials) => credentials,
                         Err(error) => {
-                            return self.end(refused(&format!(
-                                "the run could not be started: {error}"
-                            )));
+                            return self
+                                .end(refused(&format!("the run could not be started: {error}")));
                         }
                     };
                 let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
