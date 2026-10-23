@@ -868,16 +868,20 @@ fn a_session_in_a_week_the_plan_lost_says_which_week() {
         Err(error) => panic!("the fake destination builds: {error}"),
     };
 
-    let refused =
-        match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day())) {
-            Ok(outcome) => outcome,
-            Err(error) => panic!("a runtime is available: {error}"),
-        };
+    let refused = match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day()))
+    {
+        Ok(outcome) => outcome,
+        Err(error) => panic!("a runtime is available: {error}"),
+    };
 
     match refused {
         Err(DeliveryError::WeekNotRun { date, week_of }) => {
             assert_eq!(date, entry_test_day());
-            assert_eq!(week_of, Date::constant(2026, 6, 29), "the week, by its Monday");
+            assert_eq!(
+                week_of,
+                Date::constant(2026, 6, 29),
+                "the week, by its Monday"
+            );
         }
         Err(other) => panic!("the wrong refusal: {other}"),
         Ok(_) => panic!("a session in a week the plan no longer runs was delivered"),
@@ -914,11 +918,11 @@ fn a_prescription_whose_mesocycle_is_gone_is_a_corrupt_store() {
         Err(error) => panic!("the fake destination builds: {error}"),
     };
 
-    let refused =
-        match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day())) {
-            Ok(outcome) => outcome,
-            Err(error) => panic!("a runtime is available: {error}"),
-        };
+    let refused = match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day()))
+    {
+        Ok(outcome) => outcome,
+        Err(error) => panic!("a runtime is available: {error}"),
+    };
 
     match refused {
         Err(DeliveryError::NoMesocycle { date }) => assert_eq!(date, entry_test_day()),
