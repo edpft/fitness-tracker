@@ -208,7 +208,7 @@ pub async fn generate(
     report(
         &offered,
         gym,
-        lift.as_str(),
+        lift.name(),
         start,
         test.is_some(),
         microcycles,

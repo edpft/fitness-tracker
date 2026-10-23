@@ -83,7 +83,7 @@ pub fn unreadable(error: &str) -> Markup {
 
 fn lift_section(lift: RepsExercise, stretches: &[Stretch]) -> Markup {
     html! {
-        h2 { (lift.as_str()) }
+        h2 { (lift.name()) }
         @if stretches.is_empty() {
             p { "No test has been recorded." }
         } @else {
@@ -192,7 +192,7 @@ fn chart(lift: RepsExercise, stretches: &[Stretch]) -> Markup {
     html! {
         div.plot {
             svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-                aria-label=(format!("{} estimated 1RM by session since the test", lift.as_str())) {
+                aria-label=(format!("{} estimated 1RM by session since the test", lift.name())) {
                 @for kg in (0..).map(|n| f64::from(n).mul_add(step, low)).take_while(|kg| *kg <= high) {
                     line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(kg)) y2=(frame.y(kg)) {}
                     text.axis x=(LEFT - 6.0) y=(frame.y(kg) + 4.0) text-anchor="end" {

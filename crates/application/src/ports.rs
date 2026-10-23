@@ -1035,7 +1035,7 @@ pub enum LastPerformance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnderivableSlot {
     pub slot: SlotId,
-    pub exercise: &'static str,
+    pub exercise: domain::gym::Exercise,
     pub reason: UnderivableReason,
 }
 

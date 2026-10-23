@@ -187,6 +187,85 @@ fn every_exercise_key_is_distinct_and_reversible() {
     );
 }
 
+/// The examples #93 asked for, read the way the operator writes them.
+#[test]
+fn an_exercise_is_named_the_way_the_operator_writes_it() {
+    use domain::gym::Exercise;
+
+    for (key, name) in [
+        ("back-squat-barbell", "Back Squat (Barbell)"),
+        ("front-squat-barbell", "Front Squat (Barbell)"),
+        (
+            "bulgarian-split-squat-barbell",
+            "Bulgarian Split Squat (Barbell)",
+        ),
+    ] {
+        let exercise = Exercise::named(key).expect("the key is in the vocabulary");
+        assert_eq!(exercise.name(), name);
+        assert_eq!(exercise.as_str(), key, "the key is untouched by the name");
+    }
+}
+
+/// Every exercise has a name of its own, and a name that brackets an implement
+/// brackets the one the exercise is declared with.
+///
+/// Two exercises sharing a name would be one line in a list standing for two
+/// things the operator can pick. And because the bracket and the implement are
+/// written on the same line but in two columns, this is what stops them
+/// disagreeing.
+#[test]
+fn every_exercise_name_is_distinct_and_brackets_its_own_implement() {
+    use domain::gym::exercise::Implement;
+
+    // The bracket's spelling of an implement: `medicine-ball` reads `Medicine Ball`.
+    let label = |implement: Implement| -> String {
+        implement
+            .as_str()
+            .split('-')
+            .map(|word| {
+                let mut letters = word.chars();
+                letters.next().map_or_else(String::new, |first| {
+                    first.to_uppercase().chain(letters).collect()
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let labels: Vec<(Implement, String)> = Implement::ALL
+        .iter()
+        .map(|&implement| (implement, label(implement)))
+        .collect();
+
+    let mut seen = std::collections::BTreeSet::new();
+    macro_rules! check {
+        ($vocabulary:ty) => {
+            for &exercise in <$vocabulary>::ALL {
+                let name = exercise.name();
+                assert!(seen.insert(name), "{name} names two exercises");
+                assert!(!name.is_empty(), "{} has no name", exercise.as_str());
+                assert_ne!(name, exercise.as_str(), "{name} is still its key");
+
+                let bracketed = name
+                    .rsplit_once(" (")
+                    .and_then(|(_, rest)| rest.strip_suffix(')'));
+                if let Some((implement, _)) = labels
+                    .iter()
+                    .find(|(_, label)| Some(label.as_str()) == bracketed)
+                {
+                    assert_eq!(
+                        *implement,
+                        exercise.implement(),
+                        "{name} brackets an implement it is not declared with"
+                    );
+                }
+            }
+        };
+    }
+    check!(RepsExercise);
+    check!(DurationExercise);
+    check!(DistanceExercise);
+}
+
 /// Every movement's key is distinct and reversible, and every one of them is a
 /// movement some exercise is.
 ///

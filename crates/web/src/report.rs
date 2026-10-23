@@ -296,7 +296,7 @@ fn gym_session(issued: &Prescription) -> Markup {
         @if !issued.underivable.is_empty() {
             ul.failed {
                 @for slot in &issued.underivable {
-                    li { (slot.slot) " (" (slot.exercise) ") — not derivable: " (slot.reason) }
+                    li { (slot.slot) " (" (slot.exercise.name()) ") — not derivable: " (slot.reason) }
                 }
             }
         }
@@ -331,7 +331,7 @@ fn describe(exercise: &PrescribedExercise) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    format!("{} {sets}", exercise.exercise_key())
+    format!("{} {sets}", exercise.exercise().name())
 }
 
 /// One set: the measure, then the load, then whatever qualifies it.
@@ -411,7 +411,7 @@ fn unexpressed(unexpressed: &[Unexpressed]) -> Markup {
         @if !unexpressed.is_empty() {
             p { "what would not go:" }
             ul.failed {
-                @for item in unexpressed { li { (item.exercise) " — " (item.reason) } }
+                @for item in unexpressed { li { (item.exercise.name()) " — " (item.reason) } }
             }
         }
     }
