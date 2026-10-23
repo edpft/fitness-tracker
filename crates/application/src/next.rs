@@ -14,10 +14,11 @@
 //! nothing was outstanding because nothing had been prescribed. So whether to
 //! fetch is a question for each stream alone (#468) — the operator,
 //! 2026-10-16: *"Once a daily Withings weigh in has been collected, we don't
-//! need to collect another one until the next day."* Hevy and Peloton are
-//! always fetched, because a session could have been completed in the last
-//! hour. A source that cannot be reached is a failed step, and the run carries
-//! on with what is already landed (§ 36).
+//! need to collect another one until the next day."* Hevy, Peloton and the
+//! watch's activities are always fetched, because a session could have been
+//! completed in the last hour; the watch's days wait until yesterday is whole
+//! (#432). A source that cannot be reached is a failed step, and the run
+//! carries on with what is already landed (§ 36).
 //!
 //! **Then every derived layer is brought current, and only what moved is
 //! derived.** The layers are a graph: a normalised layer reads its stream's
@@ -117,11 +118,26 @@ pub trait Walks {
     }
 }
 
-/// A stream fetched once a day: once it holds an observation for today, it is
-/// not fetched again until tomorrow (#468).
+/// A stream fetched once a day: once it holds the day it waits for, it is not
+/// fetched again until tomorrow (#468, #432).
+///
+/// The operator, 2026-10-22: *"we don't need to fetch daily data if we've
+/// already got data for today, in the case of Withings, or yesterday, in the
+/// case of daily Garmin metrics."*
 pub struct Daily<W, N> {
     pub walks: W,
     pub newest: N,
+    pub awaits: Awaits,
+}
+
+/// Which day's observation a [`Daily`] stream waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Awaits {
+    /// A weigh-in is whole the moment it is taken.
+    Today,
+    /// A watch's day is whole only once the next has begun and the watch has
+    /// synced past it (#528).
+    Yesterday,
 }
 
 impl<W: Walks + Sync, N: NewestObservation + Sync> Walks for Daily<W, N> {
@@ -138,11 +154,19 @@ impl<W: Walks + Sync, N: NewestObservation + Sync> Walks for Daily<W, N> {
     }
 
     async fn due(&self, today: Date) -> Result<bool, StoreError> {
+        let awaited = match self.awaits {
+            Awaits::Today => Some(today),
+            Awaits::Yesterday => today.yesterday().ok(),
+        };
+        // A day before the calendar's first is none to wait for.
+        let Some(awaited) = awaited else {
+            return Ok(true);
+        };
         Ok(self
             .newest
             .newest_day()
             .await?
-            .is_none_or(|newest| newest < today))
+            .is_none_or(|newest| newest < awaited))
     }
 }
 
@@ -711,11 +735,17 @@ where
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
+pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
     pub gym_records: Records<GW>,
     pub cycling_records: Records<CW>,
     /// Body weight, which no discipline collects (#409, #357).
     pub weigh_in_records: Records<BW>,
+    /// The activities the watch records, which no discipline collects either
+    /// (#432), fetched every run as the disciplines' are.
+    pub watch_records: Records<WW>,
+    /// The watch's days and nights, fetched until yesterday is whole (#432),
+    /// after its activities and on the same sign-in.
+    pub watch_days: Records<WD>,
     /// Every normalised layer, fetched this run or not.
     pub normalised: NL,
     /// Each canonical layer.
@@ -743,16 +773,18 @@ pub struct NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
-    ports: NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
+pub struct Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
+    ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
 }
 
-impl<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
-    Next<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
+impl<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
+    Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
 where
     GW: Walks + Sync,
     CW: Walks + Sync,
     BW: Walks + Sync,
+    WW: Walks + Sync,
+    WD: Walks + Sync,
     NL: NormalisedLayers + Sync,
     CL: Canonicalising + Sync,
     DL: DerivationLedger + Sync,
@@ -771,7 +803,7 @@ where
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
     pub const fn new(
-        ports: NextPorts<GW, CW, BW, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
+        ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
     ) -> Self {
         Self { ports }
     }
@@ -808,7 +840,7 @@ where
         // 1. Every source at once, before anything is judged. The operator,
         // 2026-10-18: *"We should pull the new data in parallel if we can."*
         // Peloton's catalogue is refreshed after its rides, on the same login.
-        let (gym, cycling, weigh_ins) = all(
+        let (gym, cycling, weigh_ins, watch) = all(
             self.fetch(&self.ports.gym_records, now.date, progress),
             async {
                 let mut done = self
@@ -819,11 +851,24 @@ where
                 Ok::<_, NextError>(done)
             },
             self.fetch(&self.ports.weigh_in_records, now.date, progress),
+            // **The watch's days after its activities**, on the one sign-in:
+            // Garmin is asked one request at a time.
+            async {
+                let mut done = self
+                    .fetch(&self.ports.watch_records, now.date, progress)
+                    .await?;
+                done.extend(
+                    self.fetch(&self.ports.watch_days, now.date, progress)
+                        .await?,
+                );
+                Ok::<_, NextError>(done)
+            },
         )
         .await;
         run.extend(gym?);
         run.extend(cycling?);
         run.extend(weigh_ins?);
+        run.extend(watch?);
 
         // **Every layer is current before the standing is read**, and for the
         // gym that is the whole of #361: deriving a stream deletes its rows,
@@ -1206,17 +1251,18 @@ fn finish(
     run.push(done);
 }
 
-/// Three futures run at once on the caller's task, and all three outcomes.
+/// Four futures run at once on the caller's task, and all four outcomes.
 ///
 /// **By hand, because the core depends on no runtime.** Each is polled until it
 /// is ready and never after, which is all a join is.
-async fn all<A: Future, B: Future, C: Future>(
+async fn all<A: Future, B: Future, C: Future, D: Future>(
     a: A,
     b: B,
     c: C,
-) -> (A::Output, B::Output, C::Output) {
-    let (mut a, mut b, mut c) = (pin!(a), pin!(b), pin!(c));
-    let (mut first, mut second, mut third) = (None, None, None);
+    d: D,
+) -> (A::Output, B::Output, C::Output, D::Output) {
+    let (mut a, mut b, mut c, mut d) = (pin!(a), pin!(b), pin!(c), pin!(d));
+    let (mut first, mut second, mut third, mut fourth) = (None, None, None, None);
     poll_fn(|context| {
         if first.is_none()
             && let Poll::Ready(output) = a.as_mut().poll(context)
@@ -1233,10 +1279,15 @@ async fn all<A: Future, B: Future, C: Future>(
         {
             third = Some(output);
         }
-        match (first.take(), second.take(), third.take()) {
-            (Some(a), Some(b), Some(c)) => Poll::Ready((a, b, c)),
-            (a, b, c) => {
-                (first, second, third) = (a, b, c);
+        if fourth.is_none()
+            && let Poll::Ready(output) = d.as_mut().poll(context)
+        {
+            fourth = Some(output);
+        }
+        match (first.take(), second.take(), third.take(), fourth.take()) {
+            (Some(a), Some(b), Some(c), Some(d)) => Poll::Ready((a, b, c, d)),
+            (a, b, c, d) => {
+                (first, second, third, fourth) = (a, b, c, d);
                 Poll::Pending
             }
         }

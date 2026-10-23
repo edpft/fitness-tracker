@@ -273,6 +273,26 @@ fn reaches(date: Date, synced: Timestamp) -> Result<Timestamp, SourceError> {
     Ok(end.min(synced))
 }
 
+/// The last day a walk has landed whole, from how far it has reached (#432).
+///
+/// **The day before the one its resumption point falls on.** A day's record
+/// reaches the end of the day, or the watch's last sync if that came first
+/// (#528), and the resumption point is the furthest of those. So every day
+/// before the one it falls on was landed after the watch had synced past its
+/// end, and the day it falls on was not: it was landed short of its end, or
+/// not yet at all.
+///
+/// `None` for a resumption point on the calendar's first day.
+#[must_use]
+pub fn whole_through(reached: Watermark) -> Option<Date> {
+    reached
+        .as_timestamp()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
+        .yesterday()
+        .ok()
+}
+
 fn midnight(date: Date) -> Result<jiff::Timestamp, SourceError> {
     date.to_zoned(jiff::tz::TimeZone::UTC)
         .map(|zoned| zoned.timestamp())
@@ -315,7 +335,7 @@ impl WorkoutEventSource for GarminDays {
 
 #[cfg(test)]
 mod tests {
-    use super::{EARLIEST, GarminDay, last_sync, reaches, start_from};
+    use super::{EARLIEST, GarminDay, last_sync, reaches, start_from, whole_through};
     use domain::landing::{Endpoint, EventTime, Watermark};
     use jiff::civil::date;
 
@@ -416,6 +436,32 @@ mod tests {
         assert_eq!(reach(date(2026, 10, 13)), "2026-10-14T00:00:00Z");
         assert_eq!(reach(date(2026, 10, 14)), "2026-10-14T10:25:00Z");
         assert_eq!(reach(date(2026, 10, 15)), "2026-10-14T10:25:00Z");
+    }
+
+    /// **Whole through the day before the resumption point** (#432): reached
+    /// mid-morning, the day before was synced past and that day was not;
+    /// reached at midnight, the day that ended there is whole and the next
+    /// has not begun to land.
+    #[test]
+    fn a_walk_is_whole_through_the_day_before_its_resumption_point() {
+        let reached = |instant: &str| {
+            Watermark::from(EventTime::from(
+                instant.parse::<jiff::Timestamp>().expect("a time"),
+            ))
+        };
+        assert_eq!(
+            whole_through(reached("2026-10-22T08:16:00Z")),
+            Some(date(2026, 10, 21))
+        );
+        assert_eq!(
+            whole_through(reached("2026-10-22T00:00:00Z")),
+            Some(date(2026, 10, 21))
+        );
+        assert_eq!(
+            whole_through(reached("2026-10-21T23:30:00Z")),
+            Some(date(2026, 10, 20)),
+            "a sync before midnight leaves that day short of its end"
+        );
     }
 
     /// The watermark's own day is asked for again: the watch has not synced
