@@ -1914,17 +1914,6 @@ fn accessory_exercise(
     }
 }
 
-/// The scheme a block's non-primary slots run.
-const fn scheme_for<'a>(
-    consulted: &Consulted<'a>,
-    block: Block,
-) -> &'a domain::prescription::AccessoryScheme {
-    match block {
-        Block::Hypertrophy => &consulted.programming.hypertrophy,
-        _ => &consulted.programming.strength,
-    }
-}
-
 /// How a slot's numbers are arrived at.
 ///
 /// A total function of `(slot, primacy)`, which is what the model of record says:
@@ -2018,7 +2007,7 @@ fn one_exercise(
     let Some(LastPerformance::Performed(last)) = history.get(&reps_exercise) else {
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
-    let scheme = scheme_for(consulted, slot.block());
+    let scheme = consulted.programming.scheme_for(slot);
     let banded = consulted
         .ladders
         .get(&slot)

@@ -22,11 +22,11 @@
 //!
 //! [`GenerationParameters`]: super::GenerationParameters
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use crate::{
     measure::{Kg, RepCount},
-    prescription::{ByIntensity, Percentage, Target},
+    prescription::{Block, ByIntensity, Percentage, SlotId, Target},
     sequence::NonEmpty,
 };
 
@@ -98,11 +98,10 @@ pub struct BackOff {
 /// Work the range, and when the top of it is reached at every working set, add an
 /// increment and start again at the bottom.
 ///
-/// **One scheme per block, not one per slot and not one for everything.** The
-/// slots within a block are prescribed alike — every non-primary strength slot
-/// shares a scheme, and so does every hypertrophy slot — while the two blocks
-/// differ from each other. A per-slot scheme is a larger authored surface that
-/// nothing yet needs.
+/// **One scheme per block, unless a slot has its own.** The slots within a
+/// block are prescribed alike — every non-primary strength slot shares a
+/// scheme, and so does every hypertrophy slot — except where a slot is given a
+/// scheme of its own, which the wrist pair has been since 2026-10-22.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessoryScheme {
     /// The rep target, as a target. **Not two loose bounds**: a `low` and a
@@ -133,8 +132,22 @@ pub struct Programming {
     pub strength: AccessoryScheme,
     /// Every hypertrophy slot.
     pub hypertrophy: AccessoryScheme,
+    /// The slots that run a scheme of their own rather than their block's.
+    pub slots: BTreeMap<SlotId, AccessoryScheme>,
     pub first_reset: ResetProtocol,
     pub second_reset: ResetProtocol,
+}
+
+impl Programming {
+    /// The scheme a non-primary slot runs: its own where it has one, and
+    /// otherwise its block's.
+    #[must_use]
+    pub fn scheme_for(&self, slot: SlotId) -> &AccessoryScheme {
+        self.slots.get(&slot).unwrap_or_else(|| match slot.block() {
+            Block::Hypertrophy => &self.hypertrophy,
+            _ => &self.strength,
+        })
+    }
 }
 
 /// A value in this file that will not build.
@@ -234,12 +247,17 @@ pub fn programming() -> Result<Programming, InvalidProgramming> {
             higher: TopSetReps::new(count("heavy top set", 1)?),
         },
 
-        // INFERRED. The ranges were eyeballed from pull-ups at six, curls around
-        // four to six and wrist work at six, and are unconfirmed. One scheme per
-        // block rather than one per slot: the slots within a block are
-        // prescribed alike, and the two blocks differ from each other.
+        // INFERRED. The two blocks' ranges were eyeballed from pull-ups at six
+        // and curls around four to six, and are unconfirmed.
         strength: scheme("strength scheme", (4, 6), 3)?,
         hypertrophy: scheme("hypertrophy scheme", (4, 6), 3)?,
+
+        // The wrist pair runs eight to twelve. The operator, 2026-10-22, asked
+        // whether the whole hypertrophy block should: "Only the wrist pair".
+        slots: BTreeMap::from([
+            (SlotId::WristFlexion, scheme("wrist pair", (8, 12), 3)?),
+            (SlotId::WristExtension, scheme("wrist pair", (8, 12), 3)?),
+        ]),
 
         // From docs/primary-lift-progression.md. The drop and the increment are
         // chosen as a pair so both land on the plate grid and both cost four
@@ -264,6 +282,7 @@ pub fn programming() -> Result<Programming, InvalidProgramming> {
 #[cfg(test)]
 mod pinned {
     use super::programming;
+    use crate::prescription::SlotId;
 
     #[test]
     fn the_shipped_programming_builds() {
@@ -295,5 +314,18 @@ mod pinned {
         assert_eq!(shipped.back_off.lower.sets.as_u32(), 3);
         assert_eq!(shipped.back_off.lower.reps.as_u32(), 6);
         assert_eq!(shipped.top_set_reps.lower.as_rep_count().as_u32(), 3);
+
+        let range = |slot| {
+            let scheme = shipped.scheme_for(slot);
+            (scheme.sets.as_u32(), scheme.reps.to_string())
+        };
+        assert_eq!(range(SlotId::WristFlexion), (3, "8-12".to_owned()));
+        assert_eq!(range(SlotId::WristExtension), (3, "8-12".to_owned()));
+        assert_eq!(
+            range(SlotId::Biceps),
+            (3, "4-6".to_owned()),
+            "the rest of the hypertrophy block keeps its own"
+        );
+        assert_eq!(range(SlotId::UpperPull), (3, "4-6".to_owned()));
     }
 }

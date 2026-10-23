@@ -738,6 +738,9 @@ pub fn parameters_in_force(
         programming.hypertrophy.sets,
         programming.hypertrophy.reps,
     );
+    for (slot, scheme) in &programming.slots {
+        println!("  {slot} {} × {}", scheme.sets, scheme.reps);
+    }
     println!(
         "  first stall: drop {}, re-climb {}kg a week",
         programming.first_reset.drop, programming.first_reset.reclimb_per_week,
