@@ -36,7 +36,9 @@ use domain::{
         BikePlusRide, ComposedFrom, PerformedSession, RideRecord, RideSample, RideVenue, Watts,
     },
     landing::EventKind,
-    measure::{BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres},
+    measure::{
+        BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres, PositiveDuration,
+    },
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
     sequence::NonEmpty,
 };
@@ -339,7 +341,7 @@ fn venue_of(workout: &WorkoutRecord) -> Result<RideVenue, RefusalReason> {
 /// samples, which is derivable from them (§ 5). The operator has ridden 82
 /// seconds past the end of a class, and those three numbers are three different
 /// quantities rather than three accounts of one.
-fn span_of(workout: &WorkoutRecord) -> Result<(Timestamp, Duration), RefusalReason> {
+fn span_of(workout: &WorkoutRecord) -> Result<(Timestamp, PositiveDuration), RefusalReason> {
     let unreadable =
         |field: &'static str, detail: String| RefusalReason::UnreadableValue { field, detail };
 
@@ -353,11 +355,15 @@ fn span_of(workout: &WorkoutRecord) -> Result<(Timestamp, Duration), RefusalReas
         Timestamp::from_second(start).map_err(|_| unreadable("start_time", start.to_string()))?;
     let seconds = end
         .checked_sub(start)
-        .filter(|span| *span > 0)
-        .ok_or_else(|| unreadable("end_time", format!("{end}, which is not after {start}")))?;
-    let duration = u64::try_from(seconds)
-        .map(Duration::from_seconds)
-        .map_err(|_| unreadable("end_time", end.to_string()))?;
+        .filter(|span| *span >= 0)
+        .ok_or_else(|| unreadable("end_time", format!("{end}, which is before {start}")))?;
+    // **A ride of no length is not a ride** (#326). The operator, 2026-09-30:
+    // *"A 0 duration activity isn't an activity, by definition, nothing
+    // happened."* Refused as that, which says what was wrong and that there
+    // is nothing to fix, rather than as a value this adapter could not read.
+    let seconds = u64::try_from(seconds).map_err(|_| unreadable("end_time", end.to_string()))?;
+    let duration =
+        PositiveDuration::from_seconds(seconds).map_err(|_| RefusalReason::NothingHappened)?;
 
     Ok((instant, duration))
 }

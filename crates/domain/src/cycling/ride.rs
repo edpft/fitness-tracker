@@ -53,7 +53,7 @@
 use std::fmt;
 
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
-use crate::measure::{Duration, InvalidQuantity, Metres};
+use crate::measure::{Duration, InvalidQuantity, Metres, PositiveDuration};
 use crate::sequence::NonEmpty;
 use crate::{measure::HeartRateSeries, normalised::StartedAt};
 
@@ -320,7 +320,7 @@ pub struct ComposedFrom {
 pub struct BikePlusRide {
     started_at: StartedAt,
     at: RideVenue,
-    duration: Duration,
+    duration: PositiveDuration,
     distance: Metres,
     average_power: Watts,
     samples: NonEmpty<RideSample>,
@@ -355,7 +355,13 @@ pub struct RideRecord {
     /// and they differ — the operator has ridden 82 seconds past the end of a
     /// class. Nor is it the span of the samples, which is derivable from them
     /// (§ 5) and shorter again.
-    pub duration: Duration,
+    ///
+    /// **Positive, because a ride of no length is not a ride** (#326). The
+    /// operator, 2026-09-30: *"A 0 duration activity isn't an activity, by
+    /// definition, nothing happened."* The store's `CHECK` already held the
+    /// rule; the type now does, so a ride stating zero is refused as nothing
+    /// having happened rather than failing at the store.
+    pub duration: PositiveDuration,
     pub distance: Metres,
     /// The average power the source stated for the ride.
     ///
@@ -417,7 +423,7 @@ impl BikePlusRide {
         &self.at
     }
 
-    pub const fn duration(&self) -> Duration {
+    pub const fn duration(&self) -> PositiveDuration {
         self.duration
     }
 

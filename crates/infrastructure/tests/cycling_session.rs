@@ -555,6 +555,40 @@ fn an_unknown_distance_unit_refuses_the_ride() {
     });
 }
 
+/// **A ride of no length is refused as nothing having happened** (#326), and
+/// one that ends before it starts as a value this adapter cannot read. The
+/// operator, 2026-09-30: *"A 0 duration activity isn't an activity, by
+/// definition, nothing happened."*
+#[test]
+fn a_ride_of_no_length_is_refused_as_nothing_having_happened() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        for ((start, end), expected) in [
+            ((400, 400), "nothing-happened"),
+            ((400, 100), "unreadable-value"),
+        ] {
+            let (pool, _directory) = landed(
+                vec![("ride-1", workout("ride-1", Kind::Main, start, end))],
+                vec![("ride-1", graph(&[1], &[93], None, "2.0", "km"))],
+            )
+            .await
+            .expect("a landed corpus");
+
+            let summary = derive(&pool)
+                .await
+                .expect("a derivation, not a store failure");
+            assert_eq!(summary.workouts_written.as_usize(), 0);
+
+            let refusals = refusals(&pool).await.expect("refusals");
+            let reasons: Vec<&str> = refusals
+                .iter()
+                .map(|refusal| refusal.reason.as_str())
+                .collect();
+            assert!(reasons.contains(&expected), "{start}..{end}: {reasons:?}");
+        }
+    });
+}
+
 /// The FTP table is derived with the sessions, and re-derived with them.
 ///
 /// **Both halves matter** (issue #56). The value is what the test measured, and

@@ -457,7 +457,9 @@ async fn write_ride(
     let started_at = ride.started_at().instant().to_string();
     let zone = ride.started_at().zone().id().to_owned();
     let source_record_id = ride.source_record_id().as_str().to_owned();
-    let duration = seconds_for_storage(ride.duration())?;
+    let duration = seconds_for_storage(domain::measure::Duration::from_seconds(
+        ride.duration().as_seconds(),
+    ))?;
     let distance =
         i64::try_from(ride.distance().as_millimetres()).map_err(|_| StoreError::Corrupt {
             detail: "a distance larger than the store can hold".to_owned(),
