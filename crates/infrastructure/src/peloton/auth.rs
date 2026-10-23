@@ -669,10 +669,10 @@ fn refusal(path: &str, status: StatusCode, body: &str, judges: Judges) -> Source
         return SourceError::Unauthorised;
     }
     SourceError::Refusing {
-        detail: match code {
-            Some(code) => format!("{path} answered {status}, {code}"),
-            None => format!("{path} answered {status}"),
-        },
+        detail: code.map_or_else(
+            || format!("{path} answered {status}"),
+            |code| format!("{path} answered {status}, {code}"),
+        ),
     }
 }
 
