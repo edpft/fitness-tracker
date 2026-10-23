@@ -830,8 +830,9 @@ fn a_date_with_nothing_issued_delivers_nothing() {
     assert_eq!(destination.calls(), 0);
 }
 
-/// The fixture's plan authored again a week later, as an illness that cost the
-/// entry test's week would have it: nothing now covers 29 June to 5 July.
+/// The fixture's plan authored again with its block a week later, as an
+/// illness that cost the block's first week would have it: nothing now covers
+/// 6 to 12 July.
 async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
     Authoring::new(
         SqlitePlanStore::new(ready.pool.clone(), corpus::zone()?),
@@ -839,7 +840,7 @@ async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
     )
     .author(
         &programme::plan(vec![
-            programme::entry_test_from(Date::constant(2026, 7, 6))?,
+            programme::entry_test()?,
             programme::as_programme(programme::programme_from(Date::constant(2026, 7, 13))?),
         ])?,
         &programme::parameters()?,
@@ -848,9 +849,9 @@ async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The entry test's day, which [`a_week_lost`] takes out of the plan.
-const fn entry_test_day() -> Date {
-    Date::constant(2026, 7, 3)
+/// The block's first session, whose week [`a_week_lost`] takes out of the plan.
+const fn first_session_day() -> Date {
+    Date::constant(2026, 7, 6)
 }
 
 /// **A session in a week the plan no longer runs says which week, and does
@@ -861,25 +862,25 @@ const fn entry_test_day() -> Date {
 #[test]
 fn a_session_in_a_week_the_plan_lost_says_which_week() {
     let ready = run!(ready());
-    run!(ready.prescriber.prescribe(entry_test_day()));
+    run!(ready.prescriber.prescribe(first_session_day()));
     run!(a_week_lost(&ready));
     let destination = match Counting::new() {
         Ok(destination) => destination,
         Err(error) => panic!("the fake destination builds: {error}"),
     };
 
-    let refused = match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day()))
-    {
-        Ok(outcome) => outcome,
-        Err(error) => panic!("a runtime is available: {error}"),
-    };
+    let refused =
+        match corpus::block_on(delivering(&ready, &destination).deliver(first_session_day())) {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("a runtime is available: {error}"),
+        };
 
     match refused {
         Err(DeliveryError::WeekNotRun { date, week_of }) => {
-            assert_eq!(date, entry_test_day());
+            assert_eq!(date, first_session_day());
             assert_eq!(
                 week_of,
-                Date::constant(2026, 6, 29),
+                Date::constant(2026, 7, 6),
                 "the week, by its Monday"
             );
         }
@@ -895,7 +896,7 @@ fn a_session_in_a_week_the_plan_lost_says_which_week() {
 #[test]
 fn a_prescription_whose_mesocycle_is_gone_is_a_corrupt_store() {
     let ready = run!(ready());
-    run!(ready.prescriber.prescribe(entry_test_day()));
+    run!(ready.prescriber.prescribe(first_session_day()));
     run!(async {
         let mut connection = ready.pool.acquire().await?;
         sqlx::query("PRAGMA foreign_keys = OFF")
@@ -905,7 +906,7 @@ fn a_prescription_whose_mesocycle_is_gone_is_a_corrupt_store() {
             "DELETE FROM gym_mesocycle \
              WHERE id = (SELECT mesocycle FROM prescribed_workout WHERE issued_for = ?)",
         )
-        .bind(entry_test_day().to_string())
+        .bind(first_session_day().to_string())
         .execute(&mut *connection)
         .await?;
         sqlx::query("PRAGMA foreign_keys = ON")
@@ -918,14 +919,14 @@ fn a_prescription_whose_mesocycle_is_gone_is_a_corrupt_store() {
         Err(error) => panic!("the fake destination builds: {error}"),
     };
 
-    let refused = match corpus::block_on(delivering(&ready, &destination).deliver(entry_test_day()))
-    {
-        Ok(outcome) => outcome,
-        Err(error) => panic!("a runtime is available: {error}"),
-    };
+    let refused =
+        match corpus::block_on(delivering(&ready, &destination).deliver(first_session_day())) {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("a runtime is available: {error}"),
+        };
 
     match refused {
-        Err(DeliveryError::NoMesocycle { date }) => assert_eq!(date, entry_test_day()),
+        Err(DeliveryError::NoMesocycle { date }) => assert_eq!(date, first_session_day()),
         Err(other) => panic!("the wrong refusal: {other}"),
         Ok(_) => panic!("a session whose mesocycle is gone was delivered"),
     }
