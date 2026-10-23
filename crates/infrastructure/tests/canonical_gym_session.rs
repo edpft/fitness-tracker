@@ -12,7 +12,7 @@
 
 mod support;
 
-use application::CanonicalGymSessionStore as _;
+use application::{CanonicalGymSessionStore as _, PerformedGymSessions as _};
 use domain::{
     canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount},
     gym::{
@@ -318,5 +318,84 @@ fn a_replacement_replaces_and_reads_oldest_first() {
         // Written newest first and read oldest first, so the order is the
         // store's rather than the caller's.
         assert_eq!(store.all().await.expect("a read"), vec![older, newer]);
+    });
+}
+
+/// **A read spanning a rebuild sees the layer it began on, whole** (#467).
+///
+/// On 2026-10-16 a page read during `next` showed front squat with no test.
+/// The layer is replaced in one transaction under fresh ids, and a session is
+/// read in several queries — its row, then its items and sets — so a read that
+/// straddled the commit could take its rows from before and its sets from
+/// after. A reading is one snapshot: the layer replaced between its two reads,
+/// it answers both times with the layer as it stood, and the next read answers
+/// with the new one.
+#[test]
+fn a_reading_spanning_a_replacement_sees_the_layer_it_began_on() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (_directory, pool) = support::store::derived_and_authored()
+            .await
+            .expect("a derived store");
+        let ids = normalised(&pool).await.expect("normalised sessions");
+        let normalised_session = ids[0];
+        let store = SqliteCanonicalGymSessionStore::new(pool.clone());
+
+        let squatted = |day: &str, grams: u64| {
+            CanonicalGymSession::new(
+                on(day).expect("a day"),
+                NonEmpty::of(
+                    CanonicalItem::Exercise(CanonicalExercise::ForReps {
+                        identified: Attributed::new(
+                            Identified::Recorded(RepsExercise::FrontSquatBarbell),
+                            normalised_session,
+                        ),
+                        sets: NonEmpty::of(
+                            logged_set(1, grams, normalised_session).expect("a set"),
+                            vec![],
+                        ),
+                    }),
+                    vec![],
+                ),
+                None,
+                None,
+            )
+        };
+        let before = vec![squatted("2026-09-25", 92_500)];
+        let after = vec![
+            squatted("2026-09-25", 92_500),
+            squatted("2026-10-02", 95_000),
+        ];
+        let (from, to) = (
+            "2026-09-01".parse::<Date>().expect("a day"),
+            "2026-10-31".parse::<Date>().expect("a day"),
+        );
+        store.replace(before.clone()).await.expect("a write");
+
+        let mut reading = store.reading().await.expect("a reading");
+        assert_eq!(
+            reading.between(from, to).await.expect("a read"),
+            before,
+            "the first read is the layer as it stands"
+        );
+
+        store
+            .replace(after.clone())
+            .await
+            .expect("a rebuild while the reading is open");
+
+        assert_eq!(
+            reading.between(from, to).await.expect("a second read"),
+            before,
+            "the second read is the layer the reading began on, whole"
+        );
+        assert_eq!(reading.all().await.expect("a third read"), before);
+        drop(reading);
+
+        assert_eq!(
+            store.between(from, to).await.expect("a fresh read"),
+            after,
+            "a read begun after the rebuild sees it"
+        );
     });
 }
