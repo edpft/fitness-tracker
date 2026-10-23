@@ -301,7 +301,7 @@ fn page<T: Figure>(
             body {
                 (crate::page::following(run))
                 main.wide {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu(shown.path))
                     h1 { (shown.title) }
                     p.method { (shown.point) }
                     (crate::range::choices(shown.path, over))
@@ -342,7 +342,12 @@ pub fn unreadable(shown: Shown, error: &str) -> Markup {
                 title { (shown.title) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu(shown.path))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

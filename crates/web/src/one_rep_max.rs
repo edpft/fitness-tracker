@@ -43,7 +43,7 @@ pub fn page(view: &View, run: &crate::run::View) -> Markup {
             body {
                 (crate::page::following(run))
                 main.wide {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu("/estimated-1rm"))
                     h1 { (TITLE) }
                     p.legend {
                         "estimator: " (view.estimator)
@@ -71,7 +71,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { (TITLE) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/estimated-1rm"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

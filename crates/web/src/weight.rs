@@ -52,7 +52,7 @@ pub fn page(series: &Series, ranges: &Ranges, over: Over, run: &crate::run::View
             body {
                 (crate::page::following(run))
                 main.wide {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu("/body-weight"))
                     h1 { (TITLE) }
                     (crate::range::choices("/body-weight", over))
                     (body(series, ranges, over))
@@ -73,7 +73,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { (TITLE) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/body-weight"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }

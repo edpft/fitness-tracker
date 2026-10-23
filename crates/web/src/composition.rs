@@ -161,7 +161,7 @@ pub fn page(
             body {
                 (crate::page::following(run))
                 main.wide {
-                    p { a href="/" { "Run next" } }
+                    (crate::page::menu("/body-composition"))
                     h1 { (TITLE) }
                     (against_phase(against, &methods))
                     (crate::range::choices("/body-composition", over))
@@ -453,7 +453,12 @@ pub fn unreadable(error: &str) -> Markup {
                 title { (TITLE) }
                 style { (crate::page::STYLE) }
             }
-            body { main { p.failed { "the store could not be read: " (error) } } }
+            body {
+                main {
+                    (crate::page::menu("/body-composition"))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
         }
     }
 }
