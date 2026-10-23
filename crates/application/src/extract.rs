@@ -189,6 +189,7 @@ where
         let outcome = RunOutcome::Failed {
             finished_at: self.clock.now(),
             reason: error.as_failure_reason(),
+            detail: error.to_string(),
         };
         // If recording the failure also fails, the original failure is the one
         // worth reporting — the store being unreachable is why we are here.

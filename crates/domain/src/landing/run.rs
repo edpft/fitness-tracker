@@ -113,6 +113,13 @@ pub enum FailureReason {
     SourceUnavailable,
     #[error("the source rejected our credential")]
     Unauthorised,
+    /// No token was held that the credential could use, so nothing was sent
+    /// (#439).
+    #[error("the source needs signing in again")]
+    SignInNeeded,
+    /// The source answered and would not talk: throttling, or blocking (#368).
+    #[error("the source is refusing to talk")]
+    SourceRefusing,
     #[error("another run is already in progress")]
     AlreadyRunning,
     #[error("the source served an event carrying no identifier")]
@@ -131,6 +138,8 @@ impl FailureReason {
         match self {
             Self::SourceUnavailable => "source_unavailable",
             Self::Unauthorised => "unauthorised",
+            Self::SignInNeeded => "sign_in_needed",
+            Self::SourceRefusing => "source_refusing",
             Self::AlreadyRunning => "already_running",
             Self::MissingProvenance => "missing_provenance",
             Self::StoreFailure => "store_failure",
@@ -153,6 +162,8 @@ impl TryFrom<&str> for FailureReason {
         match value {
             "source_unavailable" => Ok(Self::SourceUnavailable),
             "unauthorised" => Ok(Self::Unauthorised),
+            "sign_in_needed" => Ok(Self::SignInNeeded),
+            "source_refusing" => Ok(Self::SourceRefusing),
             "already_running" => Ok(Self::AlreadyRunning),
             "missing_provenance" => Ok(Self::MissingProvenance),
             "store_failure" => Ok(Self::StoreFailure),
@@ -193,6 +204,14 @@ pub enum RunOutcome {
     Failed {
         finished_at: FetchedAt,
         reason: FailureReason,
+        /// What the failure said, as the operator read it: for a source, the
+        /// status it answered and its own code where it gave one (#368).
+        ///
+        /// **Kept so a failure can be read from the store**, rather than
+        /// reproduced live. The reason alone said `unauthorised` for a
+        /// credential that had logged in four seconds earlier, and nothing
+        /// said why.
+        detail: String,
     },
 }
 
@@ -249,5 +268,29 @@ impl ExtractionRun {
 
     pub const fn outcome(&self) -> &RunOutcome {
         &self.outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FailureReason;
+
+    /// **Every reason reads back as the one written.** One that did not would
+    /// be kept as a failure with its reason discarded, which is the fallback
+    /// for a newer program's reasons and not for this one's.
+    #[test]
+    fn every_reason_round_trips_through_its_stored_form() {
+        for reason in [
+            FailureReason::SourceUnavailable,
+            FailureReason::Unauthorised,
+            FailureReason::SignInNeeded,
+            FailureReason::SourceRefusing,
+            FailureReason::AlreadyRunning,
+            FailureReason::MissingProvenance,
+            FailureReason::StoreFailure,
+            FailureReason::MalformedResponse,
+        ] {
+            assert_eq!(FailureReason::try_from(reason.as_str()), Ok(reason));
+        }
     }
 }

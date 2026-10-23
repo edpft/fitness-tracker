@@ -234,8 +234,19 @@ impl PelotonWorkouts {
             })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(SourceError::Unauthorised);
+        }
+        // **A 403 is not the token refused** (#368): Peloton answers one for
+        // reasons that say nothing about the credential, and reading it as a
+        // rejection sends the operator to re-enter a password that works.
+        if matches!(
+            status,
+            reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::TOO_MANY_REQUESTS
+        ) {
+            return Err(SourceError::Refusing {
+                detail: format!("{path} answered {status}"),
+            });
         }
         if !status.is_success() {
             let detail = response.text().await.unwrap_or_default();

@@ -205,6 +205,103 @@ fn a_rejected_credential_is_unauthorised_and_not_retried() {
     });
 }
 
+/// The login answered with `status` and `body`, and what the adapter made of
+/// it, with how many times the password was posted.
+async fn refused_with(status: u16, body: &str) -> (SourceError, usize) {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/authorize"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("set-cookie", "_csrf=csrf-from-authorize; Path=/")
+                .insert_header("location", "/login"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html></html>"))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/usernamepassword/login"))
+        .respond_with(ResponseTemplate::new(status).set_body_string(body))
+        .mount(&server)
+        .await;
+
+    let auth = PelotonAuth::new(server.uri(), credentials(), None);
+    let failure = match auth.bearer().await {
+        Ok(_) => SourceError::Malformed {
+            detail: "a refused login earned a token".to_owned(),
+        },
+        Err(failure) => failure,
+    };
+    let attempts = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path() == "/usernamepassword/login")
+        .count();
+    (failure, attempts)
+}
+
+/// **Auth0's anomaly detection is a source refusing to talk, not a wrong
+/// password** (#368). On 2026-10-05 a run said the credential was rejected
+/// four seconds after the same credential had logged in; the operator's one
+/// remedy for that message, re-entering the password, was the wrong one.
+#[test]
+fn an_anomaly_block_is_a_source_refusing_to_talk() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        for body in [
+            "AnomalyDetected: Invalid state",
+            r#"{"error":"too_many_attempts","error_description":"blocked"}"#,
+        ] {
+            let (failure, attempts) = refused_with(403, body).await;
+            let SourceError::Refusing { detail } = &failure else {
+                panic!("a 403 saying {body} read as {failure:?}");
+            };
+            assert!(detail.contains("403"), "the status is said: {detail}");
+            assert!(
+                detail.contains("AnomalyDetected") || detail.contains("too_many_attempts"),
+                "Auth0's code is said: {detail}"
+            );
+            assert_eq!(attempts, 1, "a refused login is not retried");
+        }
+    });
+}
+
+/// **A 429 is the same kind of thing**: Auth0 throttling, whatever the
+/// credential (#368).
+#[test]
+fn a_rate_limited_login_is_a_source_refusing_to_talk() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        let (failure, attempts) = refused_with(429, "{}").await;
+        let SourceError::Refusing { detail } = &failure else {
+            panic!("a 429 read as {failure:?}");
+        };
+        assert!(detail.contains("429"), "the status is said: {detail}");
+        assert_eq!(attempts, 1, "a throttled login is not retried");
+    });
+}
+
+/// **A 403 that says the password is wrong is a rejected credential**, so the
+/// body decides rather than the status.
+#[test]
+fn a_403_saying_the_password_is_wrong_is_a_rejection() {
+    let rt = runtime().expect("a current-thread runtime builds");
+    rt.block_on(async {
+        let (failure, _) = refused_with(
+            403,
+            r#"{"error":"access_denied","error_description":"Wrong email or password."}"#,
+        )
+        .await;
+        assert_eq!(failure, SourceError::Unauthorised);
+    });
+}
+
 /// Without the cookie there is nothing to sign the login with, and saying so is
 /// better than posting a form that will be refused.
 #[test]

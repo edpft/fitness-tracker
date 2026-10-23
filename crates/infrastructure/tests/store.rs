@@ -566,6 +566,7 @@ fn a_failed_run_is_not_a_success() {
             RunOutcome::Failed {
                 finished_at: at,
                 reason: domain::landing::FailureReason::SourceUnavailable,
+                detail: "the source was unreachable: connection refused".to_owned(),
             },
         )
         .await
@@ -575,6 +576,42 @@ fn a_failed_run_is_not_a_success() {
             log.latest_success(&stream).await.expect("store operation"),
             None
         );
+    });
+}
+
+/// **A failed run keeps what it said** (#368), so the next failure can be
+/// read from the store: the status and the source's own code, beside the
+/// reason.
+#[test]
+fn a_failed_run_keeps_what_the_failure_said() {
+    runtime().expect("a tokio runtime").block_on(async {
+        let (_dir, pool) = store().await.expect("store operation");
+        let log = SqliteExtractionRunLog::new(pool.clone());
+        let stream = hevy_workouts().expect("valid test fixture");
+        let at = FetchedAt::try_from("2026-10-05T07:03:12Z").expect("valid test fixture");
+        let said = "the source is refusing to talk: /usernamepassword/login answered \
+                    403 Forbidden, AnomalyDetected";
+
+        let run = log.begin(&stream, at).await.expect("store operation");
+        log.finish(
+            run,
+            RunOutcome::Failed {
+                finished_at: at,
+                reason: domain::landing::FailureReason::SourceRefusing,
+                detail: said.to_owned(),
+            },
+        )
+        .await
+        .expect("store operation");
+
+        let (reason, detail): (String, Option<String>) = sqlx::query_as(
+            "SELECT failure_reason, failure_detail FROM extraction_run ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("the run reads back");
+        assert_eq!(reason, "source_refusing");
+        assert_eq!(detail.as_deref(), Some(said));
     });
 }
 
