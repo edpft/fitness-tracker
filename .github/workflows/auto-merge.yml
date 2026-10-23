@@ -7,5 +7,10 @@ permissions:
     pull-requests: write
 
 jobs:
+    # Majors too (#534): the publish job's dry run now tries every action a
+    # bump touches before `gate` passes, so a major merges on green like any
+    # other bump.
     auto-merge:
         uses: edpft/rust-workflows/.github/workflows/auto-merge.yml@main
+        with:
+            allow-major: true
