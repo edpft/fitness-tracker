@@ -41,7 +41,7 @@
 //! would save that request and make this the one adapter that reads `since`
 //! differently from the way the port defines it.
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, EventTime, RawPayload, Watermark};
 
 use super::{auth::PelotonAuth, workouts::PelotonWorkouts};
@@ -142,7 +142,7 @@ impl WorkoutEventSource for PelotonWorkoutSamples {
             // source said. Read before the id is moved out of the event.
             let occurred_at = workout.provenance.occurred_at();
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 workout.source_record_id,
                 EventProvenance::new(endpoint, EventKind::Updated, occurred_at).into(),
                 payload,

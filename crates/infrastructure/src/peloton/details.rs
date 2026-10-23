@@ -14,7 +14,7 @@
 //! graph: two fetches of the same workouts a day apart answered byte-for-byte
 //! the same, rank included.
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{Endpoint, EventKind, EventProvenance, RawPayload, Watermark};
 
 use super::{auth::PelotonAuth, samples::wanted, workouts::PelotonWorkouts};
@@ -71,7 +71,7 @@ impl WorkoutEventSource for PelotonWorkoutDetails {
                     detail: format!("{path} answered nothing: {error}"),
                 })?;
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 workout.source_record_id,
                 EventProvenance::new(endpoint, EventKind::Updated, occurred_at).into(),
                 payload,

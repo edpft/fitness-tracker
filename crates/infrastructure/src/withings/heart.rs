@@ -21,7 +21,7 @@
 
 use std::{sync::Arc, sync::OnceLock, time::Duration};
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
 };
@@ -220,7 +220,7 @@ impl WorkoutEventSource for WithingsEcgs {
                     }
                 })?;
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 source_record_id,
                 // **Always `Updated`**, as for measure groups: the list serves
                 // a recording as it now stands.
@@ -304,7 +304,7 @@ impl WorkoutEventSource for WithingsEcgSignals {
             // **The recording's time, not the request's**, as Garmin's files
             // take theirs: the resumption point advances on what the list
             // stated.
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 entry.source_record_id,
                 EventProvenance::new(
                     endpoint()?,

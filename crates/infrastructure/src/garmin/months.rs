@@ -96,7 +96,7 @@ impl GarminMonths {
         let source_record_id = SourceRecordId::try_from(first.strftime("%Y-%m").to_string())
             .map_err(|error| malformed(error.to_string()))?;
         let payload = RawPayload::try_from(bytes).map_err(|error| malformed(error.to_string()))?;
-        Ok(SourceEvent::new(
+        Ok(crate::revision::json_event(
             source_record_id,
             EventProvenance::new(
                 endpoint.clone(),

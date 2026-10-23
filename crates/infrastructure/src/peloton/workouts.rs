@@ -94,11 +94,10 @@ const VOLATILE_CLASS_FIELDS: [&str; 11] = [
 
 /// What the next serving of this workout is compared against.
 ///
-/// The payload with the class's global counters removed, re-serialised and
-/// hashed. **Canonical because `serde_json::Map` is a `BTreeMap`** — this build
-/// does not enable `preserve_order` — so keys come out in one order whatever
-/// order they arrived in, and the same workout hashes the same next week. The
-/// test at the foot of this file pins that.
+/// The payload with the class's global counters removed, then put in one key
+/// order as every JSON record's revision is ([`crate::revision`]), so the same
+/// workout hashes the same next week. The test at the foot of this file pins
+/// that.
 ///
 /// Falls back to the payload's own digest when the bytes will not parse or will
 /// not re-serialise. That is the safe direction: an unreadable payload compares
@@ -117,10 +116,7 @@ fn revision_of(payload: &RawPayload) -> PayloadDigest {
         }
     }
 
-    serde_json::to_vec(&value)
-        .ok()
-        .and_then(|bytes| RawPayload::try_from(bytes.as_slice()).ok())
-        .map_or_else(|| payload.digest(), |stable| stable.digest())
+    crate::revision::of_value(&value).unwrap_or_else(|| payload.digest())
 }
 
 /// Who the session belongs to. The list endpoint is addressed by user, so the

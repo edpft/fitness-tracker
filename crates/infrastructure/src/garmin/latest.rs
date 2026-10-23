@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, RawPayload, SourceRecordId, Watermark,
 };
@@ -94,7 +94,7 @@ impl WorkoutEventSource for GarminLatestOf {
             .await?;
         let endpoint = Endpoint::try_from(self.latest.endpoint())
             .map_err(|error| malformed(error.to_string()))?;
-        let event = SourceEvent::new(
+        let event = crate::revision::json_event(
             // **The account**, since there is one of each per account: a
             // changed answer is a new version of the same record.
             SourceRecordId::try_from(name).map_err(|error| malformed(error.to_string()))?,

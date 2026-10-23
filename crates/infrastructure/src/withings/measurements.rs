@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use application::{EventBatch, SourceError, SourceEvent, WorkoutEventSource};
+use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{
     Endpoint, EventKind, EventProvenance, EventTime, RawPayload, SourceRecordId, Watermark,
 };
@@ -194,7 +194,7 @@ impl WorkoutEventSource for WithingsMeasurements {
                 }
             })?;
 
-            events.push(SourceEvent::new(
+            events.push(crate::revision::json_event(
                 source_record_id,
                 // **Always `Updated`**: `getmeas` serves a group as it now
                 // stands and has no event kinds.

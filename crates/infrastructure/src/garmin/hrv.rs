@@ -174,7 +174,7 @@ impl GarminHrv {
                 detail: error.to_string(),
             })?;
 
-        Ok(Some(SourceEvent::new(
+        Ok(Some(crate::revision::json_event(
             source_record_id,
             EventProvenance::new(
                 endpoint.clone(),

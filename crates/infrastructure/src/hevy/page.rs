@@ -135,7 +135,7 @@ fn parse_event(raw: &RawValue, endpoint: &Endpoint) -> Result<SourceEvent, Sourc
     let payload =
         RawPayload::try_from(raw.get().as_bytes()).map_err(|error| malformed(error.to_string()))?;
 
-    Ok(SourceEvent::new(
+    Ok(crate::revision::json_event(
         source_record_id,
         EventProvenance::new(endpoint.clone(), kind, occurred_at).into(),
         payload,

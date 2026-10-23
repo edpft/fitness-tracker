@@ -35,7 +35,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use super::{
-    activities::{ActivityPage, GarminActivities, revision_of},
+    activities::{ActivityPage, GarminActivities},
     auth::GarminAuth,
 };
 
@@ -138,7 +138,7 @@ impl WorkoutEventSource for GarminExerciseSets {
                 provenance: EventProvenance::new(endpoint, EventKind::Updated, occurred_at).into(),
                 // The same source, so the same unstable key order: compared on
                 // the canonical form, landed as served.
-                revision: revision_of(&payload),
+                revision: crate::revision::of_json(&payload),
                 payload,
             });
         }
