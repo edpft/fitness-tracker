@@ -66,7 +66,7 @@ jobs:
       REF: github:${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}#packages.x86_64-linux.default
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # 2.31 rather than the action's default for the import trace below.
       - name: Install nix
