@@ -276,20 +276,60 @@ pub trait RunLock {
     fn try_acquire(&self, stream: &LandingStream) -> Result<Self::Guard, RunLockError>;
 }
 
-/// Single-flight for `next` as a whole, whichever frontend starts it.
+/// One thing a run of `next` collects or derives, which no two runs do at once.
+///
+/// **Parts rather than the run** (#559): a page collects only what its charts
+/// read, so two runs over different streams go at the same time, and a run
+/// whose part another has joins that run rather than doing it twice.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Part {
+    /// One walk's landing stream.
+    Fetching(LandingStream),
+    /// One normalised layer.
+    Normalising(LandingStream),
+    Canonicalising(CanonicalLayer),
+    /// Refreshing the classes, committing and delivering, which only a run of
+    /// the whole of `next` does.
+    Delivering,
+}
+
+/// Whether a run took its parts.
+#[derive(Debug)]
+pub enum Taken<G> {
+    /// Every one of them, held until the guard drops.
+    All(G),
+    /// None, because other runs hold these.
+    Held(std::collections::BTreeSet<Part>),
+}
+
+/// Single-flight for each part of `next`, whichever frontend starts it.
 ///
 /// **Not [`RunLock`] again**: a run of `next` walks several streams, and each
-/// walk still takes its own stream's lock. This one says a second run is refused
-/// before it starts, rather than failing at every fetch and then delivering
-/// anyway.
+/// walk still takes its own stream's lock. This one says which run collects a
+/// part before any of it starts, so a second run waits for the first rather
+/// than failing at every fetch.
 pub trait NextLock {
     type Guard: Send;
 
+    /// Take every part, or none of them. Never waits.
+    ///
     /// # Errors
     ///
-    /// [`RunLockError::Held`] if another run of `next` has it. Fails
-    /// immediately rather than waiting.
-    fn try_acquire(&self) -> Result<Self::Guard, RunLockError>;
+    /// [`RunLockError::Unavailable`] if a lock cannot be taken or refused.
+    fn try_acquire(
+        &self,
+        parts: &std::collections::BTreeSet<Part>,
+    ) -> Result<Taken<Self::Guard>, RunLockError>;
+
+    /// Wait until no run holds any of `parts`.
+    ///
+    /// # Errors
+    ///
+    /// [`RunLockError::Unavailable`] if a lock cannot be waited on.
+    fn released(
+        &self,
+        parts: &std::collections::BTreeSet<Part>,
+    ) -> impl Future<Output = Result<(), RunLockError>> + Send;
 }
 
 /// The current instant.
@@ -2973,7 +3013,7 @@ impl Build {
 }
 
 /// One of the canonical layers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CanonicalLayer {
     Gym,
     Cycling,

@@ -6,14 +6,17 @@
 
 use std::path::{Path, PathBuf};
 
+use jiff::civil::Date;
+
 use application::{
-    Build, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers, StoreError,
+    Build, CanonicalLayer, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers,
+    Part, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
-        CanonicalPorts, CyclingPorts, GymPorts, Next, NextError, NextPorts, NoAccess, Progress,
-        Report,
+        CanonicalPorts, CyclingPorts, Done, GymPorts, IfGoing, Next, NextError, NextPorts,
+        NoAccess, Progress, Report, Scope,
     },
 };
 use domain::{
@@ -23,12 +26,18 @@ use domain::{
     schedule::{DayPart, Discipline},
 };
 use infrastructure::{
-    FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
+    BtwbExportLandingStore, FileRunLock, GarminActivityFileLandingStore,
+    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore,
+    GarminHrvLandingStore, HevyWorkoutLandingStore, MyFitnessPalExportLandingStore,
+    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    SpreadsheetFileLandingStore, SqliteCanonicalCyclingSessionStore,
+    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore,
+    SqliteCyclingMesocycleStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
+    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, WithingsMeasurementLandingStore,
+    connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -74,8 +83,89 @@ pub async fn run(
     credentials: &infrastructure::Credentials,
     now: DayPart,
     skip: Option<&str>,
+    if_going: IfGoing,
     progress: &(impl Progress + Sync),
 ) -> Result<Report, NextFailure> {
+    match over(
+        database,
+        zone,
+        credentials,
+        Asked::Next {
+            now,
+            skip,
+            if_going,
+        },
+        progress,
+    )
+    .await?
+    {
+        Answered::Report(report) => Ok(*report),
+        Answered::Collected(_) => unreachable_answer(),
+    }
+}
+
+/// Collect and derive only `scope`, joining any run collecting part of it, and
+/// deliver nothing (#559).
+///
+/// # Errors
+///
+/// [`NextFailure`] if the store or a lock is unavailable. A source that cannot
+/// be reached is a failed step and nothing more (§ 36).
+pub async fn collect(
+    database: &Path,
+    zone: &OperatorZone,
+    credentials: &infrastructure::Credentials,
+    today: Date,
+    scope: &Scope,
+    progress: &(impl Progress + Sync),
+) -> Result<Vec<Done>, NextFailure> {
+    match over(
+        database,
+        zone,
+        credentials,
+        Asked::Collect { scope, today },
+        progress,
+    )
+    .await?
+    {
+        Answered::Collected(run) => Ok(run),
+        Answered::Report(_) => unreachable_answer(),
+    }
+}
+
+/// Which of the use case's two acts is asked for.
+enum Asked<'a> {
+    Next {
+        now: DayPart,
+        skip: Option<&'a str>,
+        if_going: IfGoing,
+    },
+    Collect {
+        scope: &'a Scope,
+        today: Date,
+    },
+}
+
+enum Answered {
+    Report(Box<Report>),
+    Collected(Vec<Done>),
+}
+
+/// An act answered as the other, which `over` never does.
+fn unreachable_answer<T>() -> Result<T, NextFailure> {
+    Err(NextFailure::Store(StoreError::Unavailable {
+        detail: "next answered a different question from the one asked".to_owned(),
+    }))
+}
+
+/// The use case over this build's adapters, asked `asked`.
+async fn over(
+    database: &Path,
+    zone: &OperatorZone,
+    credentials: &infrastructure::Credentials,
+    asked: Asked<'_>,
+    progress: &(impl Progress + Sync),
+) -> Result<Answered, NextFailure> {
     let pool = connect(database).await?;
 
     // **This build collects the gym from Hevy and cycling from Peloton**, and
@@ -124,14 +214,7 @@ pub async fn run(
             database: database.to_path_buf(),
             zone: zone.clone(),
         },
-        canonical: CanonicalPorts {
-            normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
-            canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
-            normalised_cycling: SqliteNormalisedCyclingSessionReader::new(pool.clone()),
-            canonical_cycling: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-            normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
-            canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
-        },
+        canonical: canonical(&pool),
         ledger: SqliteDerivationLedger::new(pool.clone()),
         build: build(BUILD),
         classes: class_source,
@@ -180,7 +263,126 @@ pub async fn run(
     });
 
     // **Boxed, because it holds every source's fetch at once** (#468).
-    Ok(Box::pin(next.run(now, skip, progress)).await?)
+    Ok(match asked {
+        Asked::Next {
+            now,
+            skip,
+            if_going,
+        } => Answered::Report(Box::new(
+            Box::pin(next.run(now, skip, if_going, progress)).await?,
+        )),
+        Asked::Collect { scope, today } => {
+            Answered::Collected(Box::pin(next.collect(scope, today, progress)).await?)
+        }
+    })
+}
+
+/// What a chart reads, from which the parts its page's run collects follow
+/// (#559).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reads {
+    /// A landing stream, read as it landed.
+    Landed(&'static str),
+    /// A normalised layer, and every walk it is derived from.
+    Normalised(&'static str),
+    /// A canonical layer, and every normalised layer it is built from.
+    Canonical(CanonicalLayer),
+}
+
+/// The parts a run collecting what `reads` names takes: each part read, and
+/// every part it is derived from.
+///
+/// # Errors
+///
+/// [`WiringError`] if a name read is not a stream's.
+pub fn scope(reads: impl IntoIterator<Item = Reads>) -> Result<Scope, WiringError> {
+    let stream = |name: &str| LandingStream::try_from(name).map_err(WiringError::from);
+    let normalised = |name: &str| -> Result<Vec<Part>, WiringError> {
+        let mut parts = vec![Part::Normalising(stream(name)?)];
+        for landed in landed_from(name) {
+            parts.push(Part::Fetching(stream(landed)?));
+        }
+        Ok(parts)
+    };
+    let mut parts = Vec::new();
+    for read in reads {
+        match read {
+            Reads::Landed(name) => parts.push(Part::Fetching(stream(name)?)),
+            Reads::Normalised(name) => parts.extend(normalised(name)?),
+            Reads::Canonical(layer) => {
+                parts.push(Part::Canonicalising(layer));
+                for name in built_from(layer) {
+                    parts.extend(normalised(name)?);
+                }
+            }
+        }
+    }
+    Ok(Scope::new(parts))
+}
+
+/// The walks `next` lands a normalised layer's records by. None for a stream
+/// read from a folder, which `next` derives but does not fetch.
+///
+/// **The landing tables [`wiring::inputs`] counts for the stream**, which are
+/// what its arm of [`wiring::run`] derives from.
+fn landed_from(normalised: &str) -> &'static [&'static str] {
+    match normalised {
+        HevyWorkoutLandingStore::STREAM => &[HevyWorkoutLandingStore::STREAM],
+        PelotonRideLandingStore::STREAM => &[
+            PelotonRideLandingStore::STREAM,
+            PelotonRideDetailLandingStore::STREAM,
+            PelotonRideSampleLandingStore::STREAM,
+        ],
+        WithingsMeasurementLandingStore::STREAM => &[WithingsMeasurementLandingStore::STREAM],
+        GarminHrvLandingStore::STREAM => &[GarminHrvLandingStore::STREAM],
+        GarminActivityLandingStore::STREAM => &[
+            GarminActivityLandingStore::STREAM,
+            GarminExerciseSetLandingStore::STREAM,
+            GarminActivityFileLandingStore::STREAM,
+        ],
+        GarminDailyHeartRateLandingStore::STREAM => &[GarminDailyHeartRateLandingStore::STREAM],
+        _ => &[],
+    }
+}
+
+/// The normalised layers each canonical layer is built from: the streams that
+/// write the normalised tables its reader reads.
+const fn built_from(layer: CanonicalLayer) -> &'static [&'static str] {
+    match layer {
+        CanonicalLayer::Gym => &[
+            HevyWorkoutLandingStore::STREAM,
+            GarminActivityLandingStore::STREAM,
+            SpreadsheetFileLandingStore::STREAM,
+            BtwbExportLandingStore::STREAM,
+        ],
+        CanonicalLayer::Cycling => &[PelotonRideLandingStore::STREAM],
+        CanonicalLayer::WeighIns => &[
+            WithingsMeasurementLandingStore::STREAM,
+            SpreadsheetFileLandingStore::STREAM,
+            MyFitnessPalExportLandingStore::STREAM,
+        ],
+    }
+}
+
+/// Each canonical layer, and the normalised layers it is built from.
+fn canonical(
+    pool: &infrastructure::SqlitePool,
+) -> CanonicalPorts<
+    SqliteNormalisedGymSessionReader,
+    SqliteCanonicalGymSessionStore,
+    SqliteNormalisedCyclingSessionReader,
+    SqliteCanonicalCyclingSessionStore,
+    SqliteNormalisedWeighInReader,
+    SqliteCanonicalWeighInStore,
+> {
+    CanonicalPorts {
+        normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
+        canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
+        normalised_cycling: SqliteNormalisedCyclingSessionReader::new(pool.clone()),
+        canonical_cycling: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+        normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
+        canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
+    }
 }
 
 /// The commit this build was made from, as the flake bakes it in.
@@ -355,9 +557,99 @@ fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, 
 
 #[cfg(test)]
 mod tests {
-    use application::Build;
+    use application::{Build, CanonicalLayer, Part, next::Scope};
+    use domain::landing::LandingStream;
 
-    use super::build;
+    use super::{build, landed_from};
+    use crate::{body_weight, catalogue, composition, heart_rate, one_rep_max, per_device, wiring};
+
+    fn named(scope: &Scope) -> Vec<String> {
+        scope
+            .parts()
+            .iter()
+            .map(|part| match part {
+                Part::Fetching(stream) => format!("fetching {stream}"),
+                Part::Normalising(stream) => format!("normalising {stream}"),
+                Part::Canonicalising(layer) => format!("canonicalising {}", layer.as_str()),
+                Part::Delivering => "delivering".to_owned(),
+            })
+            .collect()
+    }
+
+    /// **Each chart's page collects what its chart reads and nothing else**
+    /// (#559): the HRV chart its nights and the record of which watch was
+    /// worn, never Hevy or Withings, and never a delivery.
+    #[test]
+    fn each_chart_collects_what_it_reads() {
+        assert_eq!(
+            named(&per_device::overnight_hrv_collects().expect("a scope")),
+            [
+                "fetching garmin.activities",
+                "fetching garmin.activity_files",
+                "fetching garmin.daily_heart_rate",
+                "fetching garmin.hrv",
+                "fetching peloton.account",
+                "normalising garmin.hrv",
+            ]
+        );
+        assert_eq!(
+            named(&one_rep_max::collects().expect("a scope")),
+            [
+                "fetching garmin.activities",
+                "fetching garmin.activity_files",
+                "fetching garmin.exercise_sets",
+                "fetching hevy.workouts",
+                "normalising btwb.exports",
+                "normalising garmin.activities",
+                "normalising hevy.workouts",
+                "normalising spreadsheets.files",
+                "canonicalising gym",
+            ]
+        );
+        assert_eq!(
+            named(&body_weight::collects().expect("a scope")),
+            [
+                "fetching withings.measurements",
+                "normalising myfitnesspal.exports",
+                "normalising spreadsheets.files",
+                "normalising withings.measurements",
+                "canonicalising weigh-ins",
+            ]
+        );
+        for scope in [
+            per_device::resting_heart_rate_collects(),
+            heart_rate::collects(),
+            composition::collects(),
+        ] {
+            let scope = scope.expect("a scope");
+            assert!(!scope.has(&Part::Delivering));
+            assert!(!scope.has(&Part::Fetching(
+                LandingStream::try_from("hevy.workouts").expect("a stream")
+            )));
+        }
+        assert!(
+            heart_rate::collects()
+                .expect("a scope")
+                .has(&Part::Canonicalising(CanonicalLayer::Cycling))
+        );
+    }
+
+    /// **Every stream `next` fetches and derives says what it is landed by**,
+    /// so a chart reading it fetches it: a stream added without saying would
+    /// be derived by a page's run from whatever the last whole run landed.
+    #[test]
+    fn every_fetched_stream_says_what_it_is_landed_by() {
+        for known in catalogue::KNOWN
+            .iter()
+            .filter(|known| wiring::derives(known) && known.system().is_some())
+        {
+            assert!(
+                !landed_from(&known.name()).is_empty(),
+                "{} says nothing of what lands it",
+                known.name()
+            );
+        }
+    }
 
     /// **Only a clean commit is a build**, since `-dirty` and `unknown` each
     /// name many versions of the code.

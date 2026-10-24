@@ -8,9 +8,21 @@
 
 use application::{StoreError, devices::DeviceRegister};
 use domain::{device::Register, normalised::OperatorZone};
-use infrastructure::{GarminRecordedDevices, GarminWear, PelotonRecordedDevices};
+use infrastructure::{
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminDailyHeartRateLandingStore,
+    GarminRecordedDevices, GarminWear, PelotonAccountLandingStore, PelotonRecordedDevices,
+};
 
-use crate::store::Store;
+use crate::{next::Reads, store::Store};
+
+/// What the register reads: Garmin's recordings and days, and Peloton's
+/// account, each as it landed (#559).
+pub const READS: [Reads; 4] = [
+    Reads::Landed(GarminActivityLandingStore::STREAM),
+    Reads::Landed(GarminActivityFileLandingStore::STREAM),
+    Reads::Landed(GarminDailyHeartRateLandingStore::STREAM),
+    Reads::Landed(PelotonAccountLandingStore::STREAM),
+];
 
 /// Every device the record identifies, and the days a watch was worn.
 ///

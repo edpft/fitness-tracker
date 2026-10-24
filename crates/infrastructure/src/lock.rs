@@ -14,11 +14,12 @@
 //! crate. Planning assumed one would be required; it is not.
 
 use std::{
+    collections::BTreeSet,
     fs::{File, OpenOptions, TryLockError},
     path::{Path, PathBuf},
 };
 
-use application::{NextLock, RunLock, RunLockError};
+use application::{NextLock, Part, RunLock, RunLockError, Taken};
 use domain::landing::LandingStream;
 
 /// An advisory file lock, one file per stream.
@@ -71,18 +72,74 @@ impl RunLock for FileRunLock {
     }
 }
 
-/// **A file of its own**, `.next.lock`, which no stream can collide with: a
-/// stream's name is always `source.entity`.
-impl NextLock for FileRunLock {
-    type Guard = FileRunGuard;
-
-    fn try_acquire(&self) -> Result<Self::Guard, RunLockError> {
-        acquire(&self.directory.join(".next.lock"))
+impl FileRunLock {
+    /// **A file of its own for each part**, none of which a stream's can
+    /// collide with: a stream's name is always `source.entity`, and every one
+    /// of these starts `next`. Delivering keeps `.next.lock`, the file the
+    /// whole run held before it had parts (#559).
+    fn part_path(&self, part: &Part) -> PathBuf {
+        let name = match part {
+            Part::Delivering => return self.directory.join(".next.lock"),
+            Part::Fetching(stream) => format!("fetching.{stream}"),
+            Part::Normalising(stream) => format!("normalising.{stream}"),
+            Part::Canonicalising(layer) => format!("canonicalising.{}", layer.as_str()),
+        };
+        self.directory.join(format!(".next.{name}.lock"))
     }
 }
 
-fn acquire(path: &Path) -> Result<FileRunGuard, RunLockError> {
-    let file = OpenOptions::new()
+/// Every part a run of `next` took, held until dropped.
+#[derive(Debug)]
+pub struct NextRunGuard {
+    _parts: Vec<FileRunGuard>,
+}
+
+impl NextLock for FileRunLock {
+    type Guard = NextRunGuard;
+
+    fn try_acquire(&self, parts: &BTreeSet<Part>) -> Result<Taken<Self::Guard>, RunLockError> {
+        let mut taken = Vec::new();
+        let mut held = BTreeSet::new();
+        for part in parts {
+            match acquire(&self.part_path(part)) {
+                Ok(guard) => taken.push(guard),
+                Err(RunLockError::Held) => {
+                    held.insert(part.clone());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        // **All or none**: what was taken is let go before the caller waits.
+        if held.is_empty() {
+            Ok(Taken::All(NextRunGuard { _parts: taken }))
+        } else {
+            Ok(Taken::Held(held))
+        }
+    }
+
+    /// Each lock in turn, waited on and let go: once the last is free, every
+    /// run that held one when this was asked has ended.
+    async fn released(&self, parts: &BTreeSet<Part>) -> Result<(), RunLockError> {
+        let paths: Vec<PathBuf> = parts.iter().map(|part| self.part_path(part)).collect();
+        tokio::task::spawn_blocking(move || {
+            for path in paths {
+                let file = open(&path)?;
+                file.lock().map_err(|error| RunLockError::Unavailable {
+                    detail: format!("{}: {error}", path.display()),
+                })?;
+                let _ = file.unlock();
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|error| RunLockError::Unavailable {
+            detail: error.to_string(),
+        })?
+    }
+}
+
+fn open(path: &Path) -> Result<File, RunLockError> {
+    OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
@@ -90,7 +147,11 @@ fn acquire(path: &Path) -> Result<FileRunGuard, RunLockError> {
         .open(path)
         .map_err(|error| RunLockError::Unavailable {
             detail: format!("{}: {error}", path.display()),
-        })?;
+        })
+}
+
+fn acquire(path: &Path) -> Result<FileRunGuard, RunLockError> {
+    let file = open(path)?;
 
     // Try, never block. Waiting would turn a loud "already running" into a
     // silent queue, and an operator running extraction twice by mistake
