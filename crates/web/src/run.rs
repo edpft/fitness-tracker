@@ -4,16 +4,20 @@
 //! page that is closed, or a phone that sleeps, costs the run nothing; a page
 //! opened mid-run is shown where it has got to and then each step as it ends.
 //! Opening a page is what starts one (#466), so nobody presses anything.
+//!
+//! **A page collects only what its charts read** (#559): the front page runs
+//! the whole of `next`, and a chart page only its own streams, so runs over
+//! different streams go at the same time. A run already covering what a page
+//! asks for is joined, here if this server started it and through the store's
+//! locks if the terminal did.
 
 use std::{
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex, PoisonError},
 };
 
-use application::next::{Done, NextError, Progress, Step};
+use application::next::NextError;
+use application::next::{Done, IfGoing, Progress, Scope, Step};
 use configurator::next::NextFailure;
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use maud::{Markup, PreEscaped, html};
@@ -114,11 +118,33 @@ impl View {
     }
 }
 
-/// The run this server holds, and whether one is going.
+/// What a page asks a run to collect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asked {
+    /// The whole of `next`, as the front page does: the operator, 2026-10-23,
+    /// *"Opening the main page should trigger a collection run for all
+    /// metrics."*
+    Everything,
+    /// Only what a chart reads, delivering nothing.
+    Only(Scope),
+}
+
+impl Asked {
+    /// Whether a run asked for `self` collects everything `other` asks for.
+    fn covers(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Everything, _) => true,
+            (Self::Only(_), Self::Everything) => false,
+            (Self::Only(going), Self::Only(asked)) => going.covers(asked),
+        }
+    }
+}
+
+/// The runs this server holds.
 pub struct Runs {
     setting: Setting,
     view: watch::Sender<View>,
-    going: AtomicBool,
+    going: Mutex<Vec<Asked>>,
 }
 
 impl Runs {
@@ -126,7 +152,7 @@ impl Runs {
         Self {
             setting,
             view: watch::Sender::new(View::default()),
-            going: AtomicBool::new(false),
+            going: Mutex::new(Vec::new()),
         }
     }
 
@@ -144,36 +170,50 @@ impl Runs {
         self.view.borrow().clone()
     }
 
-    /// Start a run, unless this server has one going, in which case the page
-    /// opening joins it.
+    /// Start a run of what a page asks for, unless this server has one going
+    /// that covers it, in which case the page opening joins that.
     ///
-    /// **A run going in the terminal is refused by the run itself**, which
-    /// takes the store's lock before it reads anything, and every page is
-    /// shown why. This only saves starting a second thread to be told the same.
-    /// So is a run that could not be started at all: there is no one request
-    /// to answer, so it is said where every page will see it.
-    pub fn start(self: &Arc<Self>) {
-        if self.going.swap(true, Ordering::SeqCst) {
-            return;
+    /// **A run that covers only part of it is the run's to join**, as one
+    /// going in the terminal is: it waits on the store's locks for the parts
+    /// another run holds and collects the rest itself. So is a run that could
+    /// not be started at all: there is no one request to answer, so it is
+    /// said where every page will see it.
+    pub fn start(self: &Arc<Self>, asked: &Asked) {
+        {
+            let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
+            if going.iter().any(|run| run.covers(asked)) {
+                return;
+            }
+            // **The steps shown are this server's runs since none was going**,
+            // so a run started beside another adds to what the page shows.
+            if going.is_empty() {
+                let ended = self.view.borrow().ended;
+                self.view.send_replace(View {
+                    going: true,
+                    ended,
+                    ..View::default()
+                });
+            }
+            going.push(asked.clone());
         }
-        let ended = self.view.borrow().ended;
-        let before = self.view.send_replace(View {
-            going: true,
-            ended,
-            ..View::default()
-        });
 
         let runs = Arc::clone(self);
+        let started = asked.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("next".to_owned())
-            .spawn(move || runs.run(before))
+            .spawn(move || runs.run(&started))
         {
-            self.view.send_modify(|view| {
-                view.going = false;
-                view.refused = Some(format!("the run could not be started: {error}"));
-            });
-            self.going.store(false, Ordering::SeqCst);
+            self.end(
+                asked,
+                Some(refused(&format!("the run could not be started: {error}"))),
+            );
         }
+    }
+
+    /// Say why a page's run could not be asked for, where every page sees it.
+    pub fn refuse(&self, message: &str) {
+        self.view
+            .send_modify(|view| view.refused = Some(message.to_owned()));
     }
 
     /// The run, on a thread and a runtime of its own.
@@ -181,59 +221,83 @@ impl Runs {
     /// **Its own runtime**, so nothing about the run's futures has to suit the
     /// server's: what is shared is the channel each step is sent down.
     ///
-    /// **A run refused by the lock never happened**, so the page goes back to
-    /// the run before it and says why this one did not start, and nothing
-    /// drawn from the store is redrawn.
-    fn run(&self, before: View) {
-        let ending = match tokio::runtime::Builder::new_current_thread()
+    /// **Only a run of the whole of `next` ends on a report**: a chart's run
+    /// delivers nothing, and its page redraws from the store.
+    fn run(&self, asked: &Asked) {
+        let setting = &self.setting;
+        let started = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-        {
-            Err(error) => refused(&format!("the run could not be started: {error}")),
-            Ok(runtime) => {
-                let setting = &self.setting;
-                let credentials =
-                    match configurator::config::credentials_at(setting.credentials.as_deref()) {
-                        Ok(credentials) => credentials,
-                        Err(error) => {
-                            return self
-                                .end(refused(&format!("the run could not be started: {error}")));
-                        }
-                    };
-                let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
-                let outcome = runtime.block_on(configurator::next::run(
+            .map_err(|error| error.to_string())
+            .and_then(|runtime| {
+                configurator::config::credentials_at(setting.credentials.as_deref())
+                    .map(|credentials| (runtime, credentials))
+                    .map_err(|error| error.to_string())
+            });
+        let (runtime, credentials) = match started {
+            Ok(started) => started,
+            Err(error) => {
+                return self.end(
+                    asked,
+                    Some(refused(&format!("the run could not be started: {error}"))),
+                );
+            }
+        };
+        let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+        let following = Following(&self.view);
+        let ending = match asked {
+            Asked::Everything => Some(
+                match runtime.block_on(configurator::next::run(
                     &setting.database,
                     &setting.zone,
                     &credentials,
                     DayPart::containing(here.datetime()),
                     None,
-                    &Following(&self.view),
-                ));
-                match outcome {
+                    IfGoing::Join,
+                    &following,
+                )) {
                     Ok(answered) => report::report(&answered),
-                    Err(failure @ NextFailure::Next(NextError::AlreadyRunning)) => {
-                        self.view.send_replace(View {
-                            refused: Some(failure.to_string()),
-                            ..before
-                        });
-                        self.going.store(false, Ordering::SeqCst);
-                        return;
+                    Err(failure @ NextFailure::Next(NextError::Joined)) => {
+                        html! { p { (failure) } }
                     }
                     Err(failure) => refused(&unanswered(&failure)),
+                },
+            ),
+            Asked::Only(scope) => match runtime.block_on(configurator::next::collect(
+                &setting.database,
+                &setting.zone,
+                &credentials,
+                here.date(),
+                scope,
+                &following,
+            )) {
+                Ok(_) => None,
+                Err(failure) => {
+                    self.refuse(&failure.to_string());
+                    None
                 }
-            }
+            },
         };
-        self.end(ending);
+        self.end(asked, ending);
     }
 
-    /// The run is over: every page is shown how it ended.
-    fn end(&self, ending: Markup) {
+    /// A run is over: every page is shown how it ended, where it ended on
+    /// something to show.
+    fn end(&self, asked: &Asked, ending: Option<Markup>) {
+        let still = {
+            let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(at) = going.iter().position(|run| run == asked) {
+                going.remove(at);
+            }
+            !going.is_empty()
+        };
         self.view.send_modify(|view| {
-            view.ending = Some(ending);
-            view.going = false;
+            if let Some(ending) = ending {
+                view.ending = Some(ending);
+            }
+            view.going = still;
             view.ended += 1;
         });
-        self.going.store(false, Ordering::SeqCst);
     }
 }
 
@@ -313,13 +377,22 @@ impl Progress for Following<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, atomic::Ordering};
+    use std::sync::Arc;
 
-    use application::next::{Done, Found, NoAccess, Progress as _, Step, StepFailure};
+    use application::{
+        Part,
+        next::{Done, Found, NoAccess, Progress as _, Scope, Step, StepFailure},
+    };
     use domain::{landing::LandingStream, normalised::OperatorZone};
     use tokio::sync::watch;
 
-    use super::{Following, Runs, Setting, View, step_event};
+    use super::{Asked, Following, Runs, Setting, View, step_event};
+
+    fn only(streams: &[&str]) -> Asked {
+        Asked::Only(Scope::new(streams.iter().map(|stream| {
+            Part::Normalising(LandingStream::try_from(*stream).expect("a stream"))
+        })))
+    }
 
     fn shown(view: &watch::Sender<View>) -> String {
         view.borrow().render().into_string()
@@ -382,8 +455,9 @@ mod tests {
         assert!(shown.contains("failed: no hevy credential"), "{shown}");
     }
 
-    /// **A page opened while a run is going joins it**: nothing starts, and
-    /// the page is shown where the run has got to.
+    /// **A page opened while a run covering it is going joins it**: nothing
+    /// starts, and the page is shown where the run has got to. A chart's page
+    /// joins the front page's run.
     #[test]
     fn a_page_opened_mid_run_joins_it() {
         let runs = Arc::new(Runs::new(Setting {
@@ -391,18 +465,35 @@ mod tests {
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
             credentials: None,
         }));
-        runs.going.store(true, Ordering::SeqCst);
+        runs.going
+            .lock()
+            .expect("not poisoned")
+            .push(Asked::Everything);
         runs.view.send_modify(|view| view.going = true);
         Following(&runs.view).started(&Step::RefreshingClasses);
 
-        runs.start();
+        runs.start(&Asked::Everything);
+        runs.start(&only(&["garmin.hrv"]));
 
         let view = runs.view();
         assert_eq!(view.steps.len(), 1);
+        assert_eq!(runs.going.lock().expect("not poisoned").len(), 1);
         assert!(view.refused.is_none());
         let step = view.step().into_string();
         assert!(step.contains("Refreshing Peloton's classes"), "{step}");
         assert!(step.contains("…"), "{step}");
+    }
+
+    /// **A run covers what it collects and nothing more**: the whole of
+    /// `next` covers every chart, a chart's run covers a chart reading less,
+    /// and none covers the whole of `next` or a chart reading something else.
+    #[test]
+    fn a_run_covers_only_what_it_collects() {
+        let hrv = only(&["garmin.hrv", "garmin.activities"]);
+        assert!(Asked::Everything.covers(&hrv));
+        assert!(hrv.covers(&only(&["garmin.hrv"])));
+        assert!(!hrv.covers(&Asked::Everything));
+        assert!(!hrv.covers(&only(&["withings.measurements"])));
     }
 
     /// A page drawn from the store says which step the run is on, and

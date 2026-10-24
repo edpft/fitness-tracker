@@ -34,7 +34,7 @@ use clap::{Arg, ArgMatches, Command, value_parser};
 use maud::Markup;
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
 
-use run::{Runs, Setting};
+use run::{Asked, Runs, Setting};
 
 fn main() -> std::process::ExitCode {
     // `clippy::exit` is `forbid`, so returning `ExitCode` is not a style
@@ -147,20 +147,34 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
 }
 
 async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    page::index(&opened(&runs, &headers))
+    page::index(&opened(&runs, &headers, Ok(Asked::Everything)))
 }
 
-/// Start a run as a page is opened, or join the one going, and say where it
-/// has got to.
+/// Start a run of what a page asks for as it is opened, or join one going
+/// that covers it, and say where it has got to.
 ///
 /// **Not when htmx asks**, which is a page redrawing itself because a run
 /// ended: starting another would redraw it again when that one ended, for
 /// ever.
-fn opened(runs: &Arc<Runs>, headers: &HeaderMap) -> run::View {
+fn opened(
+    runs: &Arc<Runs>,
+    headers: &HeaderMap,
+    asked: Result<Asked, configurator::wiring::WiringError>,
+) -> run::View {
     if !headers.contains_key("hx-request") {
-        runs.start();
+        match asked {
+            Ok(asked) => runs.start(&asked),
+            Err(error) => runs.refuse(&format!("the run could not be asked for: {error}")),
+        }
     }
     runs.view()
+}
+
+/// What a chart's page asks a run to collect: what it reads.
+fn only(
+    collects: Result<application::next::Scope, configurator::wiring::WiringError>,
+) -> Result<Asked, configurator::wiring::WiringError> {
+    collects.map(Asked::Only)
 }
 
 /// The range `?over=` names.
@@ -175,7 +189,7 @@ async fn heart_rate(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(&runs, &headers, only(configurator::heart_rate::collects()));
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
@@ -196,7 +210,7 @@ async fn body_weight(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(&runs, &headers, only(configurator::body_weight::collects()));
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
@@ -218,7 +232,7 @@ async fn body_composition(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(&runs, &headers, only(configurator::composition::collects()));
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
         Ok(store) => store,
@@ -243,7 +257,11 @@ async fn overnight_hrv(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(
+        &runs,
+        &headers,
+        only(configurator::per_device::overnight_hrv_collects()),
+    );
     let shown = daily::OVERNIGHT_HRV;
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
@@ -266,7 +284,11 @@ async fn resting_heart_rate(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(
+        &runs,
+        &headers,
+        only(configurator::per_device::resting_heart_rate_collects()),
+    );
     let shown = daily::RESTING_HEART_RATE;
     let setting = runs.setting();
     let store = match configurator::store::Store::open(&setting.database).await {
@@ -284,7 +306,7 @@ async fn resting_heart_rate(
 
 /// Estimated 1RM in each planned macrocycle, read afresh from the store.
 async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let run = opened(&runs, &headers);
+    let run = opened(&runs, &headers, only(configurator::one_rep_max::collects()));
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return one_rep_max::unreadable(&error.to_string()),

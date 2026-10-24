@@ -28,6 +28,7 @@ use maud::{Markup, html};
 /// A step of the run, named.
 pub fn step(step: &Step) -> String {
     match step {
+        Step::Joining(parts) => joining(parts),
         Step::Fetching(stream) => format!("Fetching {stream}"),
         Step::Normalising(stream) => format!("Normalising {stream}"),
         Step::Canonicalising(discipline) => {
@@ -42,16 +43,38 @@ pub fn step(step: &Step) -> String {
     }
 }
 
+/// The runs a run joined, by what they collect: the whole of `next`, or the
+/// streams and canonical layers (#559).
+fn joining(parts: &std::collections::BTreeSet<application::Part>) -> String {
+    use application::Part;
+    if parts.contains(&Part::Delivering) {
+        return "Joining the run of next going".to_owned();
+    }
+    let mut named = std::collections::BTreeSet::new();
+    for part in parts {
+        named.insert(match part {
+            Part::Fetching(stream) | Part::Normalising(stream) => stream.to_string(),
+            Part::Canonicalising(layer) => format!("canonical {}", layer.as_str()),
+            Part::Delivering => continue,
+        });
+    }
+    format!(
+        "Joining the run collecting {}",
+        named.into_iter().collect::<Vec<_>>().join(", ")
+    )
+}
+
 /// How a step ended: done with a count of what it found, or failed and why.
 pub fn outcome(done: &Done) -> String {
     let found = match &done.outcome {
         Err(failure) => return format!("failed: {failure}"),
         Ok(Found::NotDue) => return "not due until tomorrow".to_owned(),
         Ok(Found::Unchanged) => return "unchanged".to_owned(),
+        Ok(Found::Joined) => return "done".to_owned(),
         Ok(found) => found,
     };
     let what = match found {
-        Found::NotDue | Found::Unchanged => String::new(),
+        Found::NotDue | Found::Unchanged | Found::Joined => String::new(),
         Found::Landed(records) if records.as_usize() == 0 => "nothing new".to_owned(),
         Found::Landed(records) => format!("{records} new"),
         Found::Written(written) => format!("{written} written"),

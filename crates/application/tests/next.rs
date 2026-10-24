@@ -6,7 +6,7 @@
 //! source it cannot reach costs that step and nothing else (§ 36).
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     future::poll_fn,
     sync::{
         Arc, Mutex,
@@ -18,17 +18,17 @@ use std::{
 use application::{
     Build, CanonicalLayer, ClassSource, ClassesListed, ClassesRead, DerivationLedger, DerivedFrom,
     DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar, NewestObservation, NextLock,
-    NormalisationError, NormalisationSummary, NormalisedLayers, PlanStore, PrescriptionError,
-    RunLockError, RunSummary, SourceError, StoreError,
+    NormalisationError, NormalisationSummary, NormalisedLayers, Part, PlanStore, PrescriptionError,
+    RunLockError, RunSummary, SourceError, StoreError, Taken,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
         Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Found,
-        GymPrescribed, GymSessions, MesocycleCommitter, Next, NextError, NextPorts, NoAccess,
-        Prescribed, Progress, Records, Report, SkipRefused, StandingReader, Step, StepFailure,
-        Walks, WhatIsNext,
+        GymPrescribed, GymSessions, IfGoing, MesocycleCommitter, Next, NextError, NextPorts,
+        NoAccess, Prescribed, Progress, Records, Report, Scope, SkipRefused, StandingReader, Step,
+        StepFailure, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -628,20 +628,45 @@ type Ports<H = Unreachable> = NextPorts<
     Lock,
 >;
 
-/// Whether another run of `next` holds the lock.
+/// The parts other runs of `next` hold, each let go once waited on.
+#[derive(Default)]
 pub struct Lock {
-    held: bool,
+    held: Mutex<BTreeSet<Part>>,
+}
+
+impl Lock {
+    fn holding(parts: impl IntoIterator<Item = Part>) -> Self {
+        Self {
+            held: Mutex::new(parts.into_iter().collect()),
+        }
+    }
 }
 
 impl NextLock for Lock {
     type Guard = ();
 
-    fn try_acquire(&self) -> Result<(), RunLockError> {
-        if self.held {
-            Err(RunLockError::Held)
+    fn try_acquire(&self, parts: &BTreeSet<Part>) -> Result<Taken<()>, RunLockError> {
+        let contended: BTreeSet<Part> = self
+            .held
+            .lock()
+            .map_err(|_| RunLockError::Unavailable {
+                detail: "poisoned".to_owned(),
+            })?
+            .intersection(parts)
+            .cloned()
+            .collect();
+        Ok(if contended.is_empty() {
+            Taken::All(())
         } else {
-            Ok(())
+            Taken::Held(contended)
+        })
+    }
+
+    async fn released(&self, parts: &BTreeSet<Part>) -> Result<(), RunLockError> {
+        if let Ok(mut held) = self.held.lock() {
+            held.retain(|part| !parts.contains(part));
         }
+        Ok(())
     }
 }
 
@@ -717,7 +742,7 @@ fn over<H>(
         committing: committer,
         gym: Unplanned,
         cycling: Dayless,
-        lock: Lock { held: false },
+        lock: Lock::default(),
     })
 }
 
@@ -744,7 +769,7 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
     .expect("the ports build");
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     let steps: Vec<(&Step, bool)> = report
@@ -813,7 +838,7 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
     ));
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     let fetched: Vec<(String, Option<Found>)> = report
@@ -873,7 +898,7 @@ fn with_no_garmin_credential_the_watch_is_not_collected_and_the_run_carries_on()
     ports.watch_days.walks = Err(no_garmin.clone());
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     let garmin = stream("garmin.activities").expect("a stream");
@@ -923,7 +948,7 @@ fn every_step_is_reported_as_it_ends_in_the_order_the_report_keeps() {
     let heard = Heard::default();
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &heard))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &heard))
         .expect("the run answers");
 
     let expected: Vec<String> = report
@@ -956,7 +981,7 @@ fn a_mesocycle_that_cannot_be_committed_is_a_failed_step() {
     .expect("the ports build");
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     assert!(report.run.iter().any(|done| done.step == Step::Committing
@@ -981,7 +1006,7 @@ fn a_skip_takes_the_rest_of_the_current_window() {
     let next = Next::new(ports);
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(next.run(now(), Some("ill"), &Heard::default()))
+        .block_on(next.run(now(), Some("ill"), IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     let skipped = report.run.iter().find_map(|done| match &done.outcome {
@@ -1008,7 +1033,7 @@ fn a_skip_with_nothing_to_skip_is_refused() {
     .expect("the ports build");
     let refused = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), Some("ill"), &Heard::default()));
+        .block_on(Next::new(ports).run(now(), Some("ill"), IfGoing::Refuse, &Heard::default()));
 
     assert_eq!(
         refused.err(),
@@ -1025,7 +1050,7 @@ fn no_recorded_week_is_refused_before_anything_runs() {
     let heard = Heard::default();
     let refused = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &heard));
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &heard));
 
     assert_eq!(refused.err(), Some(NextError::NoWeek));
     assert!(heard.events().is_empty());
@@ -1043,7 +1068,7 @@ fn a_settled_microcycle_prescribes_nothing() {
     .expect("the ports build");
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     assert!(matches!(report.next, WhatIsNext::MicrocycleComplete { .. }));
@@ -1059,14 +1084,107 @@ fn a_run_while_another_is_going_is_refused_before_anything_runs() {
         Committer(None),
     )
     .expect("the ports build");
-    ports.lock = Lock { held: true };
+    ports.lock = Lock::holding([Part::Delivering]);
     let heard = Heard::default();
     let refused = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &heard));
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &heard));
 
     assert_eq!(refused.err(), Some(NextError::AlreadyRunning));
     assert!(heard.events().is_empty());
+}
+
+/// **A page's run of the whole of `next` joins one going** (#559): it waits
+/// for it, uses what it collected, and delivers nothing itself.
+#[test]
+fn a_whole_run_asked_to_join_waits_and_delivers_nothing() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![SessionState::ToBePrescribed]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    ports.lock = Lock::holding([Part::Delivering]);
+    let heard = Heard::default();
+    let joined = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Join, &heard));
+
+    assert_eq!(joined.err(), Some(NextError::Joined));
+    assert_eq!(
+        heard.events(),
+        vec![
+            "started Joining({Delivering})".to_owned(),
+            "finished Joining({Delivering})".to_owned(),
+        ]
+    );
+}
+
+/// **A chart's run collects only what it reads** (#559): its walks and its
+/// layers, and no class refresh, commit or delivery.
+#[test]
+fn a_collection_fetches_and_derives_only_its_scope() {
+    let ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![SessionState::ToBePrescribed]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let hevy = stream("hevy.workouts").expect("a stream");
+    let scope = Scope::new([
+        Part::Fetching(hevy.clone()),
+        Part::Normalising(hevy),
+        Part::Canonicalising(CanonicalLayer::Gym),
+    ]);
+    let run = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).collect(&scope, now().date, &Heard::default()))
+        .expect("the run collects");
+
+    let steps: Vec<String> = run.iter().map(|done| format!("{:?}", done.step)).collect();
+    assert_eq!(
+        steps,
+        vec![
+            "Fetching(LandingStream { source: SourceName(\"hevy\"), entity: EntityKind(\"workouts\") })",
+            "Normalising(LandingStream { source: SourceName(\"hevy\"), entity: EntityKind(\"workouts\") })",
+            "Canonicalising(Gym)",
+        ]
+    );
+}
+
+/// **A part another run holds is joined, not collected again**, and the rest
+/// is collected: the watch's page joins the gym's, and fetches its own
+/// stream once the gym's run has ended.
+#[test]
+fn a_part_another_run_holds_is_joined_and_the_rest_collected() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![SessionState::ToBePrescribed]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let hevy = stream("hevy.workouts").expect("a stream");
+    let watch = stream("garmin.activities").expect("a stream");
+    ports.lock = Lock::holding([Part::Normalising(hevy.clone())]);
+    let scope = Scope::new([
+        Part::Fetching(watch.clone()),
+        Part::Normalising(watch.clone()),
+        Part::Normalising(hevy.clone()),
+    ]);
+    let run = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).collect(&scope, now().date, &Heard::default()))
+        .expect("the run collects");
+
+    let steps: Vec<&Step> = run.iter().map(|done| &done.step).collect();
+    assert_eq!(
+        steps,
+        vec![
+            &Step::Joining(BTreeSet::from([Part::Normalising(hevy)])),
+            &Step::Fetching(watch.clone()),
+            &Step::Normalising(watch),
+        ]
+    );
 }
 
 // --- Deriving only what something new reached (#468) ------------------------
@@ -1084,7 +1202,12 @@ fn run_over(graph: &Arc<Graph>, build: Option<&str>) -> Result<Report, Box<dyn s
         Unreachable,
     )?;
     ports.build = build.map(|build| Build::from(build.to_owned()));
-    Ok(runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?)
+    Ok(runtime()?.block_on(Next::new(ports).run(
+        now(),
+        None,
+        IfGoing::Refuse,
+        &Heard::default(),
+    ))?)
 }
 
 /// Each derivation step, named, and whether it said its layer was unchanged.
@@ -1235,7 +1358,12 @@ fn withings_on(newest: Option<Date>) -> Result<Fetched, Box<dyn std::error::Erro
     if let Ok(daily) = &mut ports.weigh_in_records.walks {
         daily.newest = Newest(newest);
     }
-    let report = runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?;
+    let report = runtime()?.block_on(Next::new(ports).run(
+        now(),
+        None,
+        IfGoing::Refuse,
+        &Heard::default(),
+    ))?;
     let withings = stream("withings.measurements")?;
     Ok(report
         .run
@@ -1293,7 +1421,7 @@ fn the_streams_are_fetched_at_once() {
     }
     let report = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).run(now(), None, &Heard::default()))
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
         .expect("the run answers");
 
     let fetched: Vec<bool> = report
@@ -1318,7 +1446,12 @@ fn watch_on(whole: Option<Date>) -> Result<Fetched, Box<dyn std::error::Error>> 
     if let Ok(daily) = &mut ports.watch_days.walks {
         daily.newest = Newest(whole);
     }
-    let report = runtime()?.block_on(Next::new(ports).run(now(), None, &Heard::default()))?;
+    let report = runtime()?.block_on(Next::new(ports).run(
+        now(),
+        None,
+        IfGoing::Refuse,
+        &Heard::default(),
+    ))?;
     let watch = [
         stream("garmin.activities")?,
         stream("garmin.daily_heart_rate")?,

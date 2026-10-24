@@ -32,6 +32,7 @@
 //! (#390).
 
 use std::{
+    collections::BTreeSet,
     future::{Future, poll_fn},
     pin::pin,
     task::Poll,
@@ -55,10 +56,10 @@ use crate::{
     CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory,
     ExtractionError, GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock,
     NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
-    NormalisedWeighInReader, PlanStore, PrescribedWorkoutStore, Prescription,
+    NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, RideDestination, RidesPlaced, RunLockError,
-    RunSummary, SourceError, StoreError, WorkoutExtractor, WorkoutPrescriber as _,
+    RunSummary, SourceError, StoreError, Taken, WorkoutExtractor, WorkoutPrescriber as _,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
@@ -222,9 +223,78 @@ pub struct Records<W> {
     pub walks: Result<W, NoAccess>,
 }
 
+/// What a run collects and derives (#559).
+///
+/// **A page collects only what its charts read**, and a run of the whole of
+/// `next` collects every part there is. The operator, 2026-10-23: *"Opening a
+/// visualisation page should trigger a collection run for the metrics needed
+/// for its visualisations."*
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Scope {
+    parts: BTreeSet<Part>,
+}
+
+impl Scope {
+    pub fn new(parts: impl IntoIterator<Item = Part>) -> Self {
+        Self {
+            parts: parts.into_iter().collect(),
+        }
+    }
+
+    pub const fn parts(&self) -> &BTreeSet<Part> {
+        &self.parts
+    }
+
+    pub fn has(&self, part: &Part) -> bool {
+        self.parts.contains(part)
+    }
+
+    /// Whether a run over `self` collects everything a run over `other` would.
+    pub fn covers(&self, other: &Self) -> bool {
+        other.parts.is_subset(&self.parts)
+    }
+
+    fn without(&self, joined: &BTreeSet<Part>) -> Self {
+        Self {
+            parts: self.parts.difference(joined).cloned().collect(),
+        }
+    }
+
+    /// Whether an entry with no access is reported: where it is fetched, or
+    /// where something else from its source is and no other entry of that
+    /// source says so.
+    ///
+    /// **Once per source a page reads**, so a page reading Garmin's
+    /// activities is not told the watch's days could not be fetched too.
+    fn reports(&self, entry: &LandingStream, entries: &[&LandingStream]) -> bool {
+        let fetched = |stream: &LandingStream| self.has(&Part::Fetching(stream.clone()));
+        let from_source = self.parts.iter().any(
+            |part| matches!(part, Part::Fetching(stream) if stream.source() == entry.source()),
+        );
+        let said_elsewhere = entries
+            .iter()
+            .any(|other| *other != entry && other.source() == entry.source() && fetched(other));
+        fetched(entry) || (from_source && !said_elsewhere)
+    }
+}
+
+/// What a run of the whole of `next` does when another is going.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfGoing {
+    /// Say so at once, as the terminal does.
+    Refuse,
+    /// Wait for it, as a page does: the operator, 2026-10-23, *"unless there
+    /// is already one in progress, in which case, it should join and use
+    /// that."*
+    Join,
+}
+
 /// A step of the run, as it is reported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
+    /// Waiting for the runs collecting these parts to end, and using what they
+    /// collected (#559).
+    Joining(BTreeSet<Part>),
     Fetching(LandingStream),
     Normalising(LandingStream),
     /// Rebuilding a discipline's canonical layer from the normalised one.
@@ -243,6 +313,8 @@ pub enum Step {
 /// What a step found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Found {
+    /// The runs joined have ended.
+    Joined,
     /// Records landed by a walk.
     Landed(RecordCount),
     /// A stream that holds today's observation, so is not fetched until
@@ -326,6 +398,10 @@ pub enum NextError {
     /// Another run of `next` is going, from this frontend or the other.
     #[error("a run of next is already going")]
     AlreadyRunning,
+    /// Another run of `next` delivered while this one waited for it, so this
+    /// one used what it collected and delivered nothing.
+    #[error("joined the run of next that was going, which has ended")]
+    Joined,
     /// No week has been recorded, so nothing says what is next.
     #[error("no week has been recorded, so nothing says what is next")]
     NoWeek,
@@ -821,60 +897,26 @@ where
         &self,
         now: DayPart,
         skip: Option<&str>,
+        if_going: IfGoing,
         progress: &(impl Progress + Sync),
     ) -> Result<Report, NextError> {
+        let mut run = Vec::new();
         // **Held for the whole run**, and taken before anything is read: a
         // second run that got as far as delivering would put a session at the
         // destination the first is about to replace.
-        let _guard = self.ports.lock.try_acquire().map_err(|error| match error {
-            RunLockError::Held => NextError::AlreadyRunning,
-            RunLockError::Unavailable { detail } => {
-                NextError::Store(StoreError::Unavailable { detail })
-            }
-        })?;
+        let everything = self.everything();
+        let (_guard, joined) = self.take(&everything, if_going, progress, &mut run).await?;
+        if joined.contains(&Part::Delivering) {
+            return Err(NextError::Joined);
+        }
         if self.ports.diary.diary().await?.patterns().is_empty() {
             return Err(NextError::NoWeek);
         }
-        let mut run = Vec::new();
 
-        // 1. Every source at once, before anything is judged. The operator,
-        // 2026-10-18: *"We should pull the new data in parallel if we can."*
-        // Peloton's catalogue is refreshed after its rides, on the same login.
-        let (gym, cycling, weigh_ins, watch) = all(
-            self.fetch(&self.ports.gym_records, now.date, progress),
-            async {
-                let mut done = self
-                    .fetch(&self.ports.cycling_records, now.date, progress)
-                    .await?;
-                let (step, outcome) = self.refresh(progress).await;
-                finish(progress, &mut done, step, outcome);
-                Ok::<_, NextError>(done)
-            },
-            self.fetch(&self.ports.weigh_in_records, now.date, progress),
-            // **The watch's days after its activities**, on the one sign-in:
-            // Garmin is asked one request at a time.
-            async {
-                let mut done = self
-                    .fetch(&self.ports.watch_records, now.date, progress)
-                    .await?;
-                done.extend(
-                    self.fetch(&self.ports.watch_days, now.date, progress)
-                        .await?,
-                );
-                Ok::<_, NextError>(done)
-            },
-        )
-        .await;
-        run.extend(gym?);
-        run.extend(cycling?);
-        run.extend(weigh_ins?);
-        run.extend(watch?);
-
-        // **Every layer is current before the standing is read**, and for the
-        // gym that is the whole of #361: deriving a stream deletes its rows,
-        // and a standing read inside that window once told the operator he had
-        // lost every week.
-        self.derive(progress, &mut run).await?;
+        // 1. Every source at once, before anything is judged, and every layer
+        // brought current.
+        self.gather(&everything.without(&joined), now.date, progress, &mut run)
+            .await?;
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
         let holidays = self.ports.holidays.holidays().await;
@@ -909,19 +951,183 @@ where
         Ok(Report { run, plan, next })
     }
 
-    /// Fetch one catalogue entry, if it is due today.
+    /// Collect and derive only `scope`, joining any run collecting part of
+    /// it, and deliver nothing (#559).
+    ///
+    /// The operator, 2026-10-23: *"A visualisation page is a visualisation
+    /// page."*
+    ///
+    /// # Errors
+    ///
+    /// [`NextError`] if the store or a lock fails.
+    pub async fn collect(
+        &self,
+        scope: &Scope,
+        today: Date,
+        progress: &(impl Progress + Sync),
+    ) -> Result<Vec<Done>, NextError> {
+        let mut run = Vec::new();
+        let (_guard, joined) = self.take(scope, IfGoing::Join, progress, &mut run).await?;
+        self.gather(&scope.without(&joined), today, progress, &mut run)
+            .await?;
+        Ok(run)
+    }
+
+    /// Every part this build collects: each walk, each normalised and
+    /// canonical layer, and delivering.
+    ///
+    /// **Each catalogue entry as well as its walks**, so an entry with no
+    /// access, whose walks are unknown, is still reported.
+    pub fn everything(&self) -> Scope {
+        fn walks_of<W: Walks>(records: &Records<W>, parts: &mut BTreeSet<Part>) {
+            parts.insert(Part::Fetching(records.entry.clone()));
+            if let Ok(walks) = &records.walks {
+                parts.extend(
+                    (0..walks.count())
+                        .filter_map(|at| walks.stream(at))
+                        .map(|stream| Part::Fetching(stream.clone())),
+                );
+            }
+        }
+        let mut parts = BTreeSet::from([Part::Delivering]);
+        walks_of(&self.ports.gym_records, &mut parts);
+        walks_of(&self.ports.cycling_records, &mut parts);
+        walks_of(&self.ports.weigh_in_records, &mut parts);
+        walks_of(&self.ports.watch_records, &mut parts);
+        walks_of(&self.ports.watch_days, &mut parts);
+        parts.extend(
+            self.ports
+                .normalised
+                .streams()
+                .into_iter()
+                .map(Part::Normalising),
+        );
+        parts.extend(CANONICAL.map(Part::Canonicalising));
+        Scope { parts }
+    }
+
+    /// The name of each catalogue entry `next` fetches.
+    const fn entries(&self) -> [&LandingStream; 5] {
+        [
+            &self.ports.gym_records.entry,
+            &self.ports.cycling_records.entry,
+            &self.ports.weigh_in_records.entry,
+            &self.ports.watch_records.entry,
+            &self.ports.watch_days.entry,
+        ]
+    }
+
+    /// Take every part of `scope`, joining the runs that hold any of it.
+    ///
+    /// **All or none, then wait holding nothing**, so two runs waiting on each
+    /// other cannot deadlock. Once the runs joined have ended the whole scope
+    /// is taken again, the parts joined included: a canonical layer is not
+    /// derived while another run re-derives a layer it reads.
+    ///
+    /// Returns the guard and the parts joined, which another run collected.
+    async fn take(
+        &self,
+        scope: &Scope,
+        if_going: IfGoing,
+        progress: &(impl Progress + Sync),
+        run: &mut Vec<Done>,
+    ) -> Result<(L::Guard, BTreeSet<Part>), NextError> {
+        let unavailable = |error| match error {
+            RunLockError::Held => NextError::AlreadyRunning,
+            RunLockError::Unavailable { detail } => {
+                NextError::Store(StoreError::Unavailable { detail })
+            }
+        };
+        let mut joined = BTreeSet::new();
+        loop {
+            match self
+                .ports
+                .lock
+                .try_acquire(scope.parts())
+                .map_err(unavailable)?
+            {
+                Taken::All(guard) => return Ok((guard, joined)),
+                Taken::Held(held) => {
+                    if if_going == IfGoing::Refuse && held.contains(&Part::Delivering) {
+                        return Err(NextError::AlreadyRunning);
+                    }
+                    let step = Step::Joining(held.clone());
+                    progress.started(&step);
+                    self.ports.lock.released(&held).await.map_err(unavailable)?;
+                    finish(progress, run, step, Ok(Found::Joined));
+                    joined.extend(held);
+                }
+            }
+        }
+    }
+
+    /// Fetch every walk in `scope`, all sources at once, then bring the layers
+    /// in it current.
+    async fn gather(
+        &self,
+        scope: &Scope,
+        today: Date,
+        progress: &(impl Progress + Sync),
+        run: &mut Vec<Done>,
+    ) -> Result<(), NextError> {
+        // The operator, 2026-10-18: *"We should pull the new data in parallel
+        // if we can."* Peloton's catalogue is refreshed after its rides, on
+        // the same login, and only by a run that delivers.
+        let (gym, cycling, weigh_ins, watch) = all(
+            self.fetch(&self.ports.gym_records, scope, today, progress),
+            async {
+                let mut done = self
+                    .fetch(&self.ports.cycling_records, scope, today, progress)
+                    .await?;
+                if scope.has(&Part::Delivering) {
+                    let (step, outcome) = self.refresh(progress).await;
+                    finish(progress, &mut done, step, outcome);
+                }
+                Ok::<_, NextError>(done)
+            },
+            self.fetch(&self.ports.weigh_in_records, scope, today, progress),
+            // **The watch's days after its activities**, on the one sign-in:
+            // Garmin is asked one request at a time.
+            async {
+                let mut done = self
+                    .fetch(&self.ports.watch_records, scope, today, progress)
+                    .await?;
+                done.extend(
+                    self.fetch(&self.ports.watch_days, scope, today, progress)
+                        .await?,
+                );
+                Ok::<_, NextError>(done)
+            },
+        )
+        .await;
+        run.extend(gym?);
+        run.extend(cycling?);
+        run.extend(weigh_ins?);
+        run.extend(watch?);
+
+        // **Every layer is current before the standing is read**, and for the
+        // gym that is the whole of #361: deriving a stream deletes its rows,
+        // and a standing read inside that window once told the operator he had
+        // lost every week.
+        self.derive(scope, progress, run).await
+    }
+
+    /// Fetch the walks of one catalogue entry that are in `scope`, if it is
+    /// due today.
     ///
     /// **Each walk is reported as it ends**, so a long one says it is done
     /// while the others are still going.
     async fn fetch<W: Walks + Sync>(
         &self,
         records: &Records<W>,
+        scope: &Scope,
         today: Date,
         progress: &(impl Progress + Sync),
     ) -> Result<Vec<Done>, NextError> {
         let mut run = Vec::new();
         let step = Step::Fetching(records.entry.clone());
         let walks = match &records.walks {
+            Err(_) if !scope.reports(&records.entry, &self.entries()) => return Ok(run),
             Err(why) => {
                 progress.started(&step);
                 finish(
@@ -934,12 +1140,22 @@ where
             }
             Ok(walks) => walks,
         };
+        let wanted: Vec<usize> = (0..walks.count())
+            .filter(|&at| {
+                walks
+                    .stream(at)
+                    .is_some_and(|stream| scope.has(&Part::Fetching(stream.clone())))
+            })
+            .collect();
+        if wanted.is_empty() {
+            return Ok(run);
+        }
         if !walks.due(today).await? {
             progress.started(&step);
             finish(progress, &mut run, step, Ok(Found::NotDue));
             return Ok(run);
         }
-        for at in 0..walks.count() {
+        for at in wanted {
             let Some(stream) = walks.stream(at) else {
                 continue;
             };
@@ -966,6 +1182,7 @@ where
     /// over as current.
     async fn derive(
         &self,
+        scope: &Scope,
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
@@ -975,8 +1192,20 @@ where
             Some(build) => ledger.build().await?.as_ref() != Some(build),
         };
         let mut failed = false;
+        let streams = self.ports.normalised.streams();
+        // **A build is recorded only by a run that derived every layer under
+        // it**, which a run over part of the graph did not.
+        let whole = streams
+            .iter()
+            .all(|stream| scope.has(&Part::Normalising(stream.clone())))
+            && CANONICAL
+                .iter()
+                .all(|layer| scope.has(&Part::Canonicalising(*layer)));
 
-        for stream in self.ports.normalised.streams() {
+        for stream in streams {
+            if !scope.has(&Part::Normalising(stream.clone())) {
+                continue;
+            }
             let step = Step::Normalising(stream.clone());
             progress.started(&step);
             let inputs = self.ports.normalised.inputs(&stream).await?;
@@ -997,11 +1226,10 @@ where
             finish(progress, run, step, outcome);
         }
 
-        for layer in [
-            CanonicalLayer::Gym,
-            CanonicalLayer::Cycling,
-            CanonicalLayer::WeighIns,
-        ] {
+        for layer in CANONICAL {
+            if !scope.has(&Part::Canonicalising(layer)) {
+                continue;
+            }
             let step = match layer {
                 CanonicalLayer::Gym => Step::Canonicalising(Discipline::Gym),
                 CanonicalLayer::Cycling => Step::Canonicalising(Discipline::Cycling),
@@ -1035,6 +1263,7 @@ where
 
         if let Some(build) = &self.ports.build
             && every
+            && whole
             && !failed
         {
             ledger.record_build(build).await?;
@@ -1240,6 +1469,13 @@ where
 }
 
 /// Report a step's end, and keep it for the report.
+/// Every canonical layer, in the order they are derived.
+const CANONICAL: [CanonicalLayer; 3] = [
+    CanonicalLayer::Gym,
+    CanonicalLayer::Cycling,
+    CanonicalLayer::WeighIns,
+];
+
 fn finish(
     progress: &impl Progress,
     run: &mut Vec<Done>,
