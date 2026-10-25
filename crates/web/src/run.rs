@@ -433,7 +433,10 @@ mod tests {
             took: std::time::Duration::from_secs(42),
         });
         let finished = shown(&view);
-        assert!(finished.contains("done, 3 new classes (42.0 s)"), "{finished}");
+        assert!(
+            finished.contains("done, 3 new classes (42.0 s)"),
+            "{finished}"
+        );
         assert!(!finished.contains("…"), "{finished}");
         assert_eq!(finished.matches("<li>").count(), 1, "{finished}");
     }
