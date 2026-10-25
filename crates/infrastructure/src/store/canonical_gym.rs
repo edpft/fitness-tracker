@@ -525,6 +525,12 @@ async fn write_session(
     Ok(id)
 }
 
+/// The watch's beats, as the canonical session holds them.
+///
+/// **One statement per session, the series handed over as a JSON array**, as
+/// the canonical rides' are: a row per statement made rebuilding the
+/// operator's 785,000 beats take over thirty seconds of every run that
+/// reached the gym (#560).
 async fn write_heart_rate(
     tx: &mut Transaction<'_, Sqlite>,
     session: i64,
@@ -537,22 +543,24 @@ async fn write_heart_rate(
     else {
         return Ok(());
     };
+    let mut rows = Vec::with_capacity(series.samples().count());
     for sample in series.samples().iter() {
         let at = i64::try_from(sample.at.as_seconds()).map_err(|e| corrupt(&e))?;
-        let bpm = i64::from(sample.beats_per_minute.as_u32());
-        sqlx::query!(
-            r#"
-            INSERT INTO canonical_gym_session_heart_rate (session, at_seconds, beats_per_minute)
-            VALUES (?, ?, ?)
-            "#,
-            session,
-            at,
-            bpm
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| store_error(&e))?;
+        rows.push(format!("[{at},{}]", sample.beats_per_minute.as_u32()));
     }
+    let rows = format!("[{}]", rows.join(","));
+    sqlx::query!(
+        r#"
+        INSERT INTO canonical_gym_session_heart_rate (session, at_seconds, beats_per_minute)
+        SELECT ?, value ->> 0, value ->> 1
+          FROM json_each(?)
+        "#,
+        session,
+        rows,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
     Ok(())
 }
 

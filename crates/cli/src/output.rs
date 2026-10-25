@@ -1149,8 +1149,13 @@ fn joining(parts: &std::collections::BTreeSet<application::Part>) -> String {
     )
 }
 
-/// How a step ended: done with a count of what it found, or failed and why.
+/// How a step ended, and how long it took (#560).
 pub fn outcome(done: &application::next::Done) -> String {
+    format!("{} ({:.1} s)", ended(done), done.took.as_secs_f64())
+}
+
+/// Done with a count of what it found, or failed and why.
+fn ended(done: &application::next::Done) -> String {
     use std::fmt::Write as _;
 
     use application::next::Found;

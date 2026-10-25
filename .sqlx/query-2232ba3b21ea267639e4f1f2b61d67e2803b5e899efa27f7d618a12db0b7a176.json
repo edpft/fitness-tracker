@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO bike_plus_ride_sample (\n            ride, at_seconds, power_watts, cadence_rpm,\n            resistance_percentage, speed_millimetres_per_hour\n        )\n        SELECT ?, value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4\n          FROM json_each(?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2232ba3b21ea267639e4f1f2b61d67e2803b5e899efa27f7d618a12db0b7a176"
+}
