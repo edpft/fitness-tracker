@@ -20,7 +20,7 @@
 //! the reason [`super::peloton_normalised`] gives: the extraction adapters stay
 //! apart, and a derivation reads raw, of which all three of these are Garmin's.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     gym::{
         Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
@@ -114,11 +114,13 @@ impl AccountReader for GarminGymAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<ActivityAccount>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<ActivityAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let sets_stream = LandingStream::try_from(GarminExerciseSetLandingStore::STREAM)
             .map_err(|error| corrupt(&error))?;
 
-        let rows = sqlx::query!(
+        let landed = sqlx::query_as!(
+            Row,
             r#"
             SELECT id AS "id!: i64",
                    endpoint AS "endpoint!: String",
@@ -133,28 +135,16 @@ impl AccountReader for GarminGymAccountReader {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|error| store_error(&error))?;
-
-        let mut landed = Vec::with_capacity(rows.len());
-        for row in rows {
-            landed.push(
-                Row {
-                    id: row.id,
-                    endpoint: row.endpoint,
-                    fetched_at: row.fetched_at,
-                    source_record_id: row.source_record_id,
-                    event_kind: row.event_kind,
-                    event_time: row.event_time,
-                    payload: row.payload,
-                }
-                .into_record(&self.stream)?,
-            );
-        }
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| row.into_record(&self.stream))
+        .collect::<Result<Vec<_>, _>>()?;
 
         let file_stream = LandingStream::try_from(GarminActivityFileLandingStore::STREAM)
             .map_err(|error| corrupt(&error))?;
 
-        let set_rows = sqlx::query!(
+        let sets = sqlx::query_as!(
+            Row,
             r#"
             SELECT id AS "id!: i64",
                    endpoint AS "endpoint!: String",
@@ -169,25 +159,13 @@ impl AccountReader for GarminGymAccountReader {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|error| store_error(&error))?;
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| row.into_record(&sets_stream))
+        .collect::<Result<Vec<_>, _>>()?;
 
-        let mut sets = Vec::with_capacity(set_rows.len());
-        for row in set_rows {
-            sets.push(
-                Row {
-                    id: row.id,
-                    endpoint: row.endpoint,
-                    fetched_at: row.fetched_at,
-                    source_record_id: row.source_record_id,
-                    event_kind: row.event_kind,
-                    event_time: row.event_time,
-                    payload: row.payload,
-                }
-                .into_record(&sets_stream)?,
-            );
-        }
-
-        let file_rows = sqlx::query!(
+        let recordings = sqlx::query_as!(
+            Row,
             r#"
             SELECT id AS "id!: i64",
                    endpoint AS "endpoint!: String",
@@ -202,25 +180,22 @@ impl AccountReader for GarminGymAccountReader {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|error| store_error(&error))?;
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| row.into_record(&file_stream))
+        .collect::<Result<Vec<_>, _>>()?;
 
-        let mut recordings = Vec::with_capacity(file_rows.len());
-        for row in file_rows {
-            recordings.push(
-                Row {
-                    id: row.id,
-                    endpoint: row.endpoint,
-                    fetched_at: row.fetched_at,
-                    source_record_id: row.source_record_id,
-                    event_kind: row.event_kind,
-                    event_time: row.event_time,
-                    payload: row.payload,
-                }
-                .into_record(&file_stream)?,
-            );
-        }
-
-        Ok(activities(landed, sets, recordings))
+        Ok(Reached {
+            up_to: super::marks::up_to(landed.iter().chain(&sets).chain(&recordings)),
+            previously: marks.map(|marks| {
+                activities(
+                    marks.held(&landed),
+                    marks.held(&sets),
+                    marks.held(&recordings),
+                )
+            }),
+            now: activities(landed, sets, recordings),
+        })
     }
 }
 
@@ -271,6 +246,27 @@ impl NormalisedEntityStore for SqliteMeasuredGymSessionStore {
         }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        sessions: Vec<MeasuredGymSession>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        super::normalised::clear_sessions(&mut tx, &stream, &removed).await?;
+        for session in &sessions {
+            write_session(&mut tx, run_id, &stream, session).await?;
+        }
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(sessions.len()))
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT DISTINCT stream AS \"stream!: String\", run_id AS \"run!: i64\"\n            FROM gym_session\n            ORDER BY stream, run_id\n            ",
+  "query": "\n            SELECT stream AS \"stream!: String\", run_id AS \"run!: i64\", count(*) AS \"rows!: i64\"\n            FROM gym_session\n            GROUP BY stream, run_id\n            ORDER BY stream, run_id\n            ",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,12 @@
             "name": "run_id"
           }
         }
+      },
+      {
+        "name": "rows!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -31,8 +37,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "224943a11a44bbf7392344ae2aa52886282eaec44f3c75fe1f34bb9a6a479c19"
+  "hash": "13f0fef3d5e255ccbd5745da2e2f36c8061c27faaca8501c45a4daaa463d0c7f"
 }

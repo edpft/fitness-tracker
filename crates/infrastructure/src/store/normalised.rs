@@ -17,7 +17,7 @@
 //! them over. What it keeps is the half only it can do: reaching a store, so
 //! that what the translator receives is whole and cannot go back for more.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     gym::{
         GymWorkout, Load, ManualSet, PerformedExercise, PerformedGymSession, Set, SetKind,
@@ -66,7 +66,8 @@ impl AccountReader for HevySessionAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<SessionAccount>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<SessionAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         // Oldest first, by the store's own sequence — which is the order the
         // source served them, because raw is append-only. Defined so a
         // derivation is reproducible, not because the derivation depends on
@@ -119,7 +120,11 @@ impl AccountReader for HevySessionAccountReader {
             ));
         }
 
-        Ok(group(records))
+        Ok(Reached {
+            up_to: super::marks::up_to(&records),
+            previously: marks.map(|marks| group(marks.held(&records))),
+            now: group(records),
+        })
     }
 }
 
@@ -176,6 +181,27 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
 
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        sessions: Vec<PerformedGymSession>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        clear_sessions(&mut tx, &stream, &removed).await?;
+        for session in &sessions {
+            write_session(&mut tx, run_id, &stream, session).await?;
+        }
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(sessions.len()))
     }
 
     /// **Sessions, not workouts.** What this store holds is entities, and the
@@ -247,6 +273,103 @@ pub(super) async fn clear_stream(
         .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+    Ok(())
+}
+
+/// Every row one stream wrote for the sessions stored under any of these
+/// landing records, children first (#571).
+///
+/// **A session is stored under its first workout and its workouts under their
+/// own**, so a record naming any workout of a session removes the whole of it.
+/// The canonical layer goes first, all of it, for [`clear_stream`]'s reason.
+pub(super) async fn clear_sessions(
+    tx: &mut Transaction<'_, Sqlite>,
+    stream: &str,
+    removed: &[LandingRecordId],
+) -> Result<(), StoreError> {
+    super::canonical_gym::clear(tx).await?;
+    let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+    let sessions = sqlx::query_scalar!(
+        r#"
+        SELECT id AS "id!: i64" FROM gym_session
+         WHERE stream = ?
+           AND (landing_record_id IN (SELECT value FROM json_each(?))
+                OR id IN (SELECT session FROM gym_workout
+                           WHERE stream = ?
+                             AND landing_record_id IN (SELECT value FROM json_each(?))))
+        "#,
+        stream,
+        removed,
+        stream,
+        removed
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let sessions = super::ids_json(sessions);
+
+    sqlx::query!(
+        "DELETE FROM measured_set WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM measured_gym_session_heart_rate WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM measured_gym_session WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM performed_set WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM performed_exercise WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM workout_item WHERE workout IN \
+         (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM gym_workout WHERE session IN (SELECT value FROM json_each(?))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM gym_session WHERE id IN (SELECT value FROM json_each(?))",
+        sessions
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
     Ok(())
 }
 

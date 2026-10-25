@@ -13,7 +13,7 @@
 //! **Which groups make a weigh-in is not decided here.** That is Withings
 //! knowledge and lives in [`crate::withings::account`]; this reads rows.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     body::{BodyScanWeighIn, Component, Composition, MeasuredBy, Rhythm, Segment},
     landing::{
@@ -59,7 +59,8 @@ impl AccountReader for WithingsWeighInAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<WeighInAccount>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<WeighInAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -104,7 +105,11 @@ impl AccountReader for WithingsWeighInAccountReader {
             ));
         }
 
-        Ok(group(records))
+        Ok(Reached {
+            up_to: super::marks::up_to(&records),
+            previously: marks.map(|marks| group(marks.held(&records))),
+            now: group(records),
+        })
     }
 }
 
@@ -213,6 +218,74 @@ impl NormalisedEntityStore for SqliteWeighInStore {
             write_weigh_in(&mut tx, run_id, &stream, &weigh_in).await?;
         }
 
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        weigh_ins: Vec<BodyScanWeighIn>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+
+        super::canonical_weigh_in::clear(&mut tx).await?;
+        // A Body Scan is stored under its composition group and each of its
+        // parts under its own, so a record naming any part removes it whole.
+        let doomed = sqlx::query!(
+            r#"
+            SELECT landing_record_id AS "scan!: i64", weigh_in AS "weigh_in!: i64"
+              FROM body_scan_weigh_in
+             WHERE landing_record_id IN (SELECT value FROM json_each(?))
+                OR landing_record_id IN (SELECT weigh_in FROM body_scan_part
+                                          WHERE landing_record_id IN (SELECT value FROM json_each(?)))
+            "#,
+            removed,
+            removed
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let scans = super::ids_json(doomed.iter().map(|row| row.scan));
+        let rows = super::ids_json(doomed.iter().map(|row| row.weigh_in));
+        for statement in [
+            "DELETE FROM body_scan_part WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM body_scan_vascular WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM body_scan_nerves WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM body_scan_heart WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM body_scan_weigh_in WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+        ] {
+            sqlx::query(statement)
+                .bind(&scans)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+        for statement in [
+            "DELETE FROM manual_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM segment_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM body_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))",
+        ] {
+            sqlx::query(statement)
+                .bind(&rows)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+
+        let written = weigh_ins.len();
+        for weigh_in in weigh_ins {
+            write_weigh_in(&mut tx, run_id, &stream, &weigh_in).await?;
+        }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

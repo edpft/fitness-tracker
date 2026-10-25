@@ -10,7 +10,7 @@ use jiff::civil::Date;
 
 use application::{
     Build, CanonicalLayer, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers,
-    Part, StoreError,
+    Part, Rederivation, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
@@ -462,7 +462,7 @@ impl NormalisedLayers for Layers {
         };
         let known = Self::known(stream).map_err(|error| failed(&error))?;
         match wiring::run(
-            Command::Normalise(self.zone.clone()),
+            Command::Normalise(self.zone.clone(), Rederivation::Incremental),
             known,
             &self.database,
             &Unreported,

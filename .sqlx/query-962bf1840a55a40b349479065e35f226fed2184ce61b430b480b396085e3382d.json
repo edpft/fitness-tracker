@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT landing_record_id AS \"scan!: i64\", weigh_in AS \"weigh_in!: i64\"\n              FROM body_scan_weigh_in\n             WHERE landing_record_id IN (SELECT value FROM json_each(?))\n                OR landing_record_id IN (SELECT weigh_in FROM body_scan_part\n                                          WHERE landing_record_id IN (SELECT value FROM json_each(?)))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "scan!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_weigh_in",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "weigh_in!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_weigh_in",
+            "name": "weigh_in"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "962bf1840a55a40b349479065e35f226fed2184ce61b430b480b396085e3382d"
+}

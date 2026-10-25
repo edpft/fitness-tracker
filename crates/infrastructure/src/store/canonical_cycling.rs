@@ -71,14 +71,23 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
     /// **Peloton's alone**, so the stream is the one constant: nothing else
     /// writes `cycling_session`.
     async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
-        let runs = sqlx::query_scalar!(
-            r#"SELECT DISTINCT run_id AS "run!: i64" FROM cycling_session ORDER BY run_id"#
+        let runs = sqlx::query!(
+            r#"
+            SELECT run_id AS "run!: i64", count(*) AS "rows!: i64"
+            FROM cycling_session GROUP BY run_id ORDER BY run_id
+            "#
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
         Ok(super::derivation_ledger::written_by(runs.into_iter().map(
-            |run| (super::PelotonRideLandingStore::STREAM.to_owned(), run),
+            |row| {
+                (
+                    super::PelotonRideLandingStore::STREAM.to_owned(),
+                    row.run,
+                    row.rows,
+                )
+            },
         )))
     }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE normalisation_run SET terms = ?, read_up_to = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e1522e0f3d8275189cc4c06b21752354129f14566dc85bdfd28271f82cdcd8e0"
+}

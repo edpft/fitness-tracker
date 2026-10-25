@@ -118,11 +118,18 @@ impl DerivationLedger for SqliteDerivationLedger {
 }
 
 /// The derivations that wrote a normalised layer's rows, as a canonical layer
-/// built from them is derived from: each stream and its run, in order.
-pub(crate) fn written_by(runs: impl IntoIterator<Item = (String, i64)>) -> DerivedFrom {
+/// built from them is derived from: each stream and its run, in order, and how
+/// many rows each one's still stand.
+///
+/// **The count as well as the run** (#571). A derivation that revises only
+/// what changed can remove rows without writing any — a retraction, or a
+/// session now refused — and it clears the canonical layer when it does. The
+/// runs alone would then read the same as before, and the empty layer as
+/// current.
+pub(crate) fn written_by(runs: impl IntoIterator<Item = (String, i64, i64)>) -> DerivedFrom {
     let runs: Vec<String> = runs
         .into_iter()
-        .map(|(stream, run)| format!("{stream} {run}"))
+        .map(|(stream, run, rows)| format!("{stream} {run} ({rows})"))
         .collect();
     DerivedFrom::from(runs.join(", "))
 }

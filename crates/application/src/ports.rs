@@ -31,9 +31,9 @@ use domain::gym::{
     CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
 };
 use domain::landing::{
-    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingStream,
-    PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome, SourceRecordId,
-    Watermark,
+    EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
+    LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
+    SourceRecordId, Watermark,
 };
 use domain::measure::{PositiveDuration, RepCount};
 use domain::normalised::{
@@ -473,6 +473,18 @@ pub trait RawExtent {
 pub trait SourceAccount {
     fn records(&self) -> usize;
 
+    /// Every landing record it reads, counted or not: what makes it the account
+    /// it is (#571).
+    ///
+    /// **Two accounts with the same records translate the same**, because
+    /// translation is a function of the account and nothing else. So an
+    /// account whose records are unchanged since the last derivation needs no
+    /// translating again, and one whose records are not is translated whole.
+    /// A record read only for what it says about this account — a sleep record
+    /// naming a night's watch, the account answers either side of a ride — is
+    /// in here too, for that reason.
+    fn landed(&self) -> Vec<&LandedRecord>;
+
     /// How many of those records a later serving replaced.
     ///
     /// **§ 10, applied where composition made it matter.** Two records sharing
@@ -497,6 +509,102 @@ impl SourceAccount for LandedRecord {
     fn records(&self) -> usize {
         1
     }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        vec![self]
+    }
+}
+
+/// How far a derivation has read raw: the last landing record of each table it
+/// reads (#571).
+///
+/// **Opaque to the use case**, as an extraction's resume token is to it: what
+/// it records and how is the reader's, because only the reader knows which
+/// tables it reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadUpTo(String);
+
+impl From<String> for ReadUpTo {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl ReadUpTo {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What a derivation interprets raw under, besides raw: the build, the
+/// declared zone and the corrections in force (#571).
+///
+/// **A derivation can pick up where the last one stopped only under the same
+/// terms.** A new build may translate a past record differently, a zone places
+/// every session's times on a different date, and a correction rewrites a past
+/// session; each reinterprets what was already derived, so a change in any of
+/// them derives the whole layer again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Terms(String);
+
+impl From<String> for Terms {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl Terms {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Where the last derivation of a stream stopped, and under what terms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mark {
+    pub terms: Terms,
+    pub up_to: ReadUpTo,
+}
+
+/// How much of raw a derivation reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reading {
+    /// Every account: the full re-derivation.
+    Whole,
+    /// Every account, and what raw held up to this mark grouped the same way,
+    /// so the accounts a record landed since has changed can be told apart.
+    Since(ReadUpTo),
+}
+
+/// What a reader read.
+#[derive(Debug)]
+pub struct Reached<A> {
+    /// Every account raw holds now.
+    pub now: Vec<A>,
+    /// The accounts raw held up to the mark, grouped by the same rule; `None`
+    /// for a whole reading.
+    ///
+    /// **Grouped again rather than remembered**, because raw is append-only and
+    /// grouping is deterministic: what raw held up to the mark, grouped now, is
+    /// what the last derivation grouped. A record landed since can change an
+    /// account it is not part of — a Hevy deletion leaves the workout beside it
+    /// in a session of its own — and comparing the two groupings finds that
+    /// without any reader having to know it can happen.
+    pub previously: Option<Vec<A>>,
+    /// How far raw reached when this was read.
+    pub up_to: ReadUpTo,
+}
+
+/// Whether to derive the whole layer, or only what landed since the last
+/// derivation (#571).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rederivation {
+    /// Every account, whatever the last derivation did.
+    Whole,
+    /// Only the accounts a record landed since has changed, where the last
+    /// derivation left a mark under the same terms; the whole layer where it
+    /// did not.
+    Incremental,
 }
 
 /// Raw, read-only, for one stream.
@@ -541,9 +649,12 @@ pub trait AccountReader {
     ///
     /// # Errors
     ///
-    /// [`StoreError`] if the store is unavailable or holds something
-    /// unreadable.
-    fn accounts(&self) -> impl Future<Output = Result<Vec<Self::Account>, StoreError>> + Send;
+    /// [`StoreError`] if the store is unavailable, holds something unreadable,
+    /// or the mark is not one this reader wrote.
+    fn accounts(
+        &self,
+        reading: &Reading,
+    ) -> impl Future<Output = Result<Reached<Self::Account>, StoreError>> + Send;
 }
 
 /// Turns one source's payload into our entity.
@@ -595,6 +706,24 @@ pub trait NormalisedEntityStore {
     fn replace(
         &self,
         run: NormalisationRunId,
+        entities: Vec<Self::Entity>,
+    ) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
+
+    /// Remove whatever these landing records derived, write these entities,
+    /// and leave every other entity standing, in one transaction (#571).
+    ///
+    /// `removed` are records of this stream's own table, and every one of the
+    /// accounts that changed: each entity is stored under one of its records,
+    /// so naming all of them removes it wherever it was filed. Still never an
+    /// update in place: what changed is removed and written again whole.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
         entities: Vec<Self::Entity>,
     ) -> impl Future<Output = Result<WorkoutCount, StoreError>> + Send;
 
@@ -767,6 +896,23 @@ pub trait RefusalStore {
         refusals: Vec<Refusal>,
     ) -> impl Future<Output = Result<RefusalCount, StoreError>> + Send;
 
+    /// Remove the refusals of these source records and record these, leaving
+    /// every other refusal standing (#571).
+    ///
+    /// **By source record, not landing record**: a refusal can name a record of
+    /// any table its account read, and only the source's identifier is common
+    /// to all of them.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<SourceRecordId>,
+        refusals: Vec<Refusal>,
+    ) -> impl Future<Output = Result<RefusalCount, StoreError>> + Send;
+
     /// Read back after a derivation, so what the domain will not accept is
     /// visible rather than surfacing only in a log.
     ///
@@ -808,6 +954,25 @@ pub trait NormalisationRunLog {
         &self,
         stream: &LandingStream,
     ) -> impl Future<Output = Result<Option<NormalisationRun>, StoreError>> + Send;
+
+    /// Where the latest success stopped, where it recorded one (#571).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn mark(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<Option<Mark>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_mark(
+        &self,
+        run: NormalisationRunId,
+        mark: &Mark,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// What a derivation did.
@@ -842,6 +1007,11 @@ pub struct NormalisationSummary {
     pub retractions_read: RecordCount,
     pub records_refused: RecordCount,
     pub refusals_recorded: RefusalCount,
+    /// How many records the layer stands on once this derivation is written:
+    /// every record of every account raw holds, whether or not this one read
+    /// it (#571). What `records_read` was before a derivation could read only
+    /// part of raw, and what how far behind a layer is is counted against.
+    pub records_covered: RecordCount,
 }
 
 /// What the last derivation would not accept.
@@ -938,6 +1108,7 @@ pub trait WorkoutNormaliser {
     /// has a gap. Never for a record the domain refused.
     fn normalise(
         &self,
+        rederivation: Rederivation,
     ) -> impl Future<Output = Result<NormalisationSummary, NormalisationError>> + Send;
 }
 

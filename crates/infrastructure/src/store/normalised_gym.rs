@@ -67,8 +67,9 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
     async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
         let runs = sqlx::query!(
             r#"
-            SELECT DISTINCT stream AS "stream!: String", run_id AS "run!: i64"
+            SELECT stream AS "stream!: String", run_id AS "run!: i64", count(*) AS "rows!: i64"
             FROM gym_session
+            GROUP BY stream, run_id
             ORDER BY stream, run_id
             "#
         )
@@ -76,7 +77,7 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
         .await
         .map_err(|error| store_error(&error))?;
         Ok(super::derivation_ledger::written_by(
-            runs.into_iter().map(|row| (row.stream, row.run)),
+            runs.into_iter().map(|row| (row.stream, row.run, row.rows)),
         ))
     }
 }

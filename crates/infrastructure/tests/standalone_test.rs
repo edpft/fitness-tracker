@@ -146,7 +146,9 @@ async fn landed_store() -> Result<
         },
         corpus::zone()?,
     );
-    let _summary: NormalisationSummary = normalisation.normalise().await?;
+    let _summary: NormalisationSummary = normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?;
 
     // The performed record is read through the canonical layer, which is a
     // derivation of what the step above has just written (#350).

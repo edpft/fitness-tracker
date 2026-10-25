@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT weigh_in AS \"weigh_in!: i64\" FROM myfitnesspal_weigh_in\n             WHERE landing_record_id IN (SELECT value FROM json_each(?))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "weigh_in!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "myfitnesspal_weigh_in",
+            "name": "weigh_in"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dcdb9fc98e6f937bff5ca04cc9b6a2ec114adbb440712a988da10956108250c9"
+}

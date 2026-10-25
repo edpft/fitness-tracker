@@ -147,16 +147,8 @@ pub fn sightings(landed: &LandedRecord, zone: &OperatorZone) -> Vec<Sighting> {
 /// naming two, leave which one it was unsaid. `pairings` is oldest first.
 #[must_use]
 pub fn ridden_with(pairings: &[LandedRecord], at: &StartedAt) -> Option<Sighting> {
-    let when = |landed: &LandedRecord| landed.record().fetched_at().as_timestamp();
-    let instant = at.instant();
-    let before = pairings
-        .iter()
-        .filter(|landed| when(landed) <= instant)
-        .max_by_key(|landed| (when(landed), landed.id()))?;
-    let after = pairings
-        .iter()
-        .filter(|landed| when(landed) >= instant)
-        .min_by_key(|landed| (when(landed), landed.id()))?;
+    let (before, after) = either_side(pairings, at.instant());
+    let (before, after) = (before?, after?);
     let (named, also) = (sightings(before, at.zone()), sightings(after, at.zone()));
     let ([named], [also]) = (named.as_slice(), also.as_slice()) else {
         return None;
@@ -165,6 +157,25 @@ pub fn ridden_with(pairings: &[LandedRecord], at: &StartedAt) -> Option<Sighting
         at: at.clone(),
         ..named.clone()
     })
+}
+
+/// The answers either side of an instant: the last at or before it and the
+/// first at or after it, which are all [`ridden_with`] reads of the account.
+#[must_use]
+pub fn either_side(
+    pairings: &[LandedRecord],
+    instant: jiff::Timestamp,
+) -> (Option<&LandedRecord>, Option<&LandedRecord>) {
+    let when = |landed: &LandedRecord| landed.record().fetched_at().as_timestamp();
+    let before = pairings
+        .iter()
+        .filter(|landed| when(landed) <= instant)
+        .max_by_key(|landed| (when(landed), landed.id()));
+    let after = pairings
+        .iter()
+        .filter(|landed| when(landed) >= instant)
+        .min_by_key(|landed| (when(landed), landed.id()));
+    (before, after)
 }
 
 #[cfg(test)]

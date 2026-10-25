@@ -48,6 +48,13 @@ impl SourceAccount for NightAccount {
         self.superseded.len().saturating_add(1)
     }
 
+    fn landed(&self) -> Vec<&LandedRecord> {
+        std::iter::once(&self.night)
+            .chain(&self.superseded)
+            .chain(self.sleep.as_ref())
+            .collect()
+    }
+
     fn superseded(&self) -> usize {
         self.superseded.len()
     }
@@ -106,6 +113,13 @@ impl DayAccount {
 impl SourceAccount for DayAccount {
     fn records(&self) -> usize {
         self.superseded.len().saturating_add(1)
+    }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        std::iter::once(&self.day)
+            .chain(&self.superseded)
+            .chain(self.sleep.as_ref())
+            .collect()
     }
 
     fn superseded(&self) -> usize {
@@ -200,6 +214,14 @@ impl SourceAccount for ActivityAccount {
             .saturating_add(1)
             .saturating_add(usize::from(self.sets.is_some()))
             .saturating_add(usize::from(self.recording.is_some()))
+    }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        std::iter::once(&self.activity)
+            .chain(self.sets.as_ref())
+            .chain(self.recording.as_ref())
+            .chain(&self.superseded)
+            .collect()
     }
 
     fn superseded(&self) -> usize {

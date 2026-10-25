@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT terms AS \"terms: String\", read_up_to AS \"read_up_to: String\"\n            FROM normalisation_run\n            WHERE stream = ? AND outcome = 'succeeded'\n            ORDER BY finished_at DESC, id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "terms: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_run",
+            "name": "terms"
+          }
+        }
+      },
+      {
+        "name": "read_up_to: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalisation_run",
+            "name": "read_up_to"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "5b1c9d3e86b6de8dd7e8daddc91e12f989083d22b7bf175f410f8e0c6816dc43"
+}

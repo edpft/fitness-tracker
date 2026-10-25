@@ -60,7 +60,9 @@ async fn derived_corpus() -> Result<(SqlitePool, tempfile::TempDir), Box<dyn std
         },
         corpus::zone()?,
     );
-    let _summary: NormalisationSummary = normalisation.normalise().await?;
+    let _summary: NormalisationSummary = normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?;
 
     // The history is read through the canonical layer, which is a derivation of
     // what the step above has just written (#350).

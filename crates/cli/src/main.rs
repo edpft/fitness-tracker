@@ -23,7 +23,9 @@ use std::{
     process::ExitCode,
 };
 
-use application::{ExtractionError, NormalisationError, SourceError, StatusError, StoreError};
+use application::{
+    ExtractionError, NormalisationError, Rederivation, SourceError, StatusError, StoreError,
+};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
@@ -137,6 +139,15 @@ fn command() -> ClapCommand {
                         .help(
                             "The IANA time zone trained in, such as Europe/London. \
                              Required: no zone is compiled in",
+                        ),
+                )
+                .arg(
+                    Arg::new("whole")
+                        .long("whole")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "Derive the whole layer again, rather than only what \
+                             landed since the last derivation",
                         ),
                 ),
         )
@@ -1445,7 +1456,12 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
             // Printed before the run begins, so a long first derivation says
             // what it is doing.
             output::derivation_started(&stream);
-            Command::Normalise(zone)
+            let rederivation = if sub.get_flag("whole") {
+                Rederivation::Whole
+            } else {
+                Rederivation::Incremental
+            };
+            Command::Normalise(zone, rederivation)
         }
         "refusals" => Command::Refusals,
         "status" => Command::Status,

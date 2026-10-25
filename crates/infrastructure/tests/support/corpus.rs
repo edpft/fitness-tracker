@@ -19,8 +19,8 @@ use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use application::{
     NormalisationError, StoreError,
     ports::{
-        AccountReader, Clock, NormalisationRunLog, NormalisedEntityStore, RefusalStore,
-        WorkoutNormaliser as _,
+        AccountReader, Clock, Mark, NormalisationRunLog, NormalisedEntityStore, Reached, ReadUpTo,
+        Reading, RefusalStore, WorkoutNormaliser as _,
     },
 };
 use domain::{
@@ -212,8 +212,14 @@ impl AccountReader for InMemoryRaw {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<Self::Account>, StoreError> {
-        Ok(infrastructure::hevy::group(self.records.clone()))
+    /// Always the whole of what it holds: a fixture with no mark of its own
+    /// has nothing to have read up to.
+    async fn accounts(&self, _reading: &Reading) -> Result<Reached<Self::Account>, StoreError> {
+        Ok(Reached {
+            now: infrastructure::hevy::group(self.records.clone()),
+            previously: None,
+            up_to: ReadUpTo::from(String::new()),
+        })
     }
 }
 
@@ -262,6 +268,28 @@ impl NormalisedEntityStore for InMemorySessions {
                 detail: "the fixture lock was poisoned".to_owned(),
             })?;
             *held = workouts;
+        }
+        Ok(WorkoutCount::from(count))
+    }
+
+    async fn revise(
+        &self,
+        _run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        workouts: Vec<PerformedGymSession>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let count = workouts.len();
+        {
+            let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            held.retain(|session| {
+                !session
+                    .workouts()
+                    .iter()
+                    .any(|workout| removed.contains(&workout.landed_as()))
+            });
+            held.extend(workouts);
         }
         Ok(WorkoutCount::from(count))
     }
@@ -316,6 +344,23 @@ impl RefusalStore for InMemoryRefusals {
                 detail: "the fixture lock was poisoned".to_owned(),
             })?;
             *held = refusals;
+        }
+        Ok(RefusalCount::from(count))
+    }
+
+    async fn revise(
+        &self,
+        _run: NormalisationRunId,
+        removed: Vec<SourceRecordId>,
+        refusals: Vec<Refusal>,
+    ) -> Result<RefusalCount, StoreError> {
+        let count = refusals.len();
+        {
+            let mut held = self.written.lock().map_err(|_| StoreError::Corrupt {
+                detail: "the fixture lock was poisoned".to_owned(),
+            })?;
+            held.retain(|refusal| !removed.contains(&refusal.source_record_id));
+            held.extend(refusals);
         }
         Ok(RefusalCount::from(count))
     }
@@ -395,6 +440,15 @@ impl NormalisationRunLog for InMemoryRunLog {
             .filter(|run| run.outcome().is_success())
             .max_by_key(|run| run.id())
             .cloned())
+    }
+
+    /// None: this log keeps no mark, so every derivation through it is whole.
+    async fn mark(&self, _stream: &LandingStream) -> Result<Option<Mark>, StoreError> {
+        Ok(None)
+    }
+
+    async fn record_mark(&self, _run: NormalisationRunId, _mark: &Mark) -> Result<(), StoreError> {
+        Ok(())
     }
 }
 
@@ -516,7 +570,9 @@ impl Derivation {
             zone,
         );
 
-        let summary = normalisation.normalise().await?;
+        let summary = normalisation
+            .normalise(application::Rederivation::Whole)
+            .await?;
 
         let store_broke = |_| {
             NormalisationError::Store(StoreError::Corrupt {

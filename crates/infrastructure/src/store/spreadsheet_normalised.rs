@@ -16,7 +16,7 @@ use application::{NormalisedEntityStore, StoreError};
 use domain::{
     body::ManualWeighIn,
     gym::ManualGymSession,
-    landing::{InvalidStream, LandingStream},
+    landing::{InvalidStream, LandingRecordId, LandingStream},
     normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::SqlitePool;
@@ -27,10 +27,23 @@ use super::{
     SpreadsheetFileLandingStore, count_from_storage,
     manual_session::write_session,
     normalisation_run_for_storage,
-    normalised::clear_stream,
+    normalised::{clear_sessions, clear_stream},
     store_error,
-    weigh_in::{count_manual_weigh_ins, replace_manual_weigh_ins},
+    weigh_in::{count_manual_weigh_ins, replace_manual_weigh_ins, revise_manual_weigh_ins},
 };
+
+/// A file's weigh-ins and sessions, apart.
+fn split(entities: Vec<SpreadsheetEntity>) -> (Vec<ManualWeighIn>, Vec<ManualGymSession>) {
+    let mut weigh_ins: Vec<ManualWeighIn> = Vec::new();
+    let mut sessions: Vec<ManualGymSession> = Vec::new();
+    for entity in entities {
+        match entity {
+            SpreadsheetEntity::WeighIn(weigh_in) => weigh_ins.push(weigh_in),
+            SpreadsheetEntity::GymSession(session) => sessions.push(*session),
+        }
+    }
+    (weigh_ins, sessions)
+}
 
 /// Writes what the spreadsheets derive.
 #[derive(Debug, Clone)]
@@ -68,14 +81,7 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
         let stream = self.stream.to_string();
         let written = entities.len();
 
-        let mut weigh_ins: Vec<ManualWeighIn> = Vec::new();
-        let mut sessions: Vec<ManualGymSession> = Vec::new();
-        for entity in entities {
-            match entity {
-                SpreadsheetEntity::WeighIn(weigh_in) => weigh_ins.push(weigh_in),
-                SpreadsheetEntity::GymSession(session) => sessions.push(*session),
-            }
-        }
+        let (weigh_ins, sessions) = split(entities);
 
         let mut tx = self
             .pool
@@ -89,6 +95,31 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
 
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        entities: Vec<SpreadsheetEntity>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let written = entities.len();
+        let (weigh_ins, sessions) = split(entities);
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        revise_manual_weigh_ins(&mut tx, run_id, &stream, &removed, &weigh_ins).await?;
+        clear_sessions(&mut tx, &stream, &removed).await?;
+        for session in &sessions {
+            write_session(&mut tx, run_id, &stream, session).await?;
+        }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id AS \"id!: i64\" FROM gym_session\n         WHERE stream = ?\n           AND (landing_record_id IN (SELECT value FROM json_each(?))\n                OR id IN (SELECT session FROM gym_workout\n                           WHERE stream = ?\n                             AND landing_record_id IN (SELECT value FROM json_each(?))))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_session",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3393bb62236526d44c5268f6392a1bd4fcf867189ae456ed329dfef626827ab7"
+}

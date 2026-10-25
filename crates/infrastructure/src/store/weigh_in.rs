@@ -16,7 +16,7 @@
 //! below. Body weight is read back from the canonical layer
 //! ([`super::canonical_weigh_in`]), where copies of one day are one weigh-in.
 
-use application::{AccountReader, StoreError};
+use application::{AccountReader, Reached, Reading, StoreError};
 use domain::{
     body::{LastSaved, ManualWeighIn},
     landing::{
@@ -59,7 +59,8 @@ impl AccountReader for SpreadsheetFileAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<Workbook>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<Workbook>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -99,7 +100,11 @@ impl AccountReader for SpreadsheetFileAccountReader {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        Ok(Workbook::gather(records))
+        Ok(Reached {
+            up_to: super::marks::up_to(&records),
+            previously: marks.map(|marks| Workbook::gather(marks.held(&records))),
+            now: Workbook::gather(records),
+        })
     }
 }
 
@@ -123,7 +128,53 @@ pub(super) async fn replace_manual_weigh_ins(
         .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+    write_manual_weigh_ins(tx, run_id, stream, weigh_ins).await
+}
 
+/// The manual weigh-ins copied from any of these files removed, and these
+/// written, leaving the rest standing (#571).
+pub(super) async fn revise_manual_weigh_ins(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    stream: &str,
+    removed: &[LandingRecordId],
+    weigh_ins: &[ManualWeighIn],
+) -> Result<(), StoreError> {
+    super::canonical_weigh_in::clear(tx).await?;
+    let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+    let doomed = sqlx::query_scalar!(
+        r#"
+        SELECT weigh_in AS "weigh_in!: i64" FROM manual_weigh_in
+         WHERE landing_record_id IN (SELECT value FROM json_each(?))
+        "#,
+        removed
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let doomed = super::ids_json(doomed);
+    for statement in [
+        "DELETE FROM manual_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+        "DELETE FROM segment_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+        "DELETE FROM body_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
+        "DELETE FROM manual_weigh_in WHERE weigh_in IN (SELECT value FROM json_each(?))",
+        "DELETE FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))",
+    ] {
+        sqlx::query(statement)
+            .bind(&doomed)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+    }
+    write_manual_weigh_ins(tx, run_id, stream, weigh_ins).await
+}
+
+async fn write_manual_weigh_ins(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    stream: &str,
+    weigh_ins: &[ManualWeighIn],
+) -> Result<(), StoreError> {
     for weigh_in in weigh_ins {
         let on_day = weigh_in.on().to_string();
         let mass = i64::try_from(weigh_in.mass().as_grams()).map_err(|error| corrupt(&error))?;

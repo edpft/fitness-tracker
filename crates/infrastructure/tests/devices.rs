@@ -28,6 +28,9 @@ use jiff::civil::date;
 use serde_json::json;
 use sqlx::SqlitePool;
 
+#[path = "support/layers.rs"]
+mod layers;
+
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 const FORERUNNER_165: u32 = 3_483_897_389;
@@ -234,8 +237,23 @@ impl application::Clock for FixedClock {
 
 /// Garmin's activities and days normalised, and the register read from them.
 async fn devices(pool: &SqlitePool) -> Result<Register, Failure> {
+    derive(pool, application::Rederivation::Whole).await?;
+    Ok(DeviceRegister::new(
+        GarminRecordedDevices::new(pool.clone()),
+        GarminWear::new(pool.clone()),
+    )
+    .register()
+    .await?)
+}
+
+/// Garmin's activities and days normalised, whole or only what landed since,
+/// and how many entities each run wrote.
+async fn derive(
+    pool: &SqlitePool,
+    rederivation: application::Rederivation,
+) -> Result<(usize, usize), Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
-    Normalisation::new(
+    let activities = Normalisation::new(
         NormalisationPorts {
             raw: GarminGymAccountReader::new(pool.clone())?,
             translator: GarminActivityTranslator::default(),
@@ -246,9 +264,9 @@ async fn devices(pool: &SqlitePool) -> Result<Register, Failure> {
         },
         zone.clone(),
     )
-    .normalise()
+    .normalise(rederivation)
     .await?;
-    Normalisation::new(
+    let days = Normalisation::new(
         NormalisationPorts {
             raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
             translator: GarminDailyHeartRateTranslator,
@@ -259,14 +277,12 @@ async fn devices(pool: &SqlitePool) -> Result<Register, Failure> {
         },
         zone,
     )
-    .normalise()
+    .normalise(rederivation)
     .await?;
-    Ok(DeviceRegister::new(
-        GarminRecordedDevices::new(pool.clone()),
-        GarminWear::new(pool.clone()),
-    )
-    .register()
-    .await?)
+    Ok((
+        activities.workouts_written.as_usize(),
+        days.workouts_written.as_usize(),
+    ))
 }
 
 /// One day of Garmin's daily heart rate: worn, with a resting heart rate, or
@@ -459,5 +475,115 @@ fn the_strap_over_bluetooth_is_the_strap_over_ant() {
             panic!("the strap alone was in use");
         };
         assert_eq!(device, strap);
+    });
+}
+
+/// Garmin's sleep record for a date, naming the watch that slept.
+async fn slept(pool: &SqlitePool, date: &str, serial: u32) -> Result<(), Failure> {
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+    let payload = serde_json::to_vec(&json!({
+        "dailySleepDTO": { "calendarDate": date, "sleepNeed": { "deviceId": serial } },
+    }))?;
+    let record = LandingRecord::land(
+        LandingStream::try_from("garmin.sleep")?,
+        FetchedAt::try_from("2026-10-13T08:00:00Z")?,
+        SourceRecordId::try_from(date)?,
+        EventProvenance::new(
+            Endpoint::try_from("/wellness-service/wellness/dailySleepData")?,
+            EventKind::Updated,
+            None,
+        )
+        .into(),
+        RawPayload::try_from(payload)?,
+    );
+    let landing = infrastructure::GarminSleepLandingStore::new(pool.clone())?;
+    let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+    landing.append(run, vec![record]).await?;
+    Ok(())
+}
+
+/// What lands before the first derivation.
+async fn first_batch(pool: &SqlitePool) -> Result<(), Failure> {
+    land(
+        pool,
+        "1",
+        "2024-06-30 15:52:20",
+        &recording((1, 2700, VIVOACTIVE_3), &[(2, 120, 32, TICKR, 7, 1)]),
+    )
+    .await?;
+    land(
+        pool,
+        "2",
+        "2026-09-29 18:40:07",
+        &recording((1, 4432, FORERUNNER_165), &[]),
+    )
+    .await?;
+    day(pool, "2026-10-10", true).await?;
+    day(pool, "2026-10-11", false).await?;
+    day(pool, "2026-10-12", true).await?;
+    Ok(())
+}
+
+/// What lands after it: a new activity, activity 2 served again, today's day
+/// served again as it grew, a new day, and the sleep record naming the watch
+/// for a day already derived.
+async fn second_batch(pool: &SqlitePool) -> Result<(), Failure> {
+    land(
+        pool,
+        "3",
+        "2025-03-02 12:26:12",
+        &recording((1, 3121, EDGE_530), &[(1, 120, 1, FORERUNNER_165, 255, 1)]),
+    )
+    .await?;
+    land(
+        pool,
+        "2",
+        "2026-09-29 18:40:07",
+        &recording((1, 4432, FORERUNNER_165), &[(2, 120, 32, TICKR, 7, 1)]),
+    )
+    .await?;
+    day(pool, "2026-10-12", false).await?;
+    day(pool, "2026-10-13", true).await?;
+    slept(pool, "2026-10-10", FORERUNNER_165).await?;
+    Ok(())
+}
+
+/// The same raw, derived whole and derived across two runs, holds the same
+/// rows, and the second run writes only what the second batch changed.
+#[test]
+fn an_incremental_derivation_writes_what_a_whole_one_would() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let whole = connect(&directory.path().join("whole.db"))
+            .await
+            .expect("a store");
+        first_batch(&whole).await.expect("the first batch");
+        second_batch(&whole).await.expect("the second batch");
+        derive(&whole, application::Rederivation::Whole)
+            .await
+            .expect("a whole derivation");
+
+        let incremental = connect(&directory.path().join("incremental.db"))
+            .await
+            .expect("a store");
+        first_batch(&incremental).await.expect("the first batch");
+        derive(&incremental, application::Rederivation::Incremental)
+            .await
+            .expect("a first derivation");
+        second_batch(&incremental).await.expect("the second batch");
+        let (activities, days) = derive(&incremental, application::Rederivation::Incremental)
+            .await
+            .expect("an incremental derivation");
+
+        assert_eq!(
+            layers::dump(&incremental).await.expect("a dump"),
+            layers::dump(&whole).await.expect("a dump"),
+        );
+        // Activities 2 and 3, each its devices; not activity 1.
+        assert_eq!(activities, 0, "no gym session among them");
+        // 2026-10-10 now its watch is named, 2026-10-12 served again, and
+        // 2026-10-13: a resting heart rate and a wear for each worn day.
+        assert_eq!(days, 2);
     });
 }

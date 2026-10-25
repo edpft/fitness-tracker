@@ -14,9 +14,9 @@ use std::path::{Path, PathBuf};
 
 use application::{
     DerivationStatus, DerivationStatusReporter, DerivedFrom, ExtractionError,
-    ExtractionStatusReporter, LandingStore, NormalisationError, NormalisationSummary,
+    ExtractionStatusReporter, LandingStore, NormalisationError, NormalisationSummary, Rederivation,
     RefusalReport, RefusalReporter, ResumptionPointResetter, ResumptionPointStore, RunSummary,
-    StatusError, StreamStatus, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
+    StatusError, StreamStatus, Terms, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
     next::{Awaits, Daily, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
@@ -75,7 +75,7 @@ pub enum Command {
     ExtractFolder(PathBuf),
     /// Derive the normalised layer from what raw already holds. Contacts no
     /// source, which is why it carries a zone rather than a credential.
-    Normalise(OperatorZone),
+    Normalise(OperatorZone, Rederivation),
     /// Read back what the last derivation would not accept. Takes no zone: it
     /// consults none to produce the list.
     Refusals,
@@ -345,18 +345,46 @@ pub async fn inputs(
             });
         }
     };
-    let corrections = match overlay {
+    let corrections = corrections(&pool, overlay).await?;
+    Ok(DerivedFrom::from(format!(
+        "records {records}; corrections {}; zone {}",
+        corrections.join(","),
+        zone.id()
+    )))
+}
+
+/// The corrections in force on a stream's overlay, by id, where it has one.
+async fn corrections(
+    pool: &SqlitePool,
+    overlay: Option<&'static str>,
+) -> Result<Vec<String>, WiringError> {
+    Ok(match overlay {
         None => Vec::new(),
-        Some(stream) => SqliteEditOverlayStore::new(pool, stream)?
+        Some(stream) => SqliteEditOverlayStore::new(pool.clone(), stream)?
             .all()
             .await?
             .iter()
             .map(|correction| correction.id().to_string())
             .collect(),
-    };
-    Ok(DerivedFrom::from(format!(
-        "records {records}; corrections {}; zone {}",
-        corrections.join(","),
+    })
+}
+
+/// What a derivation interprets raw under (#571): the build, the corrections in
+/// force on its overlay, and the zone. A derivation picks up where the last
+/// one stopped only where these read the same.
+///
+/// **A build outside nix names none**, and so reads the same from one build to
+/// the next: a derivation by such a build picks up where the last stopped even
+/// where the code changed. `--whole` is the way round it.
+async fn terms(
+    pool: &SqlitePool,
+    zone: &OperatorZone,
+    overlay: Option<&'static str>,
+) -> Result<Terms, WiringError> {
+    Ok(Terms::from(format!(
+        "build {}; corrections {}; zone {}",
+        crate::next::BUILD.unwrap_or("unknown"),
+        corrections(pool, overlay).await?.join(","),
         zone.id()
     )))
 }
@@ -416,7 +444,8 @@ async fn garmin_daily_heart_rate(
                 walk.extraction.extract().await?,
             )))
         }
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
@@ -427,8 +456,11 @@ async fn garmin_daily_heart_rate(
                     clock: SystemClock,
                 },
                 zone,
-            );
-            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
         }
         Command::Refusals => {
             let reporter = Refusals::new(
@@ -511,8 +543,11 @@ async fn peloton_rides(
             )
             .await
         }
-        Command::Normalise(zone) => {
-            let summary = peloton_normalisation(pool, zone)?.normalise().await?;
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
+            let summary = peloton_normalisation(pool, zone, terms)?
+                .normalise(rederivation)
+                .await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -769,6 +804,7 @@ fn peloton_walks(
 fn peloton_normalisation(
     pool: SqlitePool,
     zone: OperatorZone,
+    terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     Ok(Normalisation::new(
         NormalisationPorts {
@@ -780,7 +816,8 @@ fn peloton_normalisation(
             clock: SystemClock,
         },
         zone,
-    ))
+    )
+    .under(terms))
 }
 
 /// Peloton's rides as `next` collects them: every walk behind the entry.
@@ -849,7 +886,8 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
             let summary = nights.extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminHrvAccountReader::new(pool.clone())?,
@@ -860,9 +898,10 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
                     clock: SystemClock,
                 },
                 zone,
-            );
+            )
+            .under(terms);
 
-            let summary = normalisation.normalise().await?;
+            let summary = normalisation.normalise(rederivation).await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -936,7 +975,8 @@ async fn garmin_activities(
             stream: GarminActivityLandingStore::STREAM,
         }),
         Command::Extract(access) => collect_activities(access, (&pool, database), walks).await,
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, Some(GarminExerciseSetLandingStore::STREAM)).await?;
             // The overlay is read here, as it is for Hevy and for the same
             // reason: § II.2 applies a correction while the layer is rebuilt,
             // and this is that moment. It is keyed on `garmin.exercise_sets`
@@ -962,8 +1002,11 @@ async fn garmin_activities(
                     clock: SystemClock,
                 },
                 zone,
-            );
-            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
         }
         Command::Refusals => {
             let reporter = Refusals::new(
@@ -1501,8 +1544,11 @@ async fn withings_measurements(
         Command::Extract(access) => {
             collect_withings(access, landing, resumption, runs, (pool, database), walks).await
         }
-        Command::Normalise(zone) => {
-            let summary = withings_normalisation(pool, zone)?.normalise().await?;
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
+            let summary = withings_normalisation(pool, zone, terms)?
+                .normalise(rederivation)
+                .await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -1662,6 +1708,7 @@ fn hevy_walk(
 async fn hevy_normalisation(
     pool: SqlitePool,
     zone: OperatorZone,
+    terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     let overlay = SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
         .overlay()
@@ -1676,7 +1723,8 @@ async fn hevy_normalisation(
             clock: SystemClock,
         },
         zone,
-    ))
+    )
+    .under(terms))
 }
 
 /// The API root and a sign-in for it, from the application's own credential.
@@ -1735,6 +1783,7 @@ fn withings_walk(
 fn withings_normalisation(
     pool: SqlitePool,
     zone: OperatorZone,
+    terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     Ok(Normalisation::new(
         NormalisationPorts {
@@ -1749,7 +1798,8 @@ fn withings_normalisation(
             clock: SystemClock,
         },
         zone,
-    ))
+    )
+    .under(terms))
 }
 
 /// Withings' weigh-ins as `next` collects them (#409, #357): **once a day**.
@@ -1846,8 +1896,12 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
                 .await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(zone) => {
-            let summary = hevy_normalisation(pool, zone).await?.normalise().await?;
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, Some(HevyWorkoutLandingStore::STREAM)).await?;
+            let summary = hevy_normalisation(pool, zone, terms)
+                .await?
+                .normalise(rederivation)
+                .await?;
             Ok(Outcome::Derived(Box::new(summary)))
         }
         Command::Refusals => {
@@ -1913,7 +1967,8 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: SpreadsheetFileAccountReader::new(pool.clone())?,
@@ -1927,8 +1982,11 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
                     clock: SystemClock,
                 },
                 zone,
-            );
-            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
         }
         Command::Refusals => {
             let reporter = Refusals::new(
@@ -1988,7 +2046,8 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: BtwbExportAccountReader::new(pool.clone())?,
@@ -2002,8 +2061,11 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
                     clock: SystemClock,
                 },
                 zone,
-            );
-            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
         }
         Command::Refusals => {
             let reporter = Refusals::new(
@@ -2063,7 +2125,8 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone) => {
+        Command::Normalise(zone, rederivation) => {
+            let terms = terms(&pool, &zone, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: MyFitnessPalExportAccountReader::new(pool.clone())?,
@@ -2077,8 +2140,11 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
                     clock: SystemClock,
                 },
                 zone,
-            );
-            Ok(Outcome::Derived(Box::new(normalisation.normalise().await?)))
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
         }
         Command::Refusals => {
             let reporter = Refusals::new(
@@ -2138,7 +2204,7 @@ async fn wahoo_files(command: Command, database: &Path) -> Result<Outcome, Wirin
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(_) | Command::Refusals => Err(WiringError::NothingDerives {
+        Command::Normalise(..) | Command::Refusals => Err(WiringError::NothingDerives {
             stream: WahooFileLandingStore::STREAM,
         }),
         Command::Status => {

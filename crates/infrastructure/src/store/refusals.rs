@@ -14,7 +14,7 @@ use domain::{
     landing::{InvalidStream, LandingRecordId, LandingStream, SourceRecordId},
     normalised::{NormalisationRunId, Refusal, RefusalCount, RefusalLocus, RefusalReason},
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::{corrupt, normalisation_run_for_storage, store_error};
 
@@ -229,44 +229,43 @@ impl RefusalStore for SqliteRefusalStore {
             .map_err(|error| store_error(&error))?;
 
         let written = refusals.len();
-        for refusal in &refusals {
-            let (locus_kind, entry_index, set_index, group_id) = locus_columns(refusal.locus);
-            let landing_record_id = refusal.landed_as.as_i64();
-            let source_record_id = refusal.source_record_id.as_str();
-            let exercise = refusal.exercise.map(domain::gym::Exercise::as_str);
-            let reason = refusal.reason.as_str();
-            let kind = refusal.kind().as_str();
-            let detail = refusal.reason.detail();
-
-            sqlx::query!(
-                r#"
-                INSERT INTO normalisation_refusal (
-                    run_id, stream, landing_record_id, source_record_id,
-                    locus_kind, entry_index, set_index, group_id,
-                    exercise, reason, kind, detail
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-                run_id,
-                stream,
-                landing_record_id,
-                source_record_id,
-                locus_kind,
-                entry_index,
-                set_index,
-                group_id,
-                exercise,
-                reason,
-                kind,
-                detail
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
-
+        write_refusals(&mut tx, run_id, &stream, &refusals).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(RefusalCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<SourceRecordId>,
+        refusals: Vec<Refusal>,
+    ) -> Result<RefusalCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let removed = serde_json::to_string(
+            &removed
+                .iter()
+                .map(SourceRecordId::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|error| corrupt(&error))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        sqlx::query!(
+            "DELETE FROM normalisation_refusal \
+             WHERE stream = ? AND source_record_id IN (SELECT value FROM json_each(?))",
+            stream,
+            removed
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        write_refusals(&mut tx, run_id, &stream, &refusals).await?;
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(RefusalCount::from(refusals.len()))
     }
 
     async fn all(&self) -> Result<Vec<Refusal>, StoreError> {
@@ -312,6 +311,51 @@ impl RefusalStore for SqliteRefusalStore {
 
         Ok(refusals)
     }
+}
+
+/// Each refusal, as a row.
+async fn write_refusals(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    stream: &str,
+    refusals: &[Refusal],
+) -> Result<(), StoreError> {
+    for refusal in refusals {
+        let (locus_kind, entry_index, set_index, group_id) = locus_columns(refusal.locus);
+        let landing_record_id = refusal.landed_as.as_i64();
+        let source_record_id = refusal.source_record_id.as_str();
+        let exercise = refusal.exercise.map(domain::gym::Exercise::as_str);
+        let reason = refusal.reason.as_str();
+        let kind = refusal.kind().as_str();
+        let detail = refusal.reason.detail();
+
+        sqlx::query!(
+            r#"
+            INSERT INTO normalisation_refusal (
+                run_id, stream, landing_record_id, source_record_id,
+                locus_kind, entry_index, set_index, group_id,
+                exercise, reason, kind, detail
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            run_id,
+            stream,
+            landing_record_id,
+            source_record_id,
+            locus_kind,
+            entry_index,
+            set_index,
+            group_id,
+            exercise,
+            reason,
+            kind,
+            detail
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
 }
 
 /// The stored `kind` is derived from the reason, and this is what keeps the two

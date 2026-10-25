@@ -135,7 +135,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
         },
         zone()?,
     )
-    .normalise()
+    .normalise(application::Rederivation::Whole)
     .await?;
 
     Normalisation::new(
@@ -149,7 +149,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
         },
         zone()?,
     )
-    .normalise()
+    .normalise(application::Rederivation::Whole)
     .await?;
 
     Ok((pool, directory))
@@ -307,7 +307,7 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
             },
             zone().expect("a zone"),
         )
-        .normalise()
+        .normalise(application::Rederivation::Whole)
         .await
         .expect("re-deriving succeeds with a canonical layer in the store");
 
@@ -370,7 +370,7 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
             },
             zone().expect("a zone"),
         )
-        .normalise()
+        .normalise(application::Rederivation::Whole)
         .await
         .expect("re-deriving succeeds");
 

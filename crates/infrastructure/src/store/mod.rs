@@ -31,6 +31,7 @@ pub mod gym_mesocycle;
 pub mod history;
 pub mod landing;
 mod manual_session;
+mod marks;
 pub mod myfitnesspal_export_landing;
 pub mod myfitnesspal_normalised;
 pub mod normalisation_run_log;
@@ -165,6 +166,13 @@ pub(crate) fn served_by_a_feed(provenance: &Provenance) -> Result<&EventProvenan
 
 /// SQLite counts rows in `i64` and a run id does not go negative, so the two
 /// representations meet here and nowhere else.
+/// Row ids as the JSON array a statement reads them from with `json_each`, so a
+/// list of any length is one bound parameter (#571).
+fn ids_json(ids: impl IntoIterator<Item = i64>) -> String {
+    let ids: Vec<String> = ids.into_iter().map(|id| id.to_string()).collect();
+    format!("[{}]", ids.join(","))
+}
+
 fn run_id_for_storage(run: RunId) -> Result<i64, StoreError> {
     i64::try_from(run.as_u64()).map_err(|_| StoreError::Corrupt {
         detail: format!("run id {run} is larger than the store can hold"),

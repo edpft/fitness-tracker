@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT landing_record_id AS \"id!: i64\" FROM cycling_session\n             WHERE landing_record_id IN (SELECT value FROM json_each(?))\n                OR landing_record_id IN (SELECT session FROM bike_plus_ride\n                                          WHERE landing_record_id IN (SELECT value FROM json_each(?)))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "cycling_session",
+            "name": "landing_record_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b436bd9ed9fc6907a5a9d8c68b16fc8399fe90f4815de6530b20499575846867"
+}

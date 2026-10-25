@@ -42,7 +42,7 @@ async fn normalise_hevy(pool: &SqlitePool) -> Fallible<NormalisationRunId> {
         },
         corpus::zone()?,
     )
-    .normalise()
+    .normalise(application::Rederivation::Whole)
     .await?;
     Ok(summary.run_id)
 }
@@ -69,9 +69,12 @@ fn a_canonical_layers_inputs_move_with_the_derivation_that_wrote_them() {
 
     assert_eq!(first, again);
     assert_ne!(first, after);
-    assert_eq!(
-        after,
-        DerivedFrom::from(format!("hevy.workouts {}", run.as_u64()))
+    // The run, and how many of its rows stand (#571).
+    assert!(
+        after
+            .as_str()
+            .starts_with(&format!("hevy.workouts {} (", run.as_u64())),
+        "{after:?}"
     );
     assert_eq!(weigh_ins, DerivedFrom::from(String::new()));
 }
@@ -100,6 +103,7 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
                     retractions_read: 0.into(),
                     records_refused: 0.into(),
                     refusals_recorded: 0.into(),
+                    records_covered: 0.into(),
                 },
             )
         };

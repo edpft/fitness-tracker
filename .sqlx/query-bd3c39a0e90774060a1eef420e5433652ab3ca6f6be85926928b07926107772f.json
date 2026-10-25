@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM resting_heart_rate WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "bd3c39a0e90774060a1eef420e5433652ab3ca6f6be85926928b07926107772f"
+}

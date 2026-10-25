@@ -278,7 +278,8 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
         },
         corpus::zone()?,
     );
-    application::WorkoutNormaliser::normalise(&normalisation).await?;
+    application::WorkoutNormaliser::normalise(&normalisation, application::Rederivation::Whole)
+        .await?;
 
     // The performed record is read through the canonical layer, which is a
     // derivation of what the step above has just written (#350).

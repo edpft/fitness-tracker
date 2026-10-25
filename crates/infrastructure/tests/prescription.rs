@@ -61,7 +61,9 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
         },
         corpus::zone()?,
     );
-    let _summary: NormalisationSummary = normalisation.normalise().await?;
+    let _summary: NormalisationSummary = normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?;
 
     // The performed record is read through the canonical layer, which is a
     // derivation of what the step above has just written (#350).

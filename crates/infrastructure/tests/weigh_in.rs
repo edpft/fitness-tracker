@@ -14,6 +14,9 @@ use domain::{
 use infrastructure::withings::{WithingsWeighInTranslator, group};
 use serde_json::{Value, json};
 
+#[path = "support/layers.rs"]
+mod layers;
+
 type Failure = Box<dyn std::error::Error>;
 
 const AT: i64 = 1_789_000_000;
@@ -215,5 +218,124 @@ fn the_other_two_ecg_codes_are_the_ones_the_app_showed() {
             panic!("no weigh-in: {translated:?}");
         };
         assert_eq!(entity.heart().and_then(|heart| heart.rhythm), Some(rhythm));
+    }
+}
+
+// --- Deriving only what landed since (#571) ---------------------------------
+
+/// A group stamped at another second than [`AT`].
+fn at(mut group: Value, date: i64) -> Value {
+    if let Some(stamp) = group.get_mut("date") {
+        *stamp = json!(date);
+    }
+    group
+}
+
+/// Groups into the store, each under the source id given.
+async fn land(pool: &sqlx::SqlitePool, groups: Vec<(&str, Value)>) -> Result<(), Failure> {
+    use application::{ExtractionRunLog as _, LandingStore as _};
+
+    let landing = infrastructure::WithingsMeasurementLandingStore::new(pool.clone())?;
+    let runs = infrastructure::SqliteExtractionRunLog::new(pool.clone());
+    let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+    let mut records = Vec::new();
+    for (id, payload) in groups {
+        records.push(LandingRecord::land(
+            LandingStream::try_from("withings.measurements")?,
+            FetchedAt::try_from("2026-09-17T08:00:00Z")?,
+            SourceRecordId::try_from(id)?,
+            EventProvenance::new(
+                Endpoint::try_from("/measure")?,
+                EventKind::try_from("updated")?,
+                None,
+            )
+            .into(),
+            RawPayload::try_from(serde_json::to_vec(&payload)?)?,
+        ));
+    }
+    landing.append(run, records).await?;
+    Ok(())
+}
+
+async fn derive(
+    pool: &sqlx::SqlitePool,
+    rederivation: application::Rederivation,
+) -> Result<usize, Failure> {
+    use application::WorkoutNormaliser as _;
+
+    struct EpochClock;
+    impl application::Clock for EpochClock {
+        fn now(&self) -> FetchedAt {
+            FetchedAt::EPOCH
+        }
+    }
+    let summary = application::normalise::Normalisation::new(
+        application::normalise::NormalisationPorts {
+            raw: infrastructure::WithingsWeighInAccountReader::new(pool.clone())?,
+            translator: WithingsWeighInTranslator,
+            workouts: infrastructure::SqliteWeighInStore::new(pool.clone())?,
+            refusals: infrastructure::SqliteRefusalStore::new(
+                pool.clone(),
+                "withings.measurements",
+            )?,
+            runs: infrastructure::SqliteNormalisationRunLog::new(pool.clone()),
+            clock: EpochClock,
+        },
+        OperatorZone::try_from("Europe/London")?,
+    )
+    .normalise(rederivation)
+    .await?;
+    Ok(summary.workouts_written.as_usize())
+}
+
+fn first_batch() -> Vec<(&'static str, Value)> {
+    vec![
+        ("a-composition", composition()),
+        ("a-heart", heart(9)),
+        ("b-composition", at(composition(), AT + 86_400)),
+    ]
+}
+
+/// The first weigh-in's vascular group landing late, and a new weigh-in.
+fn second_batch() -> Vec<(&'static str, Value)> {
+    vec![
+        ("a-vascular", vascular()),
+        ("c-composition", at(composition(), AT + 2 * 86_400)),
+    ]
+}
+
+#[test]
+fn an_incremental_derivation_writes_what_a_whole_one_would() {
+    let outcome: Result<(), Failure> = (|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async {
+            let directory = tempfile::tempdir()?;
+            let whole = infrastructure::connect(&directory.path().join("whole.db")).await?;
+            land(&whole, first_batch()).await?;
+            land(&whole, second_batch()).await?;
+            derive(&whole, application::Rederivation::Whole).await?;
+
+            let incremental =
+                infrastructure::connect(&directory.path().join("incremental.db")).await?;
+            land(&incremental, first_batch()).await?;
+            derive(&incremental, application::Rederivation::Incremental).await?;
+            land(&incremental, second_batch()).await?;
+            let written = derive(&incremental, application::Rederivation::Incremental).await?;
+
+            assert_eq!(
+                layers::dump(&incremental).await?,
+                layers::dump(&whole).await?
+            );
+            assert_eq!(
+                written, 2,
+                "the weigh-in its vascular group joined, and the new one"
+            );
+            Ok(())
+        })
+    })();
+    if let Err(error) = outcome {
+        panic!("{error}");
     }
 }

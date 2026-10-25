@@ -59,7 +59,9 @@ async fn derive(pool: &SqlitePool) -> Result<NormalisationSummary, Box<dyn std::
         },
         corpus::zone()?,
     );
-    Ok(normalisation.normalise().await?)
+    Ok(normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?)
 }
 
 /// Everything the layer holds, in a form two derivations can be compared by.

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM normalisation_refusal WHERE stream = ? AND source_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8e76fffc915e7f4cfd287ae1c2bfc3b9ce01e13127bfb08432794a1c4b2d2ccf"
+}

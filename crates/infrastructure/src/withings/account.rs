@@ -32,6 +32,10 @@ impl SourceAccount for WeighInAccount {
         self.groups.count().saturating_add(self.superseded.len())
     }
 
+    fn landed(&self) -> Vec<&LandedRecord> {
+        self.groups.iter().chain(&self.superseded).collect()
+    }
+
     fn superseded(&self) -> usize {
         self.superseded.len()
     }

@@ -78,7 +78,9 @@ pub async fn with_programme(
         },
         corpus::zone()?,
     );
-    let _summary: NormalisationSummary = normalisation.normalise().await?;
+    let _summary: NormalisationSummary = normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?;
     canonicalise(&pool).await?;
 
     Authoring::new(

@@ -67,6 +67,10 @@ impl SourceAccount for MyFitnessPalExports {
     fn records(&self) -> usize {
         self.files.count()
     }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        self.files.iter().collect()
+    }
 }
 
 /// Reads the weigh-ins out of MyFitnessPal's exports.
