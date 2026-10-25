@@ -22,6 +22,7 @@ use domain::{
         Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, Resistance,
         RideSample, RideVenue, Speed, Watts,
     },
+    device::{DeviceName, Sighting},
     measure::{BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres},
     normalised::{OperatorZone, StartedAt},
     sequence::NonEmpty,
@@ -56,6 +57,8 @@ struct RideRow {
     distance_millimetres: i64,
     average_power_watts: i64,
     heart_rate_declared_missing_seconds: Option<i64>,
+    heart_rate_device: Option<String>,
+    heart_rate_device_name: Option<String>,
 }
 
 /// The samples and heart rate of every ride, keyed as [`RideRow::key`] is.
@@ -96,7 +99,8 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
                    r.zone AS "zone!: String",
                    r.venue_reference, r.venue_called,
                    r.duration_seconds, r.distance_millimetres, r.average_power_watts,
-                   r.heart_rate_declared_missing_seconds
+                   r.heart_rate_declared_missing_seconds,
+                   r.heart_rate_device, r.heart_rate_device_name
               FROM cycling_session AS s
               JOIN bike_plus_ride AS r ON r.session = s.landing_record_id
              ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id
@@ -226,6 +230,9 @@ struct CanonicalRideRow {
     heart_rate_from: Option<i64>,
     heart_rate_declared_missing_seconds: Option<i64>,
     heart_rate_declared_missing_from: Option<i64>,
+    heart_rate_device: Option<String>,
+    heart_rate_device_name: Option<String>,
+    heart_rate_device_from: Option<i64>,
 }
 
 impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
@@ -254,7 +261,9 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
                    r.samples_normalised_session AS "samples_from!: i64",
                    r.heart_rate_normalised_session AS "heart_rate_from: i64",
                    r.heart_rate_declared_missing_seconds AS "heart_rate_declared_missing_seconds: i64",
-                   r.heart_rate_declared_missing_normalised_session AS "heart_rate_declared_missing_from: i64"
+                   r.heart_rate_declared_missing_normalised_session AS "heart_rate_declared_missing_from: i64",
+                   r.heart_rate_device, r.heart_rate_device_name,
+                   r.heart_rate_device_normalised_session AS "heart_rate_device_from: i64"
               FROM canonical_cycling_session AS s
               JOIN canonical_bike_plus_ride AS r ON r.session = s.id
              ORDER BY s.id, r.position
@@ -376,8 +385,21 @@ fn canonical_ride_of(
         _ => None,
     };
 
+    let started_at = StartedAt::new(instant, zone);
+    let heart_rate_device = match (
+        monitor(
+            row.heart_rate_device,
+            row.heart_rate_device_name,
+            &started_at,
+        )?,
+        row.heart_rate_device_from,
+    ) {
+        (Some(monitor), Some(id)) => Some(Attributed::new(monitor, from(id)?)),
+        _ => None,
+    };
+
     Ok(CanonicalBikePlusRide::new(CanonicalRideRecord {
-        started_at: Attributed::new(StartedAt::new(instant, zone), from(row.started_at_from)?),
+        started_at: Attributed::new(started_at, from(row.started_at_from)?),
         at: Attributed::new(venue, from(row.venue_from)?),
         duration: Attributed::new(
             seconds_from_storage(row.duration_seconds)?,
@@ -396,6 +418,7 @@ fn canonical_ride_of(
         samples: Attributed::new(samples, from(row.samples_from)?),
         heart_rate,
         heart_rate_declared_missing,
+        heart_rate_device,
     }))
 }
 
@@ -584,6 +607,15 @@ async fn write_ride(
     let missing_from = ride
         .heart_rate_declared_missing()
         .map(|missing| missing.normalised_session().as_i64());
+    let device = ride
+        .heart_rate_device()
+        .map(|seen| seen.value().device.to_string());
+    let device_name = ride
+        .heart_rate_device()
+        .map(|seen| seen.value().name.as_str().to_owned());
+    let device_from = ride
+        .heart_rate_device()
+        .map(|seen| seen.normalised_session().as_i64());
 
     sqlx::query!(
         r#"
@@ -595,9 +627,10 @@ async fn write_ride(
             distance_millimetres, distance_normalised_session,
             average_power_watts, average_power_normalised_session,
             samples_normalised_session, heart_rate_normalised_session,
-            heart_rate_declared_missing_seconds, heart_rate_declared_missing_normalised_session
+            heart_rate_declared_missing_seconds, heart_rate_declared_missing_normalised_session,
+            heart_rate_device, heart_rate_device_name, heart_rate_device_normalised_session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         session,
         position,
@@ -618,6 +651,9 @@ async fn write_ride(
         heart_rate_from,
         missing,
         missing_from,
+        device,
+        device_name,
+        device_from,
     )
     .execute(&mut **tx)
     .await
@@ -793,8 +829,16 @@ fn ride_of(
         .and_then(|beats| NonEmpty::new(beats).ok())
         .map(|beats| Attributed::new(HeartRateSeries::new(beats), id));
 
+    let started_at = StartedAt::new(instant, zone);
+    let heart_rate_device = monitor(
+        row.heart_rate_device,
+        row.heart_rate_device_name,
+        &started_at,
+    )?
+    .map(|monitor| Attributed::new(monitor, id));
+
     Ok(CanonicalBikePlusRide::new(CanonicalRideRecord {
-        started_at: Attributed::new(StartedAt::new(instant, zone), id),
+        started_at: Attributed::new(started_at, id),
         at: Attributed::new(venue, id),
         duration: Attributed::new(seconds_from_storage(row.duration_seconds)?, id),
         distance: Attributed::new(
@@ -814,7 +858,24 @@ fn ride_of(
             .map(seconds_from_storage)
             .transpose()?
             .map(|missing| Attributed::new(missing, id)),
+        heart_rate_device,
     }))
+}
+
+/// The monitor a ride's row names, as Peloton's account named it.
+fn monitor(
+    device: Option<String>,
+    name: Option<String>,
+    at: &StartedAt,
+) -> Result<Option<Sighting>, StoreError> {
+    let (Some(device), Some(name)) = (device, name) else {
+        return Ok(None);
+    };
+    Ok(Some(crate::peloton::paired::monitor(
+        device.parse().map_err(|e| corrupt(&e))?,
+        DeviceName::try_from(name).map_err(|e| corrupt(&e))?,
+        at.clone(),
+    )))
 }
 
 fn sample(

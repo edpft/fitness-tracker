@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!: i64\",\n                   endpoint AS \"endpoint!: String\",\n                   fetched_at AS \"fetched_at!: String\",\n                   source_record_id AS \"source_record_id!: String\",\n                   event_kind AS \"event_kind!: String\",\n                   event_time AS \"event_time: String\",\n                   payload AS \"payload!: Vec<u8>\"\n            FROM peloton_account_landing\n            ORDER BY id ASC\n            ",
+  "query": "\n        SELECT id AS \"id!: i64\",\n               endpoint AS \"endpoint!: String\",\n               fetched_at AS \"fetched_at!: String\",\n               source_record_id AS \"source_record_id!: String\",\n               event_kind AS \"event_kind!: String\",\n               event_time AS \"event_time: String\",\n               payload AS \"payload!: Vec<u8>\"\n        FROM peloton_account_landing\n        ORDER BY id ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "821f65161c84ddfd3d08fccc3e42355ba7a1a29947d432a6ea10fe22d6b859c5"
+  "hash": "4d9330aa4299e8588f4d08fcade96bd888313c3dd7a93906e163fcff7fd6a324"
 }

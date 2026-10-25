@@ -35,7 +35,7 @@ use domain::{
     cycling::{
         BikePlusRide, ComposedFrom, PerformedSession, RideRecord, RideSample, RideVenue, Watts,
     },
-    landing::EventKind,
+    landing::{EventKind, LandedRecord},
     measure::{
         BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres, PositiveDuration,
     },
@@ -130,7 +130,7 @@ impl Translator for PelotonSessionTranslator {
         // be this layer inventing what the source did not say.
         let mut rides = Vec::with_capacity(account.rides().count());
         for landed in account.rides().iter() {
-            match ride_from(landed, zone) {
+            match ride_from(landed, account.pairings(), zone) {
                 Ok((ride, noted)) => {
                     for reason in noted {
                         scribe.note(RefusalLocus::Record, reason);
@@ -244,6 +244,7 @@ fn described(roles: &[RideRole]) -> String {
 /// One ride, from the workout record and the graph that carries its samples.
 fn ride_from(
     landed: &LandedRide,
+    pairings: &[LandedRecord],
     zone: &OperatorZone,
 ) -> Result<(BikePlusRide, Vec<RefusalReason>), RefusalReason> {
     let record = &landed.ride;
@@ -288,10 +289,11 @@ fn ride_from(
     // produced are unaffected either way. A problem with it is carried back
     // rather than raised, so it costs the declaration and not the ride.
     let (heart_rate, heart_rate_declared_missing, noted) = heart_rate_of(&graph);
+    let started_at = StartedAt::new(instant, zone.clone());
 
     Ok((
         BikePlusRide::new(RideRecord {
-            started_at: StartedAt::new(instant, zone.clone()),
+            started_at: started_at.clone(),
             at,
             duration,
             distance,
@@ -299,6 +301,7 @@ fn ride_from(
             samples,
             heart_rate,
             heart_rate_declared_missing,
+            heart_rate_device: super::paired::ridden_with(pairings, &started_at),
             provenance: record.provenance().clone(),
             source_record_id: record.source_record_id().clone(),
             landed_as: ComposedFrom {

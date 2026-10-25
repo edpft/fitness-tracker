@@ -923,6 +923,7 @@ fn ridden(
         samples: NonEmpty::of(sample, vec![]),
         heart_rate: None,
         heart_rate_declared_missing: None,
+        heart_rate_device: None,
         provenance: EventProvenance::new(
             Endpoint::try_from("/api/user/u/workouts")?,
             EventKind::Updated,

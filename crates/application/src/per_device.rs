@@ -44,6 +44,10 @@ where
 
     /// Last night's average HRV, by morning, one series per watch.
     ///
+    /// **On the watch each night's own record names** (#569): Garmin names it
+    /// by serial on every night it has HRV for, and the register, Garmin's
+    /// recordings, says what that watch is called.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.

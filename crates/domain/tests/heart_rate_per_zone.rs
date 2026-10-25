@@ -45,6 +45,15 @@ fn ftp() -> Fallible<Ftp> {
 
 /// A ride whose power and heart rate are given second by second, from 1.
 fn ride(power: &[(u64, u32)], beats: Option<&[(u64, u32)]>) -> Fallible<CanonicalBikePlusRide> {
+    ridden_with(power, beats, None)
+}
+
+/// As [`ride`], ridden with the monitor Peloton's account names.
+fn ridden_with(
+    power: &[(u64, u32)],
+    beats: Option<&[(u64, u32)]>,
+    monitor: Option<Sighting>,
+) -> Fallible<CanonicalBikePlusRide> {
     let id = NormalisedSessionId::try_from(1)?;
     let samples = power
         .iter()
@@ -84,6 +93,7 @@ fn ride(power: &[(u64, u32)], beats: Option<&[(u64, u32)]>) -> Fallible<Canonica
         samples: Attributed::new(NonEmpty::new(samples)?, id),
         heart_rate,
         heart_rate_declared_missing: None,
+        heart_rate_device: monitor.map(|monitor| Attributed::new(monitor, id)),
     }))
 }
 
@@ -276,4 +286,56 @@ fn a_ride_carries_the_one_device_in_use_and_otherwise_none() {
             .sent_by,
         SentBy::Unknown
     );
+}
+
+/// The monitor Peloton's account names: ANT+ 3629.
+fn paired_monitor() -> Fallible<Sighting> {
+    Ok(Sighting {
+        device: DeviceIdentifier::Ant(AntDeviceNumber::of_serial(3629).ok_or("an ANT+ number")?),
+        also: Vec::new(),
+        name: DeviceName::try_from("Device: 3629")?,
+        role: Role::Paired,
+        measured: BTreeSet::from([Measurand::HeartRate]),
+        sent: BTreeSet::from([Measurand::HeartRate]),
+        at: started(RIDE_DAY, 19)?,
+        source: "Peloton",
+        worn: false,
+    })
+}
+
+/// #569: a ride Peloton's account names a monitor for is placed on it, under
+/// the name of the device the register knows by that number.
+#[test]
+fn a_ride_ridden_with_a_named_monitor_is_placed_on_it() {
+    let beats: Vec<(u64, u32)> = (1..=300).map(|at| (at, 120)).collect();
+    let session = main_ride(
+        ridden_with(
+            &held(1, 300, 140),
+            Some(&beats),
+            Some(paired_monitor().expect("a monitor")),
+        )
+        .expect("a ride"),
+    );
+
+    let two = register(
+        &[
+            watch(3_483_897_389, "Forerunner 165", date(2026, 9, 1)).expect("a sighting"),
+            watch(3_483_897_389, "Forerunner 165", date(2026, 10, 31)).expect("a sighting"),
+            watch(3_960_966_298, "Vivoactive 3", date(2026, 9, 1)).expect("a sighting"),
+            watch(3_960_966_298, "Vivoactive 3", date(2026, 10, 31)).expect("a sighting"),
+        ],
+        Wear::default(),
+    );
+    let SentBy::Device(device) = of(&session, &two).expect("a ride's heart rate").sent_by else {
+        panic!("the account names the monitor, so two watches in use is no question");
+    };
+    assert_eq!(device.name().as_str(), "Forerunner 165");
+
+    let SentBy::Device(device) = of(&session, &nobody())
+        .expect("a ride's heart rate")
+        .sent_by
+    else {
+        panic!("a monitor the register does not hold is still the one named");
+    };
+    assert_eq!(device.name().as_str(), "Device: 3629");
 }

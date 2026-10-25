@@ -195,7 +195,7 @@ async fn heart_rate(
         Ok(store) => store,
         Err(error) => return chart::unreadable(&error.to_string()),
     };
-    let rides = configurator::heart_rate::rides(&store, &setting.zone).await;
+    let rides = configurator::heart_rate::rides(&store).await;
     let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
     match rides.and_then(|rides| Ok((rides, ranges?))) {
@@ -268,7 +268,7 @@ async fn overnight_hrv(
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let trended = configurator::per_device::overnight_hrv_trend(&store, &setting.zone).await;
+    let trended = configurator::per_device::overnight_hrv_trend(&store).await;
     let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
     match trended.and_then(|trended| Ok((trended, ranges?))) {
@@ -295,7 +295,7 @@ async fn resting_heart_rate(
         Ok(store) => store,
         Err(error) => return daily::unreadable(shown, &error.to_string()),
     };
-    let trended = configurator::per_device::resting_heart_rate_trend(&store, &setting.zone).await;
+    let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
     let ranges = configurator::ranges::today(&store, &setting.zone).await;
     store.close().await;
     match trended.and_then(|trended| Ok((trended, ranges?))) {

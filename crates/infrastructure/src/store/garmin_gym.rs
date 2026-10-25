@@ -291,7 +291,7 @@ impl NormalisedEntityStore for SqliteMeasuredGymSessionStore {
 ///
 /// **One workout per session**, as a log's is. A watch files one recording per
 /// session and the operator never split one across two.
-async fn write_session(
+pub(super) async fn write_session(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
     stream: &str,

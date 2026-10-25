@@ -14,6 +14,7 @@
 
 pub mod account;
 pub mod activities;
+pub mod activity;
 pub mod auth;
 mod connect;
 pub mod corrections;
@@ -28,10 +29,13 @@ pub mod latest;
 pub mod mapping;
 pub mod months;
 pub mod resting;
+pub mod sleep;
 pub mod translate;
+pub mod wear;
 
 pub use account::{ActivityAccount, DayAccount, NightAccount, days, nights};
 pub use activities::{ActivityPage, GarminActivities};
+pub use activity::{ActivityDevices, GarminActivityEntity, GarminActivityTranslator};
 pub use auth::{GarminAuth, GarminCredentials};
 pub use corrections::{FoundSet, GarminRecordedSets};
 pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
@@ -40,6 +44,7 @@ pub use gym::GarminGymTranslator;
 pub use hrv::{GarminHrv, HrvWalk};
 pub use resting::GarminRestingHeartRateTranslator;
 pub use translate::GarminHrvTranslator;
+pub use wear::{GarminDailyHeartRateTranslator, GarminDayEntity, WearDay};
 
 use application::SourceError;
 

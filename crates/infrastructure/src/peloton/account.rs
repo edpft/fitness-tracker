@@ -10,6 +10,8 @@
 //! and not beside the query that fills it. What one source's account of one
 //! session consists of is a fact about that source.
 
+use std::sync::Arc;
+
 use application::SourceAccount;
 use domain::{landing::LandedRecord, sequence::NonEmpty};
 
@@ -52,6 +54,12 @@ pub struct SessionAccount {
     /// two. They are carried rather than dropped because a record with no
     /// outcome is what § 38's reconciliation exists to catch.
     superseded: Vec<LandedRide>,
+    /// Every landed answer from Peloton's account, oldest first: what the bike
+    /// was paired with as of each time it was asked (#569).
+    ///
+    /// **Shared by every session and counted by none**: an answer is about
+    /// the account rather than any one session, so it is no session's record.
+    pairings: Arc<[LandedRecord]>,
 }
 
 impl SessionAccount {
@@ -64,9 +72,22 @@ impl SessionAccount {
     /// `superseded` is the earlier servings of those same rides, carried only
     /// so that they are counted.
     pub fn of(rides: Vec<LandedRide>, superseded: Vec<LandedRide>) -> Option<Self> {
-        NonEmpty::new(rides)
-            .ok()
-            .map(|rides| Self { rides, superseded })
+        NonEmpty::new(rides).ok().map(|rides| Self {
+            rides,
+            superseded,
+            pairings: Arc::from([]),
+        })
+    }
+
+    /// This session, with every answer Peloton's account has given.
+    #[must_use]
+    pub fn paired(self, pairings: Arc<[LandedRecord]>) -> Self {
+        Self { pairings, ..self }
+    }
+
+    /// Every landed answer from the account, oldest first.
+    pub fn pairings(&self) -> &[LandedRecord] {
+        &self.pairings
     }
 
     /// The session's rides, in the order they were ridden.

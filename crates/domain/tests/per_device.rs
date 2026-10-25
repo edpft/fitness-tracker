@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use domain::{
-    analytical::per_device::{Reading, SentBy, per_device},
+    analytical::per_device::{Reading, Recorded, SentBy, per_device},
     device::{
         DeviceIdentifier, DeviceName, Measurand, Register, Role, SerialNumber, Sighting, Wear,
         register,
@@ -50,10 +50,23 @@ fn devices(wear: Wear) -> Result<Register, Failure> {
     ))
 }
 
-fn reading(on: Date, beats: u32) -> Result<Reading<BeatsPerMinute>, Failure> {
-    Ok(Reading {
-        on,
-        value: BeatsPerMinute::new(beats)?,
+fn reading(on: Date, beats: u32) -> Result<Recorded<BeatsPerMinute>, Failure> {
+    Ok(Recorded {
+        reading: Reading {
+            on,
+            value: BeatsPerMinute::new(beats)?,
+        },
+        by: None,
+    })
+}
+
+/// A reading whose own record names the watch.
+fn named_by(on: Date, beats: u32, serial: &str) -> Result<Recorded<BeatsPerMinute>, Failure> {
+    Ok(Recorded {
+        by: Some(DeviceIdentifier::Serial(SerialNumber::try_from(
+            serial.to_owned(),
+        )?)),
+        ..reading(on, beats)?
     })
 }
 
@@ -117,4 +130,41 @@ fn a_watch_not_worn_that_day_did_not_take_the_reading() {
         panic!("{} series, not one", series.len());
     };
     assert_eq!(only.sent_by, SentBy::Unknown);
+}
+
+/// #569: a night whose own record names the watch is that watch's, after its
+/// last activity as much as before it, and whatever the register would say.
+#[test]
+fn a_reading_its_own_record_names_is_that_device_s() {
+    let register = devices(Wear::default()).expect("a register");
+
+    let series = per_device(
+        vec![
+            named_by(date(2026, 10, 20), 50, "3483897389").expect("a reading"),
+            named_by(date(2024, 12, 22), 53, "3483897389").expect("a reading"),
+            named_by(date(2024, 10, 19), 55, "3498069814").expect("a reading"),
+        ],
+        Measurand::HeartRate,
+        &register,
+    );
+
+    let shape: Vec<(String, Vec<Date>)> = series
+        .iter()
+        .map(|one| {
+            (
+                named(&one.sent_by),
+                one.readings.iter().map(|reading| reading.on).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            ("serial/3498069814".to_owned(), vec![date(2024, 10, 19)]),
+            (
+                "Forerunner 165".to_owned(),
+                vec![date(2024, 12, 22), date(2026, 10, 20)]
+            ),
+        ]
+    );
 }

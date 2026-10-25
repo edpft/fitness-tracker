@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_bike_plus_ride (\n            session, position, role,\n            started_at_utc, zone, started_at_normalised_session,\n            venue_reference, venue_called, venue_normalised_session,\n            duration_seconds, duration_normalised_session,\n            distance_millimetres, distance_normalised_session,\n            average_power_watts, average_power_normalised_session,\n            samples_normalised_session, heart_rate_normalised_session,\n            heart_rate_declared_missing_seconds, heart_rate_declared_missing_normalised_session,\n            heart_rate_device, heart_rate_device_name, heart_rate_device_normalised_session\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 22
+    },
+    "nullable": []
+  },
+  "hash": "78b39f071d092f9721527ba43d4cab6e9d282d2cfb205a32b731154f20d831cd"
+}

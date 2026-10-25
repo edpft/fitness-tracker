@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.id AS \"session!: i64\", s.kind AS \"kind!: String\",\n                   r.position AS \"position!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\", r.zone AS \"zone!: String\",\n                   r.started_at_normalised_session AS \"started_at_from!: i64\",\n                   r.venue_reference AS \"venue_reference!: String\",\n                   r.venue_called AS \"venue_called!: String\",\n                   r.venue_normalised_session AS \"venue_from!: i64\",\n                   r.duration_seconds AS \"duration_seconds!: i64\",\n                   r.duration_normalised_session AS \"duration_from!: i64\",\n                   r.distance_millimetres AS \"distance_millimetres!: i64\",\n                   r.distance_normalised_session AS \"distance_from!: i64\",\n                   r.average_power_watts AS \"average_power_watts!: i64\",\n                   r.average_power_normalised_session AS \"average_power_from!: i64\",\n                   r.samples_normalised_session AS \"samples_from!: i64\",\n                   r.heart_rate_normalised_session AS \"heart_rate_from: i64\",\n                   r.heart_rate_declared_missing_seconds AS \"heart_rate_declared_missing_seconds: i64\",\n                   r.heart_rate_declared_missing_normalised_session AS \"heart_rate_declared_missing_from: i64\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             ORDER BY s.id, r.position\n            ",
+  "query": "\n            SELECT s.id AS \"session!: i64\", s.kind AS \"kind!: String\",\n                   r.position AS \"position!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\", r.zone AS \"zone!: String\",\n                   r.started_at_normalised_session AS \"started_at_from!: i64\",\n                   r.venue_reference AS \"venue_reference!: String\",\n                   r.venue_called AS \"venue_called!: String\",\n                   r.venue_normalised_session AS \"venue_from!: i64\",\n                   r.duration_seconds AS \"duration_seconds!: i64\",\n                   r.duration_normalised_session AS \"duration_from!: i64\",\n                   r.distance_millimetres AS \"distance_millimetres!: i64\",\n                   r.distance_normalised_session AS \"distance_from!: i64\",\n                   r.average_power_watts AS \"average_power_watts!: i64\",\n                   r.average_power_normalised_session AS \"average_power_from!: i64\",\n                   r.samples_normalised_session AS \"samples_from!: i64\",\n                   r.heart_rate_normalised_session AS \"heart_rate_from: i64\",\n                   r.heart_rate_declared_missing_seconds AS \"heart_rate_declared_missing_seconds: i64\",\n                   r.heart_rate_declared_missing_normalised_session AS \"heart_rate_declared_missing_from: i64\",\n                   r.heart_rate_device, r.heart_rate_device_name,\n                   r.heart_rate_device_normalised_session AS \"heart_rate_device_from: i64\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             ORDER BY s.id, r.position\n            ",
   "describe": {
     "columns": [
       {
@@ -211,6 +211,39 @@
             "name": "heart_rate_declared_missing_normalised_session"
           }
         }
+      },
+      {
+        "name": "heart_rate_device",
+        "ordinal": 19,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "heart_rate_device"
+          }
+        }
+      },
+      {
+        "name": "heart_rate_device_name",
+        "ordinal": 20,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "heart_rate_device_name"
+          }
+        }
+      },
+      {
+        "name": "heart_rate_device_from: i64",
+        "ordinal": 21,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "heart_rate_device_normalised_session"
+          }
+        }
       }
     ],
     "parameters": {
@@ -235,8 +268,11 @@
       false,
       true,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "18e08bd3a35dff5b9afc8fdfed3ceaeba32098869a2e078113df33c3ebb9d078"
+  "hash": "1748ce9d0aff8986c5af5a9380494e6a5a5bf8499e53929af32ad9ed2b66687f"
 }

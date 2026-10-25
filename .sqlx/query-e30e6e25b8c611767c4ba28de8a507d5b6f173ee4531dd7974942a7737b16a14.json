@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO device_sighting (\n                stream, landing_record_id, source_record_id, device, name, role,\n                worn, at_utc, zone, run_id\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "device_sighting",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e30e6e25b8c611767c4ba28de8a507d5b6f173ee4531dd7974942a7737b16a14"
+}

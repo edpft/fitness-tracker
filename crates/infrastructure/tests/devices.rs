@@ -1,10 +1,14 @@
-//! Which device sent a Bike+ ride's heart rate (#427), through the use case
-//! over the real store: Garmin's recordings and Peloton's account.
+//! Which device sent a reading no record names (#427), through the use case
+//! over the real store: Garmin's recordings and days, normalised (#569).
 //!
 //! The serial numbers and dates are the operator's; the recordings are built
 //! here, in the shape his landed ones hold.
 
-use application::{ExtractionRunLog as _, LandingStore, devices::DeviceRegister};
+use application::{
+    ExtractionRunLog as _, LandingStore, WorkoutNormaliser as _,
+    devices::DeviceRegister,
+    normalise::{Normalisation, NormalisationPorts},
+};
 use domain::{
     device::{Device, DeviceIdentifier, InUse, Measurand, Register, SerialNumber},
     landing::{
@@ -14,9 +18,11 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminDailyHeartRateLandingStore,
-    GarminRecordedDevices, GarminWear, PelotonAccountLandingStore, PelotonRecordedDevices,
-    SqliteExtractionRunLog, connect,
+    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminActivityTranslator,
+    GarminDailyHeartRateAccountReader, GarminDailyHeartRateLandingStore,
+    GarminDailyHeartRateTranslator, GarminGymAccountReader, GarminRecordedDevices, GarminWear,
+    PelotonAccountLandingStore, SqliteDailyHeartRateStore, SqliteExtractionRunLog,
+    SqliteGarminActivityStore, SqliteNormalisationRunLog, SqliteRefusalStore, connect,
 };
 use jiff::civil::date;
 use serde_json::json;
@@ -218,13 +224,45 @@ async fn store() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
     Ok((pool, directory))
 }
 
+struct FixedClock;
+
+impl application::Clock for FixedClock {
+    fn now(&self) -> FetchedAt {
+        FetchedAt::EPOCH
+    }
+}
+
+/// Garmin's activities and days normalised, and the register read from them.
 async fn devices(pool: &SqlitePool) -> Result<Register, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
+    Normalisation::new(
+        NormalisationPorts {
+            raw: GarminGymAccountReader::new(pool.clone())?,
+            translator: GarminActivityTranslator::default(),
+            workouts: SqliteGarminActivityStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), "garmin.activities")?,
+            runs: SqliteNormalisationRunLog::new(pool.clone()),
+            clock: FixedClock,
+        },
+        zone.clone(),
+    )
+    .normalise()
+    .await?;
+    Normalisation::new(
+        NormalisationPorts {
+            raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
+            translator: GarminDailyHeartRateTranslator,
+            workouts: SqliteDailyHeartRateStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), "garmin.daily_heart_rate")?,
+            runs: SqliteNormalisationRunLog::new(pool.clone()),
+            clock: FixedClock,
+        },
+        zone,
+    )
+    .normalise()
+    .await?;
     Ok(DeviceRegister::new(
-        (
-            GarminRecordedDevices::new(pool.clone(), zone.clone()),
-            PelotonRecordedDevices::new(pool.clone(), zone),
-        ),
+        GarminRecordedDevices::new(pool.clone()),
         GarminWear::new(pool.clone()),
     )
     .register()
@@ -273,8 +311,8 @@ fn runtime() -> Result<tokio::runtime::Runtime, Failure> {
 }
 
 /// Each device the record identifies is one entry, named for what it is: the
-/// Forerunner 165 once, though Garmin names it by serial and Peloton by ANT+
-/// number. A sync is no device.
+/// Forerunner 165 once, though it wrote one recording and was paired to
+/// another. A sync is no device.
 #[test]
 fn every_device_is_one_entry() {
     let runtime = runtime().expect("a runtime");
@@ -300,7 +338,7 @@ fn every_device_is_one_entry() {
         );
         let watch = find(&devices, FORERUNNER_165).expect("the watch");
         assert_eq!(watch.first_used(), date(2025, 3, 2));
-        assert_eq!(watch.last_used(), date(2026, 10, 13));
+        assert_eq!(watch.last_used(), date(2026, 9, 29));
     });
 }
 
@@ -343,21 +381,20 @@ fn a_watch_that_broadcasts_is_a_candidate() {
     });
 }
 
-/// Peloton's account carries the watch past its last Garmin activity, so the
-/// rides after it are the watch's with nothing stated.
+/// #569: Peloton's account is no evidence about a Garmin device. The watch's
+/// span ends at its last Garmin activity, though the account landed after it
+/// naming the monitor the watch broadcasts as.
 #[test]
-fn the_paired_monitor_carries_the_watch_forward() {
+fn peloton_s_account_does_not_carry_a_garmin_watch() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let (pool, _directory) = store().await.expect("a store");
         let devices = devices(&pool).await.expect("the register");
 
-        for ride in [date(2026, 9, 30), date(2026, 10, 4), date(2026, 10, 7)] {
-            let InUse::One(device) = devices.sent_by(Measurand::HeartRate, ride) else {
-                panic!("one device sent the heart rate of {ride}");
-            };
-            assert_eq!(device.name().as_str(), "Forerunner 165");
-        }
+        assert_eq!(
+            devices.sent_by(Measurand::HeartRate, date(2026, 10, 4)),
+            InUse::Unknown
+        );
     });
 }
 

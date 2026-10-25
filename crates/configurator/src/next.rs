@@ -28,16 +28,16 @@ use domain::{
 use infrastructure::{
     BtwbExportLandingStore, FileRunLock, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore,
-    GarminHrvLandingStore, HevyWorkoutLandingStore, MyFitnessPalExportLandingStore,
-    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    SpreadsheetFileLandingStore, SqliteCanonicalCyclingSessionStore,
-    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore,
-    SqliteCyclingMesocycleStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
-    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, WithingsMeasurementLandingStore,
-    connect,
+    GarminHrvLandingStore, GarminSleepLandingStore, HevyWorkoutLandingStore,
+    MyFitnessPalExportLandingStore, PelotonAccountLandingStore, PelotonRideDetailLandingStore,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    WithingsMeasurementLandingStore, connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -332,15 +332,22 @@ fn landed_from(normalised: &str) -> &'static [&'static str] {
             PelotonRideLandingStore::STREAM,
             PelotonRideDetailLandingStore::STREAM,
             PelotonRideSampleLandingStore::STREAM,
+            PelotonAccountLandingStore::STREAM,
         ],
         WithingsMeasurementLandingStore::STREAM => &[WithingsMeasurementLandingStore::STREAM],
-        GarminHrvLandingStore::STREAM => &[GarminHrvLandingStore::STREAM],
+        GarminHrvLandingStore::STREAM => &[
+            GarminHrvLandingStore::STREAM,
+            GarminSleepLandingStore::STREAM,
+        ],
         GarminActivityLandingStore::STREAM => &[
             GarminActivityLandingStore::STREAM,
             GarminExerciseSetLandingStore::STREAM,
             GarminActivityFileLandingStore::STREAM,
         ],
-        GarminDailyHeartRateLandingStore::STREAM => &[GarminDailyHeartRateLandingStore::STREAM],
+        GarminDailyHeartRateLandingStore::STREAM => &[
+            GarminDailyHeartRateLandingStore::STREAM,
+            GarminSleepLandingStore::STREAM,
+        ],
         _ => &[],
     }
 }
@@ -577,8 +584,9 @@ mod tests {
     }
 
     /// **Each chart's page collects what its chart reads and nothing else**
-    /// (#559): the HRV chart its nights and the record of which watch was
-    /// worn, never Hevy or Withings, and never a delivery.
+    /// (#559): the HRV chart its nights, the sleep records naming each night's
+    /// watch and Garmin's recordings naming the watch (#569), never Hevy,
+    /// Withings or Peloton, and never a delivery.
     #[test]
     fn each_chart_collects_what_it_reads() {
         assert_eq!(
@@ -587,8 +595,11 @@ mod tests {
                 "fetching garmin.activities",
                 "fetching garmin.activity_files",
                 "fetching garmin.daily_heart_rate",
+                "fetching garmin.exercise_sets",
                 "fetching garmin.hrv",
-                "fetching peloton.account",
+                "fetching garmin.sleep",
+                "normalising garmin.activities",
+                "normalising garmin.daily_heart_rate",
                 "normalising garmin.hrv",
             ]
         );
@@ -632,6 +643,21 @@ mod tests {
                 .expect("a scope")
                 .has(&Part::Canonicalising(CanonicalLayer::Cycling))
         );
+        // #569: a ride's monitor is Peloton's account's, and a day's watch
+        // Garmin's own records'; the register is Garmin's, for history.
+        let account = Part::Fetching(LandingStream::try_from("peloton.account").expect("a stream"));
+        assert!(heart_rate::collects().expect("a scope").has(&account));
+        let resting = per_device::resting_heart_rate_collects().expect("a scope");
+        assert!(!resting.has(&account));
+        for part in [
+            Part::Fetching(LandingStream::try_from("garmin.sleep").expect("a stream")),
+            Part::Normalising(
+                LandingStream::try_from("garmin.daily_heart_rate").expect("a stream"),
+            ),
+            Part::Normalising(LandingStream::try_from("garmin.activities").expect("a stream")),
+        ] {
+            assert!(resting.has(&part), "{part:?}");
+        }
     }
 
     /// **Every stream `next` fetches and derives says what it is landed by**,

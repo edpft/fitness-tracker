@@ -16,6 +16,7 @@
 use std::fmt;
 
 use crate::canonical::{Attributed, NormalisedSessionId};
+use crate::device::Sighting;
 use crate::measure::{Duration, HeartRateSeries, Metres};
 use crate::normalised::StartedAt;
 use crate::sequence::NonEmpty;
@@ -40,6 +41,7 @@ pub struct CanonicalBikePlusRide {
     samples: Attributed<NonEmpty<RideSample>>,
     heart_rate: Option<Attributed<HeartRateSeries>>,
     heart_rate_declared_missing: Option<Attributed<Duration>>,
+    heart_rate_device: Option<Attributed<Sighting>>,
 }
 
 /// What a canonical ride is built from, so the constructor is not eight
@@ -53,6 +55,7 @@ pub struct CanonicalRideRecord {
     pub samples: Attributed<NonEmpty<RideSample>>,
     pub heart_rate: Option<Attributed<HeartRateSeries>>,
     pub heart_rate_declared_missing: Option<Attributed<Duration>>,
+    pub heart_rate_device: Option<Attributed<Sighting>>,
 }
 
 impl CanonicalBikePlusRide {
@@ -66,6 +69,7 @@ impl CanonicalBikePlusRide {
             samples: record.samples,
             heart_rate: record.heart_rate,
             heart_rate_declared_missing: record.heart_rate_declared_missing,
+            heart_rate_device: record.heart_rate_device,
         }
     }
 
@@ -106,6 +110,12 @@ impl CanonicalBikePlusRide {
         self.heart_rate_declared_missing.as_ref()
     }
 
+    /// The monitor it was ridden with — see
+    /// [`super::RideRecord::heart_rate_device`].
+    pub const fn heart_rate_device(&self) -> Option<&Attributed<Sighting>> {
+        self.heart_rate_device.as_ref()
+    }
+
     /// Every normalised session a field of it names, each once.
     fn normalised_sessions(&self) -> Vec<NormalisedSessionId> {
         let mut ids = vec![
@@ -119,6 +129,11 @@ impl CanonicalBikePlusRide {
         ids.extend(self.heart_rate.as_ref().map(Attributed::normalised_session));
         ids.extend(
             self.heart_rate_declared_missing
+                .as_ref()
+                .map(Attributed::normalised_session),
+        );
+        ids.extend(
+            self.heart_rate_device
                 .as_ref()
                 .map(Attributed::normalised_session),
         );

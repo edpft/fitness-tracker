@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT day AS \"day!: String\", rate_bpm AS \"rate!: i64\"\n            FROM resting_heart_rate\n            ORDER BY day ASC\n            ",
+  "query": "SELECT day AS \"day!: String\", worn AS \"worn!: i64\" FROM wear_day",
   "describe": {
     "columns": [
       {
@@ -9,19 +9,19 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "resting_heart_rate",
+            "table": "wear_day",
             "name": "day"
           }
         }
       },
       {
-        "name": "rate!: i64",
+        "name": "worn!: i64",
         "ordinal": 1,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "resting_heart_rate",
-            "name": "rate_bpm"
+            "table": "wear_day",
+            "name": "worn"
           }
         }
       }
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "eaaed368f2297f52a49eb7afd85fc88b4a0f777d828a5737dbf9e845e77d8a37"
+  "hash": "8f230b6b3d4957c4ea7a3285e762e1f44b42a23f614686def600733b4f4b7521"
 }

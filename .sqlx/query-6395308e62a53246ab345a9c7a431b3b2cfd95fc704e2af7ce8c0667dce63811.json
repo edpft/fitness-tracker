@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM wear_day",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "6395308e62a53246ab345a9c7a431b3b2cfd95fc704e2af7ce8c0667dce63811"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT m.sighting AS \"sighting!: i64\", m.measurand AS \"measurand!: String\",\n               m.how AS \"how!: String\"\n          FROM device_sighting_measurand AS m\n          JOIN device_sighting AS s ON s.id = m.sighting\n         WHERE s.stream = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "sighting!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "device_sighting_measurand",
+            "name": "sighting"
+          }
+        }
+      },
+      {
+        "name": "measurand!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "device_sighting_measurand",
+            "name": "measurand"
+          }
+        }
+      },
+      {
+        "name": "how!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "device_sighting_measurand",
+            "name": "how"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7bf953b818e02715ba290b0822c4f719ea47e6af2439598fdaebf88e1333789c"
+}

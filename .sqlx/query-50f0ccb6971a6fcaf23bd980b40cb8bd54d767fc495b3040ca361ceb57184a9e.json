@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO wear_day (landing_record_id, source_record_id, day, worn, run_id)\n            VALUES (?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "50f0ccb6971a6fcaf23bd980b40cb8bd54d767fc495b3040ca361ceb57184a9e"
+}

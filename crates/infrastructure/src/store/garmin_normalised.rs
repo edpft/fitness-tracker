@@ -104,8 +104,59 @@ impl AccountReader for GarminHrvAccountReader {
             ));
         }
 
-        Ok(nights(records))
+        let mut sleeps = sleeps(&self.pool).await?;
+        Ok(nights(records)
+            .into_iter()
+            .map(|night| {
+                let sleep = sleeps.remove(night.night().source_record_id().as_str());
+                night.slept(sleep)
+            })
+            .collect())
     }
+}
+
+/// The serving of Garmin's sleep record that stands for each date, keyed by
+/// the date it is filed under, which is the date a night and a day are (#569).
+pub(super) async fn sleeps(
+    pool: &SqlitePool,
+) -> Result<std::collections::BTreeMap<String, LandedRecord>, StoreError> {
+    let stream = LandingStream::try_from(super::GarminSleepLandingStore::STREAM)
+        .map_err(|error| corrupt(&error))?;
+    let rows = sqlx::query!(
+        r#"
+        SELECT id AS "id!: i64",
+               endpoint AS "endpoint!: String",
+               fetched_at AS "fetched_at!: String",
+               source_record_id AS "source_record_id!: String",
+               event_kind AS "event_kind!: String",
+               event_time AS "event_time: String",
+               payload AS "payload!: Vec<u8>"
+          FROM garmin_sleep_landing AS landed
+         WHERE id = (
+             SELECT MAX(id) FROM garmin_sleep_landing
+              WHERE source_record_id = landed.source_record_id
+         )
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut sleeps = std::collections::BTreeMap::new();
+    for row in rows {
+        let key = row.source_record_id.clone();
+        let record = super::garmin_gym::Row {
+            id: row.id,
+            endpoint: row.endpoint,
+            fetched_at: row.fetched_at,
+            source_record_id: row.source_record_id,
+            event_kind: row.event_kind,
+            event_time: row.event_time,
+            payload: row.payload,
+        }
+        .into_record(&stream)?;
+        sleeps.insert(key, record);
+    }
+    Ok(sleeps)
 }
 
 /// The normalised layer for overnight HRV.
@@ -205,6 +256,7 @@ async fn write_night(
     let endpoint = event.endpoint().as_str().to_owned();
     let event_kind = event.kind().as_str().to_owned();
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());
+    let recorded_by = night.recorded_by().map(ToString::to_string);
 
     sqlx::query!(
         r#"
@@ -213,9 +265,9 @@ async fn write_night(
             measured_until_utc, zone, last_night_average_ms,
             last_night_five_minute_high_ms, weekly_average_ms, status,
             baseline_low_upper_ms, baseline_balanced_low_ms, baseline_balanced_upper_ms,
-            endpoint, event_kind, event_time, run_id
+            endpoint, event_kind, event_time, run_id, recorded_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         id,
         source_record_id,
@@ -234,6 +286,7 @@ async fn write_night(
         event_kind,
         event_time,
         run_id,
+        recorded_by,
     )
     .execute(&mut **tx)
     .await
