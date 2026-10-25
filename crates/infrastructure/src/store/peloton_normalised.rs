@@ -454,36 +454,39 @@ async fn write_samples(
     ride_id: i64,
     ride: &BikePlusRide,
 ) -> Result<(), StoreError> {
+    // **One statement per ride, the series handed over as a JSON array**, as
+    // the canonical rides' are (#560).
+    let mut rows = Vec::with_capacity(ride.samples().count());
     for sample in ride.samples().iter() {
-        let at = seconds_for_storage(sample.at)?;
-        let power = i64::from(sample.power.as_u32());
-        let cadence = i64::from(sample.cadence.as_revolutions_per_minute());
-        let resistance = i64::from(sample.resistance.as_percentage());
         let speed = i64::try_from(sample.speed.as_millimetres_per_hour()).map_err(|_| {
             StoreError::Corrupt {
                 detail: "a speed larger than the store can hold".to_owned(),
             }
         })?;
-
-        sqlx::query!(
-            r#"
-            INSERT INTO bike_plus_ride_sample (
-                ride, at_seconds, power_watts, cadence_rpm,
-                resistance_percentage, speed_millimetres_per_hour
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-            ride_id,
-            at,
-            power,
-            cadence,
-            resistance,
-            speed,
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| store_error(&error))?;
+        rows.push(format!(
+            "[{},{},{},{},{speed}]",
+            seconds_for_storage(sample.at)?,
+            sample.power.as_u32(),
+            sample.cadence.as_revolutions_per_minute(),
+            sample.resistance.as_percentage(),
+        ));
     }
+    let rows = format!("[{}]", rows.join(","));
+    sqlx::query!(
+        r#"
+        INSERT INTO bike_plus_ride_sample (
+            ride, at_seconds, power_watts, cadence_rpm,
+            resistance_percentage, speed_millimetres_per_hour
+        )
+        SELECT ?, value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4
+          FROM json_each(?)
+        "#,
+        ride_id,
+        rows,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
     Ok(())
 }
 
@@ -564,23 +567,27 @@ async fn write_ride(
     write_samples(tx, ride_id, ride).await?;
 
     if let Some(series) = ride.heart_rate() {
+        let mut rows = Vec::with_capacity(series.samples().count());
         for sample in series.samples().iter() {
-            let at = seconds_for_storage(sample.at)?;
-            let beats = i64::from(sample.beats_per_minute.as_u32());
-
-            sqlx::query!(
-                r#"
-                INSERT INTO bike_plus_ride_heart_rate (ride, at_seconds, beats_per_minute)
-                VALUES (?, ?, ?)
-                "#,
-                ride_id,
-                at,
-                beats,
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|error| store_error(&error))?;
+            rows.push(format!(
+                "[{},{}]",
+                seconds_for_storage(sample.at)?,
+                sample.beats_per_minute.as_u32()
+            ));
         }
+        let rows = format!("[{}]", rows.join(","));
+        sqlx::query!(
+            r#"
+            INSERT INTO bike_plus_ride_heart_rate (ride, at_seconds, beats_per_minute)
+            SELECT ?, value ->> 0, value ->> 1
+              FROM json_each(?)
+            "#,
+            ride_id,
+            rows,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
     }
 
     Ok(())

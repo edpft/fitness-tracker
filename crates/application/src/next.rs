@@ -36,6 +36,7 @@ use std::{
     future::{Future, poll_fn},
     pin::pin,
     task::Poll,
+    time::{Duration, Instant},
 };
 
 use domain::{
@@ -373,6 +374,8 @@ pub enum StepFailure {
 pub struct Done {
     pub step: Step,
     pub outcome: Result<Found, StepFailure>,
+    /// From the step starting to its ending, so the slowest is visible (#560).
+    pub took: Duration,
 }
 
 /// Where the run has got to, as it gets there.
@@ -923,19 +926,19 @@ where
         let standing = self.ports.microcycle.standing(now).await?;
         let diary = self.ports.diary.diary().await?;
         if let Ok(holidays) = &holidays
-            && let Some((step, outcome)) = self
+            && let Some((started, outcome)) = self
                 .commit(now, holidays, &standing, &diary, progress)
                 .await
         {
-            finish(progress, &mut run, step, outcome);
+            finish(progress, &mut run, started, outcome);
         }
 
         // 3. Where the plan stands, after taking a skip if one was asked for.
         let mut standing = self.ports.microcycle.standing(now).await?;
         if let Some(reason) = skip {
-            progress.started(&Step::Skipping);
+            let started = start(progress, Step::Skipping);
             let found = self.skip(&standing, now, reason).await?;
-            finish(progress, &mut run, Step::Skipping, Ok(found));
+            finish(progress, &mut run, started, Ok(found));
             standing = self.ports.microcycle.standing(now).await?;
         }
         let diary = self.ports.diary.diary().await?;
@@ -1051,10 +1054,9 @@ where
                     if if_going == IfGoing::Refuse && held.contains(&Part::Delivering) {
                         return Err(NextError::AlreadyRunning);
                     }
-                    let step = Step::Joining(held.clone());
-                    progress.started(&step);
+                    let started = start(progress, Step::Joining(held.clone()));
                     self.ports.lock.released(&held).await.map_err(unavailable)?;
-                    finish(progress, run, step, Ok(Found::Joined));
+                    finish(progress, run, started, Ok(Found::Joined));
                     joined.extend(held);
                 }
             }
@@ -1080,8 +1082,8 @@ where
                     .fetch(&self.ports.cycling_records, scope, today, progress)
                     .await?;
                 if scope.has(&Part::Delivering) {
-                    let (step, outcome) = self.refresh(progress).await;
-                    finish(progress, &mut done, step, outcome);
+                    let (started, outcome) = self.refresh(progress).await;
+                    finish(progress, &mut done, started, outcome);
                 }
                 Ok::<_, NextError>(done)
             },
@@ -1129,11 +1131,11 @@ where
         let walks = match &records.walks {
             Err(_) if !scope.reports(&records.entry, &self.entries()) => return Ok(run),
             Err(why) => {
-                progress.started(&step);
+                let started = start(progress, step);
                 finish(
                     progress,
                     &mut run,
-                    step,
+                    started,
                     Err(StepFailure::NoAccess(why.clone())),
                 );
                 return Ok(run);
@@ -1151,22 +1153,21 @@ where
             return Ok(run);
         }
         if !walks.due(today).await? {
-            progress.started(&step);
-            finish(progress, &mut run, step, Ok(Found::NotDue));
+            let started = start(progress, step);
+            finish(progress, &mut run, started, Ok(Found::NotDue));
             return Ok(run);
         }
         for at in wanted {
             let Some(stream) = walks.stream(at) else {
                 continue;
             };
-            let step = Step::Fetching(stream.clone());
-            progress.started(&step);
+            let started = start(progress, Step::Fetching(stream.clone()));
             let outcome = match walks.walk(at).await {
                 Some(Ok(summary)) => Ok(Found::Landed(summary.records_landed)),
                 Some(Err(error)) => Err(StepFailure::Extraction(error)),
                 None => continue,
             };
-            finish(progress, &mut run, step, outcome);
+            finish(progress, &mut run, started, outcome);
         }
         Ok(run)
     }
@@ -1206,8 +1207,7 @@ where
             if !scope.has(&Part::Normalising(stream.clone())) {
                 continue;
             }
-            let step = Step::Normalising(stream.clone());
-            progress.started(&step);
+            let started = start(progress, Step::Normalising(stream.clone()));
             let inputs = self.ports.normalised.inputs(&stream).await?;
             let outcome = if !every && ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
                 Ok(Found::Unchanged)
@@ -1223,7 +1223,7 @@ where
                     }
                 }
             };
-            finish(progress, run, step, outcome);
+            finish(progress, run, started, outcome);
         }
 
         for layer in CANONICAL {
@@ -1235,7 +1235,7 @@ where
                 CanonicalLayer::Cycling => Step::Canonicalising(Discipline::Cycling),
                 CanonicalLayer::WeighIns => Step::CanonicalisingWeighIns,
             };
-            progress.started(&step);
+            let started = start(progress, step);
             let inputs = self.ports.canonical.inputs(layer).await?;
             let found = if !every && ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
                 Found::Unchanged
@@ -1258,7 +1258,7 @@ where
                 ledger.record_canonical(layer, &inputs).await?;
                 found
             };
-            finish(progress, run, step, Ok(found));
+            finish(progress, run, started, Ok(found));
         }
 
         if let Some(build) = &self.ports.build
@@ -1279,19 +1279,18 @@ where
     async fn refresh(
         &self,
         progress: &(impl Progress + Sync),
-    ) -> (Step, Result<Found, StepFailure>) {
-        let step = Step::RefreshingClasses;
-        progress.started(&step);
+    ) -> (Started, Result<Found, StepFailure>) {
+        let started = start(progress, Step::RefreshingClasses);
         let source = match &self.ports.classes {
-            Err(why) => return (step, Err(StepFailure::NoAccess(why.clone()))),
+            Err(why) => return (started, Err(StepFailure::NoAccess(why.clone()))),
             Ok(source) => source,
         };
         let listed = match source.list().await {
             Ok(listed) => listed,
-            Err(error) => return (step, Err(StepFailure::Source(error))),
+            Err(error) => return (started, Err(StepFailure::Source(error))),
         };
         if listed.outstanding > 0 {
-            progress.estimated(&step, listed.outstanding, listed.reading_takes);
+            progress.estimated(&started.step, listed.outstanding, listed.reading_takes);
         }
         let outcome = source
             .read()
@@ -1303,7 +1302,7 @@ where
                 stopped: read.stopped,
             })
             .map_err(StepFailure::Source);
-        (step, outcome)
+        (started, outcome)
     }
 
     /// Commit the next concurrent mesocycle, where one is due.
@@ -1316,8 +1315,7 @@ where
         standing: &Standing,
         diary: &Diary,
         progress: &(impl Progress + Sync),
-    ) -> Option<(Step, Result<Found, StepFailure>)> {
-        let step = Step::Committing;
+    ) -> Option<(Started, Result<Found, StepFailure>)> {
         let due = match self
             .ports
             .committing
@@ -1326,9 +1324,12 @@ where
         {
             Ok(Some(due)) => due,
             Ok(None) => return None,
-            Err(error) => return Some((step, Err(StepFailure::Commit(error)))),
+            Err(error) => {
+                let started = start(progress, Step::Committing);
+                return Some((started, Err(StepFailure::Commit(error))));
+            }
         };
-        progress.started(&step);
+        let started = start(progress, Step::Committing);
         let outcome = self
             .ports
             .committing
@@ -1339,7 +1340,7 @@ where
                 span: due.span,
             })
             .map_err(StepFailure::Commit);
-        Some((step, outcome))
+        Some((started, outcome))
     }
 
     /// Take what is left of the current session's window (#391).
@@ -1468,7 +1469,6 @@ where
     }
 }
 
-/// Report a step's end, and keep it for the report.
 /// Every canonical layer, in the order they are derived.
 const CANONICAL: [CanonicalLayer; 3] = [
     CanonicalLayer::Gym,
@@ -1476,13 +1476,33 @@ const CANONICAL: [CanonicalLayer; 3] = [
     CanonicalLayer::WeighIns,
 ];
 
+/// A step that has started, and when.
+struct Started {
+    step: Step,
+    at: Instant,
+}
+
+/// Report a step's start.
+fn start(progress: &impl Progress, step: Step) -> Started {
+    progress.started(&step);
+    Started {
+        step,
+        at: Instant::now(),
+    }
+}
+
+/// Report a step's end, and keep it for the report.
 fn finish(
     progress: &impl Progress,
     run: &mut Vec<Done>,
-    step: Step,
+    started: Started,
     outcome: Result<Found, StepFailure>,
 ) {
-    let done = Done { step, outcome };
+    let done = Done {
+        step: started.step,
+        outcome,
+        took: started.at.elapsed(),
+    };
     progress.finished(&done);
     run.push(done);
 }
