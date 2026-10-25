@@ -584,17 +584,23 @@ mod tests {
     }
 
     /// **Each chart's page collects what its chart reads and nothing else**
-    /// (#559): the HRV chart its nights and the sleep records naming each
-    /// night's watch (#569), never Hevy, Withings or Peloton, and never a
-    /// delivery.
+    /// (#559): the HRV chart its nights, the sleep records naming each night's
+    /// watch and Garmin's recordings naming the watch (#569), never Hevy,
+    /// Withings or Peloton, and never a delivery.
     #[test]
     fn each_chart_collects_what_it_reads() {
         assert_eq!(
             named(&per_device::overnight_hrv_collects().expect("a scope")),
             [
+                "fetching garmin.activities",
+                "fetching garmin.activity_files",
+                "fetching garmin.daily_heart_rate",
+                "fetching garmin.exercise_sets",
                 "fetching garmin.hrv",
                 "fetching garmin.sleep",
-                "normalising garmin.hrv"
+                "normalising garmin.activities",
+                "normalising garmin.daily_heart_rate",
+                "normalising garmin.hrv",
             ]
         );
         assert_eq!(

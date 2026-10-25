@@ -6,9 +6,10 @@
 //! are two series and nothing here joins them.
 //!
 //! **The watch Garmin's own records name for the night** (#569): its sleep
-//! record names the device on every night since 2024-12-22. Before that nothing
-//! does, and a day is placed on the one wrist device the register shows worn
-//! that day ([`Register::worn_on`]), the rule for history alone. A day it
+//! record names the device by serial on every night since 2024-12-22, and the
+//! register says what that device is called. Before that nothing names one,
+//! and a day is placed on the one wrist device the register shows worn that
+//! day ([`Register::worn_on`]), the rule for history alone. A day it
 //! cannot place is [`SentBy::Unknown`] rather than guessed — a series of its
 //! own, as a ride's is in [`super::heart_rate`].
 //!

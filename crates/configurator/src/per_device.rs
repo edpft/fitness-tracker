@@ -35,15 +35,16 @@ fn per_device(
 }
 
 /// What the overnight HRV chart reads: the nights, each with the sleep record
-/// naming its watch (#559, #569).
+/// naming its watch, and Garmin's recordings, which say what it is called
+/// (#559, #569).
 ///
 /// # Errors
 ///
 /// [`WiringError`] if a name read is not a stream's.
 pub fn overnight_hrv_collects() -> Result<Scope, WiringError> {
-    next::scope(std::iter::once(Reads::Normalised(
-        GarminHrvLandingStore::STREAM,
-    )))
+    next::scope(
+        std::iter::once(Reads::Normalised(GarminHrvLandingStore::STREAM)).chain(devices::READS),
+    )
 }
 
 /// What the resting heart rate chart reads: the days, each with the sleep
