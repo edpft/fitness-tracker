@@ -2,13 +2,10 @@
 //! build's store (#254).
 
 use application::{StoreError, devices::DeviceRegister, next::Scope, per_device::PerDevice};
-use domain::{
-    analytical::{hrv::Trended, resting},
-    normalised::OperatorZone,
-};
+use domain::analytical::{hrv::Trended, resting};
 use infrastructure::{
     GarminDailyHeartRateLandingStore, GarminHrvLandingStore, GarminRecordedDevices, GarminWear,
-    PelotonRecordedDevices, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
+    SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
 };
 
 use crate::{
@@ -20,11 +17,10 @@ use crate::{
 
 fn per_device(
     store: &Store,
-    zone: &OperatorZone,
 ) -> PerDevice<
     SqliteOvernightHrvHistory,
     SqliteRestingHeartRateHistory,
-    (GarminRecordedDevices, PelotonRecordedDevices),
+    GarminRecordedDevices,
     GarminWear,
 > {
     let pool = store.pool();
@@ -32,29 +28,27 @@ fn per_device(
         SqliteOvernightHrvHistory::new(pool.clone()),
         SqliteRestingHeartRateHistory::new(pool.clone()),
         DeviceRegister::new(
-            (
-                GarminRecordedDevices::new(pool.clone(), zone.clone()),
-                PelotonRecordedDevices::new(pool.clone(), zone.clone()),
-            ),
+            GarminRecordedDevices::new(pool.clone()),
             GarminWear::new(pool.clone()),
         ),
     )
 }
 
-/// What the overnight HRV chart reads: the nights, and which watch each was
-/// recorded by (#559).
+/// What the overnight HRV chart reads: the nights, each with the sleep record
+/// naming its watch (#559, #569).
 ///
 /// # Errors
 ///
 /// [`WiringError`] if a name read is not a stream's.
 pub fn overnight_hrv_collects() -> Result<Scope, WiringError> {
-    next::scope(
-        std::iter::once(Reads::Normalised(GarminHrvLandingStore::STREAM)).chain(devices::READS),
-    )
+    next::scope(std::iter::once(Reads::Normalised(
+        GarminHrvLandingStore::STREAM,
+    )))
 }
 
-/// What the resting heart rate chart reads: the days, and which watch each
-/// was recorded by (#559).
+/// What the resting heart rate chart reads: the days, each with the sleep
+/// record naming its watch, and the register for the days before Garmin named
+/// one (#559, #569).
 ///
 /// # Errors
 ///
@@ -71,11 +65,8 @@ pub fn resting_heart_rate_collects() -> Result<Scope, WiringError> {
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn overnight_hrv_trend(
-    store: &Store,
-    zone: &OperatorZone,
-) -> Result<Vec<Trended>, StoreError> {
-    per_device(store, zone).overnight_hrv_trend().await
+pub async fn overnight_hrv_trend(store: &Store) -> Result<Vec<Trended>, StoreError> {
+    per_device(store).overnight_hrv_trend().await
 }
 
 /// Each day's resting heart rate, one series per watch, with its slow line
@@ -84,9 +75,6 @@ pub async fn overnight_hrv_trend(
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn resting_heart_rate_trend(
-    store: &Store,
-    zone: &OperatorZone,
-) -> Result<Vec<resting::Trended>, StoreError> {
-    per_device(store, zone).resting_heart_rate_trend().await
+pub async fn resting_heart_rate_trend(store: &Store) -> Result<Vec<resting::Trended>, StoreError> {
+    per_device(store).resting_heart_rate_trend().await
 }

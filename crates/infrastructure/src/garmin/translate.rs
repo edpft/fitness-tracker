@@ -26,6 +26,7 @@ use domain::{
         HrvBaseline, HrvReading, HrvStatus, LastNight, MeasurementWindow, OvernightHrv,
         OvernightHrvRecord, WeeklyStatus,
     },
+    device::DeviceIdentifier,
     landing::{EventKind, LandedRecord},
     measure::HeartRateVariability,
     normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
@@ -182,6 +183,7 @@ fn readings(
 fn overnight_hrv(
     record: &LandedRecord,
     zone: &OperatorZone,
+    recorded_by: Option<DeviceIdentifier>,
 ) -> Result<OvernightHrv, RefusalReason> {
     let night: Night = serde_json::from_slice(record.payload().as_bytes()).map_err(|error| {
         RefusalReason::UnreadablePayload {
@@ -258,6 +260,7 @@ fn overnight_hrv(
         landed_as: record.id(),
         source_record_id: record.source_record_id().clone(),
         provenance: record.provenance().clone(),
+        recorded_by,
     }))
 }
 
@@ -297,12 +300,18 @@ impl Translator for GarminHrvTranslator {
             EventKind::Updated => {}
         }
 
-        Ok(match overnight_hrv(record, zone) {
-            Ok(night) => Translation::Entity {
-                entity: Box::new(night),
-                refusals: scribe.into_refusals(),
+        Ok(
+            match overnight_hrv(
+                record,
+                zone,
+                account.sleep().and_then(super::sleep::recorded_by),
+            ) {
+                Ok(night) => Translation::Entity {
+                    entity: Box::new(night),
+                    refusals: scribe.into_refusals(),
+                },
+                Err(reason) => scribe.only(RefusalLocus::Record, reason),
             },
-            Err(reason) => scribe.only(RefusalLocus::Record, reason),
-        })
+        )
     }
 }

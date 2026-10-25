@@ -28,8 +28,9 @@ pub use calendar::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 pub use credentials::{Credential, CredentialError, Credentials};
 pub use folder::FolderFiles;
 pub use garmin::{
-    GarminAuth, GarminCredentials, GarminGymTranslator, GarminHrv, GarminHrvTranslator,
-    GarminRecordedSets, GarminRestingHeartRateTranslator,
+    GarminActivityTranslator, GarminAuth, GarminCredentials, GarminDailyHeartRateTranslator,
+    GarminGymTranslator, GarminHrv, GarminHrvTranslator, GarminRecordedSets,
+    GarminRestingHeartRateTranslator,
 };
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyStandIns, HevyWorkoutEvents,
@@ -49,13 +50,13 @@ pub use store::{
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
     GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
     MyFitnessPalExportLandingStore, OverlayError, PelotonAccountLandingStore, PelotonRawExtent,
-    PelotonRecordedDevices, PelotonRideDetailLandingStore, PelotonRideLandingStore,
-    PelotonRideSampleLandingStore, PelotonSessionAccountReader, SpreadsheetFileAccountReader,
-    SpreadsheetFileLandingStore, SqliteBtwbStore, SqliteCanonicalCyclingSessionStore,
-    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqliteCompositionHistory,
-    SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteCyclingSessionStore,
+    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
+    SqliteBtwbStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCanonicalWeighInStore, SqliteCompositionHistory, SqliteCyclingDeliveryStore,
+    SqliteCyclingMesocycleStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore,
     SqliteDerivationLedger, SqliteDiaryStore, SqliteEditOverlayStore, SqliteEquipmentStore,
-    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory,
+    SqliteExerciseHistory, SqliteExtractionRunLog, SqliteFtpHistory, SqliteGarminActivityStore,
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteGymSessionStore,
     SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore, SqliteNormalisationRunLog,
     SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO device_sighting_identifier (sighting, position, identifier)\n                VALUES (?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "b12480298b66ad9beb0cbc84806f30361a9ac9902c8ef343d6add9eec30152a1"
+}

@@ -11,6 +11,7 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     body::{RestingHeartRate, RestingHeartRateRecord},
+    device::DeviceIdentifier,
     landing::{EventKind, LandedRecord},
     measure::BeatsPerMinute,
     normalised::{OperatorZone, RefusalLocus, RefusalReason},
@@ -31,7 +32,10 @@ struct Day {
 }
 
 /// The day's figure, or the one reason there is none.
-fn resting_heart_rate(record: &LandedRecord) -> Result<RestingHeartRate, RefusalReason> {
+fn resting_heart_rate(
+    record: &LandedRecord,
+    recorded_by: Option<DeviceIdentifier>,
+) -> Result<RestingHeartRate, RefusalReason> {
     let day: Day = serde_json::from_slice(record.payload().as_bytes()).map_err(|error| {
         RefusalReason::UnreadablePayload {
             detail: error.to_string(),
@@ -58,6 +62,7 @@ fn resting_heart_rate(record: &LandedRecord) -> Result<RestingHeartRate, Refusal
         landed_as: record.id(),
         source_record_id: record.source_record_id().clone(),
         provenance: record.provenance().clone(),
+        recorded_by,
     }))
 }
 
@@ -95,12 +100,14 @@ impl Translator for GarminRestingHeartRateTranslator {
             EventKind::Updated => {}
         }
 
-        Ok(match resting_heart_rate(record) {
-            Ok(day) => Translation::Entity {
-                entity: Box::new(day),
-                refusals: scribe.into_refusals(),
+        Ok(
+            match resting_heart_rate(record, account.sleep().and_then(super::sleep::recorded_by)) {
+                Ok(day) => Translation::Entity {
+                    entity: Box::new(day),
+                    refusals: scribe.into_refusals(),
+                },
+                Err(reason) => scribe.only(RefusalLocus::Record, reason),
             },
-            Err(reason) => scribe.only(RefusalLocus::Record, reason),
-        })
+        )
     }
 }

@@ -3,10 +3,9 @@
 use application::{
     CanonicalLayer, StoreError, devices::DeviceRegister, heart_rate::HeartRatePerZone, next::Scope,
 };
-use domain::{analytical::heart_rate::RideHeartRate, normalised::OperatorZone};
+use domain::analytical::heart_rate::RideHeartRate;
 use infrastructure::{
-    GarminRecordedDevices, GarminWear, PelotonRecordedDevices, SqliteCanonicalCyclingSessionStore,
-    SqliteFtpHistory,
+    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
 };
 
 use crate::{
@@ -17,7 +16,8 @@ use crate::{
 };
 
 /// What the heart rate chart reads: the canonical rides, the FTP derived with
-/// them, and which device recorded each (#559).
+/// them and the monitor each was ridden with, and which watch was in use (#559,
+/// #569).
 ///
 /// # Errors
 ///
@@ -31,16 +31,13 @@ pub fn collects() -> Result<Scope, WiringError> {
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn rides(store: &Store, zone: &OperatorZone) -> Result<Vec<RideHeartRate>, StoreError> {
+pub async fn rides(store: &Store) -> Result<Vec<RideHeartRate>, StoreError> {
     let pool = store.pool();
     HeartRatePerZone::new(
         SqliteCanonicalCyclingSessionStore::new(pool.clone()),
         SqliteFtpHistory::new(pool.clone()),
         DeviceRegister::new(
-            (
-                GarminRecordedDevices::new(pool.clone(), zone.clone()),
-                PelotonRecordedDevices::new(pool.clone(), zone.clone()),
-            ),
+            GarminRecordedDevices::new(pool.clone()),
             GarminWear::new(pool.clone()),
         ),
     )

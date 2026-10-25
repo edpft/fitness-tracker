@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO resting_heart_rate (\n                landing_record_id, source_record_id, day, rate_bpm,\n                endpoint, event_kind, event_time, run_id, recorded_by\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "8faad511090ea07b21a7c9b6318f36fb97347b522a862634081f240aa03f3f9f"
+}

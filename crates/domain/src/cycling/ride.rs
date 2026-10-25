@@ -55,7 +55,7 @@ use std::fmt;
 use crate::landing::{LandingRecordId, Provenance, SourceRecordId};
 use crate::measure::{Duration, InvalidQuantity, Metres, PositiveDuration};
 use crate::sequence::NonEmpty;
-use crate::{measure::HeartRateSeries, normalised::StartedAt};
+use crate::{device::Sighting, measure::HeartRateSeries, normalised::StartedAt};
 
 use super::venue::RideVenue;
 use super::zone::Watts;
@@ -326,6 +326,7 @@ pub struct BikePlusRide {
     samples: NonEmpty<RideSample>,
     heart_rate: Option<HeartRateSeries>,
     heart_rate_declared_missing: Option<Duration>,
+    heart_rate_device: Option<Sighting>,
     provenance: Provenance,
     source_record_id: SourceRecordId,
     landed_as: ComposedFrom,
@@ -373,9 +374,7 @@ pub struct RideRecord {
     pub samples: NonEmpty<RideSample>,
     /// The heart rate relayed through the bike, where something was worn.
     ///
-    /// **Which device supplied it is not recoverable.** Peloton records no
-    /// sensor identity anywhere, and the operator has parked that: it would
-    /// have to come from Garmin directly.
+    /// **The ride itself names no sensor**: see [`Self::heart_rate_device`].
     pub heart_rate: Option<HeartRateSeries>,
     /// How many seconds the source says it did not measure.
     ///
@@ -390,6 +389,14 @@ pub struct RideRecord {
     /// rather than a position — which is also why the store keeps it on the
     /// ride's own row.
     pub heart_rate_declared_missing: Option<Duration>,
+    /// The monitor the Bike+ was paired with, where Peloton's account says.
+    ///
+    /// **Peloton's account, composed into the ride** (§ 3.1): the account names
+    /// the paired monitor as of each time it was fetched, and a ride between
+    /// two fetches naming the same one was ridden with it (operator,
+    /// 2026-10-25). [`None`] before the first fetch, after the last, or between
+    /// two that differ.
+    pub heart_rate_device: Option<Sighting>,
     pub provenance: Provenance,
     pub source_record_id: SourceRecordId,
     pub landed_as: ComposedFrom,
@@ -408,6 +415,7 @@ impl BikePlusRide {
             samples: record.samples,
             heart_rate: record.heart_rate,
             heart_rate_declared_missing: record.heart_rate_declared_missing,
+            heart_rate_device: record.heart_rate_device,
             provenance: record.provenance,
             source_record_id: record.source_record_id,
             landed_as: record.landed_as,
@@ -448,6 +456,11 @@ impl BikePlusRide {
     /// [`RideRecord::heart_rate_declared_missing`].
     pub const fn heart_rate_declared_missing(&self) -> Option<Duration> {
         self.heart_rate_declared_missing
+    }
+
+    /// The monitor it was ridden with: see [`RideRecord::heart_rate_device`].
+    pub const fn heart_rate_device(&self) -> Option<&Sighting> {
+        self.heart_rate_device.as_ref()
     }
 
     pub const fn provenance(&self) -> &Provenance {

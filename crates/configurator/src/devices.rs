@@ -1,27 +1,24 @@
 //! Which device sent a reading, over this build's store (#427).
 //!
-//! **Garmin's recordings and Peloton's account are the record**, and Garmin's
-//! daily heart rate says which days a watch was worn. Garmin names every
-//! device that wrote a recording and every sensor paired to it; Peloton names
-//! the monitor the Bike+ is paired with. Another source of what a device
-//! recorded is another reader here, and nothing above this changes.
+//! **Garmin's normalised activities are the record**, and its daily heart rate
+//! says which days a watch was worn (#569). Garmin names every device that
+//! wrote a recording and every sensor paired to it. Peloton's monitor is the
+//! ride's own, composed into it from Peloton's account, so it is not read here.
+//! Another source of what a device recorded is another reader here, and nothing
+//! above this changes.
 
 use application::{StoreError, devices::DeviceRegister};
-use domain::{device::Register, normalised::OperatorZone};
+use domain::device::Register;
 use infrastructure::{
-    GarminActivityFileLandingStore, GarminActivityLandingStore, GarminDailyHeartRateLandingStore,
-    GarminRecordedDevices, GarminWear, PelotonAccountLandingStore, PelotonRecordedDevices,
+    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminRecordedDevices, GarminWear,
 };
 
 use crate::{next::Reads, store::Store};
 
-/// What the register reads: Garmin's recordings and days, and Peloton's
-/// account, each as it landed (#559).
-pub const READS: [Reads; 4] = [
-    Reads::Landed(GarminActivityLandingStore::STREAM),
-    Reads::Landed(GarminActivityFileLandingStore::STREAM),
-    Reads::Landed(GarminDailyHeartRateLandingStore::STREAM),
-    Reads::Landed(PelotonAccountLandingStore::STREAM),
+/// What the register reads: Garmin's activities and days, normalised (#569).
+pub const READS: [Reads; 2] = [
+    Reads::Normalised(GarminActivityLandingStore::STREAM),
+    Reads::Normalised(GarminDailyHeartRateLandingStore::STREAM),
 ];
 
 /// Every device the record identifies, and the days a watch was worn.
@@ -29,12 +26,9 @@ pub const READS: [Reads; 4] = [
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn register(store: &Store, zone: &OperatorZone) -> Result<Register, StoreError> {
+pub async fn register(store: &Store) -> Result<Register, StoreError> {
     DeviceRegister::new(
-        (
-            GarminRecordedDevices::new(store.pool().clone(), zone.clone()),
-            PelotonRecordedDevices::new(store.pool().clone(), zone.clone()),
-        ),
+        GarminRecordedDevices::new(store.pool().clone()),
         GarminWear::new(store.pool().clone()),
     )
     .register()

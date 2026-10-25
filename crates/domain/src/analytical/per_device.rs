@@ -5,11 +5,12 @@
 //! (§ 6): the figure is the watch's and its algorithm's, so two watches' figures
 //! are two series and nothing here joins them.
 //!
-//! **Neither record names its watch.** Garmin files a night or a day under the
-//! account, so each is placed on the one wrist device the register shows worn
-//! that day ([`Register::worn_on`]), and a day it cannot place is
-//! [`SentBy::Unknown`] rather than guessed — a series of its own, as a ride's
-//! is in [`super::heart_rate`].
+//! **The watch Garmin's own records name for the night** (#569): its sleep
+//! record names the device on every night since 2024-12-22. Before that nothing
+//! does, and a day is placed on the one wrist device the register shows worn
+//! that day ([`Register::worn_on`]), the rule for history alone. A day it
+//! cannot place is [`SentBy::Unknown`] rather than guessed — a series of its
+//! own, as a ride's is in [`super::heart_rate`].
 //!
 //! **A gap is a gap** (§ 37): a series holds the days that have a figure and
 //! nothing for the days between.
@@ -17,7 +18,7 @@
 use jiff::civil::Date;
 
 use super::range::Range;
-use crate::device::{InUse, Measurand, Register};
+use crate::device::{DeviceIdentifier, InUse, Measurand, Register};
 
 pub use super::heart_rate::SentBy;
 
@@ -26,6 +27,14 @@ pub use super::heart_rate::SentBy;
 pub struct Reading<T> {
     pub on: Date,
     pub value: T,
+}
+
+/// One day's figure, and the device its own source's records name for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recorded<T> {
+    pub reading: Reading<T>,
+    /// [`None`] where nothing names one.
+    pub by: Option<DeviceIdentifier>,
 }
 
 /// Every figure one device took, in date order.
@@ -59,18 +68,24 @@ impl<T: Copy> DeviceSeries<T> {
 /// rate cannot have taken one.
 #[must_use]
 pub fn per_device<T>(
-    readings: Vec<Reading<T>>,
+    readings: Vec<Recorded<T>>,
     what: Measurand,
     register: &Register,
 ) -> Vec<DeviceSeries<T>> {
     let mut readings = readings;
-    readings.sort_by_key(|reading| reading.on);
+    readings.sort_by_key(|recorded| recorded.reading.on);
     let mut series: Vec<DeviceSeries<T>> = Vec::new();
     let mut unplaced: Vec<Reading<T>> = Vec::new();
-    for reading in readings {
-        let InUse::One(device) = register.worn_on(what, reading.on) else {
-            unplaced.push(reading);
-            continue;
+    for Recorded { reading, by } in readings {
+        let device = match by {
+            Some(named) => register.recorded_by(&named, what, reading.on),
+            None => match register.worn_on(what, reading.on) {
+                InUse::One(device) => device.clone(),
+                InUse::Several(_) | InUse::Unknown => {
+                    unplaced.push(reading);
+                    continue;
+                }
+            },
         };
         let held = series.iter_mut().find(|one| match &one.sent_by {
             SentBy::Device(held) => held.identifiers() == device.identifiers(),
@@ -79,7 +94,7 @@ pub fn per_device<T>(
         match held {
             Some(one) => one.readings.push(reading),
             None => series.push(DeviceSeries {
-                sent_by: SentBy::Device(device.clone()),
+                sent_by: SentBy::Device(device),
                 readings: vec![reading],
             }),
         }

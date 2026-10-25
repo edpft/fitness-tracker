@@ -10,7 +10,7 @@ use domain::{
         per_device::{DeviceSeries, per_device},
         resting,
     },
-    device::Measurand,
+    device::{Measurand, Wear, register},
     measure::{BeatsPerMinute, HeartRateVariability},
 };
 
@@ -44,17 +44,20 @@ where
 
     /// Last night's average HRV, by morning, one series per watch.
     ///
+    /// **On the watch each night's own record names, and no register**
+    /// (#569): Garmin names the watch on every night it has HRV for, so there
+    /// is no history to place.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
     pub async fn overnight_hrv(
         &self,
     ) -> Result<Vec<DeviceSeries<HeartRateVariability>>, StoreError> {
-        let register = self.devices.register().await?;
         Ok(per_device(
             self.nights.nights().await?,
             Measurand::HeartRate,
-            &register,
+            &register(&[], Wear::default()),
         ))
     }
 

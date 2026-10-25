@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM device_sighting WHERE stream = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "55497c671a3026377549dd28e92e47246b5743c6d5137ccf83c1bc7f9a428e03"
+}

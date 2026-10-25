@@ -37,7 +37,7 @@ use domain::{
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::peloton::{LandedRide, SessionAccount, group};
 
@@ -198,8 +198,52 @@ impl AccountReader for PelotonSessionAccountReader {
             rides.push(LandedRide { ride, samples });
         }
 
-        Ok(group(rides))
+        let pairings = pairings(&self.pool).await?;
+
+        Ok(group(rides)
+            .into_iter()
+            .map(|session| session.paired(Arc::clone(&pairings)))
+            .collect())
     }
+}
+
+/// Every answer Peloton's account gave, oldest first, which each session reads
+/// for the monitor its rides were ridden with (#569).
+async fn pairings(pool: &SqlitePool) -> Result<Arc<[LandedRecord]>, StoreError> {
+    let account_stream = LandingStream::try_from(super::PelotonAccountLandingStore::STREAM)
+        .map_err(|error| corrupt(&error))?;
+    let answers = sqlx::query!(
+        r#"
+        SELECT id AS "id!: i64",
+               endpoint AS "endpoint!: String",
+               fetched_at AS "fetched_at!: String",
+               source_record_id AS "source_record_id!: String",
+               event_kind AS "event_kind!: String",
+               event_time AS "event_time: String",
+               payload AS "payload!: Vec<u8>"
+        FROM peloton_account_landing
+        ORDER BY id ASC
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut pairings = Vec::with_capacity(answers.len());
+    for row in answers {
+        pairings.push(
+            Row {
+                id: row.id,
+                endpoint: row.endpoint,
+                fetched_at: row.fetched_at,
+                source_record_id: row.source_record_id,
+                event_kind: row.event_kind,
+                event_time: row.event_time,
+                payload: row.payload,
+            }
+            .into_record(&account_stream)?,
+        );
+    }
+    Ok(Arc::from(pairings))
 }
 
 /// The normalised layer for Peloton sessions.
@@ -477,6 +521,10 @@ async fn write_ride(
 
     let venue_reference = ride.at().reference();
     let venue_called = ride.at().called();
+    let device = ride.heart_rate_device().map(|seen| seen.device.to_string());
+    let device_name = ride
+        .heart_rate_device()
+        .map(|seen| seen.name.as_str().to_owned());
 
     sqlx::query!(
         r#"
@@ -485,9 +533,9 @@ async fn write_ride(
             started_at_utc, zone, duration_seconds, distance_millimetres,
             average_power_watts, heart_rate_declared_missing_seconds,
             endpoint, event_kind, event_time, run_id, session, role,
-            venue_reference, venue_called
+            venue_reference, venue_called, heart_rate_device, heart_rate_device_name
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         ride_id,
         samples_id,
@@ -506,6 +554,8 @@ async fn write_ride(
         role,
         venue_reference,
         venue_called,
+        device,
+        device_name,
     )
     .execute(&mut **tx)
     .await

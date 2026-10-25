@@ -9,6 +9,9 @@
 //! whose device cannot be told is [`SentBy::Unknown`] rather than guessed
 //! (§ 6). Nothing here joins two devices' points.
 //!
+//! **The ride's own monitor where Peloton's account names one**, and otherwise
+//! the one device the register shows in use that day.
+//!
 //! **The method is part of the series** (§ 6), and it is the operator's,
 //! 2026-10-14: power is a trailing 30-second mean, and a second counts towards
 //! a zone only once the ride has been in that zone for 120 seconds. Heart rate
@@ -103,10 +106,17 @@ pub fn heart_rate_by_zone(
         return None;
     };
     let started_at = main.started_at().value().clone();
-    let sent_by = match register.sent_by(Measurand::HeartRate, started_at.wall_clock().date()) {
-        InUse::One(device) => SentBy::Device(device.clone()),
-        InUse::Several(_) | InUse::Unknown => SentBy::Unknown,
-    };
+    let sent_by = main.heart_rate_device().map_or_else(
+        || match register.sent_by(Measurand::HeartRate, started_at.wall_clock().date()) {
+            InUse::One(device) => SentBy::Device(device.clone()),
+            InUse::Several(_) | InUse::Unknown => SentBy::Unknown,
+        },
+        |stated| {
+            register
+                .stated(stated.value())
+                .map_or(SentBy::Unknown, SentBy::Device)
+        },
+    );
     Some(RideHeartRate {
         venue: main.at().value().clone(),
         by_zone: by_zone(main, ftp),

@@ -46,6 +46,7 @@ use std::fmt;
 
 use jiff::civil::Date;
 
+use crate::device::DeviceIdentifier;
 use crate::{
     landing::{LandingRecordId, Provenance, SourceRecordId},
     measure::HeartRateVariability,
@@ -190,6 +191,9 @@ pub struct OvernightHrvRecord {
     pub landed_as: LandingRecordId,
     pub source_record_id: SourceRecordId,
     pub provenance: Provenance,
+    /// The watch Garmin's sleep record names for the night, where it names one
+    /// (#569): every night since 2024-12-22.
+    pub recorded_by: Option<DeviceIdentifier>,
 }
 
 /// One night of HRV, as Garmin told it.
@@ -201,9 +205,15 @@ pub struct OvernightHrv {
     landed_as: LandingRecordId,
     source_record_id: SourceRecordId,
     provenance: Provenance,
+    recorded_by: Option<DeviceIdentifier>,
 }
 
 impl OvernightHrv {
+    /// The watch that recorded it, where Garmin's records name one.
+    pub const fn recorded_by(&self) -> Option<&DeviceIdentifier> {
+        self.recorded_by.as_ref()
+    }
+
     pub fn new(record: OvernightHrvRecord) -> Self {
         Self {
             measured: record.measured,
@@ -212,6 +222,7 @@ impl OvernightHrv {
             landed_as: record.landed_as,
             source_record_id: record.source_record_id,
             provenance: record.provenance,
+            recorded_by: record.recorded_by,
         }
     }
 

@@ -77,7 +77,7 @@ pub use cycling_delivery::SqliteCyclingDeliveryStore;
 pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
 pub use derivation_ledger::SqliteDerivationLedger;
-pub use devices::{GarminRecordedDevices, GarminWear, PelotonRecordedDevices};
+pub use devices::{GarminRecordedDevices, GarminWear, SqliteGarminActivityStore};
 pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use equipment::SqliteEquipmentStore;
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;
@@ -117,8 +117,8 @@ pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;
 pub use refusals::SqliteRefusalStore;
 pub use resting_heart_rate::{
-    GarminDailyHeartRateAccountReader, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
-    SqliteRestingHeartRateStore,
+    GarminDailyHeartRateAccountReader, SqliteDailyHeartRateStore, SqliteOvernightHrvHistory,
+    SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore,
 };
 pub use resumption::SqliteResumptionPointStore;
 pub use run_log::SqliteExtractionRunLog;

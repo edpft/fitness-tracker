@@ -13,12 +13,13 @@
 //! **Derived, never stated.** Every source of a ride's heart rate identifies
 //! itself or can be placed by when it was active, so nothing here is the
 //! operator's to say (operator, 2026-10-13), and the register re-derives from
-//! what has landed every time it is asked for (§ 7).
+//! the normalised layer every time it is asked for (#569).
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     num::NonZeroU16,
+    str::FromStr,
 };
 
 use jiff::civil::Date;
@@ -150,6 +151,29 @@ impl fmt::Display for DeviceIdentifier {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?} is not a device identifier: `serial/<serial>` or `ant/<number>`")]
+pub struct InvalidDeviceIdentifier(String);
+
+impl FromStr for DeviceIdentifier {
+    type Err = InvalidDeviceIdentifier;
+
+    /// What [`fmt::Display`] writes, read back.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let invalid = || InvalidDeviceIdentifier(value.to_owned());
+        match value.split_once('/') {
+            Some(("serial", serial)) => SerialNumber::try_from(serial.to_owned())
+                .map(Self::Serial)
+                .map_err(|_| invalid()),
+            Some(("ant", number)) => number
+                .parse::<NonZeroU16>()
+                .map(|number| Self::Ant(AntDeviceNumber(number)))
+                .map_err(|_| invalid()),
+            _ => Err(invalid()),
+        }
+    }
+}
+
 /// What a device measures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Measurand {
@@ -167,6 +191,25 @@ impl fmt::Display for Measurand {
             Self::Cadence => "cadence",
             Self::Speed => "speed",
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?} is not something a device measures")]
+pub struct InvalidMeasurand(String);
+
+impl FromStr for Measurand {
+    type Err = InvalidMeasurand;
+
+    /// What [`fmt::Display`] writes, read back.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "heart rate" => Ok(Self::HeartRate),
+            "power" => Ok(Self::Power),
+            "cadence" => Ok(Self::Cadence),
+            "speed" => Ok(Self::Speed),
+            other => Err(InvalidMeasurand(other.to_owned())),
+        }
     }
 }
 
@@ -334,6 +377,44 @@ impl Register {
     #[must_use]
     pub fn sent_by(&self, what: Measurand, date: Date) -> InUse<'_> {
         sent_by(&self.devices, &self.wear, what, date)
+    }
+
+    /// The device a record names by `identifier` alone, as the register knows
+    /// it: the register's entry where it holds one, and otherwise a device known
+    /// only by that identifier, measuring `what` on `on`.
+    #[must_use]
+    pub fn recorded_by(&self, identifier: &DeviceIdentifier, what: Measurand, on: Date) -> Device {
+        self.devices
+            .iter()
+            .find(|device| device.is(identifier))
+            .cloned()
+            .unwrap_or_else(|| Device {
+                identifiers: vec![identifier.clone()],
+                name: DeviceName(identifier.to_string()),
+                measures: BTreeSet::from([what]),
+                sends: BTreeSet::new(),
+                first_used: on,
+                last_used: on,
+                worn: true,
+            })
+    }
+
+    /// The device a record names, as the register knows it.
+    ///
+    /// **The register's entry where it shares an identifier**, so a monitor a
+    /// ride names by its ANT+ number is the watch that broadcasts by it, under
+    /// the watch's own name. One the register does not hold is the device as
+    /// the record describes it.
+    #[must_use]
+    pub fn stated(&self, sighting: &Sighting) -> Option<Device> {
+        let identifiers: Vec<&DeviceIdentifier> = std::iter::once(&sighting.device)
+            .chain(&sighting.also)
+            .collect();
+        self.devices
+            .iter()
+            .find(|device| identifiers.iter().any(|identifier| device.is(identifier)))
+            .cloned()
+            .or_else(|| devices(std::slice::from_ref(sighting)).pop())
     }
 
     /// Which device on the wrist measured `what` on `date`, for a reading a

@@ -1391,7 +1391,7 @@ pub trait OvernightHrvHistory {
         &self,
     ) -> impl Future<
         Output = Result<
-            Vec<domain::analytical::per_device::Reading<domain::measure::HeartRateVariability>>,
+            Vec<domain::analytical::per_device::Recorded<domain::measure::HeartRateVariability>>,
             StoreError,
         >,
     > + Send;
@@ -1407,7 +1407,7 @@ pub trait RestingHeartRateHistory {
         &self,
     ) -> impl Future<
         Output = Result<
-            Vec<domain::analytical::per_device::Reading<domain::measure::BeatsPerMinute>>,
+            Vec<domain::analytical::per_device::Recorded<domain::measure::BeatsPerMinute>>,
             StoreError,
         >,
     > + Send;

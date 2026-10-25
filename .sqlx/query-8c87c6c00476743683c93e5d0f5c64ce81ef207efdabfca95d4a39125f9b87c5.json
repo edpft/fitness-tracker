@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO device_sighting_measurand (sighting, measurand, how)\n                VALUES (?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8c87c6c00476743683c93e5d0f5c64ce81ef207efdabfca95d4a39125f9b87c5"
+}

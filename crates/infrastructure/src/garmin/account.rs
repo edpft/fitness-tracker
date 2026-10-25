@@ -18,12 +18,28 @@ use domain::landing::LandedRecord;
 pub struct NightAccount {
     night: LandedRecord,
     superseded: Vec<LandedRecord>,
+    /// Garmin's sleep record for the same date, which names the watch (#569).
+    ///
+    /// **Read, not counted**: it is the sleep stream's record, composed here
+    /// for the one thing it says about this night.
+    sleep: Option<LandedRecord>,
 }
 
 impl NightAccount {
     /// The serving that stands.
     pub const fn night(&self) -> &LandedRecord {
         &self.night
+    }
+
+    /// This night, with Garmin's sleep record for its date.
+    #[must_use]
+    pub fn slept(self, sleep: Option<LandedRecord>) -> Self {
+        Self { sleep, ..self }
+    }
+
+    /// Garmin's sleep record for its date, where one landed.
+    pub const fn sleep(&self) -> Option<&LandedRecord> {
+        self.sleep.as_ref()
     }
 }
 
@@ -45,7 +61,11 @@ impl SourceAccount for NightAccount {
 pub fn nights(records: Vec<LandedRecord>) -> Vec<NightAccount> {
     last_of_each(records)
         .into_iter()
-        .map(|(night, superseded)| NightAccount { night, superseded })
+        .map(|(night, superseded)| NightAccount {
+            night,
+            superseded,
+            sleep: None,
+        })
         .collect()
 }
 
@@ -58,12 +78,28 @@ pub fn nights(records: Vec<LandedRecord>) -> Vec<NightAccount> {
 pub struct DayAccount {
     day: LandedRecord,
     superseded: Vec<LandedRecord>,
+    /// Garmin's sleep record for the same date, which names the watch (#569).
+    ///
+    /// **Read, not counted**: it is the sleep stream's record, composed here
+    /// for the one thing it says about this day.
+    sleep: Option<LandedRecord>,
 }
 
 impl DayAccount {
     /// The serving that stands.
     pub const fn day(&self) -> &LandedRecord {
         &self.day
+    }
+
+    /// This day, with Garmin's sleep record for its date.
+    #[must_use]
+    pub fn slept(self, sleep: Option<LandedRecord>) -> Self {
+        Self { sleep, ..self }
+    }
+
+    /// Garmin's sleep record for its date, where one landed.
+    pub const fn sleep(&self) -> Option<&LandedRecord> {
+        self.sleep.as_ref()
     }
 }
 
@@ -82,7 +118,11 @@ impl SourceAccount for DayAccount {
 pub fn days(records: Vec<LandedRecord>) -> Vec<DayAccount> {
     last_of_each(records)
         .into_iter()
-        .map(|(day, superseded)| DayAccount { day, superseded })
+        .map(|(day, superseded)| DayAccount {
+            day,
+            superseded,
+            sleep: None,
+        })
         .collect()
 }
 
