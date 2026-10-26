@@ -249,3 +249,23 @@ fn too_few_weigh_ins_give_no_cell() {
     let test = read.mesocycles.first().expect("the entry test");
     assert_eq!(test.by_method.first().map(|one| one.cell), Some(None));
 }
+
+/// **A mesocycle under a week old has no cell yet**: its first trend day is
+/// still ahead of today. It panicked, and took the web page down with it.
+#[test]
+fn a_mesocycle_under_a_week_old_has_no_cell() {
+    let autumn = autumn().expect("a macrocycle");
+    let mut planned = planned().to_vec();
+    planned.push(Span::new(date(2026, 10, 26), 4));
+    let mut measured = cutting();
+    let last = *measured.last().expect("a weigh-in");
+    measured.push(Measured {
+        on: date(2026, 10, 26),
+        ..last
+    });
+    let read = read(&measured, autumn, &planned, date(2026, 10, 26));
+
+    let current = read.mesocycles.last().expect("today's mesocycle");
+    assert!(current.running);
+    assert_eq!(current.by_method.first().map(|one| one.cell), Some(None));
+}
