@@ -28,7 +28,12 @@ To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`
 - **Done**: its PR merged, or the work landed some other way. Close it and say
   where the work landed.
 - **Duplicate** of another open issue: close the thinner one, pointing at the
-  other, and carry over anything only it said.
+  other, and carry over anything only it said. Two issues are duplicates when
+  meeting one's "done when" would meet the other's, however differently they
+  are worded. Titles do not show that: read every open issue's body and "done
+  when", group them by what they would change (a command, a page, a type), and
+  compare within each group, across milestones too. A split the operator asked
+  for, or one issue that reads what another builds, is not a duplicate.
 - **Overtaken**: a later decision or change made it moot. Close it and name what
   overtook it.
 - **Still wanted but wrong**: the title or "done when" no longer describes the
