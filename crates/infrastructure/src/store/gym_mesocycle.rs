@@ -26,7 +26,7 @@
 //! corrupt rather than merely unexpected, which is the same verdict a failed
 //! consistency check gets.
 
-use std::num::NonZeroU8;
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{FillChangeStore, MesocycleInForce, MesocycleStore, StoreError};
 use domain::{
@@ -221,6 +221,8 @@ pub(super) async fn in_force(
     .map_err(|error| store_error(&error))?;
 
     let mut mesocycles = Vec::with_capacity(rows.len());
+    // Every change made so far in each plan, which its later mesocycles carry.
+    let mut carried: BTreeMap<i64, FillChanges> = BTreeMap::new();
     for row in rows {
         let fills = read_fills(pool, row.id).await?;
         let interruptions = read_interruptions(pool, row.id).await?;
@@ -277,7 +279,10 @@ pub(super) async fn in_force(
             }
         };
 
-        let changes = read_changes(pool, row.id).await?;
+        let own = read_changes(pool, row.id).await?;
+        let earlier = carried.entry(row.plan).or_default();
+        let changes = earlier.followed_by(&own);
+        earlier.clone_from(&changes);
         mesocycles.push((
             row.plan,
             MesocycleInForce {

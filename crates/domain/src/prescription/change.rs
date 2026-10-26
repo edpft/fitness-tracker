@@ -121,6 +121,17 @@ impl FillChanges {
             .and_then(|change| change.loaded_by)
     }
 
+    /// These changes, followed by a later mesocycle's own (#578).
+    ///
+    /// A change holds from its date until another replaces it, so a plan's
+    /// later mesocycle carries every change made in an earlier one: its fills
+    /// were stated with the plan, before any change was. A plan authored afresh
+    /// states its fills again, and carries nothing.
+    #[must_use]
+    pub fn followed_by(&self, later: &Self) -> Self {
+        Self::new(self.0.iter().chain(&later.0).cloned().collect())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &FillChange> {
         self.0.iter()
     }
