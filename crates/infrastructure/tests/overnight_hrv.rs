@@ -5,6 +5,9 @@
 //! Garmin serves for a night it measured nothing on, and the one night with a
 //! five-minute high and no average — are the ones his 634 landed nights hold.
 
+#[path = "support/layers.rs"]
+mod layers;
+
 use application::{Translation, ports::SourceAccount, ports::Translator};
 use domain::{
     body::{HrvStatus, OvernightHrv},
@@ -340,7 +343,7 @@ fn a_night_served_twice_is_the_later_serving_and_the_earlier_is_set_aside() {
 /// that a night and its readings survive a round trip through the store, and
 /// that a second derivation reproduces the first exactly (§ 7).
 mod stored {
-    use super::{Failure, night, night_with};
+    use super::{Failure, layers, night, night_with};
 
     use application::{
         ExtractionRunLog as _, LandingStore as _, WorkoutNormaliser,
@@ -431,6 +434,13 @@ mod stored {
     }
 
     async fn derive(pool: &SqlitePool) -> Result<(usize, usize), Failure> {
+        derive_as(pool, application::Rederivation::Whole).await
+    }
+
+    async fn derive_as(
+        pool: &SqlitePool,
+        rederivation: application::Rederivation,
+    ) -> Result<(usize, usize), Failure> {
         let normalisation = Normalisation::new(
             NormalisationPorts {
                 raw: GarminHrvAccountReader::new(pool.clone())?,
@@ -442,11 +452,96 @@ mod stored {
             },
             OperatorZone::try_from("Europe/London")?,
         );
-        let summary = normalisation.normalise().await?;
+        let summary = normalisation.normalise(rederivation).await?;
         Ok((
             summary.workouts_written.as_usize(),
             summary.refusals_recorded.as_usize(),
         ))
+    }
+
+    /// Nights into the store, under a run of their own.
+    async fn land(pool: &SqlitePool, records: Vec<LandingRecord>) -> Result<(), Failure> {
+        let landing = GarminHrvLandingStore::new(pool.clone())?;
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+        landing.append(run, records).await?;
+        Ok(())
+    }
+
+    fn first_batch() -> Result<Vec<LandingRecord>, Failure> {
+        Ok(vec![
+            landing_record(
+                "2025-06-01",
+                &night(
+                    "2025-06-01",
+                    "2025-05-31T22:32:32.0",
+                    "2025-06-01T05:55:54.0",
+                    0,
+                ),
+            )?,
+            landing_record(
+                "2025-03-31",
+                &night(
+                    "2025-03-31",
+                    "2025-03-30T22:32:32.0",
+                    "2025-03-31T05:55:54.0",
+                    1,
+                ),
+            )?,
+        ])
+    }
+
+    /// 2025-06-01 served again, revised as Garmin does, and a new night.
+    fn second_batch() -> Result<Vec<LandingRecord>, Failure> {
+        Ok(vec![
+            landing_record(
+                "2025-06-01",
+                &night(
+                    "2025-06-01",
+                    "2025-05-31T22:32:32.0",
+                    "2025-06-01T05:55:54.0",
+                    2,
+                ),
+            )?,
+            landing_record(
+                "2026-09-17",
+                &night(
+                    "2026-09-17",
+                    "2026-09-16T22:32:32.0",
+                    "2026-09-17T05:55:54.0",
+                    4,
+                ),
+            )?,
+        ])
+    }
+
+    #[test]
+    fn an_incremental_derivation_writes_what_a_whole_one_would() {
+        let outcome: Result<(), Failure> = block_on(async {
+            let directory = tempfile::tempdir()?;
+            let whole = connect(&directory.path().join("whole.db")).await?;
+            land(&whole, first_batch()?).await?;
+            land(&whole, second_batch()?).await?;
+            derive_as(&whole, application::Rederivation::Whole).await?;
+
+            let incremental = connect(&directory.path().join("incremental.db")).await?;
+            land(&incremental, first_batch()?).await?;
+            derive_as(&incremental, application::Rederivation::Incremental).await?;
+            land(&incremental, second_batch()?).await?;
+            let (written, _) =
+                derive_as(&incremental, application::Rederivation::Incremental).await?;
+
+            assert_eq!(
+                layers::dump(&incremental).await?,
+                layers::dump(&whole).await?
+            );
+            assert_eq!(written, 2, "the night served again and the new one");
+            Ok(())
+        })
+        .and_then(|outcome| outcome);
+        if let Err(error) = outcome {
+            panic!("{error}");
+        }
     }
 
     fn block_on<T>(body: impl std::future::Future<Output = T>) -> Result<T, Failure> {

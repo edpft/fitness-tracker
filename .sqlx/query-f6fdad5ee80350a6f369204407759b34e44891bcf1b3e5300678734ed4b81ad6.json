@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM device_sighting WHERE stream = ? AND landing_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f6fdad5ee80350a6f369204407759b34e44891bcf1b3e5300678734ed4b81ad6"
+}

@@ -13,7 +13,7 @@
 //! SQL would mean doing zone arithmetic in SQL, and the morning is how a night
 //! is asked for.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     body::{HrvReading, HrvStatus, OvernightHrv},
     landing::{
@@ -57,7 +57,8 @@ impl AccountReader for GarminHrvAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<NightAccount>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<NightAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         // Oldest first, by the store's own sequence — which is the order the
         // source served them, because raw is append-only.
         let rows = sqlx::query!(
@@ -104,22 +105,41 @@ impl AccountReader for GarminHrvAccountReader {
             ));
         }
 
-        let mut sleeps = sleeps(&self.pool).await?;
-        Ok(nights(records)
-            .into_iter()
-            .map(|night| {
-                let sleep = sleeps.remove(night.night().source_record_id().as_str());
-                night.slept(sleep)
-            })
-            .collect())
+        let sleeps = sleeps(&self.pool).await?;
+        let slept = |records: Vec<LandedRecord>, sleeps: &[LandedRecord]| {
+            let mut sleeps = by_date(sleeps);
+            nights(records)
+                .into_iter()
+                .map(|night| {
+                    let sleep = sleeps.remove(night.night().source_record_id().as_str());
+                    night.slept(sleep)
+                })
+                .collect()
+        };
+        Ok(Reached {
+            up_to: super::marks::up_to(records.iter().chain(&sleeps)),
+            previously: marks.map(|marks| slept(marks.held(&records), &marks.held(&sleeps))),
+            now: slept(records, &sleeps),
+        })
     }
 }
 
-/// The serving of Garmin's sleep record that stands for each date, keyed by
-/// the date it is filed under, which is the date a night and a day are (#569).
-pub(super) async fn sleeps(
-    pool: &SqlitePool,
-) -> Result<std::collections::BTreeMap<String, LandedRecord>, StoreError> {
+/// Sleep records keyed by the date each is filed under.
+pub(super) fn by_date(sleeps: &[LandedRecord]) -> std::collections::BTreeMap<String, LandedRecord> {
+    sleeps
+        .iter()
+        .map(|sleep| (sleep.source_record_id().as_str().to_owned(), sleep.clone()))
+        .collect()
+}
+
+/// The serving of Garmin's sleep record that stands for each date, filed under
+/// the date a night and a day are (#569).
+///
+/// **Only the serving that stands**, so what raw held up to a mark is not quite
+/// what stood then: a date served again since reads as having had no sleep
+/// record. That date has a new record either way, so its night is translated
+/// again whichever way it is read.
+pub(super) async fn sleeps(pool: &SqlitePool) -> Result<Vec<LandedRecord>, StoreError> {
     let stream = LandingStream::try_from(super::GarminSleepLandingStore::STREAM)
         .map_err(|error| corrupt(&error))?;
     let rows = sqlx::query!(
@@ -141,9 +161,8 @@ pub(super) async fn sleeps(
     .fetch_all(pool)
     .await
     .map_err(|error| store_error(&error))?;
-    let mut sleeps = std::collections::BTreeMap::new();
+    let mut sleeps = Vec::with_capacity(rows.len());
     for row in rows {
-        let key = row.source_record_id.clone();
         let record = super::garmin_gym::Row {
             id: row.id,
             endpoint: row.endpoint,
@@ -154,7 +173,7 @@ pub(super) async fn sleeps(
             payload: row.payload,
         }
         .into_record(&stream)?;
-        sleeps.insert(key, record);
+        sleeps.push(record);
     }
     Ok(sleeps)
 }
@@ -218,6 +237,37 @@ impl NormalisedEntityStore for SqliteOvernightHrvStore {
             write_night(&mut tx, run_id, &night).await?;
         }
 
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        nights: Vec<OvernightHrv>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        for statement in [
+            "DELETE FROM overnight_hrv_reading WHERE night IN (SELECT value FROM json_each(?))",
+            "DELETE FROM overnight_hrv WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+        ] {
+            sqlx::query(statement)
+                .bind(&removed)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+        let written = nights.len();
+        for night in nights {
+            write_night(&mut tx, run_id, &night).await?;
+        }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

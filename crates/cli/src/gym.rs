@@ -32,7 +32,7 @@ use crate::{
     Failure, catalogue, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing,
     wiring, wiring::Command,
 };
-use application::strength::RelativeStrength;
+use application::{Rederivation, strength::RelativeStrength};
 use configurator::store::Store;
 use domain::{
     analytical::Rts,
@@ -65,8 +65,13 @@ pub async fn next(
 
     // 2. What it means. Contacts no source: everything it needs is now landed.
     output::derivation_started(&stream);
-    let derived =
-        crate::carry_out(Command::Normalise(zone.clone()), known, database, &stream).await?;
+    let derived = crate::carry_out(
+        Command::Normalise(zone.clone(), Rederivation::Incremental),
+        known,
+        database,
+        &stream,
+    )
+    .await?;
     report(&stream, derived);
 
     // 3. What happened, however many sources recorded it. Everything below reads
@@ -150,8 +155,13 @@ pub async fn strength(
         }
 
         output::derivation_started(&stream);
-        let derived =
-            crate::carry_out(Command::Normalise(zone.clone()), known, database, &stream).await?;
+        let derived = crate::carry_out(
+            Command::Normalise(zone.clone(), Rederivation::Incremental),
+            known,
+            database,
+            &stream,
+        )
+        .await?;
         report(&stream, derived);
     }
 

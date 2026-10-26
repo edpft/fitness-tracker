@@ -6,13 +6,14 @@
 //! serving of a day stands is Garmin knowledge, in [`crate::garmin::account`].
 
 use application::{
-    AccountReader, NormalisedEntityStore, OvernightHrvHistory, RestingHeartRateHistory, StoreError,
+    AccountReader, NormalisedEntityStore, OvernightHrvHistory, Reached, Reading as RawReading,
+    RestingHeartRateHistory, StoreError,
 };
 use domain::{
     analytical::per_device::{Reading, Recorded},
     body::RestingHeartRate,
     device::DeviceIdentifier,
-    landing::{InvalidStream, LandingStream},
+    landing::{InvalidStream, LandedRecord, LandingRecordId, LandingStream},
     measure::{BeatsPerMinute, HeartRateVariability},
     normalised::{NormalisationRunId, WorkoutCount},
 };
@@ -53,7 +54,8 @@ impl AccountReader for GarminDailyHeartRateAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<DayAccount>, StoreError> {
+    async fn accounts(&self, reading: &RawReading) -> Result<Reached<DayAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -86,14 +88,22 @@ impl AccountReader for GarminDailyHeartRateAccountReader {
                 .into_record(&self.stream)?,
             );
         }
-        let mut sleeps = super::garmin_normalised::sleeps(&self.pool).await?;
-        Ok(days(records)
-            .into_iter()
-            .map(|day| {
-                let sleep = sleeps.remove(day.day().source_record_id().as_str());
-                day.slept(sleep)
-            })
-            .collect())
+        let sleeps = super::garmin_normalised::sleeps(&self.pool).await?;
+        let slept = |records: Vec<LandedRecord>, sleeps: &[LandedRecord]| {
+            let mut sleeps = super::garmin_normalised::by_date(sleeps);
+            days(records)
+                .into_iter()
+                .map(|day| {
+                    let sleep = sleeps.remove(day.day().source_record_id().as_str());
+                    day.slept(sleep)
+                })
+                .collect()
+        };
+        Ok(Reached {
+            up_to: super::marks::up_to(records.iter().chain(&sleeps)),
+            previously: marks.map(|marks| slept(marks.held(&records), &marks.held(&sleeps))),
+            now: slept(records, &sleeps),
+        })
     }
 }
 
@@ -129,7 +139,16 @@ impl NormalisedEntityStore for SqliteRestingHeartRateStore {
         run: NormalisationRunId,
         days: Vec<RestingHeartRate>,
     ) -> Result<WorkoutCount, StoreError> {
-        replace(&self.pool, run, &days, &[]).await
+        replace(&self.pool, run, None, &days, &[]).await
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        days: Vec<RestingHeartRate>,
+    ) -> Result<WorkoutCount, StoreError> {
+        replace(&self.pool, run, Some(&removed), &days, &[]).await
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
@@ -172,15 +191,18 @@ impl NormalisedEntityStore for SqliteDailyHeartRateStore {
         run: NormalisationRunId,
         entities: Vec<GarminDayEntity>,
     ) -> Result<WorkoutCount, StoreError> {
-        let mut days = Vec::new();
-        let mut wear = Vec::new();
-        for entity in entities {
-            match entity {
-                GarminDayEntity::RestingHeartRate(day) => days.push(day),
-                GarminDayEntity::Wear(day) => wear.push(day),
-            }
-        }
-        replace(&self.pool, run, &days, &wear).await
+        let (days, wear) = split(entities);
+        replace(&self.pool, run, None, &days, &wear).await
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        entities: Vec<GarminDayEntity>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let (days, wear) = split(entities);
+        replace(&self.pool, run, Some(&removed), &days, &wear).await
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
@@ -188,23 +210,61 @@ impl NormalisedEntityStore for SqliteDailyHeartRateStore {
     }
 }
 
+/// A day's resting heart rate and its wear, apart.
+fn split(entities: Vec<GarminDayEntity>) -> (Vec<RestingHeartRate>, Vec<WearDay>) {
+    let mut days = Vec::new();
+    let mut wear = Vec::new();
+    for entity in entities {
+        match entity {
+            GarminDayEntity::RestingHeartRate(day) => days.push(day),
+            GarminDayEntity::Wear(day) => wear.push(day),
+        }
+    }
+    (days, wear)
+}
+
+/// Every day, or only the days stored under `removed` (#571), in place of
+/// what they held.
 async fn replace(
     pool: &SqlitePool,
     run: NormalisationRunId,
+    removed: Option<&[LandingRecordId]>,
     days: &[RestingHeartRate],
     wear: &[WearDay],
 ) -> Result<WorkoutCount, StoreError> {
     let run_id = normalisation_run_for_storage(run)?;
     let mut tx = pool.begin().await.map_err(|error| store_error(&error))?;
 
-    sqlx::query!("DELETE FROM resting_heart_rate")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error(&error))?;
-    sqlx::query!("DELETE FROM wear_day")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error(&error))?;
+    match removed {
+        None => {
+            sqlx::query!("DELETE FROM resting_heart_rate")
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+            sqlx::query!("DELETE FROM wear_day")
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+        Some(removed) => {
+            let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+            sqlx::query!(
+                "DELETE FROM resting_heart_rate \
+                 WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+                removed
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+            sqlx::query!(
+                "DELETE FROM wear_day WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+                removed
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+    }
 
     for day in days {
         let id = day.landed_as().as_i64();

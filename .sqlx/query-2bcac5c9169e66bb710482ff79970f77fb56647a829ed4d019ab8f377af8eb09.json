@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM wear_day WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2bcac5c9169e66bb710482ff79970f77fb56647a829ed4d019ab8f377af8eb09"
+}

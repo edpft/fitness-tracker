@@ -12,6 +12,9 @@ use domain::{
 };
 use infrastructure::{SpreadsheetSessionTranslator, Workbook};
 
+#[path = "support/layers.rs"]
+mod layers;
+
 type Failure = Box<dyn std::error::Error>;
 
 const SESSIONS: &[u8] = include_bytes!("fixtures/spreadsheets/gym-sessions.xlsx");
@@ -263,7 +266,7 @@ mod store {
     };
     use sqlx::SqlitePool;
 
-    use super::{Failure, SESSIONS, record};
+    use super::{BEGINNER, EARLY_2017, FINAL_2017, Failure, SESSIONS, landed, layers, record};
 
     struct EpochClock;
 
@@ -278,6 +281,13 @@ mod store {
     }
 
     async fn derive(pool: &SqlitePool) -> Result<NormalisationSummary, Failure> {
+        derive_as(pool, application::Rederivation::Whole).await
+    }
+
+    async fn derive_as(
+        pool: &SqlitePool,
+        rederivation: application::Rederivation,
+    ) -> Result<NormalisationSummary, Failure> {
         let normalisation = Normalisation::new(
             NormalisationPorts {
                 raw: SpreadsheetFileAccountReader::new(pool.clone())?,
@@ -292,7 +302,7 @@ mod store {
             },
             OperatorZone::try_from("Europe/London")?,
         );
-        Ok(normalisation.normalise().await?)
+        Ok(normalisation.normalise(rederivation).await?)
     }
 
     async fn count(pool: &SqlitePool, sql: &'static str) -> Result<i64, Failure> {
@@ -368,5 +378,64 @@ mod store {
         })
         .and_then(|result| result);
         outcome.expect("the derivation round-trips");
+    }
+
+    /// Files into the store, each its own record.
+    async fn land(pool: &SqlitePool, files: &[(i64, &str, &[u8])]) -> Result<(), Failure> {
+        let landing = SpreadsheetFileLandingStore::new(pool.clone())?;
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+        let mut records = Vec::new();
+        for (id, path, bytes) in files {
+            records.push(landed(*id, path, bytes)?.record().clone());
+        }
+        landing.append(run, records).await?;
+        Ok(())
+    }
+
+    const FIRST: &[(i64, &str, &[u8])] = &[
+        (1, "Dropbox/Random/1RM.xlsx", SESSIONS),
+        (
+            2,
+            "Dropbox/CT 2017 (Netbook's conflicted copy 2017-03-29).xlsx",
+            EARLY_2017,
+        ),
+    ];
+
+    /// The CT 2017 workbook's own file, joining its conflicted copy, and a
+    /// workbook of its own.
+    const SECOND: &[(i64, &str, &[u8])] = &[
+        (3, "Dropbox/CT 2017.xlsx", FINAL_2017),
+        (4, "Dropbox/Beginner 2020.xlsx", BEGINNER),
+    ];
+
+    #[test]
+    fn an_incremental_derivation_writes_what_a_whole_one_would() {
+        let outcome: Result<(), Failure> = block_on(async {
+            let directory = tempfile::tempdir()?;
+            let whole = connect(&directory.path().join("whole.db")).await?;
+            land(&whole, FIRST).await?;
+            land(&whole, SECOND).await?;
+            let all = derive_as(&whole, application::Rederivation::Whole).await?;
+
+            let incremental = connect(&directory.path().join("incremental.db")).await?;
+            land(&incremental, FIRST).await?;
+            derive_as(&incremental, application::Rederivation::Incremental).await?;
+            land(&incremental, SECOND).await?;
+            let since = derive_as(&incremental, application::Rederivation::Incremental).await?;
+
+            assert_eq!(
+                layers::dump(&incremental).await?,
+                layers::dump(&whole).await?
+            );
+            // Not the 1RM sheet, which nothing landed since reached.
+            assert!(since.records_read.as_usize() < all.records_read.as_usize());
+            assert!(since.reconciles(), "every record read has one outcome");
+            Ok(())
+        })
+        .and_then(|outcome| outcome);
+        if let Err(error) = outcome {
+            panic!("{error}");
+        }
     }
 }

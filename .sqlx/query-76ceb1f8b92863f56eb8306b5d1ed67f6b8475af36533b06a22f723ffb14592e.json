@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM measured_gym_session_heart_rate WHERE workout IN (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "76ceb1f8b92863f56eb8306b5d1ed67f6b8475af36533b06a22f723ffb14592e"
+}

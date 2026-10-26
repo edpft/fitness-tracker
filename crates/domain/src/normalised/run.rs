@@ -183,6 +183,9 @@ pub enum NormalisationOutcome {
         retractions_read: RecordCount,
         records_refused: RecordCount,
         refusals_recorded: RefusalCount,
+        /// How many records the layer stands on once written, which a
+        /// derivation reading only what is new no longer reads all of (#571).
+        records_covered: RecordCount,
     },
     Failed {
         finished_at: FetchedAt,

@@ -70,6 +70,10 @@ impl SourceAccount for SessionAccount {
         self.workouts.count() + self.superseded.len()
     }
 
+    fn landed(&self) -> Vec<&LandedRecord> {
+        self.workouts.iter().chain(&self.superseded).collect()
+    }
+
     fn superseded(&self) -> usize {
         self.superseded.len()
     }

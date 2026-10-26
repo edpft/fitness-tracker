@@ -27,6 +27,9 @@ use infrastructure::{
 };
 use jiff::civil::date;
 
+#[path = "support/layers.rs"]
+mod layers;
+
 const FIRST: &[u8] = include_bytes!("fixtures/myfitnesspal/first-export.ods");
 const SECOND: &[u8] = include_bytes!("fixtures/myfitnesspal/second-export.ods");
 
@@ -66,6 +69,13 @@ async fn land(folder: &Path, pool: &SqlitePool, database: &Path) -> Result<usize
 }
 
 async fn normalise(pool: &SqlitePool) -> Result<usize, StoreError> {
+    normalise_as(pool, application::Rederivation::Whole).await
+}
+
+async fn normalise_as(
+    pool: &SqlitePool,
+    rederivation: application::Rederivation,
+) -> Result<usize, StoreError> {
     let stream = MyFitnessPalExportLandingStore::STREAM;
     let summary = Normalisation::new(
         NormalisationPorts {
@@ -78,7 +88,7 @@ async fn normalise(pool: &SqlitePool) -> Result<usize, StoreError> {
         },
         OperatorZone::try_from("Europe/London").map_err(corrupt)?,
     )
-    .normalise()
+    .normalise(rederivation)
     .await
     .map_err(corrupt)?;
     Ok(summary.workouts_written.as_usize())
@@ -221,6 +231,54 @@ fn the_history_reads_a_weight_dated_to_a_day() {
                 at: Occurred::On(date(2014, 12, 29)),
                 mass: domain::measure::Kg::from_grams(70_100),
             })
+        );
+    });
+}
+
+/// A second export derived on its own run holds the rows a derivation of both
+/// at once would (#571). Every export is one account, so the second reaches
+/// all of it.
+#[test]
+fn an_incremental_derivation_writes_what_a_whole_one_would() {
+    runtime().expect("a runtime").block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+
+        let whole_folder =
+            folder_with(&directory.path().join("whole"), &[("a.ods", FIRST)]).expect("a folder");
+        let whole_database = directory.path().join("whole.db");
+        let whole = connect(&whole_database).await.expect("a store");
+        land(&whole_folder, &whole, &whole_database)
+            .await
+            .expect("the first");
+        fs::write(whole_folder.join("b.ods"), SECOND).expect("the second");
+        land(&whole_folder, &whole, &whole_database)
+            .await
+            .expect("the second");
+        normalise_as(&whole, application::Rederivation::Whole)
+            .await
+            .expect("a whole derivation");
+
+        let folder = folder_with(&directory.path().join("incremental"), &[("a.ods", FIRST)])
+            .expect("a folder");
+        let database = directory.path().join("incremental.db");
+        let incremental = connect(&database).await.expect("a store");
+        land(&folder, &incremental, &database)
+            .await
+            .expect("the first");
+        normalise_as(&incremental, application::Rederivation::Incremental)
+            .await
+            .expect("a first derivation");
+        fs::write(folder.join("b.ods"), SECOND).expect("the second");
+        land(&folder, &incremental, &database)
+            .await
+            .expect("the second");
+        normalise_as(&incremental, application::Rederivation::Incremental)
+            .await
+            .expect("an incremental derivation");
+
+        assert_eq!(
+            layers::dump(&incremental).await.expect("a dump"),
+            layers::dump(&whole).await.expect("a dump"),
         );
     });
 }

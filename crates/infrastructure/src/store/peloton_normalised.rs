@@ -25,7 +25,7 @@
 //! both being current, which is why a ride with no graph is a refusal rather
 //! than an error.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     cycling::{BikePlusRide, Ftp, FtpProvenance, PerformedSession, Watts},
     landing::{
@@ -118,15 +118,8 @@ impl AccountReader for PelotonSessionAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<SessionAccount>, StoreError> {
-        // The graphs first, keyed by the workout they belong to. **The latest
-        // landed graph wins** where a workout has more than one: a graph
-        // carries no identity of its own, so there is no pairing to preserve —
-        // and § 10's rule that the later of two servings supersedes is a
-        // canonical-layer rule the derivation may act on where doing so needs
-        // nothing it cannot see. It cannot arise in the operator's account, and
-        // the alternative is refusing a ride over a duplicate of a payload that
-        // is byte-identical.
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<SessionAccount>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let samples_stream = LandingStream::try_from(super::PelotonRideSampleLandingStore::STREAM)
             .map_err(|error| corrupt(&error))?;
 
@@ -147,24 +140,24 @@ impl AccountReader for PelotonSessionAccountReader {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let mut graphs: BTreeMap<String, LandedRecord> = BTreeMap::new();
+        let mut graphs = Vec::with_capacity(graph_rows.len());
         for row in graph_rows {
-            let key = row.source_record_id.clone();
-            let record = Row {
-                id: row.id,
-                endpoint: row.endpoint,
-                fetched_at: row.fetched_at,
-                source_record_id: row.source_record_id,
-                event_kind: row.event_kind,
-                event_time: row.event_time,
-                payload: row.payload,
-            }
-            .into_record(&samples_stream)?;
-            graphs.insert(key, record);
+            graphs.push(
+                Row {
+                    id: row.id,
+                    endpoint: row.endpoint,
+                    fetched_at: row.fetched_at,
+                    source_record_id: row.source_record_id,
+                    event_kind: row.event_kind,
+                    event_time: row.event_time,
+                    payload: row.payload,
+                }
+                .into_record(&samples_stream)?,
+            );
         }
 
-        // Then the workouts, oldest first, by the store's own sequence — which
-        // is the order the source served them, because raw is append-only.
+        // The workouts, oldest first, by the store's own sequence — which is
+        // the order the source served them, because raw is append-only.
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -184,32 +177,73 @@ impl AccountReader for PelotonSessionAccountReader {
 
         let mut rides = Vec::with_capacity(rows.len());
         for row in rows {
-            let samples = graphs.get(&row.source_record_id).cloned();
-            let ride = Row {
-                id: row.id,
-                endpoint: row.endpoint,
-                fetched_at: row.fetched_at,
-                source_record_id: row.source_record_id,
-                event_kind: row.event_kind,
-                event_time: row.event_time,
-                payload: row.payload,
-            }
-            .into_record(&self.stream)?;
-            rides.push(LandedRide { ride, samples });
+            rides.push(
+                Row {
+                    id: row.id,
+                    endpoint: row.endpoint,
+                    fetched_at: row.fetched_at,
+                    source_record_id: row.source_record_id,
+                    event_kind: row.event_kind,
+                    event_time: row.event_time,
+                    payload: row.payload,
+                }
+                .into_record(&self.stream)?,
+            );
         }
 
         let pairings = pairings(&self.pool).await?;
 
-        Ok(group(rides)
-            .into_iter()
-            .map(|session| session.paired(Arc::clone(&pairings)))
-            .collect())
+        Ok(Reached {
+            up_to: super::marks::up_to(rides.iter().chain(&graphs).chain(&pairings)),
+            previously: marks.map(|marks| {
+                sessions(
+                    marks.held(&rides),
+                    &marks.held(&graphs),
+                    marks.held(&pairings),
+                )
+            }),
+            now: sessions(rides, &graphs, pairings),
+        })
     }
+}
+
+/// Every ride with its graph, grouped into sessions, each reading the account
+/// for its monitor.
+///
+/// **The latest landed graph wins** where a workout has more than one: a graph
+/// carries no identity of its own, so there is no pairing to preserve — and
+/// § 10's rule that the later of two servings supersedes is a canonical-layer
+/// rule the derivation may act on where doing so needs nothing it cannot see.
+/// It cannot arise in the operator's account, and the alternative is refusing a
+/// ride over a duplicate of a payload that is byte-identical.
+fn sessions(
+    rides: Vec<LandedRecord>,
+    graphs: &[LandedRecord],
+    pairings: Vec<LandedRecord>,
+) -> Vec<SessionAccount> {
+    let mut latest: BTreeMap<&str, &LandedRecord> = BTreeMap::new();
+    for graph in graphs {
+        latest.insert(graph.source_record_id().as_str(), graph);
+    }
+    let rides = rides
+        .into_iter()
+        .map(|ride| {
+            let samples = latest
+                .get(ride.source_record_id().as_str())
+                .map(|graph| (*graph).clone());
+            LandedRide { ride, samples }
+        })
+        .collect();
+    let pairings: Arc<[LandedRecord]> = Arc::from(pairings);
+    group(rides)
+        .into_iter()
+        .map(|session| session.paired(Arc::clone(&pairings)))
+        .collect()
 }
 
 /// Every answer Peloton's account gave, oldest first, which each session reads
 /// for the monitor its rides were ridden with (#569).
-async fn pairings(pool: &SqlitePool) -> Result<Arc<[LandedRecord]>, StoreError> {
+async fn pairings(pool: &SqlitePool) -> Result<Vec<LandedRecord>, StoreError> {
     let account_stream = LandingStream::try_from(super::PelotonAccountLandingStore::STREAM)
         .map_err(|error| corrupt(&error))?;
     let answers = sqlx::query!(
@@ -243,7 +277,7 @@ async fn pairings(pool: &SqlitePool) -> Result<Arc<[LandedRecord]>, StoreError> 
             .into_record(&account_stream)?,
         );
     }
-    Ok(Arc::from(pairings))
+    Ok(pairings)
 }
 
 /// The normalised layer for Peloton sessions.
@@ -320,6 +354,65 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
             write_session(&mut tx, run_id, &session).await?;
         }
 
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        sessions: Vec<PerformedSession>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+
+        // The canonical layer first, for `replace`'s reason. A session is
+        // stored under its first ride and each ride under its own, so a record
+        // naming any ride of a session removes the whole of it, and the FTP it
+        // measured with it.
+        super::canonical_cycling::clear(&mut tx).await?;
+        let doomed = sqlx::query_scalar!(
+            r#"
+            SELECT landing_record_id AS "id!: i64" FROM cycling_session
+             WHERE landing_record_id IN (SELECT value FROM json_each(?))
+                OR landing_record_id IN (SELECT session FROM bike_plus_ride
+                                          WHERE landing_record_id IN (SELECT value FROM json_each(?)))
+            "#,
+            removed,
+            removed
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let doomed = super::ids_json(doomed);
+        for statement in [
+            "DELETE FROM bike_plus_ride_heart_rate WHERE ride IN \
+             (SELECT landing_record_id FROM bike_plus_ride \
+               WHERE session IN (SELECT value FROM json_each(?)))",
+            "DELETE FROM bike_plus_ride_sample WHERE ride IN \
+             (SELECT landing_record_id FROM bike_plus_ride \
+               WHERE session IN (SELECT value FROM json_each(?)))",
+            "DELETE FROM bike_plus_ride WHERE session IN (SELECT value FROM json_each(?))",
+            "DELETE FROM ftp WHERE measured_by IN (SELECT value FROM json_each(?))",
+            "DELETE FROM cycling_session WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+        ] {
+            sqlx::query(statement)
+                .bind(&doomed)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+
+        let written = sessions.len();
+        for session in sessions {
+            write_session(&mut tx, run_id, &session).await?;
+        }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

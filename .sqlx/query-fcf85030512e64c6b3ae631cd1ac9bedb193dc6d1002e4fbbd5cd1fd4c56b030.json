@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT count(*) AS \"named!: i64\" FROM bike_plus_ride\n                WHERE heart_rate_device IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "named!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fcf85030512e64c6b3ae631cd1ac9bedb193dc6d1002e4fbbd5cd1fd4c56b030"
+}

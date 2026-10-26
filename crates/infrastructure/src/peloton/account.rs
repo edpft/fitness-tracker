@@ -15,6 +15,8 @@ use std::sync::Arc;
 use application::SourceAccount;
 use domain::{landing::LandedRecord, sequence::NonEmpty};
 
+use super::payload::WorkoutRecord;
+
 /// One ride, as far as Peloton has been asked about it.
 #[derive(Debug, Clone)]
 pub struct LandedRide {
@@ -106,6 +108,29 @@ impl SourceAccount for SessionAccount {
             .chain(self.superseded.iter())
             .map(LandedRide::records)
             .sum()
+    }
+
+    /// Its rides and their graphs, the servings they replaced, and the account
+    /// answers either side of each ride, which say what it was ridden with.
+    fn landed(&self) -> Vec<&LandedRecord> {
+        let mut landed: Vec<&LandedRecord> = self
+            .rides
+            .iter()
+            .chain(self.superseded.iter())
+            .flat_map(|ride| std::iter::once(&ride.ride).chain(ride.samples.as_ref()))
+            .collect();
+        for ride in self.rides.iter() {
+            let started = WorkoutRecord::read(ride.ride.payload().as_bytes())
+                .ok()
+                .and_then(|workout| workout.start_time)
+                .and_then(|start| jiff::Timestamp::from_second(start).ok());
+            if let Some(started) = started {
+                let (before, after) = super::paired::either_side(&self.pairings, started);
+                landed.extend(before);
+                landed.extend(after);
+            }
+        }
+        landed
     }
 
     fn superseded(&self) -> usize {

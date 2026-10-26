@@ -16,6 +16,9 @@ use domain::{
 };
 use infrastructure::{BtwbTranslator, Exports};
 
+#[path = "support/layers.rs"]
+mod layers;
+
 type Failure = Box<dyn std::error::Error>;
 
 const HEADER: &str = "Date,Formatted Result,Result,Performed,Workout,Description,Notes\n";
@@ -223,4 +226,82 @@ fn a_file_that_is_not_an_export_is_refused() {
         matches!(translation, Translation::Refused(_)),
         "{translation:?}"
     );
+}
+
+// --- Deriving only what landed since (#571) ---------------------------------
+
+async fn land(pool: &sqlx::SqlitePool, id: i64, csv: &str) -> Result<(), Failure> {
+    use application::{ExtractionRunLog as _, LandingStore as _};
+
+    let landing = infrastructure::BtwbExportLandingStore::new(pool.clone())?;
+    let runs = infrastructure::SqliteExtractionRunLog::new(pool.clone());
+    let run = runs.begin(landing.stream(), FetchedAt::EPOCH).await?;
+    let record = landed(id, &format!("export-{id}.csv"), csv)?;
+    landing.append(run, vec![record.record().clone()]).await?;
+    Ok(())
+}
+
+async fn derive(
+    pool: &sqlx::SqlitePool,
+    rederivation: application::Rederivation,
+) -> Result<(), Failure> {
+    use application::WorkoutNormaliser as _;
+
+    struct EpochClock;
+    impl application::Clock for EpochClock {
+        fn now(&self) -> FetchedAt {
+            FetchedAt::EPOCH
+        }
+    }
+    application::normalise::Normalisation::new(
+        application::normalise::NormalisationPorts {
+            raw: infrastructure::BtwbExportAccountReader::new(pool.clone())?,
+            translator: BtwbTranslator,
+            workouts: infrastructure::SqliteBtwbStore::new(pool.clone())?,
+            refusals: infrastructure::SqliteRefusalStore::new(pool.clone(), "btwb.exports")?,
+            runs: infrastructure::SqliteNormalisationRunLog::new(pool.clone()),
+            clock: EpochClock,
+        },
+        OperatorZone::try_from("Europe/London")?,
+    )
+    .normalise(rederivation)
+    .await?;
+    Ok(())
+}
+
+/// A later export derived on its own run holds the rows a derivation of both
+/// at once would. Every export is one account, so it reaches all of them.
+#[test]
+fn an_incremental_derivation_writes_what_a_whole_one_would() {
+    let outcome: Result<(), Failure> = (|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async {
+            let first = format!("{HEADER}{SQUAT_AND_AMRAP}");
+            let second = format!("{HEADER}{SQUAT_AND_AMRAP}{LIFT_AND_AMREPS}");
+            let directory = tempfile::tempdir()?;
+
+            let whole = infrastructure::connect(&directory.path().join("whole.db")).await?;
+            land(&whole, 1, &first).await?;
+            land(&whole, 2, &second).await?;
+            derive(&whole, application::Rederivation::Whole).await?;
+
+            let incremental =
+                infrastructure::connect(&directory.path().join("incremental.db")).await?;
+            land(&incremental, 1, &first).await?;
+            derive(&incremental, application::Rederivation::Incremental).await?;
+            land(&incremental, 2, &second).await?;
+            derive(&incremental, application::Rederivation::Incremental).await?;
+
+            assert_eq!(
+                layers::dump(&incremental).await?,
+                layers::dump(&whole).await?
+            );
+            Ok(())
+        })
+    })();
+    if let Err(error) = outcome {
+        panic!("{error}");
+    }
 }

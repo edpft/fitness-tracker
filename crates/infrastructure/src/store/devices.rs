@@ -11,7 +11,7 @@ use application::{NormalisedEntityStore, RecordedDevices, StoreError, WearRecord
 use domain::{
     device::{DeviceIdentifier, DeviceName, Measurand, Role, Sighting, Wear},
     gym::MeasuredGymSession,
-    landing::{InvalidStream, LandingStream},
+    landing::{InvalidStream, LandingRecordId, LandingStream},
     normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
 };
 use jiff::{Timestamp, civil::Date};
@@ -20,8 +20,11 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use crate::garmin::{ActivityDevices, GarminActivityEntity, devices::joined};
 
 use super::{
-    GarminActivityLandingStore, corrupt, count_from_storage, garmin_gym::write_session,
-    normalisation_run_for_storage, normalised::clear_stream, store_error,
+    GarminActivityLandingStore, corrupt, count_from_storage,
+    garmin_gym::write_session,
+    normalisation_run_for_storage,
+    normalised::{clear_sessions, clear_stream},
+    store_error,
 };
 
 /// Writes what Garmin's activities derive: the gym sessions, in the tables
@@ -63,14 +66,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
 
-        let mut sessions: Vec<MeasuredGymSession> = Vec::new();
-        let mut devices: Vec<ActivityDevices> = Vec::new();
-        for entity in entities {
-            match entity {
-                GarminActivityEntity::GymSession(session) => sessions.push(*session),
-                GarminActivityEntity::Devices(found) => devices.push(*found),
-            }
-        }
+        let (sessions, devices) = split(entities);
 
         let mut tx = self
             .pool
@@ -92,6 +88,42 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         Ok(WorkoutCount::from(sessions.len()))
     }
 
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        entities: Vec<GarminActivityEntity>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let (sessions, devices) = split(entities);
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        clear_sessions(&mut tx, &stream, &removed).await?;
+        for session in &sessions {
+            write_session(&mut tx, run_id, &stream, session).await?;
+        }
+        let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        sqlx::query!(
+            "DELETE FROM device_sighting \
+             WHERE stream = ? AND landing_record_id IN (SELECT value FROM json_each(?))",
+            stream,
+            removed
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        for found in &devices {
+            write_sightings(&mut tx, run_id, &stream, found).await?;
+        }
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(sessions.len()))
+    }
+
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
         let stream = self.stream.to_string();
         let row = sqlx::query!(
@@ -103,6 +135,19 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         .map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(count_from_storage(Some(row.count))?))
     }
+}
+
+/// An activity's gym session and its devices, apart.
+fn split(entities: Vec<GarminActivityEntity>) -> (Vec<MeasuredGymSession>, Vec<ActivityDevices>) {
+    let mut sessions: Vec<MeasuredGymSession> = Vec::new();
+    let mut devices: Vec<ActivityDevices> = Vec::new();
+    for entity in entities {
+        match entity {
+            GarminActivityEntity::GymSession(session) => sessions.push(*session),
+            GarminActivityEntity::Devices(found) => devices.push(*found),
+        }
+    }
+    (sessions, devices)
 }
 
 /// One activity's devices, in the order its recording names them.

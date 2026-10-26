@@ -31,6 +31,9 @@ use infrastructure::{
 };
 use sqlx::SqlitePool;
 
+#[path = "support/layers.rs"]
+mod layers;
+
 type Built<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// A clock that never moves, so a run log is comparable between derivations.
@@ -224,6 +227,13 @@ async fn append<S: application::LandingStore + Sync>(
 }
 
 async fn derive(pool: &SqlitePool) -> Built<NormalisationSummary> {
+    derive_as(pool, application::Rederivation::Whole).await
+}
+
+async fn derive_as(
+    pool: &SqlitePool,
+    rederivation: application::Rederivation,
+) -> Built<NormalisationSummary> {
     let normalisation = Normalisation::new(
         NormalisationPorts {
             raw: PelotonSessionAccountReader::new(pool.clone())?,
@@ -235,7 +245,7 @@ async fn derive(pool: &SqlitePool) -> Built<NormalisationSummary> {
         },
         OperatorZone::try_from("Europe/London")?,
     );
-    Ok(normalisation.normalise().await?)
+    Ok(normalisation.normalise(rederivation).await?)
 }
 
 /// Rebuild the canonical cycling layer from what `derive` wrote.
@@ -1399,5 +1409,191 @@ fn re_deriving_the_rides_empties_the_canonical_layer_until_it_is_rebuilt() {
 
         canonicalise(&pool).await.expect("the layer rebuilt");
         assert_eq!(canonical.count().await.expect("a count").as_usize(), 1);
+    });
+}
+
+// --- Deriving only what landed since (#571) ---------------------------------
+
+/// Peloton's account as asked at `at`, paired with one monitor.
+fn answer(at: &str) -> Built<LandingRecord> {
+    Ok(LandingRecord::land(
+        LandingStream::try_from("peloton.account")?,
+        FetchedAt::try_from(at)?,
+        SourceRecordId::try_from("me")?,
+        EventProvenance::new(Endpoint::try_from("/api/me")?, EventKind::Updated, None).into(),
+        RawPayload::try_from(
+            r#"{"id":"me","paired_devices":[{"name":"Device: 3629",
+                "paired_device_type":"heart_rate_monitor","serial_number":"3629"}]}"#
+                .as_bytes(),
+        )?,
+    ))
+}
+
+/// Workouts, their graphs and the account's answers, as one batch lands them.
+type Batch<'a> = (
+    Vec<(&'a str, String)>,
+    Vec<(&'a str, String)>,
+    Vec<LandingRecord>,
+);
+
+/// Two batches of rides and graphs landed one after the other, each with the
+/// account answers given, deriving between them as `between` says.
+async fn in_two_batches(
+    first: Batch<'_>,
+    second: Batch<'_>,
+    between: bool,
+) -> Built<(SqlitePool, tempfile::TempDir, Option<NormalisationSummary>)> {
+    use application::LandingStore as _;
+
+    let directory = tempfile::tempdir()?;
+    let pool = connect(&directory.path().join("test.db")).await?;
+    let rides = PelotonRideLandingStore::new(pool.clone())?;
+    let samples = PelotonRideSampleLandingStore::new(pool.clone())?;
+    let account = infrastructure::PelotonAccountLandingStore::new(pool.clone())?;
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+
+    let (workouts, graphs, answers) = first;
+    append(&rides, &runs, "/api/user/u/workouts", workouts).await?;
+    append(&samples, &runs, "/api/workout/w/performance_graph", graphs).await?;
+    let run = runs.begin(account.stream(), FetchedAt::EPOCH).await?;
+    account.append(run, answers).await?;
+    if between {
+        derive_as(&pool, application::Rederivation::Incremental).await?;
+    }
+
+    let (workouts, graphs, answers) = second;
+    append(&rides, &runs, "/api/user/u/workouts", workouts).await?;
+    append(&samples, &runs, "/api/workout/w/performance_graph", graphs).await?;
+    let run = runs.begin(account.stream(), FetchedAt::EPOCH).await?;
+    account.append(run, answers).await?;
+    let summary = derive_as(&pool, application::Rederivation::Incremental).await?;
+    Ok((pool, directory, between.then_some(summary)))
+}
+
+fn plain_graph() -> String {
+    graph(
+        &[1, 2, 3],
+        &[150, 160, 170],
+        Some((&[120, 121, 122], "0")),
+        "2.0",
+        "km",
+    )
+}
+
+/// The same raw, derived whole and derived across two runs, holds the same
+/// rows — and the second run translates only the sessions the second batch
+/// changed: a ride whose cool-down landed later, a ride whose graph did, and a
+/// ride of its own.
+#[test]
+fn an_incremental_derivation_writes_what_a_whole_one_would() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let batches = || {
+            (
+                (
+                    vec![
+                        ("ride-1", workout("ride-1", Kind::Main, 100, 400)),
+                        ("ride-2", workout("ride-2", Kind::CoolDown, 450, 600)),
+                        ("ride-3", workout("ride-3", Kind::WarmUp, 10_000, 10_600)),
+                        ("ride-4", workout("ride-4", Kind::Test, 10_700, 11_900)),
+                        ("ride-5", workout("ride-5", Kind::Main, 50_000, 50_300)),
+                        ("ride-8", workout("ride-8", Kind::Main, 70_000, 70_300)),
+                    ],
+                    vec![
+                        ("ride-1", plain_graph()),
+                        ("ride-2", plain_graph()),
+                        ("ride-3", plain_graph()),
+                        ("ride-4", graph_averaging(&[1, 2, 3], &[200, 210, 220], 209)),
+                        ("ride-5", plain_graph()),
+                    ],
+                    Vec::new(),
+                ),
+                (
+                    vec![
+                        ("ride-6", workout("ride-6", Kind::CoolDown, 50_350, 50_500)),
+                        ("ride-7", workout("ride-7", Kind::Main, 90_000, 90_300)),
+                    ],
+                    vec![
+                        ("ride-6", plain_graph()),
+                        ("ride-7", plain_graph()),
+                        ("ride-8", plain_graph()),
+                    ],
+                    Vec::new(),
+                ),
+            )
+        };
+        let (first, second) = batches();
+        let (whole, _whole_directory, _) = in_two_batches(first, second, false)
+            .await
+            .expect("a whole derivation");
+        let (first, second) = batches();
+        let (incremental, _incremental_directory, summary) = in_two_batches(first, second, true)
+            .await
+            .expect("an incremental derivation");
+
+        assert_eq!(
+            layers::dump(&incremental).await.expect("a dump"),
+            layers::dump(&whole).await.expect("a dump"),
+        );
+        let summary = summary.expect("the second run's summary");
+        // Ride 5 with its new cool-down, ride 7, and ride 8 now its graph has
+        // landed: not the warm-up and test, nor ride 1 and its cool-down.
+        assert_eq!(summary.workouts_written.as_usize(), 3);
+        assert!(summary.reconciles(), "every record read has one outcome");
+        assert_eq!(summary.records_covered.as_usize(), 16);
+    });
+}
+
+/// A new account answer gives the rides since the last one their monitor, and
+/// an incremental derivation finds them without being told.
+#[test]
+fn a_new_account_answer_reaches_the_rides_before_it() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let batches = || -> Built<_> {
+            Ok((
+                (
+                    vec![
+                        ("ride-1", workout("ride-1", Kind::Main, 100, 400)),
+                        ("ride-2", workout("ride-2", Kind::Main, 90_000, 90_300)),
+                    ],
+                    vec![("ride-1", plain_graph()), ("ride-2", plain_graph())],
+                    vec![answer("1970-01-01T00:00:50Z")?],
+                ),
+                (
+                    Vec::new(),
+                    Vec::new(),
+                    vec![answer("1970-01-02T02:00:00Z")?],
+                ),
+            ))
+        };
+        let (first, second) = batches().expect("fixtures");
+        let (whole, _whole_directory, _) = in_two_batches(first, second, false)
+            .await
+            .expect("a whole derivation");
+        let (first, second) = batches().expect("fixtures");
+        let (incremental, _incremental_directory, summary) = in_two_batches(first, second, true)
+            .await
+            .expect("an incremental derivation");
+
+        assert_eq!(
+            layers::dump(&incremental).await.expect("a dump"),
+            layers::dump(&whole).await.expect("a dump"),
+        );
+        let named = sqlx::query_scalar!(
+            r#"SELECT count(*) AS "named!: i64" FROM bike_plus_ride
+                WHERE heart_rate_device IS NOT NULL"#
+        )
+        .fetch_one(&incremental)
+        .await
+        .expect("a count");
+        assert_eq!(named, 2, "both rides now have an answer either side");
+        assert_eq!(
+            summary
+                .expect("the second run's summary")
+                .workouts_written
+                .as_usize(),
+            2
+        );
     });
 }

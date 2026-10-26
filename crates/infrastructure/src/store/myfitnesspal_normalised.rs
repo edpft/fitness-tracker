@@ -7,7 +7,7 @@
 //! stream's rows are replaced. Where each was written, and when it was typed,
 //! hang off its row in `myfitnesspal_weigh_in`.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     body::ManualWeighIn,
     landing::{
@@ -16,7 +16,7 @@ use domain::{
     },
     normalised::{NormalisationRunId, WorkoutCount},
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::{
     MyFitnessPalExportLandingStore, corrupt, count_from_storage, normalisation_run_for_storage,
@@ -54,7 +54,11 @@ impl AccountReader for MyFitnessPalExportAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<MyFitnessPalExports>, StoreError> {
+    async fn accounts(
+        &self,
+        reading: &Reading,
+    ) -> Result<Reached<MyFitnessPalExports>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -94,7 +98,11 @@ impl AccountReader for MyFitnessPalExportAccountReader {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        Ok(MyFitnessPalExports::gather(records))
+        Ok(Reached {
+            up_to: super::marks::up_to(&records),
+            previously: marks.map(|marks| MyFitnessPalExports::gather(marks.held(&records))),
+            now: MyFitnessPalExports::gather(records),
+        })
     }
 }
 
@@ -149,58 +157,50 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for weigh_in in &weigh_ins {
-            let Some(entered_at) = weigh_in.entered_at() else {
-                return Err(StoreError::Corrupt {
-                    detail: format!(
-                        "a MyFitnessPal weigh-in on {} states no time it was entered",
-                        weigh_in.on()
-                    ),
-                });
-            };
-            let entered_at = entered_at.to_string();
-            let on_day = weigh_in.on().to_string();
-            let mass =
-                i64::try_from(weigh_in.mass().as_grams()).map_err(|error| corrupt(&error))?;
-            let cell = weigh_in.written_in();
-            let landed_as = cell.landed_as.as_i64();
-            let sheet = cell.sheet.as_str();
-            let reference = cell.cell.as_str();
-
-            let row = sqlx::query!(
-                r#"
-                INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)
-                VALUES (?, ?, ?, ?)
-                RETURNING id AS "id!: i64"
-                "#,
-                stream,
-                on_day,
-                mass,
-                run_id,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO myfitnesspal_weigh_in (
-                    weigh_in, landing_record_id, sheet, cell, entered_at_utc
-                )
-                VALUES (?, ?, ?, ?, ?)
-                "#,
-                row.id,
-                landed_as,
-                sheet,
-                reference,
-                entered_at,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
+        write_weigh_ins(&mut tx, run_id, &stream, &weigh_ins).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        weigh_ins: Vec<ManualWeighIn>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        super::canonical_weigh_in::clear(&mut tx).await?;
+        let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        let doomed = sqlx::query_scalar!(
+            r#"
+            SELECT weigh_in AS "weigh_in!: i64" FROM myfitnesspal_weigh_in
+             WHERE landing_record_id IN (SELECT value FROM json_each(?))
+            "#,
+            removed
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let doomed = super::ids_json(doomed);
+        for statement in [
+            "DELETE FROM myfitnesspal_weigh_in WHERE weigh_in IN (SELECT value FROM json_each(?))",
+            "DELETE FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))",
+        ] {
+            sqlx::query(statement)
+                .bind(&doomed)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error(&error))?;
+        }
+        write_weigh_ins(&mut tx, run_id, &stream, &weigh_ins).await?;
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(weigh_ins.len()))
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {
@@ -210,4 +210,63 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
             .map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(count_from_storage(Some(row.count))?))
     }
+}
+
+/// MyFitnessPal's weigh-ins, each beside the row every source writes to.
+async fn write_weigh_ins(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    stream: &str,
+    weigh_ins: &[ManualWeighIn],
+) -> Result<(), StoreError> {
+    for weigh_in in weigh_ins {
+        let Some(entered_at) = weigh_in.entered_at() else {
+            return Err(StoreError::Corrupt {
+                detail: format!(
+                    "a MyFitnessPal weigh-in on {} states no time it was entered",
+                    weigh_in.on()
+                ),
+            });
+        };
+        let entered_at = entered_at.to_string();
+        let on_day = weigh_in.on().to_string();
+        let mass = i64::try_from(weigh_in.mass().as_grams()).map_err(|error| corrupt(&error))?;
+        let cell = weigh_in.written_in();
+        let landed_as = cell.landed_as.as_i64();
+        let sheet = cell.sheet.as_str();
+        let reference = cell.cell.as_str();
+
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO weigh_in (stream, on_day, mass_grams, run_id)
+            VALUES (?, ?, ?, ?)
+            RETURNING id AS "id!: i64"
+            "#,
+            stream,
+            on_day,
+            mass,
+            run_id,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO myfitnesspal_weigh_in (
+                weigh_in, landing_record_id, sheet, cell, entered_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+            row.id,
+            landed_as,
+            sheet,
+            reference,
+            entered_at,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
 }

@@ -104,6 +104,10 @@ impl SourceAccount for Workbook {
     fn records(&self) -> usize {
         self.copies.count()
     }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        self.copies.iter().collect()
+    }
 }
 
 /// A landed copy, with the date in its name if it is a conflicted copy.

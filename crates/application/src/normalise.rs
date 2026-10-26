@@ -1,7 +1,9 @@
 //! Deriving the normalised layer from raw.
 //!
 //! Reads every account for one stream, translates each, and replaces the
-//! stream's normalised layer with the result. It contacts nothing: a derivation
+//! stream's normalised layer with the result — or, where the last derivation
+//! left a mark under the same terms, translates only the accounts a record
+//! landed since has changed, and replaces only what they derived (#571). It contacts nothing: a derivation
 //! works with every source down, which is § 36 satisfied by construction rather
 //! than by degrading gracefully.
 //!
@@ -13,8 +15,10 @@
 //! cannot — whether a source that deletes a workout and later serves it again
 //! has re-created it — which § 10 reserves for the canonical layer.
 
+use std::collections::BTreeSet;
+
 use domain::{
-    landing::{LandingStream, RecordCount, SourceRecordId},
+    landing::{LandedRecord, LandingRecordId, LandingStream, RecordCount, SourceRecordId},
     normalised::{
         NormalisationFailure, NormalisationOutcome, NormalisationRunId, NormalisedEntity,
         OperatorZone, Refusal, RefusalCount, WorkoutCount,
@@ -22,11 +26,12 @@ use domain::{
 };
 
 use crate::{
-    error::NormalisationError,
+    error::{NormalisationError, StoreError},
     ports::{
-        AccountReader, Clock, DerivationStatus, DerivationStatusReporter, NormalisationRunLog,
-        NormalisationSummary, NormalisedEntityStore, RawExtent, RefusalReport, RefusalReporter,
-        RefusalStore, SourceAccount, Translation, Translator, WorkoutNormaliser,
+        AccountReader, Clock, DerivationStatus, DerivationStatusReporter, Mark,
+        NormalisationRunLog, NormalisationSummary, NormalisedEntityStore, RawExtent, Reading,
+        Rederivation, RefusalReport, RefusalReporter, RefusalStore, SourceAccount, Terms,
+        Translation, Translator, WorkoutNormaliser,
     },
 };
 
@@ -37,6 +42,7 @@ use crate::{
 pub struct Normalisation<R, T, W, F, G, C> {
     stream: LandingStream,
     zone: OperatorZone,
+    terms: Terms,
     raw: R,
     translator: T,
     workouts: W,
@@ -73,6 +79,7 @@ where
     pub fn new(ports: NormalisationPorts<R, T, W, F, G, C>, zone: OperatorZone) -> Self {
         Self {
             stream: ports.raw.stream().clone(),
+            terms: Terms::from(format!("zone {}", zone.id())),
             zone,
             raw: ports.raw,
             translator: ports.translator,
@@ -81,6 +88,69 @@ where
             runs: ports.runs,
             clock: ports.clock,
         }
+    }
+
+    /// The terms this derivation interprets raw under, where they are more
+    /// than the zone: the build and the corrections, which the composition root
+    /// knows and the use case does not.
+    #[must_use]
+    pub fn under(self, terms: Terms) -> Self {
+        Self { terms, ..self }
+    }
+}
+
+/// The accounts to translate, and what the layer holds that they replace.
+struct Changed<A> {
+    accounts: Vec<A>,
+    /// `None` for a whole reading, which replaces the layer.
+    removed: Option<Vec<LandedRecord>>,
+}
+
+/// An account's identity: its records, by table and landing id.
+fn identity(account: &impl SourceAccount) -> Vec<(String, i64)> {
+    let mut records: Vec<(String, i64)> = account
+        .landed()
+        .into_iter()
+        .map(|record| (record.record().stream().to_string(), record.id().as_i64()))
+        .collect();
+    records.sort();
+    records
+}
+
+/// The accounts raw holds now that it did not hold up to the mark, and the
+/// records of every account it no longer holds (#571).
+///
+/// **An account with the same records is the same account**, so it stands as
+/// it was derived; every other one is translated, and everything the accounts
+/// it replaced derived is removed. That is the whole of what makes an
+/// incremental derivation identical to a full one: translation is a function of
+/// the account, and an account is its records.
+///
+/// **A retraction never reaches outside its own account.** Every reader sets
+/// the earlier servings of a source record aside in the account holding the
+/// latest, and a retraction is a serving, so the record it names and anything
+/// composing it are always in the account the retraction is in — which is
+/// translated with it.
+fn changed<A: SourceAccount>(now: Vec<A>, previously: Option<Vec<A>>) -> Changed<A> {
+    let Some(previously) = previously else {
+        return Changed {
+            accounts: now,
+            removed: None,
+        };
+    };
+    let held: BTreeSet<Vec<(String, i64)>> = previously.iter().map(identity).collect();
+    let current: BTreeSet<Vec<(String, i64)>> = now.iter().map(identity).collect();
+    let removed = previously
+        .iter()
+        .filter(|account| !current.contains(&identity(*account)))
+        .flat_map(|account| account.landed().into_iter().cloned())
+        .collect();
+    Changed {
+        accounts: now
+            .into_iter()
+            .filter(|account| !held.contains(&identity(account)))
+            .collect(),
+        removed: Some(removed),
     }
 }
 
@@ -147,38 +217,18 @@ where
         let _ = self.runs.finish(run, outcome).await;
         error
     }
-}
 
-impl<R, T, W, F, G, C> WorkoutNormaliser for Normalisation<R, T, W, F, G, C>
-where
-    R: AccountReader + Sync,
-    T: Translator<Account = R::Account> + Sync,
-    T::Entity: NormalisedEntity + Send,
-    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
-    F: RefusalStore + Sync,
-    G: NormalisationRunLog + Sync,
-    C: Clock + Sync,
-{
-    async fn normalise(&self) -> Result<NormalisationSummary, NormalisationError> {
-        let stream = &self.stream;
-        let started_at = self.clock.now();
-        let run = self.runs.begin(stream, started_at).await?;
-
-        // No lock. A derivation reads raw and writes only its own tables, so it
-        // neither takes the extraction lock nor advances the resumption point —
-        // a record landed after this began is simply picked up by the next one.
-        let accounts = match self.raw.accounts().await {
-            Ok(accounts) => accounts,
-            Err(error) => return Err(self.record_failure(run, error.into()).await),
-        };
-
-        // Records, not accounts. A session composes several of them and the
-        // reconciliation below is a statement about records (§ 38).
-        let records_read =
-            RecordCount::from(accounts.iter().map(SourceAccount::records).sum::<usize>());
+    /// Translate each account, and count what became of every record in it.
+    ///
+    /// # Errors
+    ///
+    /// [`NormalisationError`] for a gap in our own vocabulary, the only thing
+    /// that stops a derivation. Nothing is written, so the previous derivation
+    /// is left standing rather than half-replaced.
+    fn translate(&self, accounts: &[R::Account]) -> Result<Derived<T::Entity>, NormalisationError> {
         let mut derived = Derived::default();
 
-        for account in &accounts {
+        for account in accounts {
             match self.translator.translate(account, &self.zone) {
                 Ok(Translation::Entity { entity, refusals }) => {
                     derived.entities.push(*entity);
@@ -216,9 +266,104 @@ where
                 // The only thing that stops a derivation is a gap in our own
                 // vocabulary. Nothing is written, so the previous derivation is
                 // left standing rather than half-replaced.
-                Err(error) => return Err(self.record_failure(run, error).await),
+                Err(error) => return Err(error),
             }
         }
+        Ok(derived)
+    }
+
+    /// Write what was derived: the whole layer, or only what changed.
+    ///
+    /// **Nothing at all where nothing changed**, rather than a revision of
+    /// nothing: writing a gym stream clears the canonical layer, and a run that
+    /// found nothing new must leave it standing.
+    async fn write(
+        &self,
+        run: NormalisationRunId,
+        removed: Option<Vec<LandedRecord>>,
+        derived: Derived<T::Entity>,
+    ) -> Result<(WorkoutCount, RefusalCount), StoreError> {
+        let Some(removed) = removed else {
+            let written = self.workouts.replace(run, derived.entities).await?;
+            let refusals = self.refusals.replace(run, derived.refusals).await?;
+            return Ok((written, refusals));
+        };
+        if removed.is_empty() && derived.entities.is_empty() && derived.refusals.is_empty() {
+            return Ok((WorkoutCount::from(0), RefusalCount::from(0)));
+        }
+        // This stream's own table, which is what each entity is stored under;
+        // landing ids are per table, so another table's would name other rows.
+        let records: Vec<LandingRecordId> = removed
+            .iter()
+            .filter(|record| record.record().stream() == &self.stream)
+            .map(LandedRecord::id)
+            .collect();
+        let mut sources: Vec<SourceRecordId> = removed
+            .iter()
+            .map(|record| record.source_record_id().clone())
+            .collect();
+        sources.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        sources.dedup();
+        let written = self.workouts.revise(run, records, derived.entities).await?;
+        let refusals = self.refusals.revise(run, sources, derived.refusals).await?;
+        Ok((written, refusals))
+    }
+}
+
+impl<R, T, W, F, G, C> WorkoutNormaliser for Normalisation<R, T, W, F, G, C>
+where
+    R: AccountReader + Sync,
+    T: Translator<Account = R::Account> + Sync,
+    T::Entity: NormalisedEntity + Send,
+    W: NormalisedEntityStore<Entity = T::Entity> + Sync,
+    F: RefusalStore + Sync,
+    G: NormalisationRunLog + Sync,
+    C: Clock + Sync,
+{
+    async fn normalise(
+        &self,
+        rederivation: Rederivation,
+    ) -> Result<NormalisationSummary, NormalisationError> {
+        let stream = &self.stream;
+        let started_at = self.clock.now();
+        let run = self.runs.begin(stream, started_at).await?;
+
+        // Only from a mark left under the same terms: a derivation under
+        // others reinterprets what is already derived.
+        let mark = match rederivation {
+            Rederivation::Whole => None,
+            Rederivation::Incremental => match self.runs.mark(stream).await {
+                Ok(mark) => mark.filter(|mark| mark.terms == self.terms),
+                Err(error) => return Err(self.record_failure(run, error.into()).await),
+            },
+        };
+        let reading = mark.map_or(Reading::Whole, |mark| Reading::Since(mark.up_to));
+
+        // No lock. A derivation reads raw and writes only its own tables, so it
+        // neither takes the extraction lock nor advances the resumption point —
+        // a record landed after this began is simply picked up by the next one.
+        let reached = match self.raw.accounts(&reading).await {
+            Ok(reached) => reached,
+            Err(error) => return Err(self.record_failure(run, error.into()).await),
+        };
+        let records_covered = RecordCount::from(
+            reached
+                .now
+                .iter()
+                .map(SourceAccount::records)
+                .sum::<usize>(),
+        );
+        let up_to = reached.up_to;
+        let Changed { accounts, removed } = changed(reached.now, reached.previously);
+
+        // Records, not accounts. A session composes several of them and the
+        // reconciliation below is a statement about records (§ 38).
+        let records_read =
+            RecordCount::from(accounts.iter().map(SourceAccount::records).sum::<usize>());
+        let mut derived = match self.translate(&accounts) {
+            Ok(derived) => derived,
+            Err(error) => return Err(self.record_failure(run, error).await),
+        };
 
         // The second pass. A retraction removes the entity composing the record
         // it names, wherever that entity sat in the sequence, and one naming a
@@ -245,12 +390,8 @@ where
         let records_refused = RecordCount::from(derived.refused);
         let records_superseded = RecordCount::from(derived.superseded);
 
-        let written = match self.workouts.replace(run, derived.entities).await {
+        let (written, refusals) = match self.write(run, removed, derived).await {
             Ok(written) => written,
-            Err(error) => return Err(self.record_failure(run, error.into()).await),
-        };
-        let refusals = match self.refusals.replace(run, derived.refusals).await {
-            Ok(refusals) => refusals,
             Err(error) => return Err(self.record_failure(run, error.into()).await),
         };
 
@@ -264,7 +405,17 @@ where
             retractions_read,
             records_refused,
             refusals_recorded: refusals,
+            records_covered,
         };
+
+        // Before the outcome, so a mark is only ever read off a success.
+        let mark = Mark {
+            terms: self.terms.clone(),
+            up_to,
+        };
+        if let Err(error) = self.runs.record_mark(run, &mark).await {
+            return Err(self.record_failure(run, error.into()).await);
+        }
 
         let finished_at = self.clock.now();
         if let Err(error) = self
@@ -281,6 +432,7 @@ where
                     retractions_read: summary.retractions_read,
                     records_refused: summary.records_refused,
                     refusals_recorded: summary.refusals_recorded,
+                    records_covered: summary.records_covered,
                 },
             )
             .await
@@ -385,7 +537,9 @@ where
 
         let held = self.raw.records().await?.as_usize();
         let read = last_success.as_ref().map_or(0, |run| match run.outcome() {
-            NormalisationOutcome::Succeeded { records_read, .. } => records_read.as_usize(),
+            NormalisationOutcome::Succeeded {
+                records_covered, ..
+            } => records_covered.as_usize(),
             NormalisationOutcome::InFlight | NormalisationOutcome::Failed { .. } => 0,
         });
 

@@ -314,7 +314,9 @@ mod store {
             },
             OperatorZone::try_from("Europe/London")?,
         );
-        Ok(normalisation.normalise().await?)
+        Ok(normalisation
+            .normalise(application::Rederivation::Whole)
+            .await?)
     }
 
     async fn count(pool: &SqlitePool, sql: &'static str) -> Result<i64, Failure> {

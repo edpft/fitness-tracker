@@ -8,6 +8,7 @@
 #![allow(dead_code, unused_macros, unused_imports)]
 
 pub mod corpus;
+pub mod layers;
 pub mod programme;
 pub mod store;
 

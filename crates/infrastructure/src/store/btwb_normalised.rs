@@ -6,7 +6,7 @@
 //! spreadsheets', told apart by `stream`, and only this stream's rows are
 //! replaced.
 
-use application::{AccountReader, NormalisedEntityStore, StoreError};
+use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     gym::ManualGymSession,
     landing::{
@@ -53,7 +53,8 @@ impl AccountReader for BtwbExportAccountReader {
         &self.stream
     }
 
-    async fn accounts(&self) -> Result<Vec<Exports>, StoreError> {
+    async fn accounts(&self, reading: &Reading) -> Result<Reached<Exports>, StoreError> {
+        let marks = super::marks::Marks::of(reading)?;
         let rows = sqlx::query!(
             r#"
             SELECT id AS "id!: i64",
@@ -93,7 +94,11 @@ impl AccountReader for BtwbExportAccountReader {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        Ok(Exports::gather(records))
+        Ok(Reached {
+            up_to: super::marks::up_to(&records),
+            previously: marks.map(|marks| Exports::gather(marks.held(&records))),
+            now: Exports::gather(records),
+        })
     }
 }
 
@@ -144,6 +149,27 @@ impl NormalisedEntityStore for SqliteBtwbStore {
         }
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
+    }
+
+    async fn revise(
+        &self,
+        run: NormalisationRunId,
+        removed: Vec<LandingRecordId>,
+        sessions: Vec<ManualGymSession>,
+    ) -> Result<WorkoutCount, StoreError> {
+        let run_id = normalisation_run_for_storage(run)?;
+        let stream = self.stream.to_string();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        super::normalised::clear_sessions(&mut tx, &stream, &removed).await?;
+        for session in &sessions {
+            write_session(&mut tx, run_id, &stream, session).await?;
+        }
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        Ok(WorkoutCount::from(sessions.len()))
     }
 
     async fn count(&self) -> Result<WorkoutCount, StoreError> {

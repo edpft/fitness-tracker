@@ -242,6 +242,7 @@ impl NormalisedLayers for Layers {
             retractions_read: RecordCount::from(0),
             records_refused: RecordCount::from(0),
             refusals_recorded: RefusalCount::from(0),
+            records_covered: RecordCount::from(0),
         })
     }
 }

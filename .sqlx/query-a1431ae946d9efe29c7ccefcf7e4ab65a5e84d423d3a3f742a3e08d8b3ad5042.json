@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM measured_set WHERE workout IN (SELECT id FROM gym_workout WHERE session IN (SELECT value FROM json_each(?)))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a1431ae946d9efe29c7ccefcf7e4ab65a5e84d423d3a3f742a3e08d8b3ad5042"
+}

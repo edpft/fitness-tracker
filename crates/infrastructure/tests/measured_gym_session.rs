@@ -356,7 +356,9 @@ async fn derive(pool: &SqlitePool) -> Result<application::NormalisationSummary, 
         },
         OperatorZone::try_from("Europe/London")?,
     );
-    Ok(normalisation.normalise().await?)
+    Ok(normalisation
+        .normalise(application::Rederivation::Whole)
+        .await?)
 }
 
 /// A whole session, end to end: the summary the list states on the session's own

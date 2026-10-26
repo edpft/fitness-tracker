@@ -78,6 +78,10 @@ impl SourceAccount for Exports {
     fn records(&self) -> usize {
         self.files.count()
     }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        self.files.iter().collect()
+    }
 }
 
 /// One result: a row of the export.

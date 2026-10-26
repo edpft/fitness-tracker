@@ -6,7 +6,7 @@
 //! of it — and one table carrying both would have half its columns empty in
 //! either direction.
 
-use application::{NormalisationRunLog, StoreError};
+use application::{Mark, NormalisationRunLog, ReadUpTo, StoreError, Terms};
 use domain::{
     landing::{FetchedAt, LandingStream, RecordCount},
     normalised::{
@@ -74,6 +74,7 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 retractions_read,
                 records_refused,
                 refusals_recorded,
+                records_covered,
             } => {
                 let finished_at = finished_at.to_string();
                 let records_read = count_for_storage(records_read.as_usize())?;
@@ -84,6 +85,7 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 let retractions_read = count_for_storage(retractions_read.as_usize())?;
                 let records_refused = count_for_storage(records_refused.as_usize())?;
                 let refusals_recorded = count_for_storage(refusals_recorded.as_usize())?;
+                let records_covered = count_for_storage(records_covered.as_usize())?;
 
                 sqlx::query!(
                     r#"
@@ -91,7 +93,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                     SET finished_at = ?, outcome = 'succeeded',
                         records_read = ?, workouts_written = ?, records_composed = ?,
                         records_superseded = ?, workouts_retracted = ?,
-                        retractions_read = ?, records_refused = ?, refusals_recorded = ?
+                        retractions_read = ?, records_refused = ?, refusals_recorded = ?,
+                        records_covered = ?
                     WHERE id = ?
                     "#,
                     finished_at,
@@ -103,6 +106,7 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                     retractions_read,
                     records_refused,
                     refusals_recorded,
+                    records_covered,
                     id
                 )
                 .execute(&self.pool)
@@ -153,7 +157,8 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                    workouts_retracted AS "workouts_retracted: i64",
                    retractions_read AS "retractions_read: i64",
                    records_refused AS "records_refused: i64",
-                   refusals_recorded AS "refusals_recorded: i64"
+                   refusals_recorded AS "refusals_recorded: i64",
+                   records_covered AS "records_covered: i64"
             FROM normalisation_run
             WHERE stream = ? AND outcome = 'succeeded'
             ORDER BY finished_at DESC
@@ -188,8 +193,54 @@ impl NormalisationRunLog for SqliteNormalisationRunLog {
                 retractions_read: RecordCount::from(count_from_storage(row.retractions_read)?),
                 records_refused: RecordCount::from(count_from_storage(row.records_refused)?),
                 refusals_recorded: RefusalCount::from(count_from_storage(row.refusals_recorded)?),
+                // Null on a run recorded before a derivation could read part of
+                // raw, every one of which read all of it.
+                records_covered: RecordCount::from(count_from_storage(
+                    row.records_covered.or(row.records_read),
+                )?),
             },
         )))
+    }
+
+    /// **The latest success's, or none**: a mark from an earlier success than
+    /// the latest would name rows the latest has since replaced.
+    async fn mark(&self, stream: &LandingStream) -> Result<Option<Mark>, StoreError> {
+        let stream = stream.to_string();
+        let row = sqlx::query!(
+            r#"
+            SELECT terms AS "terms: String", read_up_to AS "read_up_to: String"
+            FROM normalisation_run
+            WHERE stream = ? AND outcome = 'succeeded'
+            ORDER BY finished_at DESC, id DESC
+            LIMIT 1
+            "#,
+            stream
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(row.and_then(|row| {
+            Some(Mark {
+                terms: Terms::from(row.terms?),
+                up_to: ReadUpTo::from(row.read_up_to?),
+            })
+        }))
+    }
+
+    async fn record_mark(&self, run: NormalisationRunId, mark: &Mark) -> Result<(), StoreError> {
+        let id = normalisation_run_for_storage(run)?;
+        let terms = mark.terms.as_str();
+        let up_to = mark.up_to.as_str();
+        sqlx::query!(
+            "UPDATE normalisation_run SET terms = ?, read_up_to = ? WHERE id = ?",
+            terms,
+            up_to,
+            id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(())
     }
 }
 
