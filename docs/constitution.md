@@ -1,7 +1,14 @@
 <!--
 Sync Impact Report
-- Version: 7.0.0, amended 2026-10-22. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 8.0.0, amended 2026-10-26. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 8.0.0 — § 14.1: how a program prescribes (the ramp, back-offs, top sets, resets, and each
+  section's sets, repetitions and rest) is authored data kept as dated versions, configured when
+  the program is designed and never asked when a plan is made; a plan is generated from the
+  versions in force when it was planned. MAJOR: "making them configurable is the error" and the
+  "true if no program were being authored" test removed. The test asked whether a value should
+  be asked; the distinction was when (#192). The operator, 2026-10-26: *"what I was legislating
+  against was the programme wizard asking all of these questions every time."*
 - 7.0.0 — § 14.1: a non-primary slot's repetitions (a range, or a static slot's fixed count)
   are the operator's to change, from a date, for a block, a superset within it or an exercise
   within that, the narrowest standing; the primary lift's exercise and prescription stay fixed.
@@ -286,9 +293,9 @@ The state is **derived from the relations and never stored**: a status column wo
 
 **14.** **Generation parameters.** Values consulted when authoring a program, and only those that are facts about the world the program is run in rather than facts about how it prescribes: available plate increments, training availability, scheduling constraints, the family calendar. Only the current value is required. What was generated is recorded concretely in the authored record (§ 12), so the parameter that produced it needs no history and a superseded value answers no question. Where such a value is received from an external system it arrives through an adapter behind a port (§ 16), and need not be persisted at all.
 
-**14.1.** **How a program prescribes is not a parameter.** Warm-up set percentages, back-off schemes, top-set repetitions and reset protocols are not generation parameters, whatever they have in common with one. Where the published program states them they are the program's, and one set held in common would be a shared model of training across programs that do not share one. Where the published program is silent they are one fixed decision, not a knob: this system programs a set workout shape and a set warm-up ramp, and is not a builder of arbitrary workouts. Making them configurable is the error, independently of where the configuration is kept. The test is whether the value would still be true if no program were being authored: an available plate increment and an unavailable Monday would; a back-off percentage would not.
+**14.1.** **How a program prescribes is not a parameter, and it is set when the program is designed.** Warm-up set percentages, back-off schemes, top-set repetitions, reset protocols, and the sets, repetitions and rest each section runs are not generation parameters, whatever they have in common with one. They are authored data (§ 12): the program's own values, and each primary progression's, each kept as dated versions. They are configured when the program is designed, never asked when a plan is made. A plan is generated from the versions in force when it was planned, and a later version does not alter it. Where a published program states them, they are that program's: one set held in common would be a shared model of training across programs that do not share one. This system programs a set workout shape and is not a builder of arbitrary workouts. What is configurable is the values within that shape, not the shape. The operator, 2026-10-26: *"what I was legislating against was the programme wizard asking all of these questions every time. There's a distinction between configuring the programme in general, e.g. setting warm sets, and configuring a specific plan."*
 
-**The primary lift is the program; the other slots are the operator's.** A non-primary slot's repetitions — the range it progresses through, or the fixed count a static slot holds — may be changed from a date, for a block, for a superset within a block, or for an exercise within a superset, and where more than one applies the narrowest stands. Such a change is authored data (§ 12), not a parameter, and the fixed decision above is only its default. The primary lift's exercise and its prescription (the ramp, the back-offs, the top sets and the resets) stay fixed. The operator, 2026-10-22: *"the idea was to prevent changes to the primary lift because if you change that, you are really changing the programme."*
+**The primary lift is the program; the other slots are the operator's.** A non-primary slot's repetitions — the range it progresses through, or the fixed count a static slot holds — may be changed from a date, for a block, for a superset within a block, or for an exercise within a superset, and where more than one applies the narrowest stands. Such a change is authored data (§ 12), not a parameter, and the fixed decision above is only its default. The primary lift's exercise and its prescription (the ramp, the back-offs, the top sets and the resets) stay fixed for a plan once it is planned. The operator, 2026-10-22: *"the idea was to prevent changes to the primary lift because if you change that, you are really changing the programme."*
 
 ## IV. Architecture
 
@@ -378,4 +385,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 7.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-22
+**Version**: 8.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-26
