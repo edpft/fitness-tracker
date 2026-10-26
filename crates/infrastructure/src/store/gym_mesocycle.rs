@@ -26,7 +26,7 @@
 //! corrupt rather than merely unexpected, which is the same verdict a failed
 //! consistency check gets.
 
-use std::num::NonZeroU8;
+use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{FillChangeStore, MesocycleInForce, MesocycleStore, StoreError};
 use domain::{
@@ -289,7 +289,19 @@ pub(super) async fn in_force(
             },
         ));
     }
-    Ok(mesocycles)
+    Ok(carried(mesocycles))
+}
+
+/// Each mesocycle with every change made earlier in its plan, followed by its
+/// own (#578). `mesocycles` is in order of start.
+fn carried(mut mesocycles: Vec<(i64, MesocycleInForce)>) -> Vec<(i64, MesocycleInForce)> {
+    let mut earlier: BTreeMap<i64, FillChanges> = BTreeMap::new();
+    for (plan, found) in &mut mesocycles {
+        let so_far = earlier.entry(*plan).or_default();
+        found.changes = so_far.followed_by(&found.changes);
+        so_far.clone_from(&found.changes);
+    }
+    mesocycles
 }
 
 /// The calendar a stored mesocycle runs against.
