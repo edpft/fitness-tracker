@@ -221,8 +221,6 @@ pub(super) async fn in_force(
     .map_err(|error| store_error(&error))?;
 
     let mut mesocycles = Vec::with_capacity(rows.len());
-    // Every change made so far in each plan, which its later mesocycles carry.
-    let mut carried: BTreeMap<i64, FillChanges> = BTreeMap::new();
     for row in rows {
         let fills = read_fills(pool, row.id).await?;
         let interruptions = read_interruptions(pool, row.id).await?;
@@ -279,10 +277,7 @@ pub(super) async fn in_force(
             }
         };
 
-        let own = read_changes(pool, row.id).await?;
-        let earlier = carried.entry(row.plan).or_default();
-        let changes = earlier.followed_by(&own);
-        earlier.clone_from(&changes);
+        let changes = read_changes(pool, row.id).await?;
         mesocycles.push((
             row.plan,
             MesocycleInForce {
@@ -294,7 +289,19 @@ pub(super) async fn in_force(
             },
         ));
     }
-    Ok(mesocycles)
+    Ok(carried(mesocycles))
+}
+
+/// Each mesocycle with every change made earlier in its plan, followed by its
+/// own (#578). `mesocycles` is in order of start.
+fn carried(mut mesocycles: Vec<(i64, MesocycleInForce)>) -> Vec<(i64, MesocycleInForce)> {
+    let mut earlier: BTreeMap<i64, FillChanges> = BTreeMap::new();
+    for (plan, found) in &mut mesocycles {
+        let so_far = earlier.entry(*plan).or_default();
+        found.changes = so_far.followed_by(&found.changes);
+        so_far.clone_from(&found.changes);
+    }
+    mesocycles
 }
 
 /// The calendar a stored mesocycle runs against.
