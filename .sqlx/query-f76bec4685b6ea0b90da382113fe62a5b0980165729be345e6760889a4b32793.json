@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT of_top_set_bp AS \"of_top_set_bp!: i64\", reps AS \"reps!: i64\"\n            FROM sbs_warmup_step\n            WHERE authored_at = ?\n            ORDER BY position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "of_top_set_bp!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sbs_warmup_step",
+            "name": "of_top_set_bp"
+          }
+        }
+      },
+      {
+        "name": "reps!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sbs_warmup_step",
+            "name": "reps"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f76bec4685b6ea0b90da382113fe62a5b0980165729be345e6760889a4b32793"
+}

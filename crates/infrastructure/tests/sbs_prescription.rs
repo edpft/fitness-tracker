@@ -179,13 +179,10 @@ async fn ready(
     // `Result` across the await, and a boxed error is not `Send` — which
     // `clippy::future_not_send` refuses rather than this reading better.
     let plan = programme::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?;
-    let parameters = programme::parameters()?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), zone.clone()),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&plan, &parameters)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), zone.clone()))
+        .author(&plan)
+        .await?;
 
     let stands_on = sqlx::query_scalar::<_, i64>("SELECT MIN(id) FROM gym_session")
         .fetch_one(&pool)

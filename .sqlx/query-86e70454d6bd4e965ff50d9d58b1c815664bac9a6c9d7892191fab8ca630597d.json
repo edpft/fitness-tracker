@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sbs_progression (authored_at) VALUES (?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "86e70454d6bd4e965ff50d9d58b1c815664bac9a6c9d7892191fab8ca630597d"
+}

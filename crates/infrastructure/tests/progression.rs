@@ -211,8 +211,8 @@ fn the_block_opens_below_what_its_entry_test_failed() {
         panic!("the anchor fixture builds")
     };
     let (Ok(ladder), Ok(steps)) = (
-        programme.ladder(anchor, &parameters),
-        programme.steps(&parameters),
+        programme.ladder(anchor, &parameters.planned_with.linear, &parameters.scales),
+        programme.steps(&parameters.scales),
     ) else {
         panic!("the ladder builds")
     };

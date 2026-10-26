@@ -8,11 +8,11 @@
 //! performance it exists to be compared against — which would make expectation
 //! against reality unrecoverable, and is what § 11 protects.
 //!
-//! **The anchor and the parameters are recorded by value.** That is what makes
-//! § 14 correct: only the current parameter value is required precisely because
-//! what it generated is captured here. An operator reading a prescription issued
-//! six months earlier sees every number it was derived from without consulting
-//! anything else.
+//! **The anchor and every set are recorded by value.** An operator reading a
+//! prescription issued six months earlier sees every number it was derived from
+//! without consulting anything else. Which versions of the programme and its
+//! progression produced them is not recorded here: it is the plan's, derived
+//! from when the plan was made (#192).
 
 use std::fmt;
 
@@ -20,9 +20,7 @@ use jiff::{Timestamp, civil::Date};
 
 use crate::{measure::Kg, schedule::SessionRole};
 
-use super::{
-    anchor::Anchor, parameters::GenerationParameters, schedule::WeekKind, shape::WorkoutShape,
-};
+use super::{anchor::Anchor, schedule::WeekKind, shape::WorkoutShape};
 
 /// Which authored programme issued a prescription.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -87,8 +85,8 @@ impl DerivedFrom {
 /// A prescription that was issued.
 ///
 /// Every field is a constructor argument, so a prescription that exists is one
-/// that knows its date, its ladder position, what it derived its loads from and
-/// the parameters in force when it did. There is no setter and no partial form.
+/// that knows its date, its ladder position and what it derived its loads from.
+/// There is no setter and no partial form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrescribedWorkout {
     shape: WorkoutShape,
@@ -99,14 +97,6 @@ pub struct PrescribedWorkout {
     session_role: SessionRole,
     week: WeekKind,
     derived_from: DerivedFrom,
-    parameters: GenerationParameters,
-    /// Which authored version those parameters came from.
-    ///
-    /// The values are recorded here too, which is what § 14 rests on — but the
-    /// version is the join back to the authored set, and without it two
-    /// prescriptions generated under different parameters are indistinguishable
-    /// except by comparing every field.
-    parameters_authored_at: Timestamp,
     programme: MesocycleId,
     issued_at: Timestamp,
 }
@@ -125,8 +115,6 @@ impl PrescribedWorkout {
         session_role: SessionRole,
         week: WeekKind,
         derived_from: DerivedFrom,
-        parameters: GenerationParameters,
-        parameters_authored_at: Timestamp,
         programme: MesocycleId,
         issued_at: Timestamp,
     ) -> Self {
@@ -136,8 +124,6 @@ impl PrescribedWorkout {
             session_role,
             week,
             derived_from,
-            parameters,
-            parameters_authored_at,
             programme,
             issued_at,
         }
@@ -167,14 +153,6 @@ impl PrescribedWorkout {
     /// The anchor, where this session derived from one.
     pub const fn anchor(&self) -> Option<Anchor> {
         self.derived_from.anchor()
-    }
-
-    pub const fn parameters(&self) -> &GenerationParameters {
-        &self.parameters
-    }
-
-    pub const fn parameters_authored_at(&self) -> Timestamp {
-        self.parameters_authored_at
     }
 
     pub const fn programme(&self) -> MesocycleId {

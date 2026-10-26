@@ -747,7 +747,7 @@ impl Sides {
     /// How many times the position is held to work it through.
     ///
     /// Two is anatomy rather than a parameter: a body has two sides, and the
-    /// authored duration in `GenerationParameters::static_hold` is what each of
+    /// authored duration in `Programme::static_hold` is what each of
     /// them is held for.
     pub const fn holds(self) -> u32 {
         match self {

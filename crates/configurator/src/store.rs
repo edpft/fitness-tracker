@@ -13,8 +13,8 @@ use application::{
     FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
     NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
     PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, RiddenSessionLog, RiddenVenues, StoreError,
-    WeighInHistory,
+    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgrammeStore, ProgressionStore,
+    RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
@@ -61,9 +61,13 @@ impl Store {
         SqlitePlanStore::new(self.pool.clone(), zone.clone())
     }
 
-    /// The parameters a prescription is generated from.
+    /// What a prescription is generated from: the load scales (§ 14), and the
+    /// versions of the programme and each primary progression (#192).
     #[must_use]
-    pub fn parameters(&self) -> impl GenerationParameterStore + Clone + Send + Sync + use<> {
+    pub fn parameters(
+        &self,
+    ) -> impl GenerationParameterStore + ProgrammeStore + ProgressionStore + Clone + Send + Sync + use<>
+    {
         SqliteGenerationParameterStore::new(self.pool.clone())
     }
 

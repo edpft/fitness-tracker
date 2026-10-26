@@ -43,8 +43,8 @@ use domain::normalised::{
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::RerunOrdinal;
 use domain::prescription::{
-    Anchor, GenerationParameters, GymMesocycle, MesocycleId, PrescribedWorkout, PrescriptionState,
-    Progress, SlotId, WeekIndex,
+    Anchor, GymMesocycle, LinearProgression, MesocycleId, PrescribedWorkout, PrescriptionState,
+    Programme, Progress, SbsProgression, Scales, SlotId, WeekIndex,
 };
 use domain::provider::ExternalProgramme;
 use domain::schedule::{Alteration, Diary, Holidays, SessionRole, Skip, TrainingPattern};
@@ -1638,39 +1638,102 @@ pub trait CanonicalWeighInStore {
     fn count(&self) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
 }
 
-/// The § 14 parameters, in force as one version.
-pub trait GenerationParameterStore {
-    /// The greatest `authored_at`, with the version it came from.
-    ///
-    /// § 14 requires only the current value. Superseded rows are retained and no
-    /// derivation reads one; an issued prescription names the version it used,
-    /// which is what makes that safe.
+/// The versions of the programme and of each primary progression a plan is
+/// planned with (#192), and the load scales of the date a session is for.
+///
+/// **What a derivation reads, in one place.** A plan takes the latest version of
+/// each authored on or before it was planned, so a later version reaches only
+/// the plans made after it (§ 14.1). The scales are equipment facts and are the
+/// ones true on the session's own date (#450).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedWith {
+    pub programme: Programme,
+    pub linear: LinearProgression,
+    pub sbs: SbsProgression,
+}
+
+/// The versions of the programme, each in force from when it was authored
+/// (#192).
+///
+/// **Superseded by date, never overwritten** (§ 12). Which version a plan uses
+/// is the latest authored on or before the plan, a `WHERE` clause rather than a
+/// reference stored on the plan.
+pub trait ProgrammeStore {
+    /// The latest version authored at or before `at`, with when it was.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn current(
+    fn programme_at(
         &self,
-    ) -> impl Future<Output = Result<Option<(Timestamp, GenerationParameters)>, StoreError>> + Send;
+        at: Timestamp,
+    ) -> impl Future<Output = Result<Option<(Timestamp, Programme)>, StoreError>> + Send;
 
-    /// Author a set, superseding by date rather than overwriting (§ 12).
+    /// Author a version, in force from `at`.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn author(
+    fn author_programme(
         &self,
-        authored_at: Timestamp,
-        parameters: &GenerationParameters,
+        at: Timestamp,
+        programme: &Programme,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// The versions of each primary progression, each in force from when it was
+/// authored (#192). Separate from the programme because the operator designs
+/// them separately: the primary runs one of them, and the programme says
+/// nothing about how.
+pub trait ProgressionStore {
+    /// The latest version of linear progression authored at or before `at`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn linear_at(
+        &self,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<Option<(Timestamp, LinearProgression)>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn author_linear(
+        &self,
+        at: Timestamp,
+        linear: &LinearProgression,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
+    /// The latest version of SBS authored at or before `at`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn sbs_at(
+        &self,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<Option<(Timestamp, SbsProgression)>, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn author_sbs(
+        &self,
+        at: Timestamp,
+        sbs: &SbsProgression,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// The § 14 generation parameters: what the gym's equipment can hold, as of a
+/// date (#450).
+pub trait GenerationParameterStore {
     /// Every kind's increments as now known to have been true on a date
     /// (issue #450).
     ///
     /// **Not part of a parameter version.** The increments are equipment
     /// facts, true over periods of real-world time, and a prescription is
-    /// generated against the ones true on its own date. [`Self::current`] fills
-    /// [`GenerationParameters::scales`] with today's.
+    /// generated against the ones true on its own date.
     ///
     /// # Errors
     ///
@@ -1678,7 +1741,7 @@ pub trait GenerationParameterStore {
     fn scales_on(
         &self,
         date: jiff::civil::Date,
-    ) -> impl Future<Output = Result<domain::prescription::Scales, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Scales, StoreError>> + Send;
 
     /// A range of bands as now known to have been on a date: what a fill
     /// assisted by it is prescribed against (#454).
@@ -1735,6 +1798,9 @@ pub struct MesocycleInForce {
     /// Which mesocycle of the plan this is, as the plan numbers them.
     pub ordinal: MesocycleOrdinal,
     pub plan: PlanName,
+    /// When the plan holding it was made, which decides the versions of the
+    /// programme and its progressions it is derived from (#192).
+    pub planned_at: Timestamp,
     pub mesocycle: GymMesocycle,
     /// Its fills as changed since it was written, each from a date (#454).
     pub changes: domain::prescription::FillChanges,
@@ -2436,7 +2502,10 @@ pub struct LadderStanding {
     /// plan, so the first mesocycle of a second plan would print as the third.
     pub ordinal: MesocycleOrdinal,
     pub programme: GymMesocycle,
-    pub parameters: GenerationParameters,
+    /// The versions the plan was planned with.
+    pub planned_with: PlannedWith,
+    /// The load scales true on the date asked about.
+    pub scales: Scales,
     /// Derived from the gating sessions before the date asked about.
     /// Where the record puts the programme, for the one template that has a
     /// position to be at. `None` for a block, whose loads are shares of its
@@ -2567,10 +2636,13 @@ pub trait PlanAuthor {
     /// [`PrescriptionError`] if the store is unavailable, if the plan competes
     /// for days another plan holds, or if a mesocycle claims a maximum that was
     /// never measured.
+    ///
+    /// **Authors no version of the programme or its progressions** (#192): those
+    /// are designed on their own, and a plan takes the ones in force when it is
+    /// made.
     fn author(
         &self,
         plan: &Plan,
-        parameters: &GenerationParameters,
     ) -> impl Future<Output = Result<(PlanId, Authored), PrescriptionError>> + Send;
 }
 

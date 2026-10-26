@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT name AS \"name!: String\", authored_at AS \"authored_at!: String\" FROM plan",
+  "describe": {
+    "columns": [
+      {
+        "name": "name!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "authored_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "authored_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4058dcd31cbd849328f60b8c9a19e1398bcf6d3363394684dd0496d37fa4ef1f"
+}

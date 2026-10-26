@@ -56,18 +56,13 @@ type Prescriber = Prescribing<
 /// 30 August and this week is adjacent rather than overlapping — which the
 /// overlap rule would otherwise refuse.
 async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
-    let (parameters, directory, pool) = corpus_store().await?;
+    let (directory, pool) = corpus_store().await?;
 
     let test = test_programme()?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(
-        &programme::named_plan("entry-test", vec![test])?,
-        &parameters,
-    )
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::named_plan("entry-test", vec![test])?)
+        .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
@@ -88,37 +83,21 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
 ///
 /// Shared by every part of this file that wants a predecessor: what succeeds the
 /// fixture block differs, and everything before that does not.
-async fn corpus_store() -> Result<
-    (
-        domain::prescription::GenerationParameters,
-        tempfile::TempDir,
-        SqlitePool,
-    ),
-    Box<dyn std::error::Error>,
-> {
-    let (parameters, directory, pool) = landed_store().await?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&programme::as_plan(programme::programme()?)?, &parameters)
-    .await?;
+async fn corpus_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::error::Error>> {
+    let (directory, pool) = landed_store().await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::as_plan(programme::programme()?)?)
+        .await?;
 
-    Ok((parameters, directory, pool))
+    Ok((directory, pool))
 }
 
 /// The corpus, landed and derived, and **nothing authored**.
 ///
 /// The store a plan's first week sees: a record of what has been trained, and no
 /// programme before this one to inherit anything from.
-async fn landed_store() -> Result<
-    (
-        domain::prescription::GenerationParameters,
-        tempfile::TempDir,
-        SqlitePool,
-    ),
-    Box<dyn std::error::Error>,
-> {
+async fn landed_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
@@ -155,7 +134,7 @@ async fn landed_store() -> Result<
     // derivation of what the step above has just written (#350).
     store::canonicalise(&pool).await?;
 
-    Ok((programme::parameters()?, directory, pool))
+    Ok((directory, pool))
 }
 
 /// A test week, authored in its own right.
@@ -355,15 +334,12 @@ fn autumn_block() -> Result<domain::prescription::GymMesocycle, Box<dyn std::err
 
 /// A store with the fixture block, and an autumn block that tests its own entry.
 async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
-    let (_, directory, pool) = corpus_store().await?;
-    let parameters = programme::parameters()?;
+    let (directory, pool) = corpus_store().await?;
     let block = autumn_block()?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&programme::named_plan("autumn", vec![block])?, &parameters)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::named_plan("autumn", vec![block])?)
+        .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
@@ -523,18 +499,16 @@ fn provided_test() -> Result<domain::prescription::GymMesocycle, Box<dyn std::er
 async fn with_provided_test(
     predecessor: bool,
 ) -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
-    let (parameters, directory, pool) = if predecessor {
+    let (directory, pool) = if predecessor {
         corpus_store().await?
     } else {
         landed_store().await?
     };
     let plan = programme::named_plan("published-entry-test", vec![provided_test()?])?;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&plan, &parameters)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&plan)
+        .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
@@ -671,7 +645,7 @@ async fn held_after_the_test()
 -> Result<(HoldingPrescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     use application::DiaryStore as _;
 
-    let (parameters, directory, pool) = landed_store().await?;
+    let (directory, pool) = landed_store().await?;
     let answers = programme::authored(
         Date::constant(2026, 6, 29),
         Shape::Test {
@@ -681,12 +655,10 @@ async fn held_after_the_test()
         },
     )?;
     let test = programme::authoring(answers, &[])??;
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&programme::named_plan("held", vec![test])?, &parameters)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::named_plan("held", vec![test])?)
+        .await?;
 
     let diary = infrastructure::SqliteDiaryStore::new(pool.clone())
         .diary()
@@ -764,7 +736,8 @@ fn a_holding_week_opens_the_linear_template_from_the_test_just_done() {
             domain::gym::RepsExercise::FrontSquatBarbell,
         ))
         .expect("the front squat has a scale");
-    let opening = steps.quantise_loaded(parameters.entry_drop.applied_to(failed));
+    let opening =
+        steps.quantise_loaded(parameters.planned_with.linear.entry_drop.applied_to(failed));
 
     assert_eq!(
         top_set(&heavy.workout),

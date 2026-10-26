@@ -976,7 +976,9 @@ fn a_mesocycle_that_cannot_be_committed_is_a_failed_step() {
             SessionState::ToBePrescribed,
             SessionState::ToBePrescribed,
         ]),
-        Committer(Some(CommitError::NoParameters)),
+        Committer(Some(CommitError::NotDesigned {
+            planned_at: jiff::Timestamp::UNIX_EPOCH,
+        })),
         Answering,
     )
     .expect("the ports build");
@@ -986,7 +988,10 @@ fn a_mesocycle_that_cannot_be_committed_is_a_failed_step() {
         .expect("the run answers");
 
     assert!(report.run.iter().any(|done| done.step == Step::Committing
-        && done.outcome == Err(StepFailure::Commit(CommitError::NoParameters))));
+        && done.outcome
+            == Err(StepFailure::Commit(CommitError::NotDesigned {
+                planned_at: jiff::Timestamp::UNIX_EPOCH,
+            }))));
     assert!(matches!(report.next, WhatIsNext::Session { .. }));
 }
 

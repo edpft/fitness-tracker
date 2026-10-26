@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT authored_at AS \"authored_at!: String\" FROM linear_progression",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "authored_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c1f91d4b9775ddd9d3759a3185e89e89982e3ad92e5dbc53964439780e26727"
+}

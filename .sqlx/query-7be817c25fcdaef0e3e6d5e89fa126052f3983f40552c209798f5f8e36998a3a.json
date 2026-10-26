@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT authored_at AS \"authored_at!: String\" FROM programme",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "authored_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7be817c25fcdaef0e3e6d5e89fa126052f3983f40552c209798f5f8e36998a3a"
+}

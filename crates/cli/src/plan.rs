@@ -356,8 +356,8 @@ async fn author(
     })?;
 
     // **Before the first question, not after the last.** A plan cannot be
-    // authored against no parameters (§ 14), and finding that out at the end
-    // costs every answer just given.
+    // authored against no programme or progression (#192), and finding that out
+    // at the end costs every answer just given.
     let parameter_store = store.parameters();
     let parameters = wizard::ready(&parameter_store).await?;
 
@@ -418,8 +418,8 @@ async fn author(
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let plan = with_both(name, existing.as_ref(), gym_side.clone(), mesocycles)?;
 
-    let (_, authored) = application::prescribe::Authoring::new(plans, parameter_store)
-        .author(&plan, &parameters)
+    let (_, authored) = application::prescribe::Authoring::new(plans)
+        .author(&plan)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 

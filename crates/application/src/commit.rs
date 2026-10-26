@@ -29,8 +29,8 @@ use domain::{
 use jiff::civil::{Date, Weekday};
 
 use crate::{
-    GenerationParameterStore, HoldingRides, PlanStore, PublishedCycling, PublishedProgrammes,
-    RiddenVenues, SourceError, StoreError,
+    GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
+    PublishedProgrammes, RiddenVenues, SourceError, StoreError,
     holding::NoHoldingRide,
     microcycle::Standing,
     published::{self, BuildError, EASIER, HARDER},
@@ -53,9 +53,13 @@ pub enum CommitError {
     Build(#[from] BuildError),
     #[error(transparent)]
     Holding(#[from] NoHoldingRide),
-    /// Nothing authored could prescribe anything without them (§ 14).
-    #[error("the store has no generation parameters")]
-    NoParameters,
+    /// No version of linear progression had been stored when the plan was
+    /// made, and a hold's holding weeks climb by it (#192).
+    #[error(
+        "no version of linear progression had been stored when this plan was made, at \
+         {planned_at}. `fitness init` stores the first"
+    )]
+    NotDesigned { planned_at: jiff::Timestamp },
     /// The plan does not say what to carry on with.
     #[error("{detail}")]
     NothingToCarryOn { detail: String },
@@ -106,7 +110,7 @@ pub struct Committing<P, G, H, R, B> {
 impl<P, G, H, R, B> Committing<P, G, H, R, B>
 where
     P: PlanStore + Clone + Sync,
-    G: GenerationParameterStore + Sync,
+    G: GenerationParameterStore + ProgressionStore + Sync,
     H: HoldingRides + Sync,
     R: RiddenVenues + Sync,
     B: PublishedProgrammes + Sync,
@@ -241,13 +245,16 @@ where
             detail: "the last gym mesocycle names no published programme to carry on with"
                 .to_owned(),
         })?;
-        let parameters = self
+        // The plan's own version, because what is committed is part of the plan
+        // and was planned with it (#192); the scales are the start's (#450).
+        let planned_at = plan.authored_at();
+        let (_, linear) = self
             .ports
             .parameters
-            .current()
+            .linear_at(planned_at)
             .await?
-            .map(|(_, parameters)| parameters)
-            .ok_or(CommitError::NoParameters)?;
+            .ok_or(CommitError::NotDesigned { planned_at })?;
+        let scales = self.ports.parameters.scales_on(start).await?;
 
         let sbs = Gym::Sbs.weeks();
         let provided = |microcycles: Vec<u32>| {
@@ -310,7 +317,8 @@ where
                     before.fills().clone(),
                     &skips,
                     self.zone.as_time_zone(),
-                    &parameters,
+                    &linear,
+                    &scales,
                 )
                 .map_err(|error| unbuildable(&error))?,
             );

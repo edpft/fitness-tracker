@@ -105,11 +105,12 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
             let zone = support::corpus::zone()?;
 
             let plan = programme::plan(vec![cycle()?])?;
-            Authoring::new(
-                infrastructure::SqlitePlanStore::new(pool.clone(), zone.clone()),
-                infrastructure::SqliteGenerationParameterStore::new(pool.clone()),
-            )
-            .author(&plan, &programme::parameters()?)
+            programme::design(&pool).await?;
+            Authoring::new(infrastructure::SqlitePlanStore::new(
+                pool.clone(),
+                zone.clone(),
+            ))
+            .author(&plan)
             .await?;
 
             let store = infrastructure::SqliteGymMesocycleStore::new(pool, zone);

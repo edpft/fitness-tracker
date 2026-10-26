@@ -22,16 +22,15 @@ use domain::{
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
         Anchor, AnchorProvenance, Attempts, BlockPeriodisation, BlockWeek, DerivedFrom,
-        GatingTopSet, GenerationParameters, GymMesocycle, Ladder, Linear, LoadSteps, Opening,
-        Position, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
-        PrescribedWorkout, PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay,
-        SbsSession, Section, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan,
+        GatingTopSet, GymMesocycle, Ladder, Linear, LoadSteps, Opening, Position,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
+        PrescriptionState, Progress, Progression, Sbs, SbsChart, SbsDay, SbsSession, Scales,
+        Section, SlotId, SupersetMember, Target, Test, WarmupStep, WeekKind, WeekPlan,
         WorkoutShape, anchor,
         linear::SlotContent,
-        programming, progress_after, rep_max, rested,
+        progress_after, rep_max, rested,
         sbs::chart::{
-            CompletedSet, day as sbs_day, maximum_after as sbs_maximum_after, training_max_share,
-            working_load,
+            CompletedSet, maximum_after as sbs_maximum_after, training_max_share, working_load,
         },
         warmup_ramp,
     },
@@ -45,8 +44,9 @@ use crate::{
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
         LastPerformance, MesocycleInForce, MesocycleStore, Performance, PerformedSetSummary,
-        PlanAuthor, PlanStore, PrescribedWorkoutStore, Prescription, PrescriptionLifecycle,
-        UnderivableReason, UnderivableSlot, WorkoutPrescriber,
+        PlanAuthor, PlanStore, PlannedWith, PrescribedWorkoutStore, Prescription,
+        PrescriptionLifecycle, ProgrammeStore, ProgressionStore, UnderivableReason,
+        UnderivableSlot, WorkoutPrescriber,
     },
 };
 
@@ -138,6 +138,37 @@ pub async fn next_session(
     })
 }
 
+/// The versions a plan made at `planned_at` is derived from: the latest of each
+/// authored on or before it (#192).
+///
+/// # Errors
+///
+/// [`PrescriptionError::NotDesigned`] where no version of one of them had been
+/// authored by then, and [`PrescriptionError::Store`] if the store cannot answer.
+pub async fn planned_with(
+    store: &(impl ProgrammeStore + ProgressionStore + Sync),
+    planned_at: Timestamp,
+) -> Result<PlannedWith, PrescriptionError> {
+    let not_designed = |what| PrescriptionError::NotDesigned { what, planned_at };
+    let (_, programme) = store
+        .programme_at(planned_at)
+        .await?
+        .ok_or_else(|| not_designed("programme"))?;
+    let (_, linear) = store
+        .linear_at(planned_at)
+        .await?
+        .ok_or_else(|| not_designed("linear progression"))?;
+    let (_, sbs) = store
+        .sbs_at(planned_at)
+        .await?
+        .ok_or_else(|| not_designed("SBS"))?;
+    Ok(PlannedWith {
+        programme,
+        linear,
+        sbs,
+    })
+}
+
 /// Everything generation needs from the outside.
 ///
 /// **`lifecycle` is here because a performed session is not re-derived.** The
@@ -211,7 +242,7 @@ impl<H, P, G, S, L> WorkoutPrescriber for Prescribing<H, P, G, S, L>
 where
     H: ExerciseHistory + Sync,
     P: MesocycleStore + Sync,
-    G: GenerationParameterStore + Sync,
+    G: GenerationParameterStore + ProgrammeStore + ProgressionStore + Sync,
     S: PrescribedWorkoutStore + Sync,
     L: PrescriptionLifecycle + Sync,
 {
@@ -220,17 +251,11 @@ where
             return Err(PrescriptionError::NoPlan { date: on });
         };
         let (ordinal, plan, programme) = (found.ordinal, found.plan, found.mesocycle);
-        let Some((_, parameters)) = self.ports.parameters.current().await? else {
-            return Err(PrescriptionError::NoParameters);
-        };
-        let parameters = GenerationParameters {
-            scales: self.ports.parameters.scales_on(on).await?,
-            ..parameters
-        };
-        let programming = programming()?;
+        let with = planned_with(&self.ports.parameters, found.planned_at).await?;
+        let scales = self.ports.parameters.scales_on(on).await?;
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &programming,
+            planned_with: &with,
+            scales: &scales,
             ladders: &NO_LADDERS,
             loaded: &NO_LOADS,
         };
@@ -246,7 +271,8 @@ where
             plan,
             ordinal,
             programme,
-            parameters,
+            planned_with: with,
+            scales,
             anchor,
             maximum,
             progress,
@@ -366,7 +392,7 @@ impl<H, P, G, S, L> Prescribing<H, P, G, S, L>
 where
     H: ExerciseHistory + Sync,
     P: MesocycleStore + Sync,
-    G: GenerationParameterStore + Sync,
+    G: GenerationParameterStore + ProgrammeStore + ProgressionStore + Sync,
     S: PrescribedWorkoutStore + Sync,
     L: PrescriptionLifecycle + Sync,
 {
@@ -385,14 +411,11 @@ where
         // (#454). A change after this date is not this session's.
         let (programme_id, plan, changes) = (found.id, found.plan, found.changes);
         let programme = found.mesocycle.changed_on(&changes, date);
-        let Some((parameters_at, parameters)) = self.ports.parameters.current().await? else {
-            return Err(PrescriptionError::NoParameters);
-        };
+        // **The versions the plan was made with, not the latest** (#192): a
+        // version authored since reaches only the plans made after it.
+        let with = planned_with(&self.ports.parameters, found.planned_at).await?;
         // The increments true on the session's date, not today's (issue #450).
-        let parameters = GenerationParameters {
-            scales: self.ports.parameters.scales_on(date).await?,
-            ..parameters
-        };
+        let scales = self.ports.parameters.scales_on(date).await?;
         let (week, role) = programme.calendar().place(date)?;
         // A skipped essential session earlier in the week is prescribed here
         // instead (#392).
@@ -410,10 +433,9 @@ where
             .iter()
             .filter_map(|slot| Some((*slot, changes.loaded_by(*slot, role, date)?)))
             .collect();
-        let programming = programming()?;
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &programming,
+            planned_with: &with,
+            scales: &scales,
             ladders: &ladders,
             loaded: &loaded,
         };
@@ -493,7 +515,10 @@ where
         // another member of its item follows it, and the second of those is not
         // known while a slot is still being derived — the grouping happens
         // above.
-        let shape = rested(&WorkoutShape::new(items), &consulted.parameters.rest);
+        let shape = rested(
+            &WorkoutShape::new(items),
+            &consulted.planned_with.programme.rest,
+        );
 
         let workout = PrescribedWorkout::new(
             shape,
@@ -501,8 +526,6 @@ where
             role,
             recorded,
             derived_from(&plan, &programme, week, inheritance, opening)?,
-            parameters,
-            parameters_at,
             programme_id,
             Timestamp::now(),
         );
@@ -813,11 +836,7 @@ where
         let mut maximum = opening.load();
         // The increment is the plate grid's, not a number of this module's:
         // what SBS's `FLOOR` rounds to is whatever the bar can actually hold.
-        let Some(steps) = consulted
-            .parameters
-            .scales
-            .for_exercise(Exercise::Reps(primary))
-        else {
+        let Some(steps) = consulted.scales.for_exercise(Exercise::Reps(primary)) else {
             return Ok(maximum);
         };
         let increment = steps.step_at(maximum);
@@ -863,7 +882,12 @@ where
             performed.push((index.as_u32(), completed_sets_of(performance)));
         }
 
-        maximum = sbs_maximum_after(maximum, &performed, increment);
+        maximum = sbs_maximum_after(
+            &consulted.planned_with.sbs.chart,
+            maximum,
+            &performed,
+            increment,
+        );
         Ok(maximum)
     }
 
@@ -910,6 +934,7 @@ where
             .await?;
         let Some(MesocycleInForce {
             plan: before_plan,
+            planned_at: before_planned_at,
             mesocycle: GymMesocycle::Progression(Progression::Linear(before)),
             ..
         }) = predecessor
@@ -924,6 +949,14 @@ where
             });
         };
 
+        // **The predecessor's own versions**, which are its plan's (#192): a
+        // block planned before a version changed climbs as it was planned to,
+        // whichever plan the test after it belongs to.
+        let theirs = planned_with(&self.ports.parameters, before_planned_at).await?;
+        let consulted = &Consulted {
+            planned_with: &theirs,
+            ..*consulted
+        };
         let progress = self
             .progress(&before_plan, &before, consulted, date)
             .await?;
@@ -944,13 +977,17 @@ where
                 light: None,
             });
         };
-        let Ok(ladder) = before.ladder(before_opening, consulted.parameters) else {
+        let Ok(ladder) = before.ladder(
+            before_opening,
+            &consulted.planned_with.linear,
+            consulted.scales,
+        ) else {
             return Ok(Inheritance {
                 target: stated,
                 light: None,
             });
         };
-        let Ok(steps) = before.steps(consulted.parameters) else {
+        let Ok(steps) = before.steps(consulted.scales) else {
             return Ok(Inheritance {
                 target: stated,
                 light: None,
@@ -966,7 +1003,11 @@ where
             // ladder's position is not a measurement — the predecessor never
             // tested, which is exactly why the number was asserted.
             target: stated.or(inherited),
-            light: progress.light_top_set(ladder, steps, consulted.parameters.light_of_heavy),
+            light: progress.light_top_set(
+                ladder,
+                steps,
+                consulted.planned_with.linear.light_of_heavy,
+            ),
         })
     }
 
@@ -1029,9 +1070,9 @@ where
 
         Ok(progress_after(
             &gating,
-            consulted.programming.first_reset,
-            consulted.programming.second_reset,
-            programme.steps(consulted.parameters)?,
+            consulted.planned_with.linear.first_reset,
+            consulted.planned_with.linear.second_reset,
+            programme.steps(consulted.scales)?,
         ))
     }
 }
@@ -1184,20 +1225,20 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
 
 /// What a derivation consults, and it is two kinds of thing.
 ///
-/// **The consulted are facts about the world the training happens in** — the
-/// load steps each implement moves in, what the week allows — and they are
-/// authored, dated and read from the store. **The programming is the shape the
-/// operator trains**: the ramp, the back-offs, the top sets, the accessory
-/// schemes and the reset protocols. It has one value, it is not authored, and
-/// it is fixed in this build.
+/// **The versions the plan was made with** — the programme and each primary
+/// progression, as the operator designed them (#192) — and **facts about the
+/// world the training happens in**: the load steps each implement moves in on
+/// the session's date, and the bands and loads its fills name.
 ///
 /// They travel together for the reason [`Standing`] does: every derivation
-/// below needs both, and `issue_slots` was already at the argument limit
+/// below needs them, and `issue_slots` was already at the argument limit
 /// carrying one of them.
 #[derive(Debug, Clone, Copy)]
 struct Consulted<'a> {
-    parameters: &'a GenerationParameters,
-    programming: &'a Programming,
+    /// The versions the plan was made with (#192).
+    planned_with: &'a PlannedWith,
+    /// The load scales true on the session's date (#450).
+    scales: &'a Scales,
     /// The bands that assist each slot a change says is band-assisted, as
     /// they were on the session's date (#454).
     ladders: &'a BTreeMap<SlotId, BandLadder>,
@@ -1441,7 +1482,7 @@ fn primary_slot_item(
         });
     };
 
-    let Some(steps) = consulted.parameters.scales.for_exercise(*exercise) else {
+    let Some(steps) = consulted.scales.for_exercise(*exercise) else {
         return Derived::underivable(UnderivableSlot {
             slot,
             exercise: *exercise,
@@ -1457,9 +1498,13 @@ fn primary_slot_item(
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block_load(block, role, week, standing.opening, steps)
         }
-        GymMesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
-            sbs_load(sbs, role, week, steps, maximum)
-        }
+        GymMesocycle::Progression(Progression::Provided { .. }) => sbs_load(
+            &consulted.planned_with.sbs.chart,
+            role,
+            week,
+            steps,
+            maximum,
+        ),
         GymMesocycle::Test(test) => test_load(test, consulted, role, inheritance, steps),
     };
     let plan = match plan {
@@ -1473,7 +1518,13 @@ fn primary_slot_item(
         }
     };
 
-    let sets = primary_sets(plan, consulted, role, steps);
+    let sets = primary_sets(
+        plan,
+        consulted,
+        ramp_of(programme, consulted.planned_with),
+        role,
+        steps,
+    );
 
     let Ok(sets) = NonEmpty::new(sets) else {
         return Derived::underivable(UnderivableSlot {
@@ -1513,7 +1564,7 @@ fn linear_load(
     };
     let (Some(progress), Ok(ladder)) = (
         standing.progress,
-        linear.ladder(opening, consulted.parameters),
+        linear.ladder(opening, &consulted.planned_with.linear, consulted.scales),
     ) else {
         return Err(UnderivableReason::NoLadder);
     };
@@ -1526,13 +1577,18 @@ fn linear_load(
     let load = match role.intensity() {
         Relative::Higher => progress.heavy_top_set(ladder, steps),
         Relative::Lower => {
-            progress.light_top_set(ladder, steps, consulted.parameters.light_of_heavy)
+            progress.light_top_set(ladder, steps, consulted.planned_with.linear.light_of_heavy)
         }
     };
     load.map_or(Err(UnderivableReason::NoLadder), |load| {
         Ok(PrimaryLoad::TopSet {
             load,
-            reps: consulted.programming.top_set_reps.get(role).as_rep_count(),
+            reps: consulted
+                .planned_with
+                .linear
+                .top_set_reps
+                .get(role)
+                .as_rep_count(),
         })
     })
 }
@@ -1556,9 +1612,9 @@ fn holding_load(
     let Ok(ladder) = Ladder::new(
         Opening {
             maximum,
-            drop: consulted.parameters.entry_drop,
+            drop: consulted.planned_with.linear.entry_drop,
         },
-        consulted.parameters.ladder_climb_per_week,
+        consulted.planned_with.linear.ladder_climb_per_week,
         1,
         steps,
     ) else {
@@ -1567,12 +1623,19 @@ fn holding_load(
     let week = domain::prescription::WeekIndex::FIRST;
     let load = match role.intensity() {
         Relative::Higher => ladder.heavy_top_set(week, steps),
-        Relative::Lower => ladder.light_top_set(week, steps, consulted.parameters.light_of_heavy),
+        Relative::Lower => {
+            ladder.light_top_set(week, steps, consulted.planned_with.linear.light_of_heavy)
+        }
     };
     load.map_or(Err(UnderivableReason::NoLadder), |load| {
         Ok(PrimaryLoad::TopSet {
             load,
-            reps: consulted.programming.top_set_reps.get(role).as_rep_count(),
+            reps: consulted
+                .planned_with
+                .linear
+                .top_set_reps
+                .get(role)
+                .as_rep_count(),
         })
     })
 }
@@ -1611,7 +1674,7 @@ fn measuring(mesocycle: &GymMesocycle) -> Span {
 /// That limitation is deliberate and visible rather than papered over: the
 /// alternative is to invent a progression the chart does not state.
 fn sbs_load(
-    _sbs: &Sbs,
+    chart: &SbsChart,
     role: SessionRole,
     week: WeekKind,
     steps: &LoadSteps,
@@ -1626,7 +1689,7 @@ fn sbs_load(
         Relative::Lower => SbsSession::First,
         Relative::Higher => SbsSession::Second,
     };
-    let Ok(day) = sbs_day(index.as_u32(), session) else {
+    let Ok(day) = chart.day(index.as_u32(), session) else {
         return Err(UnderivableReason::NoLadder);
     };
 
@@ -1794,7 +1857,7 @@ fn test_load(
         });
     }
 
-    if let Some(day) = provided_other_session(test) {
+    if let Some(day) = provided_other_session(test, &consulted.planned_with.sbs.chart) {
         // The same refusal the attempt itself makes, and for the same reason:
         // both days of the week are shares of the target, so a week with no
         // target has no light session either.
@@ -1813,7 +1876,12 @@ fn test_load(
     };
     Ok(PrimaryLoad::TopSet {
         load: steps.quantise_loaded(load),
-        reps: consulted.programming.top_set_reps.get(role).as_rep_count(),
+        reps: consulted
+            .planned_with
+            .linear
+            .top_set_reps
+            .get(role)
+            .as_rep_count(),
     })
 }
 
@@ -1826,9 +1894,9 @@ fn test_load(
 /// [`SbsSession::First`] rather than the role, because which session of the week
 /// this is has already been decided: the attempt is
 /// [`Test::ROLE`] and this is the other one.
-fn provided_other_session(test: &Test) -> Option<SbsDay> {
+fn provided_other_session(test: &Test, chart: &SbsChart) -> Option<SbsDay> {
     let microcycle = test.provided()?.microcycles().next()?;
-    sbs_day(microcycle, SbsSession::First).ok()
+    chart.day(microcycle, SbsSession::First).ok()
 }
 
 /// Several slots issued as one item, as the template groups them.
@@ -1965,7 +2033,7 @@ fn hold(consulted: &Consulted<'_>, exercise: DurationExercise) -> PrescribedExer
             // Unloaded, and the pinned axis is volume rather than intensity —
             // which is how a slot with no load still prescribes something.
             Load::UNLOADED,
-            Target::Exactly(consulted.parameters.static_hold),
+            Target::Exactly(consulted.planned_with.programme.static_hold),
         )
     };
     let rest = (1..exercise.sides().holds()).map(|_| set()).collect();
@@ -2020,7 +2088,7 @@ fn one_exercise(
     let Some(LastPerformance::Performed(last)) = history.get(&reps_exercise) else {
         return Err(underivable(UnderivableReason::NeverPerformed));
     };
-    let scheme = consulted.programming.scheme_for(slot);
+    let scheme = consulted.planned_with.programme.scheme_for(slot);
     let banded = consulted
         .ladders
         .get(&slot)
@@ -2152,7 +2220,6 @@ fn progressed_load(
     }
 
     let steps = consulted
-        .parameters
         .scales
         .for_implement(implement)
         .ok_or(UnderivableReason::NoLoadScale)?;
@@ -2202,28 +2269,22 @@ fn standing_at_heaviest(
     Ok((heaviest.load, reached_top))
 }
 
-/// Storing an authored plan and the consulted it was generated against.
-pub struct Authoring<P, G> {
+/// Storing an authored plan.
+pub struct Authoring<P> {
     plans: P,
-    parameters: G,
 }
 
-impl<P, G> Authoring<P, G> {
-    pub const fn new(plans: P, parameters: G) -> Self {
-        Self { plans, parameters }
+impl<P> Authoring<P> {
+    pub const fn new(plans: P) -> Self {
+        Self { plans }
     }
 }
 
-impl<P, G> PlanAuthor for Authoring<P, G>
+impl<P> PlanAuthor for Authoring<P>
 where
     P: PlanStore + Sync,
-    G: GenerationParameterStore + Sync,
 {
-    async fn author(
-        &self,
-        plan: &Plan,
-        parameters: &GenerationParameters,
-    ) -> Result<(PlanId, Authored), PrescriptionError> {
+    async fn author(&self, plan: &Plan) -> Result<(PlanId, Authored), PrescriptionError> {
         // Refused before anything is written. Two plans covering one day would
         // make which of them answers depend on the order rows came back in,
         // which is the silent ambiguity § 12's discipline exists to stop.
@@ -2245,12 +2306,20 @@ where
         // able to claim it opened from a test that had already happened, and
         // that claim had to be checked against the store; no programme states a
         // maximum now, so there is no claim left to be wrong.
-        // Parameters first: a plan names the version it was authored against,
-        // and one stored without them would reference nothing.
-        self.parameters
-            .author(plan.authored_at(), parameters)
-            .await?;
         Ok((self.plans.author(plan).await?, authored))
+    }
+}
+
+/// Which progression's ramp the primary warms up on (#192).
+///
+/// **Each progression states its own** (operator, 2026-10-24). An SBS cycle,
+/// and a test SBS provides, ramp on SBS's; everything else ramps on linear's,
+/// which is the one block periodisation read before the two were separated.
+fn ramp_of<'a>(mesocycle: &GymMesocycle, with: &'a PlannedWith) -> &'a NonEmpty<WarmupStep> {
+    match mesocycle {
+        GymMesocycle::Progression(Progression::Provided { .. }) => &with.sbs.warmup,
+        GymMesocycle::Test(test) if test.provided().is_some() => &with.sbs.warmup,
+        GymMesocycle::Progression(_) | GymMesocycle::Test(_) => &with.linear.warmup,
     }
 }
 
@@ -2262,6 +2331,7 @@ where
 fn primary_sets(
     plan: PrimaryLoad,
     consulted: &Consulted<'_>,
+    floor: &NonEmpty<WarmupStep>,
     role: SessionRole,
     steps: &LoadSteps,
 ) -> Vec<PrescribedSet<RepCount>> {
@@ -2282,11 +2352,9 @@ fn primary_sets(
     // both cases, so a low count leaves it exactly as authored.
     let ramp = match plan {
         PrimaryLoad::RepMax { reps, .. } | PrimaryLoad::Attempt { reps, .. } => {
-            Cow::Owned(warmup_ramp(&consulted.programming.warmup, reps))
+            Cow::Owned(warmup_ramp(floor, reps))
         }
-        PrimaryLoad::TopSet { .. } | PrimaryLoad::Across { .. } => {
-            Cow::Borrowed(&consulted.programming.warmup)
-        }
+        PrimaryLoad::TopSet { .. } | PrimaryLoad::Across { .. } => Cow::Borrowed(floor),
     };
     for step in ramp.iter() {
         sets.push(PrescribedSet::warmup(
@@ -2303,7 +2371,7 @@ fn primary_sets(
             ));
             // The back-offs are the role's own pattern — heavy `2 × 4`, light
             // `3 × 6` — and not the strength block's accessory scheme.
-            let pattern = consulted.programming.back_off.get(role);
+            let pattern = consulted.planned_with.linear.back_off.get(role);
             let back_off = steps.quantise_loaded(pattern.of_top_set.of(load));
             for _ in 0..pattern.sets.as_u32() {
                 sets.push(PrescribedSet::fixed(
@@ -2380,6 +2448,18 @@ fn primary_sets(
     sets
 }
 
+/// The versions this build ships, as a plan made on a new store would take
+/// them.
+#[cfg(test)]
+fn shipped() -> Result<PlannedWith, domain::prescription::seed::InvalidSeed> {
+    use domain::prescription::seed;
+    Ok(PlannedWith {
+        programme: seed::programme()?,
+        linear: seed::linear()?,
+        sbs: seed::sbs()?,
+    })
+}
+
 #[cfg(test)]
 mod progression_tests {
     //! Double progression progresses from the heaviest working set (issue #129).
@@ -2390,11 +2470,11 @@ mod progression_tests {
     use domain::{
         gym::{Load, Performed, SetKind, SignedKg, exercise::Exercise},
         measure::{Kg, RepCount},
-        prescription::seed::seed,
+        prescription::seed,
     };
     use jiff::civil::Date;
 
-    use super::{Consulted, programming};
+    use super::Consulted;
     use super::{Performance, PerformedSetSummary, banded_load, progressed_load};
 
     /// The operator's Supaflex chart of 2026-10-15, at each band's force at
@@ -2449,7 +2529,7 @@ mod progression_tests {
     /// sixes at `-7`, and `-7` is nearest the 1/5 band.
     #[test]
     fn a_banded_slot_re_issues_the_band_nearest_its_last_load() {
-        let shape = programming().expect("the shipped programming builds");
+        let shape = seed::programme().expect("the shipped programme builds");
         let ladder = supaflex().expect("the chart builds");
         let last = performance(vec![
             set(assisted(15), 6).expect("a set"),
@@ -2468,7 +2548,7 @@ mod progression_tests {
     /// Three sixes on the 4/5 band step to the next on the chart.
     #[test]
     fn a_banded_slot_topped_steps_down_the_chart() {
-        let shape = programming().expect("the shipped programming builds");
+        let shape = seed::programme().expect("the shipped programme builds");
         let ladder = supaflex().expect("the chart builds");
         let last = performance(vec![
             set(assisted(21), 6).expect("a set"),
@@ -2487,7 +2567,7 @@ mod progression_tests {
     /// Past the last band is no band at all.
     #[test]
     fn the_last_band_topped_is_bodyweight() {
-        let shape = programming().expect("the shipped programming builds");
+        let shape = seed::programme().expect("the shipped programme builds");
         let ladder = supaflex().expect("the chart builds");
         let last = performance(vec![
             set(assisted(9), 6).expect("a set"),
@@ -2527,11 +2607,11 @@ mod progression_tests {
     /// — the top set, not the 30kg back-off it ended on.
     #[test]
     fn a_top_set_and_back_offs_re_issue_the_top_set() {
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2544,7 +2624,7 @@ mod progression_tests {
         let progressed = progressed_load(
             &consulted,
             Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
-            &consulted.programming.strength,
+            &consulted.planned_with.programme.strength,
             &last,
         )
         .expect("the slot derives");
@@ -2560,11 +2640,11 @@ mod progression_tests {
     /// so the load steps up.
     #[test]
     fn three_sets_at_the_top_of_the_range_step_up() {
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2577,7 +2657,7 @@ mod progression_tests {
         let progressed = progressed_load(
             &consulted,
             Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
-            &consulted.programming.strength,
+            &consulted.planned_with.programme.strength,
             &last,
         )
         .expect("the slot derives");
@@ -2593,11 +2673,11 @@ mod progression_tests {
     /// it.
     #[test]
     fn a_more_assisted_set_does_not_count_toward_the_step() {
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2610,7 +2690,7 @@ mod progression_tests {
         let progressed = progressed_load(
             &consulted,
             Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip).implement(),
-            &consulted.programming.strength,
+            &consulted.planned_with.programme.strength,
             &last,
         )
         .expect("the slot derives");
@@ -2629,11 +2709,11 @@ mod progression_tests {
     /// state one.
     #[test]
     fn an_assisted_session_re_issues_its_least_assisted_set() {
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2646,7 +2726,7 @@ mod progression_tests {
         let progressed = progressed_load(
             &consulted,
             Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip).implement(),
-            &consulted.programming.strength,
+            &consulted.planned_with.programme.strength,
             &last,
         )
         .expect("the slot derives");
@@ -2661,11 +2741,11 @@ mod progression_tests {
     /// A session that fell short re-issues the heaviest set, not the last one.
     #[test]
     fn a_session_that_fell_short_re_issues_its_top_set() {
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2677,7 +2757,7 @@ mod progression_tests {
         let progressed = progressed_load(
             &consulted,
             Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
-            &consulted.programming.strength,
+            &consulted.planned_with.programme.strength,
             &last,
         )
         .expect("the slot derives");
@@ -2697,8 +2777,8 @@ mod progression_tests {
 
         use super::{LastPerformance, UnderivableReason, one_exercise};
 
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let history = std::collections::BTreeMap::from([(
             RepsExercise::DeadBug,
             LastPerformance::Performed(performance(vec![
@@ -2710,8 +2790,8 @@ mod progression_tests {
         let dead_bug = Exercise::Reps(RepsExercise::DeadBug);
 
         let unstated = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2874,21 +2954,21 @@ mod ramp_tests {
     //! nothing else. What an SBS *cycle* prescribes end to end cannot be tested
     //! at all yet — the store's `template` CHECK does not admit `sbs`.
 
-    use super::{Consulted, programming};
+    use super::Consulted;
     use super::{PrimaryLoad, primary_sets};
     use domain::{
         gym::{Load, Rir},
         measure::{Kg, RepCount},
-        prescription::{LoadSteps, seed::seed},
+        prescription::{LoadSteps, seed},
         schedule::{Relative, SessionRole},
     };
 
     fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
-        let parameters = seed()?;
-        let shape = programming()?;
+        let with = super::shipped()?;
+        let scales = seed::scales()?;
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2896,6 +2976,7 @@ mod ramp_tests {
         let sets = primary_sets(
             plan,
             &consulted,
+            &consulted.planned_with.linear.warmup,
             SessionRole::new(Relative::Higher, Relative::Lower),
             &steps,
         );
@@ -2944,11 +3025,11 @@ mod ramp_tests {
             toward: Kg::from_grams(95_000),
             reps: RepCount::new(1).expect("one is a repetition count"),
         };
-        let parameters = seed().expect("the seed builds");
-        let shape = programming().expect("the shipped programming builds");
+        let with = super::shipped().expect("the seed builds");
+        let scales = seed::scales().expect("the seed builds");
         let consulted = Consulted {
-            parameters: &parameters,
-            programming: &shape,
+            planned_with: &with,
+            scales: &scales,
             ladders: &super::NO_LADDERS,
             loaded: &super::NO_LOADS,
         };
@@ -2956,6 +3037,7 @@ mod ramp_tests {
         let shape: Vec<(bool, Option<u64>, Option<Rir>)> = primary_sets(
             plan,
             &consulted,
+            &consulted.planned_with.linear.warmup,
             SessionRole::new(Relative::Higher, Relative::Lower),
             &steps,
         )

@@ -18,7 +18,7 @@
 //! `tests/fixtures/programme.toml`, and a test asserted the two agreed. The
 //! document is gone and so is that test; this file is now the only fixture.
 
-use application::StoreError;
+use application::{PlannedWith, StoreError};
 use std::collections::BTreeMap;
 
 use domain::{
@@ -26,9 +26,8 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Plan, PlanName, Programme},
     prescription::{
-        Anchor, AnchorProvenance, Authored, AuthoringError, BackOff, ByIntensity, Calendar,
-        GenerationParameters, GymMesocycle, Linear, LoadSteps, Percentage, PrescribedWorkout,
-        Progression, ResetProtocol, Scales, Skip, Step, TopSetReps, WarmupStep,
+        Anchor, AnchorProvenance, Authored, AuthoringError, ByIntensity, Calendar, GymMesocycle,
+        Linear, LoadSteps, PrescribedWorkout, Progression, Scales, Skip, Step,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -53,10 +52,6 @@ fn kg(value: &str) -> Result<Kg, ProgrammeFixtureError> {
     Kg::try_from(value.to_owned()).map_err(invalid)
 }
 
-fn pct(value: &str) -> Result<Percentage, ProgrammeFixtureError> {
-    Percentage::try_from(value.to_owned()).map_err(invalid)
-}
-
 fn reps(count: u32) -> Result<RepCount, ProgrammeFixtureError> {
     RepCount::new(count).map_err(invalid)
 }
@@ -70,22 +65,30 @@ pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
     TimeZone::get("Europe/London").map_err(invalid)
 }
 
-/// The parameters, with a **test** ladder climb.
+/// What a fixture plan is derived from: the versions of the programme and each
+/// primary progression (#192), and the load scales.
+pub struct Parameters {
+    pub planned_with: PlannedWith,
+    pub scales: Scales,
+}
+
+/// The versions this build ships, and the fixture's load scales.
 ///
-/// The back-off percentage and the warm-up ramp are the operator's own. The
-/// light-of-heavy percentage, the accessory range and the per-role repetitions are
-/// inferred from the record; see the module note.
+/// The ladder climb is the shipped 2.5kg, which is also the smallest plate, so
+/// it reads as a test rate as well as the authored one.
 ///
 /// # Errors
 ///
 /// [`ProgrammeFixtureError`] if any literal here is not a valid value, which
 /// would be a typo in this file.
-pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
-    Ok(GenerationParameters {
-        light_of_heavy: pct("85%")?,
-        // A test rate. See the module note.
-        ladder_climb_per_week: kg("2.5")?,
-        entry_drop: pct("-10%")?,
+pub fn parameters() -> Result<Parameters, ProgrammeFixtureError> {
+    use domain::prescription::seed;
+    Ok(Parameters {
+        planned_with: PlannedWith {
+            programme: seed::programme().map_err(invalid)?,
+            linear: seed::linear().map_err(invalid)?,
+            sbs: seed::sbs().map_err(invalid)?,
+        },
         // The bar, and the rack the wrist work is done on. A banded scale is
         // what the single increment could not express: 10kg leaves on a 2kg
         // step and 7kg on a 1kg one.
@@ -117,17 +120,52 @@ pub fn parameters() -> Result<GenerationParameters, ProgrammeFixtureError> {
                 .map_err(invalid)?,
             ),
         ])),
-        // The operator's own, stated on 2026-08-23. Mobility rests not at all,
-        // and no block but the two below rests differently when supersetted.
-        rest: domain::prescription::RestScheme {
-            plyometric: flat(30),
-            power: flat(90),
-            strength: grouped(120, 180, 90, 150)?,
-            hypertrophy: grouped(120, 180, 90, 150)?,
-            mobility: flat(0),
-        },
-        static_hold: domain::measure::Duration::from_seconds(60),
     })
+}
+
+/// Store the fixture's versions, dated at the epoch so every plan a test makes
+/// takes them (#192), and its scales as the equipment's kinds where none is
+/// known (#450).
+///
+/// **What authoring a plan used to do as a side effect**, which it no longer
+/// does: a plan takes the versions in force when it was made, and one made in
+/// a store with none has nothing to be derived from.
+///
+/// # Errors
+///
+/// [`ProgrammeFixtureError`] if a fixture value is invalid or the store refuses.
+pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFixtureError> {
+    use application::{EquipmentStore as _, ProgrammeStore as _, ProgressionStore as _};
+    use infrastructure::store::{SqliteEquipmentStore, SqliteGenerationParameterStore};
+
+    let fixture = parameters()?;
+    let versions = SqliteGenerationParameterStore::new(pool.clone());
+    let at = jiff::Timestamp::UNIX_EPOCH;
+    // Once: a test that builds on another's store designs it again.
+    if versions.programme_at(at).await?.is_none() {
+        versions
+            .author_programme(at, &fixture.planned_with.programme)
+            .await?;
+        versions
+            .author_linear(at, &fixture.planned_with.linear)
+            .await?;
+        versions.author_sbs(at, &fixture.planned_with.sbs).await?;
+    }
+
+    let equipment = SqliteEquipmentStore::new(pool.clone());
+    if equipment.facts().await?.kinds.is_empty() {
+        for (implement, steps) in fixture.scales.iter() {
+            equipment
+                .record(
+                    &domain::gym::equipment::Statement::Kind(*implement, steps.clone()),
+                    None,
+                    at,
+                    None,
+                )
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// The eleven slot fills the record shows.
@@ -476,7 +514,8 @@ pub fn authoring(
         fills()?,
         interruptions,
         zone()?,
-        &parameters()?,
+        &parameters()?.planned_with.linear,
+        &parameters()?.scales,
     ))
 }
 
@@ -509,7 +548,8 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
         ),
         fills()?,
         calendar_running(weekdays()?, skips)?,
-        &parameters,
+        &parameters.planned_with.linear,
+        &parameters.scales,
     )
     .map_err(invalid)
 }
@@ -530,7 +570,8 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
         ),
         fills()?,
         calendar_from(start, weekdays()?)?,
-        &parameters,
+        &parameters.planned_with.linear,
+        &parameters.scales,
     )
     .map_err(invalid)
 }
@@ -591,7 +632,8 @@ pub fn primary_not_counted_in_reps()
         ),
         fills()?,
         calendar()?,
-        &parameters,
+        &parameters.planned_with.linear,
+        &parameters.scales,
     ))
 }
 
@@ -613,38 +655,9 @@ pub fn primary_does_not_fill_its_slot()
         ),
         fills()?,
         calendar()?,
-        &parameters,
+        &parameters.planned_with.linear,
+        &parameters.scales,
     ))
-}
-
-/// A block that rests the same however its work is grouped.
-const fn flat(seconds: u64) -> domain::prescription::SectionRest {
-    domain::prescription::SectionRest {
-        between_sets: domain::prescription::Target::Exactly(
-            domain::measure::Duration::from_seconds(seconds),
-        ),
-        after_superset: None,
-    }
-}
-
-/// A block that rests less at the end of a superset than on its own.
-fn grouped(
-    low: u64,
-    high: u64,
-    superset_low: u64,
-    superset_high: u64,
-) -> Result<domain::prescription::SectionRest, ProgrammeFixtureError> {
-    let span = |low: u64, high: u64| {
-        domain::prescription::Target::between(
-            domain::measure::Duration::from_seconds(low),
-            domain::measure::Duration::from_seconds(high),
-        )
-        .ok_or_else(|| invalid("a rest range that does not span"))
-    };
-    Ok(domain::prescription::SectionRest {
-        between_sets: span(low, high)?,
-        after_superset: Some(span(superset_low, superset_high)?),
-    })
 }
 
 /// A minimal issued session for a date, for a test that only needs one to
@@ -657,12 +670,8 @@ fn grouped(
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date, the shape or the parameters are
-/// invalid.
-pub fn a_workout_for(
-    date: Date,
-    parameters_authored_at: jiff::Timestamp,
-) -> Result<PrescribedWorkout, ProgrammeFixtureError> {
+/// [`ProgrammeFixtureError`] if the date or the shape is invalid.
+pub fn a_workout_for(date: Date) -> Result<PrescribedWorkout, ProgrammeFixtureError> {
     use domain::{
         gym::{Load, exercise::RepsExercise},
         measure::RepCount,
@@ -700,8 +709,6 @@ pub fn a_workout_for(
         SessionRole::new(Relative::Higher, Relative::Lower),
         WeekKind::Climbing(WeekIndex::new(1).map_err(invalid)?),
         DerivedFrom::Anchor(anchor()?),
-        parameters()?,
-        parameters_authored_at,
         MesocycleId::new(1),
         "2026-09-15T18:00:00Z".parse().map_err(invalid)?,
     ))

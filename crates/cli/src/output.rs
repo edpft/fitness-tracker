@@ -11,10 +11,7 @@ use domain::{
     canonical::SessionCount,
     landing::{LandingStream, RunOutcome, Watermark},
     normalised::{Refusal, RefusalKind, RefusalLocus},
-    prescription::{
-        BlockPeriodisation, GenerationParameters, GymMesocycle, Linear, Progression, WeekIndex,
-        WeekPlan,
-    },
+    prescription::{BlockPeriodisation, GymMesocycle, Linear, Progression, WeekIndex, WeekPlan},
 };
 
 pub fn run_started(stream: &LandingStream) {
@@ -483,7 +480,7 @@ pub fn programme_authored(
     authored: application::Authored,
     plan: &domain::plan::Plan,
     programme: &GymMesocycle,
-    parameters: &domain::prescription::GenerationParameters,
+    parameters: &crate::wizard::Ready,
 ) {
     let calendar = programme.calendar();
     // Which of the two it was, first and in plain words. A name the store has
@@ -542,19 +539,16 @@ pub fn programme_authored(
             calendar.calendar_weeks(),
         );
     }
-    authored_plan(programme, parameters);
-    authored_parameters(parameters);
+    authored_plan(programme, &parameters.planned_with);
+    authored_parameters(&parameters.planned_with, &parameters.scales);
 }
 
 /// What this programme's template makes of its anchor.
 ///
 /// Split out because it is three unrelated reports sharing a `match`, and
-/// because what the parameters say is a separate question from what the
+/// because what the versions say is a separate question from what the
 /// programme does with them.
-fn authored_plan(
-    programme: &GymMesocycle,
-    parameters: &domain::prescription::GenerationParameters,
-) {
+fn authored_plan(programme: &GymMesocycle, with: &application::PlannedWith) {
     let calendar = programme.calendar();
     match programme {
         GymMesocycle::Test(test) => {
@@ -578,26 +572,38 @@ fn authored_plan(
                 "  opening from whatever the mesocycle before it measures, \
                  and it does not stay fixed"
             );
+            let first_days: Vec<String> = with
+                .sbs
+                .chart
+                .days()
+                .filter_map(|(_, session, day)| match (session, day) {
+                    (
+                        domain::prescription::SbsSession::First,
+                        domain::prescription::SbsDay::Percentage { sets, reps, share },
+                    ) => Some(format!("{sets}×{reps} @ {share}")),
+                    _ => None,
+                })
+                .collect();
             println!(
-                "  four weeks, stated by the chart: 5×5 @ 80%, 4×3 @ 85%, \
-                 3×1 @ 90%, 3×3 @ 75%"
+                "  four weeks, stated by the chart: {}",
+                first_days.join(", ")
             );
             println!(
                 "  the second session of each week finds a rep max, and that \
                  result is what the next week is a share of"
             );
-            println!("  week 4 ends on a single, which opens the next cycle");
+            println!("  week 4 ends on a test, which opens the next cycle");
         }
         GymMesocycle::Progression(Progression::Linear(_)) => {
             println!(
                 "  it opens {} off the failed load of whatever measured the \
                  lift before it",
-                parameters.entry_drop
+                with.linear.entry_drop
             );
             println!(
                 "  ladder climbs {}kg a week over {} climbing weeks, and none of \
                  them is a test",
-                parameters.ladder_climb_per_week,
+                with.linear.ladder_climb_per_week,
                 calendar.duration_weeks(),
             );
         }
@@ -626,139 +632,154 @@ fn authored_plan(
     }
 }
 
-/// The parameters the programme was authored against.
+/// What the plan was authored against, in short.
 ///
-/// **Split out because they are not about the programme.** They are the values
-/// in force when it was authored, recorded with it (§ 14), and they read the
-/// same whichever template was being authored.
-fn authored_parameters(parameters: &domain::prescription::GenerationParameters) {
+/// **Split out because it is not about the mesocycle.** These are the versions
+/// in force when the plan was made (#192), and they read the same whichever
+/// template was being authored.
+fn authored_parameters(with: &application::PlannedWith, scales: &domain::prescription::Scales) {
     println!(
         "  the light session's top set runs at {} of the heavy load",
-        parameters.light_of_heavy
+        with.linear.light_of_heavy
     );
     println!(
         "  opening drops {} off a failed entry test",
-        parameters.entry_drop
+        with.linear.entry_drop
     );
-    for (implement, steps) in parameters.scales.iter() {
+    for (implement, steps) in scales.iter() {
         println!("  {implement} loads in {steps}");
     }
-    println!("  holds {}", parameters.static_hold);
+    println!("  holds {}", with.programme.static_hold);
 }
 
-/// Every parameter in force, and when it was settled.
+/// The time a version was authored, to the second. What the operator wants from
+/// it is whether it predates the plan he is about to make.
+fn since(at: jiff::Timestamp) -> String {
+    at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
+}
+
+fn ramp(warmup: &domain::sequence::NonEmpty<domain::prescription::WarmupStep>) {
+    println!("  warm-up ramp, of the session's own top set — a floor: a work-up toward");
+    println!("  a higher repetition count takes more");
+    for step in warmup.iter() {
+        println!("    {} × {}", step.of_top_set, step.reps);
+    }
+}
+
+/// The latest version of the programme and of each primary progression, and
+/// today's load scales.
 ///
 /// **Complete rather than summarised**, which is the whole reason it exists.
 /// Decision 0015's guard against a wrong shipped default was that a default is
-/// never invisible — it used to be written into the programme document, and
-/// with the document gone this is what keeps that promise. A report that showed
-/// the interesting half would leave the warm-up ramp and the reset protocols
-/// exactly as unexaminable as they were.
+/// never invisible, and a report that showed the interesting half would leave
+/// the warm-up ramp and the reset protocols exactly as unexaminable as they were.
 ///
 /// [`authored_parameters`] stays the short form: it runs after authoring, where
-/// the question is what this programme was built against rather than what every
+/// the question is what this plan was built against rather than what every
 /// number is.
 pub fn parameters_in_force(
-    authored_at: jiff::Timestamp,
-    parameters: &domain::prescription::GenerationParameters,
-    programming: &domain::prescription::Programming,
+    programme: (jiff::Timestamp, &domain::prescription::Programme),
+    linear: (jiff::Timestamp, &domain::prescription::LinearProgression),
+    sbs: (jiff::Timestamp, &domain::prescription::SbsProgression),
+    scales: &domain::prescription::Scales,
 ) {
-    // Seconds, not nanoseconds. What the operator wants from this line is
-    // whether it predates the block he is about to author.
+    let (programme_at, programme) = programme;
+    println!("the programme, since {}", since(programme_at));
     println!(
-        "generation parameters, in force since {}",
-        authored_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        "  strength slots {} × {}; hypertrophy slots {} × {}",
+        programme.strength.sets,
+        programme.strength.reps,
+        programme.hypertrophy.sets,
+        programme.hypertrophy.reps,
     );
-
-    println!();
-    println!("the ladder");
-    println!("  climbs {}kg a week", parameters.ladder_climb_per_week);
-    println!(
-        "  a derived opening drops {} off a failed entry test",
-        parameters.entry_drop
-    );
-    println!(
-        "  the light session's top set runs at {} of the heavy load",
-        parameters.light_of_heavy
-    );
-
-    println!();
-    println!("everything that is not the primary");
-    println!("  holds {}", parameters.static_hold);
-
-    println!();
-    println!("rest");
-    for (block, rest) in [
-        ("plyometric", parameters.rest.plyometric),
-        ("power", parameters.rest.power),
-        ("strength", parameters.rest.strength),
-        ("hypertrophy", parameters.rest.hypertrophy),
-        ("mobility", parameters.rest.mobility),
+    for (slot, scheme) in &programme.slots {
+        println!("  {slot} {} × {}", scheme.sets, scheme.reps);
+    }
+    println!("  holds {}", programme.static_hold);
+    println!("  rest");
+    for (section, rest) in [
+        ("plyometric", programme.rest.plyometric),
+        ("power", programme.rest.power),
+        ("strength", programme.rest.strength),
+        ("hypertrophy", programme.rest.hypertrophy),
+        ("mobility", programme.rest.mobility),
     ] {
-        // **Absent and equal are different**, so a block that says nothing about
-        // supersets says nothing here either rather than repeating its
+        // **Absent and equal are different**, so a section that says nothing
+        // about supersets says nothing here either rather than repeating its
         // between-sets rest as though it had been stated.
         match rest.after_superset {
             Some(after) => println!(
-                "  {block:<12} {} between sets, {after} after a superset",
+                "    {section:<12} {} between sets, {after} after a superset",
                 rest.between_sets
             ),
-            None => println!("  {block:<12} {} between sets", rest.between_sets),
+            None => println!("    {section:<12} {} between sets", rest.between_sets),
         }
     }
 
+    let (linear_at, linear) = linear;
     println!();
-    println!("what each implement can hold");
-    for (implement, steps) in parameters.scales.iter() {
-        // Rendered before it is padded: a `Display` that writes straight to the
-        // formatter ignores a width, and `Implement`'s does.
-        println!("  {:<12} {steps}", implement.to_string());
-    }
-
-    // **Printed even though it is not authored.** These stopped being
-    // parameters, and none of them can be set — but the guard against a wrong
-    // shipped value was that it is never invisible, and dropping them from this
-    // report would leave the warm-up ramp exactly as unexaminable as it was
-    // before the report existed. The heading says which half is which.
-    println!();
-    println!("how this build programmes, which is fixed and not authored");
+    println!("linear progression, since {}", since(linear_at));
+    println!("  climbs {}kg a week", linear.ladder_climb_per_week);
+    println!(
+        "  a derived opening drops {} off a failed entry test",
+        linear.entry_drop
+    );
+    println!(
+        "  the light session's top set runs at {} of the heavy load",
+        linear.light_of_heavy
+    );
     println!(
         "  heavy top set × {}; light top set × {}",
-        programming.top_set_reps.higher, programming.top_set_reps.lower,
+        linear.top_set_reps.higher, linear.top_set_reps.lower,
     );
     println!(
         "  heavy back-off {} × {} at {} of top set; light {} × {} at {}",
-        programming.back_off.higher.sets,
-        programming.back_off.higher.reps,
-        programming.back_off.higher.of_top_set,
-        programming.back_off.lower.sets,
-        programming.back_off.lower.reps,
-        programming.back_off.lower.of_top_set,
+        linear.back_off.higher.sets,
+        linear.back_off.higher.reps,
+        linear.back_off.higher.of_top_set,
+        linear.back_off.lower.sets,
+        linear.back_off.lower.reps,
+        linear.back_off.lower.of_top_set,
     );
-    println!(
-        "  strength slots {} × {}; hypertrophy slots {} × {}",
-        programming.strength.sets,
-        programming.strength.reps,
-        programming.hypertrophy.sets,
-        programming.hypertrophy.reps,
-    );
-    for (slot, scheme) in &programming.slots {
-        println!("  {slot} {} × {}", scheme.sets, scheme.reps);
-    }
     println!(
         "  first stall: drop {}, re-climb {}kg a week",
-        programming.first_reset.drop, programming.first_reset.reclimb_per_week,
+        linear.first_reset.drop, linear.first_reset.reclimb_per_week,
     );
     println!(
         "  second stall: drop {}, re-climb {}kg a week",
-        programming.second_reset.drop, programming.second_reset.reclimb_per_week,
+        linear.second_reset.drop, linear.second_reset.reclimb_per_week,
     );
+    ramp(&linear.warmup);
+
+    let (sbs_at, sbs) = sbs;
+    println!();
+    println!("SBS, since {}", since(sbs_at));
+    for (week, session, day) in sbs.chart.days() {
+        use domain::prescription::{SbsDay, SbsSession};
+        let label = match session {
+            SbsSession::First => format!("  week {week}"),
+            SbsSession::Second => "        ".to_owned(),
+        };
+        match day {
+            SbsDay::Percentage { sets, reps, share } => {
+                println!("{label}  {sets}×{reps} @ {share}");
+            }
+            SbsDay::RepMax {
+                reps,
+                back_off_sets,
+                back_off_reps,
+            } => println!("{label}  {reps}RM, then {back_off_sets}×{back_off_reps}"),
+            SbsDay::Test { reps } => println!("{label}  a test at {reps}"),
+        }
+    }
+    ramp(&sbs.warmup);
 
     println!();
-    println!("the warm-up ramp, of the session's own top set");
-    println!("  a floor: a work-up toward a higher repetition count takes more");
-    for step in programming.warmup.iter() {
-        println!("  {} × {}", step.of_top_set, step.reps);
+    println!("what each implement can hold");
+    for (implement, steps) in scales.iter() {
+        // Rendered before it is padded: a `Display` that writes straight to the
+        // formatter ignores a width, and `Implement`'s does.
+        println!("  {:<12} {steps}", implement.to_string());
     }
 }
 
@@ -772,7 +793,6 @@ pub fn parameters_in_force(
 /// which is what lets the climb be seen passing 100% of the max it started from.
 pub fn programme_standing(standing: &application::LadderStanding) {
     let programme = &standing.programme;
-    let parameters = &standing.parameters;
     let calendar = programme.calendar();
 
     println!(
@@ -803,10 +823,10 @@ pub fn programme_standing(standing: &application::LadderStanding) {
     match programme {
         GymMesocycle::Test(test) => test_standing(test, standing),
         GymMesocycle::Progression(Progression::Linear(linear)) => {
-            linear_standing(linear, standing, parameters);
+            linear_standing(linear, standing);
         }
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
-            block_standing(block, standing.anchor, parameters);
+            block_standing(block, standing.anchor, &standing.scales);
         }
         GymMesocycle::Progression(Progression::Provided { .. }) => {
             sbs_standing(standing.anchor, standing.maximum);
@@ -891,11 +911,8 @@ fn test_standing(test: &domain::prescription::Test, standing: &application::Ladd
 ///
 /// The `of anchor` column is read back out of the load rather than driving it,
 /// which is what lets the climb be seen passing 100% of the max it started from.
-fn linear_standing(
-    linear: &Linear,
-    standing: &application::LadderStanding,
-    parameters: &GenerationParameters,
-) {
+fn linear_standing(linear: &Linear, standing: &application::LadderStanding) {
+    let (linear_progression, scales) = (&standing.planned_with.linear, &standing.scales);
     let Some(resolved) = standing.anchor else {
         println!("no anchor: nothing has measured this lift and no test asserts one");
         return;
@@ -903,15 +920,15 @@ fn linear_standing(
     println!("anchor {resolved}, as the record stands on the date asked about");
     println!(
         "opening derived: {} off the anchor's failed load",
-        parameters.entry_drop
+        linear_progression.entry_drop
     );
 
-    let Ok(ladder) = linear.ladder(resolved, parameters) else {
+    let Ok(ladder) = linear.ladder(resolved, linear_progression, scales) else {
         println!("  no ladder: the block is too short to climb");
         return;
     };
     let anchor = resolved.load();
-    let Ok(steps) = linear.steps(parameters) else {
+    let Ok(steps) = linear.steps(scales) else {
         println!("  no ladder: no load scale is authored for the primary's implement");
         return;
     };
@@ -932,7 +949,7 @@ fn linear_standing(
             continue;
         };
         let heavy = ladder.heavy_top_set(index, steps);
-        let light = ladder.light_top_set(index, steps, parameters.light_of_heavy);
+        let light = ladder.light_top_set(index, steps, linear_progression.light_of_heavy);
         // The rung the record puts the operator on, which after a miss is behind
         // the calendar.
         let here = if index == standing_week { " ←" } else { "" };
@@ -973,7 +990,7 @@ fn linear_standing(
 fn block_standing(
     block: &BlockPeriodisation,
     resolved: Option<domain::prescription::Anchor>,
-    parameters: &GenerationParameters,
+    scales: &domain::prescription::Scales,
 ) {
     let Some(resolved) = resolved else {
         println!("no anchor: nothing has measured this lift and no test asserts one");
@@ -990,7 +1007,7 @@ fn block_standing(
         println!("  no plan: this duration does not hold three phases");
         return;
     };
-    let Some(steps) = parameters.scales.for_exercise(block.primary_exercise()) else {
+    let Some(steps) = scales.for_exercise(block.primary_exercise()) else {
         println!("  no plan: no load scale is authored for the primary's implement");
         return;
     };

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO linear_progression (\n                authored_at, light_of_heavy_bp, ladder_climb_grams, entry_drop_bp,\n                higher_top_set_reps, lower_top_set_reps,\n                higher_back_off_sets, higher_back_off_reps, higher_back_off_bp,\n                lower_back_off_sets, lower_back_off_reps, lower_back_off_bp,\n                first_reset_drop_bp, first_reset_reclimb_grams,\n                second_reset_drop_bp, second_reset_reclimb_grams\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 16
+    },
+    "nullable": []
+  },
+  "hash": "943b73e8fa327a226ed75a565c89cb0bb68f01f27edf077ab902e40e93d3f5ed"
+}

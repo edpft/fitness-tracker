@@ -48,7 +48,7 @@ use crate::{
     prescription::{
         block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
-        sbs::{Sbs, SbsDay, SbsSession, chart},
+        sbs::{Sbs, chart},
         schedule::{Calendar, WeekKind},
     },
     provider::ProvidedFrom,
@@ -208,7 +208,8 @@ impl GymMesocycle {
     /// one question the concurrent microcycle asks of each discipline, and asked
     /// of the session rather than the week, because the week does not always
     /// know. SBS week 4 places as a climbing week — its first session is a taper
-    /// the chart states in full — and its second is the one-repetition maximum.
+    /// the chart states in full — and its second is the one-repetition maximum,
+    /// which is where every version of the chart puts its test (#192).
     #[must_use]
     pub fn tests_in(&self, week: WeekKind) -> bool {
         match (self, week) {
@@ -219,10 +220,7 @@ impl GymMesocycle {
                 block.kind(at) == Some(WeekKind::Test)
             }
             (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(at)) => {
-                matches!(
-                    chart::day(at.as_u32(), SbsSession::Second),
-                    Ok(SbsDay::Test { .. })
-                )
+                at.as_u32() == chart::WEEKS
             }
         }
     }

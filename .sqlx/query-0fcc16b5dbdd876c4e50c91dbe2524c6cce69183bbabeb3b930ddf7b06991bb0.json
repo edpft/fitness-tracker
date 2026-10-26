@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO programme_slot_scheme (authored_at, slot, reps_low, reps_high, sets)\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "0fcc16b5dbdd876c4e50c91dbe2524c6cce69183bbabeb3b930ddf7b06991bb0"
+}

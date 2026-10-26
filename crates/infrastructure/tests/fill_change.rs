@@ -37,11 +37,12 @@ fn a_change_in_one_mesocycle_holds_in_the_next() {
             entry_test_from(date(2026, 9, 28)).expect("a test week"),
         ])
         .expect("a plan");
-        Authoring::new(
-            infrastructure::SqlitePlanStore::new(pool.clone(), zone.clone()),
-            infrastructure::SqliteGenerationParameterStore::new(pool.clone()),
-        )
-        .author(&plan, &programme::parameters().expect("the parameters"))
+        programme::design(&pool).await.expect("the fixture designs");
+        Authoring::new(infrastructure::SqlitePlanStore::new(
+            pool.clone(),
+            zone.clone(),
+        ))
+        .author(&plan)
         .await
         .expect("the plan is authored");
 

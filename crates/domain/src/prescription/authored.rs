@@ -24,9 +24,10 @@ use crate::{
     prescription::{
         anchor::Anchor,
         block::{BlockPeriodisation, EntryTest},
+        linear::LinearProgression,
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
         mesocycle::{GymMesocycle, InconsistentMesocycle, Progression},
-        parameters::GenerationParameters,
+        parameters::Scales,
         sbs::{self, Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, Skip},
         test::{Test, Tested},
@@ -213,7 +214,8 @@ pub fn programme(
     fills: SlotFills,
     interruptions: &[Skip],
     zone: TimeZone,
-    parameters: &GenerationParameters,
+    linear: &LinearProgression,
+    scales: &Scales,
 ) -> Result<GymMesocycle, AuthoringError> {
     let Authored {
         start,
@@ -250,7 +252,8 @@ pub fn programme(
                 Primary::new(pattern, primary_exercise, gating),
                 fills,
                 calendar,
-                parameters,
+                linear,
+                scales,
             )?)))
         }
         Shape::Block {

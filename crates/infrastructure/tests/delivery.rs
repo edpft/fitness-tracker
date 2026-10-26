@@ -286,12 +286,10 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
     // derivation of what the step above has just written (#350).
     store::canonicalise(&pool).await?;
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&plan, &programme::parameters()?)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&plan)
+        .await?;
 
     Ok(Ready {
         prescriber: Prescribing::new(PrescriptionPorts {
@@ -576,15 +574,12 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
     let (first_issued, first_delivery) = first;
 
     let (issued, second) = run!(async {
-        Authoring::new(
-            SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
-            SqliteGenerationParameterStore::new(ready.pool.clone()),
-        )
-        .author(
-            &programme::as_plan(programme::programme_from(Date::constant(2026, 7, 20))?)?,
-            &programme::parameters()?,
-        )
-        .await?;
+        programme::design(&ready.pool).await?;
+        Authoring::new(SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()))
+            .author(&programme::as_plan(programme::programme_from(
+                Date::constant(2026, 7, 20),
+            )?)?)
+            .await?;
 
         let issued = ready.prescriber.prescribe(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>((
@@ -767,15 +762,12 @@ fn a_replacement_moves_the_delivery_record() {
     });
 
     let replacing = run!(async {
-        Authoring::new(
-            SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()),
-            SqliteGenerationParameterStore::new(ready.pool.clone()),
-        )
-        .author(
-            &programme::as_plan(programme::programme_from(Date::constant(2026, 7, 20))?)?,
-            &programme::parameters()?,
-        )
-        .await?;
+        programme::design(&ready.pool).await?;
+        Authoring::new(SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()))
+            .author(&programme::as_plan(programme::programme_from(
+                Date::constant(2026, 7, 20),
+            )?)?)
+            .await?;
         let issued = ready.prescriber.prescribe(monday()).await?;
         delivering(&ready, &destination).deliver(monday()).await?;
         Ok::<_, Box<dyn std::error::Error>>(issued.id)
@@ -836,18 +828,13 @@ fn a_date_with_nothing_issued_delivers_nothing() {
 /// illness that cost the block's first week would have it: nothing now covers
 /// 6 to 12 July.
 async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
-    Authoring::new(
-        SqlitePlanStore::new(ready.pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(ready.pool.clone()),
-    )
-    .author(
-        &programme::plan(vec![
+    programme::design(&ready.pool).await?;
+    Authoring::new(SqlitePlanStore::new(ready.pool.clone(), corpus::zone()?))
+        .author(&programme::plan(vec![
             programme::entry_test()?,
             programme::as_programme(programme::programme_from(Date::constant(2026, 7, 13))?),
-        ])?,
-        &programme::parameters()?,
-    )
-    .await?;
+        ])?)
+        .await?;
     Ok(())
 }
 
