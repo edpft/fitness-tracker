@@ -15,6 +15,7 @@ use application::{
     NormalisedGymSessionReader as _, NormalisedWeighInReader as _, WorkoutNormaliser as _,
     normalise::{Normalisation, NormalisationPorts},
 };
+use domain::normalised::StatedZones;
 use domain::{
     landing::{FetchedAt, LandingStream},
     normalised::{NormalisationOutcome, NormalisationRunId},
@@ -40,7 +41,7 @@ async fn normalise_hevy(pool: &SqlitePool) -> Fallible<NormalisationRunId> {
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     )
     .normalise(application::Rederivation::Whole)
     .await?;

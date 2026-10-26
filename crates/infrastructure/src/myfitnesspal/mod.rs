@@ -26,7 +26,7 @@ use domain::{
     body::{Cell, CellRef, Entry, ManualWeighIn, SheetName},
     landing::LandedRecord,
     measure::Kg,
-    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason},
+    normalised::{Refusal, RefusalLocus, RefusalReason, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::{Timestamp, civil::Date};
@@ -86,7 +86,7 @@ impl Translator for MyFitnessPalWeighInTranslator {
     fn translate(
         &self,
         exports: &MyFitnessPalExports,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<ManualWeighIn>, NormalisationError> {
         let mut scribes: Vec<Scribe> = Vec::new();
         let mut read: Vec<Vec<ManualWeighIn>> = Vec::new();

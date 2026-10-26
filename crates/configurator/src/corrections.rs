@@ -12,6 +12,7 @@ use domain::{
     landing::InvalidStream,
     normalised::{
         CorrectedTerm, Correction, CorrectionId, CorrectionReason, OperatorZone, SetFigures,
+        StatedZones,
     },
     sequence::NonEmpty,
 };
@@ -53,6 +54,15 @@ const CORRECTED: [&str; 2] = [
     GarminExerciseSetLandingStore::STREAM,
 ];
 
+/// The zones the derivation places each entry's day by, so an entry is found
+/// on the day the derivation put it on.
+async fn stated_zones(
+    store: &Store,
+    declared: &OperatorZone,
+) -> Result<StatedZones, CorrectionError> {
+    Ok(crate::wiring::stated_zones(store.pool(), declared).await?)
+}
+
 /// Every entry that reads as an exercise within the days given.
 ///
 /// # Errors
@@ -65,8 +75,9 @@ pub async fn reading_as(
     from: Option<Date>,
     until: Option<Date>,
 ) -> Result<Vec<StandIn>, CorrectionError> {
+    let zones = stated_zones(store, zone).await?;
     Ok(HevyStandIns::new(store.pool().clone())
-        .reading_as(exercise, zone, from, until)
+        .reading_as(exercise, &zones, from, until)
         .await?)
 }
 
@@ -99,12 +110,13 @@ pub async fn recording(
     zone: &OperatorZone,
     on: Date,
 ) -> Result<Vec<FoundSet>, CorrectionError> {
+    let zones = stated_zones(store, zone).await?;
     let mut found = GarminRecordedSets::new(store.pool().clone())
-        .recording(recorded, zone, on)
+        .recording(recorded, &zones, on)
         .await?;
     found.extend(
         infrastructure::hevy::HevyStandIns::new(store.pool().clone())
-            .recording(recorded, zone, on)
+            .recording(recorded, &zones, on)
             .await?,
     );
     Ok(found)

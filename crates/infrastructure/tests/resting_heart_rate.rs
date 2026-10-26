@@ -5,6 +5,7 @@
 //! three the operator's 3,204 landed days hold.
 
 use application::{Translation, ports::SourceAccount, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     body::RestingHeartRate,
     landing::{
@@ -63,8 +64,10 @@ fn translate(records: Vec<LandedRecord>) -> Result<Translation<RestingHeartRate>
     let [account] = accounts.as_slice() else {
         return Err(format!("{} days, not one", accounts.len()).into());
     };
-    Ok(GarminRestingHeartRateTranslator
-        .translate(account, &OperatorZone::try_from("Europe/London")?)?)
+    Ok(GarminRestingHeartRateTranslator.translate(
+        account,
+        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
+    )?)
 }
 
 fn entity(records: Vec<LandedRecord>) -> Result<RestingHeartRate, Failure> {

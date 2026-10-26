@@ -12,7 +12,7 @@ use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     body::RestingHeartRate,
     landing::{LandedRecord, LandingRecordId, SourceRecordId},
-    normalised::{NormalisedEntity, OperatorZone},
+    normalised::{NormalisedEntity, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
@@ -100,9 +100,9 @@ impl Translator for GarminDailyHeartRateTranslator {
     fn translate(
         &self,
         account: &DayAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<GarminDayEntity>, NormalisationError> {
-        let resting = GarminRestingHeartRateTranslator.translate(account, zone)?;
+        let resting = GarminRestingHeartRateTranslator.translate(account, zones)?;
         let wear = wear(account.day()).map(GarminDayEntity::Wear);
         Ok(match (resting, wear) {
             (Translation::Retraction { of }, _) => Translation::Retraction { of },

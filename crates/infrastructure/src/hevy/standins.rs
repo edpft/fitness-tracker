@@ -24,7 +24,7 @@ use application::StoreError;
 use domain::{
     gym::exercise::Exercise,
     landing::SourceRecordId,
-    normalised::{CorrectedTerm, OperatorZone, SetFigures, SourceTerm, StartedAt},
+    normalised::{CorrectedTerm, SetFigures, SourceTerm, StatedZones},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -78,7 +78,7 @@ impl HevyStandIns {
     pub async fn reading_as(
         &self,
         exercise: Exercise,
-        zone: &OperatorZone,
+        zones: &StatedZones,
         from: Option<Date>,
         until: Option<Date>,
     ) -> Result<Vec<StandIn>, StoreError> {
@@ -130,7 +130,7 @@ impl HevyStandIns {
             let Ok(instant) = workout.start_time.parse::<Timestamp>() else {
                 continue;
             };
-            let day = StartedAt::new(instant, zone.clone()).wall_clock().date();
+            let day = zones.started_at(instant).wall_clock().date();
             if from.is_some_and(|first| day < first) || until.is_some_and(|last| day > last) {
                 continue;
             }
@@ -187,7 +187,7 @@ impl HevyStandIns {
     pub async fn recording(
         &self,
         recorded: SetFigures,
-        zone: &OperatorZone,
+        zones: &StatedZones,
         day: Date,
     ) -> Result<Vec<FoundSet>, StoreError> {
         let rows = sqlx::query!(
@@ -229,7 +229,7 @@ impl HevyStandIns {
             let Ok(instant) = workout.start_time.parse::<Timestamp>() else {
                 continue;
             };
-            let started = StartedAt::new(instant, zone.clone()).wall_clock();
+            let started = zones.started_at(instant).wall_clock();
             if started.date() != day {
                 continue;
             }

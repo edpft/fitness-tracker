@@ -8,6 +8,7 @@
 
 mod support;
 
+use domain::normalised::StatedZones;
 use std::sync::{
     Mutex,
     atomic::{AtomicUsize, Ordering},
@@ -276,7 +277,7 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     application::WorkoutNormaliser::normalise(&normalisation, application::Rederivation::Whole)
         .await?;

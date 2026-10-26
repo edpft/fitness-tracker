@@ -28,4 +28,4 @@ pub use run::{
     NormalisationFailure, NormalisationOutcome, NormalisationRun, NormalisationRunId, RefusalCount,
     UnknownNormalisationFailure, WorkoutCount,
 };
-pub use time::{OperatorZone, StartedAt, UnknownTimeZone};
+pub use time::{OperatorZone, StartedAt, StatedZones, UnknownTimeZone};

@@ -16,6 +16,7 @@ use application::{
     canonicalise::{self, Canonicalised},
     normalise::{Normalisation, NormalisationPorts, Refusals},
 };
+use domain::normalised::StatedZones;
 use domain::{
     landing::{
         Endpoint, EventKind, EventProvenance, FetchedAt, LandingRecord, LandingStream, RawPayload,
@@ -243,7 +244,7 @@ async fn derive_as(
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
-        OperatorZone::try_from("Europe/London")?,
+        StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
     );
     Ok(normalisation.normalise(rederivation).await?)
 }

@@ -23,6 +23,7 @@ use application::{
     NormalisedGymSessionReader as _, WorkoutNormaliser as _, canonicalise,
     normalise::{Normalisation, NormalisationPorts},
 };
+use domain::normalised::StatedZones;
 use domain::{
     gym::CanonicalGymSession,
     landing::{
@@ -133,7 +134,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        zone()?,
+        StatedZones::throughout(zone()?),
     )
     .normalise(application::Rederivation::Whole)
     .await?;
@@ -147,7 +148,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        zone()?,
+        StatedZones::throughout(zone()?),
     )
     .normalise(application::Rederivation::Whole)
     .await?;
@@ -305,7 +306,7 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
                 runs: SqliteNormalisationRunLog::new(pool.clone()),
                 clock: corpus::FixedClock,
             },
-            zone().expect("a zone"),
+            StatedZones::throughout(zone().expect("a zone")),
         )
         .normalise(application::Rederivation::Whole)
         .await
@@ -368,7 +369,7 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
                 runs: SqliteNormalisationRunLog::new(pool.clone()),
                 clock: corpus::FixedClock,
             },
-            zone().expect("a zone"),
+            StatedZones::throughout(zone().expect("a zone")),
         )
         .normalise(application::Rederivation::Whole)
         .await

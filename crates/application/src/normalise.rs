@@ -20,8 +20,8 @@ use std::collections::BTreeSet;
 use domain::{
     landing::{LandedRecord, LandingRecordId, LandingStream, RecordCount, SourceRecordId},
     normalised::{
-        NormalisationFailure, NormalisationOutcome, NormalisationRunId, NormalisedEntity,
-        OperatorZone, Refusal, RefusalCount, WorkoutCount,
+        NormalisationFailure, NormalisationOutcome, NormalisationRunId, NormalisedEntity, Refusal,
+        RefusalCount, StatedZones, WorkoutCount,
     },
 };
 
@@ -41,7 +41,7 @@ use crate::{
 /// talks to and a test can drive the whole of it with fakes and no I/O.
 pub struct Normalisation<R, T, W, F, G, C> {
     stream: LandingStream,
-    zone: OperatorZone,
+    zones: StatedZones,
     terms: Terms,
     raw: R,
     translator: T,
@@ -73,14 +73,14 @@ where
     /// so a derivation cannot be built holding a stream its ports disagree
     /// with. The rule extraction established, unchanged.
     ///
-    /// The zone *is* an argument, because it is not a fact about any port — it
-    /// is a declared interpretive parameter, and § II.3 says translation takes
-    /// it from configuration.
-    pub fn new(ports: NormalisationPorts<R, T, W, F, G, C>, zone: OperatorZone) -> Self {
+    /// The zones *are* an argument, because they are not a fact about any port —
+    /// they are a declared interpretive parameter, and § II.3 says translation
+    /// takes them from configuration.
+    pub fn new(ports: NormalisationPorts<R, T, W, F, G, C>, zones: StatedZones) -> Self {
         Self {
             stream: ports.raw.stream().clone(),
-            terms: Terms::from(format!("zone {}", zone.id())),
-            zone,
+            terms: Terms::from(format!("zone {zones}")),
+            zones,
             raw: ports.raw,
             translator: ports.translator,
             workouts: ports.workouts,
@@ -229,7 +229,7 @@ where
         let mut derived = Derived::default();
 
         for account in accounts {
-            match self.translator.translate(account, &self.zone) {
+            match self.translator.translate(account, &self.zones) {
                 Ok(Translation::Entity { entity, refusals }) => {
                     derived.entities.push(*entity);
                     derived.refusals.extend(refusals);

@@ -22,6 +22,7 @@ use application::{
 };
 use domain::gym::{Load, Performed, SetKind, exercise::RepsExercise};
 use domain::measure::Kg;
+use domain::normalised::StatedZones;
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGymSessionStore,
@@ -58,7 +59,7 @@ async fn derived_corpus() -> Result<(SqlitePool, tempfile::TempDir), Box<dyn std
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     let _summary: NormalisationSummary = normalisation
         .normalise(application::Rederivation::Whole)

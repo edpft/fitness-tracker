@@ -25,7 +25,7 @@ use domain::{
     },
     landing::{FileProvenance, LandedRecord},
     measure::Kg,
-    normalised::{OperatorZone, RefusalLocus, RefusalReason},
+    normalised::{RefusalLocus, RefusalReason, StatedZones},
 };
 use jiff::civil::Date;
 
@@ -145,7 +145,7 @@ impl Translator for SpreadsheetWeighInTranslator {
     fn translate(
         &self,
         record: &LandedRecord,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<ManualWeighIn>, NormalisationError> {
         let workbook = super::Workbook::of(record.clone());
         super::translate_with(&workbook, "weigh-ins", |copies, scribes| {

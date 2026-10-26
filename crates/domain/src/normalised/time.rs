@@ -111,3 +111,135 @@ impl fmt::Display for StartedAt {
         write!(f, "{}", self.wall_clock())
     }
 }
+
+/// Every zone the operator has stated, each in force from when it was stated
+/// until the next (#66).
+///
+/// § 13: the value in force at the time of the observation is the one that
+/// applies. Translating every observation through the latest zone instead
+/// would move every past session's wall clock the day the operator moves
+/// house.
+///
+/// **The first zone stated is in force before it was stated**, because the
+/// record reaches back years before anyone stated one, and the alternative is
+/// a record with no wall clock at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatedZones {
+    first: OperatorZone,
+    /// Each later zone and the instant it was stated, oldest first.
+    later: Vec<(Timestamp, OperatorZone)>,
+}
+
+impl StatedZones {
+    /// One zone, in force throughout.
+    #[must_use]
+    pub const fn throughout(zone: OperatorZone) -> Self {
+        Self {
+            first: zone,
+            later: Vec::new(),
+        }
+    }
+
+    /// The zones stated, each with when; `None` if there are none.
+    #[must_use]
+    pub fn stated(statements: impl IntoIterator<Item = (Timestamp, OperatorZone)>) -> Option<Self> {
+        let mut statements: Vec<_> = statements.into_iter().collect();
+        statements.sort_by_key(|(at, _)| *at);
+        let mut statements = statements.into_iter();
+        let (_, first) = statements.next()?;
+        Some(Self {
+            first,
+            later: statements.collect(),
+        })
+    }
+
+    /// The zone in force at `instant`.
+    #[must_use]
+    pub fn in_force_at(&self, instant: Timestamp) -> &OperatorZone {
+        self.later
+            .iter()
+            .rev()
+            .find(|(from, _)| *from <= instant)
+            .map_or(&self.first, |(_, zone)| zone)
+    }
+
+    /// When something started at `instant`, in the zone in force then.
+    #[must_use]
+    pub fn started_at(&self, instant: Timestamp) -> StartedAt {
+        StartedAt::new(instant, self.in_force_at(instant).clone())
+    }
+}
+
+/// The first zone alone, then each later one with when it was stated — so one
+/// zone reads as its identifier, as it did before there could be more.
+impl fmt::Display for StatedZones {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.first)?;
+        for (from, zone) in &self.later {
+            write!(f, ", {zone} from {from}")?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::Timestamp;
+
+    use super::{OperatorZone, StatedZones};
+
+    fn at(text: &str) -> Timestamp {
+        text.parse().expect("an instant")
+    }
+
+    fn zone(id: &str) -> OperatorZone {
+        OperatorZone::try_from(id).expect("a zone")
+    }
+
+    fn moved() -> StatedZones {
+        StatedZones::stated([
+            (at("2027-03-01T09:00:00Z"), zone("Pacific/Auckland")),
+            (at("2026-09-15T13:29:25Z"), zone("Europe/London")),
+        ])
+        .expect("two zones")
+    }
+
+    #[test]
+    fn a_session_before_the_move_keeps_its_wall_clock() {
+        let started = moved().started_at(at("2026-10-20T17:00:00Z"));
+        assert_eq!(started.wall_clock().time().to_string(), "18:00:00");
+        assert_eq!(started.wall_clock().date().to_string(), "2026-10-20");
+    }
+
+    #[test]
+    fn a_session_after_the_move_reads_in_the_new_zone() {
+        let started = moved().started_at(at("2027-03-02T05:00:00Z"));
+        assert_eq!(started.zone().id(), "Pacific/Auckland");
+        assert_eq!(started.wall_clock().time().to_string(), "18:00:00");
+    }
+
+    #[test]
+    fn the_first_zone_reaches_back_before_it_was_stated() {
+        assert_eq!(
+            moved().in_force_at(at("2016-05-01T07:00:00Z")).id(),
+            "Europe/London"
+        );
+    }
+
+    #[test]
+    fn nothing_stated_is_no_zones() {
+        assert_eq!(StatedZones::stated([]), None);
+    }
+
+    #[test]
+    fn one_zone_reads_as_its_identifier() {
+        assert_eq!(
+            StatedZones::throughout(zone("Europe/London")).to_string(),
+            "Europe/London"
+        );
+        assert_eq!(
+            moved().to_string(),
+            "Europe/London, Pacific/Auckland from 2027-03-01T09:00:00Z"
+        );
+    }
+}

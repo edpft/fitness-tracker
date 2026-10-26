@@ -24,7 +24,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord},
     measure::{BeatsPerMinute, Kg},
-    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::Timestamp;
@@ -387,7 +387,7 @@ fn algorithm(group: &Group) -> Result<u64, RefusalReason> {
 /// The weigh-in, or the one reason there is none.
 fn weigh_in(
     account: &WeighInAccount,
-    zone: &OperatorZone,
+    zones: &StatedZones,
 ) -> Result<BodyScanWeighIn, RefusalReason> {
     let mut measures = BTreeMap::new();
     let mut parts: BTreeMap<Part, Vec<MeasuredBy>> = BTreeMap::new();
@@ -455,7 +455,7 @@ fn weigh_in(
     // The zone the source states, where it states one (§ II.3).
     let zone = stated_zone
         .and_then(|stated| OperatorZone::try_from(stated).ok())
-        .unwrap_or_else(|| zone.clone());
+        .unwrap_or_else(|| zones.in_force_at(instant).clone());
 
     let heart_from = parts
         .remove(&Part::Heart)
@@ -484,7 +484,7 @@ impl Translator for WithingsWeighInTranslator {
     fn translate(
         &self,
         account: &WeighInAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<BodyScanWeighIn>, NormalisationError> {
         let mut scribe = Scribe::new(account.groups().first());
 
@@ -510,7 +510,7 @@ impl Translator for WithingsWeighInTranslator {
             }
         }
 
-        Ok(match weigh_in(account, zone) {
+        Ok(match weigh_in(account, zones) {
             Ok(weigh_in) => Translation::Entity {
                 entity: Box::new(weigh_in),
                 refusals: scribe.into_refusals(),

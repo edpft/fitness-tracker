@@ -33,7 +33,7 @@ use domain::{
     },
     landing::{CellRef, LandedRecord, LandingRecordId, SheetCell, SheetName},
     measure::{Duration, Metres, RepCount},
-    normalised::{OperatorZone, Refusal, RefusalLocus, RefusalReason},
+    normalised::{Refusal, RefusalLocus, RefusalReason, StatedZones},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
@@ -108,7 +108,7 @@ impl Translator for BtwbTranslator {
     fn translate(
         &self,
         exports: &Exports,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<ManualGymSession>, NormalisationError> {
         let mut scribes: Vec<Scribe> = Vec::new();
         let mut read: Vec<Option<Vec<Vec<String>>>> = Vec::new();

@@ -9,6 +9,7 @@
 mod layers;
 
 use application::{Translation, ports::SourceAccount, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     body::{HrvStatus, OvernightHrv},
     landing::{
@@ -96,7 +97,10 @@ fn translate(date: &str, payload: &Value) -> Result<Translation<OvernightHrv>, F
     let [account] = accounts.as_slice() else {
         return Err(format!("{} nights, not one", accounts.len()).into());
     };
-    Ok(GarminHrvTranslator.translate(account, &OperatorZone::try_from("Europe/London")?)?)
+    Ok(GarminHrvTranslator.translate(
+        account,
+        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
+    )?)
 }
 
 fn entity_for(date: &str, payload: &Value) -> Result<OvernightHrv, Failure> {
@@ -324,7 +328,9 @@ fn a_night_served_twice_is_the_later_serving_and_the_earlier_is_set_aside() {
     let translated = GarminHrvTranslator
         .translate(
             account,
-            &OperatorZone::try_from("Europe/London".to_owned()).expect("a zone"),
+            &StatedZones::throughout(
+                OperatorZone::try_from("Europe/London".to_owned()).expect("a zone"),
+            ),
         )
         .expect("a translation");
     let Translation::Entity { entity, .. } = translated else {
@@ -450,7 +456,7 @@ mod stored {
                 runs: SqliteNormalisationRunLog::new(pool.clone()),
                 clock: EpochClock,
             },
-            OperatorZone::try_from("Europe/London")?,
+            domain::normalised::StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
         );
         let summary = normalisation.normalise(rederivation).await?;
         Ok((

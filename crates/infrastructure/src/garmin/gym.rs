@@ -38,7 +38,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord, SourceRecordId},
     measure::{BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
-    normalised::{EditOverlay, OperatorZone, RefusalLocus, RefusalReason, SetFigures, StartedAt},
+    normalised::{EditOverlay, RefusalLocus, RefusalReason, SetFigures, StartedAt, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::civil::DateTime;
@@ -160,7 +160,7 @@ impl Translator for GarminGymTranslator {
     fn translate(
         &self,
         account: &ActivityAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<MeasuredGymSession>, NormalisationError> {
         let record = account.activity();
         let mut scribe = Scribe::new(record);
@@ -219,7 +219,7 @@ impl Translator for GarminGymTranslator {
         let started_at = match activity
             .started_at
             .as_deref()
-            .map(|stamp| started(stamp, zone))
+            .map(|stamp| started(stamp, zones))
         {
             Some(Ok(started_at)) => started_at,
             Some(Err(reason)) => return Ok(scribe.only(RefusalLocus::Record, reason)),
@@ -250,7 +250,7 @@ impl Translator for GarminGymTranslator {
             }
         };
 
-        let Some(recorded) = recorded(&activity, account, zone, &self.overlay, &mut scribe) else {
+        let Some(recorded) = recorded(&activity, account, zones, &self.overlay, &mut scribe) else {
             return Ok(scribe.nothing_translatable());
         };
 
@@ -314,7 +314,7 @@ fn heart_rate(activity: &Activity) -> Option<HeartRateSummary> {
 fn recorded(
     activity: &Activity,
     account: &ActivityAccount,
-    zone: &OperatorZone,
+    zones: &StatedZones,
     overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<Recorded> {
@@ -322,7 +322,7 @@ fn recorded(
         .map(|stated| MeasuredHeartRate::new(stated, recorded_series(account, scribe)));
     let sets = account
         .sets()
-        .and_then(|landed| measured_sets(landed, zone, overlay, scribe));
+        .and_then(|landed| measured_sets(landed, zones, overlay, scribe));
 
     match (heart_rate, sets) {
         (Some(heart_rate), Some(sets)) => Some(Recorded::Both { heart_rate, sets }),
@@ -386,7 +386,7 @@ fn whole(stated: Option<&RawValue>) -> Option<&str> {
 /// The sets the watch recorded, where any of them are the operator's.
 fn measured_sets(
     landed: &LandedRecord,
-    zone: &OperatorZone,
+    zones: &StatedZones,
     overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<NonEmpty<MeasuredSet>> {
@@ -431,7 +431,7 @@ fn measured_sets(
         let at = u32::try_from(ordinal).unwrap_or(u32::MAX);
         if let Some(measured) = measured_set(
             set,
-            zone,
+            zones,
             &corrections,
             RefusalLocus::Ungrouped { set: at },
             scribe,
@@ -539,12 +539,12 @@ impl Corrections<'_> {
 /// One set, or the reason it is not one.
 fn measured_set(
     set: &ServedSet,
-    zone: &OperatorZone,
+    zones: &StatedZones,
     corrections: &Corrections<'_>,
     locus: RefusalLocus,
     scribe: &mut Scribe,
 ) -> Option<Working> {
-    let at = match set.started_at.as_deref().map(|stamp| started(stamp, zone)) {
+    let at = match set.started_at.as_deref().map(|stamp| started(stamp, zones)) {
         Some(Ok(at)) => at,
         Some(Err(reason)) => {
             scribe.note(locus, reason);
@@ -710,7 +710,7 @@ pub(super) fn recorded_figures(set: &ServedSet) -> Option<SetFigures> {
 /// Garmin serves no offset on either the activity's start or a set's, and both
 /// are UTC — `startTimeLocal` beside it is the watch's wall clock and is not
 /// carried (§ II.3). The zone is the operator's declared one.
-pub(super) fn started(stamp: &str, zone: &OperatorZone) -> Result<StartedAt, RefusalReason> {
+pub(super) fn started(stamp: &str, zones: &StatedZones) -> Result<StartedAt, RefusalReason> {
     let unreadable = |detail: String| RefusalReason::UnreadableValue {
         field: "start",
         detail,
@@ -720,6 +720,6 @@ pub(super) fn started(stamp: &str, zone: &OperatorZone) -> Result<StartedAt, Ref
     })?;
     civil
         .to_zoned(jiff::tz::TimeZone::UTC)
-        .map(|zoned| StartedAt::new(zoned.timestamp(), zone.clone()))
+        .map(|zoned| zones.started_at(zoned.timestamp()))
         .map_err(|error| unreadable(format!("{stamp:?} is not an instant: {error}")))
 }

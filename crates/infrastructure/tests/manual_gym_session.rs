@@ -2,6 +2,7 @@
 //! are small invented workbooks laid out as the operator's are.
 
 use application::{Translation, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     gym::{ManualExercise, ManualGymSession, ManualSet, Performed},
     landing::{
@@ -45,7 +46,7 @@ fn landed(id: i64, path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
 fn translate(bytes: &[u8]) -> Result<Translation<ManualGymSession>, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
     let workbook = Workbook::of(record("Dropbox/Random/1RM.xlsx", bytes)?);
-    Ok(SpreadsheetSessionTranslator.translate(&workbook, &zone)?)
+    Ok(SpreadsheetSessionTranslator.translate(&workbook, &StatedZones::throughout(zone))?)
 }
 
 fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
@@ -187,7 +188,7 @@ fn copies_of_ct_2017_merge_into_one_session_and_the_most_recent_wins() {
         panic!("the copies are one workbook, got {}", workbooks.len());
     };
     let translation = SpreadsheetSessionTranslator
-        .translate(workbook, &zone)
+        .translate(workbook, &StatedZones::throughout(zone))
         .expect("translates");
     let Translation::Entities { entities, refusals } = translation else {
         panic!("expected sessions, got {translation:?}");
@@ -300,7 +301,7 @@ mod store {
                 runs: SqliteNormalisationRunLog::new(pool.clone()),
                 clock: EpochClock,
             },
-            OperatorZone::try_from("Europe/London")?,
+            domain::normalised::StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
         );
         Ok(normalisation.normalise(rederivation).await?)
     }

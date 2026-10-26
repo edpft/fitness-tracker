@@ -36,7 +36,7 @@ use domain::{
     },
     landing::{CellRef, SheetCell, SheetName},
     measure::{Duration, Kg, Metres, RepCount},
-    normalised::{OperatorZone, RefusalLocus, RefusalReason},
+    normalised::{RefusalLocus, RefusalReason, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::{
@@ -62,7 +62,7 @@ impl Translator for SpreadsheetSessionTranslator {
     fn translate(
         &self,
         workbook: &Workbook,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<ManualGymSession>, NormalisationError> {
         super::translate_with(workbook, "gym sessions", |copies, scribes| {
             scribes

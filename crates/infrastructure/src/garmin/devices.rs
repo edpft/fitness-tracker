@@ -23,7 +23,7 @@ use domain::{
     device::{
         AntDeviceNumber, DeviceIdentifier, DeviceName, Measurand, Role, SerialNumber, Sighting,
     },
-    normalised::{OperatorZone, StartedAt},
+    normalised::{StartedAt, StatedZones},
 };
 use serde::Deserialize;
 
@@ -50,8 +50,8 @@ struct Activity {
 /// its hardware is no evidence about any device, and the register is a floor,
 /// not a census.
 #[must_use]
-pub fn sightings(account: &ActivityAccount, zone: &OperatorZone) -> Vec<Sighting> {
-    let Some((at, hardware)) = dated(account, zone) else {
+pub fn sightings(account: &ActivityAccount, zones: &StatedZones) -> Vec<Sighting> {
+    let Some((at, hardware)) = dated(account, zones) else {
         return Vec::new();
     };
     let Some(recorder) = identified(hardware.recorder) else {
@@ -205,7 +205,7 @@ fn serial(seen: &Sighting) -> Option<u32> {
 }
 
 /// When a recording was made, and the hardware it names, where it says both.
-fn dated(account: &ActivityAccount, zone: &OperatorZone) -> Option<(StartedAt, Hardware)> {
+fn dated(account: &ActivityAccount, zones: &StatedZones) -> Option<(StartedAt, Hardware)> {
     let recording = account.recording()?;
     let activity =
         serde_json::from_slice::<Activity>(account.activity().payload().as_bytes()).ok()?;
@@ -213,7 +213,7 @@ fn dated(account: &ActivityAccount, zone: &OperatorZone) -> Option<(StartedAt, H
         .started_at
         .as_deref()
         .filter(|stamp| !stamp.starts_with(NO_TIME_FIX))
-        .and_then(|stamp| started(stamp, zone).ok())?;
+        .and_then(|stamp| started(stamp, zones).ok())?;
     let hardware = fit::hardware(recording.payload().as_bytes()).ok()?;
     Some((at, hardware))
 }

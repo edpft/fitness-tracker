@@ -10,6 +10,7 @@ use application::{
     normalise::{Normalisation, NormalisationPorts},
     prescribe::Authoring,
 };
+use domain::normalised::StatedZones;
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteCanonicalGymSessionStore, SqliteExtractionRunLog, SqliteGenerationParameterStore,
@@ -76,7 +77,7 @@ pub async fn with_programme(
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     let _summary: NormalisationSummary = normalisation
         .normalise(application::Rederivation::Whole)
