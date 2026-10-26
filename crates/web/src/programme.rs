@@ -1,17 +1,18 @@
 //! The programme page: what fills each slot of the mesocycle in force, and a
 //! form to change a fill from a date (#454).
 //!
-//! **A change names the exercise and what assists it.** Only a range of bands
-//! is offered as assistance, because a range of bands is the only specific a
-//! prescription can step through so far.
+//! **A change names the exercise, what assists it and what loads it.** Only a
+//! range of bands is offered as assistance, because a range of bands is the
+//! only specific a prescription can step through so far; and only a kind with a
+//! scale on the day is offered as what loads it (#579).
 
 use application::MesocycleInForce;
 use domain::{
     gym::{
         equipment::{EquipmentFacts, Maker, Model, Specific},
-        exercise::{Exercise, RepsExercise},
+        exercise::{Exercise, Implement, RepsExercise},
     },
-    prescription::{SlotId, linear::SlotContent},
+    prescription::{FillChange, SlotId, linear::SlotContent},
     schedule::{Relative, SessionRole},
 };
 use jiff::civil::Date;
@@ -48,6 +49,12 @@ pub fn page(
         .filter(|(_, timeline)| timeline.on(today).is_some())
         .map(|(specific, _)| specific)
         .collect();
+    let loaders: Vec<Implement> = facts
+        .kinds
+        .iter()
+        .filter(|(_, timeline)| timeline.on(today).is_some())
+        .map(|(implement, _)| *implement)
+        .collect();
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -69,7 +76,7 @@ pub fn page(
                                 (found.plan) ", mesocycle " (found.ordinal) ". "
                                 "A change holds from its date; a session prescribed before it keeps what it was given."
                             }
-                            (slots(found, &banded, today))
+                            (slots(found, &banded, &loaders, today))
                         }
                     }
                 }
@@ -84,7 +91,12 @@ const SESSIONS: [(Relative, &str); 2] = [
     (Relative::Lower, "Lower-intensity session"),
 ];
 
-fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup {
+fn slots(
+    found: &MesocycleInForce,
+    banded: &[&Specific],
+    loaders: &[Implement],
+    today: Date,
+) -> Markup {
     let fills = found.mesocycle.clone().changed_on(&found.changes, today);
     html! {
         @for slot in SlotId::ALL.iter().copied().filter(|slot| changeable(*slot)) {
@@ -107,6 +119,7 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
                             (exercise.name())
                             @if let Some(change) = found.changes.on(slot, intensity, today) {
                                 @if let Some(by) = &change.assisted_by { " assisted by " (by) }
+                                @if let Some(by) = change.loaded_by { " loaded by " (by) }
                                 " " span.change { "(from " (change.from) ")" }
                             }
                         }
@@ -116,7 +129,7 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
                         @let latest = found.changes.latest(slot, intensity);
                         @let start = latest.map_or(exercise, |change| change.exercise);
                         @if let Exercise::Reps(current) = start {
-                            (form(slot, alternates.then_some(intensity), current, latest.and_then(|change| change.assisted_by.as_ref()), banded, today))
+                            (form(slot, alternates.then_some(intensity), current, latest, banded, loaders, today))
                         }
                     }
                 }
@@ -125,6 +138,7 @@ fn slots(found: &MesocycleInForce, banded: &[&Specific], today: Date) -> Markup 
                 p.change {
                     "From " (change.from) ": " (change.exercise.name())
                     @if let Some(by) = &change.assisted_by { " assisted by " (by) }
+                    @if let Some(by) = change.loaded_by { " loaded by " (by) }
                     @if let Some(intensity) = change.intensity { ", " (intensity.as_str()) "-intensity session" }
                 }
             }
@@ -136,10 +150,13 @@ fn form(
     slot: SlotId,
     intensity: Option<Relative>,
     current: RepsExercise,
-    assisted: Option<&Specific>,
+    latest: Option<&FillChange>,
     banded: &[&Specific],
+    loaders: &[Implement],
     today: Date,
 ) -> Markup {
+    let assisted = latest.and_then(|change| change.assisted_by.as_ref());
+    let loaded = latest.and_then(|change| change.loaded_by);
     html! {
         form.fill method="post" action="/programme" {
             input type="hidden" name="slot" value=(slot.as_str());
@@ -158,6 +175,12 @@ fn form(
                         option value=(format!("{}\u{1f}{}", specific.maker, specific.model)) selected[assisted == Some(*specific)] { "assisted by " (specific) }
                     }
                 }
+                select name="loaded" aria-label="Loaded by" {
+                    option value="" { "not loaded" }
+                    @for implement in loaders {
+                        option value=(implement.as_str()) selected[loaded == Some(*implement)] { "loaded by " (implement) }
+                    }
+                }
             }
             div.row {
                 input type="date" name="from" value=(today) aria-label="From";
@@ -167,22 +190,12 @@ fn form(
     }
 }
 
-/// What a posted change asked for.
-pub struct Asked {
-    pub slot: SlotId,
-    /// The session it changes, for a slot that alternates; both otherwise.
-    pub intensity: Option<Relative>,
-    pub exercise: Exercise,
-    pub assisted_by: Option<Specific>,
-    pub from: Date,
-}
-
-/// Read a posted change.
+/// Read a posted change, recorded now.
 ///
 /// # Errors
 ///
 /// What is missing or does not read, in words for the page.
-pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
+pub fn asked(form: &[(String, String)]) -> Result<FillChange, String> {
     let field = |name: &str| {
         form.iter()
             .find(|(key, _)| key == name)
@@ -209,16 +222,22 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
             })
         }
     };
+    let loaded_by = match field("loaded")? {
+        "" => None,
+        kind => Some(Implement::try_from(kind.to_owned()).map_err(|error| error.to_string())?),
+    };
     let typed = field("from")?;
     let from = typed
         .parse()
         .map_err(|_| format!("{typed:?} is not a date"))?;
-    Ok(Asked {
+    Ok(FillChange {
         slot,
         intensity,
+        from,
+        recorded_at: jiff::Timestamp::now(),
         exercise,
         assisted_by,
-        from,
+        loaded_by,
     })
 }
 

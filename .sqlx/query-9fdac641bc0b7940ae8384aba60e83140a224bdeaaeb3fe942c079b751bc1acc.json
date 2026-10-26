@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT slot AS \"slot!: String\",\n               intensity,\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
+  "query": "\n        SELECT slot AS \"slot!: String\",\n               intensity,\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model,\n               loaded_implement\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
   "describe": {
     "columns": [
       {
@@ -79,6 +79,17 @@
             "name": "assisted_model"
           }
         }
+      },
+      {
+        "name": "loaded_implement",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "loaded_implement"
+          }
+        }
       }
     ],
     "parameters": {
@@ -91,8 +102,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "f0f0b26ef303f2966f9593bb324c7fdff06b5177f188fac9063ffba8be57568f"
+  "hash": "9fdac641bc0b7940ae8384aba60e83140a224bdeaaeb3fe942c079b751bc1acc"
 }

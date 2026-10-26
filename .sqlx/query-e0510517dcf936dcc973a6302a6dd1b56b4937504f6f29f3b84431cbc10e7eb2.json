@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO gym_slot_fill_change\n            (mesocycle, slot, intensity, valid_from, recorded_at, exercise,\n             assisted_maker, assisted_model, loaded_implement)\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "e0510517dcf936dcc973a6302a6dd1b56b4937504f6f29f3b84431cbc10e7eb2"
+}

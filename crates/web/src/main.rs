@@ -404,16 +404,7 @@ async fn programme_post(
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
             Err(error) => Some(error.to_string()),
             Ok(store) => {
-                let done = configurator::fills::change(
-                    &store,
-                    &runs.setting().zone,
-                    asked.slot,
-                    asked.intensity,
-                    asked.from,
-                    asked.exercise,
-                    asked.assisted_by,
-                )
-                .await;
+                let done = configurator::fills::change(&store, &runs.setting().zone, asked).await;
                 store.close().await;
                 done.err().map(|error| error.to_string())
             }

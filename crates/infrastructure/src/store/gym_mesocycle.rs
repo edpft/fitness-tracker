@@ -32,7 +32,7 @@ use application::{FillChangeStore, MesocycleInForce, MesocycleStore, StoreError}
 use domain::{
     gym::{
         equipment::{Maker, Model, Specific},
-        exercise::Exercise,
+        exercise::{Exercise, Implement},
     },
     measure::{Kg, RepCount},
     normalised::OperatorZone,
@@ -1013,7 +1013,8 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
                recorded_at AS "recorded_at!: String",
                exercise AS "exercise!: String",
                assisted_maker,
-               assisted_model
+               assisted_model,
+               loaded_implement
         FROM gym_slot_fill_change
         WHERE mesocycle = ?
         ORDER BY id
@@ -1050,6 +1051,11 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
                 .map_err(|_| corrupt(&"a recording time that is not an instant"))?,
             exercise: exercise_of(&row.exercise)?,
             assisted_by,
+            loaded_by: row
+                .loaded_implement
+                .map(Implement::try_from)
+                .transpose()
+                .map_err(|error| corrupt(&error))?,
         });
     }
     Ok(FillChanges::new(changes))
@@ -1085,12 +1091,13 @@ async fn write_change(
         .assisted_by
         .as_ref()
         .map(|specific| specific.model.as_str());
+    let loaded = change.loaded_by.map(Implement::as_str);
     sqlx::query!(
         r"
         INSERT INTO gym_slot_fill_change
             (mesocycle, slot, intensity, valid_from, recorded_at, exercise,
-             assisted_maker, assisted_model)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             assisted_maker, assisted_model, loaded_implement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         mesocycle,
         slot,
@@ -1099,7 +1106,8 @@ async fn write_change(
         recorded_at,
         exercise,
         maker,
-        model
+        model,
+        loaded
     )
     .execute(pool)
     .await

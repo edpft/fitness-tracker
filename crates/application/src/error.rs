@@ -150,6 +150,8 @@ pub enum FillChangeError {
         specific: String,
         date: jiff::civil::Date,
     },
+    #[error("{exercise} is loaded on its own implement, not by something held")]
+    NotBodyweight { exercise: &'static str },
 }
 
 /// Reading or resetting extraction state.
