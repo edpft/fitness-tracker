@@ -102,13 +102,6 @@ pub struct PrescribedWorkout {
 }
 
 impl PrescribedWorkout {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "every one of these is what makes the prescription an issued \
-                  fact rather than a shape; grouping them into a struct would \
-                  just move the same list one level down, and making any of \
-                  them optional is the § 11 hazard this type exists to close"
-    )]
     pub const fn new(
         shape: WorkoutShape,
         issued_for: Date,

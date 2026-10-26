@@ -197,6 +197,34 @@ fn ramp(steps: Vec<(i64, i64)>) -> Result<NonEmpty<WarmupStep>, StoreError> {
     NonEmpty::new(ramp).map_err(|_| corrupt(&"a stored warm-up ramp with no step"))
 }
 
+/// The slots a programme version gives a scheme of their own.
+async fn slot_schemes(
+    pool: &SqlitePool,
+    stamp: &str,
+) -> Result<BTreeMap<SlotId, AccessoryScheme>, StoreError> {
+    let slot_rows = sqlx::query!(
+        r#"
+        SELECT slot AS "slot!: String", reps_low AS "reps_low!: i64",
+               reps_high AS "reps_high: i64", sets AS "sets!: i64"
+        FROM programme_slot_scheme
+        WHERE authored_at = ?
+        "#,
+        stamp
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut slots = BTreeMap::new();
+    for slot in slot_rows {
+        slots.insert(
+            SlotId::try_from(slot.slot).map_err(|error| corrupt(&error))?,
+            scheme(slot.reps_low, slot.reps_high, slot.sets)?,
+        );
+    }
+
+    Ok(slots)
+}
+
 /// The load scales and band ranges (§ 14), the programme (#192), and each
 /// primary progression (#192), as one store.
 #[derive(Debug, Clone)]
@@ -280,25 +308,7 @@ impl ProgrammeStore for SqliteGenerationParameterStore {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let slot_rows = sqlx::query!(
-            r#"
-            SELECT slot AS "slot!: String", reps_low AS "reps_low!: i64",
-                   reps_high AS "reps_high: i64", sets AS "sets!: i64"
-            FROM programme_slot_scheme
-            WHERE authored_at = ?
-            "#,
-            stamp
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-        let mut slots = BTreeMap::new();
-        for slot in slot_rows {
-            slots.insert(
-                SlotId::try_from(slot.slot).map_err(|error| corrupt(&error))?,
-                scheme(slot.reps_low, slot.reps_high, slot.sets)?,
-            );
-        }
+        let slots = slot_schemes(&self.pool, &stamp).await?;
 
         Ok(Some((
             stamp_from_storage(&stamp)?,

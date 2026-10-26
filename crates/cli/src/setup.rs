@@ -174,35 +174,34 @@ async fn seed_parameters(store: &Store) -> Result<ParameterOutcome, Failure> {
     let unbuildable = |error: seed::InvalidSeed| Failure::message(error.to_string(), exit::USAGE);
     let versions = store.parameters();
     let now = jiff::Timestamp::now();
-    let mut outcome = ParameterOutcome::AlreadyInForce;
-
-    if versions.programme_at(now).await.map_err(failed)?.is_none() {
+    let programme = versions.programme_at(now).await.map_err(failed)?.is_none();
+    if programme {
         versions
             .author_programme(now, &seed::programme().map_err(unbuildable)?)
             .await
             .map_err(failed)?;
-        outcome = ParameterOutcome::Seeded;
     }
-    if versions.linear_at(now).await.map_err(failed)?.is_none() {
+    let linear = versions.linear_at(now).await.map_err(failed)?.is_none();
+    if linear {
         versions
             .author_linear(now, &seed::linear().map_err(unbuildable)?)
             .await
             .map_err(failed)?;
-        outcome = ParameterOutcome::Seeded;
     }
-    if versions.sbs_at(now).await.map_err(failed)?.is_none() {
+    let sbs = versions.sbs_at(now).await.map_err(failed)?.is_none();
+    if sbs {
         versions
             .author_sbs(now, &seed::sbs().map_err(unbuildable)?)
             .await
             .map_err(failed)?;
-        outcome = ParameterOutcome::Seeded;
     }
 
     // **A store that knows no kinds takes this build's scales as them**: a
     // store that knows any is left alone, because the operator may have
     // corrected it.
     let equipment = store.equipment();
-    if equipment.facts().await.map_err(failed)?.kinds.is_empty() {
+    let kinds = equipment.facts().await.map_err(failed)?.kinds.is_empty();
+    if kinds {
         for (implement, steps) in seed::scales().map_err(unbuildable)?.iter() {
             equipment
                 .record(
@@ -214,9 +213,13 @@ async fn seed_parameters(store: &Store) -> Result<ParameterOutcome, Failure> {
                 .await
                 .map_err(failed)?;
         }
-        outcome = ParameterOutcome::Seeded;
     }
-    Ok(outcome)
+
+    Ok(if programme || linear || sbs || kinds {
+        ParameterOutcome::Seeded
+    } else {
+        ParameterOutcome::AlreadyInForce
+    })
 }
 
 /// Obtain, check and store a credential for each source not yet connected.

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT slot AS \"slot!: String\", reps_low AS \"reps_low!: i64\",\n                   reps_high AS \"reps_high: i64\", sets AS \"sets!: i64\"\n            FROM programme_slot_scheme\n            WHERE authored_at = ?\n            ",
+  "query": "\n        SELECT slot AS \"slot!: String\", reps_low AS \"reps_low!: i64\",\n               reps_high AS \"reps_high: i64\", sets AS \"sets!: i64\"\n        FROM programme_slot_scheme\n        WHERE authored_at = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "fd76b8ee752e04f934b9a1c4a033cc4d1374f3647ad3f58634ab4c1d4f89d2ed"
+  "hash": "027f819dbd90ac66f079b64247ef7c834f075792fa838156e59a9e8f22fa9e15"
 }

@@ -1682,9 +1682,10 @@ pub trait ProgrammeStore {
 }
 
 /// The versions of each primary progression, each in force from when it was
-/// authored (#192). Separate from the programme because the operator designs
-/// them separately: the primary runs one of them, and the programme says
-/// nothing about how.
+/// authored (#192).
+///
+/// Separate from the programme because the operator designs them separately:
+/// the primary runs one of them, and the programme says nothing about how.
 pub trait ProgressionStore {
     /// The latest version of linear progression authored at or before `at`.
     ///

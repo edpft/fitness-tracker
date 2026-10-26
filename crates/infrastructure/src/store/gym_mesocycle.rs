@@ -250,31 +250,21 @@ pub(super) async fn in_force(
             calendar,
             provided,
         };
+        // What the row asserts, read once: a test takes it as its own, and a
+        // periodised block's entry test as what it measured.
+        let asserted = read_anchor(
+            row.asserted_grams,
+            row.asserted_failed_grams,
+            row.asserted_provenance,
+            row.asserted_from,
+        )?;
         let mesocycle = match row.template.as_str() {
-            "test" => rehydrate_test(
-                common,
-                row.test_reps,
-                read_anchor(
-                    row.asserted_grams,
-                    row.asserted_failed_grams,
-                    row.asserted_provenance,
-                    row.asserted_from,
-                )?,
-            )?,
+            "test" => rehydrate_test(common, row.test_reps, asserted)?,
             template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                 common,
                 template,
                 gating_of(row.gating_intensity, row.gating_volume)?,
-                read_entry_test(
-                    row.entry_test_reps,
-                    row.entry_test_light_grams,
-                    read_anchor(
-                        row.asserted_grams,
-                        row.asserted_failed_grams,
-                        row.asserted_provenance,
-                        row.asserted_from,
-                    )?,
-                )?,
+                read_entry_test(row.entry_test_reps, row.entry_test_light_grams, asserted)?,
             )?,
             other => {
                 return Err(corrupt(&format!(

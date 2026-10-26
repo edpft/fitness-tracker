@@ -2315,7 +2315,7 @@ where
 /// **Each progression states its own** (operator, 2026-10-24). An SBS cycle,
 /// and a test SBS provides, ramp on SBS's; everything else ramps on linear's,
 /// which is the one block periodisation read before the two were separated.
-fn ramp_of<'a>(mesocycle: &GymMesocycle, with: &'a PlannedWith) -> &'a NonEmpty<WarmupStep> {
+const fn ramp_of<'a>(mesocycle: &GymMesocycle, with: &'a PlannedWith) -> &'a NonEmpty<WarmupStep> {
     match mesocycle {
         GymMesocycle::Progression(Progression::Provided { .. }) => &with.sbs.warmup,
         GymMesocycle::Test(test) if test.provided().is_some() => &with.sbs.warmup,
