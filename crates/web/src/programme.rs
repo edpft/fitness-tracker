@@ -190,23 +190,12 @@ fn form(
     }
 }
 
-/// What a posted change asked for.
-pub struct Asked {
-    pub slot: SlotId,
-    /// The session it changes, for a slot that alternates; both otherwise.
-    pub intensity: Option<Relative>,
-    pub exercise: Exercise,
-    pub assisted_by: Option<Specific>,
-    pub loaded_by: Option<Implement>,
-    pub from: Date,
-}
-
-/// Read a posted change.
+/// Read a posted change, recorded now.
 ///
 /// # Errors
 ///
 /// What is missing or does not read, in words for the page.
-pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
+pub fn asked(form: &[(String, String)]) -> Result<FillChange, String> {
     let field = |name: &str| {
         form.iter()
             .find(|(key, _)| key == name)
@@ -241,13 +230,14 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, String> {
     let from = typed
         .parse()
         .map_err(|_| format!("{typed:?} is not a date"))?;
-    Ok(Asked {
+    Ok(FillChange {
         slot,
         intensity,
+        from,
+        recorded_at: jiff::Timestamp::now(),
         exercise,
         assisted_by,
         loaded_by,
-        from,
     })
 }
 

@@ -5,15 +5,11 @@
 //! already be known equipment.
 
 use domain::{
-    gym::{
-        Exercise,
-        equipment::Specific,
-        exercise::Implement,
-    },
+    gym::exercise::Implement,
     prescription::{FillChange, SlotId, linear::SlotContent},
-    schedule::{Relative, SessionRole},
+    schedule::SessionRole,
 };
-use jiff::{Timestamp, civil::Date};
+use jiff::civil::Date;
 
 use crate::{EquipmentStore, FillChangeError, FillChangeStore, MesocycleInForce, MesocycleStore};
 
@@ -48,24 +44,24 @@ where
         Ok(self.mesocycles.on(date).await?)
     }
 
-    /// Fill a slot with an exercise from a date, assisted by a specific or
-    /// not, and loaded above bodyweight by a kind held or not.
+    /// Record a change: a slot filled with an exercise from a date, assisted
+    /// by a specific or not, and loaded above bodyweight by a kind held or
+    /// not.
     ///
     /// # Errors
     ///
     /// [`FillChangeError`] if no mesocycle is in force then, the slot is
     /// static or the primary, the range of bands is not known on that date,
     /// or what loads it is named for an exercise that is not bodyweight.
-    pub async fn change(
-        &self,
-        slot: SlotId,
-        intensity: Option<Relative>,
-        from: Date,
-        exercise: Exercise,
-        assisted_by: Option<Specific>,
-        loaded_by: Option<Implement>,
-        at: Timestamp,
-    ) -> Result<(), FillChangeError> {
+    pub async fn change(&self, change: FillChange) -> Result<(), FillChangeError> {
+        let FillChange {
+            slot,
+            from,
+            exercise,
+            ref assisted_by,
+            loaded_by,
+            ..
+        } = change;
         let Some(found) = self.mesocycles.on(from).await? else {
             return Err(FillChangeError::NoMesocycle { date: from });
         };
@@ -82,7 +78,7 @@ where
                 slot: slot.as_str(),
             });
         }
-        if let Some(specific) = &assisted_by {
+        if let Some(specific) = assisted_by {
             let known = self
                 .equipment
                 .facts()
@@ -103,15 +99,6 @@ where
                 exercise: exercise.name(),
             });
         }
-        let change = FillChange {
-            slot,
-            intensity,
-            from,
-            recorded_at: at,
-            exercise,
-            assisted_by,
-            loaded_by,
-        };
         Ok(self.changes.record_change(found.id, &change).await?)
     }
 }

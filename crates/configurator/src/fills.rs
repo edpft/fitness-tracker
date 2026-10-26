@@ -2,12 +2,7 @@
 //! store (#454).
 
 use application::{FillChangeError, MesocycleInForce, fills::Refilling};
-use domain::{
-    gym::{Exercise, equipment::Specific, exercise::Implement},
-    normalised::OperatorZone,
-    prescription::SlotId,
-    schedule::Relative,
-};
+use domain::{normalised::OperatorZone, prescription::FillChange};
 use jiff::civil::Date;
 
 use crate::store::Store;
@@ -40,7 +35,7 @@ pub async fn on(
     refilling(store, zone).on(date).await
 }
 
-/// Fill a slot from a date.
+/// Record a change to a slot's fill.
 ///
 /// # Errors
 ///
@@ -48,22 +43,7 @@ pub async fn on(
 pub async fn change(
     store: &Store,
     zone: &OperatorZone,
-    slot: SlotId,
-    intensity: Option<Relative>,
-    from: Date,
-    exercise: Exercise,
-    assisted_by: Option<Specific>,
-    loaded_by: Option<Implement>,
+    change: FillChange,
 ) -> Result<(), FillChangeError> {
-    refilling(store, zone)
-        .change(
-            slot,
-            intensity,
-            from,
-            exercise,
-            assisted_by,
-            loaded_by,
-            jiff::Timestamp::now(),
-        )
-        .await
+    refilling(store, zone).change(change).await
 }

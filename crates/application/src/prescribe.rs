@@ -2723,13 +2723,14 @@ mod progression_tests {
             loaded: &dumbbell,
             ..unstated
         };
-        let derived = one_exercise(&stated, &history, dead_bug, SlotId::Core)
-            .expect("a dumbbell loads it");
+        let derived =
+            one_exercise(&stated, &history, dead_bug, SlotId::Core).expect("a dumbbell loads it");
         let PrescribedExercise::ForReps { sets, .. } = derived else {
             panic!("a dead bug is counted in repetitions");
         };
         assert!(
-            sets.iter().all(|set| set.prescription.load() == Load::absolute(Kg::from_grams(1_000))),
+            sets.iter()
+                .all(|set| set.prescription.load() == Load::absolute(Kg::from_grams(1_000))),
             "the dumbbell scale's first step above nothing is 1kg: {sets:?}"
         );
     }
