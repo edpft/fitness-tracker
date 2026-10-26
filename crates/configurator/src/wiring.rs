@@ -24,7 +24,7 @@ use application::{
 };
 use domain::{
     landing::{FetchedAt, LandingStream, RecordCount, Watermark},
-    normalised::OperatorZone,
+    normalised::{OperatorZone, StatedZones},
 };
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
@@ -74,7 +74,8 @@ pub enum Command {
     /// a stream served by a folder rather than a system.
     ExtractFolder(PathBuf),
     /// Derive the normalised layer from what raw already holds. Contacts no
-    /// source, which is why it carries a zone rather than a credential.
+    /// source, which is why it carries a zone rather than a credential — the
+    /// zone this invocation declares, read only where none was ever stated.
     Normalise(OperatorZone, Rederivation),
     /// Read back what the last derivation would not accept. Takes no zone: it
     /// consults none to produce the list.
@@ -346,10 +347,10 @@ pub async fn inputs(
         }
     };
     let corrections = corrections(&pool, overlay).await?;
+    let zones = stated_zones(&pool, zone).await?;
     Ok(DerivedFrom::from(format!(
-        "records {records}; corrections {}; zone {}",
+        "records {records}; corrections {}; zone {zones}",
         corrections.join(","),
-        zone.id()
     )))
 }
 
@@ -378,15 +379,34 @@ async fn corrections(
 /// where the code changed. `--whole` is the way round it.
 async fn terms(
     pool: &SqlitePool,
-    zone: &OperatorZone,
+    zones: &StatedZones,
     overlay: Option<&'static str>,
 ) -> Result<Terms, WiringError> {
     Ok(Terms::from(format!(
-        "build {}; corrections {}; zone {}",
+        "build {}; corrections {}; zone {zones}",
         crate::next::BUILD.unwrap_or("unknown"),
         corrections(pool, overlay).await?.join(","),
-        zone.id()
     )))
+}
+
+/// The zones a derivation reads (#66): every zone the operator stated, each
+/// from when, or the zone `declared` for this invocation where none was ever
+/// stated.
+///
+/// **A stated zone beats a declared one here**, the reverse of everywhere else.
+/// A flag or a variable carries no date, so letting it win would put every past
+/// session in today's zone — and the variable is set on every invocation, so
+/// the zones stated would never be read at all (operator, 2026-10-26).
+pub(crate) async fn stated_zones(
+    pool: &SqlitePool,
+    declared: &OperatorZone,
+) -> Result<StatedZones, application::StoreError> {
+    Ok(
+        infrastructure::SqliteOperatorSettingsStore::new(pool.clone())
+            .zones()
+            .await?
+            .unwrap_or_else(|| StatedZones::throughout(declared.clone())),
+    )
 }
 
 /// What Peloton's rides derive from: the rides and their graphs, and the
@@ -444,8 +464,9 @@ async fn garmin_daily_heart_rate(
                 walk.extraction.extract().await?,
             )))
         }
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
@@ -455,7 +476,7 @@ async fn garmin_daily_heart_rate(
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
             Ok(Outcome::Derived(Box::new(
@@ -543,9 +564,10 @@ async fn peloton_rides(
             )
             .await
         }
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
-            let summary = peloton_normalisation(pool, zone, terms)?
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
+            let summary = peloton_normalisation(pool, zones, terms)?
                 .normalise(rederivation)
                 .await?;
             Ok(Outcome::Derived(Box::new(summary)))
@@ -803,7 +825,7 @@ fn peloton_walks(
 /// tables.
 fn peloton_normalisation(
     pool: SqlitePool,
-    zone: OperatorZone,
+    zones: StatedZones,
     terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     Ok(Normalisation::new(
@@ -815,7 +837,7 @@ fn peloton_normalisation(
             runs: SqliteNormalisationRunLog::new(pool),
             clock: SystemClock,
         },
-        zone,
+        zones,
     )
     .under(terms))
 }
@@ -886,8 +908,9 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
             let summary = nights.extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminHrvAccountReader::new(pool.clone())?,
@@ -897,7 +920,7 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
 
@@ -975,8 +998,9 @@ async fn garmin_activities(
             stream: GarminActivityLandingStore::STREAM,
         }),
         Command::Extract(access) => collect_activities(access, (&pool, database), walks).await,
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, Some(GarminExerciseSetLandingStore::STREAM)).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, Some(GarminExerciseSetLandingStore::STREAM)).await?;
             // The overlay is read here, as it is for Hevy and for the same
             // reason: § II.2 applies a correction while the layer is rebuilt,
             // and this is that moment. It is keyed on `garmin.exercise_sets`
@@ -1001,7 +1025,7 @@ async fn garmin_activities(
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
             Ok(Outcome::Derived(Box::new(
@@ -1544,9 +1568,10 @@ async fn withings_measurements(
         Command::Extract(access) => {
             collect_withings(access, landing, resumption, runs, (pool, database), walks).await
         }
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
-            let summary = withings_normalisation(pool, zone, terms)?
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
+            let summary = withings_normalisation(pool, zones, terms)?
                 .normalise(rederivation)
                 .await?;
             Ok(Outcome::Derived(Box::new(summary)))
@@ -1707,7 +1732,7 @@ fn hevy_walk(
 /// the derivation is the one it always was.
 async fn hevy_normalisation(
     pool: SqlitePool,
-    zone: OperatorZone,
+    zones: StatedZones,
     terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     let overlay = SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
@@ -1722,7 +1747,7 @@ async fn hevy_normalisation(
             runs: SqliteNormalisationRunLog::new(pool),
             clock: SystemClock,
         },
-        zone,
+        zones,
     )
     .under(terms))
 }
@@ -1782,7 +1807,7 @@ fn withings_walk(
 /// Body Scan weigh-ins, derived from what raw holds.
 fn withings_normalisation(
     pool: SqlitePool,
-    zone: OperatorZone,
+    zones: StatedZones,
     terms: Terms,
 ) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
     Ok(Normalisation::new(
@@ -1797,7 +1822,7 @@ fn withings_normalisation(
             runs: SqliteNormalisationRunLog::new(pool),
             clock: SystemClock,
         },
-        zone,
+        zones,
     )
     .under(terms))
 }
@@ -1896,9 +1921,10 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
                 .await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, Some(HevyWorkoutLandingStore::STREAM)).await?;
-            let summary = hevy_normalisation(pool, zone, terms)
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, Some(HevyWorkoutLandingStore::STREAM)).await?;
+            let summary = hevy_normalisation(pool, zones, terms)
                 .await?
                 .normalise(rederivation)
                 .await?;
@@ -1967,8 +1993,9 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: SpreadsheetFileAccountReader::new(pool.clone())?,
@@ -1981,7 +2008,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
             Ok(Outcome::Derived(Box::new(
@@ -2046,8 +2073,9 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: BtwbExportAccountReader::new(pool.clone())?,
@@ -2060,7 +2088,7 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
             Ok(Outcome::Derived(Box::new(
@@ -2125,8 +2153,9 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
             wanted: "a folder",
             given: "a credential",
         }),
-        Command::Normalise(zone, rederivation) => {
-            let terms = terms(&pool, &zone, None).await?;
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: MyFitnessPalExportAccountReader::new(pool.clone())?,
@@ -2139,7 +2168,7 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
                     runs: SqliteNormalisationRunLog::new(pool),
                     clock: SystemClock,
                 },
-                zone,
+                zones,
             )
             .under(terms);
             Ok(Outcome::Derived(Box::new(

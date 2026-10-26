@@ -29,7 +29,7 @@ use domain::{
     device::DeviceIdentifier,
     landing::{EventKind, LandedRecord},
     measure::HeartRateVariability,
-    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{RefusalLocus, RefusalReason, StartedAt, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::civil::DateTime;
@@ -118,9 +118,9 @@ fn instant(stamp: &str, field: &'static str) -> Result<jiff::Timestamp, RefusalR
 fn started_at(
     stamp: &str,
     field: &'static str,
-    zone: &OperatorZone,
+    zones: &StatedZones,
 ) -> Result<StartedAt, RefusalReason> {
-    instant(stamp, field).map(|instant| StartedAt::new(instant, zone.clone()))
+    instant(stamp, field).map(|instant| zones.started_at(instant))
 }
 
 fn status(stated: &str) -> Result<HrvStatus, RefusalReason> {
@@ -160,11 +160,11 @@ fn baseline(stated: &Baseline) -> Result<HrvBaseline, RefusalReason> {
 
 fn readings(
     served: Vec<Reading>,
-    zone: &OperatorZone,
+    zones: &StatedZones,
 ) -> Result<Option<NonEmpty<HrvReading>>, RefusalReason> {
     let mut readings = Vec::with_capacity(served.len());
     for reading in served {
-        let taken_at = started_at(&reading.taken_at, "reading time", zone)?;
+        let taken_at = started_at(&reading.taken_at, "reading time", zones)?;
         let value = variability(
             reading
                 .value
@@ -182,7 +182,7 @@ fn readings(
 /// The night, or the one reason there is none.
 fn overnight_hrv(
     record: &LandedRecord,
-    zone: &OperatorZone,
+    zones: &StatedZones,
     recorded_by: Option<DeviceIdentifier>,
 ) -> Result<OvernightHrv, RefusalReason> {
     let night: Night = serde_json::from_slice(record.payload().as_bytes()).map_err(|error| {
@@ -237,8 +237,8 @@ fn overnight_hrv(
         });
     };
     let measured = MeasurementWindow::new(
-        started_at(&start, "window start", zone)?,
-        started_at(&end, "window end", zone)?,
+        started_at(&start, "window start", zones)?,
+        started_at(&end, "window end", zones)?,
     )
     .map_err(|error| RefusalReason::UnreadableValue {
         field: "measurement window",
@@ -250,7 +250,7 @@ fn overnight_hrv(
         last_night: LastNight {
             average: variability(average, "last night's average")?,
             five_minute_high: variability(five_minute_high, "last night's five-minute high")?,
-            readings: readings(night.readings, zone)?,
+            readings: readings(night.readings, zones)?,
         },
         weekly: WeeklyStatus {
             average: variability(weekly_average, "the weekly average")?,
@@ -275,7 +275,7 @@ impl Translator for GarminHrvTranslator {
     fn translate(
         &self,
         account: &NightAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<OvernightHrv>, NormalisationError> {
         let record = account.night();
         let mut scribe = Scribe::new(record);
@@ -303,7 +303,7 @@ impl Translator for GarminHrvTranslator {
         Ok(
             match overnight_hrv(
                 record,
-                zone,
+                zones,
                 account.sleep().and_then(super::sleep::recorded_by),
             ) {
                 Ok(night) => Translation::Entity {

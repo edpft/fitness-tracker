@@ -2,6 +2,7 @@
 //! small invented workbooks laid out as the operator's are.
 
 use application::{Translation, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     body::ManualWeighIn,
     landing::{
@@ -35,7 +36,8 @@ fn record(path: &str, bytes: &[u8]) -> Result<LandedRecord, Failure> {
 
 fn translate(path: &str, bytes: &[u8]) -> Result<Translation<ManualWeighIn>, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
-    Ok(SpreadsheetWeighInTranslator.translate(&record(path, bytes)?, &zone)?)
+    Ok(SpreadsheetWeighInTranslator
+        .translate(&record(path, bytes)?, &StatedZones::throughout(zone))?)
 }
 
 /// Each weigh-in as `sheet!cell day kg`, which is what the operator would look
@@ -312,7 +314,7 @@ mod store {
                 runs: SqliteNormalisationRunLog::new(pool.clone()),
                 clock: EpochClock,
             },
-            OperatorZone::try_from("Europe/London")?,
+            domain::normalised::StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
         );
         Ok(normalisation
             .normalise(application::Rederivation::Whole)

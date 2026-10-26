@@ -24,6 +24,7 @@ use application::{
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
+use domain::normalised::StatedZones;
 use domain::prescription::{
     Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SlotId, WeekKind,
     authored::Shape,
@@ -144,7 +145,7 @@ async fn landed_store() -> Result<
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     let _summary: NormalisationSummary = normalisation
         .normalise(application::Rederivation::Whole)

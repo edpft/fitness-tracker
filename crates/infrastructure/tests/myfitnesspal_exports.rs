@@ -5,6 +5,7 @@
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
+use domain::normalised::StatedZones;
 use std::{fs, path::Path};
 
 use application::{
@@ -86,7 +87,7 @@ async fn normalise_as(
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
-        OperatorZone::try_from("Europe/London").map_err(corrupt)?,
+        StatedZones::throughout(OperatorZone::try_from("Europe/London").map_err(corrupt)?),
     )
     .normalise(rederivation)
     .await

@@ -12,6 +12,7 @@ use application::{
     WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts, Refusals},
 };
+use domain::normalised::StatedZones;
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExtractionRunLog, SqliteGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
@@ -57,7 +58,7 @@ async fn derive(pool: &SqlitePool) -> Result<NormalisationSummary, Box<dyn std::
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     Ok(normalisation
         .normalise(application::Rederivation::Whole)

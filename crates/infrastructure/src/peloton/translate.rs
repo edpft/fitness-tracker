@@ -39,7 +39,7 @@ use domain::{
     measure::{
         BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres, PositiveDuration,
     },
-    normalised::{OperatorZone, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{RefusalLocus, RefusalReason, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::Timestamp;
@@ -93,7 +93,7 @@ impl Translator for PelotonSessionTranslator {
     fn translate(
         &self,
         account: &SessionAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<PerformedSession>, NormalisationError> {
         // Anchored to the session's first ride: a refusal has to point the
         // operator at something they can look up, and a session is not
@@ -130,7 +130,7 @@ impl Translator for PelotonSessionTranslator {
         // be this layer inventing what the source did not say.
         let mut rides = Vec::with_capacity(account.rides().count());
         for landed in account.rides().iter() {
-            match ride_from(landed, account.pairings(), zone) {
+            match ride_from(landed, account.pairings(), zones) {
                 Ok((ride, noted)) => {
                     for reason in noted {
                         scribe.note(RefusalLocus::Record, reason);
@@ -245,7 +245,7 @@ fn described(roles: &[RideRole]) -> String {
 fn ride_from(
     landed: &LandedRide,
     pairings: &[LandedRecord],
-    zone: &OperatorZone,
+    zones: &StatedZones,
 ) -> Result<(BikePlusRide, Vec<RefusalReason>), RefusalReason> {
     let record = &landed.ride;
     let workout = WorkoutRecord::read(record.payload().as_bytes()).map_err(|error| {
@@ -289,7 +289,7 @@ fn ride_from(
     // produced are unaffected either way. A problem with it is carried back
     // rather than raised, so it costs the declaration and not the ride.
     let (heart_rate, heart_rate_declared_missing, noted) = heart_rate_of(&graph);
-    let started_at = StartedAt::new(instant, zone.clone());
+    let started_at = zones.started_at(instant);
 
     Ok((
         BikePlusRide::new(RideRecord {

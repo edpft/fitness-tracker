@@ -14,6 +14,7 @@
 //! site: the `clippy.toml` exemptions cover `#[test]` bodies, not helpers
 //! defined alongside them.
 
+use domain::normalised::StatedZones;
 use std::{collections::HashMap, sync::Arc, sync::Mutex};
 
 use application::{
@@ -567,7 +568,7 @@ impl Derivation {
                 runs: InMemoryRunLog::default(),
                 clock: FixedClock,
             },
-            zone,
+            StatedZones::throughout(zone),
         );
 
         let summary = normalisation

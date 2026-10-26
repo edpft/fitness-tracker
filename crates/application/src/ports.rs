@@ -37,8 +37,8 @@ use domain::landing::{
 };
 use domain::measure::{PositiveDuration, RepCount};
 use domain::normalised::{
-    NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
-    RefusalCount, RefusalKind, RefusalReason, WorkoutCount,
+    NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, RefusalKind,
+    RefusalReason, StatedZones, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::RerunOrdinal;
@@ -679,7 +679,7 @@ pub trait Translator {
     fn translate(
         &self,
         account: &Self::Account,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<Self::Entity>, NormalisationError>;
 }
 

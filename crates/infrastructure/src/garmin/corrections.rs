@@ -24,7 +24,7 @@
 use application::StoreError;
 use domain::{
     landing::SourceRecordId,
-    normalised::{CorrectedTerm, OperatorZone, SetFigures, SourceTerm},
+    normalised::{CorrectedTerm, SetFigures, SourceTerm, StatedZones},
 };
 use jiff::civil::{Date, Time};
 use sqlx::SqlitePool;
@@ -73,7 +73,7 @@ impl GarminRecordedSets {
     pub async fn recording(
         &self,
         recorded: SetFigures,
-        zone: &OperatorZone,
+        zones: &StatedZones,
         day: Date,
     ) -> Result<Vec<FoundSet>, StoreError> {
         let rows = sqlx::query!(
@@ -128,7 +128,7 @@ impl GarminRecordedSets {
                 };
                 // A set whose start will not read is a set the derivation
                 // refuses, so it is not a candidate here either.
-                let Ok(at) = started(stamp, zone) else {
+                let Ok(at) = started(stamp, zones) else {
                     continue;
                 };
                 if at.wall_clock().date() != day {

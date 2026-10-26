@@ -9,6 +9,7 @@ use application::{
     devices::DeviceRegister,
     normalise::{Normalisation, NormalisationPorts},
 };
+use domain::normalised::StatedZones;
 use domain::{
     device::{Device, DeviceIdentifier, InUse, Measurand, Register, SerialNumber},
     landing::{
@@ -262,7 +263,7 @@ async fn derive(
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
-        zone.clone(),
+        StatedZones::throughout(zone.clone()),
     )
     .normalise(rederivation)
     .await?;
@@ -275,7 +276,7 @@ async fn derive(
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
-        zone,
+        StatedZones::throughout(zone),
     )
     .normalise(rederivation)
     .await?;

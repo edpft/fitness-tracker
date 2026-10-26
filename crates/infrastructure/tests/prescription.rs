@@ -11,6 +11,7 @@ use application::{
     normalise::{Normalisation, NormalisationPorts},
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
+use domain::normalised::StatedZones;
 use domain::prescription::{Block, PrescribedItem, SlotId, WeekKind};
 use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
@@ -59,7 +60,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: corpus::FixedClock,
         },
-        corpus::zone()?,
+        StatedZones::throughout(corpus::zone()?),
     );
     let _summary: NormalisationSummary = normalisation
         .normalise(application::Rederivation::Whole)

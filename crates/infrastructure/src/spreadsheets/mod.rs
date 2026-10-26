@@ -9,7 +9,7 @@ use domain::{
     body::ManualWeighIn,
     gym::{Logged, ManualGymSession},
     landing::{FileProvenance, LandedRecord, SourceRecordId},
-    normalised::{NormalisedEntity, OperatorZone, Refusal, RefusalLocus, RefusalReason},
+    normalised::{NormalisedEntity, Refusal, RefusalLocus, RefusalReason, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
@@ -165,7 +165,7 @@ impl Translator for SpreadsheetTranslator {
     fn translate(
         &self,
         workbook: &Workbook,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<SpreadsheetEntity>, NormalisationError> {
         translate_with(workbook, "weigh-ins or gym sessions", |copies, scribes| {
             let mut entities = Vec::new();

@@ -15,7 +15,7 @@ use domain::{
     device::Sighting,
     gym::MeasuredGymSession,
     landing::{LandingRecordId, SourceRecordId},
-    normalised::{NormalisedEntity, OperatorZone},
+    normalised::{NormalisedEntity, StatedZones},
     sequence::NonEmpty,
 };
 
@@ -76,11 +76,11 @@ impl Translator for GarminActivityTranslator {
     fn translate(
         &self,
         account: &ActivityAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<GarminActivityEntity>, NormalisationError> {
-        let gym = self.gym.translate(account, zone)?;
+        let gym = self.gym.translate(account, zones)?;
         let record = account.activity();
-        let devices = NonEmpty::new(sightings(account, zone))
+        let devices = NonEmpty::new(sightings(account, zones))
             .ok()
             .map(|sightings| {
                 GarminActivityEntity::Devices(Box::new(ActivityDevices {

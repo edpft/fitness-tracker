@@ -14,7 +14,7 @@ use domain::{
     device::DeviceIdentifier,
     landing::{EventKind, LandedRecord},
     measure::BeatsPerMinute,
-    normalised::{OperatorZone, RefusalLocus, RefusalReason},
+    normalised::{RefusalLocus, RefusalReason, StatedZones},
 };
 use jiff::civil::Date;
 use serde::Deserialize;
@@ -77,7 +77,7 @@ impl Translator for GarminRestingHeartRateTranslator {
     fn translate(
         &self,
         account: &DayAccount,
-        _zone: &OperatorZone,
+        _zones: &StatedZones,
     ) -> Result<Translation<RestingHeartRate>, NormalisationError> {
         let record = account.day();
         let mut scribe = Scribe::new(record);

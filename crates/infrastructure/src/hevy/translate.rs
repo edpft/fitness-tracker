@@ -33,7 +33,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord},
     measure::{Distance, Duration, Kg, Metres, PositiveDuration, RepCount},
-    normalised::{EditOverlay, OperatorZone, Refusal, RefusalLocus, RefusalReason, StartedAt},
+    normalised::{EditOverlay, Refusal, RefusalLocus, RefusalReason, StatedZones},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
 };
@@ -79,7 +79,7 @@ impl Translator for HevySessionTranslator {
     fn translate(
         &self,
         account: &SessionAccount,
-        zone: &OperatorZone,
+        zones: &StatedZones,
     ) -> Result<Translation<PerformedGymSession>, NormalisationError> {
         // Anchored to the session's first workout, for a session-wide refusal
         // that belongs to no one part. A refusal has to point the operator at
@@ -131,7 +131,7 @@ impl Translator for HevySessionTranslator {
 
         for record in account.workouts().iter() {
             let mut scribe = Scribe::new(record);
-            match Self::workout(record, zone, &self.overlay, &mut scribe)? {
+            match Self::workout(record, zones, &self.overlay, &mut scribe)? {
                 Some(workout) => workouts.push(workout),
                 None => refused = true,
             }
@@ -166,7 +166,7 @@ impl HevySessionTranslator {
     /// caller refuse the session without inventing a reason for it.
     fn workout(
         record: &LandedRecord,
-        zone: &OperatorZone,
+        zones: &StatedZones,
         overlay: &EditOverlay,
         scribe: &mut Scribe,
     ) -> Result<Option<GymWorkout>, NormalisationError> {
@@ -232,7 +232,7 @@ impl HevySessionTranslator {
 
         Ok(Some(GymWorkout::new(
             items,
-            StartedAt::new(instant, zone.clone()),
+            zones.started_at(instant),
             duration,
             record.provenance().clone(),
             record.source_record_id().clone(),

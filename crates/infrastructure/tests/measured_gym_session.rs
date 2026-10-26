@@ -12,6 +12,7 @@ use application::{
     normalise::{Normalisation, NormalisationPorts},
     ports::{SourceAccount, Translator},
 };
+use domain::normalised::StatedZones;
 use domain::{
     gym::{Guess, GuessedExercise, Load, MeasuredGymSession, RepsExercise},
     landing::{
@@ -168,8 +169,10 @@ fn translate_with(
     let [account] = accounts.as_slice() else {
         return Err(format!("{} accounts, not one", accounts.len()).into());
     };
-    Ok(GarminGymTranslator::correcting(overlay.clone())
-        .translate(account, &OperatorZone::try_from("Europe/London")?)?)
+    Ok(GarminGymTranslator::correcting(overlay.clone()).translate(
+        account,
+        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
+    )?)
 }
 
 fn session_for(activity: &Value, sets: Option<&Value>) -> Result<MeasuredGymSession, Failure> {
@@ -354,7 +357,7 @@ async fn derive(pool: &SqlitePool) -> Result<application::NormalisationSummary, 
             runs: SqliteNormalisationRunLog::new(pool.clone()),
             clock: FixedClock,
         },
-        OperatorZone::try_from("Europe/London")?,
+        StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
     );
     Ok(normalisation
         .normalise(application::Rederivation::Whole)
@@ -1158,7 +1161,7 @@ fn a_withdrawn_activity_withdraws_its_session() {
 
     let zone = OperatorZone::try_from("Europe/London").expect("a zone");
     match GarminGymTranslator::default()
-        .translate(account, &zone)
+        .translate(account, &StatedZones::throughout(zone))
         .expect("a translation")
     {
         Translation::Retraction { of } => assert_eq!(of.as_str(), id),

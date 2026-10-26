@@ -3,6 +3,7 @@
 //! the operator's account serves.
 
 use application::{Translation, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     body::{BodyScanWeighIn, Rhythm},
     landing::{
@@ -111,7 +112,10 @@ fn translate(payloads: &[Value]) -> Result<Translation<BodyScanWeighIn>, Failure
     let [account] = accounts.as_slice() else {
         return Err(format!("{} weigh-ins, not one", accounts.len()).into());
     };
-    Ok(WithingsWeighInTranslator.translate(account, &OperatorZone::try_from("UTC")?)?)
+    Ok(WithingsWeighInTranslator.translate(
+        account,
+        &StatedZones::throughout(OperatorZone::try_from("UTC")?),
+    )?)
 }
 
 fn refused_for(payloads: &[Value]) -> Result<RefusalReason, Failure> {
@@ -281,7 +285,7 @@ async fn derive(
             runs: infrastructure::SqliteNormalisationRunLog::new(pool.clone()),
             clock: EpochClock,
         },
-        OperatorZone::try_from("Europe/London")?,
+        StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
     )
     .normalise(rederivation)
     .await?;

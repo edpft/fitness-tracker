@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   timezone    AS \"timezone!: String\"\n            FROM operator_settings\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operator_settings",
+            "name": "authored_at"
+          }
+        }
+      },
+      {
+        "name": "timezone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operator_settings",
+            "name": "timezone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ef1948c3d7f0b16fef19e32684adcf79b7df5d9eafd0cdace02d4d0172b95c3a"
+}

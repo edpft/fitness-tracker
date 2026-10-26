@@ -6,6 +6,7 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use application::{NormalisationError, Translation, ports::Translator};
+use domain::normalised::StatedZones;
 use domain::{
     gym::{ManualExercise, ManualGymSession, ManualItem, ManualSet, Performed},
     landing::{
@@ -62,7 +63,7 @@ fn translate(
     let Some(exports) = Exports::gather(exports).pop() else {
         return Err("no exports".into());
     };
-    Ok(BtwbTranslator.translate(&exports, &zone))
+    Ok(BtwbTranslator.translate(&exports, &StatedZones::throughout(zone)))
 }
 
 fn set<M: std::fmt::Display>(set: &ManualSet<M>) -> String {
@@ -262,7 +263,7 @@ async fn derive(
             runs: infrastructure::SqliteNormalisationRunLog::new(pool.clone()),
             clock: EpochClock,
         },
-        OperatorZone::try_from("Europe/London")?,
+        StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
     )
     .normalise(rederivation)
     .await?;
