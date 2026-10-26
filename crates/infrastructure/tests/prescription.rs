@@ -12,7 +12,7 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::normalised::StatedZones;
-use domain::prescription::{Block, PrescribedItem, SlotId, WeekKind};
+use domain::prescription::{PrescribedItem, Section, SlotId, WeekKind};
 use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
@@ -133,10 +133,10 @@ fn a_workout_is_issued_in_fatigue_order() {
     assert!(matches!(issued.workout.week(), WeekKind::Climbing(_)));
 
     // Blocks never go backwards through the session.
-    let mut blocks: Vec<Block> = Vec::new();
+    let mut blocks: Vec<Section> = Vec::new();
     for item in issued.workout.shape().items().iter() {
         for slot in item.slots() {
-            let block = slot.block();
+            let block = slot.section();
             if blocks.last() != Some(&block) {
                 blocks.push(block);
             }

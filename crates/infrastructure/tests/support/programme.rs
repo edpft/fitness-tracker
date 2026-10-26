@@ -618,8 +618,8 @@ pub fn primary_does_not_fill_its_slot()
 }
 
 /// A block that rests the same however its work is grouped.
-const fn flat(seconds: u64) -> domain::prescription::BlockRest {
-    domain::prescription::BlockRest {
+const fn flat(seconds: u64) -> domain::prescription::SectionRest {
+    domain::prescription::SectionRest {
         between_sets: domain::prescription::Target::Exactly(
             domain::measure::Duration::from_seconds(seconds),
         ),
@@ -633,7 +633,7 @@ fn grouped(
     high: u64,
     superset_low: u64,
     superset_high: u64,
-) -> Result<domain::prescription::BlockRest, ProgrammeFixtureError> {
+) -> Result<domain::prescription::SectionRest, ProgrammeFixtureError> {
     let span = |low: u64, high: u64| {
         domain::prescription::Target::between(
             domain::measure::Duration::from_seconds(low),
@@ -641,7 +641,7 @@ fn grouped(
         )
         .ok_or_else(|| invalid("a rest range that does not span"))
     };
-    Ok(domain::prescription::BlockRest {
+    Ok(domain::prescription::SectionRest {
         between_sets: span(low, high)?,
         after_superset: Some(span(superset_low, superset_high)?),
     })

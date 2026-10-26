@@ -27,13 +27,13 @@
 use crate::measure::{Duration, Spans};
 
 use super::{
-    shape::{Block, PrescribedExercise, PrescribedItem, SlotId, WorkoutShape},
+    shape::{PrescribedExercise, PrescribedItem, Section, SlotId, WorkoutShape},
     target::{PrescribedSet, Target},
 };
 
 /// What to rest, for one block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BlockRest {
+pub struct SectionRest {
     /// After a set of an exercise that stands on its own.
     pub between_sets: Target<Duration>,
     /// After the set a supersetted group ends on.
@@ -45,7 +45,7 @@ pub struct BlockRest {
     pub after_superset: Option<Target<Duration>>,
 }
 
-impl BlockRest {
+impl SectionRest {
     /// The rest this block instructs at the end of an item.
     const fn ending(self, supersetted: bool) -> Target<Duration> {
         match (supersetted, self.after_superset) {
@@ -73,21 +73,21 @@ enum Ending {
 /// [`super::parameters::AccessoryScheme`] is stated per block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RestScheme {
-    pub plyometric: BlockRest,
-    pub power: BlockRest,
-    pub strength: BlockRest,
-    pub hypertrophy: BlockRest,
-    pub mobility: BlockRest,
+    pub plyometric: SectionRest,
+    pub power: SectionRest,
+    pub strength: SectionRest,
+    pub hypertrophy: SectionRest,
+    pub mobility: SectionRest,
 }
 
 impl RestScheme {
-    pub const fn of(&self, block: Block) -> BlockRest {
-        match block {
-            Block::Plyometric => self.plyometric,
-            Block::Power => self.power,
-            Block::Strength => self.strength,
-            Block::Hypertrophy => self.hypertrophy,
-            Block::Mobility => self.mobility,
+    pub const fn of(&self, section: Section) -> SectionRest {
+        match section {
+            Section::Plyometric => self.plyometric,
+            Section::Power => self.power,
+            Section::Strength => self.strength,
+            Section::Hypertrophy => self.hypertrophy,
+            Section::Mobility => self.mobility,
         }
     }
 }
@@ -135,7 +135,7 @@ fn exercise_rested(
     scheme: &RestScheme,
     ending: Ending,
 ) -> PrescribedExercise {
-    let block = scheme.of(slot.block());
+    let block = scheme.of(slot.section());
     let rest = match ending {
         Ending::StraightOn => Target::Exactly(Duration::ZERO),
         Ending::Ends { supersetted } => block.ending(supersetted),
@@ -172,7 +172,7 @@ fn exercise_rested(
 fn sets_rested<M: Spans + Copy>(
     sets: &crate::sequence::NonEmpty<PrescribedSet<M>>,
     rest: Target<Duration>,
-    block: BlockRest,
+    block: SectionRest,
 ) -> crate::sequence::NonEmpty<PrescribedSet<M>> {
     let last_warmup = sets
         .iter()

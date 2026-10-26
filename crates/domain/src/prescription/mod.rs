@@ -52,10 +52,9 @@ pub mod workout;
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance, in_force};
 pub use attempts::Attempts;
 pub use authored::{Authored, AuthoringError};
-// `block::Block` is deliberately not re-exported here: `shape::Block` already
-// holds that name at the crate root, and the two are different things — a group
-// of items in one session, and a periodised plan. Reach the plan through
-// `prescription::block::Block`, which is what its own module doc calls it.
+// `block::Block` is reached through `prescription::block::Block`, which is what
+// its own module doc calls it. A group of items in one session is a `Section`
+// (operator, 2026-10-26), which is what freed the word for periodisation.
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
 pub use change::{FillChange, FillChanges};
 pub use delivery::{
@@ -75,7 +74,7 @@ pub use programming::{
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
-pub use rest::{BlockRest, RestScheme, rested};
+pub use rest::{RestScheme, SectionRest, rested};
 pub use sbs::{
     CompletedSet, InvalidSbs, Sbs, SbsDay, SbsSession, achieved, advance, day, maximum_after,
     training_max_share, working_load,
@@ -90,7 +89,7 @@ pub use schedule::{
     WeekIndex, WeekKind,
 };
 pub use shape::{
-    Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,
+    PrescribedExercise, PrescribedItem, PrescribedSuperset, Section, SlotId, SupersetMember,
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};

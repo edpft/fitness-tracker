@@ -29,7 +29,7 @@ use domain::{
     measure::{Kg, RepCount},
     normalised::{OperatorZone, StartedAt},
     prescription::{
-        Anchor, AnchorProvenance, Block, GymMesocycle, PrescribedExercise, PrimaryPattern, Skip,
+        Anchor, AnchorProvenance, GymMesocycle, PrescribedExercise, PrimaryPattern, Section, Skip,
         Test, Tested, authored::Shape, target::Prescribed,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
@@ -228,7 +228,7 @@ fn primary_of(prescription: &application::Prescription) -> Option<&PrescribedExe
         .find(|item| {
             item.slots()
                 .next()
-                .is_some_and(|slot| slot.block() == Block::Strength)
+                .is_some_and(|slot| slot.section() == Section::Strength)
         })
         .and_then(|item| item.exercises().next())
 }
@@ -334,7 +334,7 @@ fn the_primary_slot_is_the_front_squat() {
                 .items()
                 .iter()
                 .filter_map(|item| item.slots().next())
-                .find(|slot| slot.block() == Block::Strength)
+                .find(|slot| slot.section() == Section::Strength)
                 .map(|slot| slot.to_string())
                 .as_deref(),
             Some("knee_dominant"),

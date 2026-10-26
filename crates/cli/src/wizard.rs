@@ -42,12 +42,11 @@ use domain::{
     measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
-    // `prescription::Block` is the *slot* block — plyometric, power, strength.
-    // The periodised one is a different type with the same word on it, so it is
-    // named for what it holds: the plan a duration divides into.
+    // The periodised block, named for what it holds: the plan a duration
+    // divides into.
     prescription::{
-        Anchor, AnchorProvenance, Authored, Block, ByIntensity, Calendar, EntryTest, Fill,
-        GenerationParameters, GymMesocycle, InvalidBlock, LoadSteps, PrimaryPattern, Skip,
+        Anchor, AnchorProvenance, Authored, ByIntensity, Calendar, EntryTest, Fill,
+        GenerationParameters, GymMesocycle, InvalidBlock, LoadSteps, PrimaryPattern, Section, Skip,
         SlotFills, SlotId, StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
@@ -284,7 +283,7 @@ async fn ask_single(
 
     // A hold is the authored duration on every session, so there is nothing to
     // alternate: asking would be offering a distinction that does not exist.
-    if matches!(slot.block(), Block::Mobility) {
+    if matches!(slot.section(), Section::Mobility) {
         return Ok(Fill::Same(exercise));
     }
 

@@ -11,23 +11,23 @@ use domain::{
     },
     measure::{Duration, Kg, RepCount},
     prescription::{
-        BlockRest, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
-        RestScheme, SlotId, SupersetMember, Target, WorkoutShape, rested,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, RestScheme,
+        SectionRest, SlotId, SupersetMember, Target, WorkoutShape, rested,
     },
     sequence::{AtLeastTwo, NonEmpty},
 };
 
 type Built<T> = Result<T, Box<dyn std::error::Error>>;
 
-const fn flat(seconds: u64) -> BlockRest {
-    BlockRest {
+const fn flat(seconds: u64) -> SectionRest {
+    SectionRest {
         between_sets: Target::Exactly(Duration::from_seconds(seconds)),
         after_superset: None,
     }
 }
 
-fn grouped(low: u64, high: u64, ss_low: u64, ss_high: u64) -> Built<BlockRest> {
-    Ok(BlockRest {
+fn grouped(low: u64, high: u64, ss_low: u64, ss_high: u64) -> Built<SectionRest> {
+    Ok(SectionRest {
         between_sets: span(low, high)?,
         after_superset: Some(span(ss_low, ss_high)?),
     })

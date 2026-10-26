@@ -26,7 +26,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::{
     measure::{Kg, RepCount},
-    prescription::{Block, ByIntensity, Percentage, SlotId, Target},
+    prescription::{ByIntensity, Percentage, Section, SlotId, Target},
     sequence::NonEmpty,
 };
 
@@ -143,10 +143,12 @@ impl Programming {
     /// otherwise its block's.
     #[must_use]
     pub fn scheme_for(&self, slot: SlotId) -> &AccessoryScheme {
-        self.slots.get(&slot).unwrap_or_else(|| match slot.block() {
-            Block::Hypertrophy => &self.hypertrophy,
-            _ => &self.strength,
-        })
+        self.slots
+            .get(&slot)
+            .unwrap_or_else(|| match slot.section() {
+                Section::Hypertrophy => &self.hypertrophy,
+                _ => &self.strength,
+            })
     }
 }
 

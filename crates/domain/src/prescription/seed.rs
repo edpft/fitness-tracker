@@ -30,7 +30,7 @@ use crate::{
     gym::exercise::Implement,
     measure::{Duration, Kg},
     prescription::{
-        BlockRest, GenerationParameters, LoadSteps, Percentage, RestScheme, Scales, Step, Target,
+        GenerationParameters, LoadSteps, Percentage, RestScheme, Scales, SectionRest, Step, Target,
     },
 };
 
@@ -63,8 +63,8 @@ fn mass(what: &str, kilos: &str) -> Result<Kg, InvalidSeed> {
 }
 
 /// A rest of one duration.
-const fn exactly(seconds: u64) -> BlockRest {
-    BlockRest {
+const fn exactly(seconds: u64) -> SectionRest {
+    SectionRest {
         between_sets: Target::Exactly(Duration::from_seconds(seconds)),
         after_superset: None,
     }
@@ -75,12 +75,12 @@ const fn exactly(seconds: u64) -> BlockRest {
 /// **The domain holds a span rather than two bounds**, so an inverted range is
 /// not expressible past this point — which is why the seed states `120, 180`
 /// and gets `None` rather than a backwards rest if anyone swaps them.
-fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRest, InvalidSeed> {
+fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<SectionRest, InvalidSeed> {
     let span = |low: u64, high: u64| {
         Target::between(Duration::from_seconds(low), Duration::from_seconds(high))
             .ok_or_else(|| wrong(what, "a rest range runs low-high and must span"))
     };
-    Ok(BlockRest {
+    Ok(SectionRest {
         between_sets: span(between.0, between.1)?,
         after_superset: Some(span(after.0, after.1)?),
     })

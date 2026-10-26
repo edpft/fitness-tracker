@@ -100,7 +100,7 @@ fn non_empty<T: std::fmt::Debug + 'static>(
 /// and a session that ignored it would not be one performed against the
 /// template.
 fn exercise_for(slot: SlotId) -> BoxedStrategy<CanonicalExercise> {
-    if slot.block() == domain::prescription::Block::Mobility {
+    if slot.section() == domain::prescription::Section::Mobility {
         let seconds = (1_u64..3_600).prop_map(Duration::from_seconds);
         (
             0_usize..DurationExercise::ALL.len(),

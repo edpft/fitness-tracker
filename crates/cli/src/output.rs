@@ -1473,9 +1473,9 @@ pub fn prescribed_session(issued: &application::Prescription) {
         let Some(slot) = item.slots().next() else {
             continue;
         };
-        if block != Some(slot.block()) {
-            block = Some(slot.block());
-            println!("  {}", slot.block());
+        if block != Some(slot.section()) {
+            block = Some(slot.section());
+            println!("  {}", slot.section());
         }
 
         let members: Vec<_> = item.exercises().collect();

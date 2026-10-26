@@ -21,11 +21,12 @@ use domain::{
     measure::{Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
     prescription::{
-        Anchor, AnchorProvenance, Attempts, Block, BlockPeriodisation, BlockWeek, DerivedFrom,
+        Anchor, AnchorProvenance, Attempts, BlockPeriodisation, BlockWeek, DerivedFrom,
         GatingTopSet, GenerationParameters, GymMesocycle, Ladder, Linear, LoadSteps, Opening,
         Position, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
         PrescribedWorkout, PrescriptionState, Programming, Progress, Progression, Sbs, SbsDay,
-        SbsSession, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan, WorkoutShape, anchor,
+        SbsSession, Section, SlotId, SupersetMember, Target, Test, WeekKind, WeekPlan,
+        WorkoutShape, anchor,
         linear::SlotContent,
         programming, progress_after, rep_max, rested,
         sbs::chart::{
@@ -1945,10 +1946,10 @@ enum Scheme {
 }
 
 const fn scheme_of(slot: SlotId) -> Scheme {
-    match slot.block() {
-        Block::Plyometric | Block::Power => Scheme::Static,
-        Block::Mobility => Scheme::Hold,
-        Block::Strength | Block::Hypertrophy => Scheme::DoubleProgression,
+    match slot.section() {
+        Section::Plyometric | Section::Power => Scheme::Static,
+        Section::Mobility => Scheme::Hold,
+        Section::Strength | Section::Hypertrophy => Scheme::DoubleProgression,
     }
 }
 

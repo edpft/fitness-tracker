@@ -13,7 +13,7 @@ use application::{GenerationParameterStore, StoreError};
 use domain::{
     gym::equipment::Statement,
     measure::{Duration, Kg},
-    prescription::{BlockRest, GenerationParameters, Percentage, RestScheme, Scales, Target},
+    prescription::{GenerationParameters, Percentage, RestScheme, Scales, SectionRest, Target},
 };
 use jiff::Timestamp;
 use sqlx::SqlitePool;
@@ -50,10 +50,10 @@ fn grams_from_storage(grams: i64) -> Result<Kg, StoreError> {
 
 /// One block's rest, as the four columns the schema keeps.
 ///
-/// The inverse of [`block_rest`]. An exact rest writes no `high`, and a block
+/// The inverse of [`section_rest`]. An exact rest writes no `high`, and a block
 /// that states no superset rest writes no superset pair at all — null there
 /// means "the same however it is grouped", which is a different fact from zero.
-fn rest_columns(rest: BlockRest) -> Result<RestColumns, StoreError> {
+fn rest_columns(rest: SectionRest) -> Result<RestColumns, StoreError> {
     let (low, high) = rest_bounds(rest.between_sets)?;
     let (superset_low, superset_high) = match rest.after_superset {
         Some(grouped) => {
@@ -100,13 +100,13 @@ fn rest_bounds(rest: Target<Duration>) -> Result<(i64, Option<i64>), StoreError>
 /// the block rests the same however its work is grouped — which is not the same
 /// as resting for zero, and is why the superset pair is nullable rather than
 /// defaulted.
-fn block_rest(
+fn section_rest(
     low: i64,
     high: Option<i64>,
     superset_low: Option<i64>,
     superset_high: Option<i64>,
-) -> Result<BlockRest, StoreError> {
-    Ok(BlockRest {
+) -> Result<SectionRest, StoreError> {
+    Ok(SectionRest {
         between_sets: rest_target(low, high)?,
         after_superset: match superset_low {
             Some(low) => Some(rest_target(low, superset_high)?),
@@ -222,31 +222,31 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
             authored_at,
             GenerationParameters {
                 rest: RestScheme {
-                    plyometric: block_rest(
+                    plyometric: section_rest(
                         row.rest_plyometric_low,
                         row.rest_plyometric_high,
                         row.rest_plyometric_ss_low,
                         row.rest_plyometric_ss_high,
                     )?,
-                    power: block_rest(
+                    power: section_rest(
                         row.rest_power_low,
                         row.rest_power_high,
                         row.rest_power_ss_low,
                         row.rest_power_ss_high,
                     )?,
-                    strength: block_rest(
+                    strength: section_rest(
                         row.rest_strength_low,
                         row.rest_strength_high,
                         row.rest_strength_ss_low,
                         row.rest_strength_ss_high,
                     )?,
-                    hypertrophy: block_rest(
+                    hypertrophy: section_rest(
                         row.rest_hypertrophy_low,
                         row.rest_hypertrophy_high,
                         row.rest_hypertrophy_ss_low,
                         row.rest_hypertrophy_ss_high,
                     )?,
-                    mobility: block_rest(
+                    mobility: section_rest(
                         row.rest_mobility_low,
                         row.rest_mobility_high,
                         row.rest_mobility_ss_low,
