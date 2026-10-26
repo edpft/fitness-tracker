@@ -127,20 +127,24 @@ impl Heart {
             })
     }
 
-    /// The text of one answer from `/v2/heart`.
-    async fn post(&self, form: &[(&str, String)]) -> Result<String, SourceError> {
+    /// One answer from `/v2/heart`, its envelope's `body` handed to `read`.
+    async fn post<T>(
+        &self,
+        form: &[(&str, String)],
+        read: impl FnOnce(&RawValue) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .post(format!("{}{HEART_PATH}", self.api_base))
             .bearer_auth(bearer)
-            .form(form)
-            .send()
+            .form(form);
+        super::http::ask(request)
+            .await?
+            .read(|reply| {
+                super::body_of(super::answer(reply, HEART_PATH)?, HEART_PATH).and_then(read)
+            })
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-        super::answer(response, HEART_PATH).await
     }
 }
 
@@ -197,56 +201,59 @@ impl WorkoutEventSource for WithingsEcgs {
             form.push(("offset", position.offset.to_string()));
         }
 
-        let text = self.heart.post(&form).await?;
-        let page: Page<'_> = serde_json::from_str(super::body_of(&text, HEART_PATH)?.get())
-            .map_err(|error| SourceError::Malformed {
-                detail: format!("{HEART_PATH} answered something unreadable: {error}"),
-            })?;
-        let endpoint = endpoint()?;
+        self.heart
+            .post(&form, |body| {
+                let page: Page<'_> =
+                    serde_json::from_str(body.get()).map_err(|error| SourceError::Malformed {
+                        detail: format!("{HEART_PATH} answered something unreadable: {error}"),
+                    })?;
+                let endpoint = endpoint()?;
 
-        let mut events = Vec::with_capacity(page.series.len());
-        for raw in page.series {
-            let identity: Identity =
-                serde_json::from_str(raw.get()).map_err(|error| SourceError::Malformed {
-                    detail: format!("an ECG has no readable identity: {error}"),
-                })?;
-            let occurred_at = jiff::Timestamp::from_second(identity.timestamp)
-                .ok()
-                .map(EventTime::from);
-            let source_record_id =
-                SourceRecordId::try_from(record_id_of(&identity)).map_err(|error| {
-                    SourceError::Malformed {
-                        detail: error.to_string(),
+                let mut events = Vec::with_capacity(page.series.len());
+                for raw in page.series {
+                    let identity: Identity = serde_json::from_str(raw.get()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: format!("an ECG has no readable identity: {error}"),
+                        }
+                    })?;
+                    let occurred_at = jiff::Timestamp::from_second(identity.timestamp)
+                        .ok()
+                        .map(EventTime::from);
+                    let source_record_id = SourceRecordId::try_from(record_id_of(&identity))
+                        .map_err(|error| SourceError::Malformed {
+                            detail: error.to_string(),
+                        })?;
+
+                    events.push(crate::revision::json_event(
+                        source_record_id,
+                        // **Always `Updated`**, as for measure groups: the list serves
+                        // a recording as it now stands.
+                        EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
+                            .into(),
+                        payload_of(raw.get())?,
+                    ));
+                }
+
+                let resume = match (super::measurements::is_more(&page.more), page.offset) {
+                    (true, Some(offset)) if offset > position.offset => Some(EcgPage {
+                        offset,
+                        start: position.start,
+                        end: position.end,
+                    }),
+                    (true, _) => {
+                        return Err(SourceError::Malformed {
+                            detail: format!(
+                                "{HEART_PATH} said there was more without an offset past {}",
+                                position.offset
+                            ),
+                        });
                     }
-                })?;
+                    (false, _) => None,
+                };
 
-            events.push(crate::revision::json_event(
-                source_record_id,
-                // **Always `Updated`**, as for measure groups: the list serves
-                // a recording as it now stands.
-                EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at).into(),
-                payload_of(raw.get())?,
-            ));
-        }
-
-        let resume = match (super::measurements::is_more(&page.more), page.offset) {
-            (true, Some(offset)) if offset > position.offset => Some(EcgPage {
-                offset,
-                start: position.start,
-                end: position.end,
-            }),
-            (true, _) => {
-                return Err(SourceError::Malformed {
-                    detail: format!(
-                        "{HEART_PATH} said there was more without an offset past {}",
-                        position.offset
-                    ),
-                });
-            }
-            (false, _) => None,
-        };
-
-        Ok(EventBatch { events, resume })
+                Ok(EventBatch { events, resume })
+            })
+            .await
     }
 }
 
@@ -291,15 +298,17 @@ impl WorkoutEventSource for WithingsEcgSignals {
                 tokio::time::sleep(BETWEEN_REQUESTS).await;
             }
 
-            let text = self
+            let payload = self
                 .ecgs
                 .heart
-                .post(&[
-                    ("action", "get".to_owned()),
-                    ("signalid", ecg.signalid.to_string()),
-                ])
+                .post(
+                    &[
+                        ("action", "get".to_owned()),
+                        ("signalid", ecg.signalid.to_string()),
+                    ],
+                    |body| payload_of(body.get()),
+                )
                 .await?;
-            let body = super::body_of(&text, HEART_PATH)?;
 
             // **The recording's time, not the request's**, as Garmin's files
             // take theirs: the resumption point advances on what the list
@@ -312,7 +321,7 @@ impl WorkoutEventSource for WithingsEcgSignals {
                     entry.provenance.occurred_at(),
                 )
                 .into(),
-                payload_of(body.get())?,
+                payload,
             ));
         }
 

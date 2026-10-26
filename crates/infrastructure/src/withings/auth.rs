@@ -279,32 +279,36 @@ impl WithingsAuth {
         ];
         form.extend_from_slice(grant);
 
-        let response = self
+        let request = self
             .http()?
             .post(format!("{}{TOKEN_PATH}", self.api_base))
-            .form(&form)
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-        let text = super::answer(response, TOKEN_PATH).await?;
-        let issued: Issued = serde_json::from_str(super::body_of(&text, TOKEN_PATH)?.get())
-            .map_err(|error| SourceError::Malformed {
-                detail: format!("{TOKEN_PATH} answered without a usable token: {error}"),
-            })?;
+            .form(&form);
 
-        let expires_at = jiff::Timestamp::now()
-            .checked_add(jiff::SignedDuration::from_secs(issued.expires_in))
-            .map_err(|error| SourceError::Malformed {
-                detail: format!("{TOKEN_PATH} gave an expiry this clock cannot hold: {error}"),
-            })?;
-        Ok(Token::new(
-            issued.access_token,
-            Some(issued.refresh_token),
-            expires_at,
-            self.client.digest(),
-        ))
+        super::http::ask(request)
+            .await?
+            .read(|reply| {
+                let issued: Issued = serde_json::from_str(
+                    super::body_of(super::answer(reply, TOKEN_PATH)?, TOKEN_PATH)?.get(),
+                )
+                .map_err(|error| SourceError::Malformed {
+                    detail: format!("{TOKEN_PATH} answered without a usable token: {error}"),
+                })?;
+
+                let expires_at = jiff::Timestamp::now()
+                    .checked_add(jiff::SignedDuration::from_secs(issued.expires_in))
+                    .map_err(|error| SourceError::Malformed {
+                        detail: format!(
+                            "{TOKEN_PATH} gave an expiry this clock cannot hold: {error}"
+                        ),
+                    })?;
+                Ok(Token::new(
+                    issued.access_token,
+                    Some(issued.refresh_token),
+                    expires_at,
+                    self.client.digest(),
+                ))
+            })
+            .await
     }
 }
 

@@ -39,6 +39,7 @@ use jiff::civil::Date;
 use serde::Deserialize;
 
 use super::auth::GarminAuth;
+use crate::http;
 
 /// Where a night's HRV is served from, before the date is appended.
 const HRV_PATH: &str = "/hrv-service/hrv";
@@ -127,66 +128,71 @@ impl GarminHrv {
         endpoint: &Endpoint,
     ) -> Result<Option<SourceEvent>, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}{HRV_PATH}/{date}", self.api_base))
-            .bearer_auth(bearer)
-            .send()
+            .bearer_auth(bearer);
+
+        http::ask(request)
+            .await?
+            .read(|reply| {
+                let status = reply.status();
+                // **A night Garmin has nothing for is not a failure**, and which way it
+                // says so is not yet known: an unworn night, a date before the account
+                // existed and a date before HRV Status shipped are three cases, and no
+                // reachable documentation says whether they answer 404, 204, or a 200
+                // with an empty body. All of them are read as "no reading" here, and the
+                // first live run is what settles which actually occur.
+                if status == reqwest::StatusCode::NOT_FOUND
+                    || status == reqwest::StatusCode::NO_CONTENT
+                {
+                    return Ok(None);
+                }
+                let text = super::answer(reply, HRV_PATH)?;
+
+                // A 200 whose body is `null` or `{}` is the third way of saying it.
+                let trimmed = text.trim();
+                if trimmed.is_empty() || trimmed == "null" || trimmed == "{}" {
+                    return Ok(None);
+                }
+
+                let night: Night =
+                    serde_json::from_str(trimmed).map_err(|error| SourceError::Malformed {
+                        detail: format!("{HRV_PATH}/{date} answered something unreadable: {error}"),
+                    })?;
+                if night.hrv_summary.is_none() && night.hrv_readings.is_empty() {
+                    return Ok(None);
+                }
+
+                // **The date asked for, not the one answered.** They agree, but the
+                // request is what makes this record addressable and the walk monotonic.
+                let source_record_id =
+                    SourceRecordId::try_from(date.to_string()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: error.to_string(),
+                        }
+                    })?;
+                let payload = RawPayload::try_from(trimmed.as_bytes()).map_err(|error| {
+                    SourceError::Malformed {
+                        detail: error.to_string(),
+                    }
+                })?;
+
+                Ok(Some(crate::revision::json_event(
+                    source_record_id,
+                    EventProvenance::new(
+                        endpoint.clone(),
+                        // **Always `Updated`**: the endpoint serves a night as it now
+                        // stands and has no event kinds. A night re-served after Garmin
+                        // revises it is a new record, and the digest decides.
+                        EventKind::Updated,
+                        Some(EventTime::from(midnight(date)?)),
+                    )
+                    .into(),
+                    payload,
+                )))
+            })
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-
-        let status = response.status();
-        // **A night Garmin has nothing for is not a failure**, and which way it
-        // says so is not yet known: an unworn night, a date before the account
-        // existed and a date before HRV Status shipped are three cases, and no
-        // reachable documentation says whether they answer 404, 204, or a 200
-        // with an empty body. All of them are read as "no reading" here, and the
-        // first live run is what settles which actually occur.
-        if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::NO_CONTENT {
-            return Ok(None);
-        }
-        let text = super::answer(response, HRV_PATH).await?;
-
-        // A 200 whose body is `null` or `{}` is the third way of saying it.
-        let trimmed = text.trim();
-        if trimmed.is_empty() || trimmed == "null" || trimmed == "{}" {
-            return Ok(None);
-        }
-
-        let night: Night =
-            serde_json::from_str(trimmed).map_err(|error| SourceError::Malformed {
-                detail: format!("{HRV_PATH}/{date} answered something unreadable: {error}"),
-            })?;
-        if night.hrv_summary.is_none() && night.hrv_readings.is_empty() {
-            return Ok(None);
-        }
-
-        // **The date asked for, not the one answered.** They agree, but the
-        // request is what makes this record addressable and the walk monotonic.
-        let source_record_id =
-            SourceRecordId::try_from(date.to_string()).map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
-        let payload =
-            RawPayload::try_from(trimmed.as_bytes()).map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
-
-        Ok(Some(crate::revision::json_event(
-            source_record_id,
-            EventProvenance::new(
-                endpoint.clone(),
-                // **Always `Updated`**: the endpoint serves a night as it now
-                // stands and has no event kinds. A night re-served after Garmin
-                // revises it is a new record, and the digest decides.
-                EventKind::Updated,
-                Some(EventTime::from(midnight(date)?)),
-            )
-            .into(),
-            payload,
-        )))
     }
 }
 

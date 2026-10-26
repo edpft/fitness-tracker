@@ -29,6 +29,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 
 use super::auth::PelotonAuth;
+use crate::http::{self, Reply};
 
 /// Peloton's GraphQL gateway.
 ///
@@ -238,35 +239,32 @@ impl PelotonStack {
     /// Send one document and read the `data` out of the answer.
     async fn ask<T: serde::de::DeserializeOwned>(&self, document: &str) -> Result<T, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .post(&self.gateway)
             .bearer_auth(bearer)
             .header("Peloton-Platform", "web")
-            .json(&serde_json::json!({ "query": document }))
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
+            .json(&serde_json::json!({ "query": document }));
 
-        let status = response.status();
+        http::ask(request)
+            .await?
+            .read(|reply| Self::data_in(reply))
+            .await
+    }
+
+    /// The `data` an answer from the gateway carries.
+    fn data_in<T: serde::de::DeserializeOwned>(reply: &Reply) -> Result<T, SourceError> {
+        let status = reply.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(SourceError::Unauthorised);
         }
-        let body = response
-            .text()
-            .await
-            .map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
 
         // **GraphQL answers 200 with an `errors` array**, and a 400 carries one
         // too. Reading the status alone would take "cannot query field" for
         // success, which is the whole family of faults this adapter has already
         // been caught by once.
         let envelope: Envelope<T> =
-            serde_json::from_str(&body).map_err(|error| SourceError::Malformed {
+            serde_json::from_slice(reply.body()).map_err(|error| SourceError::Malformed {
                 detail: format!("the gateway answered {status} with something unreadable: {error}"),
             })?;
         if let Some(errors) = envelope.errors.filter(|errors| !errors.is_empty()) {

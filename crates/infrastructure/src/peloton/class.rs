@@ -40,6 +40,8 @@ use domain::{
 };
 use serde::Deserialize;
 
+use crate::http;
+
 /// Peloton's own id for the *Cool Down Ride* class type.
 ///
 /// A source's identifier, so it lives with the source's adapter (§ II.3). Read
@@ -623,7 +625,7 @@ impl PelotonClasses {
         instructor: &str,
     ) -> Result<Option<ClassSummary>, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}/api/v2/ride/archived", self.api_base))
             .bearer_auth(bearer)
@@ -636,31 +638,24 @@ impl PelotonClasses {
                 ("sort_by", "original_air_time"),
                 ("desc", "true"),
                 ("limit", "1"),
-            ])
-            .send()
+            ]);
+        http::ask(request)
+            .await?
+            .read(|reply| {
+                let status = reply.status();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    return Err(SourceError::Unauthorised);
+                }
+                if !status.is_success() {
+                    return Err(SourceError::Unavailable {
+                        detail: format!(
+                            "the cool-down search for instructor {instructor} answered {status}"
+                        ),
+                    });
+                }
+                cool_down_from(instructor, &reply.text())
+            })
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-
-        let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(SourceError::Unauthorised);
-        }
-        if !status.is_success() {
-            return Err(SourceError::Unavailable {
-                detail: format!(
-                    "the cool-down search for instructor {instructor} answered {status}"
-                ),
-            });
-        }
-        let body = response
-            .text()
-            .await
-            .map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
-        cool_down_from(instructor, &body)
     }
 
     /// One page of every power zone class Peloton serves, newest first.
@@ -678,7 +673,7 @@ impl PelotonClasses {
     /// answers something this cannot read.
     pub async fn power_zone_page(&self, page: u32) -> Result<CataloguePage, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}/api/v2/ride/archived", self.api_base))
             .bearer_auth(bearer)
@@ -690,29 +685,24 @@ impl PelotonClasses {
                 ("desc", "true"),
                 ("limit", &CATALOGUE_PAGE.to_string()),
                 ("page", &page.to_string()),
-            ])
-            .send()
+            ]);
+        http::ask(request)
+            .await?
+            .read(|reply| {
+                let status = reply.status();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    return Err(SourceError::Unauthorised);
+                }
+                if !status.is_success() {
+                    return Err(SourceError::Unavailable {
+                        detail: format!(
+                            "page {page} of the power zone catalogue answered {status}"
+                        ),
+                    });
+                }
+                power_zone_from(&reply.text())
+            })
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-
-        let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(SourceError::Unauthorised);
-        }
-        if !status.is_success() {
-            return Err(SourceError::Unavailable {
-                detail: format!("page {page} of the power zone catalogue answered {status}"),
-            });
-        }
-        let body = response
-            .text()
-            .await
-            .map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
-        power_zone_from(&body)
     }
 
     /// What `/api/ride/{id}/details` serves for one class, as served.
@@ -727,8 +717,7 @@ impl PelotonClasses {
     ///
     /// [`SourceError::Unauthorised`] where the token is refused,
     /// [`SourceError::Unavailable`] where Peloton is not answering *or has no
-    /// such class*, and [`SourceError::Malformed`] where the body cannot be
-    /// read as text. Where those two need telling apart, which is the catalogue
+    /// such class*. Where those two need telling apart, which is the catalogue
     /// walk's whole question, use
     /// [`detail_if_served`](Self::detail_if_served).
     pub async fn detail(&self, id: &str) -> Result<String, SourceError> {
@@ -771,43 +760,36 @@ impl PelotonClasses {
     ///
     /// [`SourceError::Unauthorised`] where the token is refused — which is
     /// about the credential and not about the class —
-    /// [`SourceError::Unavailable`] where Peloton is not answering, is
-    /// throttling, or refuses with a 403, and [`SourceError::Malformed`] where
-    /// the body cannot be read as text.
+    /// and [`SourceError::Unavailable`] where Peloton is not answering, is
+    /// throttling, or refuses with a 403.
     pub async fn detail_if_served(&self, id: &str) -> Result<Option<String>, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}/api/ride/{id}/details", self.api_base))
             .bearer_auth(bearer)
-            .header("Peloton-Platform", "web")
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-        let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(SourceError::Unauthorised);
-        }
-        if matches!(
-            status,
-            reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
-        ) {
-            return Ok(None);
-        }
-        if !status.is_success() {
-            return Err(SourceError::Unavailable {
-                detail: format!("class {id} answered {status}"),
-            });
-        }
-        response
-            .text()
-            .await
-            .map(Some)
-            .map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
+            .header("Peloton-Platform", "web");
+        http::ask(request)
+            .await?
+            .read(|reply| {
+                let status = reply.status();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    return Err(SourceError::Unauthorised);
+                }
+                if matches!(
+                    status,
+                    reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
+                ) {
+                    return Ok(None);
+                }
+                if !status.is_success() {
+                    return Err(SourceError::Unavailable {
+                        detail: format!("class {id} answered {status}"),
+                    });
+                }
+                Ok(Some(reply.text()))
             })
+            .await
     }
 
     /// One class, derived.

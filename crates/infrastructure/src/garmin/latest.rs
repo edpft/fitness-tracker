@@ -88,9 +88,11 @@ impl WorkoutEventSource for GarminLatestOf {
     ) -> Result<EventBatch<()>, SourceError> {
         let malformed = |detail: String| SourceError::Malformed { detail };
         let name = self.connect.name().await?;
-        let body = self
+        let payload = self
             .connect
-            .get(&self.latest.path(&name, self.today), &[])
+            .get(&self.latest.path(&name, self.today), &[], |body| {
+                RawPayload::try_from(body).map_err(|error| malformed(error.to_string()))
+            })
             .await?;
         let endpoint = Endpoint::try_from(self.latest.endpoint())
             .map_err(|error| malformed(error.to_string()))?;
@@ -100,7 +102,7 @@ impl WorkoutEventSource for GarminLatestOf {
             SourceRecordId::try_from(name).map_err(|error| malformed(error.to_string()))?,
             // As it stands: no event, and no time it happened.
             EventProvenance::new(endpoint, EventKind::Updated, None).into(),
-            RawPayload::try_from(body).map_err(|error| malformed(error.to_string()))?,
+            payload,
         );
         Ok(EventBatch {
             events: vec![event],

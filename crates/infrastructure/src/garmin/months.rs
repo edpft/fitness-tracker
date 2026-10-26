@@ -89,13 +89,17 @@ impl GarminMonths {
     async fn month(&self, first: Date, endpoint: &Endpoint) -> Result<SourceEvent, SourceError> {
         let malformed = |detail: String| SourceError::Malformed { detail };
         let last = first.last_of_month();
-        let bytes = self.connect.get(&self.month.path(first, last), &[]).await?;
+        let payload = self
+            .connect
+            .get(&self.month.path(first, last), &[], |bytes| {
+                RawPayload::try_from(bytes).map_err(|error| malformed(error.to_string()))
+            })
+            .await?;
 
         // **The month asked for**, which is what makes the record addressable
         // and the walk monotonic.
         let source_record_id = SourceRecordId::try_from(first.strftime("%Y-%m").to_string())
             .map_err(|error| malformed(error.to_string()))?;
-        let payload = RawPayload::try_from(bytes).map_err(|error| malformed(error.to_string()))?;
         Ok(crate::revision::json_event(
             source_record_id,
             EventProvenance::new(

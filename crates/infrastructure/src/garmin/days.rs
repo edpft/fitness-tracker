@@ -189,8 +189,7 @@ impl GarminDays {
     async fn synced(&self) -> Result<Timestamp, SourceError> {
         let name = self.connect.name().await?;
         let (path, query) = GarminDay::DailySummary.request(self.today, Some(&name));
-        let bytes = self.connect.get(&path, &query).await?;
-        last_sync(&bytes)
+        self.connect.get(&path, &query, last_sync).await
     }
 
     /// One day, as served.
@@ -206,7 +205,14 @@ impl GarminDays {
             None
         };
         let (path, query) = self.day.request(date, name.as_deref());
-        let bytes = self.connect.get(&path, &query).await?;
+        let payload = self
+            .connect
+            .get(&path, &query, |bytes| {
+                RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
+                    detail: error.to_string(),
+                })
+            })
+            .await?;
 
         // **The date asked for**, which is what makes the record addressable
         // and the walk monotonic.
@@ -214,9 +220,6 @@ impl GarminDays {
             SourceRecordId::try_from(date.to_string()).map_err(|error| SourceError::Malformed {
                 detail: error.to_string(),
             })?;
-        let payload = RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
-            detail: error.to_string(),
-        })?;
         Ok(crate::revision::json_event(
             source_record_id,
             EventProvenance::new(

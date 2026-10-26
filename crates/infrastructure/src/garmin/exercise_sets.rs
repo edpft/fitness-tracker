@@ -124,11 +124,14 @@ impl WorkoutEventSource for GarminExerciseSets {
                     detail: error.to_string(),
                 })?;
 
-            let body = self.activities.get(&path, &[]).await?;
-            let payload =
-                RawPayload::try_from(body.as_bytes()).map_err(|error| SourceError::Malformed {
-                    detail: format!("{path} answered nothing: {error}"),
-                })?;
+            let payload = self
+                .activities
+                .get(&path, &[], |body| {
+                    RawPayload::try_from(body.as_bytes()).map_err(|error| SourceError::Malformed {
+                        detail: format!("{path} answered nothing: {error}"),
+                    })
+                })
+                .await?;
 
             events.push(SourceEvent {
                 source_record_id: activity.source_record_id,

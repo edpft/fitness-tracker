@@ -34,19 +34,26 @@ fn client(
     })
 }
 
-/// One document, as served. No retry: it is one request, and a failure is
-/// reported rather than hidden.
-async fn get(client: &reqwest::Client, url: &str) -> Result<String, SourceError> {
-    let unavailable = |error: reqwest::Error| SourceError::Unavailable {
-        detail: format!("{url}: {error}"),
-    };
-    client
-        .get(url)
-        .send()
+/// One document, as served and read by `read`. No retry: it is one request,
+/// and a failure is reported rather than hidden.
+async fn get<T>(
+    client: &reqwest::Client,
+    url: &str,
+    read: impl FnOnce(&str) -> Result<T, SourceError>,
+) -> Result<T, SourceError> {
+    crate::http::send(client.get(url))
         .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(unavailable)?
-        .text()
+        .map_err(|error| SourceError::Unavailable {
+            detail: format!("{url}: {error}"),
+        })?
+        .read(|reply| {
+            let status = reply.status();
+            if !status.is_success() {
+                return Err(SourceError::Unavailable {
+                    detail: format!("{url}: {status}"),
+                });
+            }
+            read(&reply.text())
+        })
         .await
-        .map_err(unavailable)
 }
