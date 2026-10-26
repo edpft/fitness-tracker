@@ -37,10 +37,14 @@ use std::{
 use application::SourceError;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::Rng as _;
-use reqwest::{Client, StatusCode, cookie::CookieStore as _, cookie::Jar, redirect::Policy};
+use reqwest::{
+    Client, RequestBuilder, StatusCode, cookie::CookieStore as _, cookie::Jar, redirect::Policy,
+};
 use sha2::{Digest as _, Sha256};
 
 pub use crate::token::{CredentialDigest, Token};
+
+use crate::http::{self, Reply};
 
 /// Auth0's tenant for Peloton, and the connection a password login names.
 const TENANT: &str = "peloton-prod";
@@ -242,18 +246,15 @@ impl PelotonAuth {
     }
 
     async fn refresh(&self, refresh: &str) -> Result<Token, SourceError> {
-        let response = self
+        let request = self
             .client()?
             .post(format!("{}{TOKEN_PATH}", self.auth_base))
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("client_id", CLIENT_ID),
                 ("refresh_token", refresh),
-            ])
-            .send()
-            .await
-            .map_err(|ref error| unreachable(error))?;
-        self.token_from(response).await
+            ]);
+        self.token_from(request).await
     }
 
     async fn login(&self) -> Result<Token, SourceError> {
@@ -296,24 +297,26 @@ impl PelotonAuth {
             ("code_challenge", challenge),
             ("code_challenge_method", "S256"),
         ];
-        let mut current = self
-            .client()?
-            .get(&url)
-            .query(&query)
-            .send()
-            .await
-            .map_err(|ref error| unreachable(error))?;
+        let mut current = self.client()?.get(&url).query(&query);
         for _ in 0..MAX_REDIRECTS {
-            let Some(location) = location_of(&current) else {
+            let Some(location) = http::send(current)
+                .await
+                .map_err(|ref error| unreachable(error))?
+                .read(|reply| {
+                    let location = location_of(reply);
+                    if location.is_none() && !reply.status().is_success() {
+                        return Err(SourceError::Unavailable {
+                            detail: format!("the authorize step answered {}", reply.status()),
+                        });
+                    }
+                    Ok(location)
+                })
+                .await?
+            else {
                 return Ok(url);
             };
             url = self.absolute(&location);
-            current = self
-                .client()?
-                .get(&url)
-                .send()
-                .await
-                .map_err(|ref error| unreachable(error))?;
+            current = self.client()?.get(&url);
         }
         Err(SourceError::Malformed {
             detail: "the authorize step kept redirecting and never reached a login page".to_owned(),
@@ -368,76 +371,72 @@ impl PelotonAuth {
             "code_challenge": challenge,
             "code_challenge_method": "S256",
         });
-        let response = self
+        let request = self
             .client()?
             .post(format!("{}{LOGIN_PATH}", self.auth_base))
             .header("Origin", &self.auth_base)
             .header("Referer", login_url)
             .header("Auth0-Client", AUTH0_CLIENT)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|ref error| unreachable(error))?;
+            .json(&body);
 
         // **Wrong credentials are terminal**, and so is everything else Auth0
         // refuses with: retrying a rejected password is what a
         // credential-stuffing attempt looks like from the far end. Which of
         // the two it was is read off the body (#368).
-        let status = response.status();
-        if refuses(status) {
-            let body = response.text().await.unwrap_or_default();
-            return Err(refusal(LOGIN_PATH, status, &body, Judges::Credential));
-        }
-        if let Some(location) = location_of(&response) {
-            return Ok(Next::Redirect(self.absolute(&location)));
-        }
-        let html = response
-            .text()
+        http::send(request)
             .await
-            .map_err(|ref error| unreachable(error))?;
-        let form = HiddenForm::parse(&html).ok_or_else(|| SourceError::Malformed {
-            detail: "the login response carried neither a redirect nor a form to resubmit"
-                .to_owned(),
-        })?;
-        Ok(Next::Form(form))
+            .map_err(|ref error| unreachable(error))?
+            .read(|reply| {
+                let status = reply.status();
+                if refuses(status) {
+                    return Err(refusal(
+                        LOGIN_PATH,
+                        status,
+                        &reply.text(),
+                        Judges::Credential,
+                    ));
+                }
+                if let Some(location) = location_of(reply) {
+                    return Ok(Next::Redirect(self.absolute(&location)));
+                }
+                let form =
+                    HiddenForm::parse(&reply.text()).ok_or_else(|| SourceError::Malformed {
+                        detail:
+                            "the login response carried neither a redirect nor a form to resubmit"
+                                .to_owned(),
+                    })?;
+                Ok(Next::Form(form))
+            })
+            .await
     }
 
     /// Walk the chain until something hands back `?code=`.
     async fn follow_to_code(&self, next: Next) -> Result<String, SourceError> {
-        let mut response = match next {
-            Next::Redirect(url) => self
-                .client()?
-                .get(url)
-                .send()
-                .await
-                .map_err(|ref error| unreachable(error))?,
+        let mut request = match next {
+            Next::Redirect(url) => self.client()?.get(url),
             Next::Form(form) => self
                 .client()?
                 .post(self.absolute(&form.action))
-                .form(&form.fields)
-                .send()
-                .await
-                .map_err(|ref error| unreachable(error))?,
+                .form(&form.fields),
         };
         for _ in 0..MAX_REDIRECTS {
-            let Some(location) = location_of(&response) else {
-                return Err(SourceError::Malformed {
-                    detail: format!(
-                        "the login chain stopped at {} without an authorization code",
-                        response.status()
-                    ),
-                });
-            };
+            let location = http::send(request)
+                .await
+                .map_err(|ref error| unreachable(error))?
+                .read(|reply| {
+                    location_of(reply).ok_or_else(|| SourceError::Malformed {
+                        detail: format!(
+                            "the login chain stopped at {} without an authorization code",
+                            reply.status()
+                        ),
+                    })
+                })
+                .await?;
             let absolute = self.absolute(&location);
             if let Some(code) = query_value(&absolute, "code") {
                 return Ok(code);
             }
-            response = self
-                .client()?
-                .get(absolute)
-                .send()
-                .await
-                .map_err(|ref error| unreachable(error))?;
+            request = self.client()?.get(absolute);
         }
         Err(SourceError::Malformed {
             detail: "the login chain redirected past its limit without an authorization code"
@@ -446,7 +445,7 @@ impl PelotonAuth {
     }
 
     async fn exchange(&self, code: &str, verifier: &str) -> Result<Token, SourceError> {
-        let response = self
+        let request = self
             .client()?
             .post(format!("{}{TOKEN_PATH}", self.auth_base))
             .form(&[
@@ -455,19 +454,23 @@ impl PelotonAuth {
                 ("code", code),
                 ("code_verifier", verifier),
                 ("redirect_uri", REDIRECT_URI),
-            ])
-            .send()
-            .await
-            .map_err(|ref error| unreachable(error))?;
-        self.token_from(response).await
+            ]);
+        self.token_from(request).await
     }
 
     /// What the token endpoint served, bound to the credential that asked.
-    async fn token_from(&self, response: reqwest::Response) -> Result<Token, SourceError> {
-        let status = response.status();
+    async fn token_from(&self, request: RequestBuilder) -> Result<Token, SourceError> {
+        http::send(request)
+            .await
+            .map_err(|ref error| unreachable(error))?
+            .read(|reply| self.token_in(reply))
+            .await
+    }
+
+    fn token_in(&self, reply: &Reply) -> Result<Token, SourceError> {
+        let status = reply.status();
         if refuses(status) {
-            let body = response.text().await.unwrap_or_default();
-            return Err(refusal(TOKEN_PATH, status, &body, Judges::Grant));
+            return Err(refusal(TOKEN_PATH, status, &reply.text(), Judges::Grant));
         }
         if !status.is_success() {
             return Err(SourceError::Unavailable {
@@ -475,12 +478,9 @@ impl PelotonAuth {
             });
         }
         let body: TokenResponse =
-            response
-                .json()
-                .await
-                .map_err(|error| SourceError::Malformed {
-                    detail: format!("the token endpoint served something unreadable: {error}"),
-                })?;
+            serde_json::from_slice(reply.body()).map_err(|error| SourceError::Malformed {
+                detail: format!("the token endpoint served something unreadable: {error}"),
+            })?;
         let lifetime = i64::try_from(body.expires_in).unwrap_or(i64::MAX);
         let expires_at = jiff::Timestamp::now()
             .checked_add(jiff::Span::new().seconds(lifetime))
@@ -554,11 +554,11 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     )
 }
 
-fn location_of(response: &reqwest::Response) -> Option<String> {
-    if !response.status().is_redirection() {
+fn location_of(reply: &Reply) -> Option<String> {
+    if !reply.status().is_redirection() {
         return None;
     }
-    response
+    reply
         .headers()
         .get(reqwest::header::LOCATION)?
         .to_str()

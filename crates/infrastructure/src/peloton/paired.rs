@@ -59,9 +59,15 @@ impl WorkoutEventSource for PelotonAccount {
         _resume: Option<()>,
     ) -> Result<EventBatch<()>, SourceError> {
         let malformed = |detail: String| SourceError::Malformed { detail };
-        let body = self.client.get(ME_ENDPOINT, &[]).await?;
-        let identity: Identity = serde_json::from_slice(&body)
-            .map_err(|error| malformed(format!("{ME_ENDPOINT} answered without an id: {error}")))?;
+        let (body, identity) = self
+            .client
+            .get(ME_ENDPOINT, &[], |body| {
+                let identity: Identity = serde_json::from_slice(body).map_err(|error| {
+                    malformed(format!("{ME_ENDPOINT} answered without an id: {error}"))
+                })?;
+                Ok((body.to_vec(), identity))
+            })
+            .await?;
         let endpoint =
             Endpoint::try_from(ME_ENDPOINT).map_err(|error| malformed(error.to_string()))?;
         let event = crate::revision::json_event(

@@ -39,6 +39,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use super::auth::PelotonAuth;
+use crate::http::{self, Reply};
 
 /// How many workouts to ask for at once.
 ///
@@ -214,26 +215,31 @@ impl PelotonWorkouts {
     ///
     /// Visible to the Peloton adapter so [`super::samples`] can ask for a
     /// graph through the same client, credential and error mapping rather than
-    /// standing up a second copy of them.
-    pub(super) async fn get(
+    /// standing up a second copy of them. The body is handed to `read`, and an
+    /// answer it refuses is kept.
+    pub(super) async fn get<T>(
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<Vec<u8>, SourceError> {
+        read: impl FnOnce(&[u8]) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}{path}", self.api_base))
             .bearer_auth(bearer)
             .header("Peloton-Platform", "web")
-            .query(query)
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
+            .query(query);
 
-        let status = response.status();
+        http::ask(request)
+            .await?
+            .read(|reply| Self::body_of(reply, path).and_then(read))
+            .await
+    }
+
+    /// The body of an answer whose status says it has one.
+    fn body_of<'a>(reply: &'a Reply, path: &str) -> Result<&'a [u8], SourceError> {
+        let status = reply.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(SourceError::Unauthorised);
         }
@@ -249,35 +255,30 @@ impl PelotonWorkouts {
             });
         }
         if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
             return Err(SourceError::Unavailable {
-                detail: format!("{path} answered {status}: {}", detail.trim()),
+                detail: format!("{path} answered {status}: {}", reply.text().trim()),
             });
         }
 
-        response
-            .bytes()
-            .await
-            .map(|bytes| bytes.to_vec())
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })
+        Ok(reply.body())
     }
 
     /// Who we are, which the list endpoint is addressed by.
     pub(super) async fn user(&self) -> Result<String, SourceError> {
-        let body = self.get(ME_ENDPOINT, &[]).await?;
-        let me: serde_json::Value =
-            serde_json::from_slice(&body).map_err(|error| SourceError::Malformed {
-                detail: format!("{ME_ENDPOINT} is not JSON: {error}"),
-            })?;
+        self.get(ME_ENDPOINT, &[], |body| {
+            let me: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| SourceError::Malformed {
+                    detail: format!("{ME_ENDPOINT} is not JSON: {error}"),
+                })?;
 
-        me.get("id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| SourceError::Malformed {
-                detail: format!("{ME_ENDPOINT} answered without an id"),
-            })
+            me.get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SourceError::Malformed {
+                    detail: format!("{ME_ENDPOINT} answered without an id"),
+                })
+        })
+        .await
     }
 }
 
@@ -310,67 +311,77 @@ impl WorkoutEventSource for PelotonWorkouts {
                 detail: error.to_string(),
             })?;
 
-        let body = self
-            .get(
-                &path,
-                &[
-                    ("limit", PAGE_SIZE.to_string()),
-                    ("page", position.page.to_string()),
-                    ("joins", JOINS.to_owned()),
-                ],
-            )
-            .await?;
+        self.get(
+            &path,
+            &[
+                ("limit", PAGE_SIZE.to_string()),
+                ("page", position.page.to_string()),
+                ("joins", JOINS.to_owned()),
+            ],
+            |body| {
+                let envelope: Envelope<'_> =
+                    serde_json::from_slice(body).map_err(|error| SourceError::Malformed {
+                        detail: format!("{path} answered something unreadable: {error}"),
+                    })?;
 
-        let envelope: Envelope<'_> =
-            serde_json::from_slice(&body).map_err(|error| SourceError::Malformed {
-                detail: format!("{path} answered something unreadable: {error}"),
-            })?;
+                let mut events = Vec::with_capacity(envelope.data.len());
+                // Set where this page crosses the resumption point. The rest of the
+                // page is still landed — the source served it, and a partial page is
+                // not ours to trim — but the walk stops after it.
+                let mut reached_watermark = false;
 
-        let mut events = Vec::with_capacity(envelope.data.len());
-        // Set where this page crosses the resumption point. The rest of the
-        // page is still landed — the source served it, and a partial page is
-        // not ours to trim — but the walk stops after it.
-        let mut reached_watermark = false;
+                for raw in envelope.data {
+                    let bytes = raw.get().as_bytes();
+                    let identity: Identity = serde_json::from_str(raw.get()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: format!(
+                                "a workout in {path} has no readable identity: {error}"
+                            ),
+                        }
+                    })?;
 
-        for raw in envelope.data {
-            let bytes = raw.get().as_bytes();
-            let identity: Identity =
-                serde_json::from_str(raw.get()).map_err(|error| SourceError::Malformed {
-                    detail: format!("a workout in {path} has no readable identity: {error}"),
-                })?;
+                    let occurred_at = identity.created_at.and_then(event_time);
+                    if let (Some(at), Some(mark)) = (occurred_at, since)
+                        && at.as_timestamp() < mark.as_timestamp()
+                    {
+                        reached_watermark = true;
+                    }
 
-            let occurred_at = identity.created_at.and_then(event_time);
-            if let (Some(at), Some(mark)) = (occurred_at, since)
-                && at.as_timestamp() < mark.as_timestamp()
-            {
-                reached_watermark = true;
-            }
+                    let source_record_id =
+                        SourceRecordId::try_from(identity.id).map_err(|error| {
+                            SourceError::Malformed {
+                                detail: error.to_string(),
+                            }
+                        })?;
 
-            let source_record_id =
-                SourceRecordId::try_from(identity.id).map_err(|error| SourceError::Malformed {
-                    detail: error.to_string(),
-                })?;
+                    let payload =
+                        RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
+                            detail: error.to_string(),
+                        })?;
 
-            let payload = RawPayload::try_from(bytes).map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
+                    events.push(SourceEvent {
+                        source_record_id,
+                        // **Always `Updated`.** This source has no event kinds: it
+                        // serves the workout as it currently stands, and a deletion is
+                        // an absence rather than an event. Recording anything else
+                        // would be inventing a fact the source never stated.
+                        provenance: EventProvenance::new(
+                            endpoint.clone(),
+                            EventKind::Updated,
+                            occurred_at,
+                        )
+                        .into(),
+                        revision: revision_of(&payload),
+                        payload,
+                    });
+                }
 
-            events.push(SourceEvent {
-                source_record_id,
-                // **Always `Updated`.** This source has no event kinds: it
-                // serves the workout as it currently stands, and a deletion is
-                // an absence rather than an event. Recording anything else
-                // would be inventing a fact the source never stated.
-                provenance: EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
-                    .into(),
-                revision: revision_of(&payload),
-                payload,
-            });
-        }
+                let resume = (envelope.show_next && !reached_watermark).then(|| position.next());
 
-        let resume = (envelope.show_next && !reached_watermark).then(|| position.next());
-
-        Ok(EventBatch { events, resume })
+                Ok(EventBatch { events, resume })
+            },
+        )
+        .await
     }
 }
 

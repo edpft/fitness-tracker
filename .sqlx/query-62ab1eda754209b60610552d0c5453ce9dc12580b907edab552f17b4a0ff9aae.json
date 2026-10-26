@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO unexpected_response\n                (method, url, status, succeeded, headers, body, detail, answered_at)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "62ab1eda754209b60610552d0c5453ce9dc12580b907edab552f17b4a0ff9aae"
+}

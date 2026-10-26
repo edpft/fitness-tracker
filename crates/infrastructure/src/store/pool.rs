@@ -26,6 +26,10 @@ const APPLIED: &str = "_sqlx_migrations";
 /// fail, or succeed and carry less than it should. The copy is taken by the
 /// program rather than remembered by the operator, so every migration gets one.
 ///
+/// **Opening a store is also what keeps an unexpected answer** (#164): from
+/// here on, an answer to any request this program makes that its reader
+/// refuses is written to this store's `unexpected_response`.
+///
 /// # Errors
 ///
 /// Returns [`StoreError`] if the file cannot be opened, the copy cannot be
@@ -58,6 +62,8 @@ pub async fn connect(path: &Path) -> Result<SqlitePool, StoreError> {
         .map_err(|error| StoreError::Unavailable {
             detail: error.to_string(),
         })?;
+
+    crate::http::keep_unexpected_responses_in(path);
 
     Ok(pool)
 }

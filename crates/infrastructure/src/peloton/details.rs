@@ -65,11 +65,14 @@ impl WorkoutEventSource for PelotonWorkoutDetails {
                     detail: error.to_string(),
                 })?;
 
-            let body = self.workouts.get(&path, &[]).await?;
-            let payload =
-                RawPayload::try_from(body.as_slice()).map_err(|error| SourceError::Malformed {
-                    detail: format!("{path} answered nothing: {error}"),
-                })?;
+            let payload = self
+                .workouts
+                .get(&path, &[], |body| {
+                    RawPayload::try_from(body).map_err(|error| SourceError::Malformed {
+                        detail: format!("{path} answered nothing: {error}"),
+                    })
+                })
+                .await?;
 
             events.push(crate::revision::json_event(
                 workout.source_record_id,

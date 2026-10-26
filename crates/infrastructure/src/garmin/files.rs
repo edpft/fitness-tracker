@@ -174,13 +174,17 @@ impl WorkoutEventSource for GarminActivityFiles {
                     detail: error.to_string(),
                 })?;
 
-            let Some(body) = self.activities.get_bytes_if_any(&path).await? else {
+            let Some(payload) = self
+                .activities
+                .get_bytes_if_any(&path, |body| {
+                    RawPayload::try_from(body).map_err(|error| SourceError::Malformed {
+                        detail: format!("{path} answered nothing: {error}"),
+                    })
+                })
+                .await?
+            else {
                 continue;
             };
-            let payload =
-                RawPayload::try_from(body.as_slice()).map_err(|error| SourceError::Malformed {
-                    detail: format!("{path} answered nothing: {error}"),
-                })?;
 
             // **The activity's time, not the file's**, as the sets take theirs:
             // the resumption point advances on something the list stated.

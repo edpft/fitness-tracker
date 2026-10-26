@@ -127,15 +127,14 @@ impl WorkoutEventSource for PelotonWorkoutSamples {
                     detail: error.to_string(),
                 })?;
 
-            let body = self
+            let payload = self
                 .workouts
-                .get(&path, &[("every_n", EVERY_N.to_owned())])
+                .get(&path, &[("every_n", EVERY_N.to_owned())], |body| {
+                    RawPayload::try_from(body).map_err(|error| SourceError::Malformed {
+                        detail: format!("{path} answered nothing: {error}"),
+                    })
+                })
                 .await?;
-
-            let payload =
-                RawPayload::try_from(body.as_slice()).map_err(|error| SourceError::Malformed {
-                    detail: format!("{path} answered nothing: {error}"),
-                })?;
 
             // **The workout's time, not the graph's.** A graph states none of
             // its own, and a resumption point has to advance on something the

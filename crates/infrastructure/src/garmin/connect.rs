@@ -9,6 +9,7 @@ use std::{
 use application::SourceError;
 
 use super::auth::GarminAuth;
+use crate::http;
 
 /// Where the signed-in account's name is served from.
 const PROFILE_PATH: &str = "/userprofile-service/socialProfile";
@@ -48,24 +49,24 @@ impl Connect {
             })
     }
 
-    /// The bytes of one answer, as served.
-    pub(super) async fn get(
+    /// One answer, its bytes as served handed to `read`; an answer it refuses
+    /// is kept.
+    pub(super) async fn get<T>(
         &self,
         path: &str,
         query: &[(&'static str, String)],
-    ) -> Result<Vec<u8>, SourceError> {
+        read: impl FnOnce(&[u8]) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .get(format!("{}{path}", self.api_base))
             .query(query)
-            .bearer_auth(bearer)
-            .send()
+            .bearer_auth(bearer);
+        http::ask(request)
+            .await?
+            .read(|reply| super::answer_bytes(reply, path).and_then(read))
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-        super::answer_bytes(response, path).await
     }
 
     /// The signed-in account's name, which is not the email it signs in with.
@@ -80,19 +81,24 @@ impl Connect {
         if let Some(name) = held {
             return Ok(name);
         }
-        let bytes = self.get(PROFILE_PATH, &[]).await?;
-        let profile: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|error| SourceError::Malformed {
-                detail: format!("{PROFILE_PATH} answered something that is not JSON: {error}"),
-            })?;
-        let name = profile
-            .get("displayName")
-            .and_then(serde_json::Value::as_str)
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| SourceError::Malformed {
-                detail: format!("{PROFILE_PATH} names no account"),
-            })?
-            .to_owned();
+        let name = self
+            .get(PROFILE_PATH, &[], |bytes| {
+                let profile: serde_json::Value =
+                    serde_json::from_slice(bytes).map_err(|error| SourceError::Malformed {
+                        detail: format!(
+                            "{PROFILE_PATH} answered something that is not JSON: {error}"
+                        ),
+                    })?;
+                profile
+                    .get("displayName")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| SourceError::Malformed {
+                        detail: format!("{PROFILE_PATH} names no account"),
+                    })
+            })
+            .await?;
         if let Ok(mut held) = self.name.lock() {
             *held = Some(name.clone());
         }

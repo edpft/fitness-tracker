@@ -22,12 +22,14 @@ use application::SourceError;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
+use crate::http::{self, Reply};
+
 /// The status Withings reports for a token it does not accept.
 const INVALID_TOKEN: i64 = 401;
 
 /// The text of a Withings answer, once the transport has said it arrived.
-async fn answer(response: reqwest::Response, path: &str) -> Result<String, SourceError> {
-    let status = response.status();
+fn answer<'a>(reply: &'a Reply, path: &str) -> Result<&'a str, SourceError> {
+    let status = reply.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(SourceError::Unauthorised);
     }
@@ -38,18 +40,14 @@ async fn answer(response: reqwest::Response, path: &str) -> Result<String, Sourc
             detail: format!("{path} answered {status}"),
         });
     }
-    let text = response
-        .text()
-        .await
-        .map_err(|error| SourceError::Unavailable {
-            detail: error.to_string(),
-        })?;
     if !status.is_success() {
         return Err(SourceError::Unavailable {
-            detail: format!("{path} answered {status}: {}", text.trim()),
+            detail: format!("{path} answered {status}: {}", reply.text().trim()),
         });
     }
-    Ok(text)
+    std::str::from_utf8(reply.body()).map_err(|error| SourceError::Malformed {
+        detail: format!("{path} answered something that is not text: {error}"),
+    })
 }
 
 /// A Withings answer, with its body left as the source's own bytes.

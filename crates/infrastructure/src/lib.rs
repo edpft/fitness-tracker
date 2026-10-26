@@ -12,6 +12,7 @@ pub mod credentials;
 pub mod folder;
 pub mod garmin;
 pub mod hevy;
+mod http;
 pub mod lock;
 pub mod myfitnesspal;
 pub mod peloton;

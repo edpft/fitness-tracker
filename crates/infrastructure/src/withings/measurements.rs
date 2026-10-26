@@ -146,80 +146,82 @@ impl WorkoutEventSource for WithingsMeasurements {
         }
 
         let bearer = self.auth.bearer().await?;
-        let response = self
+        let request = self
             .client()?
             .post(format!("{}{MEASURE_PATH}", self.api_base))
             .bearer_auth(bearer)
-            .form(&form)
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
-        let text = super::answer(response, MEASURE_PATH).await?;
-        let page: Page<'_> = serde_json::from_str(super::body_of(&text, MEASURE_PATH)?.get())
-            .map_err(|error| SourceError::Malformed {
-                detail: format!("{MEASURE_PATH} answered something unreadable: {error}"),
-            })?;
+            .form(&form);
 
-        let endpoint =
-            Endpoint::try_from(MEASURE_PATH).map_err(|error| SourceError::Malformed {
-                detail: error.to_string(),
-            })?;
-
-        let mut events = Vec::with_capacity(page.measuregrps.len());
-        for raw in page.measuregrps {
-            let identity: Identity =
-                serde_json::from_str(raw.get()).map_err(|error| SourceError::Malformed {
-                    detail: format!("a measure group has no readable identity: {error}"),
+        super::http::ask(request)
+            .await?
+            .read(|reply| {
+                let page: Page<'_> = serde_json::from_str(
+                    super::body_of(super::answer(reply, MEASURE_PATH)?, MEASURE_PATH)?.get(),
+                )
+                .map_err(|error| SourceError::Malformed {
+                    detail: format!("{MEASURE_PATH} answered something unreadable: {error}"),
                 })?;
 
-            let occurred_at = identity
-                .created
-                .into_iter()
-                .chain(identity.modified)
-                .max()
-                .and_then(|second| jiff::Timestamp::from_second(second).ok())
-                .map(EventTime::from);
-
-            let source_record_id =
-                SourceRecordId::try_from(identity.grpid.to_string()).map_err(|error| {
-                    SourceError::Malformed {
+                let endpoint =
+                    Endpoint::try_from(MEASURE_PATH).map_err(|error| SourceError::Malformed {
                         detail: error.to_string(),
-                    }
-                })?;
-            let payload = RawPayload::try_from(raw.get().as_bytes()).map_err(|error| {
-                SourceError::Malformed {
-                    detail: error.to_string(),
+                    })?;
+
+                let mut events = Vec::with_capacity(page.measuregrps.len());
+                for raw in page.measuregrps {
+                    let identity: Identity = serde_json::from_str(raw.get()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: format!("a measure group has no readable identity: {error}"),
+                        }
+                    })?;
+
+                    let occurred_at = identity
+                        .created
+                        .into_iter()
+                        .chain(identity.modified)
+                        .max()
+                        .and_then(|second| jiff::Timestamp::from_second(second).ok())
+                        .map(EventTime::from);
+
+                    let source_record_id = SourceRecordId::try_from(identity.grpid.to_string())
+                        .map_err(|error| SourceError::Malformed {
+                            detail: error.to_string(),
+                        })?;
+                    let payload = RawPayload::try_from(raw.get().as_bytes()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: error.to_string(),
+                        }
+                    })?;
+
+                    events.push(crate::revision::json_event(
+                        source_record_id,
+                        // **Always `Updated`**: `getmeas` serves a group as it now
+                        // stands and has no event kinds.
+                        EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
+                            .into(),
+                        payload,
+                    ));
                 }
-            })?;
 
-            events.push(crate::revision::json_event(
-                source_record_id,
-                // **Always `Updated`**: `getmeas` serves a group as it now
-                // stands and has no event kinds.
-                EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at).into(),
-                payload,
-            ));
-        }
+                let resume = match (is_more(&page.more), page.offset) {
+                    (true, Some(offset)) if offset > position.offset => Some(MeasurementPage {
+                        offset,
+                        last_update: position.last_update,
+                    }),
+                    (true, _) => {
+                        return Err(SourceError::Malformed {
+                            detail: format!(
+                                "{MEASURE_PATH} said there was more without an offset past {}",
+                                position.offset
+                            ),
+                        });
+                    }
+                    (false, _) => None,
+                };
 
-        let resume = match (is_more(&page.more), page.offset) {
-            (true, Some(offset)) if offset > position.offset => Some(MeasurementPage {
-                offset,
-                last_update: position.last_update,
-            }),
-            (true, _) => {
-                return Err(SourceError::Malformed {
-                    detail: format!(
-                        "{MEASURE_PATH} said there was more without an offset past {}",
-                        position.offset
-                    ),
-                });
-            }
-            (false, _) => None,
-        };
-
-        Ok(EventBatch { events, resume })
+                Ok(EventBatch { events, resume })
+            })
+            .await
     }
 }
 

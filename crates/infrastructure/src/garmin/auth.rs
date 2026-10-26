@@ -66,7 +66,10 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rand::RngExt as _;
 use reqwest::{Client, StatusCode};
 
-use crate::token::{CredentialDigest, Token, TokenFile};
+use crate::{
+    http::{self, Reply},
+    token::{CredentialDigest, Token, TokenFile},
+};
 
 /// The widget that establishes the session, and the form that signs in.
 ///
@@ -330,11 +333,12 @@ impl GarminAuth {
                 ("embedWidget", "true"),
                 ("gauthHost", host.as_str()),
             ])
-            .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT)
-            .send()
+            .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT);
+        http::send(landing)
             .await
-            .map_err(|error| unreachable(&error))?;
-        read_page(landing, EMBED_PATH).await?;
+            .map_err(|error| unreachable(&error))?
+            .read(|reply| page_of(reply, EMBED_PATH))
+            .await?;
 
         // Two: the sign-in form, for the `_csrf` it will demand back.
         let form = self
@@ -342,14 +346,16 @@ impl GarminAuth {
             .get(&signin)
             .query(&signin_query(&embed))
             .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT)
-            .header(reqwest::header::REFERER, embed.as_str())
-            .send()
+            .header(reqwest::header::REFERER, embed.as_str());
+        let csrf = http::send(form)
             .await
-            .map_err(|error| unreachable(&error))?;
-        let form = read_page(form, SIGNIN_PATH).await?;
-        let csrf = csrf_token(&form).ok_or_else(|| SourceError::Malformed {
-            detail: format!("{SIGNIN_PATH} served a form with no _csrf to submit"),
-        })?;
+            .map_err(|error| unreachable(&error))?
+            .read(|reply| {
+                csrf_token(&page_of(reply, SIGNIN_PATH)?).ok_or_else(|| SourceError::Malformed {
+                    detail: format!("{SIGNIN_PATH} served a form with no _csrf to submit"),
+                })
+            })
+            .await?;
 
         self.wait().await;
 
@@ -365,13 +371,13 @@ impl GarminAuth {
                 ("password", self.credentials.password.as_str()),
                 ("embed", "true"),
                 ("_csrf", csrf.as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|error| unreachable(&error))?;
-        let answer = read_page(answer, SIGNIN_PATH).await?;
+            ]);
 
-        ticket_from(&answer)
+        http::send(answer)
+            .await
+            .map_err(|error| unreachable(&error))?
+            .read(|reply| ticket_from(&page_of(reply, SIGNIN_PATH)?))
+            .await
     }
 
     /// The anti-bot pause, or nothing at all against a stub.
@@ -440,25 +446,23 @@ impl GarminAuth {
         client_id: &str,
         form: &[(&str, &str)],
     ) -> Result<Token, SourceError> {
-        let response = self
+        let request = self
             .http()?
             .post(format!("{}{TOKEN_PATH}", self.token_base))
             .header(reqwest::header::AUTHORIZATION, basic_auth(client_id))
             .header(reqwest::header::USER_AGENT, NATIVE_USER_AGENT)
-            .form(form)
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
+            .form(form);
 
-        let status = response.status();
-        let text = response
-            .text()
+        http::send(request)
             .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })?;
+            .map_err(|error| unreachable(&error))?
+            .read(|reply| self.token_from(reply, client_id))
+            .await
+    }
+
+    /// The token an answer from the token endpoint carries.
+    fn token_from(&self, reply: &Reply, client_id: &str) -> Result<Token, SourceError> {
+        let status = reply.status();
 
         if status == StatusCode::TOO_MANY_REQUESTS {
             return Err(SourceError::Unavailable {
@@ -472,7 +476,7 @@ impl GarminAuth {
         }
 
         let issued: Issued =
-            serde_json::from_str(&text).map_err(|error| SourceError::Malformed {
+            serde_json::from_slice(reply.body()).map_err(|error| SourceError::Malformed {
                 detail: format!("{TOKEN_PATH} answered without a usable token: {error}"),
             })?;
 
@@ -520,9 +524,8 @@ const fn signin_query(embed: &str) -> [(&'static str, &str); 7] {
 /// endpoint this replaced did not do: every field of the answer it looked for
 /// was optional, so Garmin's 404 parsed cleanly into an empty one and the
 /// failure reported itself as a missing field rather than as a 404.
-async fn read_page(response: reqwest::Response, path: &str) -> Result<String, SourceError> {
-    let status = response.status();
-    let text = response.text().await.map_err(|error| unreachable(&error))?;
+fn page_of(reply: &Reply, path: &str) -> Result<String, SourceError> {
+    let status = reply.status();
 
     if status == StatusCode::TOO_MANY_REQUESTS {
         return Err(SourceError::Unavailable {
@@ -545,7 +548,7 @@ async fn read_page(response: reqwest::Response, path: &str) -> Result<String, So
             detail: format!("{path} answered {status}"),
         });
     }
-    Ok(text)
+    Ok(reply.text())
 }
 
 /// What the answer to the credential POST means.

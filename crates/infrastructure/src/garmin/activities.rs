@@ -46,6 +46,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use super::auth::GarminAuth;
+use crate::http::{self, Answer, Reply};
 
 /// Where the list is served from.
 const ACTIVITIES_PATH: &str = "/activitylist-service/activities/search/activities";
@@ -190,46 +191,41 @@ impl GarminActivities {
             })
     }
 
-    /// One page of the list, as served.
-    async fn page(&self, start: u32) -> Result<String, SourceError> {
-        self.get(
-            ACTIVITIES_PATH,
-            &[
-                ("start", start.to_string()),
-                ("limit", PAGE_SIZE.to_string()),
-            ],
-        )
-        .await
-    }
-
-    /// One answer from the API, as served.
+    /// One answer from the API, its text handed to `read`.
     ///
     /// Visible to the Garmin adapter so [`super::exercise_sets`] asks through
     /// the same client, credential and error mapping rather than a second copy
     /// of them, as Peloton's graphs do through its workout list.
-    pub(super) async fn get(
+    pub(super) async fn get<T>(
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<String, SourceError> {
-        super::answer(self.send(path, query).await?, path).await
+        read: impl Fn(&str) -> Result<T, SourceError> + Send + Sync,
+    ) -> Result<T, SourceError> {
+        self.send(path, query, |reply| {
+            super::answer(reply, path).and_then(&read)
+        })
+        .await
     }
 
-    /// One answer from the API, as the bytes served — for [`super::files`],
-    /// whose answer is an archive rather than text.
+    /// One answer from the API, its bytes handed to `read` — for
+    /// [`super::files`], whose answer is an archive rather than text.
     ///
     /// `None` where the source answers 404: it has said there is nothing at
     /// that path, which for an activity's file is a fact about the activity
     /// rather than a failure of the walk.
-    pub(super) async fn get_bytes_if_any(
+    pub(super) async fn get_bytes_if_any<T>(
         &self,
         path: &str,
-    ) -> Result<Option<Vec<u8>>, SourceError> {
-        let response = self.send(path, &[]).await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        super::answer_bytes(response, path).await.map(Some)
+        read: impl Fn(&[u8]) -> Result<T, SourceError> + Send + Sync,
+    ) -> Result<Option<T>, SourceError> {
+        self.send(path, &[], |reply| {
+            if reply.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+            super::answer_bytes(reply, path).and_then(&read).map(Some)
+        })
+        .await
     }
 
     /// One request, asked again if the server fails it.
@@ -242,38 +238,43 @@ impl GarminActivities {
     /// about the request, so asking again is the whole remedy. A 429 is not
     /// retried: that is the source asking us to stop, and [`super::answer`]
     /// says so.
-    async fn send(
+    ///
+    /// Each 5xx is kept as it is refused, so a retry that succeeds still
+    /// leaves the answers it got past.
+    async fn send<T>(
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<reqwest::Response, SourceError> {
+        read: impl Fn(&Reply) -> Result<T, SourceError> + Send + Sync,
+    ) -> Result<T, SourceError> {
         let mut wait = FIRST_RETRY_AFTER;
         for _ in 1..ATTEMPTS {
-            let response = self.send_once(path, query).await?;
-            if !response.status().is_server_error() {
-                return Ok(response);
+            let mut server_error = false;
+            let outcome = self
+                .send_once(path, query)
+                .await?
+                .read(|reply| {
+                    server_error = reply.status().is_server_error();
+                    read(reply)
+                })
+                .await;
+            if !server_error {
+                return outcome;
             }
             tokio::time::sleep(wait).await;
             wait = wait.saturating_mul(2);
         }
-        self.send_once(path, query).await
+        self.send_once(path, query).await?.read(read).await
     }
 
-    async fn send_once(
-        &self,
-        path: &str,
-        query: &[(&str, String)],
-    ) -> Result<reqwest::Response, SourceError> {
+    async fn send_once(&self, path: &str, query: &[(&str, String)]) -> Result<Answer, SourceError> {
         let bearer = self.auth.bearer().await?;
-        self.client()?
+        let request = self
+            .client()?
             .get(format!("{}{path}", self.api_base))
             .bearer_auth(bearer)
-            .query(query)
-            .send()
-            .await
-            .map_err(|error| SourceError::Unavailable {
-                detail: error.to_string(),
-            })
+            .query(query);
+        http::ask(request).await
     }
 }
 
@@ -295,68 +296,85 @@ impl WorkoutEventSource for GarminActivities {
                 detail: error.to_string(),
             })?;
 
-        let body = self.page(position.start).await?;
-        // **A bare array, not an envelope.** The source states no total and no
-        // "there is more", so the walk reads a full page as a reason to ask
-        // again — one extra empty request at the end of the list, which is the
-        // price of not inventing a count the source never gave.
-        let activities: Vec<&RawValue> =
-            serde_json::from_str(&body).map_err(|error| SourceError::Malformed {
-                detail: format!("{ACTIVITIES_PATH} answered something unreadable: {error}"),
-            })?;
+        self.get(
+            ACTIVITIES_PATH,
+            &[
+                ("start", position.start.to_string()),
+                ("limit", PAGE_SIZE.to_string()),
+            ],
+            |body| {
+                // **A bare array, not an envelope.** The source states no total and no
+                // "there is more", so the walk reads a full page as a reason to ask
+                // again — one extra empty request at the end of the list, which is the
+                // price of not inventing a count the source never gave.
+                let activities: Vec<&RawValue> =
+                    serde_json::from_str(body).map_err(|error| SourceError::Malformed {
+                        detail: format!("{ACTIVITIES_PATH} answered something unreadable: {error}"),
+                    })?;
 
-        // **The walk ends on an empty page, not on a short one.** The source
-        // states no total and no "there is more", and may serve fewer than it
-        // was asked for, so a short page says nothing about whether the list is
-        // exhausted. Asking again costs one empty request at the end of the
-        // walk; reading a short page as the end would silently stop partway
-        // through a decade of activities.
-        let served = activities.len();
-        let mut events = Vec::with_capacity(served);
-        // Set where this page crosses the resumption point. The rest of the
-        // page still lands; the walk stops after it.
-        let mut reached_watermark = false;
+                // **The walk ends on an empty page, not on a short one.** The source
+                // states no total and no "there is more", and may serve fewer than it
+                // was asked for, so a short page says nothing about whether the list is
+                // exhausted. Asking again costs one empty request at the end of the
+                // walk; reading a short page as the end would silently stop partway
+                // through a decade of activities.
+                let served = activities.len();
+                let mut events = Vec::with_capacity(served);
+                // Set where this page crosses the resumption point. The rest of the
+                // page still lands; the walk stops after it.
+                let mut reached_watermark = false;
 
-        for raw in activities {
-            let identity: Identity =
-                serde_json::from_str(raw.get()).map_err(|error| SourceError::Malformed {
-                    detail: format!(
-                        "an activity in {ACTIVITIES_PATH} has no readable identity: {error}"
-                    ),
-                })?;
+                for raw in activities {
+                    let identity: Identity = serde_json::from_str(raw.get()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: format!(
+                                "an activity in {ACTIVITIES_PATH} has no readable identity: {error}"
+                            ),
+                        }
+                    })?;
 
-            let occurred_at = identity.occurred_at();
-            if let (Some(at), Some(mark)) = (occurred_at, since)
-                && at.as_timestamp() < mark.as_timestamp()
-            {
-                reached_watermark = true;
-            }
+                    let occurred_at = identity.occurred_at();
+                    if let (Some(at), Some(mark)) = (occurred_at, since)
+                        && at.as_timestamp() < mark.as_timestamp()
+                    {
+                        reached_watermark = true;
+                    }
 
-            let source_record_id = SourceRecordId::try_from(identity.activity_id.to_string())
-                .map_err(|error| SourceError::Malformed {
-                    detail: error.to_string(),
-                })?;
-            let payload = RawPayload::try_from(raw.get().as_bytes()).map_err(|error| {
-                SourceError::Malformed {
-                    detail: error.to_string(),
+                    let source_record_id = SourceRecordId::try_from(
+                        identity.activity_id.to_string(),
+                    )
+                    .map_err(|error| SourceError::Malformed {
+                        detail: error.to_string(),
+                    })?;
+                    let payload = RawPayload::try_from(raw.get().as_bytes()).map_err(|error| {
+                        SourceError::Malformed {
+                            detail: error.to_string(),
+                        }
+                    })?;
+
+                    events.push(SourceEvent {
+                        source_record_id,
+                        // **Always `Updated`.** This source has no event kinds: it
+                        // serves an activity as it currently stands, and a deletion is
+                        // an absence rather than an event.
+                        provenance: EventProvenance::new(
+                            endpoint.clone(),
+                            EventKind::Updated,
+                            occurred_at,
+                        )
+                        .into(),
+                        revision: crate::revision::of_json(&payload),
+                        payload,
+                    });
                 }
-            })?;
 
-            events.push(SourceEvent {
-                source_record_id,
-                // **Always `Updated`.** This source has no event kinds: it
-                // serves an activity as it currently stands, and a deletion is
-                // an absence rather than an event.
-                provenance: EventProvenance::new(endpoint.clone(), EventKind::Updated, occurred_at)
-                    .into(),
-                revision: crate::revision::of_json(&payload),
-                payload,
-            });
-        }
+                let resume =
+                    (served > 0 && !reached_watermark).then(|| position.advanced_by(served));
 
-        let resume = (served > 0 && !reached_watermark).then(|| position.advanced_by(served));
-
-        Ok(EventBatch { events, resume })
+                Ok(EventBatch { events, resume })
+            },
+        )
+        .await
     }
 }
 

@@ -48,6 +48,8 @@ pub use wear::{GarminDailyHeartRateTranslator, GarminDayEntity, WearDay};
 
 use application::SourceError;
 
+use crate::http::Reply;
+
 /// The token host that goes with a sign-in host.
 ///
 /// `sso.garmin.com` mints nothing; `diauth.garmin.com` does. Derived rather
@@ -64,9 +66,8 @@ pub fn token_base_for(sso_base: &str) -> String {
 }
 
 /// The text of a Garmin answer, once the transport has said it arrived.
-async fn answer(response: reqwest::Response, path: &str) -> Result<String, SourceError> {
-    let bytes = answer_bytes(response, path).await?;
-    String::from_utf8(bytes).map_err(|error| SourceError::Malformed {
+fn answer<'a>(reply: &'a Reply, path: &str) -> Result<&'a str, SourceError> {
+    std::str::from_utf8(answer_bytes(reply, path)?).map_err(|error| SourceError::Malformed {
         detail: format!("{path} answered something that is not text: {error}"),
     })
 }
@@ -76,11 +77,8 @@ async fn answer(response: reqwest::Response, path: &str) -> Result<String, Sourc
 /// **Bytes, not text**, for the one answer that is not text: an activity's
 /// file is an archive, and decoding it as UTF-8 would corrupt what § II.1 says
 /// lands exactly as served.
-pub(super) async fn answer_bytes(
-    response: reqwest::Response,
-    path: &str,
-) -> Result<Vec<u8>, SourceError> {
-    let status = response.status();
+fn answer_bytes<'a>(reply: &'a Reply, path: &str) -> Result<&'a [u8], SourceError> {
+    let status = reply.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(SourceError::Unauthorised);
     }
@@ -91,12 +89,6 @@ pub(super) async fn answer_bytes(
             detail: format!("{path} answered {status}"),
         });
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| SourceError::Unavailable {
-            detail: error.to_string(),
-        })?;
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err(SourceError::Refusing {
             detail: format!("{path} is rate-limiting this address; wait rather than retrying"),
@@ -104,13 +96,10 @@ pub(super) async fn answer_bytes(
     }
     if !status.is_success() {
         return Err(SourceError::Unavailable {
-            detail: format!(
-                "{path} answered {status}: {}",
-                String::from_utf8_lossy(&bytes).trim()
-            ),
+            detail: format!("{path} answered {status}: {}", reply.text().trim()),
         });
     }
-    Ok(bytes.to_vec())
+    Ok(reply.body())
 }
 
 #[cfg(test)]

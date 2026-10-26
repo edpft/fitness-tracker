@@ -6,6 +6,8 @@ use application::{EventBatch, SourceError, WorkoutEventSource};
 use domain::landing::{Endpoint, Watermark};
 use reqwest::{Client, StatusCode, header::RETRY_AFTER};
 
+use crate::http::{self, Reply};
+
 use super::{
     page::parse_page,
     paging::PageNumber,
@@ -99,27 +101,30 @@ impl HevyWorkoutEvents {
     /// [`SourceError::Unavailable`] if the source cannot be reached or answers
     /// with anything else.
     pub async fn verify(&self) -> Result<(), SourceError> {
-        let response = self
+        let request = self
             .client()?
             .get(self.url())
             .header("api-key", &self.api_key)
-            .query(&[("since", EPOCH), ("page", "1"), ("pageSize", "1")])
-            .send()
+            .query(&[("since", EPOCH), ("page", "1"), ("pageSize", "1")]);
+
+        http::send(request)
             .await
             .map_err(|error| SourceError::Unavailable {
                 detail: error.to_string(),
-            })?;
-
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(SourceError::Unauthorised);
-        }
-        Err(SourceError::Unavailable {
-            detail: format!("{status}"),
-        })
+            })?
+            .read(|reply| {
+                let status = reply.status();
+                if status.is_success() {
+                    return Ok(());
+                }
+                if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+                    return Err(SourceError::Unauthorised);
+                }
+                Err(SourceError::Unavailable {
+                    detail: format!("{status}"),
+                })
+            })
+            .await
     }
 
     pub(crate) fn url(&self) -> String {
@@ -142,8 +147,8 @@ impl HevyWorkoutEvents {
 /// `Retry-After` in its delay-seconds form. The HTTP-date form is not parsed:
 /// this API sends no such header at all, and guessing at a format we have
 /// never seen would be inventing behaviour.
-fn retry_after(response: &reqwest::Response) -> Option<Duration> {
-    response
+fn retry_after(reply: &Reply) -> Option<Duration> {
+    reply
         .headers()
         .get(RETRY_AFTER)?
         .to_str()
@@ -177,7 +182,7 @@ impl WorkoutEventSource for HevyWorkoutEvents {
 
         let mut attempt = 0;
         loop {
-            let outcome = self
+            let request = self
                 .client()?
                 .get(self.url())
                 .header("api-key", &self.api_key)
@@ -185,65 +190,60 @@ impl WorkoutEventSource for HevyWorkoutEvents {
                     ("since", since.as_str()),
                     ("page", page_number.as_str()),
                     ("pageSize", page_size.as_str()),
-                ])
-                .send()
-                .await;
+                ]);
 
-            let retryable_detail =
-                match outcome {
-                    Ok(response) => {
-                        let status = response.status();
-                        if status.is_success() {
-                            let body = response.bytes().await.map_err(|error| {
-                                SourceError::Unavailable {
-                                    detail: error.to_string(),
-                                }
-                            })?;
-                            return parse_page(&body, &endpoint);
-                        }
+            let mut wait = None;
+            let outcome = match http::send(request).await {
+                Ok(answer) => {
+                    answer
+                        .read(|reply| {
+                            let status = reply.status();
+                            if status.is_success() {
+                                return parse_page(reply.body(), &endpoint);
+                            }
 
-                        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-                            // Terminal. The body here is the bare string
-                            // `InvalidApiKey` rather than JSON, which is why
-                            // nothing tries to parse it.
-                            return Err(SourceError::Unauthorised);
-                        }
+                            if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+                            {
+                                // Terminal. The body here is the bare string
+                                // `InvalidApiKey` rather than JSON, which is why
+                                // nothing tries to parse it.
+                                return Err(SourceError::Unauthorised);
+                            }
 
-                        if !is_retryable(status.as_u16()) {
-                            // A 400 or a 404 is a fault in our request, not a
-                            // passing condition at the source. Asking again would
-                            // get the same answer.
-                            let detail = response.text().await.unwrap_or_default();
-                            return Err(SourceError::Malformed {
-                                detail: format!("{status}: {}", detail.trim()),
-                            });
-                        }
+                            if !is_retryable(status.as_u16()) {
+                                // A 400 or a 404 is a fault in our request, not
+                                // a passing condition at the source. Asking
+                                // again would get the same answer.
+                                return Err(SourceError::Malformed {
+                                    detail: format!("{status}: {}", reply.text().trim()),
+                                });
+                            }
 
-                        let wait = retry_after(&response);
-                        let detail = format!("{status}");
-                        if attempt + 1 >= self.retry.attempts() {
-                            return Err(SourceError::Unavailable {
-                                detail: format!("{detail} after {} attempts", attempt + 1),
-                            });
-                        }
-                        tokio::time::sleep(self.retry.backoff(attempt, wait)).await;
-                        detail
+                            wait = retry_after(reply);
+                            Err(SourceError::Unavailable {
+                                detail: format!("{status}"),
+                            })
+                        })
+                        .await
+                }
+                // Transport failures — refused, reset, timed out — are the
+                // ordinary shape of a source being unreachable.
+                Err(error) => Err(SourceError::Unavailable {
+                    detail: error.to_string(),
+                }),
+            };
+
+            match outcome {
+                Err(SourceError::Unavailable { detail }) => {
+                    if attempt + 1 >= self.retry.attempts() {
+                        return Err(SourceError::Unavailable {
+                            detail: format!("{detail} after {} attempts", attempt + 1),
+                        });
                     }
-                    Err(error) => {
-                        // Transport failures — refused, reset, timed out — are the
-                        // ordinary shape of a source being unreachable.
-                        let detail = error.to_string();
-                        if attempt + 1 >= self.retry.attempts() {
-                            return Err(SourceError::Unavailable {
-                                detail: format!("{detail} after {} attempts", attempt + 1),
-                            });
-                        }
-                        tokio::time::sleep(self.retry.backoff(attempt, None)).await;
-                        detail
-                    }
-                };
-
-            let _ = retryable_detail;
+                    tokio::time::sleep(self.retry.backoff(attempt, wait)).await;
+                }
+                settled => return settled,
+            }
             attempt += 1;
         }
     }

@@ -64,6 +64,7 @@ use reqwest::{Client, StatusCode, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 
 use super::routine::{CreateRoutine, render};
+use crate::http::{self, Reply};
 
 /// Where routines are created.
 pub const ROUTINES_ENDPOINT: &str = "/v1/routines";
@@ -211,12 +212,16 @@ impl HevyRoutines {
         &self,
         build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
     ) -> Result<(StatusCode, DestinationReply), DeliveryError> {
-        let response = build(self.client()?)
-            .send()
+        Self::send(build(self.client()?))
+            .await?
+            .read(Self::answered)
             .await
-            .map_err(|error| Self::unreachable(&error.to_string()))?;
+    }
 
-        Self::answered(response).await
+    async fn send(request: reqwest::RequestBuilder) -> Result<http::Answer, DeliveryError> {
+        http::send(request)
+            .await
+            .map_err(|error| Self::unreachable(&error.to_string()))
     }
 
     /// **Everything the destination said, before anything looks at it** (#124).
@@ -232,24 +237,13 @@ impl HevyRoutines {
     /// is built without that feature, exactly as on the extraction side, and for
     /// the same reason.
     ///
-    /// # Errors
-    ///
-    /// [`DeliveryError::Unreachable`] if the body could not be read off the
-    /// wire, which is a connection that failed part-way rather than an answer.
-    ///
     /// The vendor's own [`StatusCode`] comes back beside the reply because two
     /// decisions here turn on it and neither belongs in the port's vocabulary: a
     /// refused credential and a routine that has gone. The reply carries only
     /// whether the act succeeded, which is the part that is not Hevy's to
     /// define.
-    async fn answered(
-        response: reqwest::Response,
-    ) -> Result<(StatusCode, DestinationReply), DeliveryError> {
-        let status = response.status();
-        let body = response
-            .bytes()
-            .await
-            .map_err(|error| Self::unreachable(&error.to_string()))?;
+    fn answered(reply: &Reply) -> Result<(StatusCode, DestinationReply), DeliveryError> {
+        let status = reply.status();
 
         // `StatusCode` always displays as something, so the fallible
         // constructor's error arm is unreachable rather than merely unlikely —
@@ -263,7 +257,7 @@ impl HevyRoutines {
                 }
             })?;
 
-        Ok((status, DestinationReply::new(stated, body.to_vec())))
+        Ok((status, DestinationReply::new(stated, reply.body().to_vec())))
     }
 
     /// Turn a refusal into the right error, having already kept what it said.
@@ -307,31 +301,35 @@ impl HevyRoutines {
 
     /// Send it, keep the answer, and read the answer as `T`.
     ///
-    /// The folder calls' whole path. Their replies are not recorded: what #124
-    /// is about is the answer to the *delivery*, and a folder lookup on the way
-    /// past is not that. A folder call that goes wrong still fails the delivery,
-    /// and still says what it said in the error it raises.
+    /// The folder calls' whole path. Their replies are not a delivery's answer
+    /// (#124), so one they cannot use is kept as any unexpected response is
+    /// (#164). A folder call that goes wrong still fails the delivery, and
+    /// still says what it said in the error it raises.
     pub(super) async fn read<T: serde::de::DeserializeOwned>(
         &self,
         build: impl FnOnce(&Client) -> reqwest::RequestBuilder,
     ) -> Result<T, DeliveryError> {
-        let (status, reply) = self.ask(build).await?;
+        Self::send(build(self.client()?))
+            .await?
+            .read(|answer| {
+                let (status, reply) = Self::answered(answer)?;
 
-        // **The one refusal that carries its own body.** A folder call's reply
-        // is not the delivery's answer and so is not kept — what it said is in
-        // this message or it is nowhere.
-        if !status.is_success() {
-            let gloss = Self::glossed(status);
-            let said = reply.text();
-            let said = said.trim();
-            return Err(Self::unreachable(&if said.is_empty() {
-                gloss
-            } else {
-                format!("{gloss}: {said}")
-            }));
-        }
+                // **The one refusal that carries its own body**, since a
+                // folder call's reply is not the delivery's.
+                if !status.is_success() {
+                    let gloss = Self::glossed(status);
+                    let said = reply.text();
+                    let said = said.trim();
+                    return Err(Self::unreachable(&if said.is_empty() {
+                        gloss
+                    } else {
+                        format!("{gloss}: {said}")
+                    }));
+                }
 
-        Self::parse(&reply)
+                Self::parse(&reply)
+            })
+            .await
     }
 
     /// # Errors

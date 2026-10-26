@@ -37,8 +37,7 @@ impl SchoolCalendar {
 
 impl HolidayCalendar for SchoolCalendar {
     async fn holidays(&self) -> Result<Holidays, SourceError> {
-        let served = super::get(self.client()?, &self.url).await?;
-        school_holidays(&served)
+        super::get(self.client()?, &self.url, school_holidays).await
     }
 }
 
